@@ -482,6 +482,9 @@ importers:
       '@sigx/zero':
         specifier: 'catalog:'
         version: 0.2.0-beta.1(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)(@sigx/runtime-dom@0.15.6)(sigx@0.15.6)
+      '@sigx/zero-daisyui':
+        specifier: 'catalog:'
+        version: 0.2.0-beta.1(@sigx/zero@0.2.0-beta.1(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)(@sigx/runtime-dom@0.15.6)(sigx@0.15.6))
     devDependencies:
       '@sigx/reactivity':
         specifier: 'catalog:'
@@ -495,9 +498,6 @@ importers:
       '@sigx/vite':
         specifier: 'catalog:'
         version: 0.15.6(@sigx/server-renderer@0.15.6)(@sigx/server@0.15.6)(sigx@0.15.6)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
-      '@sigx/zero-daisyui':
-        specifier: 'catalog:'
-        version: 0.2.0-beta.1(@sigx/zero@0.2.0-beta.1(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)(@sigx/runtime-dom@0.15.6)(sigx@0.15.6))
       '@sigx/zero-kit':
         specifier: 'catalog:'
         version: 0.2.0-beta.1

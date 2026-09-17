@@ -1,0 +1,29 @@
+/*
+ * Per-screen grids, keyed on `[data-page="…"]` (docs/design/HANDOFF.md →
+ * "Content grids"). One section per page; each page issue owns its own
+ * section so parallel branches merge without conflict. Equal-column grids
+ * are `repeat(N, minmax(0, 1fr))`; side rails are fixed because their
+ * content is mono data that must not wrap.
+ */
+
+/* ---- home (#88): minmax(0, 1fr) + 340 for the inbox row, tasks table full width, gap 28 ---- */
+
+/* ---- chats / chat (#88): 280 list + fluid thread + 320 context panel, borders, no gap ---- */
+
+/* ---- tasks / task (#88): fluid + 460, gap 28 ---- */
+
+/* ---- session (#88): fluid + 400, gap 28 ---- */
+
+/* ---- agents (#89): 2 equal columns, gap 16 ---- */
+
+/* ---- agent config (#89): fluid form + 360 versions rail, gap 40 ---- */
+
+/* ---- agent memory (#89): fluid + 320, gap 28 ---- */
+
+/* ---- machines / machine (#90): environment cards 3 columns gap 12; machine fluid + 420 ---- */
+
+/* ---- pair (#90): 620 + 360 ---- */
+
+/* ---- schedules / plugins / settings / history / usage (#90) ---- */
+
+/* ---- responsive (#91): 768–1279 rails drop, < 768 one column ---- */

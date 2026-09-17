@@ -51,6 +51,9 @@
       ],
       "@agentic/ui": [
         "./packages/ui/src/index.ts"
+      ],
+      "@agentic/ui/design-system": [
+        "./packages/ui/src/design-system/index.ts"
       ]
     }
   },

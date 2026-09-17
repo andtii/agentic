@@ -3,5 +3,15 @@
     "name": "@agentic/core",
     "path": "packages/core/dist/index.js",
     "limit": "3 KB"
+  },
+  {
+    "name": "@agentic/ui",
+    "path": "packages/ui/dist/index.prod.js",
+    "limit": "56 KB"
+  },
+  {
+    "name": "@agentic/ui css (control-room design system)",
+    "path": "packages/ui/dist/ds/css/index.css",
+    "limit": "20 KB"
   }
 ]

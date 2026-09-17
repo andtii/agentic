@@ -8,7 +8,7 @@ async function expectPage(page: Page, path: string, title: string) {
     await expect(page.locator('[data-page-title]')).toHaveText(title);
 }
 
-test('renders the shell, restores the theme before paint, and navigates two routes', async ({ page }, info) => {
+test('renders the control-room shell, restores the theme before paint, and navigates two routes', async ({ page }, info) => {
     const narrow = info.project.name === 'phone-400';
 
     await page.goto('/');
@@ -17,9 +17,14 @@ test('renders the shell, restores the theme before paint, and navigates two rout
     await expect(page.locator(shell('main'))).toBeVisible();
     await expectPage(page, '/', 'Inbox');
 
-    // themeInitScript is in <head>, ahead of the app.
+    // themeInitScript and the font links are in <head>, ahead of the app; the one theme is set on <html>.
     const head = await page.locator('head').innerHTML();
     expect(head).toContain('zero-theme');
+    expect(head).toContain('fonts.googleapis.com/css2?family=Schibsted+Grotesk');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'control-room');
+    // The design system's tokens resolve on the page.
+    const sidebarWidth = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ag-sidebar-w').trim());
+    expect(sidebarWidth).toBe('232px');
 
     if (narrow) {
         // Below 768px: no sidebar, the Drawer carries the nav.
@@ -37,14 +42,23 @@ test('renders the shell, restores the theme before paint, and navigates two rout
         await page.locator(drawerPanel).getByRole('link', { name: 'Machines' }).click();
         await expectPage(page, '/machines', 'Machines');
     } else {
-        // At 1280px: the sidebar is the nav, the Drawer trigger is gone.
-        await expect(page.locator(shell('sidebar'))).toBeVisible();
-        await expect(page.locator(shell('menu'))).toBeHidden();
-
+        // At 1280px: the 232 px sidebar is the nav under a 60 px topbar; the Drawer trigger is gone.
         const sidebar = page.locator(shell('sidebar'));
+        await expect(sidebar).toBeVisible();
+        await expect(page.locator(shell('menu'))).toBeHidden();
+        expect((await sidebar.boundingBox())?.width).toBe(232);
+        expect((await page.locator(shell('bar')).boundingBox())?.height).toBe(60);
+
+        // Two nav groups; the Home badge counts what needs a person.
+        await expect(sidebar.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+        await expect(sidebar.getByRole('navigation', { name: 'Workspace' })).toBeVisible();
+        await expect(sidebar.locator(shell('badge'))).toHaveText('1');
+        await expect(sidebar.locator(shell('connection'))).toBeVisible();
+
         await sidebar.getByRole('link', { name: 'Agents' }).click();
         await expectPage(page, '/agents', 'Agents');
         await expect(sidebar.locator('[data-part="nav-item"][data-state="active"]')).toHaveText('Agents');
+        await expect(page.locator(shell('breadcrumb'))).toContainText('Agents');
 
         await sidebar.getByRole('link', { name: 'Machines' }).click();
         await expectPage(page, '/machines', 'Machines');
@@ -55,14 +69,9 @@ test('renders the shell, restores the theme before paint, and navigates two rout
     await expectPage(page, '/agents/a1', 'Scout');
 });
 
-test('the theme toggle flips data-theme and survives a reload', async ({ page }) => {
-    await page.goto('/settings');
-    await expectPage(page, '/settings', 'Settings');
-    const before = await page.locator('html').getAttribute('data-theme');
-    await page.getByRole('button', { name: 'Theme' }).click();
-    const after = await page.locator('html').getAttribute('data-theme');
-    expect(after).not.toBe(before);
-    expect(after).toBeTruthy();
-    await page.reload();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', after!);
+test('the nav placeholders for chats, history and usage resolve', async ({ page }) => {
+    for (const [path, title] of [['/chats', 'Chats'], ['/history', 'History'], ['/usage', 'Usage']] as const) {
+        await page.goto(path);
+        await expectPage(page, path, title);
+    }
 });

@@ -11,10 +11,12 @@ import { Schedules } from './pages/Schedules';
 import { Plugins } from './pages/Plugins';
 import { Settings } from './pages/Settings';
 import { Pair } from './pages/Pair';
+import { Chats, History, Usage } from './pages/Placeholder';
 
 /** One route table for the browser and the server (docs/architecture.md §10). */
 export const routes: RouteRecordRaw[] = [
     { path: '/', name: 'home', component: Home },
+    { path: '/chats', name: 'chats', component: Chats },
     { path: '/chats/:id', name: 'chat', component: Chat },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id', name: 'agent', component: Agent },
@@ -25,7 +27,9 @@ export const routes: RouteRecordRaw[] = [
     { path: '/schedules', name: 'schedules', component: Schedules },
     { path: '/plugins', name: 'plugins', component: Plugins },
     { path: '/settings', name: 'settings', component: Settings },
-    { path: '/pair', name: 'pair', component: Pair }
+    { path: '/pair', name: 'pair', component: Pair },
+    { path: '/history', name: 'history', component: History },
+    { path: '/usage', name: 'usage', component: Usage }
 ];
 
 /** Browser: history API navigation. */
