@@ -8,3 +8,4 @@ All notable changes to `@agentic/platform` (Keep a Changelog, semver).
 - `auth`: `sameWorkspace` / `workspaceOwner` policies, `workspaceKey`, `workspaceOfActorKey` (#14).
 - `workspace`: the `Workspace` root actor — owner, agent/chat/machine/schedule index, settings, pairing codes, `exportAll` / `deleteAll` task stubs (#14).
 - `testing`: shared actor test harness — `testActorApp`, `recordingStorage`, `userPrincipal`, `statusOf` (#14).
+- `notify` (#29): `NotificationChannel` seam, `Inbox` actor (`{ws}:inbox`; append / push / list / unread / ack / subscriptions, capped at 500, `authorize: [sameWorkspace]`), `deliverAll` recording a `DeliveryAttempt` per channel, and `webPushChannel` with VAPID ES256 over WebCrypto (contentless push; payload encryption is a follow-up).
