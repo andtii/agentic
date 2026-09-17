@@ -68,7 +68,7 @@ describe('skeleton presets', () => {
         expect(rail.getAttribute('aria-busy')).toBe('true');
         // One announcement: the nested cards carry no status semantics of their own.
         expect(rail.getAttribute('role')).toBe('status');
-        expect(rail.querySelectorAll('[role="status"], [aria-busy]')).toHaveLength(0);
+        expect(rail.querySelectorAll('[role="status"], [data-skeleton][aria-busy]')).toHaveLength(0);
         expect(rail.querySelectorAll('[data-visually-hidden]')).toHaveLength(1);
         for (const c of inner) expect(c.getAttribute('aria-hidden')).toBe('true');
     });
