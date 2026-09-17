@@ -45,7 +45,8 @@ function resolveSkills(refs: readonly SkillRef[], resolved: readonly ResolvedSki
     const found: ResolvedSkill[] = [];
     const missing: string[] = [];
     for (const ref of refs) {
-        const skill = resolved.find((s) => s.id === ref.id && (ref.version === undefined || s.version === undefined || s.version === ref.version));
+        // A pinned ref needs the same version; an unversioned skill cannot vouch for it.
+        const skill = resolved.find((s) => s.id === ref.id && (ref.version === undefined || s.version === ref.version));
         if (skill) found.push(skill);
         else missing.push(skillKey(ref));
     }

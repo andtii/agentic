@@ -38,6 +38,12 @@ describe('buildSystemPrompt', () => {
         expect(prompt).toContain('Unavailable in this session: s@2.');
         expect(prompt).not.toContain('old');
     });
+
+    it('does not satisfy a versioned ref with an unversioned skill', () => {
+        const prompt = buildSystemPrompt({ config: frozenConfig({ skills: [{ id: 's', version: '2' }] }), skills: [{ id: 's', content: 'unknown version' }] });
+        expect(prompt).toContain('Unavailable in this session: s@2.');
+        expect(prompt).not.toContain('unknown version');
+    });
     it('leaves out empty sections and states when there are no tools', () => {
         const prompt = buildSystemPrompt({ config: frozenConfig({ role: '', instructions: '  ', skills: [] }) });
         expect(prompt).not.toContain('## Responsibilities');
