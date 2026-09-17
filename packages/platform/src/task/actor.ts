@@ -36,10 +36,10 @@ export type TaskMethods = {
     create(contract: TaskContract, init: TaskInit): Promise<TaskView>;
     /** `queued → active`; `sessionId` is the session doing the work, when there is one. */
     start(by: string, sessionId?: SessionId): Promise<TaskView>;
-    /** `queued | active → waiting {reason}`. */
-    reportWaiting(reason: WaitReason, by: string): Promise<TaskView>;
-    /** `waiting → active`. */
-    resolveWaiting(by: string, why?: string): Promise<TaskView>;
+    /** `queued | active → waiting {reason}`; `sessionId` records the session the task waits with, when one was opened for it. */
+    reportWaiting(reason: WaitReason, by: string, sessionId?: SessionId): Promise<TaskView>;
+    /** `waiting → active`; `sessionId` records the session that resumes the work (a fallback runtime opens a new one). */
+    resolveWaiting(by: string, why?: string, sessionId?: SessionId): Promise<TaskView>;
     /** `active → completed`. */
     complete(result: TaskResult, by: string): Promise<TaskView>;
     /** `queued | active | waiting → failed`. */
@@ -278,13 +278,13 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 await transition('active', by, 'started', sessionId === undefined ? {} : { sessionId });
                 return view();
             },
-            async reportWaiting(reason, by) {
-                await transition('waiting', by, `waiting: ${reason.kind}`, { wait: reason });
+            async reportWaiting(reason, by, sessionId) {
+                await transition('waiting', by, `waiting: ${reason.kind}`, { wait: reason, ...(sessionId === undefined ? {} : { sessionId }) });
                 return view();
             },
-            async resolveWaiting(by, why = 'resumed') {
+            async resolveWaiting(by, why = 'resumed', sessionId) {
                 requireStatus('waiting', 'resolveWaiting');
-                await transition('active', by, why);
+                await transition('active', by, why, sessionId === undefined ? {} : { sessionId });
                 return view();
             },
             async complete(result, by) {

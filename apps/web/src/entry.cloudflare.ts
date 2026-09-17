@@ -10,7 +10,7 @@ import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
-import { createActorHost, createActorWorker, ensureServerApp, type PlatformEnv } from './actors.app';
+import { createActorHost, createActorWorker, ensureServerApp, pairingWiring, type PlatformEnv } from './actors.app';
 import { createWebAuth, defaultResolveUser, type RouteHandler, type WebAuth } from './auth';
 
 const render = createFetchHandler({
@@ -47,9 +47,8 @@ function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined
     if (auth?.secret !== secret) {
         const web = createWebAuth(
             { SESSION_SECRET: secret, GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET, APP_ORIGIN: env.APP_ORIGIN },
-            // `POST /auth/pair` needs a code → workspace resolution no actor provides yet (the code alone names no
-            // workspace); the platform-side redemption is `Machine.pair(code, info)` — the wiring issue after #90 binds it.
-            { resolveUser: defaultResolveUser }
+            // `POST /auth/pair`: the code is resolved through the global `PairingDirectory`, then redeemed with `Machine.pair` (#37).
+            { resolveUser: defaultResolveUser, pairing: pairingWiring() }
         );
         auth = { secret, routes: web.routes };
     }

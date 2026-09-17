@@ -13,6 +13,7 @@ import { Inbox, inboxKey } from '../src/notify/index';
 import { defineRegistry, registryKey } from '../src/registry/index';
 import { defineScheduleActor } from '../src/schedule/index';
 import { recordingStorage, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
+import { PairingDirectory } from '../src/pairing/index';
 import { defineWorkspace, type ActorRecordRef, type ArtifactSink, type WorkspaceState, type WorkspaceStore } from '../src/workspace/index';
 
 const WS = 'u1' as WorkspaceId;
@@ -77,7 +78,7 @@ const Workspace = defineWorkspace({ sink, store });
 beforeEach(() => {
     files = new Map();
     purged = [];
-    app = testActorApp([Workspace, AgentActor, Memory, Chat, ChatPage, Schedule, Inbox, Registry], { storage: recordingStorage() });
+    app = testActorApp([Workspace, AgentActor, Memory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory], { storage: recordingStorage() });
     return app.start();
 });
 afterEach(() => app.stop());

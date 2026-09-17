@@ -20,6 +20,7 @@ import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply
 import { ServerFnError } from '@sigx/server';
 
 import { asPrincipal, issueMachineToken, machinePrincipal, mintAgentPrincipal, sameWorkspace, workspaceKey, type MachineTokenRecord } from '../auth/index.js';
+import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
@@ -114,6 +115,13 @@ interface SessionClient {
     commandReplied(reply: WireReply): Promise<void>;
 }
 
+/** The Routing actor's machine-facing entry points (`defineRoutingActor`). */
+interface RoutingClient {
+    machineOnline(machineId: MachineId): Promise<void>;
+    sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void>;
+    sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void>;
+}
+
 /** Build the Machine actor definition over its ports. One call per app — the actor `type` is `'machine'`. */
 export function defineMachineActor(ports: MachinePorts) {
     const now = ports.now ?? Date.now;
@@ -192,6 +200,14 @@ export function defineMachineActor(ports: MachinePorts) {
                 await session(sessionId, options)?.commandReplied(reply);
             }
 
+            /** The router, told one-way as this machine (the same fresh-call reasoning as `session()`); a router that is not wired hears nothing. */
+            async function notify(call: (routing: RoutingClient) => Promise<void>): Promise<void> {
+                const def = ports.routing?.();
+                if (!def) return;
+                const client = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(self), oneWay: true }) as unknown as RoutingClient;
+                await call(client).catch(() => undefined);
+            }
+
             const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: W, kind: 'error', commandId, code, message });
             /** `commandId` is unique per Session, not per machine: pending replies are keyed by both. */
             const pendingKey = (sessionId: SessionId, commandId: string): string => `${sessionId}:${commandId}`;
@@ -230,11 +246,15 @@ export function defineMachineActor(ports: MachinePorts) {
             /** Forget a hosted or queued session; answer its open commands with `closed`. */
             async function sessionGone(sessionId: SessionId, reason: string): Promise<void> {
                 const s = ctx.state;
-                const wasHosted = sessionId in s.activeSessions;
+                const hosted = s.activeSessions[sessionId];
+                const wasHosted = hosted !== undefined;
+                const taskId = hosted?.taskId ?? s.queued.find((q) => q.sessionId === sessionId)?.taskId;
                 delete s.activeSessions[sessionId];
                 const before = s.queued.length;
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
-                if (wasHosted || s.queued.length !== before) record({ sessionId, reason, at: now() });
+                const known = wasHosted || s.queued.length !== before;
+                if (known) record({ sessionId, reason, at: now() });
+                if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId));
                 for (const [key, p] of Object.entries(s.pending)) {
                     if (p.sessionId !== sessionId) continue;
                     delete s.pending[key];
@@ -271,6 +291,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 for (const p of Object.values(s.pending)) if (p.deadline > at) send({ v: V, t: 'session.command', sessionId: p.sessionId, command: ctx.snapshot(p.command) });
                 dequeue();
                 await armLiveness();
+                // Tasks parked on this machine (`waiting {environment-offline}`, policy `queue`) get their retry (§7).
+                await notify((r) => r.machineOnline(machineId));
             }
 
             async function onSessionOpened(frame: DaemonFrameOf<'session.opened'>): Promise<void> {
@@ -284,6 +306,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 // The daemon's pump skips the wire `hello`; this is where the Session learns its ref and capabilities.
                 const hello: WireFrame = { v: W, kind: 'hello', agentId: h.agentId, sessionId: frame.sessionId, sessionRef: frame.ref as SessionRef, capabilities: toAgentCapabilities(frame.capabilities), head: frame.head };
                 await session(frame.sessionId)?.forwardFrames([hello]);
+                // The session can take commands now: the router prompts the task that was waiting for this (a queued one included).
+                await notify((r) => r.sessionOpened(frame.sessionId, h.taskId));
             }
 
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {

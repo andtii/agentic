@@ -53,6 +53,14 @@ export interface MachinePorts {
     readonly sessions?: () => AnyActorDefinition;
     /** Absent → every `tool.call` is answered with an `unsupported` error. */
     readonly tools?: ToolCallPort;
+    /**
+     * The Routing actor definition (`defineRoutingActor`), as a thunk like
+     * `sessions`. When set, the machine tells the router — one-way, as itself —
+     * that it came online (`hello`), that a hosted session was acknowledged by
+     * the daemon (`session.opened`) and that one is gone (`session.closed`), so
+     * tasks waiting on this machine resume or fail with a reason (§7, EXE-11).
+     */
+    readonly routing?: () => AnyActorDefinition;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /**

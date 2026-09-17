@@ -7,6 +7,7 @@ import type { WireCommand } from '@sigx/ai-agent/wire';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
 import { defineMachineActor, machineKey, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
+import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
@@ -100,7 +101,7 @@ beforeEach(async () => {
         heartbeatWindowMs: 90_000,
         commandTimeoutMs: 120_000
     });
-    app = testActorApp([Machine, Session, Workspace], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
+    app = testActorApp([Machine, Session, Workspace, PairingDirectory], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
     await app.start();
 });
 

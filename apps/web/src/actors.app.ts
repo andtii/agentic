@@ -17,40 +17,56 @@
  * on first use, so a principal resolved in the Worker survives the hop into
  * the object and every `ctx.actor()` call after it.
  *
- * Ports that later issues fill are explicit and fail loudly until then:
- * the Session factory (`anthropic-api`, #35) and the platform tools a daemon
- * session calls back (#37). The Schedule trigger is the platform's
- * `scheduleTrigger()` (#42): a reminder lands in the Inbox from the entry's
- * own alarm, an agent entry becomes a Task; with no environment probe wired
- * yet every environment counts as offline (the router, #37, resolves it).
+ * Execution routing (#37): the Session factory runs `anthropic-api`
+ * in-process (`createSessionFactory`, BYO key), the Routing actor drives
+ * tasks to their environment (`Machine.openSession`) or the local runtime,
+ * the daemon's `tool.call` runs the platform tools over the actors
+ * (`createToolCallPort`), and `POST /auth/pair` resolves codes through the
+ * `PairingDirectory` (`pairingWiring`). The Schedule trigger is the
+ * platform's `scheduleTrigger()` (#42) over the router: the environment
+ * probe reads the Machines, and every task a firing creates — queued, or
+ * parked `waiting {environment-offline}` — is handed to `Routing.run`.
  */
-import type { Principal } from '@agentic/core';
+import type { Principal, WorkspaceId } from '@agentic/core';
 import {
     AgentActor,
     Chat,
     ChatPage,
+    LedgerActor,
     Memory,
+    PAIRING_DIRECTORY_KEY,
+    PairingDirectory,
     TaskActor,
     Workspace,
     asPrincipal,
+    createEnvironmentProbe,
+    createSessionFactory,
+    createToolCallPort,
     defineInbox,
     defineMachineActor,
+    defineRoutingActor,
     defineScheduleActor,
     defineSessionActor,
+    ledgerRecorder,
     machineKey,
     machinePrincipal,
     principalCodec,
+    routingKey,
     scheduleTrigger,
     serverAuth,
+    userPrincipal,
     type MachineActor,
     type NotificationChannel,
+    type RoutingActor,
     type SessionFactory,
+    type SessionFactoryOptions,
     type ToolCallPort,
     type TriggerPort
 } from '@agentic/platform';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
-import { createServerApp } from '@sigx/server/server';
+import { createServerApp, setPrincipal } from '@sigx/server/server';
+import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 
 export { DAEMON_SOCKET_PREFIX };
@@ -69,25 +85,32 @@ export interface PlatformEnv {
     readonly WORKSPACE_KEK?: string;
     /** Public origin, e.g. `https://agentic.example`. */
     readonly APP_ORIGIN?: string;
+    /**
+     * The Anthropic API key the `anthropic-api` runtime uses, for every workspace
+     * of this deployment, until per-workspace BYO keys land with the Registry
+     * (architecture §5a). Absent → an API-runtime task fails `no-api-key`.
+     */
+    readonly ANTHROPIC_API_KEY?: string;
 }
 
-/** The seams later issues plug. Every default refuses with the issue that owns it. */
+/** The seams an app (or a test) may override; the defaults are the real wiring. */
 export interface PlatformPorts {
-    /** Runtime id → in-process session, or `null` for a daemon-hosted runtime. */
-    readonly factory: SessionFactory;
-    readonly trigger: TriggerPort;
+    /** Runtime id → in-process session, or `null` for a daemon-hosted runtime. Default: `createSessionFactory` over `anthropic`. */
+    readonly factory?: SessionFactory;
+    /** The Anthropic provider options a workspace's sessions run with. Default: the deployment's `ANTHROPIC_API_KEY`. */
+    readonly anthropic?: SessionFactoryOptions['anthropic'];
+    /** Where a schedule firing goes. Default: `scheduleTrigger` over the Machines (environment probe) and the router (`Routing.run`). */
+    readonly trigger?: TriggerPort;
     readonly channels: readonly NotificationChannel[];
-    /** Platform tools a daemon session calls back through `tool.call` (#37). Absent → answered `unsupported`. */
+    /** Platform tools a daemon session calls back through `tool.call`. Default: `createToolCallPort` over the actors. */
     readonly tools?: ToolCallPort;
 }
 
+/** Secrets the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
+const secrets: { anthropicApiKey?: string } = {};
+
 export const defaultPorts: PlatformPorts = {
-    // `null` = not platform-managed; the Session then expects daemon frames. The `anthropic-api` factory is wired by #35.
-    factory: () => null,
-    // Inbox reminder / Task under the entry's offline policy (#42). No `environments`
-    // probe wired yet: a task that needs an environment waits `environment-offline`
-    // for the router (#37).
-    trigger: scheduleTrigger(),
+    anthropic: () => (secrets.anthropicApiKey ? { apiKey: secrets.anthropicApiKey } : undefined),
     // Web Push lands with VAPID keys (architecture §3).
     channels: []
 };
@@ -97,13 +120,56 @@ export const daemonSockets = createDaemonSocketRegistry();
 
 /** Every platform actor this deployment hosts. */
 export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
-    // Session and Machine reference each other: the sink resolves the Machine at call time, the Machine gets the Session lazily.
+    // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
+    const anthropic = ports.anthropic ?? defaultPorts.anthropic;
     const Session = defineSessionActor({
-        factory: ports.factory,
-        commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) }
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, ...(anthropic ? { anthropic } : {}) }),
+        commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) },
+        usage: ledgerRecorder()
     });
-    const Machine: MachineActor = defineMachineActor({ socket: daemonSockets.port, sessions: () => Session, ...(ports.tools ? { tools: ports.tools } : {}) });
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, defineScheduleActor({ trigger: ports.trigger }), Memory, defineInbox({ channels: ports.channels })];
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    const Machine: MachineActor = defineMachineActor({
+        socket: daemonSockets.port,
+        sessions: () => Session,
+        routing: () => Routing,
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session })
+    });
+    // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
+    // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.
+    const trigger =
+        ports.trigger ??
+        scheduleTrigger({
+            environments: createEnvironmentProbe({ machines: () => Machine }),
+            onOutcome: (event, outcome) => {
+                if (outcome.kind !== 'task' || (outcome.status !== 'queued' && outcome.wait?.kind !== 'environment-offline')) return;
+                const ws = event.workspaceId;
+                void actor(Routing, routingKey(ws))
+                    .with({ context: asPrincipal(userPrincipal(ws, ws)) })
+                    .run(outcome.taskId)
+                    .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
+            }
+        });
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, defineInbox({ channels: ports.channels })];
+}
+
+/**
+ * The `POST /auth/pair` wiring over the registry: the anonymous directory
+ * lookup, then `Machine.pair` as the machine the code was issued for.
+ */
+export function pairingWiring(actors: readonly AnyActorDefinition[] = defaultActors()): NonNullable<AuthWiring['pairing']> {
+    const Machine = machineDefinition(actors);
+    const anonymous = (): { locals: Record<string, unknown> } => {
+        const context = { locals: {} as Record<string, unknown> };
+        setPrincipal(context, null);
+        return context;
+    };
+    return {
+        resolve: (code) => actor(PairingDirectory, PAIRING_DIRECTORY_KEY).with({ context: anonymous() }).resolve(code),
+        pair: (target, code, info) =>
+            actor(Machine, machineKey(target.workspaceId, target.machineId))
+                .with({ context: asPrincipal(machinePrincipal(target.workspaceId as WorkspaceId, target.machineId)) })
+                .pair(code, info)
+    };
 }
 
 let shared: readonly AnyActorDefinition[] | undefined;
@@ -133,6 +199,7 @@ let stampedFor: string | undefined;
  * the hash match is the proof).
  */
 export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefinition[] = defaultActors()): void {
+    secrets.anthropicApiKey = env.ANTHROPIC_API_KEY || undefined;
     const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
     if (stampedFor === secret) return;
     stampedFor = secret;

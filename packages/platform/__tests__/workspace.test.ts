@@ -1,6 +1,7 @@
 import type { MachineId, Principal, WorkspaceId } from '@agentic/core';
 import { workspaceKey } from '../src/auth/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
+import { PairingDirectory } from '../src/pairing/index';
 import { DEFAULT_SETTINGS, PAIRING_CODE_LENGTH, PAIRING_CODE_TTL_MS, Workspace, type WorkspaceState } from '../src/workspace/index';
 
 const owner = userPrincipal('u1');
@@ -8,7 +9,7 @@ const KEY = workspaceKey('u1');
 
 let app: TestActorApp;
 beforeEach(() => {
-    app = testActorApp([Workspace]);
+    app = testActorApp([Workspace, PairingDirectory]);
     return app.start();
 });
 afterEach(async () => {
@@ -73,7 +74,7 @@ describe('Workspace index', () => {
         // A fresh host over the same storage activates from what was saved.
         const storage = app.storage;
         await app.stop();
-        app = testActorApp([Workspace], { storage });
+        app = testActorApp([Workspace, PairingDirectory], { storage });
         await app.start();
         const view = await ws().get();
         expect(view.agents).toEqual([agentId]);
