@@ -71,11 +71,10 @@ export interface PurgeHandlerOptions {
     readonly secret: () => string | undefined;
 }
 
-/** Same amount of work whatever the first mismatch is. */
-function sameSecret(a: string, b: string): boolean {
-    if (a.length !== b.length) return false;
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+/** Same amount of work whatever the first mismatch is — over the expected secret's length, so the given length leaks nothing. */
+function sameSecret(given: string, expected: string): boolean {
+    let diff = given.length ^ expected.length;
+    for (let i = 0; i < expected.length; i++) diff |= (given.charCodeAt(i) || 0) ^ expected.charCodeAt(i);
     return diff === 0;
 }
 
