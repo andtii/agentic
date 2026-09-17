@@ -46,7 +46,8 @@ export const PairView = component<PairViewProps>(({ props }) => {
         state.remaining = CODE_LIFETIME;
         start();
     };
-    const copy = (text: string) => { void navigator.clipboard?.writeText(text); };
+    // The clipboard can refuse (permissions, insecure context); a refused copy is not an error the page reports.
+    const copy = (text: string) => { navigator.clipboard?.writeText(text).catch(() => {}); };
 
     return () => {
         const expired = state.remaining <= 0;
