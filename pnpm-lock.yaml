@@ -369,6 +369,9 @@ importers:
       '@sigx/actors':
         specifier: 'catalog:'
         version: 0.9.2(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)(@sigx/serialize@0.15.6)(@sigx/server@0.15.6)(@sigx/vite@0.15.6(@sigx/server-renderer@0.15.6)(@sigx/server@0.15.6)(sigx@0.15.6)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)))(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+      '@sigx/ai-agent':
+        specifier: 'catalog:'
+        version: 0.1.0(@sigx/ai@0.1.0(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6))(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)
     devDependencies:
       '@sigx/actors-cloudflare':
         specifier: 'catalog:'
