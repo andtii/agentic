@@ -112,3 +112,23 @@ for await (const ev of s.tail({ epoch: 0, seq: 0 })) render(ev);   // replay, th
 - Local turns run in `tasks.drive`; after an eviction the restarted task closes the turn as interrupted — open calls cancelled, open requests resolved `cancel`, `error {code: 'process_exited', data: {interrupted: true}}`, `turn-end {stopReason: 'error'}` (`isInterruptedTurnEnd`). A model call is never re-run.
 - Daemon path: `forwardFrames(frames)` and `commandReplied(reply)` are internal (only the machine the session was opened on); a command sent to a daemon answers `pending` until its reply arrives.
 - `authorize: [sameWorkspace, sessions scope]`. The chat hears `session-started`, `typing`, the final assistant `message` and `session-ended` on `SESSION_EVENTS_TOPIC`.
+
+## Chat (`src/chat`)
+
+`Chat` is keyed `{ws}:chat:{id}` (`actorKey(ws, 'chat', id)`). It stores attributed entries, knows who is a member and since when, and decides which agents a message activates — it never starts a session or task.
+
+```ts
+import { actor } from '@sigx/actors';
+import { Chat } from '@agentic/platform';
+
+const chat = actor(Chat, key);
+await chat.addAgent(agentId, 'from-now');            // 'all' opens the whole history
+const { messageId, activated } = await chat.post('hi', [agentId]); // or 'all' for the group
+const page = await chat.history(null, 50);           // newest page; page.next is the cursor for older entries
+const hits = await chat.search('deploy');            // newest-first substring scan
+```
+
+- Activation (architecture §6): mentioned members → coordinator → the sole agent member → nobody. An agent's own post never activates itself.
+- History access: an agent principal reads from its `historyFrom` (the join entry for `'from-now'`); non-members read nothing; users and external clients with the `chats` scope read everything.
+- Persistence: the state keeps the last 200 entries and a `{seq, at}` index; every 100 older entries move to a `ChatPage` actor (`{chatKey}:p{n}`), so a post is one bounded write. Register `Chat` and `ChatPage` together.
+- Sessions publish `SessionEvent`s on `sessionEvents(chatKey)` (`topic('session-events', chatKey)`); the chat folds status and final messages into entries and tracks `activeSessions`. `typing` is not durable.
