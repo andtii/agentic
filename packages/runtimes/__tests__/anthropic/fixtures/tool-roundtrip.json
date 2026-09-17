@@ -1,0 +1,483 @@
+{
+  "agent": {
+    "capabilities": {
+      "cancel": true,
+      "config": true,
+      "defineAgents": true,
+      "fork": true,
+      "importTranscript": true,
+      "listSessions": false,
+      "permissions": "every-call",
+      "promptParts": "text+image+file",
+      "resume": "portable",
+      "steer": true,
+      "streamingToolInput": true,
+      "structuredOutput": true,
+      "subagents": "control",
+      "tools": "native"
+    },
+    "id": "anthropic-api:agent_ada"
+  },
+  "sessions": [
+    {
+      "id": "sess_91194a0d6942",
+      "log": [
+        {
+          "event": {
+            "epoch": 1,
+            "options": [
+              {
+                "current": "claude-opus-5",
+                "id": "model",
+                "label": "Model",
+                "values": [
+                  {
+                    "id": "claude-opus-5",
+                    "label": "mock/claude-opus-5"
+                  }
+                ]
+              }
+            ],
+            "seq": 1,
+            "sessionId": "sess_91194a0d6942",
+            "type": "config"
+          }
+        },
+        {
+          "command": {
+            "input": [
+              {
+                "text": "How do we deploy?",
+                "type": "text"
+              }
+            ],
+            "kind": "prompt",
+            "turnId": "turn_dca6a29f9550"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "input": [
+              {
+                "text": "How do we deploy?",
+                "type": "text"
+              }
+            ],
+            "seq": 2,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "turn-start"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "seq": 3,
+            "sessionId": "sess_91194a0d6942",
+            "type": "state",
+            "value": "running"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "messageId": "u:turn_dca6a29f9550",
+            "parts": [
+              {
+                "text": "How do we deploy?",
+                "type": "text"
+              }
+            ],
+            "seq": 4,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "user-message"
+          }
+        },
+        {
+          "event": {
+            "annotations": {
+              "idempotent": true,
+              "readOnly": true
+            },
+            "callId": "ms1",
+            "epoch": 1,
+            "input": {
+              "kinds": [
+                "fact"
+              ],
+              "query": "deploy"
+            },
+            "messageId": "a:turn_dca6a29f9550:0",
+            "name": "memory_search",
+            "seq": 5,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "tool-call"
+          }
+        },
+        {
+          "event": {
+            "callId": "ms1",
+            "epoch": 1,
+            "seq": 6,
+            "sessionId": "sess_91194a0d6942",
+            "status": "pending",
+            "turnId": "turn_dca6a29f9550",
+            "type": "tool-update"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "seq": 7,
+            "sessionId": "sess_91194a0d6942",
+            "type": "state",
+            "value": "awaiting"
+          }
+        },
+        {
+          "event": {
+            "at": 1789637286618,
+            "by": "policy",
+            "epoch": 1,
+            "outcome": "allow",
+            "requestId": "req_7f5f2220db46",
+            "ruleId": "allowAll",
+            "scope": "once",
+            "seq": 8,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "request-resolved"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "seq": 9,
+            "sessionId": "sess_91194a0d6942",
+            "type": "state",
+            "value": "running"
+          }
+        },
+        {
+          "event": {
+            "callId": "ms1",
+            "epoch": 1,
+            "seq": 10,
+            "sessionId": "sess_91194a0d6942",
+            "status": "in_progress",
+            "turnId": "turn_dca6a29f9550",
+            "type": "tool-update"
+          }
+        },
+        {
+          "event": {
+            "callId": "ms1",
+            "epoch": 1,
+            "output": {
+              "memories": [
+                {
+                  "confidence": "verified",
+                  "id": "mem_1",
+                  "kind": "fact",
+                  "score": 0.9,
+                  "subject": "release process",
+                  "tags": [
+                    "deploy"
+                  ],
+                  "text": "Deploys go through the release branch."
+                }
+              ]
+            },
+            "seq": 11,
+            "sessionId": "sess_91194a0d6942",
+            "status": "completed",
+            "turnId": "turn_dca6a29f9550",
+            "type": "tool-update"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "kind": "text",
+            "messageId": "a:turn_dca6a29f9550:0",
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 12,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-start"
+          }
+        },
+        {
+          "event": {
+            "delta": "Deploys ",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 13,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "delta": "go ",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 14,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "delta": "through ",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 15,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "delta": "the ",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 16,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "delta": "release ",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 17,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "delta": "branch.",
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 18,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-delta"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "partId": "a:turn_dca6a29f9550:0:0",
+            "seq": 19,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "part-end"
+          }
+        },
+        {
+          "event": {
+            "costUsd": 0.00265,
+            "epoch": 1,
+            "scope": "turn",
+            "seq": 20,
+            "sessionId": "sess_91194a0d6942",
+            "turnId": "turn_dca6a29f9550",
+            "type": "usage",
+            "usage": {
+              "inputTokens": 320,
+              "outputTokens": 42
+            }
+          }
+        },
+        {
+          "event": {
+            "costUsd": 0.00265,
+            "epoch": 1,
+            "seq": 21,
+            "sessionId": "sess_91194a0d6942",
+            "stopReason": "end_turn",
+            "turnId": "turn_dca6a29f9550",
+            "type": "turn-end",
+            "usage": {
+              "inputTokens": 320,
+              "outputTokens": 42
+            }
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "seq": 22,
+            "sessionId": "sess_91194a0d6942",
+            "type": "state",
+            "value": "idle"
+          }
+        },
+        {
+          "event": {
+            "epoch": 1,
+            "seq": 23,
+            "sessionId": "sess_91194a0d6942",
+            "type": "state",
+            "value": "closed"
+          }
+        },
+        {
+          "command": {
+            "kind": "close"
+          }
+        }
+      ],
+      "options": {
+        "hasPolicy": true,
+        "interactive": false
+      },
+      "ref": {
+        "final": {
+          "agent": "anthropic-api:agent_ada",
+          "data": {
+            "transcript": {
+              "agents": {},
+              "config": [
+                {
+                  "current": "claude-opus-5",
+                  "id": "model",
+                  "label": "Model",
+                  "values": [
+                    {
+                      "id": "claude-opus-5",
+                      "label": "mock/claude-opus-5"
+                    }
+                  ]
+                }
+              ],
+              "costUsd": 0.00265,
+              "epoch": 1,
+              "ext": {},
+              "grants": [],
+              "messages": [
+                {
+                  "id": "u:turn_dca6a29f9550",
+                  "parts": [
+                    {
+                      "text": "How do we deploy?",
+                      "type": "text"
+                    }
+                  ],
+                  "role": "user",
+                  "turnId": "turn_dca6a29f9550"
+                },
+                {
+                  "id": "a:turn_dca6a29f9550:0",
+                  "parts": [
+                    {
+                      "annotations": {
+                        "idempotent": true,
+                        "readOnly": true
+                      },
+                      "callId": "ms1",
+                      "input": {
+                        "kinds": [
+                          "fact"
+                        ],
+                        "query": "deploy"
+                      },
+                      "name": "memory_search",
+                      "output": {
+                        "memories": [
+                          {
+                            "confidence": "verified",
+                            "id": "mem_1",
+                            "kind": "fact",
+                            "score": 0.9,
+                            "subject": "release process",
+                            "tags": [
+                              "deploy"
+                            ],
+                            "text": "Deploys go through the release branch."
+                          }
+                        ]
+                      },
+                      "status": "completed",
+                      "type": "tool"
+                    },
+                    {
+                      "id": "a:turn_dca6a29f9550:0:0",
+                      "text": "Deploys go through the release branch.",
+                      "type": "text"
+                    }
+                  ],
+                  "role": "assistant",
+                  "turnId": "turn_dca6a29f9550"
+                }
+              ],
+              "requests": {},
+              "seq": 23,
+              "sessionId": "sess_91194a0d6942",
+              "state": "closed",
+              "turn": {
+                "costUsd": 0.00265,
+                "stopReason": "end_turn",
+                "turnId": "turn_dca6a29f9550",
+                "usage": {
+                  "inputTokens": 320,
+                  "outputTokens": 42
+                }
+              },
+              "usage": {
+                "inputTokens": 320,
+                "outputTokens": 42
+              }
+            }
+          },
+          "id": "sess_91194a0d6942",
+          "v": 1
+        },
+        "initial": {
+          "agent": "anthropic-api:agent_ada",
+          "data": {
+            "transcript": {
+              "agents": {},
+              "config": [
+                {
+                  "current": "claude-opus-5",
+                  "id": "model",
+                  "label": "Model",
+                  "values": [
+                    {
+                      "id": "claude-opus-5",
+                      "label": "mock/claude-opus-5"
+                    }
+                  ]
+                }
+              ],
+              "epoch": 1,
+              "ext": {},
+              "grants": [],
+              "messages": [],
+              "requests": {},
+              "seq": 1,
+              "sessionId": "sess_91194a0d6942",
+              "state": "idle"
+            }
+          },
+          "id": "sess_91194a0d6942",
+          "v": 1
+        }
+      }
+    }
+  ],
+  "version": 1
+}
