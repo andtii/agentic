@@ -37,3 +37,15 @@ export function setText(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 }
 
 export const text = (el: Element | null | undefined): string => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+/** A button found by its visible text. */
+export function buttonNamed(root: ParentNode, label: string): HTMLButtonElement {
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === label);
+    if (!button) throw new Error(`no button "${label}"`);
+    return button;
+}
+
+/** The `<col>` widths a `DataTable` renders from its `cols` template. */
+export function colWidths(table: Element): string[] {
+    return [...table.querySelectorAll<HTMLElement>('colgroup > col')].map((c) => c.style.width || 'auto');
+}

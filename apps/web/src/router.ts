@@ -11,7 +11,9 @@ import { Schedules } from './pages/Schedules';
 import { Plugins } from './pages/Plugins';
 import { Settings } from './pages/Settings';
 import { Pair } from './pages/Pair';
-import { Chats, History, Usage } from './pages/Placeholder';
+import { Chats } from './pages/Placeholder';
+import { History } from './pages/History';
+import { Usage } from './pages/Usage';
 
 /** One route table for the browser and the server (docs/architecture.md §10). */
 export const routes: RouteRecordRaw[] = [

@@ -33,6 +33,16 @@ describe('route skeleton', () => {
         for (const r of routes) expect(CRUMBS[String(r.name)], String(r.name)).toBeDefined();
     });
 
+    it('serves History and Usage as real pages (#90)', async () => {
+        for (const [path, name] of [['/history', 'history'], ['/usage', 'usage']] as const) {
+            const router = createServerRouter(path);
+            await router.isReady();
+            expect(router.currentRoute.name).toBe(name);
+            const record = routes.find(r => r.path === path)!;
+            expect((record.component as { __name?: string }).__name ?? '').not.toMatch(/placeholder/i);
+        }
+    });
+
     it('resolves a parameterised route with its params on the server', async () => {
         const router = createServerRouter(`/agents/${sampleIds.agent}`);
         await router.isReady();

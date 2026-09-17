@@ -1,49 +1,139 @@
-import { component } from 'sigx';
-import { Button, Card, Field, Input, NativeSelect } from '@sigx/zero-daisyui/components';
-import { listThemes, useTheme } from '@sigx/zero';
-import { Row, Stack } from '@agentic/ui';
-import { Page } from '../components/Page';
-import { ServerGreeting } from '../components/ServerGreeting';
+import { component, signal, type Define } from 'sigx';
+import { Button, ConfirmDialog, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
+import { opsSettings, type NotificationRow } from '../mock/ops';
+import { OpsPage } from './ops/OpsPage';
 
-/** `/settings` — workspace settings; theme picking exercises zero's theme registry. */
-export const Settings = component(() => {
-    const theme = useTheme();
+export type SettingsViewProps =
+    & Define.Prop<'timeZone', string, true>
+    & Define.Prop<'timeZones', readonly string[], true>
+    & Define.Prop<'defaultEnvironment', string, true>
+    & Define.Prop<'environmentOptions', readonly { value: string; label: string }[], true>
+    /** Web Push may slip (architecture §12): when it is unavailable the push column is hidden, not disabled. */
+    & Define.Prop<'pushAvailable', boolean, true>
+    & Define.Prop<'notifications', readonly NotificationRow[], true>
+    & Define.Prop<'apiKeys', readonly { provider: string; masked: string; status: string; label: string }[], true>
+    & Define.Prop<'budgets', { monthly: string; perTask: string }, true>
+    & Define.Prop<'retention', { sessionLogs: string; artifacts: string }, true>;
+
+/** One two-column form section: a 240 px title-and-hint column, then the controls. */
+const Section = component<Define.Prop<'title', string, true> & Define.Prop<'hint', string, true> & Define.Slot<'default'>>(({ props, slots }) => () => (
+    <section data-settings-section aria-label={props.title}>
+        <div data-settings-lead>
+            <h2 data-settings-title>{props.title}</h2>
+            <p data-settings-hint>{props.hint}</p>
+        </div>
+        <div data-settings-controls>{slots.default?.()}</div>
+    </section>
+));
+
+/**
+ * `/settings` — time, the notifications matrix (event × inbox, push), API
+ * keys (masked, status pill, Replace), budgets, retention, export and
+ * delete. Persistence lands with the Workspace and Registry wiring; the
+ * page edits a draft.
+ */
+export const SettingsView = component<SettingsViewProps>(({ props }) => {
+    const draft = signal({
+        timeZone: props.timeZone,
+        environment: props.defaultEnvironment,
+        monthly: props.budgets.monthly,
+        perTask: props.budgets.perTask,
+        sessionLogs: props.retention.sessionLogs,
+        artifacts: props.retention.artifacts,
+        matrix: Object.fromEntries(props.notifications.flatMap(row => [[`${row.kind}:inbox`, row.inbox], [`${row.kind}:push`, row.push]])) as Record<string, boolean>,
+        deleting: false
+    });
     return () => (
-        <Page title="Settings" subtitle="Workspace, credentials, appearance.">
-            <Card>
-                <Card.Header><Card.Title>Appearance</Card.Title></Card.Header>
-                <Card.Body>
-                    <Stack gap="md">
-                        <Field>
-                            <Field.Label>Theme</Field.Label>
-                            <NativeSelect
-                                placeholder="Follow the system"
-                                options={listThemes().map(t => ({ value: t.name, label: `${t.name} (${t.colorScheme})` }))}
-                                onValueChange={(v: string) => theme.setTheme(v ? (v as Parameters<typeof theme.setTheme>[0]) : null)}
-                            />
-                            <Field.Description>An explicit theme is remembered on this device.</Field.Description>
-                        </Field>
-                        <Row gap="sm">
-                            <Button size="sm" onClick={() => theme.toggle()}>Toggle light/dark</Button>
-                            <Button size="sm" variant="ghost" onClick={() => theme.setTheme(null)}>Follow the system</Button>
-                        </Row>
-                    </Stack>
-                </Card.Body>
-            </Card>
-            <Card>
-                <Card.Header><Card.Title>Credentials</Card.Title></Card.Header>
-                <Card.Body>
-                    <Field>
-                        <Field.Label>Anthropic API key</Field.Label>
-                        <Input type="password" autocomplete="off"><Input.Control><Input.Input placeholder="sk-ant-…" /></Input.Control></Input>
-                        <Field.Description>Encrypted at rest with the deployment key. Mock — nothing is saved.</Field.Description>
-                    </Field>
-                </Card.Body>
-            </Card>
-            <Card>
-                <Card.Header><Card.Title>Server</Card.Title></Card.Header>
-                <Card.Body><ServerGreeting /></Card.Body>
-            </Card>
-        </Page>
+        <OpsPage page="settings" title="Settings" maxWidth="860px" slots={{ actions: () => <Button intent="primary" type="submit" form="settings-form">Save</Button> }}>
+            <form id="settings-form" data-settings-form onSubmit={(e: Event) => e.preventDefault()}>
+                <Section title="Time" hint="Used by every schedule and reminder.">
+                    <div data-settings-pair>
+                        <SelectField name="time-zone" label="Time zone" model={() => draft.timeZone} options={props.timeZones.map(z => ({ value: z, label: z }))} />
+                        <SelectField name="default-environment" label="Default environment" model={() => draft.environment} options={props.environmentOptions} />
+                    </div>
+                </Section>
+
+                <Section title="Notifications" hint="Push needs this browser's permission on each device.">
+                    <table data-notify-matrix>
+                        <thead>
+                            <tr>
+                                <th scope="col"><span data-visually-hidden="">Event</span></th>
+                                <Label as="th">Inbox</Label>
+                                {props.pushAvailable ? <Label as="th">Push</Label> : null}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {props.notifications.map(row => (
+                                <tr data-notify-row={row.kind}>
+                                    <th scope="row">{row.label}</th>
+                                    <td><Switch label={`${row.label} to inbox`} hideLabel model={() => draft.matrix[`${row.kind}:inbox`]} onCheckedChange={(v: boolean) => { draft.matrix = { ...draft.matrix, [`${row.kind}:inbox`]: v }; }} /></td>
+                                    {props.pushAvailable
+                                        ? <td><Switch label={`${row.label} by push`} hideLabel model={() => draft.matrix[`${row.kind}:push`]} onCheckedChange={(v: boolean) => { draft.matrix = { ...draft.matrix, [`${row.kind}:push`]: v }; }} /></td>
+                                        : null}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </Section>
+
+                <Section title="API keys" hint="Your own keys, encrypted at rest. Runtime logins never leave their machine.">
+                    <ul data-api-keys>
+                        {props.apiKeys.map(key => (
+                            <li data-api-key>
+                                <Icon name="key" size={15} />
+                                <span data-api-provider>{key.provider}</span>
+                                <span data-api-masked>{key.masked}</span>
+                                <StatusPill status={key.status} label={key.label} />
+                                <Button intent="default">Replace</Button>
+                            </li>
+                        ))}
+                    </ul>
+                </Section>
+
+                <Section title="Budgets" hint="Execution and delegation stop at these limits.">
+                    <div data-settings-pair>
+                        <TextField name="budget-monthly" label="Monthly spend limit" model={() => draft.monthly} />
+                        <TextField name="budget-per-task" label="Default per-task limit" model={() => draft.perTask} />
+                    </div>
+                </Section>
+
+                <Section title="Retention" hint="Copies already handed to a runtime are outside platform control.">
+                    <div data-settings-pair>
+                        <TextField name="retention-logs" label="Session logs" model={() => draft.sessionLogs} />
+                        <TextField name="retention-artifacts" label="Artifacts" model={() => draft.artifacts} />
+                    </div>
+                </Section>
+
+                <Section title="Your data" hint="Export streams everything as NDJSON. Delete cascades to every agent, chat and memory.">
+                    <div data-settings-actions>
+                        <Button intent="default" icon="download">Export workspace</Button>
+                        <ConfirmDialog
+                            model={() => draft.deleting}
+                            title="Delete this workspace?"
+                            description="Every agent, chat, task, memory, schedule and machine pairing is deleted. Export first if you want a copy."
+                            confirmLabel="Delete everything"
+                            cancelLabel="Keep the workspace"
+                            onCancel={() => { draft.deleting = false; }}
+                            onConfirm={() => { draft.deleting = false; }}
+                        />
+                        <Button intent="danger" icon="trash" onClick={() => { draft.deleting = true; }}>Delete workspace</Button>
+                    </div>
+                </Section>
+            </form>
+        </OpsPage>
     );
 });
+
+export const Settings = component(() => () => (
+    <SettingsView
+        timeZone={opsSettings.timeZone}
+        timeZones={opsSettings.timeZones}
+        defaultEnvironment={opsSettings.defaultEnvironment}
+        environmentOptions={opsSettings.environmentOptions}
+        pushAvailable={opsSettings.pushAvailable}
+        notifications={opsSettings.notifications}
+        apiKeys={opsSettings.apiKeys}
+        budgets={opsSettings.budgets}
+        retention={opsSettings.retention}
+    />
+));
