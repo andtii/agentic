@@ -2,12 +2,26 @@
  * `EnvironmentCard` — one execution environment as the user must be able
  * to see it (EXE-06): runtime, account (and its auth status), machine (and
  * whether it is online), concurrency and isolation. `environmentStatus`
- * folds those signals into one state the card stamps as `data-state`.
+ * folds those signals into one state the card stamps as `data-env-state`.
+ *
+ * Drawn to `docs/design/HANDOFF.md` → "Components" (`EnvironmentCard`) on
+ * the kit's `ag-env-card` scope: name, runtime + account, a capacity meter
+ * (one 18 × 6 segment per slot, `working` when used), the queued count,
+ * "Default for" tiles, the isolation mechanism. Expired or missing auth
+ * turns the border `failed` (`data-tone`), shows the `AUTH EXPIRED` pill
+ * and a fix line with `Re-check`; an offline machine dims the card.
  */
 
 import { component, type Define } from '@sigx/runtime-core';
-import { Badge, Button, Card, Status } from '@sigx/zero';
+import { Status } from '@sigx/zero';
 import type { EnvironmentDescriptor, EnvironmentId, MachineInfo } from '@agentic/core';
+import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
+import { agEnvCardAnatomy } from '../kit/anatomy.js';
+import { Button } from '../kit/Button.js';
+import { StatusPill } from '../kit/StatusPill.js';
+import type { Tone } from '../kit/vocabulary.js';
+
+const SCOPE = agEnvCardAnatomy.scope;
 
 export type EnvironmentState = 'ready' | 'busy' | 'offline' | 'auth-missing' | 'auth-expired' | 'auth-unknown';
 
@@ -15,24 +29,57 @@ export interface EnvironmentStatus {
     readonly state: EnvironmentState;
     readonly label: string;
     readonly color: 'success' | 'warning' | 'error' | 'neutral';
+    /** The card's tone: `failed` border for auth, `dim` for an offline machine, `working` while busy. */
+    readonly tone: Tone;
 }
 
 /** Machine offline beats auth, auth beats capacity: the first thing the user has to fix comes first. */
 export function environmentStatus(env: EnvironmentDescriptor, machine?: MachineInfo): EnvironmentStatus {
-    if (machine && !machine.online) return { state: 'offline', label: 'Machine offline', color: 'neutral' };
+    if (machine && !machine.online) return { state: 'offline', label: 'Machine offline', color: 'neutral', tone: 'dim' };
     switch (env.account.authStatus) {
         case 'missing':
-            return { state: 'auth-missing', label: 'Not signed in', color: 'error' };
+            return { state: 'auth-missing', label: 'Not signed in', color: 'error', tone: 'failed' };
         case 'expired':
-            return { state: 'auth-expired', label: 'Sign-in expired', color: 'error' };
+            return { state: 'auth-expired', label: 'Sign-in expired', color: 'error', tone: 'failed' };
         case 'unknown':
-            return { state: 'auth-unknown', label: 'Sign-in status unknown', color: 'warning' };
+            return { state: 'auth-unknown', label: 'Sign-in status unknown', color: 'warning', tone: 'muted' };
         default:
             break;
     }
     const { active, max } = env.concurrency;
-    if (active >= max) return { state: 'busy', label: `Busy (${active}/${max})`, color: 'warning' };
-    return { state: 'ready', label: 'Ready', color: 'success' };
+    if (active >= max) return { state: 'busy', label: `Busy (${active}/${max})`, color: 'warning', tone: 'working' };
+    return { state: 'ready', label: 'Ready', color: 'success', tone: 'live' };
+}
+
+/** The auth pill for an account: AUTH OK, AUTH EXPIRED, NOT SIGNED IN, UNKNOWN. */
+export function authPill(env: EnvironmentDescriptor): 'auth-ok' | 'auth-expired' | 'auth-missing' | 'unknown' {
+    switch (env.account.authStatus) {
+        case 'ok':
+            return 'auth-ok';
+        case 'expired':
+            return 'auth-expired';
+        case 'missing':
+            return 'auth-missing';
+        default:
+            return 'unknown';
+    }
+}
+
+/** The fix line under a card whose auth needs a person. */
+export function authFixLine(env: EnvironmentDescriptor): string | undefined {
+    switch (env.account.authStatus) {
+        case 'expired':
+            return `The ${env.account.label} account can no longer authenticate. Work for it is held, not moved to another account.`;
+        case 'missing':
+            return `The ${env.account.label} account is not signed in on this machine.`;
+        default:
+            return undefined;
+    }
+}
+
+export interface DefaultForAgent {
+    readonly name: string;
+    readonly hue?: AgentHue;
 }
 
 export type EnvironmentCardProps = Define.Prop<'environment', EnvironmentDescriptor, true> &
@@ -41,7 +88,12 @@ export type EnvironmentCardProps = Define.Prop<'environment', EnvironmentDescrip
     /** Renders a select button with this text; `select` fires with the environment id. */
     Define.Prop<'selectLabel', string> &
     Define.Prop<'disabled', boolean> &
-    Define.Event<'select', EnvironmentId>;
+    /** Tasks queued for this environment (an offline machine holds them; EXE-12). */
+    Define.Prop<'queued', number> &
+    /** The agents that default to this environment. */
+    Define.Prop<'defaultFor', readonly DefaultForAgent[]> &
+    Define.Event<'select', EnvironmentId> &
+    Define.Event<'recheck', EnvironmentId>;
 
 export const EnvironmentCard = component<EnvironmentCardProps>(
     ({ props, emit }) =>
@@ -49,52 +101,71 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
             const env = props.environment;
             const machine = props.machine;
             const status = environmentStatus(env, machine);
+            const fix = authFixLine(env);
+            const slots = Array.from({ length: Math.max(env.concurrency.max, 0) }, (_, i) => i < env.concurrency.active);
             return (
-                <article data-scope="ai-form" data-part="environment" data-state={status.state} data-selected={props.selected ? '' : undefined}>
-                    <Card.Root>
-                        <Card.Header>
-                            <Card.Title>{env.name}</Card.Title>
-                            <span data-scope="ai-form" data-part="environment-status">
-                                <Status.Root color={status.color} />
-                                <span>{status.label}</span>
-                            </span>
-                        </Card.Header>
-                        <Card.Body>
-                            <dl data-scope="ai-form" data-part="facts">
-                                <dt>Runtime</dt>
-                                <dd>{env.runtime}</dd>
-                                <dt>Account</dt>
-                                <dd>
-                                    {env.account.label}
-                                    {env.account.identity ? ` (${env.account.identity})` : ''} <Badge.Root color={status.color}>{env.account.authStatus}</Badge.Root>
-                                </dd>
-                                <dt>Machine</dt>
-                                <dd>
-                                    {machine?.name ?? env.machineId}
-                                    {machine ? (machine.online ? ' — online' : ' — offline') : ''}
-                                </dd>
-                                <dt>Concurrency</dt>
-                                <dd>
-                                    {env.concurrency.active} of {env.concurrency.max}
-                                </dd>
-                                <dt>Isolation</dt>
-                                <dd>{env.isolation}</dd>
-                                {env.cwdRoots.length ? (
-                                    <>
-                                        <dt>Working roots</dt>
-                                        <dd>{env.cwdRoots.join(', ')}</dd>
-                                    </>
-                                ) : null}
-                            </dl>
-                        </Card.Body>
-                        {props.selectLabel ? (
-                            <Card.Footer>
-                                <Button.Root type="button" size="sm" disabled={props.disabled || props.selected} onClick={() => emit('select', env.id)}>
-                                    {props.selectLabel}
-                                </Button.Root>
-                            </Card.Footer>
+                <article data-scope={SCOPE} data-part="root" data-tone={status.tone} data-env-state={status.state} data-mod-selected={props.selected ? '' : undefined} aria-label={env.name}>
+                    <div data-scope={SCOPE} data-part="header">
+                        <h3 data-scope={SCOPE} data-part="name">{env.name}</h3>
+                        <span data-scope={SCOPE} data-part="status">
+                            <Status.Root color={status.color} />
+                            <span>{status.label}</span>
+                        </span>
+                        <StatusPill status={authPill(env)} />
+                    </div>
+                    <p data-scope={SCOPE} data-part="line">
+                        <span>{env.runtime}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span>
+                            {env.account.label}
+                            {env.account.identity ? ` (${env.account.identity})` : ''}
+                        </span>
+                    </p>
+                    <div data-scope={SCOPE} data-part="capacity" role="img" aria-label={`${env.concurrency.active} of ${env.concurrency.max} sessions in use`}>
+                        <span data-scope={SCOPE} data-part="meter" aria-hidden="true">
+                            {slots.map((used) => <span data-scope={SCOPE} data-part="slot" data-used={used ? '' : undefined} />)}
+                        </span>
+                        <span data-scope={SCOPE} data-part="count">
+                            {env.concurrency.active} of {env.concurrency.max}
+                        </span>
+                        {props.queued ? <span data-scope={SCOPE} data-part="queued">{props.queued} queued</span> : null}
+                    </div>
+                    <dl data-scope={SCOPE} data-part="facts">
+                        <dt>Machine</dt>
+                        <dd>
+                            {machine?.name ?? env.machineId}
+                            {machine ? (machine.online ? ' — online' : ' — offline') : ''}
+                        </dd>
+                        <dt>Isolation</dt>
+                        <dd>{env.isolation}</dd>
+                        {env.cwdRoots.length ? (
+                            <>
+                                <dt>Working roots</dt>
+                                <dd>{env.cwdRoots.join(', ')}</dd>
+                            </>
                         ) : null}
-                    </Card.Root>
+                        {props.defaultFor?.length ? (
+                            <>
+                                <dt>Default for</dt>
+                                <dd data-scope={SCOPE} data-part="default-for">
+                                    {props.defaultFor.map((a) => <AgentTile name={a.name} hue={a.hue} size={20} labelled />)}
+                                </dd>
+                            </>
+                        ) : null}
+                    </dl>
+                    {fix ? (
+                        <p data-scope={SCOPE} data-part="fix">
+                            <span>{fix}</span>
+                            <Button intent="default" onClick={() => emit('recheck', env.id)}>Re-check</Button>
+                        </p>
+                    ) : null}
+                    {props.selectLabel ? (
+                        <div data-scope={SCOPE} data-part="actions">
+                            <Button intent="default" disabled={props.disabled || props.selected} onClick={() => emit('select', env.id)}>
+                                {props.selectLabel}
+                            </Button>
+                        </div>
+                    ) : null}
                 </article>
             );
         },

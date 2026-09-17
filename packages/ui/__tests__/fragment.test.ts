@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FRAGMENT_VERSION, componentExportName, defineTokens, mergeManifests, tokenVocabulary, validateRecipes, type ZeroManifest } from '@sigx/zero-kit';
 import { fragment, recipes, SCOPES } from '../src/fragment';
+import { recipes as transcriptRecipes } from '../src/fragment/recipes';
+import { tokens as agenticTokens } from '../src/design-system';
 import * as ui from '../src';
 
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
@@ -26,9 +28,10 @@ describe('the ai-* fragment', () => {
         expect(fragment.package).toBe('@agentic/ui');
     });
 
-    it('owns the six scopes of the architecture, vendor-prefixed', () => {
-        expect(SCOPES).toEqual(['ai-thread', 'ai-message', 'ai-tool-call', 'ai-reasoning', 'ai-approval', 'ai-composer']);
-        for (const scope of SCOPES) expect(scope.startsWith('ai-')).toBe(true);
+    it('owns the six transcript scopes of the architecture and the kit ag-* scopes, vendor-prefixed', () => {
+        expect(SCOPES.slice(0, 6)).toEqual(['ai-thread', 'ai-message', 'ai-tool-call', 'ai-reasoning', 'ai-approval', 'ai-composer']);
+        expect(SCOPES.slice(6)).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card']);
+        for (const scope of SCOPES) expect(scope).toMatch(/^a[ig]-/);
     });
 
     it('merges into the installed @sigx/zero manifest — governed states, flags, placements, part tree', () => {
@@ -48,7 +51,10 @@ describe('the ai-* fragment', () => {
             const parts = new Set(anatomy.parts.map((p) => p.name));
             for (const part of Object.keys(recipe.parts)) expect(parts.has(part), `${recipe.component}.${part}`).toBe(true);
         }
-        const issues = validateRecipes(recipes, merged, tokenVocabulary(defineTokens({ themes: {}, defaultLight: 'light' } as never)));
+        // The transcript pack is generic (recommended vocabulary only); the kit pack reads the `--ag-*` tokens the agentic design system declares.
+        const generic = validateRecipes(transcriptRecipes, merged, tokenVocabulary(defineTokens({ themes: {}, defaultLight: 'light' } as never)));
+        expect(generic.filter((i) => i.level === 'error')).toEqual([]);
+        const issues = validateRecipes(recipes, merged, tokenVocabulary(agenticTokens as never));
         expect(issues.filter((i) => i.level === 'error')).toEqual([]);
     });
 
