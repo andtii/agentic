@@ -12,6 +12,12 @@
       "development": "./dist/index.js",
       "production": "./dist/index.prod.js",
       "import": "./dist/index.js"
+    },
+    "./claude-code": {
+      "types": "./dist/claude-code/index.d.ts",
+      "development": "./dist/claude-code.js",
+      "production": "./dist/claude-code.prod.js",
+      "import": "./dist/claude-code.js"
     }
   },
   "sideEffects": false,

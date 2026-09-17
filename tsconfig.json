@@ -31,6 +31,9 @@
       "@agentic/learning": [
         "./packages/learning/src/index.ts"
       ],
+      "@agentic/runtimes/claude-code": [
+        "./packages/runtimes/src/claude-code/index.ts"
+      ],
       "@agentic/runtimes": [
         "./packages/runtimes/src/index.ts"
       ],
