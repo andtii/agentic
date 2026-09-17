@@ -6,3 +6,4 @@ export * from './workspace/index.js';
 export * from './notify/index.js';
 export * from './memory/index.js';
 export * from './schedule/index.js';
+export * from './agent/index.js';
