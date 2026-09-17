@@ -9,6 +9,7 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | A2A server + client adapter (`packages/a2a`) | `@sigx/ai-agent-a2a` | after the conformance subset passes |
 | Memory / Learning interfaces (`packages/core`) | `@sigx/ai-agent` (`./memory`) | once two implementations exist |
 | BM25-ish memory ranking + versioned NDJSON export (`packages/memory/src/rank`, `src/export`) | `@sigx/ai-agent` (`./memory`), beside the interfaces | once a second MemoryPlugin exists |
+| Permission-free proposal guard + lesson helpers (`packages/learning/src/proposals`, `src/lessons`) | `@sigx/ai-agent` (`./memory`), beside the Learning interfaces | once a second LearningPlugin exists |
 | DelegateTool (`packages/runtimes/src/tools/delegate.ts`) | `@sigx/ai-agent` | after limit semantics settle |
 | Daemon-protocol envelope + relay (`packages/daemon-protocol`, `apps/daemon`) | `@sigx/ai-agent/wire` + `@sigx/ai-agent-node` | later |
 | `ai-thread` / `ai-message` / `ai-composer` / `ai-tool-call` / `ai-reasoning` fragment (`packages/ui`) | signalxjs/ai `@sigx/ai-ui` (signalxjs/ai#17) | soon — generic from day one |
