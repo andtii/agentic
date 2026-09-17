@@ -31,6 +31,18 @@ export function toA2aParts(parts: readonly PromptPart[]): A2aPart[] {
 
 /** A single A2A part as a prompt part; `undefined` for a data part (those are not prompt content). */
 export function toPromptPart(part: A2aPart): PromptPart | undefined {
+    // A resource travels as a text or url part with `metadata.uri` (see `toA2aParts`).
+    const uri = part.metadata?.uri;
+    if (typeof uri === 'string' && (part.text !== undefined || part.url !== undefined)) {
+        const name = part.metadata?.name;
+        return {
+            type: 'resource',
+            uri,
+            ...(typeof name === 'string' ? { name } : {}),
+            ...(part.mediaType ? { mediaType: part.mediaType } : {}),
+            ...(part.text !== undefined ? { text: part.text } : {})
+        };
+    }
     if (part.text !== undefined) return { type: 'text', text: part.text };
     const mediaType = part.mediaType ?? 'application/octet-stream';
     const named = part.filename ? { filename: part.filename } : {};

@@ -48,7 +48,13 @@ export interface TaskRecord {
     readonly updatedAt: number;
 }
 
-/** Where task snapshots live between requests. The default is in memory. */
+/**
+ * Where task snapshots live between requests. The default is in memory. A live
+ * task is always read from the handler that runs it; the store is written on
+ * part boundaries and status changes (not per text delta, which would be a
+ * write per token), so a reader on another isolate sees text up to the last
+ * finished part.
+ */
 export interface TaskStore {
     get(id: string): Promise<TaskRecord | undefined> | TaskRecord | undefined;
     put(record: TaskRecord): Promise<void> | void;
