@@ -5,6 +5,7 @@ import { AgentTile, Button, EmptyState, EnvironmentLine, Row, Stack, StatusPill 
 import { Page } from '../components/Page';
 import { agentById } from '../mock/data';
 import { agentProfile } from '../mock/agents';
+import { defineTopbar, routeId } from '../components/topbar';
 import { presencePill } from './Agents';
 import { OverviewTab } from './agent/OverviewTab';
 import { ConfigTab } from './agent/ConfigTab';
@@ -20,6 +21,15 @@ export type AgentTab = (typeof AGENT_TABS)[number];
  * (`docs/design/HANDOFF.md` → Screen specs, Agent config / Agent memory).
  * `?tab=` selects the tab on load so a link can land on Config or Memory.
  */
+defineTopbar('agent', (route) => {
+    const id = routeId(route);
+    const profile = agentProfile(id);
+    return {
+        crumb: agentById(id)?.name,
+        subtitle: profile ? () => <span>{profile.role}</span> : undefined
+    };
+});
+
 export const Agent = component(() => {
     const route = useRoute();
     useHead({ title: agentById(String(route.params.id))?.name ?? 'Agent not found' });
@@ -51,7 +61,7 @@ export const Agent = component(() => {
                                 <div data-agent-sub="">
                                     <span data-agent-role="">{profile.role}</span>
                                     {profile.environment
-                                        ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} />
+                                        ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} fit="drop-machine" />
                                         : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}
                                 </div>
                             </Stack>

@@ -152,8 +152,9 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                         <Button intent="wait" icon="check" loading={st.pending === 'once'} disabled={busy} onClick={() => decide('allow', 'once')}>
                             Allow once
                         </Button>
-                        <Button intent="default" loading={st.pending === 'session'} disabled={busy} onClick={() => decide('allow', 'session')}>
-                            Allow for this session
+                        <Button intent="default" label="Allow for this session" loading={st.pending === 'session'} disabled={busy} onClick={() => decide('allow', 'session')}>
+                            <span data-scope={SCOPE} data-part="label-full">Allow for this session</span>
+                            <span data-scope={SCOPE} data-part="label-short" aria-hidden="true">Allow for session</span>
                         </Button>
                         <Button intent="danger" icon="close" loading={st.pending === 'deny'} disabled={busy} onClick={() => decide('deny', 'once')}>
                             Deny

@@ -4,6 +4,7 @@ import { AgentTile, Button, DataTable, Tag, type Tone } from '@agentic/ui';
 import { historyFilters, opsAgent, opsHistory, type HistoryEntry, type HistoryFilter, type HistoryKind } from '../mock/ops';
 import { clock, groupByDay } from './ops/format';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
 export const HISTORY_COLS = '84px 150px 130px 1fr 110px';
@@ -30,6 +31,8 @@ export type HistoryViewProps = Define.Prop<'entries', readonly HistoryEntry[], t
  * tag, actor, what happened and the ref link, newest first and grouped by
  * day (OPS-03). `Audit.list(filter)` replaces the mock with #44.
  */
+defineTopbar('history', () => ({ actions: () => <Button intent="default" icon="download">Export</Button> }));
+
 export const HistoryView = component<HistoryViewProps>(({ props }) => {
     const ui = signal<{ filter: HistoryFilter }>({ filter: props.filter ?? 'all' });
     return () => {
@@ -45,8 +48,7 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
                                 <button type="button" data-filter-chip aria-pressed={ui.filter === f.id ? 'true' : 'false'} onClick={() => { ui.filter = f.id; }}>{f.label}</button>
                             ))}
                         </div>
-                    ),
-                    actions: () => <Button intent="default" icon="download">Export</Button>
+                    )
                 }}
             >
                 <DataTable

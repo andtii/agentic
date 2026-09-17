@@ -3,7 +3,8 @@ import { Link, RouterView, useRoute } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Breadcrumbs } from '@sigx/zero-daisyui/components';
 import { AppShell } from '@agentic/ui';
-import { CRUMBS, NAV_GROUPS } from './nav';
+import { NAV_GROUPS } from './nav';
+import { backOf, titleOf, trailFor } from './crumbs';
 import { machines } from './mock/data';
 import { topbarFor } from './components/topbar';
 
@@ -18,6 +19,11 @@ const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:w
  * everything else) together with the font links. `ThemeProvider` gives
  * server renders a per-request theme controller — `useTheme()` throws on
  * the server without one.
+ *
+ * The topbar is the route's: its trail (`crumbs.ts`) becomes the breadcrumb
+ * at ≥ 768 px and the app bar's title + back link below; the page's
+ * contribution (`components/topbar.ts`) supplies the entity name, the
+ * actions, the sub-line and the phone's one right slot.
  */
 export const App = component(() => {
     useHead({
@@ -31,59 +37,62 @@ export const App = component(() => {
         priority: -1
     });
     const route = useRoute();
+    const topbar = () => topbarFor(route);
+    const trail = () => trailFor(route, topbar());
 
-    const crumbs = (): { label: string; href: string; current?: boolean }[] => {
-        const root = CRUMBS[String(route.name ?? '')];
-        if (!root) return [];
-        const id = route.params.id;
-        const isRoot = route.path === root.href;
-        return isRoot || !id ? [{ ...root, current: true }] : [root, { label: topbarFor(route)?.crumb ?? String(id), href: route.path, current: true }];
+    return () => {
+        const top = topbar();
+        const crumbs = trail();
+        return (
+            <ThemeProvider>
+                <AppShell
+                    brand="agentic"
+                    groups={NAV_GROUPS()}
+                    currentPath={route.path}
+                    flush={route.name === 'chat'}
+                    title={titleOf(crumbs)}
+                    back={backOf(crumbs)}
+                    slots={{
+                        link: ({ item, icon }) => <Link to={item.href}>{icon}{item.label}</Link>,
+                        back: ({ href, icon }) => <Link to={href}><span data-visually-hidden="">Back</span>{icon}</Link>,
+                        actions: () => top?.actions?.() ?? null,
+                        ...(top?.subtitle ? { subtitle: top.subtitle } : {}),
+                        ...(top?.phoneAction ? { phoneAction: top.phoneAction } : {}),
+                        breadcrumb: () => (
+                            <Breadcrumbs label="Breadcrumb">
+                                {crumbs.map(crumb => (
+                                    <Breadcrumbs.Item>
+                                        {crumb.current
+                                            ? <Breadcrumbs.Link current>{crumb.label}</Breadcrumbs.Link>
+                                            : <Breadcrumbs.Link asChild><Link to={crumb.href}>{crumb.label}</Link></Breadcrumbs.Link>}
+                                        {crumb.current ? null : <Breadcrumbs.Separator>›</Breadcrumbs.Separator>}
+                                    </Breadcrumbs.Item>
+                                ))}
+                            </Breadcrumbs>
+                        ),
+                        // The always-visible half of failure distinction (OPS-04): this
+                        // browser's socket, then each machine. Live signals land with #46.
+                        connection: () => (
+                            <ul data-connection>
+                                <li data-connection-row data-state="on"><span>This browser</span><span>live</span></li>
+                                {machines.map(m => (
+                                    <li data-connection-row data-state={m.online ? 'on' : 'off'}>
+                                        <span>{m.name}</span><span>{m.online ? 'online' : 'offline'}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ),
+                        user: () => (
+                            <>
+                                <span data-user-avatar aria-hidden="true">WS</span>
+                                <span data-user-name>Workspace<small>ws:local</small></span>
+                            </>
+                        )
+                    }}
+                >
+                    <RouterView />
+                </AppShell>
+            </ThemeProvider>
+        );
     };
-
-    return () => (
-        <ThemeProvider>
-            <AppShell
-                brand="agentic"
-                groups={NAV_GROUPS()}
-                currentPath={route.path}
-                flush={route.name === 'chat'}
-                slots={{
-                    link: ({ item }) => <Link to={item.href}>{item.label}</Link>,
-                    actions: () => topbarFor(route)?.actions?.() ?? null,
-                    breadcrumb: () => (
-                        <Breadcrumbs label="Breadcrumb">
-                            {crumbs().map(crumb => (
-                                <Breadcrumbs.Item>
-                                    {crumb.current
-                                        ? <Breadcrumbs.Link current>{crumb.label}</Breadcrumbs.Link>
-                                        : <Breadcrumbs.Link asChild><Link to={crumb.href}>{crumb.label}</Link></Breadcrumbs.Link>}
-                                    {crumb.current ? null : <Breadcrumbs.Separator>›</Breadcrumbs.Separator>}
-                                </Breadcrumbs.Item>
-                            ))}
-                        </Breadcrumbs>
-                    ),
-                    // The always-visible half of failure distinction (OPS-04): this
-                    // browser's socket, then each machine. Live signals land with #87 / #46.
-                    connection: () => (
-                        <ul data-connection>
-                            <li data-connection-row data-state="on"><span>This browser</span><span>live</span></li>
-                            {machines.map(m => (
-                                <li data-connection-row data-state={m.online ? 'on' : 'off'}>
-                                    <span>{m.name}</span><span>{m.online ? 'online' : 'offline'}</span>
-                                </li>
-                            ))}
-                        </ul>
-                    ),
-                    user: () => (
-                        <>
-                            <span data-user-avatar aria-hidden="true">WS</span>
-                            <span data-user-name>Workspace<small>ws:local</small></span>
-                        </>
-                    )
-                }}
-            >
-                <RouterView />
-            </AppShell>
-        </ThemeProvider>
-    );
 });

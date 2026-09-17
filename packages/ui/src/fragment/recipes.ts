@@ -382,6 +382,8 @@ const approval: RecipeInput = {
             base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' },
             selectors: { '& > [data-scope="button"]': { blockSize: '2.5rem' } }
         },
+        'label-full': { base: { display: 'inline' } },
+        'label-short': { base: { display: 'none' } },
         // The one-line record a decision collapses to.
         record: { base: { margin: '0', fontSize: 'var(--text-sm)', color: textMuted } }
     },
@@ -452,8 +454,11 @@ const composer: RecipeInput = {
         input: {
             base: { position: 'relative' },
             selectors: {
+                // The field fills the card; its label is for assistive tech only (the card is the frame).
+                '& [data-scope="textarea"][data-part="root"]': { display: 'flex', inlineSize: '100%' },
+                '& [data-scope="textarea"][data-part="label"]': { position: 'absolute', inlineSize: '1px', blockSize: '1px', margin: '-1px', padding: '0', border: '0', overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' },
                 // Borderless, auto-growing, 14 px — the card is the frame.
-                '& textarea': { border: 'none', background: 'transparent', boxShadow: 'none', padding: '0', fontSize: 'var(--text-lg)', lineHeight: '1.5', resize: 'none', outline: 'none' },
+                '& textarea': { display: 'block', inlineSize: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', boxShadow: 'none', padding: '0', fontSize: 'var(--text-lg)', lineHeight: '1.5', resize: 'none', outline: 'none' },
                 '& textarea::placeholder': { color: textDim }
             }
         },
@@ -502,11 +507,76 @@ function colorAxis(part: string, paint: (role: string) => Record<string, string>
 
 thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${role})`, color: `var(--color-${role}-content)` }));
 
-/** The keyframes the running dot and the STREAMING pill pulse on — raw CSS the design system appends verbatim. */
+/**
+ * Raw CSS the design system appends verbatim: the keyframes the running dot
+ * and the STREAMING pill pulse on, and the phone regime recipes cannot
+ * express (`docs/design/HANDOFF.md` → "Mobile specifics"): below 768 px the
+ * composer docks to the bottom as one 48 px row (attach, single-line input
+ * at 15 px, square Send) under the "To" row, the message meta drops the
+ * environment line, and the approval card's `Allow once` takes a full row
+ * with the other two answers sharing the next.
+ */
 export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: ai-pulse 1200ms ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
     [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: none; }
+}
+@media (max-width: 767.98px) {
+    [data-scope="ai-message"][data-part="environment"] { display: none; }
+
+    [data-scope="ai-approval"][data-part="actions"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
+    [data-scope="ai-approval"][data-part="label-full"] { display: none; }
+    [data-scope="ai-approval"][data-part="label-short"] { display: inline; }
+    [data-scope="ai-approval"][data-part="actions"] > [data-scope="button"] { block-size: var(--ag-control-h-touch); }
+    [data-scope="ai-approval"][data-part="actions"] > :first-child { grid-column: 1 / -1; }
+
+    [data-scope="ai-composer"][data-part="root"] {
+        display: grid;
+        grid-template-columns: var(--ag-control-h-touch) minmax(0, 1fr) var(--ag-control-h-touch);
+        grid-template-areas: "to to to" "attachments attachments attachments" "attach input send" "cancel cancel cancel";
+        align-items: end;
+        gap: var(--space-sm);
+        border-radius: 0;
+        border-inline: 0;
+        border-block-end: 0;
+        border-block-start: var(--border) solid var(--ag-line);
+        padding: var(--space-sm) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+    }
+    [data-scope="ai-composer"][data-part="addressing"] { grid-area: to; }
+    [data-scope="ai-composer"][data-part="attachments"] { grid-area: attachments; }
+    [data-scope="ai-composer"][data-part="input"] { grid-area: input; }
+    [data-scope="ai-composer"][data-part="input"] textarea {
+        box-sizing: border-box;
+        min-block-size: var(--ag-control-h-touch);
+        padding: 12px var(--space-md);
+        border: var(--border) solid var(--ag-line-strong);
+        border-radius: var(--radius-field);
+        background: var(--color-base-100);
+        font-size: 15px;
+        line-height: 1.4;
+    }
+    [data-scope="ai-composer"][data-part="actions"] { display: contents; }
+    [data-scope="ai-composer"][data-part="keys"] { display: none; }
+    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="icon"] { grid-area: attach; inline-size: var(--ag-control-h-touch); block-size: var(--ag-control-h-touch); }
+    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="default"] { grid-area: cancel; }
+    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="primary"] {
+        grid-area: send;
+        inline-size: var(--ag-control-h-touch);
+        block-size: var(--ag-control-h-touch);
+        padding: 0;
+        justify-content: center;
+    }
+    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="primary"] > span {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
 }
 `;
 

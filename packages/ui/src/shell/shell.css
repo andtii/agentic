@@ -6,8 +6,11 @@
  * "Layout and shell").
  *
  * Two regimes on one markup:
- *   < 768px  the sidebar is gone; the Navbar's Drawer (modal, `<dialog>`)
- *            carries the navigation, and the bar shows the brand.
+ *   < 768px  the sidebar is gone; the Navbar's Drawer (modal, `<dialog>`,
+ *            312 px, 50 px items, connection strip at the foot) carries the
+ *            navigation, and the bar is a 60 px app bar on base-200: menu or
+ *            back, title 16 / 600 with an optional sub-line, one right slot
+ *            ("Mobile specifics"). Page padding 16.
  *   >= 768px a sticky 232 px sidebar (brand, nav groups, connection strip,
  *            user) beside the column of 60 px topbar + main.
  * The nav renders in both the drawer and the sidebar; only one is ever visible.
@@ -50,7 +53,94 @@
     min-inline-size: 0;
     font-size: 15px;
     font-weight: var(--weight-semibold);
+    white-space: nowrap;
 }
+
+/* one line, never two: the current entity name takes the ellipsis */
+[data-scope="ai-shell"][data-part="breadcrumb"] [data-scope="breadcrumbs"][data-part="root"],
+[data-scope="ai-shell"][data-part="breadcrumb"] [data-scope="breadcrumbs"][data-part="list"] {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    min-inline-size: 0;
+    overflow: hidden;
+}
+
+[data-scope="ai-shell"][data-part="breadcrumb"] [data-scope="breadcrumbs"][data-part="item"] {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-inline-size: 0;
+    flex: 0 1 auto;
+}
+
+[data-scope="ai-shell"][data-part="breadcrumb"] [data-scope="breadcrumbs"][data-part="separator"] { margin-inline-end: var(--space-sm); }
+
+[data-scope="ai-shell"][data-part="breadcrumb"] [data-scope="breadcrumbs"][data-part="link"] {
+    display: block;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* the app bar's title (below 768) and the topbar's leading controls */
+[data-scope="ai-shell"][data-part="title"] {
+    display: none;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-inline-size: 0;
+}
+
+[data-scope="ai-shell"][data-part="title-text"] {
+    font-size: 16px;
+    font-weight: var(--weight-semibold);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[data-scope="ai-shell"][data-part="subtitle"] {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-inline-size: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--ag-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+[data-scope="ai-shell"][data-part="menu"] > button,
+[data-scope="ai-shell"][data-part="back"] > a,
+[data-scope="ai-shell"][data-part="drawer-head"] > button {
+    display: inline-grid;
+    place-items: center;
+    inline-size: var(--ag-touch-min);
+    block-size: var(--ag-touch-min);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-field);
+    background: transparent;
+    color: var(--color-base-content);
+    cursor: pointer;
+}
+
+[data-scope="ai-shell"][data-part="menu"] > button:hover,
+[data-scope="ai-shell"][data-part="back"] > a:hover,
+[data-scope="ai-shell"][data-part="drawer-head"] > button:hover { background: var(--color-base-300); }
+
+[data-scope="ai-shell"][data-part="menu"] > button:focus-visible,
+[data-scope="ai-shell"][data-part="back"] > a:focus-visible,
+[data-scope="ai-shell"][data-part="drawer-head"] > button:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+[data-scope="ai-shell"][data-part="back"] { display: none; }
+[data-scope="ai-shell"][data-part="phone-action"] { display: none; }
 
 [data-scope="ai-shell"][data-part="breadcrumb"]:empty { display: none; }
 
@@ -159,6 +249,8 @@
     text-decoration: none;
 }
 
+[data-scope="ai-shell"][data-part="nav-item"] > a > svg { flex: none; }
+
 [data-scope="ai-shell"][data-part="nav-item"]:hover { color: var(--color-base-content); }
 
 [data-scope="ai-shell"][data-part="nav-item"][data-state="active"],
@@ -221,14 +313,113 @@
     font-weight: var(--weight-semibold);
 }
 
-/* the drawer's own nav: groups, foot, close in one column */
-[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="nav"] {
-    margin-block-end: var(--space-lg);
+/* ---- the drawer (< 768): 312 px on a near-black scrim, 50 px items ---- */
+
+[data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+    box-sizing: border-box;
+    inline-size: 312px;
+    max-inline-size: 90vw;
+    padding: var(--space-lg) var(--space-lg) calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+    background: var(--color-base-200);
+    color: var(--color-base-content);
+    border-radius: 0;
+    box-shadow: none;
 }
 
-[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="connection"],
-[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="user"] {
-    margin-block-end: var(--space-md);
+[data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]):not([open]) { display: none; }
+
+[data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"])::backdrop {
+    background: color-mix(in oklab, var(--color-base-100) 45%, black);
+    opacity: 0.85;
+}
+
+[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="drawer-head"] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+/* the title names the dialog for assistive tech; the brand row is the visible heading */
+[data-scope="drawer"][data-part="panel"] [data-scope="drawer"][data-part="title"] {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="nav-item"] {
+    block-size: 50px;
+    font-size: 16px;
+}
+
+[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="nav-item"] > a > svg {
+    inline-size: 20px;
+    block-size: 20px;
+}
+
+[data-scope="drawer"][data-part="panel"] [data-scope="ai-shell"][data-part="sidebar-spacer"] { flex: 1 1 auto; }
+
+/* 200 ms slide with the scrim fading in; nothing moves under reduced motion */
+@media (prefers-reduced-motion: no-preference) {
+    [data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]):modal {
+        translate: 0 0;
+        transition: translate 200ms cubic-bezier(0.2, 0, 0, 1), display 200ms allow-discrete, overlay 200ms allow-discrete;
+    }
+
+    [data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]):modal::backdrop {
+        transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1), display 200ms allow-discrete, overlay 200ms allow-discrete;
+    }
+
+    @starting-style {
+        [data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]):modal { translate: -100% 0; }
+        [data-scope="drawer"][data-part="panel"]:has([data-scope="ai-shell"][data-part="drawer-head"]):modal::backdrop { opacity: 0; }
+    }
+}
+
+/* ---- < 768: the app bar regime ---------------------------------------- */
+
+@media (max-width: 767.98px) {
+    [data-scope="ai-shell"][data-part="bar"] {
+        background: var(--color-base-200);
+        padding-inline: var(--space-sm) var(--space-lg);
+    }
+
+    [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"][data-part="root"] {
+        block-size: 100%;
+        gap: var(--space-sm);
+    }
+
+    [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"] [data-scope="navbar"][data-part="start"] {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+        min-inline-size: 0;
+        flex: 1 1 auto;
+    }
+
+    /* the breadcrumb yields to the title; on a detail route the back link replaces the menu */
+    [data-scope="ai-shell"][data-part="breadcrumb"] { display: none; }
+    [data-scope="ai-shell"][data-part="title"] { display: flex; }
+    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"] [data-part="menu"] { display: none; }
+    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"] [data-part="back"] { display: inline-flex; }
+    [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"] [data-part="brand"] { margin-inline-start: var(--space-xs); }
+
+    /* one right slot: the page's phone action, else the last of its actions */
+    [data-scope="ai-shell"][data-part="phone-action"] { display: flex; align-items: center; }
+    [data-scope="ai-shell"][data-part="bar"]:has([data-part="phone-action"]) [data-part="actions"] { display: none; }
+    [data-scope="ai-shell"][data-part="actions"] > :not(:last-child) { display: none; }
+
+    [data-scope="ai-shell"][data-part="main"] { padding: var(--space-lg); }
+    [data-scope="ai-shell"][data-part="main"][data-flush] { padding: 0; }
 }
 
 /* ---- ≥ 768: the sidebar regime --------------------------------------- */
@@ -241,6 +432,9 @@
     [data-scope="ai-shell"][data-part="menu"] { display: none; }
 
     [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"] [data-part="brand"] { display: none; }
+
+    [data-scope="ai-shell"][data-part="title"],
+    [data-scope="ai-shell"][data-part="back"] { display: none; }
 
     [data-scope="ai-shell"][data-part="bar"] { padding-inline: var(--ag-space-8); }
 

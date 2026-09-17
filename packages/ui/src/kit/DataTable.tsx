@@ -6,6 +6,11 @@
  * row 10 / 16 in the mono label voice, body rows 14 / 16 — both from the
  * table recipe. The whole row is not clickable: the ref or name cell is
  * the link. While `loading`, three skeleton rows stand in for the body.
+ *
+ * Below 768 px the table becomes stacked cards ("Responsive behaviour"):
+ * one card per row, each cell captioned by its column head. That is CSS in
+ * `kitCss` on the `data-ag-table` wrapper, not a second markup, so the
+ * server render never has to guess the viewport and hydration matches.
  */
 import { component, type Define } from '@sigx/runtime-core';
 import { Skeleton, Table } from '@sigx/zero';
@@ -38,7 +43,13 @@ const Root = component<DataTableProps>(({ props, slots }) => () => {
     if (__DEV__ && widths.length !== props.columns.length) {
         throw new Error(`[@agentic/ui] DataTable: ${widths.length} tracks in cols but ${props.columns.length} columns`);
     }
+    // Below 768 px the kit CSS stacks each row into a card and captions every
+    // cell with its column head, read from these custom properties.
+    const captions = props.columns
+        .map((c, i) => `--ag-col-${i + 1}: ${JSON.stringify(c.hidden ? '' : c.label)}`)
+        .join('; ');
     return (
+        <div data-ag-table="" style={captions}>
         <Table.Root class={props.class} mods={{ hover: true }}>
             <colgroup>
                 {widths.map((w) => <col style={w ? `width: ${w}` : undefined} />)}
@@ -71,6 +82,7 @@ const Root = component<DataTableProps>(({ props, slots }) => () => {
                     : slots.default?.()}
             </Table.Body>
         </Table.Root>
+        </div>
     );
 }, { name: 'DataTable' });
 

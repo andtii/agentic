@@ -86,6 +86,21 @@ describe('DataTable', () => {
         expect(root.querySelector('[data-scope="table"][data-part="root"]')!.hasAttribute('data-mod-hover')).toBe(true);
     });
 
+    it('captions every cell with its column head for the stacked layout below 768', () => {
+        const root = mount(
+            <DataTable cols="100px 1fr 60px" columns={[{ label: 'Status' }, { label: 'Objective' }, { label: 'Toggle', hidden: true }]} label="t">
+                <DataTable.Row><DataTable.Cell>a</DataTable.Cell><DataTable.Cell>b</DataTable.Cell><DataTable.Cell>c</DataTable.Cell></DataTable.Row>
+            </DataTable>
+        );
+        const wrapper = root.querySelector<HTMLElement>('[data-ag-table]')!;
+        expect(wrapper).not.toBeNull();
+        // Custom properties carry the captions; the kit CSS reads them into `td::before` per column. A hidden head captions nothing.
+        expect(wrapper.style.getPropertyValue('--ag-col-1').trim()).toBe('"Status"');
+        expect(wrapper.style.getPropertyValue('--ag-col-2').trim()).toBe('"Objective"');
+        expect(wrapper.style.getPropertyValue('--ag-col-3').trim()).toBe('""');
+        expect(wrapper.querySelector('[data-scope="table"][data-part="root"]')).not.toBeNull();
+    });
+
     it('stands in three skeleton rows while loading', () => {
         const root = mount(<DataTable cols="1fr 1fr 1fr" columns={columns} label="t" loading />);
         expect(root.querySelectorAll('tbody tr').length).toBe(3);

@@ -4,6 +4,7 @@ import { environmentsOf, opsMachines, platformRow, type OpsMachine } from '../mo
 import { MachineGroup, PlatformRow } from './machines/MachineGroup';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 export type MachinesViewProps = Define.Prop<'machines', readonly OpsMachine[], true>;
 
@@ -14,11 +15,13 @@ export type MachinesViewProps = Define.Prop<'machines', readonly OpsMachine[], t
  * machine at all (`docs/design/HANDOFF.md` → Machines).
  */
 export const MachinesView = component<MachinesViewProps>(({ props }) => () => (
-    <OpsPage page="machines" title="Machines" slots={{ actions: () => <LinkButton to="/pair" intent="primary" icon="plus">Pair a machine</LinkButton> }}>
+    <OpsPage page="machines" title="Machines">
         {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} />)}
         <PlatformRow defaultFor={platformRow.defaultFor} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
         {props.machines.length === 0 ? <EmptyState variant="machines" /> : null}
     </OpsPage>
 ));
+
+defineTopbar('machines', () => ({ actions: () => <LinkButton to="/pair" intent="primary" icon="plus">Pair a machine</LinkButton> }));
 
 export const Machines = component(() => () => <MachinesView machines={opsMachines} />);

@@ -5,6 +5,7 @@ import { pairing } from '../mock/ops';
 import { mmss } from './ops/format';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 /** The code's lifetime: the countdown starts at 10:00. */
 export const CODE_LIFETIME = 600;
@@ -23,6 +24,8 @@ export type PairViewProps =
  * and at zero the cells go dim and "New code" replaces the waiting line
  * (`docs/design/HANDOFF.md` → Pair, Edge cases).
  */
+defineTopbar('pair', () => ({ crumb: 'Pair a machine', actions: () => <LinkButton to="/machines">Cancel</LinkButton> }));
+
 export const PairView = component<PairViewProps>(({ props }) => {
     const state = signal({ remaining: props.expiresIn, code: props.code });
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -53,7 +56,7 @@ export const PairView = component<PairViewProps>(({ props }) => {
         const expired = state.remaining <= 0;
         const pairCommand = `agentic-daemon pair ${state.code}`;
         return (
-            <OpsPage page="pair" title="Pair a machine" hero slots={{ actions: () => <LinkButton to="/machines">Cancel</LinkButton> }}>
+            <OpsPage page="pair" title="Pair a machine" hero>
                 <div data-pair-grid>
                     <ol data-pair-steps>
                         <li data-pair-step data-phase="complete">
