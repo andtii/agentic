@@ -18,6 +18,7 @@
 
 import { actorKey, hasScope, SESSION_EVENTS_TOPIC, type Principal, type SessionEvent } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
@@ -237,6 +238,15 @@ export function defineSessionActor(ports: SessionPorts) {
 
             const parsed = parseSessionKey(ctx.key);
 
+            /** The daemon path's in-turn check: only the machine this remote session was opened on may speak for it. */
+            function assertHostingMachine(): void {
+                const p = ctx.principal as Principal | null;
+                const s = ctx.state;
+                if (!s.opened || s.mode !== 'remote' || !s.spec?.machineId || p?.kind !== 'machine' || p.machineId !== s.spec.machineId) {
+                    throw new ServerFnError(403, `session: "${ctx.key}" is not hosted by this machine`);
+                }
+            }
+
             async function ensureLive(): Promise<Live | null> {
                 const existing = lives.get(ctx.key);
                 if (existing) return existing;
@@ -393,6 +403,7 @@ export function defineSessionActor(ports: SessionPorts) {
 
                 /** Daemon path (internal): frames from the machine's socket, one-way. */
                 async forwardFrames(frames: readonly WireFrame[]): Promise<void> {
+                    assertHostingMachine();
                     const s = ctx.state;
                     for (const frame of frames) {
                         switch (frame.kind) {
@@ -414,6 +425,7 @@ export function defineSessionActor(ports: SessionPorts) {
 
                 /** Daemon path (internal): the reply to a command sent through the `CommandSink`. */
                 async commandReplied(replied: WireReply): Promise<void> {
+                    assertHostingMachine();
                     const known = ctx.state.commands[replied.commandId];
                     if (!known || known.reply) return;
                     await recordReply(ctx.snapshot(known.command), replied);

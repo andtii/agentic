@@ -45,7 +45,9 @@ export function createTranscriptStore(ctx: SessionStoreContext): TranscriptStore
             const t = ctx.snapshot().transcript;
             return t && t.sessionId === sessionId ? t : undefined;
         },
-        async save(_sessionId: string, transcript: AgentTranscript) {
+        async save(sessionId: string, transcript: AgentTranscript) {
+            // `load` finds a snapshot by its own id: refuse one that could never be read back.
+            if (transcript.sessionId !== sessionId) throw new Error(`transcript of "${transcript.sessionId}" saved under "${sessionId}"`);
             ctx.state.transcript = transcript;
             await ctx.save();
         },

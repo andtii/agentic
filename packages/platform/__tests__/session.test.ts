@@ -109,9 +109,26 @@ describe('Session authorization', () => {
         expect(await statusOf(app.as(userPrincipal('u2')).actor(Session, KEY).get())).toBe(403);
         expect(await statusOf(app.as(null).actor(Session, KEY).get())).toBe(401);
         expect(await statusOf(session().forwardFrames([]))).toBe(403);
-        expect(await statusOf(app.as(machine).actor(Session, KEY).forwardFrames([]))).toBeUndefined();
         const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['tasks'] };
         expect(await statusOf(app.as(external).actor(Session, KEY).get())).toBe(403);
+    });
+
+    it('lets only the hosting machine of a remote session forward frames and replies', async () => {
+        const asMachine = app.as(machine).actor(Session, KEY);
+        const reply = { v: 1, kind: 'ack', commandId: 'x' } as const;
+        // Not opened, then opened locally: no machine hosts it.
+        expect(await statusOf(asMachine.forwardFrames([]))).toBe(403);
+        await session().open(spec);
+        expect(await statusOf(asMachine.forwardFrames([]))).toBe(403);
+        expect(await statusOf(asMachine.commandReplied(reply))).toBe(403);
+
+        const REMOTE_KEY = actorKey(WS, 'session', 'session_2');
+        await app.as(owner).actor(Session, REMOTE_KEY).open({ ...spec, runtime: 'claude-code', machineId: 'machine_1' as MachineId });
+        expect(await statusOf(app.as(machine).actor(Session, REMOTE_KEY).forwardFrames([]))).toBeUndefined();
+        expect(await statusOf(app.as(machine).actor(Session, REMOTE_KEY).commandReplied(reply))).toBeUndefined();
+        const other: Principal = { kind: 'machine', workspaceId: WS, machineId: 'machine_2' as MachineId };
+        expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).forwardFrames([]))).toBe(403);
+        expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).commandReplied(reply))).toBe(403);
     });
 });
 

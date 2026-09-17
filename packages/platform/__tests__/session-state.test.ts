@@ -129,6 +129,7 @@ describe('session stores', () => {
         await store.save('s1', t);
         expect(await store.load('s1')).toEqual(t);
         expect(await store.load('s2')).toBeUndefined();
+        await expect(store.save('s2', createTranscript('s1'))).rejects.toThrow(/saved under "s2"/);
         await store.delete?.('s2');
         expect(c.state.transcript).toBeDefined();
         await store.delete?.('s1');

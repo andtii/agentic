@@ -110,5 +110,5 @@ for await (const ev of s.tail({ epoch: 0, seq: 0 })) render(ev);   // replay, th
 
 - The record is the event log: one `applySessionEntry` entry per `AgentEvent`, then `ctx.save()` (switches to `ctx.append` when `@sigx/actors` ships it). `createEventLogStore` / `createTranscriptStore` expose it as `@sigx/ai-agent` stores.
 - Local turns run in `tasks.drive`; after an eviction the restarted task closes the turn as interrupted — open calls cancelled, open requests resolved `cancel`, `error {code: 'process_exited', data: {interrupted: true}}`, `turn-end {stopReason: 'error'}` (`isInterruptedTurnEnd`). A model call is never re-run.
-- Daemon path: `forwardFrames(frames)` and `commandReplied(reply)` are internal (machine principal only); a command sent to a daemon answers `pending` until its reply arrives.
+- Daemon path: `forwardFrames(frames)` and `commandReplied(reply)` are internal (only the machine the session was opened on); a command sent to a daemon answers `pending` until its reply arrives.
 - `authorize: [sameWorkspace, sessions scope]`. The chat hears `session-started`, `typing`, the final assistant `message` and `session-ended` on `SESSION_EVENTS_TOPIC`.
