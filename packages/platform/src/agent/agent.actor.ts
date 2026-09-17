@@ -24,6 +24,11 @@ import {
     type AgentConfigEntry,
     type AgentState,
     type AgentVersionInfo,
+    type InstructionProposal,
+    type PendingProposal,
+    type ProposalOrigin,
+    type ProposalStatus,
+    appendInstruction,
     applyAgentEntry,
     configAtVersion,
     initialAgentState,
@@ -47,7 +52,33 @@ export interface AgentView {
     readonly configVersion: number;
     readonly config: AgentState['config'];
     readonly memoryScope: MemoryScope;
+    /** Instruction proposals waiting for review (LRN-08). */
+    readonly pendingProposals: number;
 }
+
+const PROPOSAL_ORIGINS: ReadonlySet<string> = new Set<ProposalOrigin['kind']>(['task-end', 'correction']);
+
+/** Only the review-gated shape is parked; anything else is a `TypeError`, never a silent drop. */
+function assertInstructionProposal(p: unknown, i: number): asserts p is InstructionProposal {
+    const x = p as Partial<InstructionProposal> | null;
+    if (!x || typeof x !== 'object' || x.kind !== 'instruction') throw new TypeError(`proposal ${i} is not an instruction proposal`);
+    if (typeof x.patch !== 'string' || !x.patch.trim()) throw new TypeError(`proposal ${i} needs a patch`);
+    if (typeof x.reason !== 'string') throw new TypeError(`proposal ${i} needs a reason`);
+    if (x.requiresReview !== true) throw new TypeError(`proposal ${i} must require review`);
+}
+
+function assertOrigin(origin: unknown): asserts origin is ProposalOrigin {
+    const o = origin as Partial<ProposalOrigin> | null;
+    if (!o || typeof o !== 'object' || !PROPOSAL_ORIGINS.has(String(o.kind)) || typeof o.sessionId !== 'string' || !o.sessionId) {
+        throw new TypeError('a proposal needs an origin { kind: task-end | correction, sessionId }');
+    }
+}
+
+/** Reviews are a human act (LRN-08): users and external clients only. */
+const reviewer = (principal: Principal | null): boolean => principal?.kind === 'user' || principal?.kind === 'external';
+/** The proposal queue: an agent parks on and reads itself only; users and external clients any agent of the workspace; a machine never. */
+const proposalAccess = (principal: Principal | null, _rq: unknown, op: { resource?: { key: string } }): boolean =>
+    principal !== null && principal.kind !== 'machine' && (principal.kind !== 'agent' || op.resource?.key === agentKey(principal.workspaceId, principal.agentId));
 
 /** The `by` a version records for the calling principal. */
 export function principalLabel(principal: unknown): string {
@@ -71,10 +102,13 @@ export const AgentActor = defineActor({
     /** Same workspace, and an external client needs the `agents` scope (§9). */
     authorize: (principal: Principal | null, _rq, op) =>
         principal !== null && op.resource !== undefined && sameWorkspace(principal, op.resource.key) && hasScope(principal, 'agents'),
+    methodAuthorize: { propose: proposalAccess, listProposals: proposalAccess, reviewProposal: reviewer },
     state: initialAgentState,
     methods: (ctx) => {
-        /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
-        async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
+        const proposals = (): PendingProposal[] => (ctx.state.proposals ??= []);
+
+        /** Fold one config version into the state; the caller persists (one save per turn). */
+        function foldVersion(patch: AgentConfigPatch, reason: string, rollbackOf?: number): AgentVersionInfo {
             const entry: AgentConfigEntry = {
                 t: 'config',
                 v: ctx.state.configVersion + 1,
@@ -85,14 +119,98 @@ export const AgentActor = defineActor({
                 ...(rollbackOf === undefined ? {} : { rollbackOf })
             };
             applyAgentEntry(ctx.state, entry);
-            await ctx.save();
             return versionInfo(entry);
+        }
+
+        /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
+        async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
+            const info = foldVersion(patch, reason, rollbackOf);
+            await ctx.save();
+            return info;
         }
 
         return {
             async get(): Promise<AgentView> {
                 const { id, workspaceId, configVersion } = ctx.state;
-                return { id, workspaceId, configVersion, config: ctx.snapshot(ctx.state.config), memoryScope: agentMemoryScope(id) };
+                return {
+                    id,
+                    workspaceId,
+                    configVersion,
+                    config: ctx.snapshot(ctx.state.config),
+                    memoryScope: agentMemoryScope(id),
+                    pendingProposals: proposals().filter((p) => p.status === 'pending').length
+                };
+            },
+
+            /**
+             * Park instruction proposals for review (LRN-08). Nothing is applied
+             * here. A pending proposal with the same patch is returned instead of
+             * a duplicate — learning proposes the same instruction on every
+             * repetition. Memory proposals are refused: the plugin applies those.
+             */
+            async propose(items: readonly InstructionProposal[], origin: ProposalOrigin): Promise<readonly PendingProposal[]> {
+                assertOrigin(origin);
+                if (!Array.isArray(items)) throw new TypeError('propose() takes a list of proposals');
+                items.forEach(assertInstructionProposal);
+                const by = principalLabel(ctx.principal);
+                const at = Date.now();
+                const out: PendingProposal[] = [];
+                let appended = false;
+                for (const proposal of items) {
+                    const patch = proposal.patch.trim();
+                    const same = proposals().find((p) => p.status === 'pending' && p.proposal.patch.trim() === patch);
+                    if (same) {
+                        out.push(same);
+                        continue;
+                    }
+                    const id = `prop_${proposals().length + 1}`;
+                    applyAgentEntry(ctx.state, {
+                        t: 'proposal',
+                        id,
+                        proposal: { kind: 'instruction', patch, reason: proposal.reason, requiresReview: true },
+                        origin: clone(origin),
+                        by,
+                        at
+                    });
+                    appended = true;
+                    out.push(proposals().at(-1)!);
+                }
+                if (appended) await ctx.save();
+                return ctx.snapshot(out);
+            },
+
+            async listProposals(status?: ProposalStatus): Promise<readonly PendingProposal[]> {
+                return ctx.snapshot(status === undefined ? proposals() : proposals().filter((p) => p.status === status));
+            },
+
+            /**
+             * Accept — the patch lands as a NEW config version with the proposal
+             * appended to `instructions`, reversible by `rollback` (AGT-06) — or
+             * reject. Either way the proposal leaves the pending queue. The version
+             * and the review fold together under ONE save, so the record never
+             * shows the patch applied with the proposal still pending.
+             */
+            async reviewProposal(id: string, decision: 'accept' | 'reject', reason?: string): Promise<PendingProposal> {
+                if (decision !== 'accept' && decision !== 'reject') throw new TypeError(`unknown review decision "${String(decision)}"`);
+                if (reason !== undefined) assertReason(reason);
+                const p = proposals().find((x) => x.id === id);
+                if (!p) throw new RangeError(`no agent proposal ${id}`);
+                if (p.status !== 'pending') throw new RangeError(`agent proposal ${id} is already ${p.status}`);
+                let version: number | undefined;
+                if (decision === 'accept') {
+                    version = foldVersion({ instructions: appendInstruction(ctx.state.config.instructions, p.proposal.patch) }, reason ?? `accepted proposal ${id}: ${p.proposal.reason}`).version;
+                }
+                applyAgentEntry(ctx.state, {
+                    t: 'review',
+                    id,
+                    decision,
+                    by: principalLabel(ctx.principal),
+                    at: Date.now(),
+                    ...(reason === undefined ? {} : { reason }),
+                    ...(version === undefined ? {} : { version })
+                });
+                await ctx.save();
+                return ctx.snapshot(proposals().find((x) => x.id === id)!);
             },
 
             /** Apply `patch` as a new version. The first update on a fresh agent creates v1. */

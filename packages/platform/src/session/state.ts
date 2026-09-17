@@ -7,11 +7,35 @@
  * activation replaying the record's log. No clock, no ids in here.
  */
 
-import type { SessionId, WorkspaceId } from '@agentic/core';
+import type { Correction, SessionId, TaskOutcome, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, PromptPart, SessionRef } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
 import type { SessionOpenSpec } from './ports.js';
+
+/** What the last finished turn taught (architecture §8): the outcome the plugin saw and what it proposed. */
+export interface LearningRecord {
+    readonly turnId: string;
+    readonly at: number;
+    readonly status: TaskOutcome['status'];
+    readonly verification: TaskOutcome['verification'];
+    /** Memory proposals the plugin applied. */
+    readonly written: number;
+    /** Instruction proposals parked for review. */
+    readonly parked: number;
+    /** Learning failed; the turn itself did not. */
+    readonly error?: string;
+}
+
+/** A correction made through `correct` — the lesson itself lives in memory with its provenance. */
+export interface CorrectionRecord {
+    readonly messageId: string;
+    readonly what: Correction['what'];
+    readonly by: Correction['by'];
+    readonly at: number;
+    readonly written: number;
+    readonly parked: number;
+}
 
 export type SessionStatus = 'idle' | 'running' | 'awaiting' | 'closed' | 'error' | 'disconnected';
 
@@ -55,12 +79,16 @@ export interface SessionState {
     /** A daemon replay that could not be filled (OPS-04): the stream resumed at `resumeAt`. */
     gap?: { readonly from: EventCursor; readonly resumeAt: EventCursor; readonly at: number };
     closedAt?: number;
+    /** The last finished turn's learning, when the actor has learning ports. */
+    learning?: LearningRecord;
+    /** Corrections made on this session's messages, oldest first. */
+    corrections?: CorrectionRecord[];
 }
 
 /** Replies remembered for idempotent retries (OPS-06); the same default as `serveSession`. */
 export const MAX_COMMANDS = 256;
 
-export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt'>>;
+export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections'>>;
 
 export type SessionEntry =
     | { readonly t: 'ev'; readonly ev: AgentEvent }
