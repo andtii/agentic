@@ -82,24 +82,27 @@ import { AgentTile, Button, DataTable, EnvironmentLine, StatusPill, WaitReasonLi
 
 ## Transcript (`src/thread`) and composer (`src/composer`)
 
-Driven by a reactive `AgentTranscript` — `useAgentSession(session).transcript` or anything the `@sigx/ai-agent` reducer folds in place. Each part is its own component, so a streaming delta re-renders one part.
+Driven by a reactive `AgentTranscript` — `useAgentSession(session).transcript` or anything the `@sigx/ai-agent` reducer folds in place. Each part is its own component, so a streaming delta re-renders one part. The visuals are `docs/design/HANDOFF.md` → "`ai-*` fragment", "Tool call `data-state`", "Approvals".
 
-- `Thread` windows its rows: at most `window` parts (default 150) in the DOM; it follows the tail while the reader is at the bottom (`data-state="on"`), freezes the window on scroll-up, and offers "Show earlier" and "Jump to latest".
-- `Message` sits on zero `Chat`: the user at `end`, everyone else at `start`, a `Badge` naming the author on every row.
-- `ToolCall` paints the lifecycle on zero's governed states — `loading` (pending, awaiting approval), `active` (running), `complete`, `error` (failed, cancelled), `closed` (denied) — with the phase as the `status` text (andtii/zero-wip#483).
-- `ApprovalPrompt` answers with `onRespond(requestId, { type: 'permission', outcome, scope })` — exactly what `session.respond()` takes.
-- `Composer` emits `send(text)` and `cancel`; pass `busy` / `steers` / `canCancel` from the agent's capabilities and `mentions` for the `@` popup.
+- `Thread` windows its rows: at most `window` parts (default 150) in the DOM; it follows the tail while the reader is at the bottom (`data-state="on"`), freezes the window on scroll-up, shows the "Showing the last N entries · Load earlier" chip and the "Jump to latest" anchor. `describe(message)` tells it who an author is (`MessageAuthor`: `name`, `hue`, `person`, `environment`, `time`); `toolMeta(part)` gives a card its meta; `logHref` is where long outputs link. The last assistant row carries the STREAMING pill while the session is mid-turn (`midTurn`).
+- `Message` is a row: the kit's `AgentTile` (32 px; the user's own rows are person circles) top-aligned, then the meta line — `name`, `environment` (kit `EnvironmentLine`, text-dim), `time` — the body and the tool cards.
+- `ToolCall` paints the lifecycle on zero's governed states — `loading` (pending, awaiting approval), `active` (running), `complete`, `error` (failed, cancelled), `closed` (denied) — with the handoff's word on a `StatusPill` in `status` (PENDING · RUNNING · DONE · ERROR · DENIED) and the refined phase (`awaiting approval`, `cancelled`, `done, no output`) as the header `meta` when the caller gave none (andtii/zero-wip#483). The border takes a colour only while `active` and on `error`. The output well shows six lines, then "Show N more lines" (`more`); past 200 lines the rest is in the session log (`log`, needs `logHref`).
+- `Reasoning` folds to "Reasoning · Ns" behind a chevron once done (`seconds`), open while it streams; the reader's toggle wins.
+- `ApprovalPrompt` is the approval card: header with the `rule`, the request well (tool + `input` verbatim), the context rows (`requestedBy`, `environment`, `via`; dropped by `compact`) and three decisions — `Allow once` (amber), `Allow for this session`, `Deny` — sent as `onRespond(requestId, { type: 'permission', outcome, scope })`, exactly what `session.respond()` takes. Buttons disable and the chosen one spins until the request resolves; pass `decision` and the card collapses to the one-line `record` (`decisionText`).
+- `Composer` emits `send(text)`, `cancel` and `attach`; pass `busy` / `steers` / `canCancel` from the agent's capabilities, `mentions` for the `@` popup, and `recipients` + `hint` for the "To" row (an empty list says nobody will answer — the page resolves who, per CHT-06).
 
 ```tsx
 const view = useAgentSession(session);
 
 <Thread transcript={view.transcript} onRespond={(id, d) => void view.respond(id, d)}
-    onCancelAgent={(id) => void view.cancelAgent(id)} />
+    onCancelAgent={(id) => void view.cancelAgent(id)}
+    describe={(m) => agents.byName(m.actor)} logHref={`/sessions/${view.transcript.sessionId}`} />
 <Composer busy={view.state === 'running' || view.state === 'awaiting'}
     steers={view.capabilities?.steer} canCancel={view.capabilities?.cancel}
+    recipients={[{ id: 'atlas', name: 'Atlas', hue: 1, role: 'coordinator' }]} hint="Atlas answers unless you @ someone"
     onSend={(text) => void view.prompt(text)} onCancel={() => void view.cancel()} />
 ```
 
 ## Fragment (`@agentic/ui/fragment`)
 
-The six `ai-*` anatomies as a zero manifest fragment plus a recipe pack on the recommended token grammar, pure data (no sigx runtime). Declared through `"sigx-zero": { "fragment": "./dist/fragment.js" }`; `build` also writes `dist/fragment.json` for `--extra-manifest`. A design system adopts it with `mergeManifests(zeroManifest, fragment)` + `recipes`, or `sigx zero:extend` once a kit carrying it is published (andtii/zero-wip#482). `__tests__/fragment.test.ts` runs the `zero:fragment` checks until then.
+The six `ai-*` anatomies (and the kit's `ag-*`) as a zero manifest fragment plus a recipe pack on the recommended token grammar — the handoff's inks (`--ag-line`, `--ag-text-dim`, …) are read with a recommended fallback, so a generic skin still renders it — pure data (no sigx runtime). `fragmentCss` carries the one `@keyframes` (the streaming pulse) for the design system's raw-CSS slot. Declared through `"sigx-zero": { "fragment": "./dist/fragment.js" }`; `build` also writes `dist/fragment.json` for `--extra-manifest`. A design system adopts it with `mergeManifests(zeroManifest, fragment)` + `recipes`, or `sigx zero:extend` once a kit carrying it is published (andtii/zero-wip#482). `__tests__/fragment.test.ts` runs the `zero:fragment` checks until then.

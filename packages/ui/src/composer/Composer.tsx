@@ -1,13 +1,17 @@
 /**
- * `Composer` — the prompt box (`ai-composer`): zero's `Textarea` that grows
- * with its lines, an `@mention` popup, an attachments strip (a stub: the
- * list is the consumer's, the picker is a follow-up), and the Send / Cancel
- * buttons as zero `Button`s.
+ * `Composer` — the prompt box (`ai-composer`, `docs/design/HANDOFF.md` →
+ * `ai-composer`): the addressing row ("To" + recipient chips + hint), zero's
+ * `Textarea` that grows with its lines, an `@mention` popup, an attachments
+ * strip (a stub: the list is the consumer's, the picker is a follow-up),
+ * and the action row — attach, the key hint, Cancel while a turn can be
+ * cancelled, `Send` primary.
  *
  * Enter sends, Shift+Enter breaks a line. While a turn runs Send stays
  * enabled only when the agent can be steered (`steers`), and Cancel appears
  * only when it can be cancelled (`canCancel`) — capabilities, never who the
- * agent is.
+ * agent is. Who the message goes to is the page's resolution (mentions ∩
+ * members, else the coordinator, else the single member, else nobody) —
+ * this component only shows it.
  *
  * Keys are read on the FORM: zero's `Textarea.Textarea` declares no key or
  * input handlers of its own (andtii/zero-wip#481), and the events
@@ -17,7 +21,9 @@
  * are synced onto the element after every render.
  */
 import { component, onMounted, onUpdated, type Define } from '@sigx/runtime-core';
-import { Button, Kbd, Textarea, dataAttr } from '@sigx/zero';
+import { Textarea, dataAttr } from '@sigx/zero';
+import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
+import { Button } from '../kit/Button.js';
 import { aiComposerAnatomy } from './anatomy.js';
 import { filterMentions, insertMention, mentionAt, rowsFor, type Mention, type MentionQuery } from './mentions.js';
 
@@ -29,6 +35,18 @@ export interface Attachment {
     readonly size?: number;
 }
 
+/** Who a message will activate — one chip in the "To" row. */
+export interface Recipient {
+    readonly id: string;
+    readonly name: string;
+    readonly hue?: AgentHue;
+    /** The role caption after the chip (`coordinator`). */
+    readonly role?: string;
+}
+
+/** The hint when nobody would answer. */
+export const NOBODY_HINT = 'nobody will answer';
+
 export type ComposerProps =
     /** The text to send — trimmed, never empty. */
     & Define.Event<'send', string>
@@ -36,6 +54,8 @@ export type ComposerProps =
     & Define.Event<'cancel'>
     /** Remove one attachment by id. */
     & Define.Event<'removeAttachment', string>
+    /** The attach button — the picker is the consumer's. */
+    & Define.Event<'attach'>
     /** A turn is running or awaiting. */
     & Define.Prop<'busy', boolean, false>
     /** `capabilities.steer` — a prompt during a turn lands inside it. */
@@ -44,6 +64,10 @@ export type ComposerProps =
     & Define.Prop<'canCancel', boolean, false>
     & Define.Prop<'disabled', boolean, false>
     & Define.Prop<'placeholder', string, false>
+    /** Who will be activated by this message; an empty list says nobody will answer. Omit to hide the row. */
+    & Define.Prop<'recipients', readonly Recipient[], false>
+    /** The right-aligned hint on the addressing row — `Atlas answers unless you @ someone`. */
+    & Define.Prop<'hint', string, false>
     /** Who can be mentioned with `@`. */
     & Define.Prop<'mentions', readonly Mention[], false>
     & Define.Prop<'attachments', readonly Attachment[], false>
@@ -94,6 +118,8 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
         st.draft = '';
         st.caret = 0;
         emit('send', text);
+        // The composer keeps focus after send.
+        textarea()?.focus();
     };
 
     const pick = (m: Mention): void => {
@@ -151,6 +177,8 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
         const list = matches();
         const isOpen = open();
         const busy = props.busy === true;
+        const recipients = props.recipients;
+        const hint = recipients ? (props.hint ?? (recipients.length === 0 ? NOBODY_HINT : undefined)) : undefined;
         return (
             <form
                 data-scope={SCOPE}
@@ -165,14 +193,31 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                 onInput={onInput}
                 onKeydown={onKeydown}
             >
+                {recipients && (
+                    <div data-scope={SCOPE} data-part="addressing">
+                        <span>To</span>
+                        {recipients.map((r) => (
+                            <span key={r.id} data-scope={SCOPE} data-part="recipient">
+                                <AgentTile name={r.name} hue={r.hue} size={18} />
+                                <span>{r.name}</span>
+                                {r.role && <small>{r.role}</small>}
+                            </span>
+                        ))}
+                        {hint && (
+                            <span data-scope={SCOPE} data-part="hint" data-nobody={dataAttr(recipients.length === 0)}>
+                                {hint}
+                            </span>
+                        )}
+                    </div>
+                )}
                 {props.attachments && props.attachments.length > 0 && (
                     <ul data-scope={SCOPE} data-part="attachments">
                         {props.attachments.map((a) => (
                             <li key={a.id} data-scope={SCOPE} data-part="attachment">
                                 <span>{a.name}</span>
-                                <Button.Root type="button" size="xs" onClick={() => emit('removeAttachment', a.id)}>
+                                <Button intent="default" onClick={() => emit('removeAttachment', a.id)}>
                                     Remove
-                                </Button.Root>
+                                </Button>
                             </li>
                         ))}
                     </ul>
@@ -180,7 +225,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                 <div data-scope={SCOPE} data-part="input">
                     <Textarea.Root model={() => st.draft} rows={rowsFor(st.draft, props.minRows ?? 1, props.maxRows ?? 8)} disabled={props.disabled} name="message">
                         <Textarea.Label>Message</Textarea.Label>
-                        <Textarea.Textarea placeholder={props.placeholder ?? (busy && props.steers ? 'Steer the running turn…' : 'Message…')} />
+                        <Textarea.Textarea placeholder={props.placeholder ?? (busy && props.steers ? 'Steer the running turn…' : 'Message the chat. @ to address an agent, otherwise the coordinator answers.')} />
                     </Textarea.Root>
                     <ul id={listId} role="listbox" aria-label="Mentions" data-scope={SCOPE} data-part="mentions" data-state={isOpen ? 'open' : 'closed'} hidden={!isOpen}>
                         {list.map((m, i) => (
@@ -201,17 +246,16 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                     </ul>
                 </div>
                 <div data-scope={SCOPE} data-part="actions">
-                    <small>
-                        <Kbd.Root size="sm">Enter</Kbd.Root> to send
-                    </small>
+                    <Button intent="icon" icon="attach" label="Attach file" disabled={props.disabled} onClick={() => emit('attach')} />
+                    <span data-scope={SCOPE} data-part="keys">Enter to send · Shift+Enter newline</span>
                     {busy && props.canCancel && (
-                        <Button.Root type="button" onClick={() => emit('cancel')}>
+                        <Button intent="default" icon="stop" onClick={() => emit('cancel')}>
                             Cancel
-                        </Button.Root>
+                        </Button>
                     )}
-                    <Button.Root type="submit" color="primary" disabled={!canSend()}>
+                    <Button intent="primary" icon="send" type="submit" disabled={!canSend()}>
                         Send
-                    </Button.Root>
+                    </Button>
                 </div>
             </form>
         );

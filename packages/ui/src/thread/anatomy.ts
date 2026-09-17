@@ -8,10 +8,16 @@
  * call's lifecycle therefore reads as `loading` (pending, awaiting approval,
  * arguments still streaming) · `active` (running) · `complete` (done) ·
  * `error` (failed, cancelled) · `closed` (denied — the request was
- * dismissed); the human phase is the text of the `status` part. Zero's
+ * dismissed); the human phase is the pill in the `status` part. Zero's
  * synonym table itself prescribes the first three (`pending → loading`,
  * `done → complete`, `failed → error`); a lifecycle family of its own is
  * filed upstream as andtii/zero-wip#483.
+ *
+ * The parts follow `docs/design/HANDOFF.md` → "`ai-*` fragment": the
+ * message meta carries the environment line and the time, the tool card an
+ * icon, a name, a signature and an optional meta, the approval card a
+ * header, the request well, the context rows, the actions and the decision
+ * record.
  */
 import { defineAnatomy } from '@sigx/zero/anatomy';
 
@@ -25,7 +31,7 @@ export const LIFECYCLE_STATES = ['loading', 'active', 'complete', 'error', 'clos
  */
 export const aiThreadAnatomy = defineAnatomy('ai-thread', {
     root: { element: 'div', states: ['on', 'off'], tokens: ['color'] },
-    /** "Show earlier" — rendered only while rows are windowed away at the top. */
+    /** "Showing the last N entries · Load earlier" — rendered only while rows are windowed away at the top. */
     earlier: { element: 'button', parent: 'root', tokens: ['color', 'radius-selector', 'text'] },
     list: { element: 'ol', parent: 'root' },
     row: { element: 'li', parent: 'list' },
@@ -34,26 +40,46 @@ export const aiThreadAnatomy = defineAnatomy('ai-thread', {
 });
 
 /**
- * One message row, composed over zero's `Chat`: the root carries the logical
- * side (`end` for the user's own rows), `meta` the attribution badge, `body`
- * the text-like parts and `tools` the tool cards, in reading order.
+ * One message row: the avatar tile top-aligned, then a column of `meta`
+ * (name, environment line, time, the STREAMING pill while the session is
+ * mid-turn), `body` and `tools` runs in reading order, and a `footer` when
+ * the row shows a slice of a long message. The root carries the logical
+ * side (`end` for the user's own rows).
  */
 export const aiMessageAnatomy = defineAnatomy('ai-message', {
     root: { element: 'div', placements: ['start', 'end'], tokens: ['color'] },
     avatar: { element: 'span', parent: 'root', tokens: ['color', 'radius-selector', 'text'] },
-    meta: { element: 'span', parent: 'root', tokens: ['text'] },
+    meta: { element: 'div', parent: 'root', tokens: ['text'] },
+    name: { element: 'span', parent: 'meta', tokens: ['text'] },
+    /** `machine / runtime / account` — the kit's env line, dropped from the row below 768 px. */
+    environment: { element: 'span', parent: 'meta', tokens: ['text'] },
+    time: { element: 'time', parent: 'meta', tokens: ['text'] },
     body: { element: 'div', parent: 'root', tokens: ['text'] },
     tools: { element: 'div', parent: 'root' },
     footer: { element: 'span', parent: 'root', tokens: ['text'] }
 });
 
-/** A tool call card: header (signature + status), collapsible io, error line, the sub-agent it spawned. */
+/**
+ * A tool call card: header (icon in the state colour, tool name, the
+ * signature truncated, an optional meta, the status pill), collapsible io,
+ * the error line, the sub-agent it spawned. The output well folds past six
+ * lines behind `more`, and `log` links out past two hundred.
+ */
 export const aiToolCallAnatomy = defineAnatomy('ai-tool-call', {
     root: { element: 'div', states: LIFECYCLE_STATES, tokens: ['color', 'radius-box', 'text'] },
     header: { element: 'div', parent: 'root', tokens: ['text'] },
+    icon: { element: 'span', parent: 'header', tokens: ['color'] },
+    name: { element: 'code', parent: 'header', tokens: ['text'] },
+    signature: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    /** Duration, diff stat, task id — whatever the caller knows about the call. */
+    meta: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     status: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     input: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },
     output: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },
+    /** "Show N more lines" — the output well past six lines. */
+    more: { element: 'button', parent: 'output', tokens: ['color', 'text'] },
+    /** The session log link — an output past two hundred lines. */
+    log: { element: 'a', parent: 'output', tokens: ['color', 'text'] },
     error: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
     agent: { element: 'div', parent: 'root', states: LIFECYCLE_STATES, tokens: ['color', 'radius-box'] }
 });
@@ -65,10 +91,22 @@ export const aiReasoningAnatomy = defineAnatomy('ai-reasoning', {
     body: { element: 'div', parent: 'root', tokens: ['text'] }
 });
 
-/** A permission prompt: what is asked, why, and the four decisions (allow / deny × once / session) as zero Buttons. */
+/**
+ * A permission request as the handoff's approval card: `header` (shield,
+ * "Approval needed", the matching rule), the `request` well (tool and
+ * input verbatim), the optional `description`, the `context` rows
+ * (Requested by, Runs on, Via — dropped by the `compact` modifier), the
+ * three `actions` (Allow once, Allow for this session, Deny), and the
+ * one-line `record` a decision collapses to.
+ */
 export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
     root: { element: 'div', tokens: ['color', 'radius-box'] },
-    title: { element: 'p', parent: 'root', tokens: ['text'] },
+    header: { element: 'div', parent: 'root', tokens: ['text'] },
+    title: { element: 'span', parent: 'header', tokens: ['text'] },
+    rule: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    request: { element: 'div', parent: 'root', tokens: ['color', 'radius-field', 'text'] },
     description: { element: 'p', parent: 'root', tokens: ['text'] },
-    actions: { element: 'div', parent: 'root' }
+    context: { element: 'dl', parent: 'root', tokens: ['text'] },
+    actions: { element: 'div', parent: 'root' },
+    record: { element: 'p', parent: 'root', tokens: ['text'] }
 });

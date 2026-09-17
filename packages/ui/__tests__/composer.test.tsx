@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { expectAnatomy } from '@sigx/zero/testing';
-import { Composer, aiComposerAnatomy } from '../src/composer';
+import { Composer, NOBODY_HINT, aiComposerAnatomy } from '../src/composer';
 import { mount, one, all, buttonNamed, tick } from './helpers';
 
 const people = [
@@ -93,6 +93,40 @@ describe('the composer', () => {
         buttonNamed(dom, 'Remove').click();
         expect(removed).toEqual(['f1']);
         expectAnatomy(dom, aiComposerAnatomy);
+    });
+
+    describe('the addressing row', () => {
+        it('shows who the message goes to as tile chips, with the hint the page gives right-aligned', () => {
+            const dom = mount(<Composer onSend={() => {}} recipients={[{ id: 'atlas', name: 'Atlas', hue: 1, role: 'coordinator' }]} hint="Atlas answers unless you @ someone" />);
+            const row = one(dom, 'ai-composer', 'addressing')!;
+            expect(row.textContent!.startsWith('To')).toBe(true);
+            const chips = all(dom, 'ai-composer', 'recipient');
+            expect(chips.map((c) => c.textContent)).toEqual(['ATAtlascoordinator']);
+            expect(chips[0]!.querySelector('[data-scope="ag-agent-tile"]')!.getAttribute('data-hue')).toBe('1');
+            expect(one(dom, 'ai-composer', 'hint')!.textContent).toBe('Atlas answers unless you @ someone');
+            expect(one(dom, 'ai-composer', 'hint')!.hasAttribute('data-nobody')).toBe(false);
+            expectAnatomy(dom, aiComposerAnatomy);
+        });
+
+        it('says nobody will answer, dimmed, when the list is empty — and renders no row when the page gives none', () => {
+            const nobody = mount(<Composer onSend={() => {}} recipients={[]} />);
+            expect(all(nobody, 'ai-composer', 'recipient')).toHaveLength(0);
+            expect(one(nobody, 'ai-composer', 'hint')!.textContent).toBe(NOBODY_HINT);
+            expect(one(nobody, 'ai-composer', 'hint')!.hasAttribute('data-nobody')).toBe(true);
+            expect(one(mount(<Composer onSend={() => {}} />), 'ai-composer', 'addressing')).toBeNull();
+        });
+
+        it('the action row: an attach icon button with a name, the key hint in mono, Send as the primary intent', () => {
+            const attached: number[] = [];
+            const dom = mount(<Composer onSend={() => {}} onAttach={() => attached.push(1)} />);
+            const attach = dom.querySelector<HTMLButtonElement>('button[aria-label="Attach file"]')!;
+            expect(attach.getAttribute('data-intent')).toBe('icon');
+            attach.click();
+            expect(attached).toEqual([1]);
+            expect(one(dom, 'ai-composer', 'keys')!.textContent).toBe('Enter to send · Shift+Enter newline');
+            expect(buttonNamed(dom, 'Send').getAttribute('data-intent')).toBe('primary');
+            expect(buttonNamed(dom, 'Send').getAttribute('type')).toBe('submit');
+        });
     });
 
     describe('@mentions', () => {

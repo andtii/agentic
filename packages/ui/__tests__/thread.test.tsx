@@ -63,15 +63,19 @@ describe('the thread over mockAgent', () => {
         // 2 000 re-renders of a 150-part window under happy-dom: seconds, not the 5 s default.
     }, 60_000);
 
-    it('attributes every row: the user at the end, the assistant at the start, badge per author', async () => {
+    it('attributes every row: the user at the end as a person, the assistant at the start as an agent tile, name per author', async () => {
         const agent = mockAgent({ script: [[{ text: 'hello', actor: 'triage' }]] });
         const { dom, view } = await live(agent);
         await view.prompt('hi');
         await tick();
         const roots = all(dom, 'ai-message', 'root');
         expect(roots.map((r) => r.getAttribute('data-placement'))).toEqual(['end', 'start']);
-        expect(all(dom, 'ai-message', 'meta').map((m) => m.textContent)).toEqual(['You', 'triage']);
-        expect(dom.querySelectorAll('[data-scope="chat"][data-part="root"]')).toHaveLength(2);
+        expect(all(dom, 'ai-message', 'name').map((m) => m.textContent)).toEqual(['You', 'triage']);
+        const tiles = all(dom, 'ag-agent-tile', 'root');
+        expect(tiles.map((t) => t.hasAttribute('data-mod-circle'))).toEqual([true, false]);
+        // Nothing streams once the turn ended, and nobody described the rows: no env line, no time.
+        expect(one(dom, 'ai-message', 'environment')).toBeNull();
+        expect(dom.querySelector('[data-scope="ag-pill"][data-status="streaming"]')).toBeNull();
     });
 
     it('pauses on scroll-up — the window freezes while the agent streams on — and the anchor resumes the tail', async () => {
@@ -124,9 +128,12 @@ describe('the thread over mockAgent', () => {
         await view.prompt('go');
         await tick();
         expect(parts(dom)).toHaveLength(20);
-        buttonNamed(dom, 'Show earlier').click();
+        const earlier = one(dom, 'ai-thread', 'earlier')!;
+        expect(earlier.textContent).toBe('Showing the last 20 entries·Load earlier');
+        earlier.click();
         await tick();
         expect(parts(dom)).toHaveLength(40);
+        expect(one(dom, 'ai-thread', 'earlier')!.textContent).toContain('Showing the last 40 entries');
         expect(dom.textContent).toContain('part 60');
     });
 
@@ -138,10 +145,13 @@ describe('the thread over mockAgent', () => {
         await tick();
         const card = one(dom, 'ai-tool-call', 'root')!;
         expect(card.getAttribute('data-state')).toBe('loading');
-        expect(one(card, 'ai-tool-call', 'status')!.textContent).toBe('awaiting approval');
+        expect(one(card, 'ai-tool-call', 'status')!.textContent).toBe('PENDING');
+        expect(one(card, 'ai-tool-call', 'meta')!.textContent).toBe('awaiting approval');
         expect(one(card, 'ai-approval', 'root')).not.toBeNull();
+        // Mid-turn: the assistant row carries the STREAMING pill.
+        expect(dom.querySelector('[data-scope="ag-pill"][data-status="streaming"]')).not.toBeNull();
 
-        buttonNamed(card, 'Allow for session').click();
+        buttonNamed(card, 'Allow for this session').click();
         await turn;
         await tick();
         expect(view.transcript.grants).toContain('tool:write');
@@ -156,11 +166,11 @@ describe('the thread over mockAgent', () => {
         const turn = view.prompt('go');
         await waitFor(() => view.requests.length === 1);
         await tick();
-        buttonNamed(dom, 'Deny once').click();
+        buttonNamed(dom, 'Deny').click();
         await turn;
         await tick();
         expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe('closed');
-        expect(one(dom, 'ai-tool-call', 'status')!.textContent).toBe('denied');
+        expect(one(dom, 'ai-tool-call', 'status')!.textContent).toBe('DENIED');
         expect(one(dom, 'ai-tool-call', 'error')!.textContent).toBe('The operator denied this call.');
     });
 });
@@ -185,7 +195,30 @@ describe('the thread over a static transcript', () => {
         const seen: [string, Decision][] = [];
         const dom = mount(<Thread transcript={transcript} onRespond={(id, d) => seen.push([id, d])} />);
         expect(rows(dom)).toHaveLength(2);
-        buttonNamed(dom, 'Deny for session').click();
-        expect(seen).toEqual([['r9', { type: 'permission', outcome: 'deny', scope: 'session', message: 'The operator denied this call.' }]]);
+        buttonNamed(dom, 'Deny').click();
+        expect(seen).toEqual([['r9', { type: 'permission', outcome: 'deny', scope: 'once', message: 'The operator denied this call.' }]]);
+    });
+
+    it('describes each row through the page — hue, environment, time — and pins STREAMING on the last assistant row mid-turn', () => {
+        const transcript = createTranscript('s1');
+        transcript.messages.push({ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'hi' }] });
+        transcript.messages.push({ id: 'm2', role: 'assistant', actor: 'Forge', parts: [{ type: 'text', id: 'p1', text: 'on it' }] });
+        transcript.messages.push({ id: 'm3', role: 'assistant', actor: 'Lint', parts: [{ type: 'text', id: 'p2', text: 'reading' }] });
+        transcript.state = 'running';
+        const dom = mount(
+            <Thread
+                transcript={transcript}
+                describe={(m) => (m.role === 'user' ? { name: 'Andii', time: { text: '14:02' } } : { hue: m.actor === 'Forge' ? 2 : 3, environment: { machine: 'alien01', runtime: 'claude-code', account: 'work' }, time: { text: '14:09', dateTime: '2026-09-17T14:09:00Z' } })}
+            />
+        );
+        expect(all(dom, 'ai-message', 'name').map((n) => n.textContent)).toEqual(['Andii', 'Forge', 'Lint']);
+        expect(all(dom, 'ai-message', 'environment')).toHaveLength(2);
+        expect(all(dom, 'ai-message', 'time').map((t) => t.textContent)).toEqual(['14:02', '14:09', '14:09']);
+        expect(all(dom, 'ai-message', 'time')[1]!.getAttribute('datetime')).toBe('2026-09-17T14:09:00Z');
+        expect(all(dom, 'ag-agent-tile', 'root').map((t) => t.getAttribute('data-hue'))).toEqual([null, '2', '3']);
+        const streaming = all(dom, 'ai-message', 'root').map((r) => r.querySelector('[data-scope="ag-pill"][data-status="streaming"]') !== null);
+        expect(streaming).toEqual([false, false, true]);
+        expect(one(dom, 'ai-thread', 'root')!.getAttribute('aria-live')).toBe('polite');
+        expectAnatomy(dom, aiMessageAnatomy);
     });
 });
