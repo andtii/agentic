@@ -11,7 +11,8 @@
 import type { MachineId } from '@agentic/core';
 import { randomBytes, sha256, timingSafeEqualText, toBase64Url } from './encoding.js';
 
-export const PAIRING_CODE_LENGTH = 6;
+/** Module-internal: the Workspace actor exports the surface-level `PAIRING_CODE_LENGTH` / `createPairingCode`. */
+const PAIRING_CODE_LENGTH = 6;
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
 /** No 0/O, 1/I/L: the code is read aloud and typed. */
 export const PAIRING_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -35,7 +36,7 @@ export interface IssuedPairing {
 export type PairingVerdict = { readonly ok: true } | { readonly ok: false; readonly reason: 'malformed' | 'expired' | 'used' | 'mismatch' };
 
 /** A fresh code from the unambiguous alphabet, rejection-sampled so every character is equally likely. */
-export function createPairingCode(): string {
+function createPairingCode(): string {
     let out = '';
     const limit = 256 - (256 % PAIRING_ALPHABET.length);
     while (out.length < PAIRING_CODE_LENGTH) {

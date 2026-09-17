@@ -51,10 +51,8 @@ export {
 } from './machine-token.js';
 
 export {
-    PAIRING_CODE_LENGTH,
     PAIRING_TTL_MS,
     PAIRING_ALPHABET,
-    createPairingCode,
     normalizePairingCode,
     hashPairingCode,
     issuePairing,

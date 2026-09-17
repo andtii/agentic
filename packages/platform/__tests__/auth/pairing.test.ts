@@ -1,14 +1,14 @@
 // @vitest-environment node
-import { consumePairing, createPairingCode, hashPairingCode, isPairingLive, issuePairing, normalizePairingCode, PAIRING_ALPHABET, PAIRING_TTL_MS, verifyPairing } from '../../src/index';
+import { consumePairing, hashPairingCode, isPairingLive, issuePairing, normalizePairingCode, PAIRING_ALPHABET, PAIRING_TTL_MS, verifyPairing } from '../../src/index';
 import type { MachineId } from '@agentic/core';
 
 const NOW = 1_800_000_000_000;
 const machineId = 'machine_1' as MachineId;
 
 describe('pairing codes (USR-04)', () => {
-    it('are 6 characters from the unambiguous alphabet', () => {
+    it('are 6 characters from the unambiguous alphabet', async () => {
         for (let i = 0; i < 50; i++) {
-            const code = createPairingCode();
+            const { code } = await issuePairing({ machineId, now: NOW });
             expect(code).toHaveLength(6);
             for (const ch of code) expect(PAIRING_ALPHABET).toContain(ch);
         }
