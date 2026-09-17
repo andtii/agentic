@@ -3,6 +3,8 @@
  * `ag-*` scopes and the compositions over zero every page builds from.
  * The `Ag*` aliases are the fragment's `componentExportName(scope)` contract.
  */
+import './globals.js';
+
 export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy } from './anatomy.js';
 export { recipes as kitRecipes } from './recipes.js';
 export { kitScopes, TONES, NEEDS_KINDS } from './vocabulary.js';
