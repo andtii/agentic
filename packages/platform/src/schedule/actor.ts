@@ -17,7 +17,7 @@ import type { AgentId, EnvironmentId, ScheduleId, WorkspaceId } from '@agentic/c
 import { workspaceOfKey } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { sameWorkspace } from '../auth/index.js';
-import type { OfflinePolicy, ScheduleFired, ScheduleKind, TriggerPort } from './ports.js';
+import type { OfflinePolicy, ScheduleFired, ScheduleKind, TriggerHop, TriggerPort } from './ports.js';
 import { countOccurrences, nextOccurrence, validateRecurrence, type Recurrence } from './recur.js';
 
 // ---------------------------------------------------------------------------
@@ -276,8 +276,12 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 ...(s.prompt !== undefined ? { prompt: s.prompt } : {}),
                 offlinePolicy: s.offlinePolicy
             };
+            // The port hops through THIS actor's context: trusted actor-to-actor
+            // calls, so the Inbox and Task policies are not re-run against the
+            // reminder's empty principal.
+            const hop: TriggerHop = { actor: (def, key) => ctx.actor(def, key) };
             try {
-                await options.trigger.fired(event);
+                await options.trigger.fired(event, hop);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 s.attempts++;

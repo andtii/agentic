@@ -97,5 +97,5 @@ A rollback restores code, not Durable Object data. If the older version cannot r
 |---|---|---|
 | Session `factory` for `anthropic-api` | returns `null` (daemon path) | #35 |
 | Daemon socket + command sink (Machine actor) | 501 / commands refused | #36 |
-| Schedule trigger (Task / Inbox) | throws; the firing is logged as dropped | #42 |
+| Schedule trigger's `EnvironmentProbe` (is an environment online?) | every environment is offline: a scheduled task that needs one waits `environment-offline` for the router | #37 |
 | Web Push channel (VAPID keys) | no channels | — |
