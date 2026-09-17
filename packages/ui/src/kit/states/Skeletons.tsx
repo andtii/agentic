@@ -16,12 +16,24 @@ const Bar = component<Define.Prop<'width', string> & Define.Prop<'height', strin
     </Skeleton.Root>
 ), { name: 'SkeletonBar' });
 
-const wrap = (preset: string, label: string, cls: string | undefined, style: string, children: unknown) => (
-    <div data-skeleton={preset} aria-busy="true" role="status" class={cls} style={style}>
-        <span data-visually-hidden="">{label}</span>
-        {children as never}
-    </div>
-);
+/**
+ * One status region per preset. An empty `label` means "do not announce":
+ * a preset nested inside another (the rail's cards) renders no status
+ * semantics and no hidden text, so a reader hears the outer region once.
+ */
+const wrap = (preset: string, label: string, cls: string | undefined, style: string, children: unknown) =>
+    label
+        ? (
+            <div data-skeleton={preset} aria-busy="true" role="status" class={cls} style={style}>
+                <span data-visually-hidden="">{label}</span>
+                {children as never}
+            </div>
+        )
+        : (
+            <div data-skeleton={preset} class={cls} style={style} aria-hidden="true">
+                {children as never}
+            </div>
+        );
 
 export type TableSkeletonProps =
     & Define.Prop<'rows', number>
@@ -43,7 +55,11 @@ export const TableSkeleton = component<TableSkeletonProps>(({ props }) => () => 
     );
 }, { name: 'TableSkeleton' });
 
-export type CardSkeletonProps = Define.Prop<'lines', number> & Define.Prop<'label', string> & Define.Prop<'class', string>;
+export type CardSkeletonProps =
+    & Define.Prop<'lines', number>
+    /** The announced text; `''` nests silently inside another preset. */
+    & Define.Prop<'label', string>
+    & Define.Prop<'class', string>;
 
 /** A card: a title bar and two lines, inside the card chrome. */
 export const CardSkeleton = component<CardSkeletonProps>(({ props }) => () => {

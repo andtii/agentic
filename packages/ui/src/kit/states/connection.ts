@@ -15,7 +15,7 @@ export interface MachineConnection {
     readonly id: string;
     readonly name: string;
     readonly online: boolean;
-    /** Active sessions while online. */
+    /** Active sessions while online; omit when unknown and the row reads `online`. */
     readonly sessions?: number;
     /** Relative age of the last heartbeat while offline, e.g. "3h". */
     readonly lastSeen?: string;
@@ -29,8 +29,10 @@ export function browserRow(state: BrowserConnection): ConnectionRow {
 
 export function machineRow(machine: MachineConnection): ConnectionRow {
     if (machine.online) {
-        const n = machine.sessions ?? 0;
-        return { id: machine.id, name: machine.name, state: `${n} ${n === 1 ? 'session' : 'sessions'}`, tone: 'live' };
+        // A count is shown only when the caller knows it; an unknown count is plain `online`, never "0 sessions".
+        const n = machine.sessions;
+        const state = n === undefined ? 'online' : `${n} ${n === 1 ? 'session' : 'sessions'}`;
+        return { id: machine.id, name: machine.name, state, tone: 'live' };
     }
     return { id: machine.id, name: machine.name, state: machine.lastSeen ? `offline ${machine.lastSeen}` : 'offline', tone: 'muted', hollow: true };
 }

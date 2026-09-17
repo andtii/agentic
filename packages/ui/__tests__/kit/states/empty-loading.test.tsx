@@ -63,8 +63,14 @@ describe('skeleton presets', () => {
         const card = mount(<CardSkeleton lines={3} />).querySelector<HTMLElement>('[data-skeleton="card"]')!;
         expect(all(card, 'skeleton', 'root')).toHaveLength(4);
         const rail = mount(<RailSkeleton cards={2} />).querySelector<HTMLElement>('[data-skeleton="rail"]')!;
-        expect(rail.querySelectorAll('[data-skeleton="card"]')).toHaveLength(2);
+        const inner = rail.querySelectorAll<HTMLElement>('[data-skeleton="card"]');
+        expect(inner).toHaveLength(2);
         expect(rail.getAttribute('aria-busy')).toBe('true');
+        // One announcement: the nested cards carry no status semantics of their own.
+        expect(rail.getAttribute('role')).toBe('status');
+        expect(rail.querySelectorAll('[role="status"], [aria-busy]')).toHaveLength(0);
+        expect(rail.querySelectorAll('[data-visually-hidden]')).toHaveLength(1);
+        for (const c of inner) expect(c.getAttribute('aria-hidden')).toBe('true');
     });
 });
 
@@ -74,6 +80,8 @@ describe('connection rows', () => {
         expect(browserRow('reconnecting')).toMatchObject({ state: 'reconnecting…', tone: 'muted', hollow: true });
         expect(machineRow({ id: 'm1', name: 'alien01', online: true, sessions: 2 })).toMatchObject({ state: '2 sessions', tone: 'live' });
         expect(machineRow({ id: 'm1', name: 'alien01', online: true, sessions: 1 }).state).toBe('1 session');
+        expect(machineRow({ id: 'm1', name: 'alien01', online: true, sessions: 0 }).state).toBe('0 sessions');
+        expect(machineRow({ id: 'm1', name: 'alien01', online: true })).toMatchObject({ state: 'online', tone: 'live' });
         expect(machineRow({ id: 'm2', name: 'nuc-lab', online: false, lastSeen: '3h' })).toMatchObject({ state: 'offline 3h', tone: 'muted', hollow: true });
         expect(machineRow({ id: 'm2', name: 'nuc-lab', online: false }).state).toBe('offline');
     });
