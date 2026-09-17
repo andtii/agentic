@@ -52,8 +52,11 @@ describe('Agent proposals', () => {
         await agent().update({ instructions: 'Be brief.' }, 'initial');
         const [p1, p2] = await agent(self).propose([proposal('Never: mention ticket numbers'), proposal('Prefer: short sentences')], origin);
 
+        const savesBefore = app.saves.filter((s) => s.type === 'Agent').length;
         const accepted = await agent().reviewProposal(p1!.id, 'accept');
         expect(accepted).toMatchObject({ id: 'prop_1', status: 'accepted', review: { by: 'user:u1', version: 2 } });
+        // The version and the review land in ONE durable write: never a patch applied with the proposal still pending.
+        expect(app.saves.filter((s) => s.type === 'Agent').length - savesBefore).toBe(1);
         const view = await agent().get();
         expect(view.configVersion).toBe(2);
         expect(view.config.instructions).toBe('Be brief.\n\nNever: mention ticket numbers');
@@ -73,9 +76,12 @@ describe('Agent proposals', () => {
         expect((await agent().get()).config.instructions).toBe('Be brief.');
     });
 
-    it('lets an agent propose only for itself and only users review', async () => {
+    it('lets an agent propose and read only for itself, machines neither, and only users review', async () => {
         expect(await statusOf(agent(other).propose([proposal('x')], origin))).toBe(403);
         expect(await statusOf(agent(self).propose([proposal('x')], origin))).toBeUndefined();
+        expect(await statusOf(agent(other).listProposals())).toBe(403);
+        expect(await statusOf(agent(self).listProposals())).toBeUndefined();
+        expect(await statusOf(agent({ kind: 'machine', workspaceId: WS, machineId: 'machine_2' as never }).listProposals())).toBe(403);
         expect(await statusOf(agent(self).reviewProposal('prop_1', 'accept'))).toBe(403);
         const machine: Principal = { kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never };
         expect(await statusOf(agent(machine).propose([proposal('y')], origin))).toBe(403);

@@ -76,8 +76,8 @@ function assertOrigin(origin: unknown): asserts origin is ProposalOrigin {
 
 /** Reviews are a human act (LRN-08): users and external clients only. */
 const reviewer = (principal: Principal | null): boolean => principal?.kind === 'user' || principal?.kind === 'external';
-/** An agent parks proposals on itself only; users and external clients on any agent of the workspace. */
-const proposer = (principal: Principal | null, _rq: unknown, op: { resource?: { key: string } }): boolean =>
+/** The proposal queue: an agent parks on and reads itself only; users and external clients any agent of the workspace; a machine never. */
+const proposalAccess = (principal: Principal | null, _rq: unknown, op: { resource?: { key: string } }): boolean =>
     principal !== null && principal.kind !== 'machine' && (principal.kind !== 'agent' || op.resource?.key === agentKey(principal.workspaceId, principal.agentId));
 
 /** The `by` a version records for the calling principal. */
@@ -102,13 +102,13 @@ export const AgentActor = defineActor({
     /** Same workspace, and an external client needs the `agents` scope (§9). */
     authorize: (principal: Principal | null, _rq, op) =>
         principal !== null && op.resource !== undefined && sameWorkspace(principal, op.resource.key) && hasScope(principal, 'agents'),
-    methodAuthorize: { propose: proposer, reviewProposal: reviewer },
+    methodAuthorize: { propose: proposalAccess, listProposals: proposalAccess, reviewProposal: reviewer },
     state: initialAgentState,
     methods: (ctx) => {
         const proposals = (): PendingProposal[] => (ctx.state.proposals ??= []);
 
-        /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
-        async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
+        /** Fold one config version into the state; the caller persists (one save per turn). */
+        function foldVersion(patch: AgentConfigPatch, reason: string, rollbackOf?: number): AgentVersionInfo {
             const entry: AgentConfigEntry = {
                 t: 'config',
                 v: ctx.state.configVersion + 1,
@@ -119,8 +119,14 @@ export const AgentActor = defineActor({
                 ...(rollbackOf === undefined ? {} : { rollbackOf })
             };
             applyAgentEntry(ctx.state, entry);
-            await ctx.save();
             return versionInfo(entry);
+        }
+
+        /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
+        async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
+            const info = foldVersion(patch, reason, rollbackOf);
+            await ctx.save();
+            return info;
         }
 
         return {
@@ -180,7 +186,9 @@ export const AgentActor = defineActor({
             /**
              * Accept — the patch lands as a NEW config version with the proposal
              * appended to `instructions`, reversible by `rollback` (AGT-06) — or
-             * reject. Either way the proposal leaves the pending queue.
+             * reject. Either way the proposal leaves the pending queue. The version
+             * and the review fold together under ONE save, so the record never
+             * shows the patch applied with the proposal still pending.
              */
             async reviewProposal(id: string, decision: 'accept' | 'reject', reason?: string): Promise<PendingProposal> {
                 if (decision !== 'accept' && decision !== 'reject') throw new TypeError(`unknown review decision "${String(decision)}"`);
@@ -190,8 +198,7 @@ export const AgentActor = defineActor({
                 if (p.status !== 'pending') throw new RangeError(`agent proposal ${id} is already ${p.status}`);
                 let version: number | undefined;
                 if (decision === 'accept') {
-                    const info = await commit({ instructions: appendInstruction(ctx.state.config.instructions, p.proposal.patch) }, reason ?? `accepted proposal ${id}: ${p.proposal.reason}`);
-                    version = info.version;
+                    version = foldVersion({ instructions: appendInstruction(ctx.state.config.instructions, p.proposal.patch) }, reason ?? `accepted proposal ${id}: ${p.proposal.reason}`).version;
                 }
                 applyAgentEntry(ctx.state, {
                     t: 'review',
