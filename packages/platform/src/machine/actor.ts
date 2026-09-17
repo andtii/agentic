@@ -193,6 +193,8 @@ export function defineMachineActor(ports: MachinePorts) {
             }
 
             const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: W, kind: 'error', commandId, code, message });
+            /** `commandId` is unique per Session, not per machine: pending replies are keyed by both. */
+            const pendingKey = (sessionId: SessionId, commandId: string): string => `${sessionId}:${commandId}`;
 
             async function armLiveness(): Promise<void> {
                 const s = ctx.state;
@@ -233,10 +235,10 @@ export function defineMachineActor(ports: MachinePorts) {
                 const before = s.queued.length;
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
                 if (wasHosted || s.queued.length !== before) record({ sessionId, reason, at: now() });
-                for (const [commandId, p] of Object.entries(s.pending)) {
+                for (const [key, p] of Object.entries(s.pending)) {
                     if (p.sessionId !== sessionId) continue;
-                    delete s.pending[commandId];
-                    await replied(sessionId, errorReply(commandId, 'closed', reason));
+                    delete s.pending[key];
+                    await replied(sessionId, errorReply(p.command.commandId, 'closed', reason));
                 }
                 dequeue();
             }
@@ -296,8 +298,9 @@ export function defineMachineActor(ports: MachinePorts) {
 
             async function onSessionReply(frame: DaemonFrameOf<'session.reply'>): Promise<void> {
                 const s = ctx.state;
-                const pending = s.pending[frame.reply.commandId];
-                delete s.pending[frame.reply.commandId];
+                const key = pendingKey(frame.sessionId, frame.reply.commandId);
+                const pending = s.pending[key];
+                delete s.pending[key];
                 await replied(frame.sessionId, frame.reply);
                 if (pending?.command.type === 'close' && frame.reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
             }
@@ -491,9 +494,10 @@ export function defineMachineActor(ports: MachinePorts) {
                         await replied(sessionId, errorReply(command.commandId, 'closed', `session ${sessionId} is not hosted by machine ${machineId}`), { oneWay: true });
                         return;
                     }
-                    if (command.commandId in s.pending) return;
+                    const key = pendingKey(sessionId, command.commandId);
+                    if (key in s.pending) return;
                     const at = now();
-                    s.pending[command.commandId] = { sessionId, command: structuredClone(command), sentAt: at, deadline: at + commandTimeoutMs };
+                    s.pending[key] = { sessionId, command: structuredClone(command), sentAt: at, deadline: at + commandTimeoutMs };
                     if (hosted && s.online) send({ v: V, t: 'session.command', sessionId, command });
                     await armLiveness();
                     await ctx.save();
@@ -508,12 +512,12 @@ export function defineMachineActor(ports: MachinePorts) {
             const ids = parseMachineKey(ctx.key);
             if (s.online && (s.lastSeen ?? 0) + heartbeatWindowMs <= at) s.online = false;
             const def = ports.sessions?.();
-            for (const [commandId, p] of Object.entries(s.pending)) {
+            for (const [key, p] of Object.entries(s.pending)) {
                 if (p.deadline > at) continue;
-                delete s.pending[commandId];
+                delete s.pending[key];
                 if (def && ids) {
                     const client = actor(def, actorKey(ids.workspaceId, 'session', p.sessionId)).with({ context: asPrincipal(machinePrincipal(ids.workspaceId, ids.machineId)) }) as unknown as SessionClient;
-                    await client.commandReplied({ v: W, kind: 'error', commandId, code: 'internal', message: `no reply from machine ${ids.machineId} within ${commandTimeoutMs} ms` });
+                    await client.commandReplied({ v: W, kind: 'error', commandId: p.command.commandId, code: 'internal', message: `no reply from machine ${ids.machineId} within ${commandTimeoutMs} ms` });
                 }
             }
             if (s.online || Object.keys(s.pending).length > 0) await ctx.reminders.set(LIVENESS, { due: Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs)) });

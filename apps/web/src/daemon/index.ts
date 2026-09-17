@@ -5,8 +5,10 @@
  *
  * - Worker half (`forwardDaemonSocket`): the token names the workspace and
  *   machine, so the upgrade is forwarded — verbatim — to that Machine's
- *   Durable Object. Nothing is proved here; a malformed or mismatched
- *   token is refused early so no object wakes for it.
+ *   Durable Object. Nothing is proved here: only the token's SHAPE and its
+ *   agreement with the path are checked, so a malformed or mismatched
+ *   token never wakes an object, while a well-formed token with a wrong
+ *   secret does wake the object and is refused there by the hash match.
  * - Object half (`createDaemonSocketHost`): the Machine actor's stored hash
  *   decides (`verifyMachineToken`; a revoked machine is refused at connect),
  *   the server end is accepted with the hibernation API under the

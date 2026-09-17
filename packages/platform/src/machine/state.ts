@@ -71,6 +71,7 @@ export interface MachineState {
     environments: EnvironmentDescriptor[];
     activeSessions: Record<string, HostedSession>;
     queued: QueuedSession[];
+    /** Keyed `${sessionId}:${commandId}` — a `commandId` is unique per Session, not per machine. */
     pending: Record<string, PendingCommand>;
     /** The most recent closures, newest last (capped). */
     closures: SessionClosure[];
