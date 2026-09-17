@@ -221,6 +221,25 @@ const report = await task.cancel('user:u1', { timeoutMs: 10_000 });    // { stop
 - `cancel` transitions to `cancelled`, fans `stop` out to unsettled children one-way, waits for their acknowledgements and — when a session is attached — for `sessionStopped()` from the session driver, until the deadline. Each hop keeps a 20 % margin of the remaining time so a child's own report arrives before the parent's deadline. Whatever did not acknowledge lands in `notStopped`; late acknowledgements still update the snapshot.
 - Budgets (COL-11, OPS-08): `recordUsage` and `delegate` run `checkBudget(constraints, spent)` from `src/ledger`; once a budget is spent (`spent >= max`) the task ends `failed` with `error.code === 'budget'` (`system:budget`), every unsettled child is cancelled one-way, and `delegate` throws `TaskLimitError('budget')` before any child is created.
 
+## Routing (`src/routing`)
+
+`defineRoutingActor({ sessions, machines, driver?, now?, newSessionId? })` builds the `routing` actor, keyed `routingKey(ws)` = `{ws}:routing:main` — the §7 driver: a task always runs where it was told to, or waits / fails with a visible reason (EXE-09/11/12, AST-05).
+
+```ts
+const Session = defineSessionActor({ factory: createSessionFactory({ routing: () => Routing, anthropic: (ws) => ({ apiKey }) }), commands, usage: ledgerRecorder() });
+const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+const Machine = defineMachineActor({ socket, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
+await actor(Routing, routingKey(ws)).run(taskId);   // queued → active (local or on its machine) | waiting {capacity | environment-offline} | failed {reason}
+```
+
+- `run(taskId)` resolves the runtime and the environment once (task `environmentId`, else the agent's default) and never changes them: `anthropic-api` opens a local Session and prompts; a daemon runtime goes through `Machine.openSession` — `opened` (prompted on `sessionOpened`), `queued` (Task `waiting {capacity, position}`), offline, or not reported by any machine yet (Task `waiting {environment-offline, policy}` then `queue` / `fail` / `fallback-api` — the last only when configured, through a transition that says why; a `queue` route binds to the first machine that reports the environment and never moves). `createEnvironmentProbe({ machines })` answers the schedule trigger's `EnvironmentProbe` with the same scan, and `run` adopts a task the trigger parked `waiting {environment-offline}`.
+- `machineOnline` / `sessionOpened` / `sessionClosed` are the Machine's one-way notifications (machine principal); `report(taskId, report)` is `task_report` from the task's agent; the `follow` task settles the Task at the turn end and closes the session.
+- `createSessionFactory({ routing, anthropic?, model?, policy? })` — the concrete `SessionFactory` (`anthropic-api` → `createPlatformModelAgent`; other runtimes → `null`). `createToolCallPort({ routing, sessions })` — the Machine's `ToolCallPort` over the same tool definitions. `createActorToolPorts({ principal, chatId?, routing? })` — the `PlatformPorts` both use (`delegate` / `ask_user` are `unsupported` until #39).
+
+## PairingDirectory (`src/pairing`)
+
+`PairingDirectory`, keyed `PAIRING_DIRECTORY_KEY` = `global:pairing`: pairing code → `{workspaceId, machineId, expiresAt}`, filed by `Workspace.registerMachinePending` over a hop, resolved once (anonymously — the `POST /auth/pair` door) with `resolve(code)`, then redeemed with `Machine.pair(code, info)`. Single use, 10 minutes; only the mapping lives here.
+
 ## Ledger (`src/ledger`)
 
 `LedgerActor` keeps the books of one workspace month: key `ledgerKey(ws, ledgerMonth(at))` → `{ws}:ledger:{yyyy-mm}` (UTC months). `authorize: [sameWorkspace]`.

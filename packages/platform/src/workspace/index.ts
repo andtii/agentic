@@ -15,10 +15,11 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkspaceId } from '@agentic/core';
 import { createId } from '@agentic/core';
 import { defineActor, type ActorPolicy } from '@sigx/actors';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
+import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
 
@@ -228,14 +229,19 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
 
             /**
              * Register a machine that has not paired yet. The daemon presents the
-             * code to `Machine.pair`, which redeems it here through a hop; the
-             * machine token itself is minted by the auth lane, never stored here.
+             * code to `POST /auth/pair`, which finds the workspace through the
+             * global `PairingDirectory` (filed here over a hop, #37) and calls
+             * `Machine.pair`, which redeems the code here through another hop;
+             * the machine token itself is minted by the auth lane, never stored here.
              */
             async registerMachinePending(input: RegisterMachineInput): Promise<RegisterMachineResult> {
                 if (!input.name.trim()) throw new Error('[Workspace] registerMachinePending: name is required');
                 const machineId = createId('machine') as MachineId;
                 const at = now();
                 const pairing = { code: createPairingCode(), expiresAt: at + PAIRING_CODE_TTL_MS };
+                // The directory is the door; this record is the proof. Filed first: a directory entry without a record is a
+                // harmless 401 that expires, a record without a directory entry would be a code nobody can present.
+                await ctx.actor(PairingDirectory, PAIRING_DIRECTORY_KEY).register(pairing.code, { workspaceId: ownerOfWorkspaceKey(ctx.key) as WorkspaceId, machineId, expiresAt: pairing.expiresAt });
                 ctx.state.machines.push({ id: machineId, name: input.name, status: 'pending', registeredAt: at, pairing });
                 await ctx.save();
                 return { machineId, pairingCode: pairing.code, expiresAt: pairing.expiresAt };

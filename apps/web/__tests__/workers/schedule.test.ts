@@ -7,7 +7,7 @@
  */
 import { env, runDurableObjectAlarm } from 'cloudflare:test';
 import type { AgentId, EnvironmentId, ScheduleId, WorkspaceId } from '@agentic/core';
-import { Inbox, TaskActor, defineScheduleActor, inboxKey, scheduledTaskId, taskKey } from '@agentic/platform';
+import { AgentActor, Inbox, TaskActor, agentKey, defineScheduleActor, inboxKey, scheduledTaskId, taskKey } from '@agentic/platform';
 import { durableObjectName } from '@sigx/actors-cloudflare';
 import { overHttp, seen, signIn } from './http';
 
@@ -19,6 +19,15 @@ const agentId = 'agent_digest' as AgentId;
 const Schedule = defineScheduleActor({ trigger: { fired: () => undefined } });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll until `check()` holds. */
+async function until(check: () => Promise<boolean>, what: string, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        await sleep(50);
+    }
+}
 
 /** Force the entry's alarm until `delivered()` holds — the alarm only fires what is already due. */
 async function advanceAlarm(key: string, delivered: () => Promise<boolean>): Promise<void> {
@@ -64,7 +73,7 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         for (const path of seen) expect(path.startsWith('/_sigx/actor/')).toBe(true);
     });
 
-    it('a scheduled agent task becomes a Task in queued with origin {kind: schedule}', async () => {
+    it('a scheduled agent task becomes a Task with origin {kind: schedule}, handed to the router (#37)', async () => {
         const cookie = await signIn(userId);
         const scheduleId = 'sch_digest' as ScheduleId;
         const key = `${workspaceId}:schedule:${scheduleId}`;
@@ -80,14 +89,18 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         const exists = () => task.get().then(() => true, () => false);
         await advanceAlarm(key, exists);
 
+        // The trigger hands the task to the router, which runs it asynchronously; this agent has no configuration, so the
+        // route ends there with a reason — the point is that a firing's task never stays `queued` unattended.
+        await until(async () => (await task.get()).status !== 'queued', 'the router to pick the task up');
         const view = await task.get();
         expect(view).toMatchObject({
             id: taskId,
-            status: 'queued',
+            status: 'failed',
             owner: agentId,
             assignee: agentId,
             objective: 'Write the digest',
-            origin: { kind: 'schedule', scheduleId }
+            origin: { kind: 'schedule', scheduleId },
+            error: { code: 'agent-unconfigured' }
         });
         expect(view.wait).toBeUndefined();
         // A scheduled task is not a reminder: nothing new reached the inbox.
@@ -99,6 +112,9 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         const scheduleId = 'sch_env' as ScheduleId;
         const key = `${workspaceId}:schedule:${scheduleId}`;
         const environmentId = 'env_laptop' as EnvironmentId;
+        // A configured agent on a daemon runtime: the router (#37) adopts the parked task and, with no machine reporting the
+        // environment, keeps it waiting under the `queue` policy instead of failing it.
+        await overHttp(AgentActor, agentKey(workspaceId, agentId), cookie).update({ name: 'Digest', instructions: 'Build it.', execution: { runtime: 'claude-code', defaultEnvironmentId: environmentId, offlinePolicy: 'queue' } }, 'create');
 
         const at = Date.now() + 200;
         await overHttp(Schedule, key, cookie).create({

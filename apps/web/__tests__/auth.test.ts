@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { createWebAuth, defaultResolveUser, userOf, type AuthEnv } from '../src/auth/index';
-import { issuePairing, OAUTH_COOKIE, readCookie, sealSession, sessionCookie, verifyMachineToken, type AuthProvider, type PendingPairing } from '@agentic/platform';
+import { issueMachineToken, OAUTH_COOKIE, sealSession, sessionCookie, type AuthProvider } from '@agentic/platform';
+import { ServerFnError } from '@sigx/server';
 import type { MachineId, WorkspaceId } from '@agentic/core';
 
 const NOW = 1_800_000_000_000;
@@ -76,42 +77,53 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
         expect(userOf(null)).toBeNull();
     });
 
-    it('pair: a live code once → machine token whose hash the wiring stored; then used/mismatch → 401', async () => {
+    it('pair: a live code resolves once to its machine, which redeems it → token; then used/mismatch/malformed → refused', async () => {
         const machineId = 'machine_1' as MachineId;
         const workspaceId = 'gh_42' as WorkspaceId;
-        const issued = await issuePairing({ machineId, now: NOW });
-        let pending: PendingPairing = issued.pending;
-        const stored: { tokenHash?: string; name?: string } = {};
+        const CODE = 'ABC234';
+        // A directory with one live code, and a machine that pairs once (the shapes `pairingWiring` binds to the actors).
+        const codes = new Map([[CODE, { workspaceId, machineId }]]);
+        const paired: { code?: string; name?: string; target?: unknown } = {};
         const auth = createWebAuth(env, {
             resolveUser: defaultResolveUser,
             provider,
             now: () => NOW + 1000,
             pairing: {
-                find: async (code) => (readCookie(null, 'x') === null && code.length ? { workspaceId, pending } : null),
-                redeem: async (input) => {
-                    pending = input.pending;
-                    stored.tokenHash = input.tokenHash;
-                    stored.name = input.name;
+                resolve: async (code) => {
+                    const target = codes.get(code) ?? null;
+                    codes.delete(code);
+                    return target;
+                },
+                pair: async (target, code, info) => {
+                    if (paired.code) throw new ServerFnError(409, 'already paired');
+                    paired.code = code;
+                    paired.name = info.name;
+                    paired.target = target;
+                    const issued = await issueMachineToken(target);
+                    return { token: issued.token, workspaceId: target.workspaceId, machineId: target.machineId };
                 }
             }
         });
         const post = (body: unknown) => auth.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }));
-        const ok = await post({ code: issued.code.toLowerCase(), name: ' laptop ' });
+        const ok = await post({ code: 'abc-234', name: ' laptop ' });
         expect(ok.status).toBe(200);
         const result = (await ok.json()) as { token: string; workspaceId: string; machineId: string };
         expect(result).toMatchObject({ workspaceId, machineId });
-        expect(stored.name).toBe('laptop');
-        await expect(verifyMachineToken(result.token, { tokenHash: stored.tokenHash! })).resolves.toMatchObject({ ok: true });
-        expect(pending.consumedAt).toBe(NOW + 1000);
+        expect(result.token).toMatch(/^amt\./);
+        expect(paired).toEqual({ code: CODE, name: 'laptop', target: { workspaceId, machineId } });
 
-        const again = await post({ code: issued.code, name: 'laptop' });
+        // The directory is single use: the same code is a mismatch now.
+        const again = await post({ code: CODE, name: 'laptop' });
         expect(again.status).toBe(401);
-        await expect(again.json()).resolves.toEqual({ error: 'used' });
-        expect((await post({ code: 'ZZZZZZ', name: 'x' })).status).toBe(401);
-        const unknown = createWebAuth(env, { resolveUser: defaultResolveUser, provider, pairing: { find: async () => null, redeem: async () => undefined } });
-        const notFound = await unknown.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: JSON.stringify({ code: issued.code, name: 'x' }) }));
-        expect(notFound.status).toBe(401);
-        await expect(notFound.json()).resolves.toEqual({ error: 'mismatch' });
+        await expect(again.json()).resolves.toEqual({ error: 'mismatch' });
+        // A machine that refuses (already paired) answers with the refusal, not a token.
+        codes.set(CODE, { workspaceId, machineId });
+        const refused = await post({ code: CODE, name: 'laptop' });
+        expect(refused.status).toBe(409);
+        await expect(refused.json()).resolves.toEqual({ error: 'used' });
+
+        expect((await post({ code: 'ZZ', name: 'x' })).status).toBe(401);
+        await expect((await post({ code: 'ZZ', name: 'x' })).json()).resolves.toEqual({ error: 'malformed' });
         expect((await post({ name: 'x' })).status).toBe(400);
         expect((await auth.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: '{' }))).status).toBe(400);
         const unwired = createWebAuth(env, { resolveUser: defaultResolveUser, provider });

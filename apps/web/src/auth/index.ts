@@ -14,19 +14,20 @@ import {
     beginOAuth,
     clearSessionCookie,
     completeOAuth,
-    consumePairing,
     githubAuthProvider,
-    issueMachineToken,
+    normalizePairingCode,
+    PAIRING_CODE_LENGTH,
     sealSession,
     serverAuth,
     sessionCookie,
-    verifyPairing,
     type AuthProvider,
     type ExternalIdentity,
     type MachineTokenLookup,
-    type PendingPairing
+    type PairedMachine,
+    type PairInfo
 } from '@agentic/platform';
 import { authenticateRequest } from '@agentic/platform';
+import { isServerFnError } from '@sigx/server';
 
 /** Workers Secrets the auth routes read (architecture §3). Never defaults, never files. */
 export interface AuthEnv {
@@ -46,10 +47,16 @@ export interface AuthWiring {
     readonly resolveUser: (identity: ExternalIdentity) => Promise<{ userId: string; workspaceId: WorkspaceId }>;
     /** Stored token hash for a machine — `Machine.get`-backed. */
     readonly machines?: MachineTokenLookup;
-    /** Pairing: find and update the pending record by code (Workspace actor), store the token hash (Machine actor). */
+    /**
+     * Pairing (#37): `resolve` names the machine a live code was issued for
+     * (the `PairingDirectory`, single use), `pair` redeems it on that machine
+     * (`Machine.pair(code, info)` under the machine's principal — it consumes
+     * the Workspace's record and mints the token). A `ServerFnError` from
+     * `pair` names the refusal: 401 code, 403 revoked, 409 already paired.
+     */
     readonly pairing?: {
-        readonly find: (code: string) => Promise<{ workspaceId: WorkspaceId; pending: PendingPairing } | null>;
-        readonly redeem: (input: { workspaceId: WorkspaceId; machineId: MachineId; pending: PendingPairing; tokenHash: string; name: string }) => Promise<void>;
+        readonly resolve: (code: string) => Promise<{ workspaceId: WorkspaceId; machineId: MachineId } | null>;
+        readonly pair: (target: { workspaceId: WorkspaceId; machineId: MachineId }, code: string, info: PairInfo) => Promise<PairedMachine>;
     };
     readonly provider?: AuthProvider;
     readonly now?: () => number;
@@ -121,7 +128,11 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
         return principal ? json({ principal }) : json({ error: 'unauthorized' }, 401);
     };
 
-    /** `agentic-daemon pair`: `{ code, name }` → `{ token, workspaceId, machineId }`. Anonymous by design — the code is the proof. */
+    /**
+     * `agentic-daemon pair`: `{ code, name }` → `{ token, workspaceId, machineId }`.
+     * Anonymous by design — the code is the proof: the directory says which
+     * machine it was issued for (once), and that machine redeems it.
+     */
     const pair: RouteHandler = async (request) => {
         if (!wiring.pairing) return json({ error: 'pairing_unavailable' }, 503);
         let body: { code?: unknown; name?: unknown };
@@ -131,13 +142,19 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
             return json({ error: 'bad_request' }, 400);
         }
         if (typeof body.code !== 'string' || typeof body.name !== 'string' || !body.name.trim()) return json({ error: 'bad_request' }, 400);
-        const found = await wiring.pairing.find(body.code);
-        if (!found) return json({ error: 'mismatch' }, 401);
-        const verdict = await verifyPairing(found.pending, body.code, now());
-        if (!verdict.ok) return json({ error: verdict.reason }, 401);
-        const issued = await issueMachineToken({ workspaceId: found.workspaceId, machineId: found.pending.machineId });
-        await wiring.pairing.redeem({ workspaceId: found.workspaceId, machineId: found.pending.machineId, pending: consumePairing(found.pending, now()), tokenHash: issued.tokenHash, name: body.name.trim() });
-        return json({ token: issued.token, workspaceId: issued.workspaceId, machineId: issued.machineId });
+        const code = normalizePairingCode(body.code);
+        if (code.length !== PAIRING_CODE_LENGTH) return json({ error: 'malformed' }, 401);
+        const target = await wiring.pairing.resolve(code);
+        if (!target) return json({ error: 'mismatch' }, 401);
+        try {
+            const paired = await wiring.pairing.pair(target, code, { name: body.name.trim() });
+            return json({ token: paired.token, workspaceId: paired.workspaceId, machineId: paired.machineId });
+        } catch (e) {
+            if (!isServerFnError(e)) throw e;
+            if (e.status === 409) return json({ error: 'used' }, 409);
+            if (e.status === 403) return json({ error: 'revoked' }, 403);
+            return json({ error: 'mismatch' }, 401);
+        }
     };
 
     return {
