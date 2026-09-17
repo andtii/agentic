@@ -57,3 +57,33 @@ export function resolveActivation(mentions: readonly AgentId[], members: readonl
     if (coordinator && members.includes(coordinator)) return [coordinator];
     return members.length === 1 ? [members[0]!] : [];
 }
+
+/**
+ * Topic a Session publishes on for the chat it belongs to, keyed by the chat's
+ * actor key (`topic(SESSION_EVENTS_TOPIC, chatKey)`); the Chat actor subscribes
+ * and folds each event into an entry (architecture §6, CHT-11).
+ */
+export const SESSION_EVENTS_TOPIC = 'session-events';
+
+/**
+ * What a Session tells its chat: status changes and FINAL assistant messages.
+ * Streaming deltas never travel this way — the UI tails the Session directly.
+ */
+export type SessionEvent =
+    | {
+          readonly kind: 'status';
+          readonly agentId: AgentId;
+          readonly sessionId: SessionId;
+          readonly status: Extract<ChatEntry, { t: 'status' }>['kind'];
+          readonly ref?: string;
+          readonly at: number;
+      }
+    | {
+          readonly kind: 'message';
+          readonly agentId: AgentId;
+          readonly sessionId: SessionId;
+          readonly taskId?: TaskId;
+          readonly parts: readonly PromptPart[];
+          readonly mentions?: readonly AgentId[];
+          readonly at: number;
+      };
