@@ -29,7 +29,7 @@ export const Session = component(() => {
                 </Row>
                 {session.status === 'interrupted' || session.status === 'error'
                     ? <Alert color="warning">
-                        <Alert.Title>Interrupted</Alert.Title>
+                        <Alert.Title>{session.status === 'error' ? 'Failed' : 'Interrupted'}</Alert.Title>
                         <Alert.Description>The turn was marked, never replayed. Resume issues a new prompt over the intact transcript.</Alert.Description>
                         <Button color="primary" size="sm">Resume</Button>
                     </Alert>

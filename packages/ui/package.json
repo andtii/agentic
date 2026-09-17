@@ -17,7 +17,7 @@
     "./shell.css": "./src/shell/shell.css"
   },
   "sideEffects": [
-    "*.css"
+    "**/*.css"
   ],
   "scripts": {
     "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
