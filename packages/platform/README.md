@@ -2,6 +2,12 @@
 
 Actor definitions on @sigx/actors: Workspace, Agent, Chat, Task, Session, Machine, Schedule, Memory, Inbox, Ledger, Registry, Audit; auth helpers.
 
+## Agent (`src/agent`)
+
+`AgentActor` is a persistent identity keyed `{ws}:agent:{id}` (`agentKey(ws, id)`). Its configuration is a log of versions: `update(patch, reason)` appends `{ t: 'config', v, patch, by, at, reason }` (`by` from `ctx.principal`, so the app's server `codec` must carry the `Principal`), `rollback(v, reason?)` appends a NEW version exactly equal to `v` (the entry carries the whole config and replaces, never merges) — history is never rewritten — and `snapshotForSession()` returns a detached `FrozenAgentConfig` stamped with `configVersion`, unaffected by later updates (AGT-06/07). A fresh agent is `configVersion 0` with `defaultAgentConfig()`; the first `update` creates v1 and a session cannot start before it. Patches merge `memoryPolicy` / `execution` (+ `limits`) one level deep and replace everything else wholesale (`mergeAgentConfig`). Skills and tool grants are separate fields; only `tools[]` feeds a policy (AGT-04). The private memory scope is `agent:{id}` (`agentMemoryScope`); `memoryPolicy.shared[]` lists the shared scopes it may read.
+
+The reducer `applyAgentEntry(state, entry)` is the shape `@sigx/actors` `applyEntry` expects; until the installed release ships `ctx.append` the actor folds and `ctx.save()`s inside the turn.
+
 Design: `docs/architecture.md`. What may move into the sigx estate later: `docs/promotion.md`.
 
 ## Auth helpers (`src/auth`)
