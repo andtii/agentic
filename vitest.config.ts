@@ -17,6 +17,7 @@ export default defineConfig({
     resolve: {
         // longest names first: a string find is a prefix match
         alias: [
+            { find: '@agentic/daemon-protocol/testing', replacement: resolve(__dirname, 'packages/daemon-protocol/src/testing/index.ts') },
             { find: '@agentic/daemon-protocol', replacement: pkg('daemon-protocol') },
             { find: '@agentic/platform', replacement: pkg('platform') },
             { find: '@agentic/runtimes/claude-code', replacement: resolve(__dirname, 'packages/runtimes/src/claude-code/index.ts') },

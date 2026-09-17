@@ -22,6 +22,9 @@
       "@agentic/daemon-protocol": [
         "./packages/daemon-protocol/src/index.ts"
       ],
+      "@agentic/daemon-protocol/testing": [
+        "./packages/daemon-protocol/src/testing/index.ts"
+      ],
       "@agentic/memory": [
         "./packages/memory/src/index.ts"
       ],
