@@ -56,7 +56,7 @@ This registers a per-user Scheduled Task, not a LocalSystem service: the token a
 - **Commands.** `session.command` → `ServedSession.handleCommand` (idempotent by `commandId`) → `session.reply`.
 - **Platform tools.** A driver's `callTool(tool, input)` is sent as `tool.call` and settles on `tool.result` (an `error` rejects with `PlatformToolError`); calls still open across a reconnect are sent again after `welcome`; unanswered calls time out (10 min).
 - **Logs.** Every line is redacted: the token, its secret part and anything shaped like a platform bearer token are replaced.
-- **Drivers.** The daemon consumes only `RuntimeDriver` from `@agentic/core` and never branches on a runtime id. `src/drivers.ts` is the registration point; the Claude Code driver (#20) is added there.
+- **Drivers.** The daemon consumes only `RuntimeDriver` from `@agentic/core` and never branches on a runtime id. `src/drivers.ts` is the registration point; this build ships `claudeCodeDriver()` from `@agentic/runtimes/claude-code` (`"runtime": "claude-code"`), disposed when `run` stops.
 
 ## Test
 

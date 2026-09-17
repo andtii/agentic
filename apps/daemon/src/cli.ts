@@ -12,7 +12,7 @@ import { hostname } from 'node:os';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
 import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner, type Credentials } from './credentials.js';
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
-import { builtinDrivers } from './drivers.js';
+import { builtinDrivers, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
@@ -134,6 +134,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 context.onStarted?.(daemon);
                 await (context.until ?? stopSignal());
                 await daemon.stop();
+                for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
                 return 0;

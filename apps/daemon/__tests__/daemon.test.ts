@@ -165,3 +165,12 @@ describe('daemon helpers', () => {
         expect(agentCapabilitiesOf(report)).toMatchObject({ resume: 'local', cancel: true, steer: true, config: true, fork: true, structuredOutput: false, permissions: 'every-call', tools: 'mcp' });
     });
 });
+
+describe('builtin drivers', () => {
+    it('ship the Claude Code driver, disposable', async () => {
+        const { builtinDrivers, isDisposable } = await import('../src/drivers');
+        const drivers = builtinDrivers();
+        expect(drivers.map((d) => d.runtime)).toEqual(['claude-code']);
+        expect(drivers.every(isDisposable)).toBe(true);
+    });
+});
