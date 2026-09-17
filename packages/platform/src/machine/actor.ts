@@ -12,7 +12,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type OpenSpec, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentVerdict, type IsolationMechanism, type MachineId, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
@@ -80,6 +80,33 @@ export interface MachineView {
     readonly pending: readonly PendingCommand[];
     readonly closures: readonly SessionClosure[];
     readonly rejected: number;
+}
+
+/** One environment's doctor verdict as `Machine.doctor()` reports it (EXE-05/07). */
+export interface EnvironmentDoctorView {
+    readonly environmentId: EnvironmentId;
+    readonly name: string;
+    readonly runtime: RuntimeId;
+    readonly account: EnvironmentDescriptor['account'];
+    readonly isolation: IsolationMechanism;
+    /** Absent when the daemon reported none (it ran no `doctor`, or predates the field) — listed in `unverified`. */
+    readonly verdict?: EnvironmentVerdict;
+}
+
+/**
+ * `Machine.doctor()` — the daemon's per-environment verdicts as last reported
+ * in `hello` / `env`: the shape the Machines page and `environments.doctor`
+ * on the MCP surface (#50) show. `ok` only when every environment has a
+ * verdict and none is an error.
+ */
+export interface MachineDoctorView {
+    readonly machineId: MachineId;
+    readonly online: boolean;
+    readonly lastSeen?: number;
+    readonly ok: boolean;
+    /** Environments the daemon sent no verdict for. */
+    readonly unverified: readonly EnvironmentId[];
+    readonly environments: readonly EnvironmentDoctorView[];
 }
 
 /** Only the machine the key names — the daemon's own socket. */
@@ -428,6 +455,34 @@ export function defineMachineActor(ports: MachinePorts) {
 
                 get(): MachineView {
                     return view(ctx);
+                },
+
+                /**
+                 * The daemon's per-environment `doctor` verdicts (isolation, auth — EXE-05/07) as last reported.
+                 * Stored, never recomputed here: the platform cannot see a machine's config dirs. With
+                 * `environmentId`, that environment only (404 when the machine does not report it).
+                 */
+                doctor(environmentId?: EnvironmentId): MachineDoctorView {
+                    const s = ctx.state;
+                    const envs = environmentId === undefined ? s.environments : s.environments.filter((e) => e.id === environmentId);
+                    if (environmentId !== undefined && envs.length === 0) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    const environments: EnvironmentDoctorView[] = envs.map((e) => ({
+                        environmentId: e.id,
+                        name: e.name,
+                        runtime: e.runtime,
+                        account: e.account,
+                        isolation: e.isolation,
+                        ...(e.doctor === undefined ? {} : { verdict: e.doctor })
+                    }));
+                    const unverified = environments.filter((e) => e.verdict === undefined).map((e) => e.environmentId);
+                    return {
+                        machineId,
+                        online: s.online,
+                        ...(s.lastSeen !== undefined ? { lastSeen: s.lastSeen } : {}),
+                        ok: unverified.length === 0 && environments.every((e) => e.verdict?.ok === true),
+                        unverified,
+                        environments
+                    };
                 },
 
                 /** The daemon says it is alive (also folded from the `heartbeat` frame). */

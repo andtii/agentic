@@ -1,72 +1,79 @@
-import { component } from 'sigx';
+import { component, signal, useHead } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { Alert, Card, Tabs } from '@sigx/zero-daisyui/components';
-import { Row, Stack } from '@agentic/ui';
+import { Tabs } from '@sigx/zero-daisyui/components';
+import { AgentTile, Button, EmptyState, EnvironmentLine, Row, Stack, StatusPill } from '@agentic/ui';
 import { Page } from '../components/Page';
-import { StatusBadge } from '../components/StatusBadge';
-import { agentById, sessions, tasks } from '../mock/data';
+import { agentById } from '../mock/data';
+import { agentProfile } from '../mock/agents';
+import { presencePill } from './Agents';
+import { OverviewTab } from './agent/OverviewTab';
+import { ConfigTab } from './agent/ConfigTab';
+import { MemoryTab } from './agent/MemoryTab';
+import { SessionsTab } from './agent/SessionsTab';
 
-/** `/agents/:id` — overview, config + versions, memory, sessions. */
+export const AGENT_TABS = ['overview', 'config', 'memory', 'sessions'] as const;
+export type AgentTab = (typeof AGENT_TABS)[number];
+
+/**
+ * `/agents/:id` — header (tile 52, name 24 / 600, role, environment line,
+ * status pill) over Overview | Config | Memory | Sessions
+ * (`docs/design/HANDOFF.md` → Screen specs, Agent config / Agent memory).
+ * `?tab=` selects the tab on load so a link can land on Config or Memory.
+ */
 export const Agent = component(() => {
     const route = useRoute();
+    useHead({ title: agentById(String(route.params.id))?.name ?? 'Agent not found' });
+    const initial = (): AgentTab => {
+        const q = String(route.query.tab ?? '');
+        return (AGENT_TABS as readonly string[]).includes(q) ? (q as AgentTab) : 'overview';
+    };
+    const state = signal({ tab: initial() });
+
     return () => {
-        const agent = agentById(String(route.params.id));
-        if (!agent) {
+        const id = String(route.params.id);
+        const agent = agentById(id);
+        const profile = agentProfile(id);
+        if (!agent || !profile) {
             return (
                 <Page title="Agent not found">
-                    <Alert color="warning"><Alert.Title>No agent with id {String(route.params.id)}</Alert.Title></Alert>
-                    <Link to="/agents">All agents</Link>
+                    <EmptyState variant="generic" title={`No agent with id ${id}`} caption="It may have been deleted, or the link is stale." slots={{ actions: () => <Link to="/agents">All agents</Link> }} />
                 </Page>
             );
         }
-        const own = sessions.filter(s => s.agentId === agent.id);
+        const pill = presencePill(profile.presence);
         return (
-            <Page title={agent.name} subtitle={agent.description}>
-                <Row gap="sm">
-                    <StatusBadge status={agent.status} />
-                    <code>{agent.runtime}</code>
-                    <span>config v{agent.configVersion}</span>
-                </Row>
-                <Tabs defaultValue="overview">
-                    <Tabs.List>
-                        <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                        <Tabs.Tab value="config">Config</Tabs.Tab>
-                        <Tabs.Tab value="memory">Memory</Tabs.Tab>
-                        <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
-                    </Tabs.List>
-                    <Tabs.Panel value="overview">
-                        <Card>
-                            <Card.Body>
-                                <Stack gap="xs">
-                                    <span>{tasks.filter(t => t.agentId === agent.id).length} tasks, {own.length} sessions</span>
-                                    <small>Mock data — the real overview reads the Agent actor.</small>
-                                </Stack>
-                            </Card.Body>
-                        </Card>
-                    </Tabs.Panel>
-                    <Tabs.Panel value="config">
-                        <Card>
-                            <Card.Body>
-                                <p>Versions 1 … {agent.configVersion}. Instructions, skills, tools and permissions live here.</p>
-                            </Card.Body>
-                        </Card>
-                    </Tabs.Panel>
-                    <Tabs.Panel value="memory">
-                        <Card><Card.Body><p>No memories yet (mock).</p></Card.Body></Card>
-                    </Tabs.Panel>
-                    <Tabs.Panel value="sessions">
-                        <Stack as="ul" gap="xs">
-                            {own.map(s => (
-                                <Row as="li" gap="sm">
-                                    <StatusBadge status={s.status} />
-                                    <Link to={`/sessions/${s.id}`}>{s.id}</Link>
-                                    <small>{s.turns} turns · {s.startedAt}</small>
-                                </Row>
-                            ))}
-                        </Stack>
-                    </Tabs.Panel>
-                </Tabs>
-            </Page>
+                <div data-page="agent" data-agent={id}>
+                    <header data-agent-header="">
+                        <Row gap="lg" align="center">
+                            <AgentTile name={agent.name} hue={profile.hue} size={52} />
+                            <Stack gap="2xs">
+                                <h1 data-page-title data-agent-name="">{agent.name}</h1>
+                                <div data-agent-sub="">
+                                    <span data-agent-role="">{profile.role}</span>
+                                    {profile.environment
+                                        ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} />
+                                        : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}
+                                </div>
+                            </Stack>
+                        </Row>
+                        <Row gap="md" align="center">
+                            <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
+                            <Button icon="chats">Start chat</Button>
+                        </Row>
+                    </header>
+                    <Tabs model={() => state.tab}>
+                        <Tabs.List>
+                            <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                            <Tabs.Tab value="config">Config</Tabs.Tab>
+                            <Tabs.Tab value="memory">Memory</Tabs.Tab>
+                            <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
+                        </Tabs.List>
+                        <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} /></Tabs.Panel>
+                        <Tabs.Panel value="config"><ConfigTab profile={profile} /></Tabs.Panel>
+                        <Tabs.Panel value="memory"><MemoryTab profile={profile} /></Tabs.Panel>
+                        <Tabs.Panel value="sessions"><SessionsTab agentId={id} /></Tabs.Panel>
+                    </Tabs>
+                </div>
         );
     };
 });

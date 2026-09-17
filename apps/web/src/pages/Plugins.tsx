@@ -1,29 +1,96 @@
-import { component } from 'sigx';
-import { Badge, Card, Switch } from '@sigx/zero-daisyui/components';
-import { Row, Spacer, Stack } from '@agentic/ui';
-import { Page } from '../components/Page';
-import { plugins } from '../mock/data';
+import { component, signal, type Define } from 'sigx';
+import { Link } from '@sigx/router';
+import { AgentTile, Button, ConfirmDialog, Icon, Label, Switch, Tag } from '@agentic/ui';
+import { disableConsequence, opsAgent, opsPlugins, type OpsPlugin } from '../mock/ops';
+import { OpsPage } from './ops/OpsPage';
 
-/** `/plugins` — in-repo modules, enabled per workspace. */
-export const Plugins = component(() => {
-    return () => (
-        <Page title="Plugins" subtitle="Registered at build time; enable or disable per workspace.">
-            <Stack gap="md">
-                {plugins.map(p => (
-                    <Card>
-                        <Card.Body>
-                            <Row gap="md">
-                                <Stack gap="2xs">
-                                    <strong>{p.name}</strong>
-                                    <Badge size="sm" color="neutral">{p.kind}</Badge>
-                                </Stack>
-                                <Spacer />
-                                <Switch defaultChecked={p.enabled}>{p.enabled ? 'Enabled' : 'Disabled'}</Switch>
-                            </Row>
-                        </Card.Body>
-                    </Card>
-                ))}
-            </Stack>
-        </Page>
-    );
+export type PluginsViewProps = Define.Prop<'plugins', readonly OpsPlugin[], true>;
+
+/** A dependent, by name, for the confirm dialog: "Forge — default environment · 1 active session". */
+export function dependentName(d: OpsPlugin['dependents'][number]): string {
+    const who = d.agentId ? opsAgent(d.agentId).name : (d.schedule ?? '');
+    return `${who} — ${d.reason}`;
+}
+
+/**
+ * `/plugins` — three-column cards: name and version, kind tag,
+ * description, granted permissions, declared unsupported operations
+ * (PLG-09), dependents as tiles, enable switch. Turning a switch off on a
+ * plugin with dependents opens the dialog that lists them by name and
+ * states the consequence ("Disable and stop 2 sessions"); the switch stays
+ * on until the user confirms.
+ */
+export const PluginsView = component<PluginsViewProps>(({ props }) => {
+    const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.plugins.map(p => [p.id, p.enabled])));
+    const ui = signal<{ confirming: string | null }>({ confirming: null });
+
+    const toggle = (plugin: OpsPlugin, next: boolean) => {
+        if (!next && plugin.dependents.length) {
+            // Hold the switch on; the dialog decides.
+            enabled[plugin.id] = true;
+            ui.confirming = plugin.id;
+            return;
+        }
+        enabled[plugin.id] = next;
+    };
+    const confirmDisable = () => {
+        if (ui.confirming) enabled[ui.confirming] = false;
+        ui.confirming = null;
+    };
+
+    return () => {
+        const confirming = props.plugins.find(p => p.id === ui.confirming);
+        return (
+            <OpsPage page="plugins" title="Plugins" slots={{ actions: () => <Button intent="default" icon="plus">Add MCP connector</Button> }}>
+                <div data-plugin-grid>
+                    {props.plugins.map(p => (
+                        <article data-plugin-card data-enabled={enabled[p.id] ? '' : undefined} aria-label={p.name}>
+                            <header data-plugin-head>
+                                <span data-plugin-name>
+                                    <span>{p.name}</span>
+                                    <span data-plugin-version>{p.version}</span>
+                                </span>
+                                <Switch label={`Enable ${p.name}`} hideLabel model={() => enabled[p.id]} onCheckedChange={(v: boolean) => toggle(p, v)} />
+                            </header>
+                            <Tag>{p.kind}</Tag>
+                            <p data-plugin-description>{p.description}</p>
+                            <div data-plugin-section>
+                                <Label>Granted</Label>
+                                {p.granted.length
+                                    ? <ul data-plugin-granted>{p.granted.map(g => <li><Icon name="check" size={14} /><span>{g}</span></li>)}</ul>
+                                    : <span data-plugin-none>nothing</span>}
+                            </div>
+                            {p.unsupported.length ? (
+                                <div data-plugin-section>
+                                    <Label>Declared unsupported</Label>
+                                    <span data-plugin-unsupported>{p.unsupported.join(', ')}</span>
+                                </div>
+                            ) : null}
+                            <footer data-plugin-foot>
+                                {p.usedBy.length
+                                    ? <span data-plugin-used>Used by {p.usedBy.map(id => <AgentTile name={opsAgent(id).name} hue={opsAgent(id).hue} size={20} labelled />)}</span>
+                                    : <span data-plugin-none>No dependents</span>}
+                                <Link to="/plugins" class="ag-link">Configure</Link>
+                            </footer>
+                        </article>
+                    ))}
+                </div>
+                {confirming ? (
+                    <ConfirmDialog
+                        model={() => ui.confirming !== null}
+                        title={`Disable ${confirming.name}?`}
+                        description="These stop being able to start work. Nothing is deleted, and nothing is moved to another runtime."
+                        dependents={confirming.dependents.map(dependentName)}
+                        dependentsLabel={`Depends on it · ${confirming.dependents.length}`}
+                        confirmLabel={disableConsequence(confirming)}
+                        cancelLabel="Keep enabled"
+                        onConfirm={confirmDisable}
+                        onCancel={() => { ui.confirming = null; }}
+                    />
+                ) : null}
+            </OpsPage>
+        );
+    };
 });
+
+export const Plugins = component(() => () => <PluginsView plugins={opsPlugins} />);

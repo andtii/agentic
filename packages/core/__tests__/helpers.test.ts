@@ -1,4 +1,4 @@
-import { actorKey, addUsage, canTransition, childTaskId, createId, hasScope, isTerminal, resolveActivation, sameWorkspace, toEnvironmentDescriptor, workspaceOfKey } from '../src/index';
+import { actorKey, addUsage, canTransition, childTaskId, createId, environmentVerdict, hasScope, isTerminal, resolveActivation, sameWorkspace, toEnvironmentDescriptor, workspaceOfKey } from '../src/index';
 import type { AgentId, CapabilityReport, EnvironmentId, LocalEnvironment, MachineId, Principal, TaskId, TaskStatus, WorkspaceId } from '../src/index';
 
 const ws = 'ws_1' as WorkspaceId;
@@ -109,6 +109,26 @@ describe('runtime seam', () => {
             isolation: 'config-dir'
         });
         expect(d).not.toHaveProperty('profileDir');
+    });
+    it('toEnvironmentDescriptor carries the doctor verdict only when one is given', () => {
+        const inspection = { authStatus: 'ok' as const, isolation: 'config-dir' as const, capabilities };
+        expect(toEnvironmentDescriptor(env, 'machine_1' as MachineId, inspection)).not.toHaveProperty('doctor');
+        const verdict = { ok: false, findings: [{ level: 'error' as const, code: 'shared-config-dir', message: 'shared', environmentIds: [env.id] }], checkedAt: 5 };
+        expect(toEnvironmentDescriptor(env, 'machine_1' as MachineId, inspection, 0, verdict).doctor).toEqual(verdict);
+    });
+    it('environmentVerdict keeps the findings naming the environment and fails on an error among them', () => {
+        const a = 'environment_a' as EnvironmentId;
+        const b = 'environment_b' as EnvironmentId;
+        const report = {
+            ok: false,
+            findings: [
+                { level: 'error' as const, code: 'shared-config-dir', message: 'a and b share', environmentIds: [a, b] },
+                { level: 'info' as const, code: 'auth-ok', message: 'a ok', environmentIds: [a] },
+                { level: 'error' as const, code: 'no-driver', message: 'unrelated' }
+            ]
+        };
+        expect(environmentVerdict(report, a, 7)).toEqual({ ok: false, findings: [report.findings[0], report.findings[1]], checkedAt: 7 });
+        expect(environmentVerdict({ ok: true, findings: [report.findings[1]] }, b, 7)).toEqual({ ok: true, findings: [], checkedAt: 7 });
     });
     it('toEnvironmentDescriptor uses the account label and identity when present', () => {
         const d = toEnvironmentDescriptor({ ...env, accountLabel: 'Work account' }, 'machine_1' as MachineId, {

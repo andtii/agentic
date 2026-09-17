@@ -67,6 +67,32 @@ describe('daemon', () => {
         expect(relay.refused).toBe(0);
     });
 
+    it("hello carries each driver's doctor verdict per environment; a driver whose checks throw yields an error verdict (EXE-05/07)", async () => {
+        const base = scriptedDriver({ events: 1, heartbeatMs: 1_000 });
+        const sharing: DaemonDriver = {
+            ...base,
+            async doctor(envs) {
+                const [a, b, c] = envs.map((e) => e.id);
+                return {
+                    ok: false,
+                    findings: [
+                        { level: 'error', code: 'shared-config-dir', message: 'a and b share a config dir', environmentIds: [a!, b!] },
+                        { level: 'info', code: 'auth-ok', message: 'c is signed in', environmentIds: [c!] }
+                    ]
+                };
+            }
+        };
+        const broken: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'broken', doctor: async () => Promise.reject(new Error('no claude binary')) };
+        const { hello } = await start([env('env_a'), env('env_b'), env('env_c'), env('env_d', { runtime: 'broken' })], [sharing, broken]);
+        const verdict = (id: string) => hello.environments.find((e) => e.id === id)!.doctor!;
+        expect(verdict('env_a')).toMatchObject({ ok: false, findings: [{ code: 'shared-config-dir', environmentIds: ['env_a', 'env_b'] }] });
+        expect(verdict('env_b')).toMatchObject({ ok: false, findings: [{ code: 'shared-config-dir' }] });
+        expect(verdict('env_c')).toMatchObject({ ok: true, findings: [{ code: 'auth-ok' }] });
+        expect(verdict('env_d')).toMatchObject({ ok: false, findings: [{ level: 'error', code: 'driver-doctor-failed', environmentIds: ['env_d'] }] });
+        expect(verdict('env_d').findings[0]!.message).toContain('no claude binary');
+        for (const e of hello.environments) expect(typeof e.doctor?.checkedAt).toBe('number');
+    });
+
     it('leaves out environments without a driver and reports an inspection failure as unknown auth', async () => {
         const failing: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'flaky', inspect: async () => Promise.reject(new Error('no claude binary')) };
         const { hello } = await start([env('env_a'), env('env_b', { runtime: 'nobody' }), env('env_c', { runtime: 'flaky' })], [scriptedDriver({ events: 1, heartbeatMs: 1_000 }), failing]);

@@ -19,7 +19,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         invalid: { v: V, t: 'hello', machineId: env.machineId, daemonVersion: '1.0.0', os: 'amiga', environments: [env], capabilities: [], resume: {} },
         path: 'os'
     },
-    env: { valid: { v: V, t: 'env', environments: [env] }, invalid: { v: V, t: 'env', environments: [{ ...env, account: { label: 'x' } }] }, path: 'environments.0.account.authStatus' },
+    env: {
+        valid: { v: V, t: 'env', environments: [{ ...env, doctor: { ok: false, findings: [{ level: 'error', code: 'shared-config-dir', message: 'shared', environmentIds: [env.id] }], checkedAt: 1 } }] },
+        invalid: { v: V, t: 'env', environments: [{ ...env, account: { label: 'x' } }] },
+        path: 'environments.0.account.authStatus'
+    },
     heartbeat: { valid: { v: V, t: 'heartbeat', at: 1, active: [env.id as unknown as never] }, invalid: { v: V, t: 'heartbeat', at: -1, active: [] }, path: 'at' },
     'session.opened': {
         valid: { v: V, t: 'session.opened', sessionId: 's1' as never, ref: { agent: 'fake', v: 1, id: 's1' }, capabilities: IN_MEMORY_CAPABILITIES, head: cursor },

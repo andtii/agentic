@@ -4,6 +4,7 @@ All notable changes to `@agentic/daemon-protocol` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `environment` schema accepts the optional `doctor` verdict (`environmentVerdict`: `ok`, bounded `findings` with level / code / message / environmentIds, `checkedAt`) on `hello` / `env` (#43).
 - `DaemonFrame` / `PlatformFrame` instantiated with the `@sigx/ai-agent/wire` envelope, plus per-kind aliases (`HelloFrame`, `SessionFrameFrame`, …).
 - Standard Schema (zod) validators for every frame kind (`daemonFrameSchemas`, `platformFrameSchemas`, the unions, the wire and common pieces) with `LIMITS` on frame size, strings, lists and records (`configure` patch keys, the output spec `name`); `tool.result` requires exactly one of `output` / `error`.
 - JSON-over-WebSocket framing: `encodeFrame`, `decodeDaemonFrame` / `decodePlatformFrame` (string or binary), `parseDaemonFrame` / `parsePlatformFrame`, `DaemonProtocolError`, and the named codes `too-large` · `not-json` · `not-object` · `unsupported-version` · `unknown-type` · `invalid`.

@@ -43,7 +43,7 @@ export { TextField, TextareaField, SelectField, NumberField, SwitchField, MultiS
 export type { FieldOption, TextFieldProps, TextareaFieldProps, SelectFieldProps, NumberFieldProps, SwitchFieldProps, MultiSelectFieldProps } from './fields.js';
 
 export { AgentForm } from './agent-form.js';
-export type { AgentFormApi, AgentFormProps } from './agent-form.js';
+export type { AgentFormApi, AgentFormProps, AgentFormRailProps, AgentFormLayout } from './agent-form.js';
 
 export { ConfigVersions } from './config-versions.js';
 export type { ConfigVersionsProps } from './config-versions.js';

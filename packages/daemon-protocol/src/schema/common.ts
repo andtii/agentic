@@ -25,6 +25,16 @@ export const cursors: z.ZodType<Readonly<Record<string, Cursor>>> = z
 
 export const os = z.enum(['windows', 'darwin', 'linux']);
 
+const doctorFinding = z.object({
+    level: z.enum(['error', 'warn', 'info']),
+    code: name,
+    message: text,
+    environmentIds: z.array(environmentId).max(LIMITS.list).optional()
+});
+
+/** A runtime's verdict on one environment (EXE-07); a daemon that ran no `doctor` leaves it out. */
+export const environmentVerdict = z.object({ ok: z.boolean(), findings: z.array(doctorFinding).max(LIMITS.list), checkedAt: nonNegativeInt });
+
 export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
     id: environmentId,
     machineId,
@@ -37,7 +47,8 @@ export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
     }),
     cwdRoots: z.array(text).max(LIMITS.list),
     concurrency: z.object({ max: nonNegativeInt, active: nonNegativeInt }),
-    isolation: z.enum(['config-dir', 'profile', 'os-user', 'container', 'none'])
+    isolation: z.enum(['config-dir', 'profile', 'os-user', 'container', 'none']),
+    doctor: environmentVerdict.optional()
 });
 
 export const environments = z.array(environment).max(LIMITS.list);

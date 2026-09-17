@@ -3,8 +3,9 @@
  * socket to the machine's platform endpoint, the local environments behind
  * it, and one served runtime session per `session.open`.
  *
- * - `hello` reports the environments (through each driver's `inspect`), the
- *   capabilities per runtime and a resume cursor per live session.
+ * - `hello` reports the environments (through each driver's `inspect`, plus
+ *   the per-environment verdict of its `doctor` — isolation and auth, EXE-05/07),
+ *   the capabilities per runtime and a resume cursor per live session.
  * - Session traffic waits for `welcome`; its `wanted` cursors restart every
  *   session pump, so a reconnect replays gaplessly — from `serveSession`'s
  *   buffer, then from the log on disk, or as a `gap` when neither reaches.
@@ -21,12 +22,15 @@
 
 import {
     DAEMON_PROTOCOL_VERSION,
+    environmentVerdict,
     toEnvironmentDescriptor,
     type CapabilityReport,
     type Cursor,
+    type DoctorReport,
     type EnvironmentDescriptor,
     type EnvironmentId,
     type EnvironmentInspection,
+    type EnvironmentVerdict,
     type LocalEnvironment,
     type MachineId,
     type RuntimeDriver,
@@ -160,6 +164,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
 
     let environments: readonly LocalEnvironment[] = options.environments;
     let inspections = new Map<EnvironmentId, EnvironmentInspection>();
+    let verdicts = new Map<EnvironmentId, EnvironmentVerdict>();
     const sessions = new Map<SessionId, LiveSession>();
     const opening = new Map<SessionId, EnvironmentId>();
     const pendingTools = new Map<string, PendingTool>();
@@ -199,7 +204,31 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 next.set(env.id, { authStatus: 'unknown', isolation: 'none', capabilities: unavailableReport(env.runtime, (e as Error).message) });
             }
         }
+        // Each driver's `doctor` over its environments: the isolation / auth verdict per environment that
+        // travels with the descriptor (EXE-05/07). A driver whose checks throw leaves every one of its
+        // environments with an error verdict, never a silent "ok".
+        const nextVerdicts = new Map<EnvironmentId, EnvironmentVerdict>();
+        const byRuntime = new Map<string, LocalEnvironment[]>();
+        for (const env of environments) {
+            if (!next.has(env.id)) continue;
+            const group = byRuntime.get(env.runtime);
+            if (group) group.push(env);
+            else byRuntime.set(env.runtime, [env]);
+        }
+        for (const [runtime, envs] of byRuntime) {
+            const checkedAt = Date.now();
+            let report: DoctorReport;
+            try {
+                report = await drivers.get(runtime)!.doctor(envs);
+            } catch (e) {
+                logger.warn('driver doctor failed', { runtime, error: e });
+                const reason = e instanceof Error && e.message ? e.message : String(e);
+                report = { ok: false, findings: [{ level: 'error', code: 'driver-doctor-failed', message: `the ${runtime} driver's checks failed: ${reason}`, environmentIds: envs.map((env) => env.id) }] };
+            }
+            for (const env of envs) nextVerdicts.set(env.id, environmentVerdict(report, env.id, checkedAt));
+        }
         inspections = next;
+        verdicts = nextVerdicts;
     }
 
     function descriptors(): EnvironmentDescriptor[] {
@@ -208,7 +237,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             const inspection = inspections.get(env.id);
             if (!inspection) continue;
             const active = [...sessions.values()].filter((s) => s.environmentId === env.id).length;
-            out.push(toEnvironmentDescriptor(env, machineId, inspection, active));
+            out.push(toEnvironmentDescriptor(env, machineId, inspection, active, verdicts.get(env.id)));
         }
         return out;
     }
