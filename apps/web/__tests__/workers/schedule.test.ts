@@ -33,7 +33,7 @@ async function until(check: () => Promise<boolean>, what: string, timeoutMs = 5_
 async function advanceAlarm(key: string, delivered: () => Promise<boolean>): Promise<void> {
     const namespace = (env as unknown as { ACTORS: DurableObjectNamespace }).ACTORS;
     const stub = namespace.get(namespace.idFromName(durableObjectName({ type: 'Schedule', key })));
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 100; i++) {
         await sleep(100);
         await runDurableObjectAlarm(stub);
         if (await delivered()) return;
@@ -53,7 +53,7 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         const schedule = overHttp(Schedule, key, cookie);
         const inbox = overHttp(Inbox, inboxKey(workspaceId), cookie);
 
-        const at = Date.now() + 200;
+        const at = Date.now() + 2_000; // far enough ahead that a slow `create` never sees it already due
         const created = await schedule.create({ kind: 'reminder', title: 'Tea', prompt: 'Kettle on', recurrence: { kind: 'at', at } });
         expect(created.next).toBe(at);
         expect(await inbox.list()).toEqual([]);
@@ -81,7 +81,7 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         const inbox = overHttp(Inbox, inboxKey(workspaceId), cookie);
         const inboxBefore = (await inbox.list()).length; // storage is per file, not per test
 
-        const at = Date.now() + 200;
+        const at = Date.now() + 2_000; // far enough ahead that a slow `create` never sees it already due
         await schedule.create({ kind: 'agent-task', title: 'Digest', prompt: 'Write the digest', agentId, recurrence: { kind: 'at', at } });
 
         const taskId = scheduledTaskId(scheduleId, at);
@@ -116,7 +116,7 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         // environment, keeps it waiting under the `queue` policy instead of failing it.
         await overHttp(AgentActor, agentKey(workspaceId, agentId), cookie).update({ name: 'Digest', instructions: 'Build it.', execution: { runtime: 'claude-code', defaultEnvironmentId: environmentId, offlinePolicy: 'queue' } }, 'create');
 
-        const at = Date.now() + 200;
+        const at = Date.now() + 2_000; // far enough ahead that a slow `create` never sees it already due
         await overHttp(Schedule, key, cookie).create({
             kind: 'agent-task',
             title: 'Build',
