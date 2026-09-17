@@ -23,7 +23,7 @@ export type SettingsErrors = Partial<Record<'timeZone', string>>;
 export function defaultWorkspaceSettings(timeZone = 'UTC'): WorkspaceSettings {
     return {
         timeZone,
-        notifications: { kinds: { reminder: true, 'task-done': true, 'task-failed': true, approval: true, input: true }, push: false }
+        notifications: { kinds: Object.fromEntries(NOTIFICATION_KINDS.map((k) => [k, true])) as SettingsDraft['kinds'], push: false }
     };
 }
 

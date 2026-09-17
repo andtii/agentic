@@ -1,6 +1,6 @@
 import { signal } from '@sigx/reactivity';
-import type { WorkspaceSettings } from '@agentic/core';
-import { SettingsForm, SETTINGS_FIELDS as F, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi } from '@agentic/ui';
+import { NOTIFICATION_KINDS, type WorkspaceSettings } from '@agentic/core';
+import { SettingsForm, SETTINGS_FIELDS as F, defaultWorkspaceSettings, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi } from '@agentic/ui';
 import { controls, describedByRole, fullSettings, labelOf, mount, setText, submit, toggle } from './helpers';
 
 const zones = ['Europe/Stockholm', 'Europe/London', 'America/New_York', 'UTC'];
@@ -16,6 +16,11 @@ function mountForm(settings: WorkspaceSettings = fullSettings()) {
 }
 
 describe('settings model', () => {
+    it('defaults enable exactly the core notification kinds', () => {
+        expect(Object.keys(defaultWorkspaceSettings().notifications.kinds)).toEqual([...NOTIFICATION_KINDS]);
+        expect(Object.values(defaultWorkspaceSettings().notifications.kinds).every(Boolean)).toBe(true);
+    });
+
     it('round-trips through the draft and through FormData', () => {
         const s = fullSettings();
         expect(fromSettingsDraft(toSettingsDraft(s))).toEqual(s);
