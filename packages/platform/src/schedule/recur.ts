@@ -60,13 +60,11 @@ interface FieldSpec {
     readonly max: number;
 }
 
-const FIELD_SPECS: readonly FieldSpec[] = [
-    { name: 'minute', min: 0, max: 59 },
-    { name: 'hour', min: 0, max: 23 },
-    { name: 'day-of-month', min: 1, max: 31 },
-    { name: 'month', min: 1, max: 12 },
-    { name: 'day-of-week', min: 0, max: 7 }
-];
+const MINUTE: FieldSpec = { name: 'minute', min: 0, max: 59 };
+const HOUR: FieldSpec = { name: 'hour', min: 0, max: 23 };
+const DAY_OF_MONTH: FieldSpec = { name: 'day-of-month', min: 1, max: 31 };
+const MONTH: FieldSpec = { name: 'month', min: 1, max: 12 };
+const DAY_OF_WEEK: FieldSpec = { name: 'day-of-week', min: 0, max: 7 };
 
 /**
  * Parse a 5-field cron expression. Throws on anything outside the subset —
@@ -75,18 +73,31 @@ const FIELD_SPECS: readonly FieldSpec[] = [
  */
 export function parseCron(expression: string): CronFields {
     const parts = expression.trim().split(/\s+/);
-    if (parts.length !== 5) {
+    const [minute, hour, dayOfMonth, month, dayOfWeek, extra] = parts;
+    if (
+        minute === undefined ||
+        hour === undefined ||
+        dayOfMonth === undefined ||
+        month === undefined ||
+        dayOfWeek === undefined ||
+        extra !== undefined
+    ) {
         throw new Error(`[schedule] cron needs 5 fields (minute hour day month weekday), got "${expression}"`);
     }
-    const sets = parts.map((part, i) => parseField(part, FIELD_SPECS[i]!, expression));
-    let dow = sets[4];
+    const fields = {
+        minute: parseField(minute, MINUTE, expression),
+        hour: parseField(hour, HOUR, expression),
+        dayOfMonth: parseField(dayOfMonth, DAY_OF_MONTH, expression),
+        month: parseField(month, MONTH, expression)
+    };
+    let dow = parseField(dayOfWeek, DAY_OF_WEEK, expression);
     if (dow) {
         // 7 is an alias of 0 (Sunday) in every cron dialect we accept.
         const norm = new Set<number>();
         for (const d of dow) norm.add(d === 7 ? 0 : d);
         dow = norm;
     }
-    return { minute: sets[0]!, hour: sets[1]!, dayOfMonth: sets[2]!, month: sets[3]!, dayOfWeek: dow! };
+    return { ...fields, dayOfWeek: dow };
 }
 
 function parseField(field: string, spec: FieldSpec, expression: string): ReadonlySet<number> | null {
@@ -277,10 +288,12 @@ export function nextOccurrence(recurrence: Recurrence, after: number): number | 
  * on an every-minute cron costs a bounded scan.
  */
 export function countOccurrences(recurrence: Recurrence, from: number, to: number, limit = 1000): number {
+    // Parse the cron once, not once per occurrence.
+    const fields = recurrence.kind === 'cron' ? parseCron(recurrence.cron) : null;
     let n = 0;
     let cursor = from;
     while (n < limit) {
-        const next = nextOccurrence(recurrence, cursor);
+        const next = fields && recurrence.kind === 'cron' ? nextCron(fields, recurrence.tz, cursor) : nextOccurrence(recurrence, cursor);
         if (next === null || next > to) break;
         n++;
         cursor = next;
