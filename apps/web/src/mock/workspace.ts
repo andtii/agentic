@@ -589,17 +589,17 @@ export interface Addressing {
  * Who a message activates: mentions ∩ members, else the coordinator, else
  * the single member, else nobody (the composer prints the nobody hint).
  */
-export function resolveAddressing(members: readonly MockChatMember[], mentionedIds: readonly string[]): Addressing {
+export function resolveAddressing(members: readonly MockChatMember[], mentionedIds: readonly string[], lookup: (id: string) => Pick<MockAgentIdentity, 'id' | 'name' | 'hue'> = agentNamed): Addressing {
     const memberIds = new Set(members.map((m) => m.agentId));
     const chip = (agentId: string, role?: string): Recipient => {
-        const a = agentNamed(agentId);
+        const a = lookup(agentId);
         return { id: a.id, name: a.name, hue: a.hue, role };
     };
     const mentioned = mentionedIds.filter((id) => memberIds.has(id));
-    if (mentioned.length) return { recipients: mentioned.map((id) => chip(id)), hint: `${mentioned.map((id) => agentNamed(id).name).join(', ')} will answer` };
+    if (mentioned.length) return { recipients: mentioned.map((id) => chip(id)), hint: `${mentioned.map((id) => lookup(id).name).join(', ')} will answer` };
     const coordinator = members.find((m) => m.coordinator);
-    if (coordinator) return { recipients: [chip(coordinator.agentId, 'coordinator')], hint: `${agentNamed(coordinator.agentId).name} answers unless you @ someone` };
-    if (members.length === 1) return { recipients: [chip(members[0]!.agentId)], hint: `${agentNamed(members[0]!.agentId).name} answers` };
+    if (coordinator) return { recipients: [chip(coordinator.agentId, 'coordinator')], hint: `${lookup(coordinator.agentId).name} answers unless you @ someone` };
+    if (members.length === 1) return { recipients: [chip(members[0]!.agentId)], hint: `${lookup(members[0]!.agentId).name} answers` };
     return { recipients: [], hint: '' };
 }
 

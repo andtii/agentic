@@ -84,6 +84,7 @@ import { learningPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
+import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
@@ -221,6 +222,23 @@ let shared: readonly AnyActorDefinition[] | undefined;
 /** One registry per isolate, so the Worker, the objects and the `machines` lookup agree on the definitions. */
 function defaultActors(): readonly AnyActorDefinition[] {
     return (shared ??= platformActors());
+}
+
+/** The definitions the pages read through during SSR (`useActorDefs`, #34): the registry's own objects, picked by type. */
+export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActors()): ActorDefs {
+    const byType = (type: string): AnyActorDefinition => {
+        const def = actors.find((d) => (d as { type: string }).type === type);
+        if (!def) throw new Error(`[actors.app] no \`${type}\` actor in the registry`);
+        return def;
+    };
+    return {
+        Workspace: byType('Workspace') as ActorDefs['Workspace'],
+        Chat: byType('Chat') as ActorDefs['Chat'],
+        AgentActor: byType('Agent') as ActorDefs['AgentActor'],
+        TaskActor: byType('task') as ActorDefs['TaskActor'],
+        Session: byType('session') as ActorDefs['Session'],
+        Routing: byType('routing') as ActorDefs['Routing']
+    };
 }
 
 /** The Machine definition in a registry — what the daemon socket and the token lookup dispatch on. */
