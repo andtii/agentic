@@ -109,6 +109,40 @@ describe('the composer', () => {
             expectAnatomy(dom, aiComposerAnatomy);
         });
 
+        it('wires the textarea to the popup as a combobox that tracks the highlighted option', async () => {
+            const dom = mount(<Composer onSend={() => {}} mentions={people} />);
+            await tick();
+            const ta = textarea(dom);
+            const list = one(dom, 'ai-composer', 'mentions')!;
+            expect(ta.getAttribute('role')).toBe('combobox');
+            expect(ta.getAttribute('aria-autocomplete')).toBe('list');
+            expect(ta.getAttribute('aria-controls')).toBe(list.id);
+            expect(ta.getAttribute('aria-expanded')).toBe('false');
+            expect(ta.hasAttribute('aria-activedescendant')).toBe(false);
+
+            type(dom, '@al');
+            await tick();
+            const options = all(dom, 'ai-composer', 'mention');
+            expect(options.every((o) => o.id !== '')).toBe(true);
+            expect(new Set(options.map((o) => o.id)).size).toBe(options.length);
+            expect(ta.getAttribute('aria-expanded')).toBe('true');
+            expect(ta.getAttribute('aria-activedescendant')).toBe(options[0]!.id);
+
+            const albert = options[1]!.id;
+            key(dom, 'ArrowDown');
+            await tick();
+            expect(ta.getAttribute('aria-activedescendant')).toBe(albert);
+            // The id follows the mention, not its position in the filtered list.
+            type(dom, '@alb');
+            await tick();
+            expect(all(dom, 'ai-composer', 'mention')[0]!.id).toBe(albert);
+
+            key(dom, 'Escape');
+            await tick();
+            expect(ta.getAttribute('aria-expanded')).toBe('false');
+            expect(ta.hasAttribute('aria-activedescendant')).toBe(false);
+        });
+
         it('arrows move the highlight and Enter picks — into the draft, not into a send', async () => {
             const sent: string[] = [];
             const dom = mount(<Composer onSend={(t) => sent.push(t)} mentions={people} />);

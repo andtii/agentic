@@ -12,8 +12,11 @@
  * Keys are read on the FORM: zero's `Textarea.Textarea` declares no key or
  * input handlers of its own (andtii/zero-wip#481), and the events
  * bubble to the root either way — one listener, filtered on the target.
+ * The same gap means the textarea takes no ARIA props, so its combobox
+ * attributes (`aria-controls` / `aria-expanded` / `aria-activedescendant`)
+ * are synced onto the element after every render.
  */
-import { component, type Define } from '@sigx/runtime-core';
+import { component, onMounted, onUpdated, type Define } from '@sigx/runtime-core';
 import { Button, Kbd, Textarea, dataAttr } from '@sigx/zero';
 import { aiComposerAnatomy } from './anatomy.js';
 import { filterMentions, insertMention, mentionAt, rowsFor, type Mention, type MentionQuery } from './mentions.js';
@@ -56,6 +59,24 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
     let form: HTMLFormElement | null = null;
 
     const textarea = (): HTMLTextAreaElement | null => form?.querySelector('textarea') ?? null;
+
+    /** A stable option id per mention, so the active descendant survives refiltering. */
+    const optionId = (m: Mention): string => `${listId}-${m.id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+
+    const syncAria = (): void => {
+        const el = textarea();
+        if (!el) return;
+        el.setAttribute('role', 'combobox');
+        el.setAttribute('aria-autocomplete', 'list');
+        el.setAttribute('aria-controls', listId);
+        const isOpen = open();
+        el.setAttribute('aria-expanded', String(isOpen));
+        const active = isOpen ? matches()[st.highlighted] : undefined;
+        if (active) el.setAttribute('aria-activedescendant', optionId(active));
+        else el.removeAttribute('aria-activedescendant');
+    };
+    onMounted(syncAria);
+    onUpdated(syncAria);
 
     const canSend = (): boolean => !props.disabled && (!props.busy || props.steers === true);
 
@@ -165,6 +186,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                         {list.map((m, i) => (
                             <li
                                 key={m.id}
+                                id={optionId(m)}
                                 role="option"
                                 aria-selected={i === st.highlighted}
                                 data-scope={SCOPE}
