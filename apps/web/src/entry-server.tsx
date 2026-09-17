@@ -1,3 +1,4 @@
+import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { installThemes } from '@agentic/ui/design-system';
 import { App } from './App';

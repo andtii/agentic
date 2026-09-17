@@ -57,6 +57,7 @@ describe('AppShell', () => {
         const badges = Array.from(host.querySelectorAll(`[data-part="sidebar"] ${part('badge')}`));
         expect(badges).toHaveLength(1);
         expect(badges[0]!.textContent).toBe('3');
+        expect(badges[0]!.getAttribute('aria-label')).toBe('3 items need you');
         expect(badges[0]!.closest('[data-part="nav-item"]')?.querySelector('a')?.getAttribute('href')).toBe('/');
     });
 

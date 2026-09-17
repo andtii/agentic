@@ -4,6 +4,8 @@ import '@agentic/ui/layout.css';
 import '@agentic/ui/shell.css';
 import './styles.css';
 import './styles/pages.css';
+// Empty at runtime: augments `@sigx/zero`'s vocabulary with the theme, properties and per-scope axes.
+import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
 import { installThemes } from '@agentic/ui/design-system';

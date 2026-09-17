@@ -101,7 +101,7 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
                     >
                         {renderLink(item)}
                         {item.badge ? (
-                            <span data-scope="ai-shell" data-part="badge" aria-label={`${item.badge} need you`}>{item.badge}</span>
+                            <span data-scope="ai-shell" data-part="badge" aria-label={item.badge === 1 ? '1 item needs you' : `${item.badge} items need you`}>{item.badge}</span>
                         ) : null}
                     </li>
                 ))}
