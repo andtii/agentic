@@ -32,8 +32,14 @@ export {
 export type { MemoryState, MemoryLogEntry, Retirement, CoercedEntry } from './state/index.js';
 export { MEMORY_STATE_VERSION, MEMORY_KINDS, createMemoryState, memoryId, isExpired, isLive, liveEntries, allEntries, completeEntry, applyMemoryLog, coerceEntry } from './state/index.js';
 
-export type { MemoryStoreOptions, OpenMemoryStore, MemoryPluginOptions } from './store/index.js';
+export type { MemoryStoreOptions, OpenMemoryStore, MemoryPluginOptions, MemoryFidelity } from './store/index.js';
 export { createMemoryStore, liveCount, memoryPlugin, MemoryNotFoundError, DEFAULT_MEMORY_PLUGIN_ID, DEFAULT_MEMORY_PLUGIN_VERSION } from './store/index.js';
+
+export type { FlatUnsupportedField, FlatMemoryEntry, FlatEntryReport, FlatMemoryStoreOptions, FlatMemoryStore, FlatMemoryPluginOptions } from './plugins/flat/index.js';
+export { FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, FLAT_UNSUPPORTED_FIELDS, toFlatEntry, createFlatMemoryStore, flatMemoryPlugin } from './plugins/flat/index.js';
+
+export type { MigrationKindReport, MigrationReport, MigrateOptions, MigrationTarget } from './migrate/index.js';
+export { migrate, MemoryMigrationError } from './migrate/index.js';
 
 export type { MemoryExportHeader } from './export/index.js';
 export { MEMORY_EXPORT_FORMAT, MEMORY_EXPORT_VERSION, MemoryExportError, memoryExportHeader, toNdjson, exportToString, ndjsonLines, parseExportHeader, fromNdjson } from './export/index.js';

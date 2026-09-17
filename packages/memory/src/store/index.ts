@@ -33,7 +33,17 @@ export class MemoryNotFoundError extends Error {
     }
 }
 
-export interface OpenMemoryStore extends MemoryStore {
+/**
+ * What `import` would drop from an entry, without writing (MEM-09): the
+ * fields the store's shape cannot hold, sorted, dotted for `provenance.*`;
+ * `null` when the row is not an entry and would be skipped. Every store of
+ * this package has it; `migrate` uses it for dry runs.
+ */
+export interface MemoryFidelity {
+    fidelity(entry: MemoryEntry): readonly string[] | null;
+}
+
+export interface OpenMemoryStore extends MemoryStore, MemoryFidelity {
     readonly state: MemoryState;
     /** The page form of `export()`: entries ordered by id after `after`. */
     exportPage(after: string | null, size?: number): { readonly entries: readonly MemoryEntry[]; readonly next: string | null };
@@ -94,6 +104,11 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): OpenMemoryS
 
         async get(id: string): Promise<MemoryEntry | undefined> {
             return state.entries[id];
+        },
+
+        fidelity(entry) {
+            const coerced = coerceEntry(entry);
+            return coerced ? [...coerced.dropped].sort() : null;
         },
 
         async query(q: MemoryQuery): Promise<readonly RankedMemory[]> {
