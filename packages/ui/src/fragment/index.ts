@@ -10,8 +10,12 @@
  */
 import { aiComposerAnatomy } from '../composer/anatomy.js';
 import { aiApprovalAnatomy, aiMessageAnatomy, aiReasoningAnatomy, aiThreadAnatomy, aiToolCallAnatomy } from '../thread/anatomy.js';
+import { kitAnatomies } from '../kit/anatomy.js';
+import { recipes as transcriptRecipes } from './recipes.js';
+import { recipes as kitRecipes } from '../kit/recipes.js';
 
-export { recipes } from './recipes.js';
+/** The recipe pack: the transcript's six scopes and the kit's `ag-*` scopes. */
+export const recipes = [...transcriptRecipes, ...kitRecipes];
 
 /**
  * The manifest fragment: `mergeManifests(zeroManifest, fragment)` (or
@@ -33,7 +37,8 @@ export const fragment = {
         aiToolCallAnatomy.toJSON(),
         aiReasoningAnatomy.toJSON(),
         aiApprovalAnatomy.toJSON(),
-        aiComposerAnatomy.toJSON()
+        aiComposerAnatomy.toJSON(),
+        ...kitAnatomies.map((a) => a.toJSON())
     ]
 };
 

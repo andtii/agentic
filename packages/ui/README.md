@@ -59,6 +59,27 @@ import { Row, Col, Spacer } from '@agentic/ui';
 - Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
 - Persistence is the caller's: the forms emit, they never write to an actor.
 
+## Component kit (`src/kit`)
+
+The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. Eight `ag-*` scopes ship in the fragment with recipes (`StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.
+
+```tsx
+import { AgentTile, Button, DataTable, EnvironmentLine, StatusPill, WaitReasonLine } from '@agentic/ui';
+
+<DataTable cols="100px 1fr 140px 270px 60px" columns={[{ label: 'Status' }, { label: 'Objective' }, { label: 'Assignee' }, { label: 'Environment' }, { label: 'Age', align: 'end' }]} label="Active tasks">
+    <DataTable.Row>
+        <DataTable.Cell><StatusPill status={task.status} />{task.wait && <WaitReasonLine wait={task.wait} detail="git push" />}</DataTable.Cell>
+        <DataTable.Cell><a href={`/tasks/${task.id}`}>{task.objective}</a></DataTable.Cell>
+        <DataTable.Cell><AgentTile name="Forge" hue={2} size={22} /> Forge</DataTable.Cell>
+        <DataTable.Cell><EnvironmentLine machine="alien01" runtime="claude-code" account="work" /></DataTable.Cell>
+        <DataTable.Cell>14m</DataTable.Cell>
+    </DataTable.Row>
+</DataTable>
+<Button intent="wait" icon="check">Allow once</Button>
+```
+
+`PILLS` is the table: if core gains a state, add its row there before it reaches a screen. `Button intent="icon"` needs a `label`; `EnvironmentLine` refuses a lone part in development (EXE-06); `DataTable` refuses a template that does not match its columns.
+
 ## Transcript (`src/thread`) and composer (`src/composer`)
 
 Driven by a reactive `AgentTranscript` — `useAgentSession(session).transcript` or anything the `@sigx/ai-agent` reducer folds in place. Each part is its own component, so a streaming delta re-renders one part.

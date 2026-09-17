@@ -21,6 +21,7 @@
  */
 import type { CustomTokenDecl, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
 import { tokens as daisy } from '@sigx/zero-daisyui';
+import { kitScopes } from '../kit/vocabulary.js';
 
 type Daisy = typeof daisy;
 /** daisyUI's eight roles — the vocabulary every daisy recipe keys `color` on. */
@@ -175,7 +176,7 @@ export const tokens: TokensInput<Roles, typeof system> = {
     variants: daisy.variants,
     modifiers: [...(daisy.modifiers ?? []), ...AG_MODIFIERS],
     axes: { tone: [...TONES], kind: [...KINDS] },
-    scopes: daisy.scopes,
+    scopes: { ...daisy.scopes, ...kitScopes },
     system,
     defaultLight: THEME,
     defaultDark: THEME,
