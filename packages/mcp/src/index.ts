@@ -2,3 +2,5 @@
 export const PACKAGE = '@agentic/mcp';
 
 export * from './client/index.js';
+
+export * from './server/index.js';

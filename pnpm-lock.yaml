@@ -159,6 +159,9 @@ importers:
       '@agentic/learning':
         specifier: workspace:*
         version: link:../../packages/learning
+      '@agentic/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@agentic/platform':
         specifier: workspace:*
         version: link:../../packages/platform
