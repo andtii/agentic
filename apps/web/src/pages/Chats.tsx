@@ -8,7 +8,8 @@ import { ChatList } from './chat/ChatList';
 import { openNewChat } from './chat/head';
 import { LiveChats } from './chat/LiveChats';
 
-defineTopbar('chats', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={openNewChat}>New chat</Button> }));
+// The button opens the live page's dialog; the mock page mounts none, so there it stays the artboard's inert control.
+defineTopbar('chats', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={dataMode() === 'live' ? openNewChat : undefined}>New chat</Button> }));
 
 /** `/chats` — the chat list at full width (the mobile issue reuses it); the workspace's chats on the platform (#34). */
 export const Chats = component(() => {

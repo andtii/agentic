@@ -164,6 +164,7 @@
 [data-new-chat-members] > label { display: flex; align-items: center; gap: var(--space-sm); }
 [data-new-chat-members] [data-member-role] { color: var(--ag-text-dim); }
 [data-chat-error] { margin: 0; padding: var(--space-sm) var(--space-2xl); font-size: var(--text-sm); color: var(--color-error); }
+[data-new-chat-members] > [data-chat-error] { padding: 0; }
 
 
 /* ---- tasks / task (#88): fluid + 460, gap 28 ---- */

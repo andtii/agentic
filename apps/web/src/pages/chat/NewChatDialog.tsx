@@ -18,7 +18,7 @@ export type NewChatDialogProps =
  * required).
  */
 export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => {
-    const st = signal({ picked: [] as string[], coordinator: '' });
+    const st = signal({ picked: [] as string[], coordinator: '', attempted: false });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';
@@ -31,7 +31,14 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
             confirmLabel="Create chat"
             danger={false}
             busy={props.busy}
-            onConfirm={() => emit('create', { agentIds: st.picked, coordinator: st.coordinator || null })}
+            onConfirm={() => {
+                // A chat needs at least one member (CHT-01): confirming with none picked keeps the dialog open.
+                if (!st.picked.length) {
+                    st.attempted = true;
+                    return;
+                }
+                emit('create', { agentIds: st.picked, coordinator: st.coordinator || null });
+            }}
             onCancel={() => emit('cancel')}
         >
             <fieldset data-new-chat-members>
