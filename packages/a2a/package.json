@@ -19,11 +19,16 @@
     "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@agentic/core": "workspace:*"
+    "@agentic/core": "workspace:*",
+    "@sigx/ai": "catalog:",
+    "@sigx/ai-agent": "catalog:",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",
     "typescript": "^7.0.2",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "@sigx/reactivity": "catalog:",
+    "@sigx/runtime-core": "catalog:"
   }
 }
