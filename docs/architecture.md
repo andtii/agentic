@@ -63,6 +63,19 @@ Keys are workspace-prefixed so every `authorize` chain starts with `sameWorkspac
 | Registry | `{ws}:registry` | save | plugins {manifest, enabled, config, grantedPermissions}, connectors {mcp url \| command, tools, status}, encrypted secrets | enable/disable/remove, dependents(id), setSecret, connectors CRUD | PLG-01..09, EXE-10 |
 | Audit | `{ws}:audit` | append | approvals, delegations, environment choices, transitions, config changes | record, list(filter) | OPS-03, COL-09 |
 
+### Schedule
+
+`packages/platform/src/schedule` (issue #28). One actor per entry, keyed `{ws}:schedule:{id}`, `defineScheduleActor({trigger: TriggerPort})`. Recurrence is `{kind: 'at', at}` (one-shot, epoch ms) or `{kind: 'cron', cron, tz}` — a 5-field cron subset (`*`, `n`, `a-b`, `a,b`, `*/n`, `a-b/n`; no names, no `L`/`W`/`#`) evaluated on the wall clock of an IANA zone. `next` is computed in `recur.ts` from `Intl.DateTimeFormat` parts only (no dependency, edge-safe); an unknown zone or bad expression is rejected at `create`/`update`, never stored.
+
+Each occurrence is armed as a ONE-SHOT reminder (`ctx.reminders.set('fire', {due: next - now})`), re-armed from `onReminder` — the runtime's 60 s period floor is never requested, and on Cloudflare the entry's own alarm fires it with no machine or browser online (AST-03/04). `onReminder` posts a `ScheduleFired {workspaceId, scheduleId, key, kind, title, scheduledFor, firedAt, occurrence, skipped, agentId?, environmentId?, prompt?, offlinePolicy}` to the `TriggerPort` (Task creation with `TaskOrigin {kind: 'schedule'}` or an Inbox notification — integration issues), then re-arms. A rejecting port is retried one floor (60 s) later up to 3 attempts, then the occurrence is logged `dropped` and the calendar moves on. Every mutation ends in `ctx.save()` inside the turn.
+
+**DST rules (AST-07)**, fixtures in `__tests__/schedule/recur.test.ts` for Europe/Stockholm 2026:
+
+- *Spring gap* — a wall time that does not exist (02:30 on 29 Mar, when 02:00 CET → 03:00 CEST) is skipped; `30 2 * * *` fires 28 Mar 01:30Z, then 30 Mar 00:30Z.
+- *Fall overlap* — a wall time that exists twice (02:30 on 25 Oct, when 03:00 CEST → 02:00 CET) fires on its FIRST occurrence only (the CEST instant, 00:30Z); the repeated hour never fires a second time, whatever the minute pattern, so `*/30 * * * *` goes 00:30Z → 02:00Z that morning.
+- *Catch-up policy `skip`* — a reminder that runs late (host down, alarm delayed) fires once for the occurrence it was armed for with `skipped = ` the number of later occurrences that fell before "now", writes a `skipped` log entry, and re-arms strictly after "now". Never a burst.
+- Reminders are "at or after due" with the host's tick as resolution (60 s on the sharded table; exact on DO alarms); an entry due sooner than a tick fires on the next tick, never early.
+
 `TaskStatus = queued | active | waiting | completed | failed | cancelled`. `WaitReason = approval {requestId, sessionId} | input {requestId} | environment-offline {environmentId, policy} | child {childTaskIds} | capacity {environmentId} | budget {limit}`.
 
 ## 5. Session execution paths

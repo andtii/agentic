@@ -73,3 +73,19 @@ expect(await statusOf(app.as(userPrincipal('u2')).actor(Workspace, workspaceKey(
 Authorization: `memoryAuthorize` on the definition (same workspace; a user or a `memory`-scoped external client owns every scope; an agent reaches `agent:{id}` only as that agent; a machine nothing) and `aclAllows` inside every method for `shared:*` (`{ read, write }` lists or `"*"`; no ACL means no agent access — AC-10, MEM-11). The app must configure a principal `codec` on `createServerApp`, or `ctx.principal` is `null` and every in-turn check fails closed.
 
 `memoryActorPlugin({ workspace })` is the platform's default `MemoryPlugin`: `open(scope)` returns `actorMemoryStore(actor(Memory, key))`, streaming `export()` by id-ordered pages and batching `import()`.
+
+## Schedule (`src/schedule`)
+
+```ts
+import { defineScheduleActor, type TriggerPort } from '@agentic/platform';
+
+const trigger: TriggerPort = { fired: (event) => inbox.push(event) }; // or create a Task
+export const Schedule = defineScheduleActor({ trigger });
+
+const s = host.actor(Schedule, 'ws_alice:schedule:sch_1');
+await s.create({ kind: 'reminder', title: 'standup', recurrence: { kind: 'cron', cron: '0 9 * * 1-5', tz: 'Europe/Stockholm' } });
+await s.get(); // { next, lastRun, runs, log, ... }
+await s.disable(); await s.enable(); await s.update({ recurrence: { kind: 'at', at: Date.now() + 3_600_000 } });
+```
+
+Each occurrence is a one-shot `ctx.reminders` entry re-armed from `onReminder`, so it fires from a Durable Object alarm with nothing else online. Cron subset: `*`, `n`, `a-b`, `a,b`, `*/n`, `a-b/n` over minute hour day month weekday (7 = Sunday). DST: a wall time inside the spring gap is skipped; one inside the fall overlap fires its first occurrence only. Catch-up policy is `skip` (fire once, log what was missed). `recur.ts` is pure and exported on its own (`parseCron`, `nextCron`, `resolveWallTime`, `nextOccurrence`).
