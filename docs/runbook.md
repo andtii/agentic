@@ -35,7 +35,7 @@ Without `SESSION_SECRET` the worker serves pages but refuses every actor call as
 | `APP_ORIGIN` | var | public origin; the OAuth callback is `${APP_ORIGIN}/auth/callback` |
 | `SESSION_SECRET` | secret | ≥ 32 chars; signs `__Host-session`, OAuth transients and agent tokens |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | secret | the GitHub OAuth app |
-| `WORKSPACE_KEK` | secret | base64, 32 bytes; AES-GCM key for stored API keys |
+| `WORKSPACE_KEK` | secret | base64, 32 bytes; AES-GCM key for stored API keys (Registry secrets; absent → `setSecret` refuses `no-kek`) |
 
 Generate a value with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Rotating `SESSION_SECRET` signs everyone out and invalidates agent tokens; rotating `WORKSPACE_KEK` makes stored API keys unreadable, so they must be re-entered.
 
