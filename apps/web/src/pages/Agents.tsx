@@ -3,6 +3,9 @@ import { Link } from '@sigx/router';
 import { AgentTile, Button, EnvironmentLine, Icon, Label, Row, Stack, StatusPill } from '@agentic/ui';
 import { agentProfiles, type AgentProfile } from '../mock/agents';
 import { defineTopbar } from '../components/topbar';
+import { dataMode } from '../data-mode';
+import { openNewAgent } from './agent/head';
+import { LiveAgents } from './agent/LiveAgents';
 
 /** The roster's status pill: the agent's presence in the handoff's vocabulary. */
 export function presencePill(presence: AgentProfile['presence']): { status: string; label?: string; hollow?: boolean } {
@@ -15,11 +18,14 @@ export function presencePill(presence: AgentProfile['presence']): { status: stri
  * in mono (config version, memory count, corrections per week — LRN-09).
  * A `claude-code` agent without an environment shows `No environment`.
  */
-defineTopbar('agents', () => ({ actions: () => <Button intent="primary" icon="plus">New agent</Button> }));
+// The button opens the live roster's dialog (#35); the mock page mounts none, so there it stays the artboard's inert control.
+defineTopbar('agents', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={dataMode() === 'live' ? openNewAgent : undefined}>New agent</Button> }));
 
+/** `/agents`: the workspace's agents on the platform (`LiveAgents`, #35), or the mock roster. */
 export const Agents = component(() => {
     useHead({ title: 'Agents' });
     return () => {
+        if (dataMode() === 'live') return <LiveAgents />;
         const rows = agentProfiles();
         return (
                 <div data-page="agents">

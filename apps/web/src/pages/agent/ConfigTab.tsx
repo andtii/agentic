@@ -1,12 +1,23 @@
 import { component, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
-import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AgentFormRailProps } from '@agentic/ui';
+import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AgentFormRailProps, type FieldOption } from '@agentic/ui';
 import type { AgentConfig, AgentConfigVersion } from '@agentic/core';
 import { agents } from '../../mock/data';
 import type { AgentProfile } from '../../mock/agents';
 import { dateTime } from './format';
 
-export type ConfigTabProps = Define.Prop<'profile', AgentProfile, true>;
+/** Where a save and a rollback go on the platform (#35): each resolves to the version the Agent actor recorded. */
+export interface ConfigStore {
+    save(config: AgentConfig, reason: string): Promise<AgentConfigVersion>;
+    rollback(version: number): Promise<AgentConfigVersion>;
+}
+
+export type ConfigTabProps =
+    & Define.Prop<'profile', AgentProfile, true>
+    /** Live mode: persist through the actor; absent, a submit appends a version locally (the mock page). */
+    & Define.Prop<'store', ConfigStore>
+    /** The collaborator options; default: the mock workspace's other agents. */
+    & Define.Prop<'collaborators', readonly FieldOption[]>;
 
 const SKILLS = [{ value: 'sigx-actors' }, { value: 'zero-anatomy' }, { value: 'git-worktree' }, { value: 'web-research' }];
 const TOOLS = [{ value: 'Read' }, { value: 'Edit' }, { value: 'Bash' }, { value: 'WebFetch' }, { value: 'memory.*' }, { value: 'memory.search' }, { value: 'task.report' }, { value: 'ask_user' }];
@@ -28,8 +39,10 @@ export function applyLine(activeOnOlder: number, current: number): string {
  * Config: `AgentForm` in the sections layout, fluid form + 360 rail
  * (`docs/design/HANDOFF.md` → Agent config). The rail carries the save card
  * — only while the form is dirty — and the versions list: proposed
- * (NEEDS REVIEW), current, past (roll back). Persistence is #35: a submit
- * appends a version locally so the page behaves end to end on mock data.
+ * (NEEDS REVIEW), current, past (roll back). With a `store` (#35, the live
+ * page) a submit and a rollback go through the Agent actor and the rail
+ * shows the version it recorded; without one a submit appends a version
+ * locally so the mock page behaves end to end.
  */
 export const ConfigTab = component<ConfigTabProps>(({ props }) => {
     const p = props.profile;
@@ -39,13 +52,30 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
         proposed: p.proposed as AgentConfigVersion | undefined,
         activeOnOlder: p.activeOnOlder
     });
+    const ui = signal({ busy: false, error: '' });
     const current = () => state.versions[0]?.version ?? 1;
+    const prepend = (v: AgentConfigVersion) => { state.versions = [v, ...state.versions]; };
+    const persist = async (run: () => Promise<AgentConfigVersion>): Promise<void> => {
+        ui.busy = true;
+        ui.error = '';
+        try {
+            prepend(await run());
+        } catch (e) {
+            ui.error = e instanceof Error ? e.message : String(e);
+        } finally {
+            ui.busy = false;
+        }
+    };
 
-    const onSubmit = ({ reason }: { config: AgentConfig; reason: string }) => {
-        state.versions = [{ version: current() + 1, at: Date.now(), by: 'Andy', reason: reason || 'Edited in the web UI' }, ...state.versions];
+    const onSubmit = ({ config, reason }: { config: AgentConfig; reason: string }) => {
+        const store = props.store;
+        if (store) void persist(() => store.save(config, reason || 'Edited in the web UI'));
+        else prepend({ version: current() + 1, at: Date.now(), by: 'Andy', reason: reason || 'Edited in the web UI' });
     };
     const rollback = (version: number) => {
-        state.versions = [{ version: current() + 1, at: Date.now(), by: 'Andy', reason: `Rolled back to v${version}.` }, ...state.versions];
+        const store = props.store;
+        if (store) void persist(() => store.rollback(version));
+        else prepend({ version: current() + 1, at: Date.now(), by: 'Andy', reason: `Rolled back to v${version}.` });
     };
 
     const rail = (form: AgentFormRailProps) => {
@@ -61,9 +91,10 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                                 <span data-save-title=""><span data-save-dot="" aria-hidden="true" />Unsaved changes</span>
                                 <TextField model={() => form.draft.reason} name={F.reason} label="Reason for this version" />
                                 <div data-save-actions="">
-                                    <Button intent="primary" type="submit">Save as v{current() + 1}</Button>
+                                    <Button intent="primary" type="submit" disabled={ui.busy}>Save as v{current() + 1}</Button>
                                     <Button onClick={() => form.reset()}>Reset</Button>
                                 </div>
+                                {ui.error ? <p data-save-error="" role="alert">{ui.error}</p> : null}
                             </Stack>
                         </Card.Body>
                     </Card>
@@ -105,7 +136,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 connectors={CONNECTORS}
                 environments={ENVIRONMENTS}
                 memoryScopes={SCOPES}
-                agents={agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
+                agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
                 onSubmit={onSubmit}
                 slots={{ rail }}
             />

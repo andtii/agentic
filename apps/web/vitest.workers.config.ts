@@ -1,7 +1,7 @@
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 import root from '../../vitest.config.ts';
-import { TEST_SESSION_SECRET, TEST_WORKSPACE_KEK } from './__tests__/workers/secret.ts';
+import { TEST_DEV_LOGIN, TEST_SESSION_SECRET, TEST_WORKSPACE_KEK } from './__tests__/workers/secret.ts';
 
 // `pnpm --filter @agentic/web test:workers` — runs inside workerd (Miniflare)
 // with the real `ActorHost` Durable Object on SQLite storage.
@@ -10,7 +10,7 @@ export default defineConfig({
         cloudflareTest({
             main: './__tests__/workers/worker.ts',
             wrangler: { configPath: './wrangler.jsonc' },
-            miniflare: { bindings: { SESSION_SECRET: TEST_SESSION_SECRET, WORKSPACE_KEK: TEST_WORKSPACE_KEK } }
+            miniflare: { bindings: { SESSION_SECRET: TEST_SESSION_SECRET, WORKSPACE_KEK: TEST_WORKSPACE_KEK, AGENTIC_DEV_LOGIN: TEST_DEV_LOGIN } }
         })
     ],
     define: { __DEV__: 'true' },

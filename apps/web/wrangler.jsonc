@@ -1,7 +1,9 @@
 {
     "$schema": "node_modules/wrangler/config-schema.json",
     "name": "agentic-web",
-    "main": "dist/server/entry.cloudflare.js",
+    // `worker.mjs` re-exports `default` and `ActorHost` from the built entry, dist/server/entry.cloudflare.js
+    // (the entry chunk itself carries helper re-exports workerd refuses as non-handler exports).
+    "main": "worker.mjs",
     "compatibility_date": "2026-08-01",
     // node:async_hooks carries the request into server functions called during SSR;
     // @sigx/actors-cloudflare requires it too.

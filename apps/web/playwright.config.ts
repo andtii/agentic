@@ -19,6 +19,8 @@ const baseURL = `http://localhost:${port}`;
 
 export default defineConfig({
     testDir: './e2e',
+    // `demo1.spec.ts` runs against a deployed Worker through `playwright.demo1.config.ts` (`smoke:demo1`, #35), never here.
+    testIgnore: /demo1\.spec\.ts$/,
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 1 : 0,

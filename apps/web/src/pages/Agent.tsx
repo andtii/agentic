@@ -6,7 +6,10 @@ import { Page } from '../components/Page';
 import { agentById } from '../mock/data';
 import { agentProfile } from '../mock/agents';
 import { defineTopbar, routeId } from '../components/topbar';
+import { dataMode } from '../data-mode';
 import { presencePill } from './Agents';
+import { agentHead } from './agent/head';
+import { LiveAgent } from './agent/LiveAgent';
 import { OverviewTab } from './agent/OverviewTab';
 import { ConfigTab } from './agent/ConfigTab';
 import { MemoryTab } from './agent/MemoryTab';
@@ -23,6 +26,11 @@ export type AgentTab = (typeof AGENT_TABS)[number];
  */
 defineTopbar('agent', (route) => {
     const id = routeId(route);
+    // Live: what the page published for THIS agent (`agent/head.ts`); mock: the workspace's view.
+    if (dataMode() === 'live') {
+        const head = agentHead.value?.id === id ? agentHead.value : undefined;
+        return { crumb: head?.name, subtitle: head?.role ? () => <span>{head.role}</span> : undefined };
+    }
     const profile = agentProfile(id);
     return {
         crumb: agentById(id)?.name,
@@ -32,7 +40,7 @@ defineTopbar('agent', (route) => {
 
 export const Agent = component(() => {
     const route = useRoute();
-    useHead({ title: agentById(String(route.params.id))?.name ?? 'Agent not found' });
+    useHead({ title: dataMode() === 'live' ? 'Agent' : (agentById(String(route.params.id))?.name ?? 'Agent not found') });
     const initial = (): AgentTab => {
         const q = String(route.query.tab ?? '');
         return (AGENT_TABS as readonly string[]).includes(q) ? (q as AgentTab) : 'overview';
@@ -41,6 +49,7 @@ export const Agent = component(() => {
 
     return () => {
         const id = String(route.params.id);
+        if (dataMode() === 'live') return <LiveAgent id={id} />;
         const agent = agentById(id);
         const profile = agentProfile(id);
         if (!agent || !profile) {
