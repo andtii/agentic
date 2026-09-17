@@ -19,11 +19,22 @@
     "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@agentic/core": "workspace:*"
+    "@agentic/core": "workspace:*",
+    "@sigx/zero": "catalog:",
+    "@sigx/markdown": "catalog:",
+    "@sigx/ai-agent": "catalog:",
+    "@sigx/ai": "catalog:"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",
     "typescript": "^7.0.2",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "sigx": "catalog:",
+    "@sigx/reactivity": "catalog:",
+    "@sigx/runtime-core": "catalog:",
+    "@sigx/runtime-dom": "catalog:",
+    "@sigx/zero-daisyui": "catalog:",
+    "@sigx/zero-kit": "catalog:",
+    "shiki": "^4.4.3"
   }
 }
