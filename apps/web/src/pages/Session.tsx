@@ -1,11 +1,14 @@
-import { component } from 'sigx';
+import { component, type Define, type JSXElement } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, FailureCard, Icon, StatusPill, ToolCall } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, FailureCard, Icon, StatusPill, ToolCall, type RespondFn } from '@agentic/ui';
 import { KeyValue } from '../components/KeyValue';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar, routeId } from '../components/topbar';
 import { agentNamed, CAPABILITY_LABELS, formatTime, loadSession, taskRow, type MockSessionView } from '../mock/workspace';
+import { dataMode } from '../data-mode';
+import { LiveSession, sessionHead } from './session/LiveSession';
+import type { AgentIdentity } from './chat/live';
 
 const sessionPill = (s: MockSessionView): string => {
     switch (s.state) {
@@ -19,13 +22,15 @@ const sessionPill = (s: MockSessionView): string => {
 };
 
 defineTopbar('session', (route) => {
-    const v = loadSession(routeId(route));
+    const id = routeId(route);
+    // Live: what the page published for THIS session (`session/LiveSession.tsx`); mock: the workspace's view.
+    const v = dataMode() === 'live' ? (sessionHead.value?.id === id ? sessionHead.value.view : undefined) : loadSession(id);
     return {
         crumb: v?.ref,
         actions: () => (v ? (
             <>
-                {v.capabilities.cancel && (v.state === 'running' || v.state === 'awaiting') ? <Button intent="default" icon="stop">Cancel turn</Button> : null}
-                <Button intent="danger" icon="close">Close session</Button>
+                {v.capabilities.cancel && (v.state === 'running' || v.state === 'awaiting') ? <Button intent="default" icon="stop" onClick={() => sessionHead.value?.cancel()}>Cancel turn</Button> : null}
+                {v.state !== 'closed' ? <Button intent="danger" icon="close" onClick={() => sessionHead.value?.close()}>Close session</Button> : null}
             </>
         ) : null)
     };
@@ -41,6 +46,7 @@ export const Session = component(() => {
     const route = useRoute();
     const view = () => loadSession(String(route.params.id));
     return () => {
+        if (dataMode() === 'live') return <LiveSession id={String(route.params.id)} />;
         const v = view();
         if (!v) {
             return (
@@ -49,7 +55,19 @@ export const Session = component(() => {
                 </Page>
             );
         }
-        const agent = agentNamed(v.agentId);
+        return <SessionView v={v} agent={agentNamed(v.agentId)} />;
+    };
+});
+
+export type SessionViewProps =
+    & Define.Prop<'v', MockSessionView, true>
+    & Define.Prop<'agent', AgentIdentity, true>
+    & Define.Prop<'onRespond', RespondFn>;
+
+/** The page body over a resolved view — the mock workspace's, or the live session's (#34). */
+export const SessionView = component<SessionViewProps>(({ props }) => {
+    return (): JSXElement => {
+        const { v, agent } = props;
         const supported = new Set(v.capabilities.supported);
         const ops = [...v.capabilities.supported, ...v.capabilities.unsupported.map((u) => u.op)];
         const reason = (op: string) => v.capabilities.unsupported.find((u) => u.op === op)?.reason;
@@ -59,7 +77,7 @@ export const Session = component(() => {
                     <AgentTile name={agent.name} hue={agent.hue} size={44} />
                     <div data-session-title>
                         <span data-session-id>Session {v.ref}</span>
-                        <span data-session-sub>Opened {formatTime(v.openedAt)} from {v.openedFrom}</span>
+                        <span data-session-sub>{v.openedAt ? `Opened ${formatTime(v.openedAt)} from ${v.openedFrom}` : `Opened from ${v.openedFrom}`}</span>
                     </div>
                     <StatusPill status={sessionPill(v)} />
                     <EnvironmentLine tone="muted" {...v.environment} />
@@ -68,7 +86,7 @@ export const Session = component(() => {
                 <section data-session-main aria-label="Session activity">
                     {v.interrupted ? <FailureCard kind="interrupted" detail="The platform restarted mid-turn. Nothing was replayed. Resume sends a new prompt over the intact transcript." action={{ label: 'Resume' }} /> : null}
                     {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} meta="3.4s" /> : null}
-                    {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={() => undefined} /> : null}
+                    {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={(id, d) => props.onRespond?.(id, d)} /> : null}
                     <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>
                         <ol data-event-log aria-label="Event log">
                             {v.events.map((e) => (

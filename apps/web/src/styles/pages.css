@@ -155,6 +155,15 @@
 [data-history-access] { border: 0; margin: 0 0 var(--space-lg); padding: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
 [data-history-access] > legend { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ag-text-muted); margin-block-end: var(--space-xs); }
 [data-history-access] > label { display: flex; align-items: center; gap: var(--space-sm); }
+/* The live dialogs (#34): the agent picker and the new-chat member list share the history-access grammar. */
+[data-agent-pick], [data-new-chat-coordinator] { display: flex; flex-direction: column; gap: var(--space-xs); margin: 0 0 var(--space-lg); }
+[data-agent-pick] > span, [data-new-chat-coordinator] > span { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ag-text-muted); }
+[data-agent-pick] > select, [data-new-chat-coordinator] > select { min-block-size: var(--ag-input-h); padding: 0 var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-field); background: var(--color-base-100); color: inherit; font: inherit; }
+[data-new-chat-members] { border: 0; margin: 0 0 var(--space-lg); padding: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-new-chat-members] > legend { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ag-text-muted); margin-block-end: var(--space-xs); }
+[data-new-chat-members] > label { display: flex; align-items: center; gap: var(--space-sm); }
+[data-new-chat-members] [data-member-role] { color: var(--ag-text-dim); }
+[data-chat-error] { margin: 0; padding: var(--space-sm) var(--space-2xl); font-size: var(--text-sm); color: var(--color-error); }
 
 
 /* ---- tasks / task (#88): fluid + 460, gap 28 ---- */

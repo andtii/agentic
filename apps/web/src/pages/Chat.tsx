@@ -8,9 +8,13 @@ import { agentNamed, loadChat, loadChats, mentionedIn, resolveAddressing, type M
 import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
+import { dataMode } from '../data-mode';
+import { chatHead } from './chat/head';
+import { lookupOver } from './chat/live';
+import { LiveChat } from './chat/LiveChat';
 
 /** "1 waiting · 1 active" — the app bar's status summary under the chat title. */
-export function memberSummary(chat: MockChatSummary): string {
+export function memberSummary(chat: Pick<MockChatSummary, 'members'>): string {
     const count = (status: string) => chat.members.filter((m) => m.status === status).length;
     const parts = [count('waiting') ? `${count('waiting')} waiting` : '', count('active') ? `${count('active')} active` : ''].filter(Boolean);
     return parts.length ? parts.join(' · ') : `${chat.members.length} ${chat.members.length === 1 ? 'member' : 'members'}`;
@@ -19,13 +23,17 @@ export function memberSummary(chat: MockChatSummary): string {
 const tasksButton = () => <Button intent="icon" icon="tree" label="Tasks in this chat" class="ag-chat-tasks" onClick={openContextDrawer} />;
 
 defineTopbar('chat', (route) => {
-    const chat = loadChat(routeId(route))?.chat;
+    const id = routeId(route);
+    // Live: what the page published for THIS chat (`chat/head.ts`); mock: the workspace's view.
+    const head = dataMode() === 'live' ? (chatHead.value?.id === id ? chatHead.value : undefined) : loadChat(id)?.chat;
+    const chat = head ? { title: head.title, members: head.members } : undefined;
+    const lookup = head && 'identities' in head ? lookupOver(head.identities) : undefined;
     return {
         crumb: chat?.title,
         // The member tiles at 16 px plus the status summary — the app bar's sub-line.
         subtitle: chat ? () => (
             <>
-                <MemberTiles agentIds={chat.members.map((m) => m.agentId)} size={18} />
+                <MemberTiles agentIds={chat.members.map((m) => m.agentId)} size={18} lookup={lookup} />
                 <span data-chat-summary>{memberSummary(chat)}</span>
             </>
         ) : undefined,
@@ -42,9 +50,10 @@ defineTopbar('chat', (route) => {
 });
 
 /**
- * `/chats/:id` — chat list, thread and composer, members and tasks. The
- * transcript is the chat's mock view (`loadChat`); #34 swaps it for the
- * Chat actor plus `Session.tail` per active session. The composer's "To"
+ * `/chats/:id` — chat list, thread and composer, members and tasks. In
+ * `live` mode (`data-mode.ts`) the page is `LiveChat`: the Chat actor read
+ * live plus one `connectSession` feed per active session (#34); otherwise
+ * the transcript is the chat's mock view (`loadChat`). The composer's "To"
  * row follows the handoff rule: mentions ∩ members, else the coordinator,
  * else the single member, else nobody.
  */
@@ -54,6 +63,7 @@ export const Chat = component(() => {
     const st = signal({ draft: '' });
     const view = () => loadChat(String(route.params.id));
     return () => {
+        if (dataMode() === 'live') return <LiveChat id={String(route.params.id)} />;
         const v = view();
         if (!v) {
             return (

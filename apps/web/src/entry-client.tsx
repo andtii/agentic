@@ -8,6 +8,10 @@ import './styles/pages.css';
 import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
+import { actorsPlugin } from '@sigx/actors/app';
+import { ACTOR_ENDPOINT, clientDefs } from './actors/client';
+import { useActorDefs, useViewer } from './actors/defs';
+import { viewerHook } from './actors/viewer';
 import { installThemes } from '@agentic/ui/design-system';
 import { App } from './App';
 import { createAppRouter } from './router';
@@ -22,4 +26,9 @@ installThemes();
 // ssrClientPlugin (declared optional on App, hence the `!`).
 const app = defineApp(<App />);
 app.use(createAppRouter());
+// The platform actors over the Worker's HTTP mount (#34): calls as POSTs, live reads on one held-open stream.
+// Actor refs are hand-built stubs (`actors/client.ts`): the platform's definitions are not `*.actor.ts` modules.
+app.use(actorsPlugin({ transport: { endpoint: ACTOR_ENDPOINT } }));
+app.defineProvide(useActorDefs, clientDefs);
+app.defineProvide(useViewer, () => viewerHook);
 app.use(ssrClientPlugin).hydrate!('#app');

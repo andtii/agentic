@@ -2,10 +2,21 @@ import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
 import { agentNamed, formatTime, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
+import type { AgentIdentity, AgentLookup } from './live';
+
+export type HistoryAccessChoice = 'all' | 'from';
 
 export type ContextPanelProps =
     & Define.Prop<'chat', MockChatSummary, true>
-    & Define.Prop<'tasks', readonly MockTaskRow[], true>;
+    & Define.Prop<'tasks', readonly MockTaskRow[], true>
+    /** Who an agent id is; the mock workspace's `agentNamed` by default. */
+    & Define.Prop<'lookup', AgentLookup>
+    /** Agents of the workspace that are not members yet — the add-agent dialog's picker (#34). */
+    & Define.Prop<'candidates', readonly AgentIdentity[]>
+    /** The add-agent dialog confirmed: `{ agentId, access }`. */
+    & Define.Event<'addAgent', { readonly agentId: string; readonly access: HistoryAccessChoice }>
+    /** "Stop task chain" confirmed. */
+    & Define.Event<'stopChain'>;
 
 const historyLine = (member: MockChatSummary['members'][number]): string => {
     const base = member.history.access === 'all' ? 'sees all history' : `Added ${formatTime(member.history.at)} · sees history from then`;
@@ -17,10 +28,13 @@ const historyLine = (member: MockChatSummary['members'][number]): string => {
  * access, the tasks in this chat, "Stop task chain", and the memory privacy
  * note (MEM-11). The add-agent dialog asks for history access (CHT-04).
  */
-export const ContextPanel = component<ContextPanelProps>(({ props }) => {
-    const st = signal({ addAgent: false, stopChain: false, access: 'all' as 'all' | 'from' });
+export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
+    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '' });
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
+        const lookup = props.lookup ?? agentNamed;
+        const candidates = props.candidates ?? [];
+        const picked = candidates.find((c) => c.id === st.pick) ?? candidates[0];
         return (
             <aside data-chat-context aria-label="Members and tasks">
                 <section data-context-section aria-label="Members">
@@ -30,7 +44,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props }) => {
                     </header>
                     <ul data-members>
                         {props.chat.members.map((member) => {
-                            const a = agentNamed(member.agentId);
+                            const a = lookup(member.agentId);
                             return (
                                 <li data-member>
                                     <AgentTile name={a.name} hue={a.hue} size={28} />
@@ -53,7 +67,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props }) => {
                     {props.tasks.length ? (
                         <ul data-mini-tree>
                             {props.tasks.map((t) => {
-                                const a = agentNamed(t.agentId);
+                                const a = lookup(t.agentId);
                                 return (
                                     <li data-mini-node data-depth={t.depth} style={`--ag-depth: ${t.depth}`}>
                                         <span data-mini-dot data-tone={t.status === 'active' ? 'working' : t.status === 'waiting' ? 'needs-you' : 'muted'} aria-hidden="true" />
@@ -78,8 +92,19 @@ export const ContextPanel = component<ContextPanelProps>(({ props }) => {
                     description="What may the agent read? Earlier messages are visible only if you allow all history (CHT-04)."
                     confirmLabel="Add agent"
                     danger={false}
-                    onConfirm={() => { st.addAgent = false; }}
+                    onConfirm={() => {
+                        st.addAgent = false;
+                        if (picked) emit('addAgent', { agentId: picked.id, access: st.access });
+                    }}
                 >
+                    {candidates.length ? (
+                        <label data-agent-pick>
+                            <span>Agent</span>
+                            <select data-scope="select" data-part="select" value={picked?.id ?? ''} onChange={(e: Event) => { st.pick = (e.target as HTMLSelectElement).value; }}>
+                                {candidates.map((c) => <option value={c.id}>{c.name}{c.role ? ` · ${c.role}` : ''}</option>)}
+                            </select>
+                        </label>
+                    ) : null}
                     <fieldset data-history-access>
                         <legend>History access</legend>
                         <label><input type="radio" name="history-access" value="all" checked={st.access === 'all'} onChange={() => { st.access = 'all'; }} /> All history</label>
@@ -93,7 +118,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props }) => {
                     dependents={props.tasks.map((t) => t.objective)}
                     dependentsLabel={`Stops ${props.tasks.length} ${props.tasks.length === 1 ? 'task' : 'tasks'}`}
                     confirmLabel={`Stop ${props.tasks.length} ${props.tasks.length === 1 ? 'task' : 'tasks'}`}
-                    onConfirm={() => { st.stopChain = false; }}
+                    onConfirm={() => { st.stopChain = false; emit('stopChain'); }}
                 />
             </aside>
         );
