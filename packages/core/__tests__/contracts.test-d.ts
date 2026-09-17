@@ -1,0 +1,32 @@
+import { expectTypeOf } from 'vitest';
+import type { AgentId, ChatEntry, ChatId, DaemonFrame, PlatformFrame, Principal, Proposal, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+
+// Every union is closed: exhaustiveness holds and the discriminants are literal.
+type Discriminant<T, K extends keyof T> = T[K];
+
+describe('contract type tests', () => {
+    it('task status and wait reasons are closed unions', () => {
+        expectTypeOf<TaskStatus>().toEqualTypeOf<'queued' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled'>();
+        expectTypeOf<Discriminant<WaitReason, 'kind'>>().toEqualTypeOf<'approval' | 'input' | 'environment-offline' | 'child' | 'capacity' | 'budget'>();
+        expectTypeOf<Discriminant<TaskOrigin, 'kind'>>().toEqualTypeOf<'user' | 'agent' | 'schedule' | 'trigger' | 'external'>();
+    });
+    it('chat entries and principals are discriminated', () => {
+        expectTypeOf<Discriminant<ChatEntry, 't'>>().toEqualTypeOf<'msg' | 'member' | 'status' | 'coordinator'>();
+        expectTypeOf<Discriminant<Principal, 'kind'>>().toEqualTypeOf<'user' | 'machine' | 'agent' | 'external'>();
+    });
+    it('daemon frames are versioned and generic over the wire types', () => {
+        type F = { readonly kind: 'event' };
+        expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
+        expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
+        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping'>();
+    });
+    it('ids do not mix', () => {
+        expectTypeOf<AgentId>().not.toEqualTypeOf<ChatId>();
+        // @ts-expect-error a ChatId is not an AgentId
+        const wrong: AgentId = 'chat_1' as ChatId;
+        void wrong;
+    });
+    it('instruction proposals always require review', () => {
+        expectTypeOf<Extract<Proposal, { kind: 'instruction' }>['requiresReview']>().toEqualTypeOf<true>();
+    });
+});
