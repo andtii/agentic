@@ -10,7 +10,8 @@ export default defineConfig({
     test: {
         environment: 'happy-dom',
         include: ['packages/**/__tests__/**/*.test.{ts,tsx}', 'apps/**/__tests__/**/*.test.{ts,tsx}'],
-        exclude: ['**/node_modules/**', '**/dist/**'],
+        // workerd-only: `pnpm --filter @agentic/web test:workers`
+        exclude: ['**/node_modules/**', '**/dist/**', 'apps/web/__tests__/workers/**'],
         globals: true,
         typecheck: { enabled: true, include: ['packages/**/__tests__/**/*.test-d.ts'] }
     },

@@ -108,6 +108,7 @@ pnpm lint             # oxlint packages apps
 pnpm size             # size-limit (.size-limit.json)
 pnpm verify:catalog   # single-minor core catalog guard (CI runs it too)
 pnpm test:scripts     # node --test for scripts/
+pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
 ```
 
 Run the web app: `pnpm --filter @agentic/web dev`. Run the daemon:

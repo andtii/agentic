@@ -11,6 +11,8 @@ pnpm --filter @agentic/ui build        # once: the app consumes @agentic/ui thro
 pnpm --filter @agentic/web dev         # Vite dev server on http://localhost:3000
 pnpm --filter @agentic/web build       # zero:validate, then dist/server + dist/client
 pnpm --filter @agentic/web preview     # wrangler dev over the production build
+pnpm --filter @agentic/web test:workers    # the Worker + ActorHost Durable Object inside workerd (Node >= 22)
+pnpm --filter @agentic/web deploy:preview  # build + wrangler deploy --env preview (docs/runbook.md)
 pnpm --filter @agentic/web zero:validate   # the design system against zero's anatomy manifest (also part of build)
 pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (see below)
 ```
@@ -23,6 +25,9 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 - `src/nav.ts` — the primary navigation.
 - `src/entry-client.tsx` / `src/entry-server.tsx` — import the design system CSS, call `installThemes()`, build the app.
 - `src/api/*.server.ts` — server functions (only ever run on the server).
+- `src/entry.cloudflare.ts` — the Worker: daemon socket stub → auth routes → actor mount + sockets → server functions → document render; exports `ActorHost`.
+- `src/actors.app.ts` — the platform actor registry, the `ActorHost` Durable Object class, the Worker half, and the ports later issues fill (`defaultPorts`).
+- `__tests__/workers/` — workerd tests over the HTTP actor mount (workspace + agent + chat, eviction, 401/403, `memoryConformance` on Durable Object storage); own `tsconfig.json`, excluded from the root typecheck and `pnpm test`.
 
 ## Theme
 
@@ -47,3 +52,5 @@ pnpm --filter @agentic/web build
 pnpm --filter @agentic/web preview   # wrangler dev
 pnpm --filter @agentic/web deploy    # wrangler deploy (run `pnpm exec wrangler login` once)
 ```
+
+Secrets (`SESSION_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `WORKSPACE_KEK`), the R2 bucket, the preview environment and the Durable Object migration rules are in [`docs/runbook.md`](../../docs/runbook.md). Without `SESSION_SECRET` the worker still serves pages, but every actor call is anonymous and refused.

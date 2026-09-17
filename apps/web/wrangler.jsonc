@@ -3,11 +3,47 @@
     "name": "agentic-web",
     "main": "dist/server/entry.cloudflare.js",
     "compatibility_date": "2026-08-01",
-    // node:async_hooks carries the request into server functions called during SSR.
+    // node:async_hooks carries the request into server functions called during SSR;
+    // @sigx/actors-cloudflare requires it too.
     "compatibility_flags": ["nodejs_compat"],
+    "define": {
+        "__DEV__": "false"
+    },
     "assets": {
         "directory": "dist/client",
         // Never serve the raw index.html template — the worker renders the document.
         "html_handling": "none"
+    },
+    // One namespace, one object per actor (architecture §3).
+    "durable_objects": {
+        "bindings": [{ "name": "ACTORS", "class_name": "ActorHost" }]
+    },
+    // SQLite-backed. NEVER `new_classes` for this class: that choice is irreversible.
+    "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ActorHost"] }],
+    "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agentic-artifacts" }],
+    "vars": {
+        "APP_ORIGIN": "http://localhost:8787"
+    },
+    // Secrets (`wrangler secret put <NAME>`; `.dev.vars` locally), never vars:
+    //   SESSION_SECRET        ≥ 32 chars — sessions, OAuth transients, agent tokens
+    //   GITHUB_CLIENT_ID      GitHub OAuth app
+    //   GITHUB_CLIENT_SECRET  GitHub OAuth app
+    //   WORKSPACE_KEK         base64, 32 bytes — AES-GCM key for stored API keys
+    // See docs/runbook.md.
+    "env": {
+        // `pnpm --filter @agentic/web deploy:preview` → worker `agentic-web-preview`.
+        // Bindings are not inherited by environments, so they are repeated here.
+        "preview": {
+            "define": {
+                "__DEV__": "false"
+            },
+            "durable_objects": {
+                "bindings": [{ "name": "ACTORS", "class_name": "ActorHost" }]
+            },
+            "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agentic-artifacts-preview" }],
+            "vars": {
+                "APP_ORIGIN": "https://agentic-web-preview.workers.dev"
+            }
+        }
     }
 }
