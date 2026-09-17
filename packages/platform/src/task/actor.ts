@@ -171,6 +171,17 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             }
         };
 
+        /**
+         * `start` and `resolveWaiting` both move to `active`, which `canTransition` allows from
+         * queued AND waiting; each method only owns one of those edges. An illegal target still
+         * reports as `IllegalTransitionError` first.
+         */
+        const requireStatus = (from: TaskStatus, method: string): void => {
+            requireCreated();
+            if (s.status === from || !canTransition(s.status, 'active')) return;
+            throw new TaskStateError('wrong-state', `task ${s.id} is ${s.status}; ${method}() runs only from ${from}`);
+        };
+
         const report = (): StopReport => ({ id: s.id, stopped: s.cancel ? s.cancel.stopped : isTerminal(s.status), notStopped: [...s.notStopped] });
 
         const ackParent = async (r: StopReport): Promise<void> => {
@@ -247,6 +258,7 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 return view();
             },
             async start(by, sessionId) {
+                requireStatus('queued', 'start');
                 await transition('active', by, 'started', sessionId === undefined ? {} : { sessionId });
                 return view();
             },
@@ -255,6 +267,7 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 return view();
             },
             async resolveWaiting(by, why = 'resumed') {
+                requireStatus('waiting', 'resolveWaiting');
                 await transition('active', by, why);
                 return view();
             },

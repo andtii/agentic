@@ -33,7 +33,7 @@ export class TaskLimitError extends Error {
 /** A call the task cannot honour in its current state (uncreated, no session to delegate from, ...). */
 export class TaskStateError extends Error {
     constructor(
-        readonly code: 'not-created' | 'not-active' | 'no-session' | 'bad-key',
+        readonly code: 'not-created' | 'not-active' | 'wrong-state' | 'no-session' | 'bad-key',
         message: string
     ) {
         super(message);

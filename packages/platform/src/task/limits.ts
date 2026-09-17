@@ -28,7 +28,7 @@ export function checkDepth(parentDepth: number, limits: Limits): number {
 export function checkConcurrency(liveChildren: number, limits: Limits): void {
     const max = limits.maxConcurrentChildren ?? DEFAULT_MAX_CONCURRENT_CHILDREN;
     if (liveChildren >= max) {
-        throw new TaskLimitError('concurrency', `${liveChildren} unsettled children reach maxConcurrentChildren ${max}`, 'maxConcurrentChildren');
+        throw new TaskLimitError('concurrency', `${liveChildren} unsettled child ${liveChildren === 1 ? 'task' : 'tasks'} already running (maxConcurrentChildren ${max})`, 'maxConcurrentChildren');
     }
 }
 

@@ -12,7 +12,8 @@ describe('limits', () => {
     it('concurrency: counts unsettled children against the cap', () => {
         expect(() => checkConcurrency(0, {})).not.toThrow();
         expect(() => checkConcurrency(DEFAULT_MAX_CONCURRENT_CHILDREN, {})).toThrow(/maxConcurrentChildren/);
-        expect(() => checkConcurrency(2, { maxConcurrentChildren: 2 })).toThrow(/maxConcurrentChildren 2/);
+        expect(() => checkConcurrency(2, { maxConcurrentChildren: 2 })).toThrow('2 unsettled child tasks already running (maxConcurrentChildren 2)');
+        expect(() => checkConcurrency(1, { maxConcurrentChildren: 1 })).toThrow('1 unsettled child task already running (maxConcurrentChildren 1)');
     });
 
     it('remaining subtracts spend and live reservations', () => {

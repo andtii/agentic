@@ -100,6 +100,22 @@ describe('lifecycle', () => {
         expect((await t.get()).status).toBe('completed');
     });
 
+    it('start runs only from queued and resolveWaiting only from waiting', async () => {
+        const t = task(id('task_3b'));
+        await t.create(contract(), { owner: a });
+        await expect(t.resolveWaiting('user:u1')).rejects.toMatchObject({ name: 'TaskStateError', code: 'wrong-state' });
+        await t.start('user:u1');
+        await t.reportWaiting({ kind: 'input', requestId: 'req_1' }, 'agent:agent_a');
+        await expect(t.start('user:u1')).rejects.toMatchObject({ name: 'TaskStateError', code: 'wrong-state' });
+        let view = await t.get();
+        expect(view.status).toBe('waiting');
+        expect(view.transitions).toHaveLength(2);
+        await t.resolveWaiting('user:u1');
+        view = await t.get();
+        expect(view.status).toBe('active');
+        expect(view.transitions).toHaveLength(3);
+    });
+
     it('the result stream resolves on the terminal state', async () => {
         const t = task(id('task_4'));
         await t.create(contract(), { owner: a });
