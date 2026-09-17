@@ -32,6 +32,25 @@ What you get back: `agent` (`modelAgent` over `anthropic().model(config.executio
 - **Pricing** (`ANTHROPIC_PRICING`, `priceUsage`): USD per million tokens for input, output, cache read and cache write; a dated snapshot resolves to its id; an unknown id is priced by family with `estimated: true`.
 - **Limits**: `execution.limits.maxSteps` is the engine's rounds per turn; the other limits are the driver's (§5a).
 
+## `claude-code`: `claudeCodeDriver`
+
+The machine daemon's driver for Claude Code (architecture §5b), on its own Node-only subpath so the edge entry never pulls in process spawning:
+
+```ts
+import { claudeCodeDriver } from '@agentic/runtimes/claude-code';
+
+const driver = claudeCodeDriver();                        // tests: { query: fakeQuery, listen, spawn, parentEnv, auth }
+const inspection = await driver.inspect(env);             // authStatus, identity, isolation, CapabilityReport → hello/env
+const { session, capabilities } = await driver.open(env, openSpec, { sessionId, callTool, policy });
+const report = await driver.doctor(environments);         // ok: false when two environments share a config dir
+```
+
+- **Isolation (EXE-04/05/07)**: one `claudeCode()` agent per environment, `settingSources: []`, `CLAUDE_CONFIG_DIR = profileDir`. The daemon's own `CLAUDE_CONFIG_DIR` and every `ANTHROPIC_*` variable are removed from the child environment, so no environment picks up another account; an environment without `profileDir` uses the default config dir and `doctor` warns. `doctor` compares config dirs normalised (separators, `..`, trailing slash; case-folded on Windows) and reports auth per profile.
+- **Sessions**: `cwd` must be inside the environment's `cwdRoots`; `system` is appended to Claude Code's preset (`systemPromptPreset: true`); `model`, `maxTurns`, `maxBudgetUsd`, the policy and `resume` pass through.
+- **Memory (MEM-10)**: the platform's `## Memory` block becomes `## Platform memory` with a note that it is not Claude Code memory; the report lists `memory.platform` as supported and `memory.runtime` (CLAUDE.md, settings) as unsupported with the reason.
+- **Platform tools**: the names in `OpenSpec.tools` are served as client tools with the platform's own name, description and schema; `execute` calls `callTool`, which the daemon sends as `tool.call`. A name the daemon has no definition for is not served and is listed as unsupported.
+- **Auth** (`readProfileAuth`): `.credentials.json` in the config dir — a refresh token is `ok`, an expired access token without one `expired`, none `missing`; identity from `.claude.json`. macOS keeps credentials in the Keychain, so it reports `unknown` there.
+
 ## Platform tools
 
 `defineTool`s over abstract ports (`packages/runtimes/src/tools/ports.ts`), so they run and test without actors. Names are provider tool names (`[A-Za-z0-9_-]`):
@@ -49,4 +68,4 @@ What you get back: `agent` (`modelAgent` over `anthropic().model(config.executio
 
 ## Tests
 
-`pnpm test packages/runtimes`. The conformance suite runs over `mockModel`; `__tests__/anthropic/fixtures/tool-roundtrip.json` is a recorded `memory_search` round trip replayed through `replayAgent` (re-record with `RECORD_FIXTURES=1 pnpm test fixture`).
+`pnpm test packages/runtimes`. The anthropic conformance suite runs over `mockModel`; the claude-code one runs `agentConformance` on the driver's agent over the adapter's scripted fake `query` (`__tests__/claude-code/fake-query.ts`, adapted from signalxjs/ai); `__tests__/anthropic/fixtures/tool-roundtrip.json` is a recorded `memory_search` round trip replayed through `replayAgent` (re-record with `RECORD_FIXTURES=1 pnpm test fixture`).
