@@ -8,6 +8,26 @@ export type AuthStatus = 'ok' | 'missing' | 'expired' | 'unknown';
 /** How accounts on one machine are kept apart; validated per runtime (EXE-07). */
 export type IsolationMechanism = 'config-dir' | 'profile' | 'os-user' | 'container' | 'none';
 
+/** One thing a runtime's `doctor` found; `environmentIds` names the environments it is about (EXE-07). */
+export interface DoctorFinding {
+    readonly level: 'error' | 'warn' | 'info';
+    readonly code: string;
+    readonly message: string;
+    readonly environmentIds?: readonly EnvironmentId[];
+}
+
+/**
+ * What the runtime's `doctor` concluded about ONE environment: the findings
+ * that name it, `ok` when none is an error — the isolation and auth verdict
+ * the daemon sends in `hello` / `env` and the Machine keeps (EXE-05/07).
+ */
+export interface EnvironmentVerdict {
+    readonly ok: boolean;
+    readonly findings: readonly DoctorFinding[];
+    /** When the daemon ran the check (its clock). */
+    readonly checkedAt: number;
+}
+
 /** A named execution environment on a machine (EXE-03/04). */
 export interface EnvironmentDescriptor {
     readonly id: EnvironmentId;
@@ -18,6 +38,8 @@ export interface EnvironmentDescriptor {
     readonly cwdRoots: readonly string[];
     readonly concurrency: { readonly max: number; readonly active: number };
     readonly isolation: IsolationMechanism;
+    /** The runtime's verdict on this environment; absent when the daemon ran no `doctor`. */
+    readonly doctor?: EnvironmentVerdict;
 }
 
 /** The operations an integration supports; unsupported ones are listed, never implied (AGT-09, PLG-09, AC-15). */
