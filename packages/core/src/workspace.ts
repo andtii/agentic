@@ -3,9 +3,9 @@
 import type { EnvironmentId } from './ids.js';
 
 /** The notification kinds the Inbox delivers (architecture §4 Inbox). */
-export type NotificationKind = 'reminder' | 'task-done' | 'task-failed' | 'approval' | 'input';
+export const NOTIFICATION_KINDS = ['reminder', 'task-done', 'task-failed', 'approval', 'input'] as const;
 
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['reminder', 'task-done', 'task-failed', 'approval', 'input'];
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /** Which notification kinds the user wants, and whether they also go to push subscriptions. */
 export interface NotificationPrefs {
