@@ -21,7 +21,8 @@
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@agentic/memory": "workspace:*",
-    "@sigx/actors": "catalog:"
+    "@sigx/actors": "catalog:",
+    "@sigx/ai-agent": "catalog:"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",

@@ -95,3 +95,20 @@ await s.disable(); await s.enable(); await s.update({ recurrence: { kind: 'at', 
 ```
 
 Each occurrence is a one-shot `ctx.reminders` entry re-armed from `onReminder`, so it fires from a Durable Object alarm with nothing else online. Cron subset: `*`, `n`, `a-b`, `a,b`, `*/n`, `a-b/n` over minute hour day month weekday (7 = Sunday). DST: a wall time inside the spring gap is skipped; one inside the fall overlap fires its first occurrence only. Catch-up policy is `skip` (fire once, log what was missed). `recur.ts` is pure and exported on its own (`parseCron`, `nextCron`, `resolveWallTime`, `nextOccurrence`).
+
+## Session (`src/session`)
+
+`defineSessionActor({ factory, commands?, now? })` builds the `session` actor, keyed `{ws}:session:{id}`. It never imports a runtime adapter: the `SessionFactory` port turns a runtime id into a live `AgentSession` (the platform-managed path) or `null` (a daemon hosts it), and the `CommandSink` port carries wire commands to that daemon's machine.
+
+```ts
+const Session = defineSessionActor({ factory: runtimesFactory, commands: { send: (t, cmd) => actor(Machine, machineKey(t)).sendCommand(t.sessionId, cmd) } });
+const s = actor(Session, actorKey(ws, 'session', id));
+await s.open({ agentId, runtime: 'anthropic-api', chatId, taskId, config });
+await s.prompt('hello', turnId);                     // idempotent by commandId (default: turnId)
+for await (const ev of s.tail({ epoch: 0, seq: 0 })) render(ev);   // replay, then follow until closed
+```
+
+- The record is the event log: one `applySessionEntry` entry per `AgentEvent`, then `ctx.save()` (switches to `ctx.append` when `@sigx/actors` ships it). `createEventLogStore` / `createTranscriptStore` expose it as `@sigx/ai-agent` stores.
+- Local turns run in `tasks.drive`; after an eviction the restarted task closes the turn as interrupted — open calls cancelled, open requests resolved `cancel`, `error {code: 'process_exited', data: {interrupted: true}}`, `turn-end {stopReason: 'error'}` (`isInterruptedTurnEnd`). A model call is never re-run.
+- Daemon path: `forwardFrames(frames)` and `commandReplied(reply)` are internal (machine principal only); a command sent to a daemon answers `pending` until its reply arrives.
+- `authorize: [sameWorkspace, sessions scope]`. The chat hears `session-started`, `typing`, the final assistant `message` and `session-ended` on `SESSION_EVENTS_TOPIC`.

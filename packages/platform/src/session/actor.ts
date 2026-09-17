@@ -1,0 +1,492 @@
+/**
+ * The Session actor — `{ws}:session:{id}` (architecture §4 Session, §5a, §5b).
+ *
+ * Durable by construction: every `AgentEvent` is appended as it happens
+ * (`ctx.append`, folded by `applySessionEntry`), commands are idempotent by
+ * `commandId` across activations, a late joiner replays the log with
+ * `tail`, and a turn cut short by an eviction is closed as INTERRUPTED on
+ * the next activation — never re-run (OPS-05/06).
+ *
+ * Two execution paths, one record:
+ * - local: the `SessionFactory` opens an in-process `AgentSession`, served
+ *   through `serveSession` for command validation and busy/closed
+ *   semantics; the `drive` task pumps its events into the log one turn at
+ *   a time and `resumeTasks` restarts it after an eviction.
+ * - remote: a daemon serves the session; the Machine actor forwards its
+ *   frames to `forwardFrames` and its replies to `commandReplied`.
+ */
+
+import { actorKey, hasScope, SESSION_EVENTS_TOPIC, type Principal, type SessionEvent } from '@agentic/core';
+import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
+import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
+
+import { sameWorkspace } from '../auth/index.js';
+import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
+import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { appendEntry, createTranscriptStore } from './store.js';
+
+const V = WIRE_PROTOCOL_VERSION;
+
+/** What a command returns: the served reply, or `pending` while a daemon has yet to answer. */
+export type SessionCommandResult = WireReply | { readonly v: typeof V; readonly kind: 'pending'; readonly commandId: string };
+
+/** `Session.get()` — the record without its log and transcript. */
+export interface SessionInfo {
+    readonly key: string;
+    readonly opened: boolean;
+    readonly spec?: SessionOpenSpec;
+    readonly mode?: SessionState['mode'];
+    readonly status: SessionState['status'];
+    readonly head: EventCursor;
+    readonly ref?: SessionState['ref'];
+    readonly capabilities?: SessionState['capabilities'];
+    readonly running?: SessionState['running'];
+    readonly openRequests: readonly string[];
+    readonly eventCount: number;
+    /** The cursor the transcript snapshot stands at. */
+    readonly transcriptAt?: EventCursor;
+    readonly gap?: SessionState['gap'];
+    readonly closedAt?: number;
+}
+
+/** The `error.code` an interrupted turn ends with; `error.data.interrupted` and `isInterruptedTurnEnd` name it exactly. */
+export const INTERRUPTED_CODE = 'process_exited' as const;
+export const INTERRUPTED_MESSAGE = 'interrupted: the session was evicted mid-turn; nothing was re-run';
+
+/** The `turn-end` a resumed driver writes for a turn the eviction cut short. */
+export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
+    return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && ev.error.message === INTERRUPTED_MESSAGE;
+}
+
+/** After `sameWorkspace`: an external client needs the `sessions` scope. */
+const sessionsScope: ActorPolicy = (principal: Principal | null) => !!principal && hasScope(principal, 'sessions');
+/** The daemon path's entry points: only a machine principal (the Machine actor's socket) reaches them. */
+const internalPolicy: ActorPolicy = (principal: Principal | null) => principal?.kind === 'machine';
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type SessionEventInit = DistributiveOmit<SessionEvent, 'agentId' | 'sessionId' | 'at'>;
+
+interface Live extends OpenedSession {
+    readonly served: ServedSession;
+    /** Turns started on THIS runtime session — a `running` turn not in here belongs to an evicted activation. */
+    readonly turns: Set<string>;
+}
+
+const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function newCommandId(type: string): string {
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    let out = '';
+    for (const b of bytes) out += ALPHABET[b % ALPHABET.length];
+    return `${type}:${out}`;
+}
+
+/**
+ * Build the Session actor definition over its ports. One call per app —
+ * the actor `type` is `'session'`, its wire and storage name.
+ */
+export function defineSessionActor(ports: SessionPorts) {
+    const now = ports.now ?? Date.now;
+    /** The live runtime session per activation, by actor key. Never outlives the activation that opened it. */
+    const lives = new Map<string, Live>();
+
+    async function dispose(key: string): Promise<void> {
+        const live = lives.get(key);
+        if (!live) return;
+        lives.delete(key);
+        await live.served.close().catch(() => {});
+        await live.session.close().catch(() => {});
+        await live.dispose?.().catch(() => {});
+    }
+
+    const set = (patch: SessionPatch): SessionEntry => ({ t: 'set', patch });
+
+    function info(c: ActorContext<SessionState>): SessionInfo {
+        const s = c.state;
+        return {
+            key: c.key,
+            opened: s.opened,
+            status: s.status,
+            head: { epoch: s.head.epoch, seq: s.head.seq },
+            openRequests: [...s.openRequests],
+            eventCount: s.events.length,
+            ...(s.spec ? { spec: c.snapshot(s.spec) } : {}),
+            ...(s.mode ? { mode: s.mode } : {}),
+            ...(s.ref ? { ref: c.snapshot(s.ref) } : {}),
+            ...(s.capabilities ? { capabilities: c.snapshot(s.capabilities) } : {}),
+            ...(s.running ? { running: c.snapshot(s.running) } : {}),
+            ...(s.transcript ? { transcriptAt: { epoch: s.transcript.epoch, seq: s.transcript.seq } } : {}),
+            ...(s.gap ? { gap: c.snapshot(s.gap) } : {}),
+            ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {})
+        };
+    }
+
+    /** Best-effort publish to the chat this session belongs to (CHT-11): a subscriber's failure lands in the report, never here. */
+    async function publishChat(c: ActorContext<SessionState>, event: SessionEventInit): Promise<void> {
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec?.chatId || !parsed) return;
+        const payload = { ...event, agentId: spec.agentId, sessionId: parsed.sessionId, at: now() } as SessionEvent;
+        try {
+            await c.publish(topic<SessionEvent>(SESSION_EVENTS_TOPIC, actorKey(parsed.workspaceId, 'chat', spec.chatId)), payload);
+        } catch {
+            // A chat that cannot be reached never fails the session.
+        }
+    }
+
+    /** Fold the events since the last snapshot into a detached copy of it; the transcript itself says where it stands. */
+    function snapshotTranscript(c: ActorContext<SessionState>): AgentTranscript {
+        const s = c.state;
+        const last = s.events[s.events.length - 1];
+        const base = s.transcript ? c.snapshot(s.transcript) : createTranscript(last?.sessionId ?? s.ref?.id ?? '');
+        for (const ev of c.snapshot(eventsAfter(s.events, { epoch: base.epoch, seq: base.seq }))) reduceAgentEvent(base, ev);
+        return base;
+    }
+
+    /** The final assistant text of one turn (sub-agent output stays nested under its call). */
+    function finalText(transcript: AgentTranscript, turnId: string): string {
+        let text = '';
+        for (const m of transcript.messages) {
+            if (m.role !== 'assistant' || m.turnId !== turnId || m.parentCallId) continue;
+            for (const p of m.parts) if (p.type === 'text' && p.text) text += (text ? '\n' : '') + p.text;
+        }
+        return text;
+    }
+
+    /** Pull what the session has already buffered (the `state` after a turn, a `config` after `configure()`) without waiting for more. */
+    async function drainBuffered(c: ActorContext<SessionState>, live: Live): Promise<void> {
+        let source: AsyncIterable<AgentEvent>;
+        try {
+            source = live.session.subscribe({ epoch: c.state.head.epoch, seq: c.state.head.seq });
+        } catch {
+            return; // the head is older than the buffer keeps: nothing to fill from here
+        }
+        const it = source[Symbol.asyncIterator]();
+        const tick = () => new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 0));
+        try {
+            for (;;) {
+                const next = await Promise.race([it.next(), tick()]);
+                if (!next || next.done) return;
+                await appendEntry(c, { t: 'ev', ev: next.value } satisfies SessionEntry);
+            }
+        } finally {
+            await it.return?.();
+        }
+    }
+
+    /** Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. */
+    async function finishTurn(c: ActorContext<SessionState>, turnId: string): Promise<void> {
+        const s = c.state;
+        const live = lives.get(c.key);
+        if (live) await drainBuffered(c, live);
+        const transcript = snapshotTranscript(c);
+        s.transcript = transcript;
+        if (live) s.ref = structuredClone(live.session.ref);
+        const text = finalText(transcript, turnId);
+        if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(s.spec?.taskId ? { taskId: s.spec.taskId } : {}) });
+        await c.save();
+    }
+
+    /**
+     * A turn the eviction cut short: close what is open (calls, requests),
+     * end the turn with the interrupted error and settle the session state
+     * — stamped in the epoch the events were in, gapless after the head.
+     */
+    async function finishInterrupted(c: ActorContext<SessionState>, turnId: string): Promise<void> {
+        const s = c.state;
+        const run = s.running;
+        if (!run || run.turnId !== turnId) return;
+        const input = c.snapshot(run.input);
+        const last = s.events[s.events.length - 1];
+        const sessionId = last?.sessionId ?? s.ref?.id ?? parseSessionKey(c.key)?.sessionId ?? c.key;
+        const epoch = Math.max(1, s.head.epoch);
+        let seq = s.head.epoch === 0 ? 0 : s.head.seq;
+        const emit = (payload: UnstampedEvent) => appendEntry(c, { t: 'ev', ev: { ...payload, sessionId, epoch, seq: ++seq } } satisfies SessionEntry);
+        const before = snapshotTranscript(c);
+        if (!s.events.some((e) => e.turnId === turnId && e.type === 'turn-start')) await emit({ type: 'turn-start', turnId, input });
+        for (const m of before.messages) {
+            if (m.turnId !== turnId) continue;
+            for (const p of m.parts) {
+                if (p.type === 'tool' && (p.status === 'pending' || p.status === 'in_progress')) {
+                    await emit({ type: 'tool-update', turnId, ...(m.parentCallId ? { parentCallId: m.parentCallId } : {}), callId: p.callId, status: 'cancelled', error: INTERRUPTED_MESSAGE });
+                }
+            }
+        }
+        for (const r of Object.values(before.requests)) {
+            if (r.turnId !== turnId) continue;
+            await emit({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: INTERRUPTED_MESSAGE, at: now() });
+        }
+        await emit({ type: 'error', turnId, code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE, recoverable: true, data: { interrupted: true } });
+        // The session settles before the turn closes, so the `turn-end` is the last word — what a resumer reads first.
+        if (s.status !== 'closed') await emit({ type: 'state', value: 'idle' });
+        await emit({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE } });
+        await finishTurn(c, turnId);
+        await publishChat(c, { kind: 'status', status: 'task', ref: `interrupted:${turnId}` });
+    }
+
+    return defineActor({
+        type: 'session',
+        authorize: [sameWorkspace, sessionsScope],
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy },
+        state: (): SessionState => initialSessionState(),
+        onDeactivate: (ctx) => dispose(ctx.key),
+        methods: (ctx) => {
+            // A fresh activation starts with no live session — whatever a previous one left here is stale.
+            void dispose(ctx.key);
+
+            const parsed = parseSessionKey(ctx.key);
+
+            async function ensureLive(): Promise<Live | null> {
+                const existing = lives.get(ctx.key);
+                if (existing) return existing;
+                const s = ctx.state;
+                if (!s.opened || !s.spec || s.mode === 'remote' || !parsed) return null;
+                const spec = ctx.snapshot(s.spec);
+                const resume = s.ref ? ctx.snapshot(s.ref) : spec.resume;
+                const opened = await ports.factory(spec.runtime, {
+                    key: ctx.key,
+                    workspaceId: parsed.workspaceId,
+                    sessionId: parsed.sessionId,
+                    spec,
+                    ...(resume ? { resume } : {}),
+                    signal: ctx.abortSignal,
+                    transcripts: createTranscriptStore(ctx)
+                });
+                if (!opened) {
+                    await appendEntry(ctx, set({ mode: 'remote' }));
+                    return null;
+                }
+                const served = serveSession(opened.session, { agentId: opened.agentId, capabilities: opened.capabilities });
+                const live: Live = { ...opened, served, turns: new Set() };
+                lives.set(ctx.key, live);
+                await appendEntry(ctx, set({ mode: 'local', ref: structuredClone(opened.session.ref), capabilities: structuredClone(opened.capabilities) }));
+                return live;
+            }
+
+            const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: V, kind: 'error', commandId, code, message });
+            const pending = (commandId: string): SessionCommandResult => ({ v: V, kind: 'pending', commandId });
+
+            /** Apply a reply: remember it, start the driver on a prompt ack, settle on a close ack. */
+            async function recordReply(command: WireCommand, replied: WireReply): Promise<void> {
+                const s = ctx.state;
+                const at = now();
+                if (command.type === 'prompt' && replied.kind === 'ack') {
+                    const turnId = replied.turnId ?? command.turnId;
+                    // A steered prompt joined the running turn: nothing new to drive.
+                    const starts = !s.running;
+                    if (starts) await appendEntry(ctx, set({ running: { turnId, commandId: command.commandId, input: command.input, startedAt: at }, status: 'running' }));
+                    await appendEntry(ctx, { t: 'reply', command, reply: replied, at } satisfies SessionEntry);
+                    if (starts && s.mode === 'local') {
+                        lives.get(ctx.key)?.turns.add(turnId);
+                        await ctx.tasks.start('drive', { turnId });
+                    }
+                    if (starts) await publishChat(ctx, { kind: 'status', status: 'typing', ref: turnId });
+                    return;
+                }
+                await appendEntry(ctx, { t: 'reply', command, reply: replied, at } satisfies SessionEntry);
+                if (command.type === 'close' && replied.kind === 'ack') {
+                    const live = lives.get(ctx.key);
+                    if (live) await drainBuffered(ctx, live);
+                    await dispose(ctx.key);
+                    await appendEntry(ctx, set({ status: 'closed', closedAt: at }));
+                    if (s.running) {
+                        // Closed mid-turn: the turn ends here, and the record says so.
+                        await finishInterrupted(ctx, s.running.turnId);
+                    } else {
+                        s.transcript = snapshotTranscript(ctx);
+                        await ctx.save();
+                    }
+                    await publishChat(ctx, { kind: 'status', status: 'session-ended' });
+                    return;
+                }
+                if (command.type === 'configure' && replied.kind === 'ack') {
+                    const live = lives.get(ctx.key);
+                    if (live) await drainBuffered(ctx, live);
+                }
+            }
+
+            /** Idempotent by `commandId`: a known command answers with what it answered before, or `pending`. */
+            async function dispatch(command: WireCommand): Promise<SessionCommandResult> {
+                const s = ctx.state;
+                const known = s.commands[command.commandId];
+                if (known) return known.reply ? ctx.snapshot(known.reply) : pending(command.commandId);
+                if (s.status === 'closed') return errorReply(command.commandId, 'closed', `session "${ctx.key}" is closed`);
+                if (!s.opened) return errorReply(command.commandId, 'invalid', `session "${ctx.key}" is not open`);
+                const live = await ensureLive();
+                // A local turn no live session knows was cut short by an eviction: settle it before anything else runs.
+                if (s.running && s.mode === 'local' && !live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
+                if (live) {
+                    const replied = await live.served.handleCommand(command, ctx.principal);
+                    await recordReply(command, replied);
+                    return structuredClone(replied);
+                }
+                const machineId = s.spec?.machineId;
+                if (!machineId || !ports.commands || !parsed) {
+                    return errorReply(command.commandId, 'unsupported', `session "${ctx.key}" has no live runtime session and no machine to send "${command.type}" to`);
+                }
+                await appendEntry(ctx, { t: 'command', command, at: now() } satisfies SessionEntry);
+                await ports.commands.send({ workspaceId: parsed.workspaceId, machineId, sessionId: parsed.sessionId }, command);
+                return pending(command.commandId);
+            }
+
+            return {
+                /** Record the spec and open the runtime session. Idempotent: a second call returns the record. */
+                async open(spec: SessionOpenSpec): Promise<SessionInfo> {
+                    const s = ctx.state;
+                    if (s.status === 'closed') throw new Error(`session "${ctx.key}" is closed`);
+                    const first = !s.opened;
+                    if (first) await appendEntry(ctx, set({ opened: true, spec: structuredClone(spec), status: 'idle', ...(spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
+                    await ensureLive();
+                    if (first) await publishChat(ctx, { kind: 'status', status: 'session-started' });
+                    return info(ctx);
+                },
+
+                /** Run a turn. `commandId` defaults to `turnId`, so a retried prompt executes once (OPS-06). */
+                prompt(input: PromptInput, turnId: string, output?: WireOutputSpec, commandId: string = turnId): Promise<SessionCommandResult> {
+                    return dispatch({ v: V, commandId, type: 'prompt', turnId, input: toPromptParts(input), ...(output ? { output } : {}) });
+                },
+
+                /** Answer an open request (CHT-09). One decision per request: `commandId` defaults to `respond:{requestId}`. */
+                respond(requestId: string, decision: Decision, commandId: string = `respond:${requestId}`): Promise<SessionCommandResult> {
+                    return dispatch({ v: V, commandId, type: 'respond', requestId, decision });
+                },
+
+                /** Cancel the running turn, or one sub-agent. */
+                cancel(agentId?: string, commandId: string = newCommandId('cancel')): Promise<SessionCommandResult> {
+                    return dispatch({ v: V, commandId, type: 'cancel', ...(agentId ? { agentId } : {}) });
+                },
+
+                configure(patch: Readonly<Record<string, string>>, commandId: string = newCommandId('configure')): Promise<SessionCommandResult> {
+                    return dispatch({ v: V, commandId, type: 'configure', patch });
+                },
+
+                /** Close the runtime session and freeze the record. */
+                async close(commandId: string = newCommandId('close')): Promise<SessionCommandResult> {
+                    const s = ctx.state;
+                    if (s.status === 'closed') return { v: V, kind: 'ack', commandId };
+                    const command: WireCommand = { v: V, commandId, type: 'close' };
+                    const result = await dispatch(command);
+                    if (result.kind === 'error' && result.code === 'unsupported') {
+                        // Nothing live and nowhere to send it: close the record itself.
+                        const ack: WireReply = { v: V, kind: 'ack', commandId };
+                        await recordReply(command, ack);
+                        return ack;
+                    }
+                    return result;
+                },
+
+                get(): SessionInfo {
+                    return info(ctx);
+                },
+
+                /** Events after `from` (exclusive) — a one-shot read; `tail` follows. */
+                events(from?: EventCursor): AgentEvent[] {
+                    return ctx.snapshot(eventsAfter(ctx.state.events, from));
+                },
+
+                /** The transcript snapshot from the last turn end, if any. */
+                transcript(): AgentTranscript | undefined {
+                    const t = ctx.state.transcript;
+                    return t ? ctx.snapshot(t) : undefined;
+                },
+
+                /** Daemon path (internal): frames from the machine's socket, one-way. */
+                async forwardFrames(frames: readonly WireFrame[]): Promise<void> {
+                    const s = ctx.state;
+                    for (const frame of frames) {
+                        switch (frame.kind) {
+                            case 'hello':
+                                await appendEntry(ctx, set({ mode: 'remote', ref: frame.sessionRef, capabilities: frame.capabilities, ...(s.status === 'disconnected' ? { status: 'idle' as const } : {}) }));
+                                break;
+                            case 'event': {
+                                const runningTurn = s.running?.turnId;
+                                await appendEntry(ctx, { t: 'ev', ev: frame.event } satisfies SessionEntry);
+                                if (frame.event.type === 'turn-end' && runningTurn !== undefined && runningTurn === frame.event.turnId) await finishTurn(ctx, runningTurn);
+                                break;
+                            }
+                            case 'gap':
+                                await appendEntry(ctx, set({ gap: { from: frame.from, resumeAt: frame.resumeAt, at: now() }, status: 'disconnected', head: frame.resumeAt }));
+                                break;
+                        }
+                    }
+                },
+
+                /** Daemon path (internal): the reply to a command sent through the `CommandSink`. */
+                async commandReplied(replied: WireReply): Promise<void> {
+                    const known = ctx.state.commands[replied.commandId];
+                    if (!known || known.reply) return;
+                    await recordReply(ctx.snapshot(known.command), replied);
+                }
+            };
+        },
+        streams: (ctx) => ({
+            /** Replay from `from` (exclusive; `{ epoch: 0, seq: 0 }` for everything), then follow until the session closes. */
+            async *tail(from?: EventCursor): AsyncIterable<AgentEvent> {
+                let last: EventCursor = from ?? { epoch: 0, seq: 0 };
+                for await (const s of ctx.changes({ initial: true })) {
+                    for (const ev of eventsAfter(s.events, last)) {
+                        if (!cursorAfter(last, ev)) continue;
+                        last = { epoch: ev.epoch, seq: ev.seq };
+                        yield ev;
+                    }
+                    if (s.status === 'closed') return;
+                }
+            }
+        }),
+        tasks: (ctx) => ({
+            /**
+             * Pump one turn's events into the log. Restarted by the runtime's
+             * task ledger after an eviction: with no live session to follow,
+             * the turn is closed as interrupted — a model call is never replayed.
+             */
+            async drive(input: { readonly turnId: string }): Promise<void> {
+                const { turnId } = input;
+                const snap = ctx.snapshot();
+                if (!snap.running || snap.running.turnId !== turnId) return;
+                const live = lives.get(ctx.key);
+                if (!live || !live.turns.has(turnId)) {
+                    await ctx.turn((c) => finishInterrupted(c, turnId));
+                    return;
+                }
+                const signal = ctx.abortSignal;
+                let source: AsyncIterable<AgentEvent>;
+                try {
+                    source = live.session.subscribe(snap.head);
+                } catch {
+                    source = live.session.subscribe();
+                }
+                const it = source[Symbol.asyncIterator]();
+                const aborted = new Promise<IteratorResult<AgentEvent>>((resolve) => {
+                    const done = () => resolve({ value: undefined as never, done: true });
+                    if (signal.aborted) done();
+                    else signal.addEventListener('abort', done, { once: true });
+                });
+                let ended = false;
+                try {
+                    for (;;) {
+                        const next = await Promise.race([it.next(), aborted]);
+                        // Deactivating: leave `running` in place — the next activation closes the turn as interrupted.
+                        if (signal.aborted || next.done) return;
+                        const ev = next.value;
+                        await ctx.turn((c) => appendEntry(c, { t: 'ev', ev } satisfies SessionEntry));
+                        if (ev.type === 'turn-end' && ev.turnId === turnId) {
+                            ended = true;
+                            break;
+                        }
+                    }
+                } catch {
+                    // The subscription failed (a dropped slow subscriber): the turn is over as far as the record can tell.
+                    if (signal.aborted) return;
+                    await ctx.turn((c) => finishInterrupted(c, turnId));
+                    return;
+                } finally {
+                    await it.return?.();
+                }
+                if (ended) await ctx.turn((c) => finishTurn(c, turnId));
+            }
+        })
+    });
+}
+
+export type SessionActor = ReturnType<typeof defineSessionActor>;
