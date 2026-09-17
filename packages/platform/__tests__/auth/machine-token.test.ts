@@ -17,6 +17,10 @@ describe('machine tokens', () => {
     it('parse refuses anything not shaped like a token', () => {
         expect(parseMachineToken('amt.ws_1.machine_1')).toBeNull();
         expect(parseMachineToken('amt.ws_1.machine_1.short')).toBeNull();
+        // The secret is exactly the issued 43-char base64url; anything longer is refused before any hashing.
+        expect(parseMachineToken('amt.ws_1.machine_1.' + 'a'.repeat(44))).toBeNull();
+        expect(parseMachineToken('amt.ws_1.machine_1.' + 'a'.repeat(4096))).toBeNull();
+        expect(parseMachineToken('amt.ws_1.machine_1.' + 'a'.repeat(42) + '=')).toBeNull();
         expect(parseMachineToken('agt.ws_1.machine_1.' + 'a'.repeat(43))).toBeNull();
         expect(parseMachineToken(null)).toBeNull();
     });

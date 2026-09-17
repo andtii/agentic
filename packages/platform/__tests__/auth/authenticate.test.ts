@@ -61,6 +61,8 @@ describe('createAuthenticate (the createServerApp hook)', () => {
         };
         await expect(authenticate(detached)).resolves.toBeNull();
         await expect(authenticate({ request: undefined as unknown as Request })).resolves.toBeNull();
+        // Request-shaped but without a `headers.get` — anonymous, not a throw.
+        await expect(authenticate({ request: { url: 'https://app.test/', headers: {} } as unknown as Request })).resolves.toBeNull();
     });
 
     it('serverAuth pairs the hook with the principal codec', () => {

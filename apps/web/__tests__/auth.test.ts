@@ -108,6 +108,10 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
         expect(again.status).toBe(401);
         await expect(again.json()).resolves.toEqual({ error: 'used' });
         expect((await post({ code: 'ZZZZZZ', name: 'x' })).status).toBe(401);
+        const unknown = createWebAuth(env, { resolveUser: defaultResolveUser, provider, pairing: { find: async () => null, redeem: async () => undefined } });
+        const notFound = await unknown.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: JSON.stringify({ code: issued.code, name: 'x' }) }));
+        expect(notFound.status).toBe(401);
+        await expect(notFound.json()).resolves.toEqual({ error: 'mismatch' });
         expect((await post({ name: 'x' })).status).toBe(400);
         expect((await auth.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: '{' }))).status).toBe(400);
         const unwired = createWebAuth(env, { resolveUser: defaultResolveUser, provider });

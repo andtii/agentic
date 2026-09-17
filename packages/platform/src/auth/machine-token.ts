@@ -38,6 +38,8 @@ export interface MachineTokenRecord {
 export type MachineTokenVerdict = { readonly ok: true; readonly principal: Principal } | { readonly ok: false; readonly reason: 'malformed' | 'unknown' | 'mismatch' | 'revoked' };
 
 const ID = /^[A-Za-z0-9_-]+$/;
+/** 32 random bytes as unpadded base64url — exactly what `issueMachineToken` mints. */
+const SECRET = /^[A-Za-z0-9_-]{43}$/;
 
 /** A fresh token + its hash for `ref`. */
 export async function issueMachineToken(ref: MachineTokenRef): Promise<IssuedMachineToken> {
@@ -56,7 +58,7 @@ export function parseMachineToken(token: string | null | undefined): MachineToke
     const parts = token.split('.');
     if (parts.length !== 4 || parts[0] !== MACHINE_TOKEN_PREFIX) return null;
     const [, workspaceId, machineId, secret] = parts as [string, string, string, string];
-    if (!ID.test(workspaceId) || !ID.test(machineId) || secret.length < 32) return null;
+    if (!ID.test(workspaceId) || !ID.test(machineId) || !SECRET.test(secret)) return null;
     return { workspaceId: workspaceId as WorkspaceId, machineId: machineId as MachineId };
 }
 

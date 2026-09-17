@@ -74,7 +74,9 @@ export function createAuthenticate(options: AuthenticateOptions): AuthenticateFn
 }
 
 function isRequestLike(value: unknown): value is Request {
-    return typeof value === 'object' && value !== null && typeof (value as { headers?: unknown }).headers === 'object' && typeof (value as { url?: unknown }).url === 'string';
+    if (typeof value !== 'object' || value === null || typeof (value as { url?: unknown }).url !== 'string') return false;
+    const headers = (value as { headers?: unknown }).headers;
+    return typeof headers === 'object' && headers !== null && typeof (headers as { get?: unknown }).get === 'function';
 }
 
 /** The pair to spread into `createServerApp<Principal>({ ...serverAuth(options) })`. */

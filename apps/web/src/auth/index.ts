@@ -132,8 +132,9 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
         }
         if (typeof body.code !== 'string' || typeof body.name !== 'string' || !body.name.trim()) return json({ error: 'bad_request' }, 400);
         const found = await wiring.pairing.find(body.code);
-        const verdict = await verifyPairing(found?.pending, body.code, now());
-        if (!found || !verdict.ok) return json({ error: verdict.ok ? 'mismatch' : verdict.reason }, 401);
+        if (!found) return json({ error: 'mismatch' }, 401);
+        const verdict = await verifyPairing(found.pending, body.code, now());
+        if (!verdict.ok) return json({ error: verdict.reason }, 401);
         const issued = await issueMachineToken({ workspaceId: found.workspaceId, machineId: found.pending.machineId });
         await wiring.pairing.redeem({ workspaceId: found.workspaceId, machineId: found.pending.machineId, pending: consumePairing(found.pending, now()), tokenHash: issued.tokenHash, name: body.name.trim() });
         return json({ token: issued.token, workspaceId: issued.workspaceId, machineId: issued.machineId });
