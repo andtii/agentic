@@ -20,7 +20,7 @@
     "size": "size-limit"
   },
   "devDependencies": {
-    "@size-limit/preset-small-lib": "^11",
+    "@size-limit/preset-small-lib": "^13",
     "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^4.1.5",
     "happy-dom": "^20.9.0",
