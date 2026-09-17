@@ -392,6 +392,8 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 if (s.sessionStopped) return;
                 await commit(ctx, { t: 'session-stopped', at: Date.now() });
                 sessionWaiter?.();
+                // The word came after the cascade settled: the parent's record of this subtree is corrected upward (COL-12).
+                if (s.cancel?.settled) await ackParent(report());
             },
             get() {
                 requireCreated();
@@ -420,7 +422,10 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             async childStopped(id, r) {
                 if (!s.children.includes(id)) return;
                 await commit(ctx, { t: 'child-stopped', at: Date.now(), id, stopped: r.stopped, notStopped: r.notStopped });
-                ackWaiters.get(id)?.();
+                const waiter = ackWaiters.get(id);
+                if (waiter) waiter();
+                // A late acknowledgement after our own cascade settled travels on up, so every ancestor's record is corrected.
+                else if (s.cancel?.settled) await ackParent(report());
             },
             async childSettled(id, status) {
                 if (!s.children.includes(id) || !Object.hasOwn(s.live, id)) return;

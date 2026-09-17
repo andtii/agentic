@@ -1,41 +1,24 @@
-import { component } from 'sigx';
-import { Link } from '@sigx/router';
-import { Status, Table } from '@sigx/zero-daisyui/components';
-import { Row } from '@agentic/ui';
-import { Page } from '../components/Page';
-import { machines } from '../mock/data';
+import { component, type Define } from 'sigx';
+import { EmptyState } from '@agentic/ui';
+import { environmentsOf, opsMachines, platformRow, type OpsMachine } from '../mock/ops';
+import { MachineGroup, PlatformRow } from './machines/MachineGroup';
+import { LinkButton } from './ops/LinkButton';
+import { OpsPage } from './ops/OpsPage';
 
-/** `/machines` — paired machines and their daemons. */
-export const Machines = component(() => {
-    return () => (
-        <Page title="Machines" subtitle="Daemons that run installed CLI runtimes for your agents.">
-            <Table hover>
-                <Table.Caption>Machines</Table.Caption>
-                <Table.Head>
-                    <Table.Row>
-                        <Table.HeaderCell>Machine</Table.HeaderCell>
-                        <Table.HeaderCell>OS</Table.HeaderCell>
-                        <Table.HeaderCell>Runtimes</Table.HeaderCell>
-                        <Table.HeaderCell>Last seen</Table.HeaderCell>
-                    </Table.Row>
-                </Table.Head>
-                <Table.Body>
-                    {machines.map(m => (
-                        <Table.Row>
-                            <Table.Cell>
-                                <Row gap="sm">
-                                    <Status color={m.online ? 'success' : 'neutral'} label={m.online ? 'online' : 'offline'} />
-                                    <Link to={`/machines/${m.id}`}>{m.name}</Link>
-                                </Row>
-                            </Table.Cell>
-                            <Table.Cell>{m.os}</Table.Cell>
-                            <Table.Cell>{m.runtimes.join(', ')}</Table.Cell>
-                            <Table.Cell>{m.lastSeen}</Table.Cell>
-                        </Table.Row>
-                    ))}
-                </Table.Body>
-            </Table>
-            <Link to="/pair">Pair a new machine</Link>
-        </Page>
-    );
-});
+export type MachinesViewProps = Define.Prop<'machines', readonly OpsMachine[], true>;
+
+/**
+ * `/machines` — one bordered group per paired machine with its
+ * environments in three columns, the `platform` row for `anthropic-api`
+ * at the bottom, and the dashed "Pair a machine" card when there is no
+ * machine at all (`docs/design/HANDOFF.md` → Machines).
+ */
+export const MachinesView = component<MachinesViewProps>(({ props }) => () => (
+    <OpsPage page="machines" title="Machines" slots={{ actions: () => <LinkButton to="/pair" intent="primary" icon="plus">Pair a machine</LinkButton> }}>
+        {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} />)}
+        <PlatformRow defaultFor={platformRow.defaultFor} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
+        {props.machines.length === 0 ? <EmptyState variant="machines" /> : null}
+    </OpsPage>
+));
+
+export const Machines = component(() => () => <MachinesView machines={opsMachines} />);

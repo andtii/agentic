@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, RuntimeId, SessionId, TaskId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 
 /**
@@ -29,6 +29,8 @@ export interface Route {
     readonly policy: OfflinePolicy;
     /** The configuration the session runs with (AGT-06/07), taken once at `run`. */
     readonly config: FrozenAgentConfig;
+    /** For a delegated task: the approval rules of every ancestor's agent (the parent route's chain plus the parent's own) — the child session's policy never widens them. */
+    readonly constraints?: readonly ApprovalRule[];
     /** Allocated at placement; the same id is retried so `Machine.openSession` stays idempotent. */
     sessionId?: SessionId;
     status: RouteStatus;

@@ -45,7 +45,7 @@ const { session, capabilities } = await driver.open(env, openSpec, { sessionId, 
 const report = await driver.doctor(environments);         // ok: false when two environments share a config dir
 ```
 
-- **Isolation (EXE-04/05/07)**: one `claudeCode()` agent per environment, `settingSources: []`, `CLAUDE_CONFIG_DIR = profileDir`. The daemon's own `CLAUDE_CONFIG_DIR` and every `ANTHROPIC_*` variable are removed from the child environment, so no environment picks up another account; an environment without `profileDir` uses the default config dir and `doctor` warns. `doctor` compares config dirs normalised (separators, `..`, trailing slash; case-folded on Windows) and reports auth per profile.
+- **Isolation (EXE-04/05/07)**: one `claudeCode()` agent per environment, `settingSources: []`, `CLAUDE_CONFIG_DIR = profileDir`. The daemon's own `CLAUDE_CONFIG_DIR` and every `ANTHROPIC_*` variable are removed from the child environment, so no environment picks up another account; an environment without `profileDir` uses the default config dir and `doctor` warns. `doctor` compares config dirs normalised (separators, `..`, trailing slash; case-folded on Windows) and reports auth per profile; its codes are `CLAUDE_CODE_DOCTOR_CODES` (`shared-config-dir` is the error, `default-config-dir` / `auth-*` the warnings and infos). `__tests__/claude-code/isolation.test.ts` is the isolation conformance run: three profiles, each session's child environment differs from the others only in `CLAUDE_CONFIG_DIR`, and starting one never changes another's. `docs/multi-account.md` has the manual checklist for the real CLI (Windows verified; macOS Keychain not).
 - **Sessions**: `cwd` must be inside the environment's `cwdRoots`; `system` is appended to Claude Code's preset (`systemPromptPreset: true`); `model`, `maxTurns`, `maxBudgetUsd`, the policy and `resume` pass through.
 - **Memory (MEM-10)**: the platform's `## Memory` block becomes `## Platform memory` with a note that it is not Claude Code memory; the report lists `memory.platform` as supported and `memory.runtime` (CLAUDE.md, settings) as unsupported with the reason.
 - **Platform tools**: the names in `OpenSpec.tools` are served as client tools with the platform's own name, description and schema; `execute` calls `callTool`, which the daemon sends as `tool.call`. A name the daemon has no definition for is not served and is listed as unsupported.
@@ -59,7 +59,7 @@ const report = await driver.doctor(environments);         // ok: false when two 
 |---|---|---|
 | `memory_search` | `MemoryPort.search` | `readOnly`, `idempotent` |
 | `memory_remember` | `MemoryPort.remember` (provenance `source: 'agent'`) | |
-| `delegate` | `TaskPort.delegate` (child id from `callId`, §7) | `openWorld` |
+| `delegate` | `TaskPort.delegate` (child id from `callId`, §7); result flattened to `{ taskId, status, text?, output?, artifacts, verified, error?, notStopped? }`; emits `agent-start` / `agent-update` for the child when the host's tool context can emit | `openWorld` |
 | `chat_post` | `ChatPort.post` | |
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |

@@ -19,6 +19,26 @@ export function configDirKey(dir: string): string {
     return n.root !== '' ? key.toLowerCase() : key;
 }
 
+/** The finding codes `claudeCodeDoctor` reports — named so the UI, the Machine verdicts and tests refer to one spelling. */
+export const CLAUDE_CODE_DOCTOR_CODES = {
+    /** error: two environments resolve to one config dir — one account, one set of settings (EXE-07). */
+    sharedConfigDir: 'shared-config-dir',
+    /** warn: no `profileDir`; the default config dir is shared with Claude Code run by hand. */
+    defaultConfigDir: 'default-config-dir',
+    authOk: 'auth-ok',
+    authUnknown: 'auth-unknown',
+    authMissing: 'auth-missing',
+    authExpired: 'auth-expired'
+} as const;
+
+/** The auth finding per `AuthStatus` — one spelling, from the table above. */
+const AUTH_CODES: Record<EnvironmentInspection['authStatus'], string> = {
+    ok: CLAUDE_CODE_DOCTOR_CODES.authOk,
+    unknown: CLAUDE_CODE_DOCTOR_CODES.authUnknown,
+    missing: CLAUDE_CODE_DOCTOR_CODES.authMissing,
+    expired: CLAUDE_CODE_DOCTOR_CODES.authExpired
+};
+
 export interface DoctorInput {
     readonly env: LocalEnvironment;
     /** The config dir the CLI will actually use: `profileDir`, or the default when there is none. */
@@ -41,7 +61,7 @@ export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
         if (group.ids.length < 2) continue;
         findings.push({
             level: 'error',
-            code: 'shared-config-dir',
+            code: CLAUDE_CODE_DOCTOR_CODES.sharedConfigDir,
             message: `Environments ${group.names.map((n) => `"${n}"`).join(', ')} share the Claude Code config dir ${group.dir}: they would use one account and one set of settings. Give each its own profileDir.`,
             environmentIds: group.ids
         });
@@ -51,16 +71,17 @@ export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
         if (env.profileDir === undefined) {
             findings.push({
                 level: 'warn',
-                code: 'default-config-dir',
+                code: CLAUDE_CODE_DOCTOR_CODES.defaultConfigDir,
                 message: `Environment "${env.name}" has no profileDir and uses the default Claude Code config dir ${configDir}; it is not isolated from Claude Code run by hand on this machine.`,
                 environmentIds: [env.id]
             });
         }
         const who = inspection.identity === undefined ? '' : ` (${inspection.identity})`;
         const auth = `Environment "${env.name}" at ${configDir}: auth ${inspection.authStatus}${who}.`;
-        if (inspection.authStatus === 'ok') findings.push({ level: 'info', code: 'auth-ok', message: auth, environmentIds: [env.id] });
-        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code: 'auth-unknown', message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
-        else findings.push({ level: 'warn', code: `auth-${inspection.authStatus}`, message: `${auth} Sign in with CLAUDE_CONFIG_DIR=${configDir} claude /login.`, environmentIds: [env.id] });
+        const code = AUTH_CODES[inspection.authStatus];
+        if (inspection.authStatus === 'ok') findings.push({ level: 'info', code, message: auth, environmentIds: [env.id] });
+        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code, message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
+        else findings.push({ level: 'warn', code, message: `${auth} Sign in with CLAUDE_CONFIG_DIR=${configDir} claude /login.`, environmentIds: [env.id] });
     }
 
     return { ok: !findings.some((f) => f.level === 'error'), findings };

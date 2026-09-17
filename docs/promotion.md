@@ -11,6 +11,7 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | BM25-ish memory ranking + versioned NDJSON export (`packages/memory/src/rank`, `src/export`) | `@sigx/ai-agent` (`./memory`), beside the interfaces | once a second MemoryPlugin exists |
 | Permission-free proposal guard + lesson helpers (`packages/learning/src/proposals`, `src/lessons`) | `@sigx/ai-agent` (`./memory`), beside the Learning interfaces | once a second LearningPlugin exists |
 | DelegateTool (`packages/runtimes/src/tools/delegate.ts`) | `@sigx/ai-agent` | after limit semantics settle |
+| Approval-rule policy compiler + `constrainPolicy` (stricter side wins across delegation) (`packages/platform/src/policy`) | `@sigx/ai-agent` policy rules | once a second consumer of `ApprovalRule` exists |
 | Daemon-protocol envelope + relay (`packages/daemon-protocol`, `apps/daemon`) | `@sigx/ai-agent/wire` + `@sigx/ai-agent-node` | later |
 | NDJSON `EventLogStore` with platform-keyed files + reconnecting bearer WebSocket with backoff (`apps/daemon/src/event-log.ts`, `src/connection.ts`) | `@sigx/ai-agent-node` | when a second Node host needs them |
 | `MultiSelect` (`packages/ui/src/_zero-gaps/multi-select.tsx`) | `@sigx/zero` Combobox multiple mode (andtii/zero-wip#479) | when zero ships it — delete the gap, re-point `MultiSelectField` |

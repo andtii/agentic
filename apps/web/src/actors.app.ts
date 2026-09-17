@@ -26,6 +26,10 @@
  * platform's `scheduleTrigger()` (#42) over the router: the environment
  * probe reads the Machines, and every task a firing creates — queued, or
  * parked `waiting {environment-offline}` — is handed to `Routing.run`.
+ * Delegation (#39): the same tool ports serve `delegate` on both paths; a
+ * child session's `request` reaches the Inbox through the router. Memory and
+ * learning (#41) run through `platformLearningPorts` over the default
+ * `@agentic/learning` plugin.
  */
 import type { Principal, WorkspaceId } from '@agentic/core';
 import {
@@ -51,6 +55,7 @@ import {
     ledgerRecorder,
     machineKey,
     machinePrincipal,
+    platformLearningPorts,
     principalCodec,
     routingKey,
     scheduleTrigger,
@@ -64,6 +69,7 @@ import {
     type ToolCallPort,
     type TriggerPort
 } from '@agentic/platform';
+import { learningPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
@@ -126,9 +132,11 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, ...(anthropic ? { anthropic } : {}) }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) },
-        usage: ledgerRecorder()
+        usage: ledgerRecorder(),
+        learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) })
     });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    const Inbox = defineInbox({ channels: ports.channels });
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, inbox: () => Inbox });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,
@@ -150,7 +158,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
                     .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
             }
         });
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, defineInbox({ channels: ports.channels })];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox];
 }
 
 /**

@@ -9,7 +9,7 @@ export { claudeCodeDriver } from './driver.js';
 export type { ProfileAuth, ProfileAuthDeps } from './auth.js';
 export { readProfileAuth } from './auth.js';
 export type { DoctorInput } from './doctor.js';
-export { claudeCodeDoctor, configDirKey } from './doctor.js';
+export { claudeCodeDoctor, CLAUDE_CODE_DOCTOR_CODES, configDirKey } from './doctor.js';
 export type { ClaudeCodeReportInput } from './capabilities.js';
 export { claudeCodeCapabilityReport } from './capabilities.js';
 export type { BridgedTools } from './tools.js';

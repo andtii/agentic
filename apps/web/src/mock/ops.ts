@@ -1,0 +1,341 @@
+/**
+ * Mock data for the operations routes (#90): machines and their
+ * environments, pairing, schedules, plugins, settings, history and usage.
+ * Shapes use `@agentic/core` vocabulary where it exists
+ * (`EnvironmentDescriptor`, `MachineInfo`, `NotificationKind`); the rest is
+ * deliberately local until #36, #42, #48, #44 and #45 wire the actors. The
+ * names are the handoff's sample data (`docs/design/HANDOFF.md`): Atlas,
+ * Forge, Lint, Scout; alien01, nuc-lab, platform.
+ */
+import type { AgentHue } from '@agentic/ui';
+import type { EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, NotificationKind } from '@agentic/core';
+
+export interface OpsAgent {
+    readonly id: string;
+    readonly name: string;
+    readonly hue: AgentHue;
+    readonly runtime: 'anthropic-api' | 'claude-code';
+}
+
+export const opsAgents: readonly OpsAgent[] = [
+    { id: 'atlas', name: 'Atlas', hue: 1, runtime: 'anthropic-api' },
+    { id: 'forge', name: 'Forge', hue: 2, runtime: 'claude-code' },
+    { id: 'lint', name: 'Lint', hue: 3, runtime: 'claude-code' },
+    { id: 'scout', name: 'Scout', hue: 4, runtime: 'anthropic-api' }
+];
+
+export const opsAgent = (id: string): OpsAgent => opsAgents.find(a => a.id === id) ?? { id, name: id, hue: 1, runtime: 'anthropic-api' };
+
+/* ---------------------------------------------------------------- machines */
+
+export interface OpsMachine extends MachineInfo {
+    /** What the OS row prints ("Windows 11"). */
+    readonly osLabel: string;
+    /** Relative age of the last heartbeat or last sighting, already formatted. */
+    readonly seen: string;
+    readonly pairedOn: string;
+}
+
+export const opsMachines: readonly OpsMachine[] = [
+    { id: 'alien01' as MachineId, name: 'alien01', os: 'windows', osLabel: 'Windows 11', daemonVersion: '0.1.0', online: true, lastSeenAt: Date.parse('2026-09-17T14:20:04Z'), seen: '4s ago', pairedOn: '16 Sep' },
+    { id: 'nuc-lab' as MachineId, name: 'nuc-lab', os: 'windows', osLabel: 'Windows 11', daemonVersion: '0.1.0', online: false, lastSeenAt: Date.parse('2026-09-17T11:20:00Z'), seen: '3h ago', pairedOn: '12 Sep' }
+];
+
+export const opsMachine = (id: string): OpsMachine | undefined => opsMachines.find(m => m.id === id);
+
+const env = (machineId: string, name: string, account: EnvironmentDescriptor['account'], active: number, max: number): EnvironmentDescriptor => ({
+    id: `${machineId}:${name}` as EnvironmentId,
+    machineId: machineId as MachineId,
+    name,
+    runtime: 'claude-code',
+    account,
+    cwdRoots: [],
+    concurrency: { active, max },
+    isolation: 'config-dir'
+});
+
+export const opsEnvironments: readonly EnvironmentDescriptor[] = [
+    env('alien01', 'work', { label: 'work', authStatus: 'ok' }, 1, 3),
+    env('alien01', 'personal', { label: 'personal', authStatus: 'ok' }, 1, 3),
+    env('alien01', 'client-acme', { label: 'client-acme', authStatus: 'expired' }, 0, 2),
+    env('nuc-lab', 'work', { label: 'work', authStatus: 'unknown' }, 0, 2)
+];
+
+export const environmentsOf = (machineId: string): readonly EnvironmentDescriptor[] => opsEnvironments.filter(e => e.machineId === machineId);
+
+/** Agents that default to an environment, by environment id. */
+export const defaultAgentsFor: Readonly<Record<string, readonly string[]>> = {
+    'alien01:work': ['forge'],
+    'alien01:personal': ['lint']
+};
+
+/** Tasks queued for an environment (held under the agent's offline policy, EXE-12). */
+export const queuedFor: Readonly<Record<string, number>> = { 'nuc-lab:work': 1 };
+
+export const queuedOn = (machineId: string): number => environmentsOf(machineId).reduce((n, e) => n + (queuedFor[e.id] ?? 0), 0);
+
+/** The `platform` row: `anthropic-api` runs without any machine. */
+export const platformRow = {
+    name: 'platform',
+    caption: 'anthropic-api · your own key, encrypted at rest · runs without any machine online',
+    defaultFor: ['atlas', 'scout'],
+    key: 'auth-ok' as const,
+    keyLabel: 'KEY OK'
+};
+
+export interface OpsSession {
+    readonly id: string;
+    readonly task: string;
+    readonly agentId: string;
+    readonly environment: string;
+    readonly machineId: string;
+    /** A pill status: `waiting` (awaiting approval), `active` (running). */
+    readonly status: 'waiting' | 'active';
+    readonly age: string;
+}
+
+export const opsSessions: readonly OpsSession[] = [
+    { id: 's_41aa', task: 'Drawer collapse in shell.css', agentId: 'forge', environment: 'work', machineId: 'alien01', status: 'waiting', age: '14m' },
+    { id: 's_41ab', task: 'Review the change', agentId: 'lint', environment: 'personal', machineId: 'alien01', status: 'active', age: '3m' }
+];
+
+export const sessionsOn = (machineId: string): readonly OpsSession[] => opsSessions.filter(s => s.machineId === machineId);
+
+export interface DoctorCheck {
+    readonly text: string;
+    readonly ok: boolean;
+    readonly note: string;
+}
+
+/** The EXE-07 account-isolation checklist the daemon reports. */
+export const doctorChecks: readonly DoctorCheck[] = [
+    { text: 'Each environment has its own profile directory', ok: true, note: '3 of 3' },
+    { text: "Starting work in one does not change another's login", ok: true, note: 'validated 17 Sep' },
+    { text: 'settingSources is empty', ok: true, note: 'ok' },
+    { text: 'client-acme can authenticate', ok: false, note: 'token expired' }
+];
+
+export const doctorFootnote = 'Validated for Windows. macOS and Linux stay disabled until the same check passes there.';
+
+/* ------------------------------------------------------------------ pairing */
+
+export const pairing = {
+    code: 'K7Q2MX',
+    /** Seconds left on the code when the page opens; the countdown starts at 10:00. */
+    expiresIn: 521,
+    install: 'npm i -g agentic-daemon',
+    grants: [
+        'The machine can accept work for this workspace and report results. Runtime logins stay on the machine. The platform only sees whether each account can authenticate.',
+        'Revoke a machine at any time from its page.'
+    ]
+};
+
+/* ---------------------------------------------------------------- schedules */
+
+export type ScheduleKind = 'reminder' | 'recurring' | 'agent-task';
+
+export interface OpsSchedule {
+    readonly id: string;
+    readonly kind: ScheduleKind;
+    readonly what: string;
+    readonly when: string;
+    /** Already in the workspace zone; `paused` while disabled. */
+    readonly nextRun: string;
+    /** `platform` or an environment id; with an agent when an agent runs it. */
+    readonly runsOn: { readonly environmentId?: string; readonly agentId?: string };
+    readonly enabled: boolean;
+}
+
+export const opsSchedules: readonly OpsSchedule[] = [
+    { id: 'sch_1', kind: 'reminder', what: 'Call the venue about the field service event', when: 'once', nextRun: 'today 15:00', runsOn: {}, enabled: true },
+    { id: 'sch_2', kind: 'recurring', what: 'Weekly summary to inbox', when: 'Thu 17:30', nextRun: 'today 17:30', runsOn: { agentId: 'atlas' }, enabled: true },
+    { id: 'sch_3', kind: 'agent-task', what: 'Nightly dependency audit', when: 'daily 02:00', nextRun: 'tomorrow 02:00', runsOn: { environmentId: 'nuc-lab:work', agentId: 'forge' }, enabled: true },
+    { id: 'sch_4', kind: 'recurring', what: 'Stand up and stretch', when: 'weekdays 10:30', nextRun: 'paused', runsOn: {}, enabled: false }
+];
+
+export const workspaceTimeZone = 'Europe/Stockholm';
+/** AST-07: how a recurrence behaves across a daylight-saving change. */
+export const dstRule = `Times are ${workspaceTimeZone}. Across daylight saving, 02:00 jobs run once: skipped hours run at 03:00, repeated hours run the first time only.`;
+
+/** The amber line under a schedule bound to an offline environment. */
+export function offlinePolicyLine(schedule: OpsSchedule): string | undefined {
+    const id = schedule.runsOn.environmentId;
+    if (!id) return undefined;
+    const machine = opsMachine(id.split(':')[0]!);
+    return machine && !machine.online ? `${machine.name} is offline · policy: queue until it returns` : undefined;
+}
+
+/* ------------------------------------------------------------------ plugins */
+
+export type PluginKind = 'runtime' | 'memory' | 'learning' | 'connector' | 'a2a';
+
+export interface PluginDependent {
+    /** An agent (by id) or a schedule (by title). */
+    readonly agentId?: string;
+    readonly schedule?: string;
+    /** "default environment · 1 active session" */
+    readonly reason: string;
+    readonly activeSessions?: number;
+}
+
+export interface OpsPlugin {
+    readonly id: string;
+    readonly name: string;
+    readonly version: string;
+    readonly kind: PluginKind;
+    readonly description: string;
+    readonly granted: readonly string[];
+    /** PLG-09: what the plugin declares it cannot do. */
+    readonly unsupported: readonly string[];
+    readonly usedBy: readonly string[];
+    readonly dependents: readonly PluginDependent[];
+    readonly enabled: boolean;
+}
+
+export const opsPlugins: readonly OpsPlugin[] = [
+    { id: 'anthropic-api', name: 'anthropic-api', version: '0.1.0', kind: 'runtime', description: 'Platform-managed agent over the Anthropic API.', granted: ['secret: anthropic key'], unsupported: [], usedBy: ['atlas', 'scout'], dependents: [{ agentId: 'atlas', reason: 'default runtime' }, { agentId: 'scout', reason: 'default runtime' }], enabled: true },
+    { id: 'claude-code', name: 'claude-code', version: '0.1.0', kind: 'runtime', description: 'Drives Claude Code on a paired machine through the daemon.', granted: ['machines: open sessions'], unsupported: ['usage and cost', 'live migration'], usedBy: ['forge', 'lint'], dependents: [{ agentId: 'forge', reason: 'default environment · 1 active session', activeSessions: 1 }, { agentId: 'lint', reason: 'default environment · 1 active session', activeSessions: 1 }, { schedule: 'Nightly dependency audit', reason: 'schedule' }], enabled: true },
+    { id: 'memory-default', name: 'memory-default', version: '0.1.0', kind: 'memory', description: 'Keyword and recency retrieval. No embeddings.', granted: ['memory: own scopes'], unsupported: ['semantic search'], usedBy: ['atlas', 'forge', 'lint', 'scout'], dependents: opsAgents.map(a => ({ agentId: a.id, reason: 'memory plugin' })), enabled: true },
+    { id: 'learning-default', name: 'learning-default', version: '0.1.0', kind: 'learning', description: 'Turns corrections into lessons. Instruction changes wait for review.', granted: ['memory: write lessons'], unsupported: [], usedBy: ['atlas', 'forge', 'lint', 'scout'], dependents: opsAgents.map(a => ({ agentId: a.id, reason: 'learning plugin' })), enabled: true },
+    { id: 'github-mcp', name: 'github (mcp)', version: 'streamable-http', kind: 'connector', description: 'Issues and pull requests as tools.', granted: ['secret: github token'], unsupported: ['resources', 'prompts', 'sampling'], usedBy: ['forge'], dependents: [{ agentId: 'forge', reason: 'connector' }], enabled: true },
+    { id: 'a2a', name: 'a2a', version: '1.0 json-rpc', kind: 'a2a', description: 'Expose agents as A2A cards and connect remote A2A agents.', granted: [], unsupported: ['gRPC and REST bindings', 'push config', 'extended card', 'Subscribe'], usedBy: [], dependents: [], enabled: false }
+];
+
+/** "Disable and stop 2 sessions" — the consequence the confirm button states. */
+export function disableConsequence(plugin: OpsPlugin): string {
+    const sessions = plugin.dependents.reduce((n, d) => n + (d.activeSessions ?? 0), 0);
+    return sessions ? `Disable and stop ${sessions} ${sessions === 1 ? 'session' : 'sessions'}` : `Disable ${plugin.name}`;
+}
+
+/* ----------------------------------------------------------------- settings */
+
+export interface NotificationRow {
+    readonly kind: NotificationKind | 'approval-or-input';
+    readonly label: string;
+    readonly inbox: boolean;
+    readonly push: boolean;
+}
+
+export const opsSettings = {
+    timeZone: workspaceTimeZone,
+    timeZones: ['Europe/Stockholm', 'Europe/London', 'America/New_York', 'Asia/Tokyo', 'UTC'],
+    defaultEnvironment: 'platform',
+    environmentOptions: [
+        { value: 'platform', label: 'platform / anthropic-api / byo-key' },
+        { value: 'alien01:work', label: 'alien01 / claude-code / work' },
+        { value: 'alien01:personal', label: 'alien01 / claude-code / personal' }
+    ],
+    /** Web Push may slip (architecture §12); when it does the column is hidden, not disabled. */
+    pushAvailable: true,
+    notifications: [
+        { kind: 'approval-or-input', label: 'Approval or input needed', inbox: true, push: true },
+        { kind: 'reminder', label: 'Reminders', inbox: true, push: true },
+        { kind: 'task-failed', label: 'Task failed', inbox: true, push: true },
+        { kind: 'task-done', label: 'Task completed', inbox: true, push: false }
+    ] as readonly NotificationRow[],
+    apiKeys: [{ provider: 'anthropic', masked: 'sk-ant-…9f2c', status: 'auth-ok' as const, label: 'KEY OK' }],
+    budgets: { monthly: '$50.00', perTask: '$5.00' },
+    retention: { sessionLogs: '90 days', artifacts: '30 days' }
+};
+
+/* ------------------------------------------------------------------ history */
+
+export type HistoryKind = 'correction' | 'approval-asked' | 'approval' | 'environment' | 'delegation' | 'interrupted' | 'config' | 'transition';
+
+export interface HistoryEntry {
+    readonly id: string;
+    /** ISO time in the workspace zone. */
+    readonly at: string;
+    readonly kind: HistoryKind;
+    /** `you` or an agent id. */
+    readonly actor: string;
+    readonly what: string;
+    readonly ref: { readonly label: string; readonly href: string };
+}
+
+export const historyFilters = [
+    { id: 'all', label: 'All', kinds: undefined },
+    { id: 'approvals', label: 'Approvals', kinds: ['approval', 'approval-asked'] },
+    { id: 'delegations', label: 'Delegations', kinds: ['delegation'] },
+    { id: 'environments', label: 'Environment choices', kinds: ['environment'] },
+    { id: 'transitions', label: 'Transitions', kinds: ['transition'] },
+    { id: 'config', label: 'Config changes', kinds: ['config'] }
+] as const satisfies readonly { id: string; label: string; kinds?: readonly HistoryKind[] }[];
+
+export type HistoryFilter = (typeof historyFilters)[number]['id'];
+
+export const opsHistory: readonly HistoryEntry[] = [
+    { id: 'h1', at: '2026-09-17T14:20:03', kind: 'correction', actor: 'you', what: 'Corrected Forge: check the focus trap after layout changes → lesson stored', ref: { label: 's_41aa', href: '/sessions/s_41aa' } },
+    { id: 'h2', at: '2026-09-17T14:09:40', kind: 'approval-asked', actor: 'forge', what: 'Bash git push origin 47-mobile-drawer · rule ask on destructive', ref: { label: 'r_5d01', href: '/sessions/s_41aa' } },
+    { id: 'h3', at: '2026-09-17T14:02:12', kind: 'environment', actor: 'forge', what: 'Session opened on alien01 / claude-code / work (agent default)', ref: { label: 's_41aa', href: '/sessions/s_41aa' } },
+    { id: 'h4', at: '2026-09-17T14:02:11', kind: 'delegation', actor: 'atlas', what: 'Delegated to Forge · depth 1 · budget split $5.00', ref: { label: 't_8f2c', href: '/tasks/t_8f2c' } },
+    { id: 'h5', at: '2026-09-17T14:02:11', kind: 'delegation', actor: 'atlas', what: 'Delegated to Lint · depth 1 · budget split $2.00', ref: { label: 't_8f2d', href: '/tasks/t_8f2d' } },
+    { id: 'h6', at: '2026-09-17T13:41:55', kind: 'interrupted', actor: 'atlas', what: 'Turn interrupted by platform restart · not replayed · waiting for Resume', ref: { label: 's_40f7', href: '/sessions/s_40f7' } },
+    { id: 'h7', at: '2026-09-17T11:06:20', kind: 'approval', actor: 'you', what: 'Allowed for session: Bash pnpm test * (from phone)', ref: { label: 'r_5c88', href: '/sessions/s_41aa' } },
+    { id: 'h8', at: '2026-09-17T09:12:44', kind: 'config', actor: 'you', what: 'Forge v6 → v7 · Added the Verify command rule', ref: { label: 'v7', href: '/agents/forge' } },
+    { id: 'h9', at: '2026-09-17T02:00:00', kind: 'transition', actor: 'forge', what: 'Nightly dependency audit queued · nuc-lab offline · policy queue', ref: { label: 't_7e01', href: '/tasks/t_7e01' } },
+    { id: 'h10', at: '2026-09-16T17:30:02', kind: 'transition', actor: 'atlas', what: 'Weekly summary completed · verified', ref: { label: 't_7c10', href: '/tasks/t_7c10' } },
+    { id: 'h11', at: '2026-09-16T09:04:10', kind: 'config', actor: 'you', what: 'Lint v2 → v3 · Reviewer role, read-only tools', ref: { label: 'v3', href: '/agents/lint' } }
+];
+
+/* -------------------------------------------------------------------- usage */
+
+export type UsageBy = 'agent' | 'task' | 'turn';
+export type DataQuality = 'reported' | 'partly-estimated' | 'not-reported';
+
+export interface UsageRow {
+    readonly id: string;
+    readonly label: string;
+    /** For `agent` rows: the agent's id (tile + runtime); for others, a mono sub-label. */
+    readonly agentId?: string;
+    readonly sub?: string;
+    readonly tasks: number;
+    /** `null` = the provider reported nothing (never 0). */
+    readonly tokens: number | null;
+    readonly costUsd: number | null;
+    readonly quality: DataQuality;
+}
+
+export const usageStats = [
+    { label: 'September spend', value: '$18.42', caption: 'of $50.00 monthly limit', tone: 'live' as const },
+    { label: 'Estimated share', value: '$2.10', caption: 'pricing unknown for 1 model', tone: 'needs-you' as const },
+    { label: 'Not reported', value: '31 sessions', caption: 'claude-code gives no cost data', tone: 'muted' as const },
+    { label: 'Corrections this week', value: '3', caption: 'down from 7 last week', tone: 'live' as const }
+];
+
+export const usageDays = { from: '1 Sep', to: '17 Sep', today: '$1.74', values: [0.6, 1.1, 0.8, 1.9, 1.4, 0.2, 0.1, 0.9, 2.1, 1.5, 2.8, 1.4, 0.7, 0.5, 2.3, 3.4, 2.6] };
+
+const agentRows: readonly UsageRow[] = [
+    { id: 'atlas', label: 'Atlas', agentId: 'atlas', tasks: 41, tokens: 2_100_000, costUsd: 11.9, quality: 'reported' },
+    { id: 'scout', label: 'Scout', agentId: 'scout', tasks: 12, tokens: 1_400_000, costUsd: 6.52, quality: 'partly-estimated' },
+    { id: 'forge', label: 'Forge', agentId: 'forge', tasks: 23, tokens: null, costUsd: null, quality: 'not-reported' },
+    { id: 'lint', label: 'Lint', agentId: 'lint', tasks: 8, tokens: null, costUsd: null, quality: 'not-reported' }
+];
+
+const taskRows: readonly UsageRow[] = [
+    { id: 't_8f2c', label: 'Make the drawer collapse below 768 px', sub: 't_8f2c · Forge', tasks: 1, tokens: null, costUsd: null, quality: 'not-reported' },
+    { id: 't_7c10', label: 'Weekly summary', sub: 't_7c10 · Atlas', tasks: 1, tokens: 310_000, costUsd: 1.74, quality: 'reported' },
+    { id: 't_77b1', label: 'Summarise which A2A clients exist today', sub: 't_77b1 · Scout', tasks: 1, tokens: 220_000, costUsd: 0.98, quality: 'partly-estimated' }
+];
+
+const turnRows: readonly UsageRow[] = [
+    { id: 'turn_1', label: 'Atlas · turn 14', sub: 's_40f7 · 14:02', tasks: 1, tokens: 12_400, costUsd: 0.07, quality: 'reported' },
+    { id: 'turn_2', label: 'Scout · turn 3', sub: 's_3e11 · 13:58', tasks: 1, tokens: 9_800, costUsd: 0.05, quality: 'partly-estimated' },
+    { id: 'turn_3', label: 'Forge · turn 9', sub: 's_41aa · 14:09', tasks: 1, tokens: null, costUsd: null, quality: 'not-reported' }
+];
+
+export const usageRows: Readonly<Record<UsageBy, readonly UsageRow[]>> = { agent: agentRows, task: taskRows, turn: turnRows };
+
+/** OPS-07: an unreported figure prints `n/a`, never 0; an estimate is prefixed `~`. */
+export function money(cost: number | null, quality: DataQuality): string {
+    if (cost === null || quality === 'not-reported') return 'n/a';
+    const text = `$${cost.toFixed(2)}`;
+    return quality === 'partly-estimated' ? `~${text}` : text;
+}
+
+export function tokensText(tokens: number | null): string {
+    if (tokens === null) return 'n/a';
+    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+    return String(tokens);
+}

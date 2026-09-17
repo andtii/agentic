@@ -16,3 +16,4 @@ export * from './registry/index.js';
 export * from './pairing/index.js';
 export * from './routing/index.js';
 export * from './audit/index.js';
+export * from './policy/index.js';
