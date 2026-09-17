@@ -27,6 +27,7 @@ export default defineConfig({
             { find: '@agentic/memory/testing', replacement: resolve(__dirname, 'packages/memory/src/testing/index.ts') },
             { find: '@agentic/memory', replacement: pkg('memory') },
             { find: '@agentic/core', replacement: pkg('core') },
+            { find: '@agentic/ui/design-system', replacement: resolve(__dirname, 'packages/ui/src/design-system/index.ts') },
             { find: '@agentic/ui', replacement: pkg('ui') },
             { find: '@agentic/mcp', replacement: pkg('mcp') },
             { find: '@agentic/a2a', replacement: pkg('a2a') }

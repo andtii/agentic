@@ -3,4 +3,4 @@
 
 // Extension-less stylesheet exports — vite/client only declares `*.css`.
 declare module '@sigx/zero/css';
-declare module '@sigx/zero-daisyui/css';
+declare module '@agentic/ui/css';

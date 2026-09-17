@@ -1,6 +1,6 @@
 # @agentic/web
 
-The web app: a server-rendered SignalX app (streaming SSR + hydration, `@sigx/router`, server functions) deployed as a Cloudflare Worker, with the UI on `@sigx/zero` + `@sigx/zero-daisyui` and the responsive shell from `@agentic/ui`.
+The web app: a server-rendered SignalX app (streaming SSR + hydration, `@sigx/router`, server functions) deployed as a Cloudflare Worker, with the UI on `@sigx/zero` skinned by `@agentic/ui`'s `control-room` design system (zero-daisyui derived; `docs/design/HANDOFF.md`) and the responsive shell from `@agentic/ui`.
 
 Scaffolded with `sigx create web --kind ssr --target cloudflare --features router,server-fn --styling none`; the Cloudflare entry (`src/entry.cloudflare.ts`, `wrangler.jsonc`) is extended by the worker-entry issue.
 
@@ -20,10 +20,11 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 ## Layout
 
 - `src/App.tsx` — the root: `ThemeProvider` + `AppShell` (from `@agentic/ui`) around `RouterView`; `themeInitScript` goes into `<head>` through `useHead`.
-- `src/router.ts` — the route table (docs/architecture.md §10): `/`, `/chats/:id`, `/agents`, `/agents/:id`, `/tasks/:id`, `/sessions/:id`, `/machines`, `/machines/:id`, `/schedules`, `/plugins`, `/settings`, `/pair`.
+- `src/router.ts` — the route table (docs/architecture.md §10): `/`, `/chats`, `/chats/:id`, `/agents`, `/agents/:id`, `/tasks/:id`, `/sessions/:id`, `/machines`, `/machines/:id`, `/schedules`, `/plugins`, `/settings`, `/pair`, `/history`, `/usage` (`/chats`, `/history`, `/usage` are placeholders until #88 / #90).
 - `src/pages/` — one component per route, mock data only (`src/mock/data.ts`).
-- `src/nav.ts` — the primary navigation.
-- `src/entry-client.tsx` / `src/entry-server.tsx` — import the design system CSS, call `installThemes()`, build the app.
+- `src/nav.ts` — the sidebar groups (Primary / Workspace), the Home badge count and the breadcrumb roots.
+- `src/styles.css` (document surface) and `src/styles/pages.css` (per-screen grids, one section per page).
+- `src/entry-client.tsx` / `src/entry-server.tsx` — import `@agentic/ui/css` (after `@sigx/zero/css`), call `installThemes()` from `@agentic/ui/design-system`, build the app.
 - `src/api/*.server.ts` — server functions (only ever run on the server).
 - `src/entry.cloudflare.ts` — the Worker: daemon socket stub → auth routes → actor mount + sockets → server functions → document render; exports `ActorHost`.
 - `src/actors.app.ts` — the platform actor registry, the `ActorHost` Durable Object class, the Worker half, and the ports later issues fill (`defaultPorts`).
@@ -31,11 +32,11 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 
 ## Theme
 
-`@sigx/zero-daisyui` ships `light`/`dark` (+ `dim`, `nord`, `sunset`). System light/dark is pure CSS (`light-dark()`); an explicit choice is stored under `zero-theme` and restored before first paint by the init script in `<head>`.
+One theme, `control-room`, dark only (docs/decisions.md), set on `<html data-theme>` in `index.html` and `color-scheme: dark` in `styles.css`. The init script in `<head>` still restores a persisted `zero-theme` choice, and `App.tsx` links the Google Fonts stylesheet (Schibsted Grotesk, JetBrains Mono). `zero:validate` checks `@agentic/ui`'s compiled design system with the `ai-*` fragment merged; the coverage report prints the warning count (declared-but-unwired axes until #85 / #87).
 
 ## Playwright
 
-`e2e/shell.spec.ts` renders the shell at 400px (drawer navigation) and 1280px (sidebar navigation) and navigates two routes each. It runs against the dev server; install a browser once:
+`e2e/shell.spec.ts` renders the shell at 400px (drawer navigation) and 1280px (232 px sidebar, 60 px topbar, nav groups, badge, breadcrumb) and navigates two routes each, plus the nav placeholders. It runs against the dev server; install a browser once:
 
 ```sh
 pnpm --filter @agentic/ui build

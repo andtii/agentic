@@ -2,7 +2,7 @@
   "name": "@agentic/ui",
   "version": "0.0.0",
   "private": true,
-  "description": "Zero-based UI: the ai-* chat fragment (thread, message, composer, tool call, reasoning, approval), layout shell and streaming markdown.",
+  "description": "Zero-based UI: the agentic design system (control-room theme on zero-daisyui), the ai-* chat fragment (thread, message, composer, tool call, reasoning, approval), forms, layout shell and streaming markdown.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,20 +20,35 @@
       "development": "./dist/fragment.js",
       "production": "./dist/fragment.prod.js",
       "import": "./dist/fragment.js"
-    }
+    },
+    "./design-system": {
+      "types": "./dist/design-system/index.d.ts",
+      "development": "./dist/design-system.js",
+      "production": "./dist/design-system.prod.js",
+      "import": "./dist/design-system.js"
+    },
+    "./css": "./dist/ds/css/index.css",
+    "./css/tokens": "./dist/ds/css/tokens.css",
+    "./register": {
+      "types": "./dist/ds/register.d.ts",
+      "import": "./dist/ds/register.js"
+    },
+    "./manifest.json": "./dist/ds/manifest.json",
+    "./fragment.json": "./dist/fragment.json"
   },
   "sideEffects": [
     "**/*.css"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && node scripts/emit-fragment.mjs"
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && node scripts/emit-fragment.mjs && node scripts/build-design-system.mjs"
   },
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@sigx/zero": "catalog:",
     "@sigx/markdown": "catalog:",
     "@sigx/ai-agent": "catalog:",
-    "@sigx/ai": "catalog:"
+    "@sigx/ai": "catalog:",
+    "@sigx/zero-daisyui": "catalog:"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",
@@ -43,7 +58,6 @@
     "@sigx/reactivity": "catalog:",
     "@sigx/runtime-core": "catalog:",
     "@sigx/runtime-dom": "catalog:",
-    "@sigx/zero-daisyui": "catalog:",
     "@sigx/zero-kit": "catalog:",
     "shiki": "^4.4.3"
   },

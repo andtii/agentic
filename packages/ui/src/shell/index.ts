@@ -1,5 +1,5 @@
-/** The responsive app shell: Navbar + Drawer (below 768px) / sidebar (above) + content. */
-export { AppShell } from './AppShell';
-export type { AppShellProps, NavItem, NavLinkSlotProps } from './AppShell';
+/** The responsive app shell: sidebar (≥ 768px) or Drawer (below) + topbar + content. */
+export { AppShell, SHELL_BREAKPOINT } from './AppShell';
+export type { AppShellProps, NavItem, NavGroup, NavLinkSlotProps } from './AppShell';
 export { ThemeToggle } from './ThemeToggle';
 export type { ThemeToggleProps } from './ThemeToggle';

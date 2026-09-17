@@ -4,6 +4,9 @@ All notable changes to `@agentic/ui` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Design system (`src/design-system`, `@agentic/ui/design-system`, #84): the `agentic` design system on zero-daisyui with the one dark theme `control-room` from `docs/design/HANDOFF.md`; `--ag-*` custom tokens; `tone` / `kind` axes and `hollow` / `outline` / `compact` / `selected` / `current` modifiers declared; daisy recipes re-tuned per scope by `withOverride` (button, fields, switch, badge, dialog, table, timeline, card, breadcrumbs, tabs, collapsible, toggle-group, skeleton, navbar); the `ai-*` fragment recipes included; compiled by `scripts/build-design-system.mjs` into `dist/ds/**` — exports `./css`, `./css/tokens`, `./register`, `./manifest.json`, `./fragment.json`; `installThemes()`. `@sigx/zero-daisyui` is a runtime dependency.
+- App shell restyled to the handoff (#84): 232 px sidebar / 60 px topbar on the design-system tokens, nav `groups` (labelled `<nav>` per group) and per-item `badge`, `breadcrumb` / `actions` / `connection` / `user` slots, `flush` main, the 3 x 16 px live marker; `SHELL_BREAKPOINT` and `NavGroup` exported. The shell no longer renders `ThemeToggle`.
+
 - Package skeleton.
 - Layout tier on `data-l-*` (`src/layout`): `Stack`/`Row`/`Col` (one `stack` scope, `data-orientation`), `Spacer`, `layoutAttrs`, breakpoint-prefixed overrides (`at={{ md: … }}`), `layout.css` step table over `--space-*`; `useMediaQuery` (SSR-safe). Exported as `@agentic/ui/layout.css`.
 - App shell (`src/shell`): `AppShell` (zero `Navbar` + modal `Drawer` below 768px, static sidebar above; router-agnostic `link` slot; `currentPath` → `data-state="active"`), `ThemeToggle`; `shell.css` exported as `@agentic/ui/shell.css`.

@@ -1,0 +1,239 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-17T09:24:07Z"
+ },
+ "title": "Agentic UI",
+ "launch": {
+  "view": "canvas",
+  "page": "core"
+ },
+ "pages": [
+  {
+   "id": "core",
+   "name": "Core flows"
+  },
+  {
+   "id": "agents",
+   "name": "Agents"
+  },
+  {
+   "id": "ops",
+   "name": "Operations"
+  },
+  {
+   "id": "mobile",
+   "name": "Mobile 400"
+  },
+  {
+   "id": "foundations",
+   "name": "Foundations"
+  }
+ ],
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1100,
+   "title": "Home  /",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Chat.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1240,
+   "title": "Chat  /chats/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Task.dc.html": {
+   "x": 0,
+   "y": 1400,
+   "w": 1440,
+   "h": 1080,
+   "title": "Task tree  /tasks/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Session.dc.html": {
+   "x": 1520,
+   "y": 1400,
+   "w": 1440,
+   "h": 1040,
+   "title": "Session  /sessions/:id",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Agents.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 820,
+   "title": "Agents  /agents",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "AgentConfig.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1560,
+   "title": "Agent config + versions  /agents/:id",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "AgentMemory.dc.html": {
+   "x": 3040,
+   "y": 0,
+   "w": 1440,
+   "h": 1100,
+   "title": "Agent memory  /agents/:id",
+   "page": "agents",
+   "is_interactive": true
+  },
+  "Machines.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 900,
+   "title": "Machines  /machines",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Machine.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 1000,
+   "title": "Machine  /machines/:id",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Pair.dc.html": {
+   "x": 3040,
+   "y": 0,
+   "w": 1440,
+   "h": 820,
+   "title": "Pair  /pair",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Schedules.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 1440,
+   "h": 720,
+   "title": "Schedules  /schedules",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Plugins.dc.html": {
+   "x": 1520,
+   "y": 1160,
+   "w": 1440,
+   "h": 1180,
+   "title": "Plugins  /plugins",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Settings.dc.html": {
+   "x": 3040,
+   "y": 1160,
+   "w": 1440,
+   "h": 1020,
+   "title": "Settings  /settings",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "History.dc.html": {
+   "x": 0,
+   "y": 2500,
+   "w": 1440,
+   "h": 800,
+   "title": "History  (audit, #44)",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "Usage.dc.html": {
+   "x": 1520,
+   "y": 2500,
+   "w": 1440,
+   "h": 900,
+   "title": "Usage  (ledger, #45)",
+   "page": "ops",
+   "is_interactive": true
+  },
+  "MobileHome.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: inbox + approval",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileChat.dc.html": {
+   "x": 480,
+   "y": 0,
+   "w": 400,
+   "h": 980,
+   "title": "Mobile: chat + composer",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileMachines.dc.html": {
+   "x": 960,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: machines",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "MobileNav.dc.html": {
+   "x": 1440,
+   "y": 0,
+   "w": 400,
+   "h": 860,
+   "title": "Mobile: drawer",
+   "page": "mobile",
+   "is_interactive": true
+  },
+  "Foundations.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1500,
+   "title": "Foundations: tokens, states, failures",
+   "page": "foundations"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "Chat.dc.html",
+  "Task.dc.html",
+  "Session.dc.html",
+  "Agents.dc.html",
+  "AgentConfig.dc.html",
+  "AgentMemory.dc.html",
+  "Machines.dc.html",
+  "Machine.dc.html",
+  "Pair.dc.html",
+  "Schedules.dc.html",
+  "Plugins.dc.html",
+  "Settings.dc.html",
+  "History.dc.html",
+  "Usage.dc.html",
+  "MobileHome.dc.html",
+  "MobileChat.dc.html",
+  "MobileMachines.dc.html",
+  "MobileNav.dc.html",
+  "Foundations.dc.html"
+ ],
+ "notes": {},
+ "designSystems": []
+}

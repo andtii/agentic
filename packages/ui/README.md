@@ -1,8 +1,24 @@
 # @agentic/ui
 
-Zero-based UI: the ai-* chat fragment (thread, message, composer, tool call, reasoning, approval), layout shell and streaming markdown.
+Zero-based UI: the `agentic` design system (`control-room` theme on zero-daisyui), the ai-* chat fragment (thread, message, composer, tool call, reasoning, approval), forms, layout shell and streaming markdown.
+
+The visual spec is `docs/design/HANDOFF.md` (tokens, layout, components, states, responsive, accessibility, motion, edge cases) with `tokens.json`, `screenshots/` and the `artboards/` source.
 
 Design: `docs/architecture.md`. What may move into the sigx estate later: `docs/promotion.md`.
+
+## Design system (`src/design-system`, `@agentic/ui/design-system`)
+
+zero-daisyui's tokens and recipes, re-tuned to the handoff and compiled by `@sigx/zero-kit` (`scripts/build-design-system.mjs`, part of `build`) into `dist/ds/**`. One theme, `control-room`, dark only. The handoff's extras are `--ag-*` custom tokens (`--ag-line`, `--ag-text-dim`, `--ag-agent-1`..., `--ag-control-h`, `--ag-sidebar-w`, ...); product states ride the `tone` and `kind` axes and the `hollow` / `outline` / `compact` / `selected` / `current` modifiers, not `data-state`.
+
+```ts
+import '@sigx/zero/css';
+import '@agentic/ui/css';                 // tokens + every recipe (daisy overridden, ai-* fragment)
+import '@agentic/ui/register';            // types: theme, properties, per-scope axes
+import { installThemes } from '@agentic/ui/design-system';
+installThemes();
+```
+
+`withOverride(recipes, scope, patch)` replaces a daisy recipe in place with the patch deep-merged (arrays and scalars replace, `compoundVariants` append) — one recipe per scope, never two. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
 
 ## Layout tier (`src/layout`)
 
@@ -20,12 +36,12 @@ import { Row, Col, Spacer } from '@agentic/ui';
 
 ## App shell (`src/shell`)
 
-`AppShell` is zero's `Navbar` + a modal `Drawer` (below 768px) or a sticky sidebar (above) around `<main>`. It is router-agnostic: pass `items` and render your router's link in the `link` slot; `currentPath` marks the active item. `ThemeToggle` flips the design system's light/dark pair through `useTheme()` (give server renders a `ThemeProvider`). Import `@agentic/ui/shell.css` once.
+`AppShell` is the handoff's shell: a sticky 232 px sidebar (brand, nav `groups` — the first unlabelled, the rest headed, each its own `<nav aria-label>` — with a per-item `badge`, then the `connection` and `user` slots) beside a 60 px topbar (`breadcrumb`, `actions` slots) and `<main>` (`flush` drops its padding). Below 768 px the sidebar becomes zero's modal `Drawer` with the same groups and foot. Router-agnostic: render your router's link in the `link` slot; `currentPath` marks the active item. Import `@agentic/ui/shell.css` once. `ThemeToggle` is still exported for a design system with a light pair; the app does not render it (dark only).
 
 ```tsx
 <ThemeProvider>
-    <AppShell brand="agentic" items={NAV} currentPath={route.path}
-        slots={{ link: ({ item }) => <Link to={item.href}>{item.label}</Link> }}>
+    <AppShell brand="agentic" groups={NAV_GROUPS} currentPath={route.path} flush={isChat}
+        slots={{ link: ({ item }) => <Link to={item.href}>{item.label}</Link>, breadcrumb, actions, connection, user }}>
         <RouterView />
     </AppShell>
 </ThemeProvider>

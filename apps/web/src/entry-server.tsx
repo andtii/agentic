@@ -1,6 +1,5 @@
-import '@sigx/zero-daisyui/register';
 import { defineApp } from 'sigx';
-import { installThemes } from '@sigx/zero-daisyui';
+import { installThemes } from '@agentic/ui/design-system';
 import { App } from './App';
 import { createServerRouter } from './router';
 

@@ -1,11 +1,12 @@
 import { defineLibConfig } from '@sigx/vite/lib';
 import type { ConfigEnv, UserConfig } from 'vite';
 
-// Two entries on purpose: `fragment` is pure data (the manifest fragment and
-// the recipe pack), so a design system's Node build script can import it
-// without loading the components or the sigx runtime.
+// Three entries on purpose: `fragment` (the manifest fragment and the recipe
+// pack) and `design-system` (tokens + every recipe) are pure data, so
+// `scripts/build-design-system.mjs` and `sigx zero:validate` import them in
+// Node without loading the components.
 const base = defineLibConfig({
-    entry: { index: 'src/index.ts', fragment: 'src/fragment/index.ts' },
+    entry: { index: 'src/index.ts', fragment: 'src/fragment/index.ts', 'design-system': 'src/design-system/index.ts' },
     external: [/@sigx\/.*/, /@agentic\/.*/, /^node:/, 'sigx', 'sigx/jsx-runtime', 'sigx/jsx-dev-runtime'],
     jsx: true,
     importSource: '@sigx/runtime-core',

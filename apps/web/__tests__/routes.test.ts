@@ -1,11 +1,11 @@
 import { routes, createServerRouter } from '../src/router';
-import { NAV } from '../src/nav';
+import { CRUMBS, NAV, NAV_GROUPS, needsYouCount } from '../src/nav';
 import { agentById, chatById, machineById, sampleIds, sessionById, taskById } from '../src/mock/data';
 
 /** The route skeleton docs/architecture.md §10 and issue #23 require. */
 const REQUIRED = [
-    '/', '/chats/:id', '/agents', '/agents/:id', '/tasks/:id', '/sessions/:id',
-    '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair'
+    '/', '/chats', '/chats/:id', '/agents', '/agents/:id', '/tasks/:id', '/sessions/:id',
+    '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair', '/history', '/usage'
 ];
 
 describe('route skeleton', () => {
@@ -18,6 +18,19 @@ describe('route skeleton', () => {
     it('every primary nav entry is a declared route', () => {
         const paths = new Set(routes.map(r => r.path));
         for (const item of NAV) expect(paths.has(item.href), item.href).toBe(true);
+    });
+
+    it('groups the nav as Primary and Workspace, with the Home badge counting what needs a person', () => {
+        const groups = NAV_GROUPS();
+        expect(groups.map(g => g.label)).toEqual(['Primary', 'Workspace']);
+        expect(groups[0]!.items.map(i => i.href)).toEqual(['/', '/chats', '/agents', '/machines', '/schedules']);
+        expect(groups[1]!.items.map(i => i.href)).toEqual(['/history', '/usage', '/plugins', '/settings']);
+        expect(groups[0]!.items[0]!.badge).toBe(needsYouCount());
+        expect(NAV.some(i => i.href === '/pair')).toBe(false);
+    });
+
+    it('has a breadcrumb root for every named route', () => {
+        for (const r of routes) expect(CRUMBS[String(r.name)], String(r.name)).toBeDefined();
     });
 
     it('resolves a parameterised route with its params on the server', async () => {

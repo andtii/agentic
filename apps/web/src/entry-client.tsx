@@ -1,17 +1,18 @@
 import '@sigx/zero/css';
-import '@sigx/zero-daisyui/css';
+import '@agentic/ui/css';
 import '@agentic/ui/layout.css';
 import '@agentic/ui/shell.css';
 import './styles.css';
-import '@sigx/zero-daisyui/register';
+import './styles/pages.css';
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
-import { installThemes } from '@sigx/zero-daisyui';
+import { installThemes } from '@agentic/ui/design-system';
 import { App } from './App';
 import { createAppRouter } from './router';
 
-// Seed zero's theme registry with the design system's themes before anything
-// reads it (the shell's toggle). The persisted choice was restored before
+// Seed zero's theme registry with the design system's one theme before
+// anything reads it. `<html data-theme="control-room">` is set in the
+// document; the persisted choice (none in v1) would be restored before
 // first paint by `themeInitScript` in <head>.
 installThemes();
 
