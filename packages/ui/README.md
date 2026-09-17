@@ -30,3 +30,15 @@ import { Row, Col, Spacer } from '@agentic/ui';
     </AppShell>
 </ThemeProvider>
 ```
+
+## Forms
+
+`AgentForm`, `ConfigVersions`, `EnvironmentCard` and `SettingsForm` bind through zero's `model=` contract and also work without JS:
+
+```tsx
+<AgentForm model={() => state.config} tools={toolOptions} action="/agents/a1/config" onSubmit={({ config, reason }) => save(config, reason)} />
+```
+
+- The form edits a draft; a valid submit writes the config back through the model and emits `submit`. An invalid submit is blocked, errors render beside their fields (`Field.Error`, `role="alert"`, wired to the control by `aria-describedby`) and `invalid` fires; `reset()` restores the draft.
+- Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
+- Persistence is the caller's: the forms emit, they never write to an actor.

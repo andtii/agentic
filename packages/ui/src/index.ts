@@ -2,3 +2,4 @@
 export const PACKAGE = '@agentic/ui';
 export * from './layout';
 export * from './shell';
+export * from './forms';

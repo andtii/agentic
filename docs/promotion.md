@@ -13,6 +13,7 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | DelegateTool (`packages/runtimes/src/tools/delegate.ts`) | `@sigx/ai-agent` | after limit semantics settle |
 | Daemon-protocol envelope + relay (`packages/daemon-protocol`, `apps/daemon`) | `@sigx/ai-agent/wire` + `@sigx/ai-agent-node` | later |
 | `ai-thread` / `ai-message` / `ai-composer` / `ai-tool-call` / `ai-reasoning` fragment (`packages/ui`) | signalxjs/ai `@sigx/ai-ui` (signalxjs/ai#17) | soon — generic from day one |
+| `MultiSelect` (`packages/ui/src/_zero-gaps/multi-select.tsx`) | `@sigx/zero` Combobox multiple mode (andtii/zero-wip#479) | when zero ships it — delete the gap, re-point `MultiSelectField` |
 | Stack / Row / Col / Spacer on `data-l-*` + `useMediaQuery` (`packages/ui/src/layout`) | `@sigx/zero` layout tier (andtii/zero-wip#473, landed on main) | when a zero release ships it — delete the folder, re-point the imports |
 | Schedule / timezone reminder actor (`packages/platform/src/schedule`) | `@sigx/actors-workflow` schedule actor (signalxjs/actors#390) | later |
 | Pricing table for Anthropic models (`packages/runtimes/src/anthropic/pricing.ts`) | `@sigx/ai-anthropic` | when a second consumer appears |
