@@ -128,6 +128,9 @@ importers:
       '@sigx/ai-agent-node':
         specifier: 'catalog:'
         version: 0.1.0(@sigx/ai-agent@0.1.0(@sigx/ai@0.1.0(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6))(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6))(@sigx/ai@0.1.0(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6))
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.3
     devDependencies:
       '@sigx/reactivity':
         specifier: 'catalog:'
@@ -138,6 +141,9 @@ importers:
       '@sigx/vite':
         specifier: 'catalog:'
         version: 0.15.6(@sigx/server-renderer@0.15.6)(@sigx/server@0.15.6)(sigx@0.15.6)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
