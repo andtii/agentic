@@ -17,6 +17,8 @@ export default defineConfig({
     resolve: { alias: root.resolve?.alias },
     test: {
         globals: true,
+        // Several Durable Object hops per test run past the 5 s default on the slower Windows runner.
+        testTimeout: 30_000,
         include: ['__tests__/workers/**/*.test.ts']
     }
 });
