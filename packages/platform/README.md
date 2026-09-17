@@ -16,6 +16,26 @@ defineActor({ type: 'Workspace', authorize: [sameWorkspace, workspaceOwner], …
 
 Keys: the Workspace root is `workspaceKey(id)` = `ws:{workspaceId}`; children are core's `actorKey(workspaceId, kind, id)` = `{workspaceId}:{kind}:{id}`. `workspaceOfActorKey(key)` reads either shape. v1 has one workspace per user, so `workspaceId === userId`.
 
+### Who is calling (architecture §9)
+
+Edge-safe (WebCrypto + `fetch`, no `node:`), framework-agnostic. The web app binds it in `apps/web/src/auth`.
+
+```ts
+import { createServerApp } from '@sigx/server/server';
+import { serverAuth } from '@agentic/platform';
+import type { Principal } from '@agentic/core';
+
+export const app = createServerApp<Principal>({
+    ...serverAuth({ sessionSecret: env.SESSION_SECRET, machines: (ref) => actor(Machine, actorKey(ref.workspaceId, 'machine', ref.machineId)).tokenRecord() })
+});
+```
+
+- **Authenticate** (`serverAuth` → `{ authenticate, codec }`): `Authorization: Bearer amt.…` → `{ kind: 'machine' }` (hash looked up through `machines`, revoked → anonymous); `Bearer agt.…` → `{ kind: 'agent' }` (sealed per session); otherwise the `__Host-session` cookie → `{ kind: 'user' }`; anything else `null`. Never throws. The `codec` round-trips every `Principal` kind so identity rides `ctx.actor()` hops unchanged.
+- **Login**: `AuthProvider { id, pkce, authorizationUrl, exchangeCode }`; `githubAuthProvider({ clientId, clientSecret, fetch? })`. `beginOAuth` → 302 + sealed `__Host-oauth` transient (state, PKCE verifier, `returnTo`, 10 min); `completeOAuth(provider, request)` verifies state, exchanges the code, returns the `ExternalIdentity`. The route then `sealSession({ userId, workspaceId })` → `sessionCookie(...)`.
+- **Agent principals**: `mintAgentPrincipal({ workspaceId, agentId, sessionId, taskId? })`; carry it over the wire as `sealAgentToken(...)`, or in process — task bodies inherit no principal — as `actor(Def, key).with({ context: asPrincipal(principal) })`.
+- **Pairing** (USR-04): `issuePairing({ machineId })` → `{ code, pending }` (Workspace stores `pending`, hash only); `verifyPairing(pending, code, now)` → `{ ok } | { reason: 'used' | 'expired' | 'mismatch' | 'malformed' }`; `consumePairing` marks it used; `issueMachineToken({ workspaceId, machineId })` → `{ token, tokenHash }` (Machine stores `tokenHash`; `revokedAt` refuses the next request).
+- **Secrets at rest**: `importWorkspaceKek(env.WORKSPACE_KEK)` → `encryptSecret(kek, apiKey, aad)` / `decryptSecret`.
+
 ## Workspace (`src/workspace`)
 
 `ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat`, `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (detached-task stubs for OPS-10).
