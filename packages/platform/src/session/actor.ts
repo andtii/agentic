@@ -22,6 +22,7 @@ import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
+import { auditPort } from '../audit/port.js';
 import { mintAgentPrincipal, sameWorkspace } from '../auth/index.js';
 import type { UsageVerdict } from '../ledger/recorder.js';
 import { agentMemoryScope } from '../agent/agent.actor.js';
@@ -120,7 +121,60 @@ export function defineSessionActor(ports: SessionPorts) {
         await live.dispose?.().catch(() => {});
     }
 
+    const audit = ports.audit ?? auditPort();
+
     const set = (patch: SessionPatch): SessionEntry => ({ t: 'set', patch });
+
+    /**
+     * One event durable — then, for a permission request or its decision, its
+     * audit record (`approval.requested` / `approval.resolved`, OPS-03), keyed
+     * by the event's `(epoch, seq)` so a replayed frame folds once. One-way: the
+     * history never fails the turn. Input requests are the chat's business.
+     */
+    async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
+        await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
+        if (ev.type !== 'request' && ev.type !== 'request-resolved') return;
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec || !parsed) return;
+        const key = `${c.key}:${ev.epoch}:${ev.seq}`;
+        const common = { at: now(), agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) };
+        if (ev.type === 'request') {
+            if (ev.kind !== 'permission') return;
+            await audit.record(c, parsed.workspaceId, {
+                ...common,
+                key,
+                kind: 'approval.requested',
+                by: `agent:${spec.agentId}`,
+                summary: `approval requested${ev.toolName ? ` for ${ev.toolName}` : ''}${ev.message ? `: ${ev.message}` : ''}`,
+                data: {
+                    requestId: ev.requestId,
+                    ...(ev.toolName ? { toolName: ev.toolName } : {}),
+                    ...(ev.callId ? { callId: ev.callId } : {}),
+                    ...(ev.message ? { message: ev.message } : {}),
+                    ...(ev.permissionKey ? { permissionKey: ev.permissionKey } : {})
+                }
+            });
+            return;
+        }
+        const request = c.state.events.find((e) => e.type === 'request' && e.requestId === ev.requestId);
+        if (!request || request.type !== 'request' || request.kind !== 'permission') return;
+        await audit.record(c, parsed.workspaceId, {
+            ...common,
+            key,
+            kind: 'approval.resolved',
+            by: ev.by === 'client' ? `user:${parsed.workspaceId}` : `system:${ev.by}`,
+            summary: `approval ${ev.outcome}${request.toolName ? ` for ${request.toolName}` : ''} (by ${ev.by})`,
+            data: {
+                requestId: ev.requestId,
+                outcome: ev.outcome,
+                resolvedBy: ev.by,
+                ...(ev.scope ? { scope: ev.scope } : {}),
+                ...(ev.reason ? { reason: ev.reason } : {}),
+                ...(ev.ruleId ? { ruleId: ev.ruleId } : {})
+            }
+        });
+    }
 
     function info(c: ActorContext<SessionState>): SessionInfo {
         const s = c.state;
@@ -283,7 +337,7 @@ export function defineSessionActor(ports: SessionPorts) {
             for (;;) {
                 const next = await Promise.race([it.next(), tick()]);
                 if (!next || next.done) return;
-                await appendEntry(c, { t: 'ev', ev: next.value } satisfies SessionEntry);
+                await appendEvent(c, next.value);
                 await recordUsage(c, next.value); // the turn is over: the books get the row, the verdict has nothing left to stop
             }
         } finally {
@@ -354,7 +408,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const sessionId = last?.sessionId ?? s.ref?.id ?? parseSessionKey(c.key)?.sessionId ?? c.key;
         const epoch = Math.max(1, s.head.epoch);
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
-        const emit = (payload: UnstampedEvent) => appendEntry(c, { t: 'ev', ev: { ...payload, sessionId, epoch, seq: ++seq } } satisfies SessionEntry);
+        const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, epoch, seq: ++seq });
         const before = snapshotTranscript(c);
         if (!s.events.some((e) => e.turnId === turnId && e.type === 'turn-start')) await emit({ type: 'turn-start', turnId, input });
         for (const m of before.messages) {
@@ -601,7 +655,7 @@ export function defineSessionActor(ports: SessionPorts) {
                                 break;
                             case 'event': {
                                 const runningTurn = s.running?.turnId;
-                                await appendEntry(ctx, { t: 'ev', ev: frame.event } satisfies SessionEntry);
+                                await appendEvent(ctx, frame.event);
                                 const verdict = await recordUsage(ctx, frame.event);
                                 // Over budget on the daemon path: the cancel travels the CommandSink like any other command.
                                 if (verdict && !verdict.ok && s.running) await dispatch({ v: V, commandId: newCommandId('cancel'), type: 'cancel' });
@@ -673,7 +727,7 @@ export function defineSessionActor(ports: SessionPorts) {
                         // Deactivating: leave `running` in place — the next activation closes the turn as interrupted.
                         if (signal.aborted || next.done) return;
                         const ev = next.value;
-                        await ctx.turn((c) => appendEntry(c, { t: 'ev', ev } satisfies SessionEntry));
+                        await ctx.turn((c) => appendEvent(c, ev));
                         const verdict = await ctx.turn((c) => recordUsage(c, ev));
                         // Over budget: the task has already failed itself; the turn stops here and no child starts (COL-11, OPS-08).
                         if (verdict && !verdict.ok && !signal.aborted) await ctx.turn((c) => cancelLocal(c, live, verdict.error));

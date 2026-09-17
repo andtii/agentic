@@ -8,6 +8,7 @@
 
 import type { Principal, SessionId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
+import type { AuditPort } from '../audit/port.js';
 
 export interface RoutingPorts {
     /** The Session actor definition this app built (`defineSessionActor`). */
@@ -20,6 +21,8 @@ export interface RoutingPorts {
      * `auth/same-workspace.ts`), which every driver-facing policy admits.
      */
     readonly driver?: (workspaceId: WorkspaceId) => Principal;
+    /** Where environment choices are recorded (`environment.chosen`, incl. a fallback; OPS-03). Default `auditPort()` — one-way to `{ws}:audit`. */
+    readonly audit?: AuditPort;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /** Session id allocation for tests. Default `createId('session')`. */

@@ -262,3 +262,19 @@ await books.recordCorrection({ agentId, week, what, at });  // LRN-09 — the @a
 ## Agent proposals (`src/agent`, LRN-08)
 
 Learning may propose an instruction change; only a review applies it. `propose(proposals, origin)` parks instruction proposals (`{ kind: 'instruction', patch, reason, requiresReview: true }` only; one per distinct pending patch; an agent principal parks on itself only, a machine never) with `origin: { kind: 'task-end' | 'correction', sessionId, taskId?, messageId? }`; `listProposals(status?)` lists them under the same access rule; `reviewProposal(id, 'accept' | 'reject', reason?)` (users and external clients) accepts as a NEW config version with the patch appended to `instructions` — reversible with `rollback` — or rejects. `AgentView.pendingProposals` counts the queue. Entries `{ t: 'proposal' }` / `{ t: 'review' }` fold through `applyAgentEntry` beside the config versions.
+
+## Audit (`src/audit`, OPS-03 / COL-09 / AGT-06)
+
+`AuditActor` is the inspectable record of every consequential action. Key `auditKey(ws)` → `{ws}:audit` (the live log); `auditMonthKey(ws, auditMonth(at))` → `{ws}:audit:{yyyy-mm}` (a UTC month archive the live log rolls into). `authorize: [sameWorkspace]`; only a user records over the wire.
+
+```ts
+const history = actor(AuditActor, auditKey(ws));
+await history.record(event);                                              // idempotent by event.key; true when new
+await history.list({ kinds: ['task.transition'], taskId, limit: 50 });   // { events (newest first), next }
+await history.list({ agentId, since, until, cursor: page.next });       // exclusive seq cursor; null when nothing older can match
+await history.stats();                                                    // { inState, recorded, archived, months }
+```
+
+- An `AuditEvent` is `{ key, seq, kind, at, by, summary, agentId?, taskId?, sessionId?, data }`; `kind` is one of `AUDIT_KINDS` (`approval.requested/resolved`, `delegation.created`, `environment.chosen`, `task.transition`, `config.versioned`, `proposal.reviewed`, `machine.paired/revoked`, `plugin.enabled/disabled/granted`, `secret.opened`) and `data` its typed payload (`AuditDataByKind`). The exact shapes and who emits them are in `docs/architecture.md` §4 Audit.
+- `recordAudit(ctx, workspaceId, event)` is what an actor calls after the work is durable: a ONE-WAY hop to the live log that swallows every failure — a history that is unreachable never fails the turn. `AuditPort` is the same contract behind an interface (`SessionPorts.audit`, `RoutingPorts.audit`; `auditPort()` default, `capturingAuditPort()` for tests). Idempotency is the emitter's: derive `key` from the source record so a retry folds once.
+- The live window keeps `AUDIT_WINDOW` (500) events; at `AUDIT_WINDOW + AUDIT_ROLL_BATCH` the oldest 100 roll into their month archives through the idempotent `archive` hop, and `list` on the live key walks the archives when a cursor passes the window (`since` / `until` prune months). Every mutation is one `AuditEntry` folded by the pure `applyAuditEntry`.

@@ -19,6 +19,7 @@ import {
     hasScope,
     sameWorkspace
 } from '@agentic/core';
+import { recordAudit } from '../audit/port.js';
 import { type AgentConfigPatch, assertAgentConfigPatch, clone } from './config.js';
 import {
     type AgentConfigEntry,
@@ -122,10 +123,25 @@ export const AgentActor = defineActor({
             return versionInfo(entry);
         }
 
+        /** The record of a new version (AGT-06, OPS-03), one-way — keyed by the version, so a retry folds once. */
+        function auditVersion(info: AgentVersionInfo): Promise<void> {
+            const { id, workspaceId } = ctx.state;
+            return recordAudit(ctx, workspaceId, {
+                key: `${ctx.key}:v${info.version}`,
+                kind: 'config.versioned',
+                at: info.at,
+                by: info.by,
+                summary: `agent ${id}: config v${info.version}${info.rollbackOf === undefined ? '' : ` (rollback to v${info.rollbackOf})`} — ${info.reason}`,
+                agentId: id,
+                data: { version: info.version, reason: info.reason, ...(info.rollbackOf === undefined ? {} : { rollbackOf: info.rollbackOf }) }
+            });
+        }
+
         /** One durable version: fold, then persist inside the same turn (Workers eviction rule). */
         async function commit(patch: AgentConfigPatch, reason: string, rollbackOf?: number): Promise<AgentVersionInfo> {
             const info = foldVersion(patch, reason, rollbackOf);
             await ctx.save();
+            await auditVersion(info);
             return info;
         }
 
@@ -197,19 +213,33 @@ export const AgentActor = defineActor({
                 if (!p) throw new RangeError(`no agent proposal ${id}`);
                 if (p.status !== 'pending') throw new RangeError(`agent proposal ${id} is already ${p.status}`);
                 let version: number | undefined;
+                let folded: AgentVersionInfo | undefined;
                 if (decision === 'accept') {
-                    version = foldVersion({ instructions: appendInstruction(ctx.state.config.instructions, p.proposal.patch) }, reason ?? `accepted proposal ${id}: ${p.proposal.reason}`).version;
+                    folded = foldVersion({ instructions: appendInstruction(ctx.state.config.instructions, p.proposal.patch) }, reason ?? `accepted proposal ${id}: ${p.proposal.reason}`);
+                    version = folded.version;
                 }
+                const by = principalLabel(ctx.principal);
+                const at = Date.now();
                 applyAgentEntry(ctx.state, {
                     t: 'review',
                     id,
                     decision,
-                    by: principalLabel(ctx.principal),
-                    at: Date.now(),
+                    by,
+                    at,
                     ...(reason === undefined ? {} : { reason }),
                     ...(version === undefined ? {} : { version })
                 });
                 await ctx.save();
+                if (folded) await auditVersion(folded);
+                await recordAudit(ctx, ctx.state.workspaceId, {
+                    key: `${ctx.key}:proposal:${id}:review`,
+                    kind: 'proposal.reviewed',
+                    at,
+                    by,
+                    summary: `agent ${ctx.state.id}: proposal ${id} ${decision === 'accept' ? 'accepted' : 'rejected'}${version === undefined ? '' : ` as config v${version}`}${reason === undefined ? '' : ` — ${reason}`}`,
+                    agentId: ctx.state.id,
+                    data: { proposalId: id, decision, ...(reason === undefined ? {} : { reason }), ...(version === undefined ? {} : { version }) }
+                });
                 return ctx.snapshot(proposals().find((x) => x.id === id)!);
             },
 

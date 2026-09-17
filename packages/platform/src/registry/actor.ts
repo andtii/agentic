@@ -23,7 +23,9 @@
 
 import type { AgentId, PermissionScope, PluginManifest, Principal, ScheduleId, WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
-import { AgentActor, agentKey } from '../agent/index.js';
+import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
+import { recordAudit } from '../audit/port.js';
+import type { AuditEventInput } from '../audit/events.js';
 import { decryptSecret, encryptSecret, sameWorkspace, workspaceKey } from '../auth/index.js';
 import { defineScheduleActor } from '../schedule/index.js';
 import { Workspace } from '../workspace/index.js';
@@ -110,6 +112,11 @@ export function defineRegistry(options: RegistryOptions = {}) {
     };
 
     const view = (ctx: Ctx, p: PluginRecord): PluginView => ctx.snapshot(p);
+
+    /** The audit record of a permission change or a secret leaving (OPS-03), one-way. */
+    const audit = (ctx: Ctx, event: AuditEventInput): Promise<void> => recordAudit(ctx, workspaceOf(ctx), event);
+    /** Distinguishes `openSecret` calls that share a millisecond within one activation. */
+    let opened = 0;
 
     /** Read the Workspace index, then every agent and schedule it lists. */
     const collectRefs = async (ctx: Ctx): Promise<{ agents: AgentRef[]; schedules: ScheduleRef[] }> => {
@@ -220,16 +227,25 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 return view(ctx, record);
             },
 
+            /** Recorded when it changes something: a plugin already enabled stays as it is, silently. */
             async enable(id: string): Promise<PluginView> {
+                const was = plugin(ctx, id).enabled;
                 const p = patchPlugin(ctx, id, { enabled: true });
                 await ctx.save();
+                if (!was) {
+                    await audit(ctx, { key: `${ctx.key}:${id}:enabled:${p.updatedAt}`, kind: 'plugin.enabled', at: p.updatedAt, by: principalLabel(ctx.principal), summary: `plugin ${id} enabled`, data: { pluginId: id } });
+                }
                 return view(ctx, p);
             },
 
             /** Always succeeds; what still references the plugin comes back so the user sees it (AC-13). */
             async disable(id: string): Promise<{ plugin: PluginView; dependents: Dependents }> {
+                const was = plugin(ctx, id).enabled;
                 const p = patchPlugin(ctx, id, { enabled: false });
                 await ctx.save();
+                if (was) {
+                    await audit(ctx, { key: `${ctx.key}:${id}:disabled:${p.updatedAt}`, kind: 'plugin.disabled', at: p.updatedAt, by: principalLabel(ctx.principal), summary: `plugin ${id} disabled`, data: { pluginId: id } });
+                }
                 return { plugin: view(ctx, p), dependents: await dependents(ctx, id) };
             },
 
@@ -264,8 +280,20 @@ export function defineRegistry(options: RegistryOptions = {}) {
                     if (!isPermissionScope(scope)) throw new RegistryError('not-declared', `[registry] not a permission scope: ${String(scope)}`);
                     if (!declared.includes(scope)) throw new RegistryError('not-declared', `[registry] "${id}" does not declare ${scope}`);
                 }
+                const added = [...new Set(scopes)].filter((s) => !p.grantedPermissions.includes(s));
                 const next = patchPlugin(ctx, id, { grantedPermissions: [...new Set([...p.grantedPermissions, ...scopes])] });
                 await ctx.save();
+                // Recorded with the scopes that are NEW; re-granting what was already held changes nothing.
+                if (added.length > 0) {
+                    await audit(ctx, {
+                        key: `${ctx.key}:${id}:granted:${next.updatedAt}:${added.join(',')}`,
+                        kind: 'plugin.granted',
+                        at: next.updatedAt,
+                        by: principalLabel(ctx.principal),
+                        summary: `plugin ${id} granted ${added.join(', ')}`,
+                        data: { pluginId: id, scopes: added }
+                    });
+                }
                 return view(ctx, next);
             },
 
@@ -369,7 +397,11 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 }
                 const record = ctx.state.secrets[name];
                 if (!record) throw new RegistryError('secret-missing', `[registry] no secret "${name}"`);
-                return decryptSecret(await kek(), record.sealed, secretAad(workspaceOf(ctx), name));
+                const value = await decryptSecret(await kek(), record.sealed, secretAad(workspaceOf(ctx), name));
+                // Every release of plaintext is an occurrence (OPS-03): no idempotency to lean on, so the key is the instant plus a counter.
+                const at = now();
+                await audit(ctx, { key: `${ctx.key}:secret:${name}:${pluginId}:${at}:${opened++}`, kind: 'secret.opened', at, by: principalLabel(ctx.principal), summary: `secret ${name} opened for plugin ${pluginId}`, data: { name, pluginId } });
+                return value;
             },
 
             // -- export -------------------------------------------------------

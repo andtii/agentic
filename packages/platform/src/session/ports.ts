@@ -23,6 +23,7 @@ export interface MemoryRetrievalRecord {
     readonly at: number;
 }
 
+import type { AuditPort } from '../audit/port.js';
 import type { UsageRecorder } from '../ledger/recorder.js';
 
 /** What `Session.open` is handed — everything a factory needs to open the runtime session. Plain JSON: it is recorded on the actor. */
@@ -111,6 +112,8 @@ export interface SessionPorts {
      * `plugin.onCorrection`. Without it the session neither retrieves nor learns.
      */
     readonly learning?: LearningPorts;
+    /** Where permission requests and their decisions are recorded (`approval.*`, OPS-03). Default `auditPort()` — one-way to `{ws}:audit`. */
+    readonly audit?: AuditPort;
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }
