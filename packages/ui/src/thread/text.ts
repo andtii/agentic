@@ -8,8 +8,8 @@ import type { ToolPartState } from '@sigx/ai-agent/app';
 
 /** What a card header shows before it elides — a header summarises, the `<details>` has the rest. */
 export const HEAD_CHARS = 72;
-export const OUTPUT_LINES = 24;
-export const OUTPUT_CHARS = 4000;
+/** Characters past which an output keeps only its head and tail; lines are the card's business (`OUTPUT_FOLD`, `OUTPUT_LOG`). */
+export const OUTPUT_CHARS = 40_000;
 
 /** Text worth putting in an element — `undefined` for anything that would render blank. */
 export function nonBlank(text: string | undefined): string | undefined {
@@ -36,15 +36,9 @@ export function signature(input: unknown): string {
     return entries.length > 1 ? `${shown}, +${entries.length - 1}` : shown;
 }
 
-/** Keep the head AND the tail: a listing is worth reading at both ends. */
+/** Keep the head AND the tail of an output too long to hold as text: a listing is worth reading at both ends. */
 export function elide(text: string): string {
     let out = text;
-    const lines = out.split('\n');
-    if (lines.length > OUTPUT_LINES) {
-        const head = lines.slice(0, Math.ceil(OUTPUT_LINES / 2));
-        const tail = lines.slice(lines.length - Math.floor(OUTPUT_LINES / 2));
-        out = [...head, `… ${lines.length - head.length - tail.length} lines omitted …`, ...tail].join('\n');
-    }
     if (out.length > OUTPUT_CHARS) {
         const half = Math.floor(OUTPUT_CHARS / 2);
         out = `${out.slice(0, half)}\n… ${out.length - OUTPUT_CHARS} characters omitted …\n${out.slice(out.length - half)}`;

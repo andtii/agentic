@@ -1,12 +1,18 @@
 /**
- * The recipe pack — default styling for the six `ai-*` scopes, written
- * against the RECOMMENDED token grammar (`var(--color-primary)`,
- * `var(--space-sm)`, `var(--radius-box)`) and nothing design-system
- * specific, so any skin keeping the recommended vocabulary adopts it as is
- * and one with its own vocabulary gets it fitted (`fitRecipesToVocabulary`)
- * or writes its own. Every declared state is styled distinctly: the kit's
- * state-legibility guard measures ink, and a tool card that looks the same
- * running and denied says nothing.
+ * The recipe pack — the six `ai-*` scopes styled to `docs/design/HANDOFF.md`
+ * → "`ai-*` fragment", "Tool call `data-state`", "Approvals", "Motion".
+ *
+ * Written against the RECOMMENDED token grammar (`var(--color-primary)`,
+ * `var(--space-sm)`, `var(--radius-box)`); the handoff's own inks
+ * (`--ag-text-dim`, `--ag-line`, …) are read WITH a recommended fallback,
+ * so a skin keeping the recommended vocabulary adopts the pack as is (the
+ * kit's validator warns on the undeclared token and moves on), and the
+ * `agentic` design system, which declares them, paints the handoff exactly.
+ * State colour rides the governed `data-state` and nested kit scopes (the
+ * pill, the tile, the environment line) — never a `tone` axis of its own,
+ * so the pack stays generic. Every declared state is styled distinctly: the
+ * kit's state-legibility guard measures ink, and a tool card that looks the
+ * same running and denied says nothing.
  *
  * Pure data: the kit import is type-only, the anatomy imports pull no
  * component code, so a design system's Node build script imports this entry
@@ -17,14 +23,31 @@ import { RECOMMENDED_ROLE_LIST } from '@sigx/zero/contract';
 
 const motion = 'var(--duration-fast) var(--ease-standard)';
 const mono = 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)';
+/** The handoff inks, with the recommended fallback a generic skin renders. */
+const line = 'var(--ag-line, var(--color-base-300))';
+const lineStrong = 'var(--ag-line-strong, var(--color-base-300))';
+const textMuted = 'var(--ag-text-muted, var(--color-base-content))';
+const textDim = 'var(--ag-text-dim, var(--color-base-content))';
+const linkHover = 'var(--ag-link-hover, var(--color-primary))';
+const controlTouch = 'var(--ag-control-h-touch, 2.75rem)';
 
-/** The lifecycle tint a tool card / sub-agent card paints per governed state. */
+/**
+ * The lifecycle ink per governed state, and the border that only `active`
+ * (RUNNING, `info`) and `error` (ERROR, `error`) take — the handoff's rule.
+ * `loading` and `closed` keep the quiet line; `complete` too, so finished
+ * work recedes. Every state still differs: the ink paints the icon.
+ */
 const lifecycle = {
-    loading: { borderColor: 'var(--color-info)', '--ai-ink': 'var(--color-info)' },
-    active: { borderColor: 'var(--color-primary)', '--ai-ink': 'var(--color-primary)' },
-    complete: { borderColor: 'var(--color-success)', '--ai-ink': 'var(--color-success)' },
+    loading: { borderColor: line, '--ai-ink': textMuted },
+    active: { borderColor: 'var(--color-info)', '--ai-ink': 'var(--color-info)' },
+    complete: { borderColor: line, '--ai-ink': textMuted, opacity: '1' },
     error: { borderColor: 'var(--color-error)', '--ai-ink': 'var(--color-error)' },
-    closed: { borderColor: 'var(--color-warning)', '--ai-ink': 'var(--color-warning)', opacity: '0.85' }
+    closed: { borderColor: line, '--ai-ink': 'var(--color-error)', opacity: '0.85' }
+};
+
+/** The 1200 ms opacity pulse a running or streaming dot carries, off under reduced motion. */
+const pulse = {
+    animation: 'ai-pulse 1200ms ease-in-out infinite'
 };
 
 const thread: RecipeInput = {
@@ -35,35 +58,45 @@ const thread: RecipeInput = {
                 position: 'relative',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--space-sm)',
+                gap: 'var(--space-2xl)',
                 overflowY: 'auto',
                 overscrollBehavior: 'contain',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-sm)',
+                paddingInline: 'var(--space-2xl)',
+                paddingBlock: 'var(--space-2xl)',
                 background: 'var(--color-base-100)',
                 color: 'var(--color-base-content)'
             },
             states: {
                 on: { scrollBehavior: 'smooth' },
                 off: { scrollBehavior: 'auto' }
-            }
+            },
+            at: { 'reduced-motion': { base: { scrollBehavior: 'auto' } } }
         },
+        // The centred "Showing the last N entries · Load earlier" chip.
         earlier: {
             base: {
                 alignSelf: 'center',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-xs)',
                 appearance: 'none',
-                border: 'var(--border) solid var(--color-base-300)',
+                border: `var(--border) solid ${line}`,
                 borderRadius: 'var(--radius-selector)',
                 background: 'var(--color-base-200)',
-                color: 'var(--color-base-content)',
+                color: textMuted,
                 fontSize: 'var(--text-sm)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-2xs)',
+                paddingInline: 'var(--space-md)',
+                paddingBlock: 'var(--space-xs)',
                 cursor: 'pointer'
+            },
+            selectors: {
+                '& > u': { color: 'var(--color-primary)', textDecoration: 'underline' },
+                '&:hover > u': { color: linkHover },
+                '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '2px' }
             }
         },
         list: {
-            base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }
+            base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2xl)' }
         },
         row: { base: { display: 'block' } },
         anchor: {
@@ -77,91 +110,179 @@ const thread: RecipeInput = {
                 background: 'var(--color-primary)',
                 color: 'var(--color-primary-content)',
                 fontSize: 'var(--text-sm)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-2xs)',
+                fontWeight: 'var(--weight-semibold, 600)',
+                paddingInline: 'var(--space-md)',
+                paddingBlock: 'var(--space-xs)',
                 boxShadow: 'var(--shadow-md)',
                 cursor: 'pointer',
                 transition: `opacity ${motion}`
             },
             // `on` is hidden by the runtime (`hiddenIn`), so the two states are
             // legitimately CSS-identical; `off` is the one that paints.
-            states: { on: {}, off: { opacity: '1' } }
+            states: { on: {}, off: { opacity: '1' } },
+            selectors: { '&:hover': { background: linkHover } }
         }
     }
 };
 
+/** Row, gap 12, tile 32 top-aligned; meta line 13/600 name, dim env line, mono 11 time; body 14/1.6; tools gap 8. */
 const message: RecipeInput = {
     component: 'ai-message',
     parts: {
         root: {
-            base: { display: 'block' },
-            selectors: {
-                '&[data-placement="end"]': { marginInlineStart: 'var(--space-xl)' },
-                '&[data-placement="start"]': { marginInlineEnd: 'var(--space-xl)' }
-            }
-        },
-        avatar: {
             base: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                inlineSize: '2rem',
-                blockSize: '2rem',
-                borderRadius: 'var(--radius-selector)',
-                background: 'var(--color-base-300)',
-                color: 'var(--color-base-content)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold, 600)'
+                display: 'grid',
+                gridTemplateColumns: 'auto minmax(0, 1fr)',
+                gridTemplateAreas: '"avatar meta" "avatar body" "avatar tools" "avatar footer"',
+                columnGap: 'var(--space-md)',
+                rowGap: 'var(--space-xs)',
+                alignItems: 'start',
+                color: 'var(--color-base-content)'
+            },
+            selectors: {
+                // The user's own rows read the same; the placement is there for a skin that wants a side.
+                '&[data-placement="end"]': { marginInlineStart: '0' },
+                '&[data-placement="start"]': { marginInlineEnd: '0' }
             }
         },
-        meta: { base: { display: 'inline-flex', gap: 'var(--space-2xs)', alignItems: 'center', fontSize: 'var(--text-xs)' } },
-        body: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', fontSize: 'var(--text-md)', lineHeight: 'var(--leading-normal, 1.5)' } },
-        tools: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', marginBlock: 'var(--space-xs)' } },
-        footer: { base: { fontSize: 'var(--text-xs)', opacity: '0.7' } }
+        avatar: { base: { gridArea: 'avatar', display: 'inline-flex', paddingBlockStart: 'var(--space-2xs)' } },
+        meta: {
+            base: {
+                gridArea: 'meta',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 'var(--space-sm)',
+                minBlockSize: '1.25rem',
+                fontSize: 'var(--text-md)'
+            }
+        },
+        name: { base: { fontWeight: 'var(--weight-semibold, 600)' } },
+        environment: { base: { display: 'inline-flex', minInlineSize: '0', color: textDim } },
+        time: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } },
+        body: {
+            base: {
+                gridArea: 'body',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-sm)',
+                fontSize: 'var(--text-lg)',
+                lineHeight: '1.6',
+                textWrap: 'pretty',
+                minInlineSize: '0'
+            }
+        },
+        tools: { base: { gridArea: 'tools', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', minInlineSize: '0' } },
+        footer: { base: { gridArea: 'footer', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } }
     }
 };
 
+/** Card base-200, radius 8, padding 10/12; header icon 15 + mono name + truncated signature + meta + pill; output well base-100. */
 const toolCall: RecipeInput = {
     component: 'ai-tool-call',
-    tokens: { '--ai-ink': 'var(--color-base-content)' },
+    tokens: { '--ai-ink': textMuted },
     parts: {
         root: {
             base: {
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--space-2xs)',
-                border: 'var(--border) solid var(--color-base-300)',
-                borderInlineStartWidth: '3px',
+                gap: 'var(--space-sm)',
+                border: `var(--border) solid ${line}`,
                 borderRadius: 'var(--radius-box)',
                 background: 'var(--color-base-200)',
                 color: 'var(--color-base-content)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-xs)',
+                paddingInline: 'var(--space-md)',
+                paddingBlock: 'var(--space-sm)',
                 fontSize: 'var(--text-sm)',
+                minInlineSize: '0',
                 transition: `border-color ${motion}`
             },
-            states: lifecycle
+            states: lifecycle,
+            // The running pill's dot pulses; still under reduced motion.
+            selectors: { '&[data-state="active"] [data-scope="ag-pill"][data-part="dot"]': pulse },
+            at: { 'reduced-motion': { selectors: { '&[data-state="active"] [data-scope="ag-pill"][data-part="dot"]': { animation: 'none' } } } }
         },
-        header: { base: { display: 'flex', alignItems: 'baseline', gap: 'var(--space-sm)', fontFamily: mono, overflowWrap: 'anywhere' } },
-        status: { base: { marginInlineStart: 'auto', color: 'var(--ai-ink)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide, 0.04em)', whiteSpace: 'nowrap' } },
+        header: {
+            base: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-sm)',
+                minInlineSize: '0'
+            }
+        },
+        icon: { base: { display: 'inline-flex', flexShrink: '0', color: 'var(--ai-ink)' } },
+        name: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold, 600)', flexShrink: '0' } },
+        signature: {
+            base: {
+                fontFamily: mono,
+                fontSize: 'var(--text-sm)',
+                color: textMuted,
+                minInlineSize: '0',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: '1 1 auto'
+            }
+        },
+        meta: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap', flexShrink: '0', marginInlineStart: 'auto' } },
+        status: { base: { display: 'inline-flex', flexShrink: '0', marginInlineStart: 'auto' }, selectors: { '[data-part="meta"] + &': { marginInlineStart: '0' } } },
         input: {
-            base: { fontFamily: mono, fontSize: 'var(--text-xs)' },
-            states: { open: { paddingBlockEnd: 'var(--space-2xs)' }, closed: { opacity: '0.8' } },
-            selectors: { '& > summary': { cursor: 'pointer' }, '& > pre': { margin: '0', overflowX: 'auto', whiteSpace: 'pre-wrap' } }
+            base: { fontFamily: mono, fontSize: 'var(--text-sm)', color: textMuted },
+            states: { open: { color: 'var(--color-base-content)' }, closed: { opacity: '0.9' } },
+            selectors: {
+                '& > summary': { cursor: 'pointer', fontSize: 'var(--text-xs)', color: textDim, textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide, 0.08em)' },
+                '& > pre': {
+                    margin: 'var(--space-xs) 0 0',
+                    padding: 'var(--space-sm) var(--space-md)',
+                    border: `var(--border) solid ${line}`,
+                    borderRadius: 'var(--radius-field)',
+                    background: 'var(--color-base-100)',
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere'
+                }
+            }
         },
+        // The output well: base-100, mono 12, pre-wrap; folded past six lines.
         output: {
-            base: { fontFamily: mono, fontSize: 'var(--text-xs)' },
-            states: { open: { paddingBlockEnd: 'var(--space-2xs)' }, closed: { opacity: '0.8' } },
-            selectors: { '& > summary': { cursor: 'pointer' }, '& > pre': { margin: '0', overflowX: 'auto', whiteSpace: 'pre-wrap' } }
+            base: { fontFamily: mono, fontSize: 'var(--text-sm)' },
+            states: { open: { color: 'var(--color-base-content)' }, closed: { opacity: '0.9' } },
+            selectors: {
+                '& > summary': { cursor: 'pointer', fontSize: 'var(--text-xs)', color: textDim, textTransform: 'uppercase', letterSpacing: 'var(--tracking-wide, 0.08em)' },
+                '& > pre': {
+                    margin: 'var(--space-xs) 0 0',
+                    padding: 'var(--space-sm) var(--space-md)',
+                    border: `var(--border) solid ${line}`,
+                    borderRadius: 'var(--radius-field)',
+                    background: 'var(--color-base-100)',
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere'
+                }
+            }
         },
-        error: { base: { margin: '0', color: 'var(--color-error)', fontSize: 'var(--text-xs)' } },
+        more: {
+            base: {
+                appearance: 'none',
+                border: 'none',
+                background: 'transparent',
+                padding: 'var(--space-xs) 0 0',
+                fontFamily: mono,
+                fontSize: 'var(--text-xs)',
+                color: 'var(--color-primary)',
+                cursor: 'pointer'
+            },
+            selectors: { '&:hover': { color: linkHover }, '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '2px' } }
+        },
+        log: {
+            base: { display: 'inline-block', paddingBlockStart: 'var(--space-xs)', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--color-primary)' },
+            selectors: { '&:hover': { color: linkHover } }
+        },
+        error: { base: { margin: '0', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--color-error)', overflowWrap: 'anywhere' } },
         agent: {
             base: {
-                border: 'var(--border) solid var(--color-base-300)',
-                borderInlineStartWidth: '3px',
+                border: `var(--border) solid ${line}`,
                 borderRadius: 'var(--radius-box)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-xs)',
+                paddingInline: 'var(--space-md)',
+                paddingBlock: 'var(--space-sm)',
                 marginBlockStart: 'var(--space-xs)'
             },
             states: lifecycle
@@ -169,25 +290,41 @@ const toolCall: RecipeInput = {
     }
 };
 
+/** Collapsed by default: chevron 14 + "Reasoning · 6s" in text-dim; the chevron turns while open. */
 const reasoning: RecipeInput = {
     component: 'ai-reasoning',
     parts: {
         root: {
             base: {
-                border: 'var(--border) dashed var(--color-base-300)',
-                borderRadius: 'var(--radius-box)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-xs)',
                 color: 'var(--color-base-content)',
-                fontSize: 'var(--text-sm)'
+                fontSize: 'var(--text-md)'
             },
-            states: { open: { background: 'var(--color-base-200)' }, closed: { opacity: '0.75' } }
+            states: { open: { paddingBlockEnd: 'var(--space-2xs)' }, closed: { opacity: '0.95' } }
         },
-        summary: { base: { cursor: 'pointer', fontStyle: 'italic' } },
-        body: { base: { paddingBlockStart: 'var(--space-2xs)', opacity: '0.9' } }
+        summary: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-sm)',
+                cursor: 'pointer',
+                listStyle: 'none',
+                color: textDim,
+                fontSize: 'var(--text-md)',
+                transition: `color ${motion}`
+            },
+            selectors: {
+                '&::-webkit-details-marker': { display: 'none' },
+                '&:hover': { color: textMuted },
+                '& > svg': { transition: `transform ${motion}` },
+                '[data-state="open"] > & > svg': { transform: 'rotate(90deg)' }
+            },
+            at: { 'reduced-motion': { selectors: { '& > svg': { transition: 'none' } } } }
+        },
+        body: { base: { paddingBlockStart: 'var(--space-sm)', paddingInlineStart: 'calc(14px + var(--space-sm))', color: textMuted, fontSize: 'var(--text-lg)', lineHeight: '1.6' } }
     }
 };
 
+/** The approval card: warning tint 6 % / border 40 %, radius 8, padding 14, gap 12; 96 px label column; 40 px actions. */
 const approval: RecipeInput = {
     component: 'ai-approval',
     parts: {
@@ -195,21 +332,66 @@ const approval: RecipeInput = {
             base: {
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--space-xs)',
-                border: 'var(--border) solid var(--color-warning)',
+                gap: 'var(--space-md)',
+                border: 'var(--border) solid color-mix(in oklab, var(--color-warning) 40%, transparent)',
                 borderRadius: 'var(--radius-box)',
-                background: 'var(--color-warning-soft, var(--color-base-200))',
+                background: 'color-mix(in oklab, var(--color-warning) 6%, transparent)',
                 color: 'var(--color-base-content)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-xs)'
+                padding: 'var(--space-lg)',
+                minInlineSize: '0',
+                // The 180 ms collapse to the record, on the design system's normal step.
+                transition: 'padding var(--duration-normal) ease-out, gap var(--duration-normal) ease-out'
+            },
+            at: { 'reduced-motion': { base: { transition: 'none' } } }
+        },
+        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-warning)' } },
+        title: { base: { fontWeight: 'var(--weight-semibold, 600)', fontSize: 'var(--text-lg)' } },
+        rule: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } },
+        request: {
+            base: {
+                display: 'flex',
+                gap: 'var(--space-md)',
+                padding: 'var(--space-sm) var(--space-md)',
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-100)',
+                fontFamily: mono,
+                fontSize: 'var(--text-sm)',
+                color: 'var(--color-base-content)',
+                overflowWrap: 'anywhere'
+            },
+            selectors: { '& > code': { fontWeight: 'var(--weight-semibold, 600)', flexShrink: '0' } }
+        },
+        description: { base: { margin: '0', fontSize: 'var(--text-md)', color: textMuted } },
+        context: {
+            base: {
+                display: 'grid',
+                gridTemplateColumns: '6rem minmax(0, 1fr)',
+                columnGap: 'var(--space-sm)',
+                rowGap: 'var(--space-xs)',
+                margin: '0',
+                fontSize: 'var(--text-sm)',
+                alignItems: 'center'
+            },
+            selectors: {
+                '& > dt': { color: textDim },
+                '& > dd': { margin: '0', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0', color: 'var(--color-base-content)' }
             }
         },
-        title: { base: { margin: '0', fontWeight: 'var(--weight-semibold, 600)' } },
-        description: { base: { margin: '0', fontSize: 'var(--text-sm)', opacity: '0.85' } },
-        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2xs)' } }
+        actions: {
+            base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' },
+            selectors: { '& > [data-scope="button"]': { blockSize: '2.5rem' } }
+        },
+        // The one-line record a decision collapses to.
+        record: { base: { margin: '0', fontSize: 'var(--text-sm)', color: textMuted } }
+    },
+    modifiers: {
+        // Session page and mobile: no context rows.
+        compact: { context: { base: { display: 'none' } } }
     }
 };
 
+/** Card base-200, `line-strong` border, radius 10; "To" row; borderless textarea 14; attach · key hint · Send 44. */
 const composer: RecipeInput = {
     component: 'ai-composer',
     parts: {
@@ -217,52 +399,95 @@ const composer: RecipeInput = {
             base: {
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--space-2xs)',
-                border: 'var(--border) solid var(--color-base-300)',
-                borderRadius: 'var(--radius-box)',
-                background: 'var(--color-base-100)',
+                gap: 'var(--space-sm)',
+                border: `var(--border) solid ${lineStrong}`,
+                borderRadius: 'var(--ag-radius-xl, var(--radius-box))',
+                background: 'var(--color-base-200)',
                 color: 'var(--color-base-content)',
-                paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-xs)'
+                paddingInline: 'var(--space-lg)',
+                paddingBlock: 'var(--space-md)'
+            },
+            selectors: {
+                '&:focus-within': { borderColor: textDim }
             }
         },
-        attachments: { base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2xs)' } },
+        addressing: {
+            base: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: textMuted }
+        },
+        recipient: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-xs)',
+                paddingInline: 'var(--space-xs)',
+                paddingBlock: 'var(--space-2xs)',
+                border: `var(--border) solid ${lineStrong}`,
+                borderRadius: 'var(--radius-selector)',
+                background: 'var(--color-base-300)',
+                color: 'var(--color-base-content)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 'var(--weight-semibold, 600)'
+            },
+            selectors: { '& > small': { fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal, 400)', color: textDim } }
+        },
+        hint: {
+            base: { marginInlineStart: 'auto', fontSize: 'var(--text-sm)', color: textMuted },
+            selectors: { '&[data-nobody]': { color: textDim } }
+        },
+        attachments: { base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' } },
         attachment: {
             base: {
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 'var(--space-2xs)',
+                gap: 'var(--space-xs)',
                 borderRadius: 'var(--radius-selector)',
-                background: 'var(--color-base-200)',
+                border: `var(--border) solid ${lineStrong}`,
+                background: 'var(--color-base-300)',
+                fontFamily: mono,
                 fontSize: 'var(--text-xs)',
-                paddingInline: 'var(--space-xs)',
+                paddingInline: 'var(--space-sm)',
                 paddingBlock: 'var(--space-2xs)'
             }
         },
-        input: { base: { position: 'relative' } },
+        input: {
+            base: { position: 'relative' },
+            selectors: {
+                // Borderless, auto-growing, 14 px — the card is the frame.
+                '& textarea': { border: 'none', background: 'transparent', boxShadow: 'none', padding: '0', fontSize: 'var(--text-lg)', lineHeight: '1.5', resize: 'none', outline: 'none' },
+                '& textarea::placeholder': { color: textDim }
+            }
+        },
+        // The mention popup: a listbox on base-300.
         mentions: {
             base: {
                 position: 'absolute',
                 insetBlockEnd: '100%',
                 insetInlineStart: '0',
                 listStyle: 'none',
-                margin: '0',
-                padding: 'var(--space-2xs)',
+                margin: '0 0 var(--space-xs)',
+                padding: 'var(--space-xs)',
                 minInlineSize: '12rem',
-                border: 'var(--border) solid var(--color-base-300)',
+                border: `var(--border) solid ${lineStrong}`,
                 borderRadius: 'var(--radius-box)',
-                background: 'var(--color-base-100)',
-                boxShadow: 'var(--shadow-md)',
+                background: 'var(--color-base-300)',
+                boxShadow: 'var(--shadow-lg)',
                 zIndex: '1'
             },
             // `closed` is hidden by the runtime; `open` is the one that paints.
             states: { open: { display: 'block' }, closed: {} }
         },
         mention: {
-            base: { paddingInline: 'var(--space-xs)', paddingBlock: 'var(--space-2xs)', borderRadius: 'var(--radius-selector)', fontSize: 'var(--text-sm)', cursor: 'pointer' },
+            base: { paddingInline: 'var(--space-sm)', paddingBlock: 'var(--space-xs)', borderRadius: 'var(--radius-selector)', fontSize: 'var(--text-md)', cursor: 'pointer' },
             states: { highlighted: { background: 'var(--color-primary)', color: 'var(--color-primary-content)' } }
         },
-        actions: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: 'var(--text-xs)' }, selectors: { '& > small': { marginInlineEnd: 'auto', opacity: '0.7' } } }
+        actions: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' },
+            selectors: {
+                '& > [data-scope="button"][data-intent="primary"]': { blockSize: controlTouch, paddingInline: 'var(--space-lg)' },
+                '& > [data-scope="button"][data-intent="icon"]': { blockSize: controlTouch, inlineSize: controlTouch }
+            }
+        },
+        keys: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } }
     }
 };
 
@@ -275,7 +500,14 @@ function colorAxis(part: string, paint: (role: string) => Record<string, string>
     return { color: Object.fromEntries(RECOMMENDED_ROLE_LIST.map((role) => [role, { [part]: { base: paint(role) } }])) };
 }
 
-message.variants = colorAxis('avatar', (role) => ({ background: `var(--color-${role})`, color: `var(--color-${role}-content)` }));
 thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${role})`, color: `var(--color-${role}-content)` }));
+
+/** The keyframes the running dot and the STREAMING pill pulse on — raw CSS the design system appends verbatim. */
+export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+[data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: ai-pulse 1200ms ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+    [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: none; }
+}
+`;
 
 export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, composer];

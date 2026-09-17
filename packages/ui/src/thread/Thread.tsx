@@ -9,28 +9,42 @@
  * window; a `part-delta` touches one part's text and re-runs that part
  * alone (`Message` / `StreamingMarkdown`). Zero has no virtualised list, so
  * the window is our own: at most `window` parts are in the DOM at once
- * (`./window`), a "Show earlier" button widens it backwards, and the
- * "Jump to latest" anchor — hidden while following — resumes the tail.
+ * (`./window`), the "Showing the last N entries · Load earlier" chip widens
+ * it backwards, and the "Jump to latest" anchor — hidden while following —
+ * resumes the tail.
  *
  * Following is decided from real scroll geometry (`scrollHeight - scrollTop
  * - clientHeight <= threshold`), which is what a scroll-up flips off; the
  * window's `end` freezes at that moment so rows do not shift under the
  * reader while the agent goes on streaming.
+ *
+ * Who an author is (hue, environment, time) comes from the page through
+ * `describe`; the STREAMING pill sits on the last assistant row while the
+ * session is mid-turn.
  */
 import { component, type Define } from '@sigx/runtime-core';
 import { spawnedAgent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
-import { Message } from './Message.js';
+import { Message, type MessageAuthor } from './Message.js';
+import type { ToolMetaFn } from './ToolCall.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
 
 const SCOPE = aiThreadAnatomy.scope;
+
+export type DescribeFn = (message: AgentMessage) => MessageAuthor | undefined;
 
 export type ThreadProps =
     & Define.Prop<'transcript', AgentTranscript, true>
     & Define.Prop<'onRespond', RespondFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>
+    /** Who a row's author is — hue, environment, time — resolved by the page. */
+    & Define.Prop<'describe', DescribeFn, false>
+    /** Header meta per tool call (duration, diff stat, task id). */
+    & Define.Prop<'toolMeta', ToolMetaFn, false>
+    /** The session log long outputs link to. */
+    & Define.Prop<'logHref', string, false>
     /** Most parts in the DOM at once. Default 150. */
     & Define.Prop<'window', number, false>
     /** Pixels from the bottom within which the thread still counts as following. Default 24. */
@@ -54,13 +68,18 @@ export function looseRequests(transcript: AgentTranscript): OpenRequest[] {
         .sort((a, b) => a.seq - b.seq);
 }
 
+/** The session is mid-turn: running, or waiting on an answer. */
+export function midTurn(transcript: AgentTranscript): boolean {
+    return transcript.state === 'running' || transcript.state === 'awaiting';
+}
+
 export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
     const st = signal({
         /** Stuck to the bottom. */
         following: true,
         /** The window's end while paused (units). */
         end: 0,
-        /** How many extra units "Show earlier" opened. */
+        /** How many extra units "Load earlier" opened. */
         extra: 0
     });
     let root: HTMLElement | null = null;
@@ -100,12 +119,16 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         const range = st.following ? followRange(total, size(), st.extra) : frozenRange(total, st.end, size(), st.extra);
         const rows = windowRows(messages, range);
         const loose = looseRequests(props.transcript);
+        const streaming = midTurn(props.transcript);
+        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+        const shown = range.end - range.start;
         return (
             <div
                 data-scope={SCOPE}
                 data-part="root"
                 data-state={st.following ? 'on' : 'off'}
                 role="log"
+                aria-live="polite"
                 aria-label={props.label ?? 'Transcript'}
                 ref={(el: HTMLElement | null) => {
                     root = el;
@@ -121,13 +144,26 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                             st.extra += size();
                         }}
                     >
-                        Show earlier
+                        <span>{`Showing the last ${shown} entries`}</span>
+                        <span aria-hidden="true">·</span>
+                        <u>Load earlier</u>
                     </button>
                 )}
                 <ol data-scope={SCOPE} data-part="list">
                     {rows.map((row) => (
                         <li key={row.key} data-scope={SCOPE} data-part="row">
-                            <Message message={row.message} from={row.from} to={row.to} transcript={props.transcript} onRespond={props.onRespond} onCancelAgent={props.onCancelAgent} />
+                            <Message
+                                message={row.message}
+                                from={row.from}
+                                to={row.to}
+                                transcript={props.transcript}
+                                author={props.describe?.(row.message)}
+                                streaming={streaming && row.message === lastAssistant}
+                                toolMeta={props.toolMeta}
+                                logHref={props.logHref}
+                                onRespond={props.onRespond}
+                                onCancelAgent={props.onCancelAgent}
+                            />
                         </li>
                     ))}
                     {props.onRespond &&

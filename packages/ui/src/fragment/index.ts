@@ -14,6 +14,9 @@ import { kitAnatomies } from '../kit/anatomy.js';
 import { recipes as transcriptRecipes } from './recipes.js';
 import { recipes as kitRecipes } from '../kit/recipes.js';
 
+/** The keyframes the streaming dot pulses on — raw CSS a design system appends verbatim (`DesignSystemInput.css`). */
+export { fragmentCss } from './recipes.js';
+
 /** The recipe pack: the transcript's six scopes and the kit's `ag-*` scopes. */
 export const recipes = [...transcriptRecipes, ...kitRecipes];
 
