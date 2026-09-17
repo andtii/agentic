@@ -1,0 +1,29 @@
+{
+  "name": "@agentic/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP client (consume servers as platform tools) and the platform MCP server (orchestration surface for external clients).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./dist/index.js",
+      "production": "./dist/index.prod.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agentic/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@sigx/vite": "catalog:",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3"
+  }
+}

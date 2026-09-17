@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@agentic/core",
+    "path": "packages/core/dist/index.js",
+    "limit": "3 KB"
+  }
+]

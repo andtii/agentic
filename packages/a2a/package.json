@@ -1,0 +1,29 @@
+{
+  "name": "@agentic/a2a",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A2A 1.0 JSON-RPC server (agent cards, tasks) and a remote-agent client adapter implementing the @sigx/ai-agent contract.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./dist/index.js",
+      "production": "./dist/index.prod.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agentic/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@sigx/vite": "catalog:",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3"
+  }
+}

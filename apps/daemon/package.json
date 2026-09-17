@@ -1,0 +1,26 @@
+{
+  "name": "@agentic/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "description": "agentic-daemon — the machine daemon: pairs a machine to a workspace, reports environments, relays runtime sessions and tool calls.",
+  "type": "module",
+  "bin": {
+    "agentic-daemon": "./bin/agentic-daemon.mjs"
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "start": "node bin/agentic-daemon.mjs"
+  },
+  "dependencies": {
+    "@agentic/core": "workspace:*",
+    "@agentic/daemon-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@sigx/vite": "catalog:",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

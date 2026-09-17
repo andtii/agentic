@@ -1,0 +1,43 @@
+{
+  "name": "agentic-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Unified Agent Platform — persistent AI agents, chats, tasks, machine daemons and Cloudflare hosting on the sigx estate",
+  "type": "module",
+  "scripts": {
+    "wt": "node scripts/worktree.mjs",
+    "branch-protection": "node scripts/apply-branch-protection.mjs andtii/agentic --approvals 0",
+    "sync:core": "node scripts/sync-core.mjs",
+    "verify:catalog": "node scripts/check-catalog.mjs",
+    "build": "pnpm -r run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint packages apps",
+    "lint:fix": "oxlint --fix packages apps",
+    "size": "size-limit"
+  },
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^11",
+    "@types/node": "^26.5.1",
+    "@vitest/coverage-v8": "^4.1.5",
+    "happy-dom": "^20.9.0",
+    "oxlint": "^1.47.0",
+    "size-limit": "^11",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3",
+    "vitest": "^4.1.5"
+  },
+  "author": "Andreas Ekdahl",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andtii/agentic.git"
+  },
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

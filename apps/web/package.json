@@ -1,0 +1,10 @@
+{
+  "name": "@agentic/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The web app: sigx SSR + serverFn + actors host on Cloudflare Workers, UI on @sigx/zero + zero-daisyui. Scaffolded by the app-shell and worker-entry issues.",
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"console.log('apps/web: scaffolded by the app-shell and worker-entry issues')\""
+  }
+}

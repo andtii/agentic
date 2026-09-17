@@ -1,0 +1,1 @@
+apps/web is scaffolded by the app-shell issue with `pnpm dlx @sigx/cli create web --kind ssr --target cloudflare --features router,server-fn --styling none -y`, then extended with the ActorHost Durable Object entry (see docs/architecture.md, Hosting topology).

@@ -1,0 +1,61 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "types": [
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@sigx/runtime-core",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "paths": {
+      "@agentic/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@agentic/daemon-protocol": [
+        "./packages/daemon-protocol/src/index.ts"
+      ],
+      "@agentic/memory": [
+        "./packages/memory/src/index.ts"
+      ],
+      "@agentic/learning": [
+        "./packages/learning/src/index.ts"
+      ],
+      "@agentic/runtimes": [
+        "./packages/runtimes/src/index.ts"
+      ],
+      "@agentic/platform": [
+        "./packages/platform/src/index.ts"
+      ],
+      "@agentic/mcp": [
+        "./packages/mcp/src/index.ts"
+      ],
+      "@agentic/a2a": [
+        "./packages/a2a/src/index.ts"
+      ],
+      "@agentic/ui": [
+        "./packages/ui/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "packages/*/__tests__/**/*.ts",
+    "packages/*/__tests__/**/*.tsx",
+    "apps/*/src/**/*.ts",
+    "apps/*/src/**/*.tsx",
+    "apps/*/__tests__/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/dist"
+  ]
+}
