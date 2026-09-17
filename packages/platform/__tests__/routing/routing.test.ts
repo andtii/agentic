@@ -437,12 +437,13 @@ describe('multi-account environments on one machine (EXE-04/05/07, AC-02)', () =
         expect(before.map((e) => e.account.identity)).toEqual(['me@work.example', 'me@home.example', 'me@client.example']);
 
         const a = await agent('agent_cc', { runtime: 'in-memory', defaultEnvironmentId: E1 });
-        // One after another, as a user switching accounts would: each run must leave the others' accounts untouched.
-        for (const [id, environmentId] of picks) {
-            await createTask(id, a, { environmentId });
-            await routing().run(id as TaskId);
-            await settled(id);
-        }
+        // One first, then two at once on the same machine (#106): each run must leave the others' accounts untouched.
+        for (const [id, environmentId] of picks) await createTask(id, a, { environmentId });
+        await routing().run('t1' as TaskId);
+        await settled('t1');
+        await routing().run('t2' as TaskId);
+        await routing().run('t3' as TaskId);
+        await Promise.all([settled('t2'), settled('t3')]);
 
         const opens = sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open') as unknown as { sessionId: string; environmentId: string }[];
         expect(opens).toHaveLength(3);
