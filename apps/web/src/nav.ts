@@ -16,20 +16,20 @@ export const NAV_GROUPS = (): readonly NavGroup[] => [
     {
         label: 'Primary',
         items: [
-            { href: '/', label: 'Home', badge: needsYouCount() },
-            { href: '/chats', label: 'Chats' },
-            { href: '/agents', label: 'Agents' },
-            { href: '/machines', label: 'Machines' },
-            { href: '/schedules', label: 'Schedules' }
+            { href: '/', label: 'Home', icon: 'home', badge: needsYouCount() },
+            { href: '/chats', label: 'Chats', icon: 'chats' },
+            { href: '/agents', label: 'Agents', icon: 'agents' },
+            { href: '/machines', label: 'Machines', icon: 'machines' },
+            { href: '/schedules', label: 'Schedules', icon: 'schedules' }
         ]
     },
     {
         label: 'Workspace',
         items: [
-            { href: '/history', label: 'History' },
-            { href: '/usage', label: 'Usage' },
-            { href: '/plugins', label: 'Plugins' },
-            { href: '/settings', label: 'Settings' }
+            { href: '/history', label: 'History', icon: 'history' },
+            { href: '/usage', label: 'Usage', icon: 'usage' },
+            { href: '/plugins', label: 'Plugins', icon: 'plugins' },
+            { href: '/settings', label: 'Settings', icon: 'settings' }
         ]
     }
 ];
@@ -37,22 +37,5 @@ export const NAV_GROUPS = (): readonly NavGroup[] => [
 /** Every nav entry, flat — what the route test checks against the route table. */
 export const NAV = NAV_GROUPS().flatMap(group => group.items);
 
-/** Topbar breadcrumb roots per route name; detail routes append their id until their page issue lands. */
-export const CRUMBS: Record<string, { label: string; href: string }> = {
-    home: { label: 'Home', href: '/' },
-    chats: { label: 'Chats', href: '/chats' },
-    chat: { label: 'Chats', href: '/chats' },
-    agents: { label: 'Agents', href: '/agents' },
-    agent: { label: 'Agents', href: '/agents' },
-    tasks: { label: 'Tasks', href: '/tasks' },
-    task: { label: 'Tasks', href: '/tasks' },
-    session: { label: 'Sessions', href: '/' },
-    machines: { label: 'Machines', href: '/machines' },
-    machine: { label: 'Machines', href: '/machines' },
-    pair: { label: 'Machines', href: '/machines' },
-    schedules: { label: 'Schedules', href: '/schedules' },
-    plugins: { label: 'Plugins', href: '/plugins' },
-    settings: { label: 'Settings', href: '/settings' },
-    history: { label: 'History', href: '/history' },
-    usage: { label: 'Usage', href: '/usage' }
-};
+/** Topbar breadcrumb roots per route name — see `crumbs.ts`, which also builds the trail. */
+export { CRUMBS } from './crumbs';

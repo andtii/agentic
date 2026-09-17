@@ -27,7 +27,7 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
             page="usage"
             title="Usage"
             slots={{
-                actions: () => (
+                lead: () => (
                     <Segmented
                         label="Group usage by"
                         model={() => ui.by}

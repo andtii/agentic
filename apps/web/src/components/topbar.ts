@@ -19,8 +19,12 @@ export interface TopbarRoute {
 export interface TopbarContribution {
     /** Rendered in the topbar's actions slot, right-aligned. */
     readonly actions?: () => JSXElement;
-    /** The breadcrumb's current-page label. */
+    /** The breadcrumb's current-page label — and the app bar's title below 768 px. */
     readonly crumb?: string;
+    /** The app bar's sub-line under the title below 768 px (member tiles, a status summary). */
+    readonly subtitle?: () => JSXElement;
+    /** The app bar's one right slot below 768 px; without it the actions render there. */
+    readonly phoneAction?: () => JSXElement;
 }
 
 const registry = new Map<string, (route: TopbarRoute) => TopbarContribution>();

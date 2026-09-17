@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import type { Decision, OpenRequest } from '@sigx/ai-agent/app';
 import { expectAnatomy } from '@sigx/zero/testing';
 import { ApprovalPrompt, DENY_MESSAGE, aiApprovalAnatomy, decisionText } from '../src/thread';
-import { mount, one, all, buttonNamed, tick } from './helpers';
+import { mount, one, all, buttonNamed, buttonName, tick } from './helpers';
 
 const request: OpenRequest = { requestId: 'r1', kind: 'permission', toolName: 'Bash', message: 'Runs `git status`.', seq: 1 };
 
@@ -30,7 +30,7 @@ describe('the approval card', () => {
         expect(one(dom, 'ai-approval', 'header')!.querySelector('svg')).not.toBeNull();
         expectAnatomy(dom, aiApprovalAnatomy);
         // Three decisions, painted by the design system's button recipe with the handoff's intents.
-        expect(buttons(dom).map((b) => [b.textContent, b.getAttribute('data-intent')])).toEqual([
+        expect(buttons(dom).map((b) => [buttonName(b), b.getAttribute('data-intent')])).toEqual([
             ['Allow once', 'wait'],
             ['Allow for this session', 'default'],
             ['Deny', 'danger']

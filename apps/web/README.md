@@ -36,15 +36,24 @@ One theme, `control-room`, dark only (docs/decisions.md), set on `<html data-the
 
 ## Playwright
 
-`e2e/shell.spec.ts` renders the shell at 400px (drawer navigation) and 1280px (232 px sidebar, 60 px topbar, nav groups, badge, breadcrumb) and navigates two routes each, plus the nav placeholders. It runs against the dev server; install a browser once:
+Three projects, one per width the handoff distinguishes (`docs/design/HANDOFF.md` → "Responsive behaviour"); each spec picks its regime with `test.skip` on the viewport:
+
+| Project | Viewport | Specs |
+|---|---|---|
+| `phone-400` | 400 × 800 | `mobile.spec.ts` (no horizontal scroll on the fourteen routes, the 312 px drawer with 50 px items and focus return, back link + title + sub-line on detail routes, the docked composer with 48 px controls, the approval card's full-row `Allow once`, stacked tables, 52 px environment rows, touch targets), the phone half of `shell.spec.ts` |
+| `tablet-1024` | 1024 × 800 | `tablet.spec.ts` (rails drop under the main column in the handoff order, Chat keeps list + thread with the context panel behind the tasks button, three-column grids become two, no horizontal scroll), plus the desktop specs that do not skip below 1280 |
+| `desktop-1280` | 1280 × 800 | `shell.spec.ts`, `core.spec.ts`, `agents.spec.ts`, `ops.spec.ts` |
+
+It runs against the dev server, so build `@agentic/ui` first and install a browser once:
 
 ```sh
 pnpm --filter @agentic/ui build
 pnpm --filter @agentic/web exec playwright install chromium
-pnpm --filter @agentic/web test:e2e
+pnpm --filter @agentic/web test:e2e        # every project
+pnpm --filter @agentic/web e2e:mobile      # the phone only
 ```
 
-CI does not run it yet (no browser install step); `pnpm test` covers the route table and the shell/layout units.
+CI runs the whole suite in the `e2e` job (`.github/workflows/ci.yml`, ubuntu, Chromium with system deps) after `pnpm build`; a failed run uploads `playwright-report`.
 
 ## Deploy (Cloudflare Workers)
 

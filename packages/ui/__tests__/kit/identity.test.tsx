@@ -38,6 +38,16 @@ describe('AgentTile', () => {
 });
 
 describe('EnvironmentLine', () => {
+    it('carries fit="drop-machine" as data-fit so the phone can drop the machine segment last', () => {
+        const root = mount(<EnvironmentLine machine="alien01" runtime="claude-code" account="work" fit="drop-machine" />);
+        const line = root.querySelector('[data-scope="ag-env-line"][data-part="root"]')!;
+        expect(line.getAttribute('data-fit')).toBe('drop-machine');
+        // All three parts still render (EXE-06); the title keeps them in full.
+        expect(line.querySelector('[data-part="machine"]')!.textContent).toBe('alien01');
+        expect(line.getAttribute('title')).toBe('alien01 / claude-code / work');
+        expect(mount(<EnvironmentLine machine="a" runtime="b" account="c" />).querySelector('[data-part="root"]')!.hasAttribute('data-fit')).toBe(false);
+    });
+
     it('renders machine / runtime / account with dim separators and never one part alone', () => {
         const root = mount(<EnvironmentLine machine="alien01" runtime="claude-code" account="work" />);
         const line = one(root, 'ag-env-line', 'root')!;

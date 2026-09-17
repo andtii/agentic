@@ -3,6 +3,7 @@ import { Link } from '@sigx/router';
 import { AgentTile, Button, ConfirmDialog, Icon, Label, Switch, Tag } from '@agentic/ui';
 import { disableConsequence, opsAgent, opsPlugins, type OpsPlugin } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 export type PluginsViewProps = Define.Prop<'plugins', readonly OpsPlugin[], true>;
 
@@ -20,6 +21,8 @@ export function dependentName(d: OpsPlugin['dependents'][number]): string {
  * states the consequence ("Disable and stop 2 sessions"); the switch stays
  * on until the user confirms.
  */
+defineTopbar('plugins', () => ({ actions: () => <Button intent="default" icon="plus">Add MCP connector</Button> }));
+
 export const PluginsView = component<PluginsViewProps>(({ props }) => {
     const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.plugins.map(p => [p.id, p.enabled])));
     const ui = signal<{ confirming: string | null }>({ confirming: null });
@@ -41,7 +44,7 @@ export const PluginsView = component<PluginsViewProps>(({ props }) => {
     return () => {
         const confirming = props.plugins.find(p => p.id === ui.confirming);
         return (
-            <OpsPage page="plugins" title="Plugins" slots={{ actions: () => <Button intent="default" icon="plus">Add MCP connector</Button> }}>
+            <OpsPage page="plugins" title="Plugins">
                 <div data-plugin-grid>
                     {props.plugins.map(p => (
                         <article data-plugin-card data-enabled={enabled[p.id] ? '' : undefined} aria-label={p.name}>

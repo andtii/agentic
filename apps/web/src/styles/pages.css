@@ -852,3 +852,75 @@ code[data-mono][data-cost="partly-estimated"] { color: var(--color-warning); fon
 code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
 
 /* ---- responsive (#91): 768–1279 rails drop, < 768 one column ---- */
+
+
+/* ---- responsive (#91): one breakpoint at 768; rails drop below 1280 (docs/design/HANDOFF.md → "Responsive behaviour") ---- */
+
+/* the topbar's tasks button shows only where the context panel has left the chat grid */
+[data-scope="button"].ag-chat-tasks { display: none; }
+[data-context-drawer] [data-chat-context] { border: 0; padding: 0; }
+[data-chat-summary] { color: var(--color-warning); }
+
+@media (max-width: 1279.98px) {
+    [data-scope="button"].ag-chat-tasks { display: inline-flex; }
+
+    /* fixed right rails drop under the main column: Home, Task, Session, Machine, Memory */
+    [data-page="home"] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="task"] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="session"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "main" "rail"; }
+    [data-machine-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="agent"] [data-agent-memory] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="agent"] [data-agent-overview] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="agent"] [data-scope="ai-form"][data-layout="sections"] { grid-template-columns: minmax(0, 1fr); }
+
+    /* Chat keeps list + thread; the context panel sits behind the tasks button */
+    [data-page="chat"] { grid-template-columns: 280px minmax(0, 1fr); }
+    [data-page="chat"] > [data-chat-context] { display: none; }
+
+    /* three-column card grids become two */
+    [data-env-grid], [data-plugin-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-usage-stats] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-pair-grid] { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xl); }
+}
+
+@media (max-width: 767.98px) {
+    /* every grid is one column */
+    [data-page="chat"] { grid-template-columns: minmax(0, 1fr); block-size: calc(100dvh - var(--ag-topbar-h)); }
+    [data-page="chat"] > [data-chat-list] { display: none; }
+    [data-chat-composer] { padding: 0; }
+    [data-chat-empty] { padding: var(--space-lg); }
+    [data-page="agents"] [data-agent-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="agents"] [data-agent-card-stats] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    [data-page="agent"] [data-agent-stats] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-page="agent"] [data-agent-header] { flex-wrap: wrap; gap: var(--space-md); }
+    [data-page="agent"] [data-agent-header] > [data-scope="stack"] { min-inline-size: 0; max-inline-size: 100%; }
+    [data-page="agent"] [data-agent-header] [data-scope="stack"][data-orientation="vertical"] { min-inline-size: 0; flex: 1 1 0; }
+    [data-page="agent"] [data-agent-sub] { flex-direction: column; align-items: flex-start; gap: var(--space-2xs); }
+    [data-page="agent"] [data-scope="ai-form"][data-part="section"] { grid-template-columns: minmax(0, 1fr); gap: var(--space-md); }
+    [data-page="agent"] [data-section="execution"] [data-scope="ai-form"][data-part="section-body"] { grid-template-columns: minmax(0, 1fr); }
+    [data-page="agent"] [data-memory-row] { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-sm); }
+    [data-page="agent"] [data-memory-actions] { justify-content: flex-start; }
+    [data-page="agent"] [data-memory-actions] [data-scope="button"] { min-inline-size: var(--ag-touch-min); min-block-size: var(--ag-touch-min); }
+    [data-env-grid], [data-plugin-grid], [data-usage-stats] { grid-template-columns: minmax(0, 1fr); }
+    [data-settings-section] { grid-template-columns: minmax(0, 1fr); gap: var(--space-md); }
+    [data-settings-pair] { grid-template-columns: minmax(0, 1fr); }
+    [data-notify-matrix] th:not(:first-child), [data-notify-matrix] td:not(:first-child) { inline-size: 64px; }
+    [data-page-head] { flex-wrap: wrap; margin-block-end: var(--space-lg); }
+    [data-page="pair"] [data-page-head] { position: static; }
+    [data-machine-head], [data-machine-hero] { flex-wrap: wrap; gap: var(--space-md); }
+    [data-session-head] { gap: var(--space-md); }
+    [data-event] { grid-template-columns: 44px minmax(0, 1fr); }
+    [data-event] > :nth-child(2) { grid-column: 2; }
+    [data-event] > :nth-child(3) { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
+    [data-kv-row] { grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-sm); }
+    [data-code-cells] { gap: var(--space-sm); }
+    [data-code-cell] { inline-size: auto; flex: 1 1 0; block-size: 64px; font-size: 28px; }
+    [data-command-well] { flex-wrap: wrap; overflow-wrap: anywhere; }
+    [data-today] > li { grid-template-columns: 48px minmax(0, 1fr); }
+    [data-today] > li > :last-child { grid-column: 2; }
+    [data-api-key] { flex-wrap: wrap; }
+    [data-cell-title] { white-space: normal; }
+    [data-bars] { block-size: 80px; }
+    /* long mono strings wrap inside wells; the environment line never does */
+    [data-panel] code, [data-card] code, [data-command-well] code { overflow-wrap: anywhere; }
+}

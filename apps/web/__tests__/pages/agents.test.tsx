@@ -1,5 +1,6 @@
 import { Agents, presencePill } from '../../src/pages/Agents';
 import { agentProfiles } from '../../src/mock/agents';
+import { topbarFor } from '../../src/components/topbar';
 import { mountAt, text } from './helpers';
 
 describe('/agents roster', () => {
@@ -37,9 +38,12 @@ describe('/agents roster', () => {
         expect(noenv.getAttribute('data-tone')).toBe('needs-you');
     });
 
-    it('has the New agent action and the delegation footer line', async () => {
+    it('registers New agent as its topbar action (#91) and has the delegation footer line', async () => {
         const root = await mountAt('/agents', <Agents />);
-        const button = [...root.querySelectorAll('button')].find((b) => text(b) === 'New agent')!;
+        // The action lives in the shell's topbar, never in an in-content head row.
+        expect([...root.querySelectorAll('button')].find((b) => text(b) === 'New agent')).toBeUndefined();
+        const actions = await mountAt('/agents', <div>{topbarFor({ name: 'agents', path: '/agents', params: {} })!.actions!()}</div>);
+        const button = [...actions.querySelectorAll('button')].find((b) => text(b) === 'New agent')!;
         expect(button.getAttribute('data-intent')).toBe('primary');
         expect(text(root.querySelector('[data-agent-grid-footer]'))).toContain('Depth 3, concurrency 3');
     });

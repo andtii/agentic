@@ -344,7 +344,11 @@ const envCard: RecipeInput = {
             }
         },
         'default-for': { base: { display: 'flex', gap: 'var(--space-xs)', flexWrap: 'wrap' } },
-        fix: { base: { margin: '0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', fontSize: 'var(--text-sm)', color: 'var(--color-base-content)', paddingBlockStart: 'var(--space-sm)', borderBlockStart: 'var(--border) solid var(--ag-line)' } },
+        fix: {
+            base: { margin: '0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', fontSize: 'var(--text-sm)', color: 'var(--color-base-content)', paddingBlockStart: 'var(--space-sm)', borderBlockStart: 'var(--border) solid var(--ag-line)' },
+            // The line wraps; the button keeps its intrinsic width ("Re-check" never breaks).
+            selectors: { '& > [data-scope="button"]': { flex: 'none' } }
+        },
         actions: { base: { display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' } }
     },
     variants: {

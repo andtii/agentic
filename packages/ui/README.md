@@ -36,7 +36,7 @@ import { Row, Col, Spacer } from '@agentic/ui';
 
 ## App shell (`src/shell`)
 
-`AppShell` is the handoff's shell: a sticky 232 px sidebar (brand, nav `groups` — the first unlabelled, the rest headed, each its own `<nav aria-label>` — with a per-item `badge`, then the `connection` and `user` slots) beside a 60 px topbar (`breadcrumb`, `actions` slots) and `<main>` (`flush` drops its padding). Below 768 px the sidebar becomes zero's modal `Drawer` with the same groups and foot. Router-agnostic: render your router's link in the `link` slot; `currentPath` marks the active item. Import `@agentic/ui/shell.css` once. `ThemeToggle` is still exported for a design system with a light pair; the app does not render it (dark only).
+`AppShell` is the handoff's shell: a sticky 232 px sidebar (brand, nav `groups` — the first unlabelled, the rest headed, each its own `<nav aria-label>` — with a per-item `badge`, then the `connection` and `user` slots) beside a 60 px topbar (`breadcrumb`, `actions` slots) and `<main>` (`flush` drops its padding). Below 768 px the sidebar becomes zero's modal `Drawer` (312 px, 50 px items, the same groups and foot behind a 44 px menu button) and the bar an app bar: `title` (the page), `back` (a detail route's parent, rendered through the `back` slot), the `subtitle` slot under the title and the `phoneAction` slot as the one right slot (else the last action). Router-agnostic: render your router's link in the `link` slot (it receives the item's `icon`); `currentPath` marks the active item. Import `@agentic/ui/shell.css` once. `ThemeToggle` is still exported for a design system with a light pair; the app does not render it (dark only).
 
 ```tsx
 <ThemeProvider>

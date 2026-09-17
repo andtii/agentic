@@ -2,6 +2,7 @@ import { component, signal, type Define } from 'sigx';
 import { Button, ConfirmDialog, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { opsSettings, type NotificationRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 export type SettingsViewProps =
     & Define.Prop<'timeZone', string, true>
@@ -32,6 +33,8 @@ const Section = component<Define.Prop<'title', string, true> & Define.Prop<'hint
  * delete. Persistence lands with the Workspace and Registry wiring; the
  * page edits a draft.
  */
+defineTopbar('settings', () => ({ actions: () => <Button intent="primary" type="submit" form="settings-form">Save</Button> }));
+
 export const SettingsView = component<SettingsViewProps>(({ props }) => {
     const draft = signal({
         timeZone: props.timeZone,
@@ -44,7 +47,7 @@ export const SettingsView = component<SettingsViewProps>(({ props }) => {
         deleting: false
     });
     return () => (
-        <OpsPage page="settings" title="Settings" maxWidth="860px" slots={{ actions: () => <Button intent="primary" type="submit" form="settings-form">Save</Button> }}>
+        <OpsPage page="settings" title="Settings" maxWidth="860px">
             <form id="settings-form" data-settings-form onSubmit={(e: Event) => e.preventDefault()}>
                 <Section title="Time" hint="Used by every schedule and reminder.">
                     <div data-settings-pair>

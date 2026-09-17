@@ -63,7 +63,11 @@ describe('/chats/:id (Chat)', () => {
     });
 
     it('lists the members with status, environment and history access, and the tasks in this chat', async () => {
-        const dom = await mountRoute('/chats/c1');
+        const page = await mountRoute('/chats/c1');
+        // The panel renders inline (≥ 1280) and again inside the end drawer the topbar's tasks button opens below (#91).
+        const dom = page.querySelector('[data-page="chat"] > [data-chat-context]')!;
+        expect(dom).not.toBeNull();
+        expect(page.querySelector('[data-context-drawer] [data-chat-context]')).not.toBeNull();
         expect(texts([...dom.querySelectorAll('[data-member-name]')])).toEqual(['Atlas', 'Forge', 'Lint']);
         expect(texts([...dom.querySelectorAll('[data-member-history]')])).toEqual(['Coordinator · sees all history', 'Sees all history', 'Added 14:02 · sees history from then']);
         expect(dom.querySelectorAll('[data-member] [data-scope="ag-env-line"][data-part="root"]')).toHaveLength(3);
