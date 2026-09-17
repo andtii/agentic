@@ -26,6 +26,7 @@
     "@sigx/ai-agent": "catalog:"
   },
   "devDependencies": {
+    "@agentic/learning": "workspace:*",
     "@sigx/vite": "catalog:",
     "typescript": "^7.0.2",
     "vite": "^8.0.3",

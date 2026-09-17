@@ -16,16 +16,19 @@
  *   frames to `forwardFrames` and its replies to `commandReplied`.
  */
 
-import { actorKey, hasScope, SESSION_EVENTS_TOPIC, type Principal, type SessionEvent, type TaskError, type UsageRow } from '@agentic/core';
+import { actorKey, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type TaskError, type TaskResult, type UsageRow } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
-import { sameWorkspace } from '../auth/index.js';
+import { mintAgentPrincipal, sameWorkspace } from '../auth/index.js';
 import type { UsageVerdict } from '../ledger/recorder.js';
+import { agentMemoryScope } from '../agent/agent.actor.js';
+import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
+import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { appendEntry, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
@@ -50,6 +53,19 @@ export interface SessionInfo {
     readonly transcriptAt?: EventCursor;
     readonly gap?: SessionState['gap'];
     readonly closedAt?: number;
+    /** What the last finished turn taught (architecture §8), when the actor has learning ports. */
+    readonly learning?: LearningRecord;
+    /** Corrections made through `correct`, oldest first. */
+    readonly corrections: readonly CorrectionRecord[];
+}
+
+/** What `correct` returns: the correction as the plugin saw it and what it proposed. */
+export interface CorrectionResult {
+    readonly correction: Correction;
+    /** Every proposal, memory ones already applied by the plugin. */
+    readonly proposals: readonly Proposal[];
+    /** Instruction proposals parked on the Agent actor for review. */
+    readonly parked: number;
 }
 
 /** The `error.code` an interrupted turn ends with; `error.data.interrupted` and `isInterruptedTurnEnd` name it exactly. */
@@ -65,6 +81,8 @@ export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
 const sessionsScope: ActorPolicy = (principal: Principal | null) => !!principal && hasScope(principal, 'sessions');
 /** The daemon path's entry points: only a machine principal (the Machine actor's socket) reaches them. */
 const internalPolicy: ActorPolicy = (principal: Principal | null) => principal?.kind === 'machine';
+/** A correction is a user's word — or an agent's, which the plugin drops unless configured to learn from it; never a machine's. */
+const correctorPolicy: ActorPolicy = (principal: Principal | null) => principal !== null && principal.kind !== 'machine';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type SessionEventInit = DistributiveOmit<SessionEvent, 'agentId' | 'sessionId' | 'at'>;
@@ -120,8 +138,103 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.running ? { running: c.snapshot(s.running) } : {}),
             ...(s.transcript ? { transcriptAt: { epoch: s.transcript.epoch, seq: s.transcript.seq } } : {}),
             ...(s.gap ? { gap: c.snapshot(s.gap) } : {}),
-            ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {})
+            ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
+            ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
+            corrections: c.snapshot(s.corrections ?? [])
         };
+    }
+
+    /** The principal the session's memory and learning run as (MEM-11): the agent, whoever opened the session. */
+    function agentPrincipal(c: ActorContext<SessionState>): Principal | null {
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec || !parsed) return null;
+        return mintAgentPrincipal({ workspaceId: parsed.workspaceId, agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) });
+    }
+
+    /**
+     * Session start (architecture §8): query the agent's own scope and its shared
+     * scopes as the agent, record what came back on the spec, and append the
+     * platform-owned block to the system prompt. A scope that refuses is listed
+     * in `retrieval.skipped`; a retrieval that fails altogether leaves the spec
+     * without memories and says so — the session still opens.
+     */
+    async function withRetrievedMemory(c: ActorContext<SessionState>, spec: SessionOpenSpec, learning: LearningPorts): Promise<SessionOpenSpec> {
+        const parsed = parseSessionKey(c.key);
+        if (!parsed) return spec;
+        const principal = mintAgentPrincipal({ workspaceId: parsed.workspaceId, agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) });
+        const at = now();
+        try {
+            const r = await retrieveMemories(learning.memory, principal, spec.config, spec, learning.retrieval);
+            const system = withMemoryBlock(spec.system, renderMemoryBlock(r.entries));
+            return {
+                ...spec,
+                memories: r.entries,
+                retrieval: { text: r.text, scopes: r.scopes, skipped: r.skipped, at },
+                ...(system !== undefined ? { system } : {})
+            };
+        } catch (error) {
+            return { ...spec, memories: [], retrieval: { text: '', scopes: [], skipped: [{ scope: `agent:${spec.agentId}`, reason: error instanceof Error ? error.message : String(error) }], at } };
+        }
+    }
+
+    /** The plugin for this session — built over the session's objective and tags when the port is a factory. */
+    function pluginFor(c: ActorContext<SessionState>, learning: LearningPorts) {
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec || !parsed) return undefined;
+        return learningPluginFor(learning.plugin, {
+            workspaceId: parsed.workspaceId,
+            agentId: spec.agentId,
+            sessionId: parsed.sessionId,
+            ...(spec.taskId ? { taskId: spec.taskId } : {}),
+            ...(spec.objective ? { objective: spec.objective } : {}),
+            ...(spec.tags ? { tags: spec.tags } : {})
+        });
+    }
+
+    /** Instruction proposals go to the Agent actor's review queue (LRN-08); the parker is the app's, or the platform default. */
+    async function park(c: ActorContext<SessionState>, learning: LearningPorts, instructions: readonly InstructionProposal[], origin: ProposalOrigin, principal: Principal): Promise<void> {
+        if (!instructions.length || !learning.park) return;
+        const spec = c.state.spec!;
+        await learning.park({ workspaceId: principal.workspaceId, agentId: spec.agentId }, instructions, origin, principal);
+    }
+
+    /**
+     * Turn end (architecture §7 "learning hook", §8): the turn's outcome — a
+     * result with text is a CLAIM unless `verify` says otherwise (LRN-03) —
+     * goes to `onTaskEnd`; memory proposals are applied by the plugin,
+     * instruction proposals parked. Runs only for a task session's regular
+     * turn end: an interrupted turn is not an outcome, and a session without a
+     * task has no task to record. Failure is recorded, never thrown.
+     */
+    async function learnFromTurn(c: ActorContext<SessionState>, turnId: string, text: string): Promise<void> {
+        const learning = ports.learning;
+        const s = c.state;
+        const spec = s.spec;
+        const parsed = parseSessionKey(c.key);
+        const principal = agentPrincipal(c);
+        const plugin = learning && pluginFor(c, learning);
+        if (!learning || !plugin || !spec?.taskId || !parsed || !principal) return;
+        const end = s.events.findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
+        if (!end || end.type !== 'turn-end' || isInterruptedTurnEnd(end)) return;
+        const status = turnStatusOf(end.stopReason);
+        const result: TaskResult = { ...(text ? { text } : {}), artifacts: [], verified: false };
+        const start = s.events.find((e) => e.type === 'turn-start' && e.turnId === turnId);
+        const objective = spec.objective?.trim() || (start?.type === 'turn-start' ? lastUserText(start.input) : '');
+        let record: LearningRecord = { turnId, at: now(), status, verification: 'none', written: 0, parked: 0 };
+        try {
+            const verdict = await learning.verify?.({ taskId: spec.taskId, agentId: spec.agentId, turnId, status, result });
+            const outcome = taskOutcomeOf({ taskId: spec.taskId, agentId: spec.agentId, objective, tags: spec.tags ?? [], status, result, ...(verdict ? { verdict } : {}) });
+            record = { ...record, verification: outcome.verification };
+            const proposals = await plugin.onTaskEnd(outcome, learning.memory(agentMemoryScope(spec.agentId), principal));
+            const instructions = instructionProposals(proposals);
+            await park(c, learning, instructions, { kind: 'task-end', sessionId: parsed.sessionId, taskId: spec.taskId }, principal);
+            record = { ...record, written: proposals.length - instructions.length, parked: instructions.length };
+        } catch (error) {
+            record = { ...record, error: error instanceof Error ? error.message : String(error) };
+        }
+        s.learning = record;
     }
 
     /** Best-effort publish to the chat this session belongs to (CHT-11): a subscriber's failure lands in the report, never here. */
@@ -223,6 +336,7 @@ export function defineSessionActor(ports: SessionPorts) {
         if (live) s.ref = structuredClone(live.session.ref);
         const text = finalText(transcript, turnId);
         if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(s.spec?.taskId ? { taskId: s.spec.taskId } : {}) });
+        await learnFromTurn(c, turnId, text);
         await c.save();
     }
 
@@ -266,7 +380,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy },
         state: (): SessionState => initialSessionState(),
         onDeactivate: (ctx) => dispose(ctx.key),
         methods: (ctx) => {
@@ -383,7 +497,11 @@ export function defineSessionActor(ports: SessionPorts) {
                     const s = ctx.state;
                     if (s.status === 'closed') throw new Error(`session "${ctx.key}" is closed`);
                     const first = !s.opened;
-                    if (first) await appendEntry(ctx, set({ opened: true, spec: structuredClone(spec), status: 'idle', ...(spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
+                    if (first) {
+                        // Memory is retrieved before the runtime session exists, so the factory (and a daemon) sees the block in the spec.
+                        const recorded = ports.learning ? await withRetrievedMemory(ctx, structuredClone(spec), ports.learning) : structuredClone(spec);
+                        await appendEntry(ctx, set({ opened: true, spec: recorded, status: 'idle', ...(spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
+                    }
                     await ensureLive();
                     if (first) await publishChat(ctx, { kind: 'status', status: 'session-started' });
                     return info(ctx);
@@ -436,6 +554,40 @@ export function defineSessionActor(ports: SessionPorts) {
                 transcript(): AgentTranscript | undefined {
                     const t = ctx.state.transcript;
                     return t ? ctx.snapshot(t) : undefined;
+                },
+
+                /**
+                 * "Correct" on an assistant message (architecture §8, AC-09): the
+                 * correction goes to `onCorrection` as the agent, so the lesson lands
+                 * in the agent's own scope with the user's provenance; instruction
+                 * proposals are parked for review. `what`: `wrong` (this was wrong),
+                 * `prefer` (do it this way), `never` (never do this).
+                 */
+                async correct(messageId: MessageId, text: string, what: Correction['what']): Promise<CorrectionResult> {
+                    const learning = ports.learning;
+                    const s = ctx.state;
+                    const principal = agentPrincipal(ctx);
+                    if (!learning?.plugin) throw new Error(`session "${ctx.key}": no learning plugin is configured, corrections cannot be learned from`);
+                    if (!s.opened || !s.spec || !parsed || !principal) throw new Error(`session "${ctx.key}" is not open`);
+                    const plugin = pluginFor(ctx, learning)!;
+                    const message = snapshotTranscript(ctx).messages.find((m) => m.id === messageId);
+                    if (!message || message.role !== 'assistant') throw new Error(`session "${ctx.key}": "${messageId}" is not an assistant message of this session`);
+                    const caller = ctx.principal as Principal | null;
+                    const correction = correctionOf({
+                        agentId: s.spec.agentId,
+                        sessionId: parsed.sessionId,
+                        messageId,
+                        text,
+                        what,
+                        by: caller?.kind === 'agent' ? 'agent' : 'user',
+                        at: now()
+                    });
+                    const proposals = await plugin.onCorrection(correction, learning.memory(agentMemoryScope(s.spec.agentId), principal));
+                    const instructions = instructionProposals(proposals);
+                    await park(ctx, learning, instructions, { kind: 'correction', sessionId: parsed.sessionId, messageId, ...(s.spec.taskId ? { taskId: s.spec.taskId } : {}) }, principal);
+                    const record: CorrectionRecord = { messageId, what: correction.what, by: correction.by, at: correction.at, written: proposals.length - instructions.length, parked: instructions.length };
+                    await appendEntry(ctx, set({ corrections: [...(s.corrections ?? []), record] }));
+                    return { correction, proposals: ctx.snapshot(proposals), parked: instructions.length };
                 },
 
                 /** Daemon path (internal): frames from the machine's socket, one-way. */

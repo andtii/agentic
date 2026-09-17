@@ -8,9 +8,20 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
+import type { LearningPorts, SkippedScope } from '../task/driver.js';
+
+/** How the memory block of a session was retrieved — recorded on the spec (MEM-10: the supply path is visible). */
+export interface MemoryRetrievalRecord {
+    /** The query text the scopes were ranked on. */
+    readonly text: string;
+    readonly scopes: readonly MemoryScope[];
+    /** Scopes that answered nothing because the agent may not read them, or failed. */
+    readonly skipped: readonly SkippedScope[];
+    readonly at: number;
+}
 
 import type { UsageRecorder } from '../ledger/recorder.js';
 
@@ -25,8 +36,21 @@ export interface SessionOpenSpec {
     readonly machineId?: MachineId;
     /** The agent configuration this session runs with (AGT-06/07). */
     readonly config: FrozenAgentConfig;
-    /** The assembled system prompt (instructions + skills + retrieved memory), when the caller built one. */
+    /** The task objective the session starts on — what memory retrieval ranks on and learning records (MEM-07, LRN-05). */
+    readonly objective?: string;
+    /** The prompt parts the work starts from (the task's context); the last text part is the latest user message. */
+    readonly context?: readonly PromptPart[];
+    /** Tags retrieval filters on and learning stamps on records. */
+    readonly tags?: readonly string[];
+    /**
+     * The assembled system prompt (instructions + skills), when the caller built one. When the actor
+     * has learning ports, `open` appends the retrieved memory block (`## Platform memory`) to it.
+     */
     readonly system?: string;
+    /** Filled by `open`: the memories retrieved for this session, in rank order — a factory renders them natively (`createPlatformModelAgent({ memories })`). */
+    readonly memories?: readonly MemoryEntry[];
+    /** Filled by `open`: how `memories` were retrieved. */
+    readonly retrieval?: MemoryRetrievalRecord;
     /** Tool names the runtime must serve. */
     readonly tools?: readonly string[];
     /** Resume an earlier runtime session. */
@@ -81,6 +105,12 @@ export interface SessionPorts {
     readonly commands?: CommandSink;
     /** Where turn-scoped `usage` events go (the Ledger, OPS-07) and who says when the task's budget is spent (OPS-08); `ledgerRecorder()` in the app. */
     readonly usage?: UsageRecorder;
+    /**
+     * Memory and learning (architecture §8): `open` retrieves the agent's memories into the spec,
+     * every finished turn of a task session goes through `plugin.onTaskEnd`, and `correct` through
+     * `plugin.onCorrection`. Without it the session neither retrieves nor learns.
+     */
+    readonly learning?: LearningPorts;
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }

@@ -129,6 +129,24 @@ await m.openSession(sessionId, environmentId, spec);   // 'opened' | 'queued' (E
 - Routing (§5b): `session.opened` → a synthesized wire `hello` to the Session; `session.frame` → `Session.forwardFrames`; `session.reply` → `Session.commandReplied`; `session.closed` frees the slot and dequeues; `tool.call` → `ToolCallPort.call(input, agentPrincipal)` → `tool.result` (a `ToolCallError` names the error code).
 - Liveness: a socket close is offline at once; a silent daemon is offline after `heartbeatWindowMs` (90 s) on the `liveness` reminder, which also answers pending commands past `commandTimeoutMs` (120 s) with `error internal`. On reconnect `welcome.wanted` carries the last forwarded cursor per session and pending commands are re-sent.
 - `authorize: [sameWorkspace, machines scope]`; `pair` / `tokenRecord` for the owner or the machine itself, `revoke` / `rename` for the owner, the socket entry points for the machine only, session methods for anyone but a machine.
+### Memory and learning on the path (`learning` port; architecture §8, #41)
+
+`defineSessionActor({ factory, learning: platformLearningPorts({ plugin }) })` puts memory and learning on the execution path; without the port the actor neither retrieves nor learns.
+
+```ts
+const ledger = memoryCorrectionLedger();                    // or the Ledger actor's (LRN-09)
+const Session = defineSessionActor({
+    factory,
+    learning: platformLearningPorts({ plugin: (c) => learningPlugin({ ledger, contextFor: () => ({ objective: c.objective, tags: c.tags }) }) })
+});
+await s.open({ agentId, runtime, taskId, objective, context, tags, config, system });   // objective/context/tags drive retrieval
+await s.correct(messageId, 'Never mention internal ticket numbers', 'never');            // → onCorrection, as the agent
+```
+
+- **Session start** (MEM-07/10/11): before the runtime session exists, `open` queries `agent:{id}` plus every `memoryPolicy.shared` scope **as the agent principal** (`retrieveMemories`; the Memory actor's `authorize` and ACL decide — a refused scope is listed in `spec.retrieval.skipped`, never hidden), on `objective` + the last text part of `context`, filtered by `tags`, under one budget (`DEFAULT_RETRIEVAL_LIMIT = 8`, `DEFAULT_RETRIEVAL_MAX_BYTES = 4096`; `platformLearningPorts({ retrieval })` changes it). The hits are recorded on the spec as `memories` (a factory renders them natively: `createPlatformModelAgent({ memories: spec.memories })`) and appended to `spec.system` as the platform-owned block `## Platform memory` (`renderMemoryBlock` / `withMemoryBlock`, idempotent) — the same heading the Claude Code driver relabels to, so the daemon path shows it verbatim.
+- **Turn end** (LRN-02/03): for a session with a `taskId`, the turn's outcome goes to `plugin.onTaskEnd` — `completed` for `end_turn` / `max_*`, `cancelled`, else `failed`; a result with text is `verification: 'claimed'`, `verified` / `refuted` only when the `verify` port says so (`taskOutcomeOf`). Memory proposals are applied by the plugin; instruction proposals are parked through `park` (default: `AgentActor.propose`). An interrupted turn is not an outcome. The result lands in `SessionInfo.learning`; a failure is recorded there, never thrown.
+- **`correct(messageId, text, what)`** (`wrong` | `prefer` | `never`; users, external clients and agents, never a machine): the assistant message of this session becomes a `Correction` (`by: 'user'`, or `'agent'` for an agent principal — dropped by the default plugin) for `plugin.onCorrection`, run as the agent so the lesson lands in `agent:{id}` with the user's provenance; instruction proposals are parked; `SessionInfo.corrections` keeps one record per correction.
+- `plugin` may be a factory over the session's context (`{ workspaceId, agentId, sessionId, taskId?, objective?, tags? }`), which is how a lesson's `conditions` name the task (LRN-04). The steps themselves are pure functions in `src/task/driver.ts`, so a Task driver can compose them too.
 
 ## Chat (`src/chat`)
 
@@ -191,3 +209,8 @@ await books.recordCorrection({ agentId, week, what, at });  // LRN-09 — the @a
 - `checkBudget(limits, spent)` / `remainingBudget` / `budgetError` / `isBudgetFailure` are the budget rules the Task actor and the Session driver share (`BUDGET_ERROR_CODE = 'budget'`). Estimated costs count in full.
 - `ledgerRecorder()` is the Session's `usage` port: `defineSessionActor({ factory, usage: ledgerRecorder() })`. For every **turn-scoped** `usage` event (session-scoped events are cumulative totals and never counted) the driver prices the row — the `OpenedSession.usageRow` the factory returned (`createPlatformModelAgent(...).usageRow`, `estimated: true` for an unlisted model), else the event's own `costUsd` as reported, else unpriced — appends it to the month's Ledger one-way, and, when the session works a task, `Task.recordUsage` charges it. A `failed {budget}` task comes back as the verdict and the driver cancels the running turn (locally on the served session; on the daemon path through the `CommandSink`). The books never fail a turn: a recorder that throws is ignored.
 - `ledgerCorrectionLedger(hops, ws)` adapts the actor to `@agentic/learning`'s `CorrectionLedger` by the month of each correction.
+- `src/task/driver.ts` holds the driver's memory and learning steps (architecture §7 "retrieve memories" / "learning hook", §8) as pure functions over `MemoryStore` and `LearningPlugin`: `retrieveMemories(open, principal, config, { objective, context, tags }, budget)` → `{ entries, hits, scopes, skipped, text }`, `renderMemoryBlock` / `withMemoryBlock` (the `## Platform memory` block), `taskOutcomeOf` / `verificationOf` / `turnStatusOf` (LRN-03), `correctionOf`, `instructionProposals`, and `platformLearningPorts({ plugin, retrieval, verify })` — the platform composition the Session actor runs (see Session).
+
+## Agent proposals (`src/agent`, LRN-08)
+
+Learning may propose an instruction change; only a review applies it. `propose(proposals, origin)` parks instruction proposals (`{ kind: 'instruction', patch, reason, requiresReview: true }` only; one per distinct pending patch; an agent principal parks on itself only, a machine never) with `origin: { kind: 'task-end' | 'correction', sessionId, taskId?, messageId? }`; `listProposals(status?)` lists them; `reviewProposal(id, 'accept' | 'reject', reason?)` (users and external clients) accepts as a NEW config version with the patch appended to `instructions` — reversible with `rollback` — or rejects. `AgentView.pendingProposals` counts the queue. Entries `{ t: 'proposal' }` / `{ t: 'review' }` fold through `applyAgentEntry` beside the config versions.

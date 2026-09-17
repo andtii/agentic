@@ -2,8 +2,15 @@
 export { AgentActor, agentKey, agentMemoryScope, principalLabel, type AgentView } from './agent.actor.js';
 export {
     type AgentConfigEntry,
+    type AgentEntry,
+    type AgentProposalEntry,
     type AgentState,
     type AgentVersionInfo,
+    type InstructionProposal,
+    type PendingProposal,
+    type ProposalOrigin,
+    type ProposalStatus,
+    appendInstruction,
     applyAgentEntry,
     configAtVersion,
     initialAgentState,
