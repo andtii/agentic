@@ -61,7 +61,7 @@ app-level `ArtifactSink` (R2 on Cloudflare), under `{ws}/{ISO stamp}/`:
 | `inbox.ndjson` | notification, push subscription | `Inbox.list` + `subscriptions` |
 | `registry.ndjson` | plugin, connector, **secret name** | `Registry.exportRows` — no sealed values, no plaintext |
 | `tasks.ndjson`, `sessions.ndjson` | task; session + its events | only when the store can `list` the workspace's records |
-| `manifest.json` | — | files written, the retention settings, and `notExported` (records seen but not typed) |
+| `manifest.json` | — | files written, the retention settings, and `notExported` (records the cascade saw but could not read: types without a reader, and typed records whose read failed — an indexed schedule never created, a task or session that refused) |
 
 Every row is read through the owning actor's own methods as the workspace
 OWNER (the task carries the owner's principal), never from raw storage.

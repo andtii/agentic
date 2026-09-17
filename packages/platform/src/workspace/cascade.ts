@@ -42,7 +42,12 @@ export interface ExportReport {
     readonly prefix: string;
     /** `{ path, rows }` per file written. */
     readonly files: readonly { readonly path: string; readonly rows: number }[];
-    /** Records the cascade saw but has no typed reader for. */
+    /**
+     * Records the cascade saw but could not read, so the archive does not
+     * hold them: types it has no reader for, and typed records whose read
+     * failed (an indexed schedule that was never created, a task or session
+     * that refused). Never silently dropped — `manifest.json` lists them.
+     */
     readonly notExported: readonly ActorRecordRef[];
 }
 
@@ -144,7 +149,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
     }
     await write('chats', chatRows);
 
-    // schedules — an indexed id that was never created is skipped
+    // schedules — an indexed id that was never created (or refuses `get`) gets no row and lands in `notExported`
     const scheduleRows: unknown[] = [];
     for (const id of snap.schedules) {
         try {
@@ -199,7 +204,7 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
     const ws = snap.owner as WorkspaceId;
     const as = <D extends AnyActorDefinition>(def: D, key: string) => actor(def, key).with({ context: asPrincipal(ownerOf(snap.owner)) });
     const refs = new Map<string, ActorRecordRef>();
-    const add = (type: string, key: string) => refs.set(`${type} ${key}`, { type, key });
+    const add = (type: string, key: string) => refs.set(JSON.stringify([type, key]), { type, key });
 
     const agentRefs: { id: AgentId; shared: readonly string[] }[] = [];
     for (const id of snap.agents) {
@@ -239,7 +244,7 @@ export async function deleteWorkspace(ctx: Ctx, options: CascadeOptions): Promis
 
     const refs = new Map<string, ActorRecordRef>();
     const add = (ref: ActorRecordRef) => {
-        if (!(ref.type === 'Workspace' && ref.key === rootKey)) refs.set(`${ref.type} ${ref.key}`, ref);
+        if (!(ref.type === 'Workspace' && ref.key === rootKey)) refs.set(JSON.stringify([ref.type, ref.key]), ref);
     };
     for (const ref of await childRecords(snap)) add(ref);
     if (store.list) for (const ref of await store.list(ws)) add(ref);
