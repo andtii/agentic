@@ -1,0 +1,20 @@
+# base
+node_modules
+dist
+dist-*
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# target:cloudflare
+.wrangler
+.dev.vars
+
+# playwright
+test-results
+playwright-report

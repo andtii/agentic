@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "jsxImportSource": "sigx",
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": true,
+        "isolatedModules": true,
+        "types": [
+            "node",
+            "@cloudflare/workers-types"
+        ]
+    },
+    "include": [
+        "src",
+        "e2e",
+        "playwright.config.ts"
+    ]
+}

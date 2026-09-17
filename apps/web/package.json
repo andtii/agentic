@@ -2,9 +2,39 @@
   "name": "@agentic/web",
   "version": "0.0.0",
   "private": true,
-  "description": "The web app: sigx SSR + serverFn + actors host on Cloudflare Workers, UI on @sigx/zero + zero-daisyui. Scaffolded by the app-shell and worker-entry issues.",
+  "description": "The web app: sigx SSR + serverFn + actors host on Cloudflare Workers, UI on @sigx/zero + zero-daisyui. Scaffolded by `sigx create` (ssr + hydrate + cloudflare + router + server-fn).",
   "type": "module",
   "scripts": {
-    "build": "node -e \"console.log('apps/web: scaffolded by the app-shell and worker-entry issues')\""
+    "dev": "node server.mjs",
+    "build": "pnpm run zero:validate && vite build --app",
+    "zero:validate": "sigx zero:validate ./node_modules/@sigx/zero-daisyui/dist/design-system.js",
+    "preview": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@agentic/ui": "workspace:*",
+    "@sigx/router": "catalog:",
+    "@sigx/server": "catalog:",
+    "@sigx/server-renderer": "catalog:",
+    "@sigx/zero": "catalog:",
+    "@sigx/zero-daisyui": "catalog:",
+    "sigx": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260917.1",
+    "@playwright/test": "^1.63.0",
+    "@sigx/cli": "^0.11.0",
+    "@sigx/cloudflare": "catalog:",
+    "@sigx/vite": "catalog:",
+    "@sigx/zero-kit": "catalog:",
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3",
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

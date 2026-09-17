@@ -10,6 +10,7 @@ docs/dist/
 *.d.ts
 *.d.ts.map
 !packages/runtime-core/src/jsx-types.d.ts
+!apps/*/src/env.d.ts
 *.js
 *.js.map
 
