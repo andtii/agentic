@@ -19,6 +19,7 @@
     "@agentic/learning": "workspace:*",
     "@agentic/platform": "workspace:*",
     "@agentic/ui": "workspace:*",
+    "@sigx/ai-agent": "catalog:",
     "@sigx/actors": "catalog:",
     "@sigx/actors-cloudflare": "catalog:",
     "@sigx/router": "catalog:",

@@ -1,49 +1,131 @@
 import { component } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { Alert, Button, Card, Timeline } from '@sigx/zero-daisyui/components';
-import { Row } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, FailureCard, Icon, StatusPill, ToolCall } from '@agentic/ui';
+import { KeyValue } from '../components/KeyValue';
 import { Page } from '../components/Page';
-import { StatusBadge } from '../components/StatusBadge';
-import { agentById, machineById, sessionById, taskById } from '../mock/data';
+import { Panel } from '../components/Panel';
+import { defineTopbar, routeId } from '../components/topbar';
+import { agentNamed, CAPABILITY_LABELS, formatTime, loadSession, taskRow, type MockSessionView } from '../mock/workspace';
 
-/** `/sessions/:id` — one execution session; the transcript is a later issue. */
+const sessionPill = (s: MockSessionView): string => {
+    switch (s.state) {
+        case 'running': return 'active';
+        case 'awaiting': return 'waiting';
+        case 'disconnected': return 'disconnected';
+        case 'error': return 'error';
+        case 'closed': return 'completed';
+        default: return s.interrupted ? 'interrupted' : 'queued';
+    }
+};
+
+defineTopbar('session', (route) => {
+    const v = loadSession(routeId(route));
+    return {
+        crumb: v?.ref,
+        actions: () => (v ? (
+            <>
+                {v.capabilities.cancel && (v.state === 'running' || v.state === 'awaiting') ? <Button intent="default" icon="stop">Cancel turn</Button> : null}
+                <Button intent="danger" icon="close">Close session</Button>
+            </>
+        ) : null)
+    };
+});
+
+/**
+ * `/sessions/:id` — the current tool call, the compact approval, the event
+ * log; execution, capabilities and grants on the right. Controls for
+ * unsupported operations are not rendered at all (AC-15): the capability
+ * list drives them, never agent identity.
+ */
 export const Session = component(() => {
     const route = useRoute();
+    const view = () => loadSession(String(route.params.id));
     return () => {
-        const session = sessionById(String(route.params.id));
-        if (!session) {
+        const v = view();
+        if (!v) {
             return (
                 <Page title="Session not found">
-                    <Alert color="warning"><Alert.Title>No session with id {String(route.params.id)}</Alert.Title></Alert>
-                    <Link to="/">Back to the inbox</Link>
+                    <EmptyState variant="generic" title="No session with that id" caption={`Nothing is called ${String(route.params.id)}.`} slots={{ actions: () => <Link to="/">Back home</Link> }} />
                 </Page>
             );
         }
-        const task = taskById(session.taskId);
+        const agent = agentNamed(v.agentId);
+        const supported = new Set(v.capabilities.supported);
+        const ops = [...v.capabilities.supported, ...v.capabilities.unsupported.map((u) => u.op)];
+        const reason = (op: string) => v.capabilities.unsupported.find((u) => u.op === op)?.reason;
         return (
-            <Page title={`Session ${session.id}`} subtitle={`${agentById(session.agentId)?.name} on ${machineById(session.machineId)?.name}`}>
-                <Row gap="sm" wrap>
-                    <StatusBadge status={session.status} />
-                    {task ? <Link to={`/tasks/${task.id}`}>{task.title}</Link> : null}
-                    <small>{session.turns} turns · started {session.startedAt}</small>
-                </Row>
-                {session.status === 'interrupted' || session.status === 'error'
-                    ? <Alert color="warning">
-                        <Alert.Title>{session.status === 'error' ? 'Failed' : 'Interrupted'}</Alert.Title>
-                        <Alert.Description>The turn was marked, never replayed. Resume issues a new prompt over the intact transcript.</Alert.Description>
-                        <Button color="primary" size="sm">Resume</Button>
-                    </Alert>
-                    : null}
-                <Card>
-                    <Card.Header><Card.Title>Transcript (mock)</Card.Title></Card.Header>
-                    <Card.Body>
-                        <Timeline>
-                            <Timeline.Item><Timeline.Marker /><Timeline.Content>Prompt received</Timeline.Content><Timeline.Connector /></Timeline.Item>
-                            <Timeline.Item><Timeline.Marker /><Timeline.Content>Tool call: read files</Timeline.Content><Timeline.Connector /></Timeline.Item>
-                            <Timeline.Item><Timeline.Marker /><Timeline.Content>Turn {session.turns}</Timeline.Content></Timeline.Item>
-                        </Timeline>
-                    </Card.Body>
-                </Card>
+            <Page title={`Session ${v.ref}`} page="session" hideTitle>
+                <header data-session-head>
+                    <AgentTile name={agent.name} hue={agent.hue} size={44} />
+                    <div data-session-title>
+                        <span data-session-id>Session {v.ref}</span>
+                        <span data-session-sub>Opened {formatTime(v.openedAt)} from {v.openedFrom}</span>
+                    </div>
+                    <StatusPill status={sessionPill(v)} />
+                    <EnvironmentLine tone="muted" {...v.environment} />
+                </header>
+
+                <section data-session-main aria-label="Session activity">
+                    {v.interrupted ? <FailureCard kind="interrupted" detail="The platform restarted mid-turn. Nothing was replayed. Resume sends a new prompt over the intact transcript." action={{ label: 'Resume' }} /> : null}
+                    {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} meta="3.4s" /> : null}
+                    {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={() => undefined} /> : null}
+                    <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>
+                        <ol data-event-log aria-label="Event log">
+                            {v.events.map((e) => (
+                                <>
+                                    {v.gap && e.seq === v.gap.to ? <EventsLostRow as="li" from={v.gap.from} to={v.gap.to} /> : null}
+                                    <li data-event data-kind={e.kind}>
+                                        <span data-event-seq>{e.seq}</span>
+                                        <span data-event-kind>{e.kind}</span>
+                                        <span data-event-text>{e.text}</span>
+                                    </li>
+                                </>
+                            ))}
+                        </ol>
+                    </Panel>
+                </section>
+
+                <aside data-session-rail aria-label="Execution and capabilities">
+                    <Panel label="Execution" slots={{ aside: () => (v.state === 'awaiting' ? <StatusPill status="waiting" label="AWAITING" /> : <StatusPill status={v.state} />) }}>
+                        <KeyValue labelWidth={96} rows={[
+                            { label: 'Agent', value: () => <span data-inline-tile><AgentTile name={agent.name} hue={agent.hue} size={18} /> {agent.name} · config v{v.configVersion}</span> },
+                            { label: 'Machine', value: () => `${v.machine.name} · ${v.machine.os}` },
+                            { label: 'Runtime', value: () => v.runtimeVersion },
+                            { label: 'Account', value: () => <span data-inline-tile>{v.environment.account} <StatusPill status={v.authStatus} /></span> },
+                            { label: 'Working dir', value: () => <code>{v.cwd}</code> },
+                            { label: 'Head', value: () => `epoch ${v.head.epoch} · seq ${v.head.seq}` },
+                            { label: 'Task', value: () => (v.taskId ? <Link to={`/tasks/${v.taskId}`}>{taskRow(v.taskId)?.ref ?? v.taskId}</Link> : '—') }
+                        ]} />
+                    </Panel>
+                    <Panel label="What this integration supports">
+                        <ul data-capabilities>
+                            {ops.map((op) => {
+                                const ok = supported.has(op);
+                                const spec = CAPABILITY_LABELS[op] ?? { label: op };
+                                return (
+                                    <li data-capability data-supported={ok ? 'true' : 'false'}>
+                                        <Icon name={ok ? 'check' : 'close'} size={14} />
+                                        <span data-capability-label>{spec.label}</span>
+                                        <span data-capability-note>{ok ? spec.note : reason(op)}</span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                        <p data-panel-note>Unsupported operations are hidden from controls, never faked.</p>
+                    </Panel>
+                    <Panel label="Session grants">
+                        {v.grants.length ? (
+                            <ul data-grants>
+                                {v.grants.map((g) => (
+                                    <li data-grant>
+                                        <code>{g.label}</code>
+                                        <Button intent="default">Revoke</Button>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : <p data-panel-note>No session-scoped grants.</p>}
+                    </Panel>
+                </aside>
             </Page>
         );
     };
