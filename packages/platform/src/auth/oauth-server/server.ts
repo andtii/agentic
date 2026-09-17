@@ -285,8 +285,11 @@ export function createOAuthServer(options: OAuthServerOptions): OAuthServer {
         const decision = form.get('decision');
         const denied = (): Response => redirect(redirectWith(txn.ru, { error: 'access_denied', error_description: 'the user denied the request', state: txn.st }));
         if (decision !== 'allow') return denied();
-        // The user may grant fewer scopes than requested (the consent checkboxes); a form without any `scope` field grants what was requested.
-        const ticked = form.has('scope') ? txn.sc.filter((s) => form.getAll('scope').includes(s)) : txn.sc;
+        // The user may grant fewer scopes than requested. The rendered form carries `consent=scoped` plus one `scope` field per
+        // ticked box, so with the marker the ticked set is authoritative — a browser sends NO `scope` field when every box is
+        // unticked, and that is a denial, never a grant of everything. A programmatic POST without the marker grants what was requested.
+        const scoped = form.get('consent') === 'scoped' || form.has('scope');
+        const ticked = scoped ? txn.sc.filter((s) => form.getAll('scope').includes(s)) : txn.sc;
         if (ticked.length === 0) return denied();
         const at = now();
         const id = randomId();

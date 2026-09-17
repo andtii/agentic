@@ -19,7 +19,8 @@ export type ClientMetadataVerdict =
     | { readonly ok: true; readonly client: Omit<RegisteredClient, 'clientId' | 'issuedAt'> }
     | { readonly ok: false; readonly error: Extract<OAuthErrorCode, 'invalid_client_metadata' | 'invalid_redirect_uri'>; readonly description: string };
 
-const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]'];
+// Node and Workers expose the IPv6 loopback as `[::1]`; some URL parsers drop the brackets — both spellings are the same host.
+const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]', '::1'];
 
 /** RFC 8252 §7.3 / §8.3: `https`, or plain `http` to a loopback address only. Never a fragment. */
 export function isAcceptableRedirectUri(value: string): boolean {

@@ -63,6 +63,7 @@ p.who{color:#9aa3b2;font-size:.9rem}
 <p class="who">Untick a permission to grant less than the client asked for.</p>
 <form method="post" action="${escapeHtml(view.action)}">
 <input type="hidden" name="txn" value="${escapeHtml(view.txn)}">
+<input type="hidden" name="consent" value="scoped">
 <ul>${items}</ul>
 <div class="actions">
 <button type="submit" name="decision" value="deny">Deny</button>

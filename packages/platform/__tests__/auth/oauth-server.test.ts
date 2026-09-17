@@ -147,6 +147,7 @@ describe('dynamic client registration (RFC 7591)', () => {
         expect(isAcceptableRedirectUri('https://app.example/cb')).toBe(true);
         expect(isAcceptableRedirectUri('http://localhost:1234/cb')).toBe(true);
         expect(isAcceptableRedirectUri('http://[::1]:1234/cb')).toBe(true);
+        expect(redirectUriMatches(['http://[::1]:1234/cb'], 'http://[::1]:5555/cb')).toBe(true);
         expect(isAcceptableRedirectUri('http://app.example/cb')).toBe(false);
         expect(isAcceptableRedirectUri('custom://cb')).toBe(false);
         expect(redirectUriMatches([REDIRECT], 'http://127.0.0.1:50000/callback')).toBe(true);
