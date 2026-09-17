@@ -19,6 +19,7 @@
  * actor's retry of a firing that threw half-way never creates a second task.
  */
 import type { EnvironmentId, ScheduleId, TaskContract, TaskId, TaskStatus, WaitReason, WorkspaceId } from '@agentic/core';
+import type { ActorClient } from '@sigx/actors';
 import { Inbox, inboxKey } from '../notify/index.js';
 import { TaskActor, taskKey } from '../task/index.js';
 import type { ScheduleFired, TriggerHop, TriggerPort } from './ports.js';
@@ -76,8 +77,13 @@ export async function deliverScheduleFired(event: ScheduleFired, hop: TriggerHop
         ...(event.environmentId !== undefined ? { environmentId: event.environmentId } : {})
     };
     let view = await task.create(contract, { owner: event.agentId });
-    // Not `queued`: an earlier attempt of this same occurrence already routed it.
-    if (view.status !== 'queued') return taskOutcome(taskId, view.status, view.wait);
+    if (view.status !== 'queued') {
+        // An earlier attempt of this same occurrence already routed it. The one
+        // step that can still be owed is the inbox's word on a `fail` — when the
+        // earlier attempt failed the task but threw before the notification landed.
+        if (view.status === 'failed' && view.error?.code === OFFLINE_CODE) await notifyTaskFailedOnce(inbox(), taskId, event.title, view.error.message);
+        return taskOutcome(taskId, view.status, view.wait);
+    }
 
     if (event.environmentId !== undefined) {
         const online = await (options.environments?.isOnline(event.workspaceId, event.environmentId) ?? false);
@@ -85,8 +91,8 @@ export async function deliverScheduleFired(event: ScheduleFired, hop: TriggerHop
             const by = scheduleActorLabel(event.scheduleId);
             if (event.offlinePolicy === 'fail') {
                 const message = `environment ${event.environmentId} is offline and the entry's offline policy is "fail"`;
-                view = await task.fail({ code: 'environment-offline', message, recoverable: false }, by);
-                await inbox().push({ kind: 'task-failed', title: event.title, body: message, ref: { kind: 'task', taskId } });
+                view = await task.fail({ code: OFFLINE_CODE, message, recoverable: false }, by);
+                await notifyTaskFailedOnce(inbox(), taskId, event.title, message);
             } else {
                 view = await task.reportWaiting({ kind: 'environment-offline', environmentId: event.environmentId, policy: event.offlinePolicy }, by);
             }
@@ -100,9 +106,30 @@ export function scheduleTrigger(options: ScheduleTriggerOptions = {}): TriggerPo
     return {
         async fired(event, hop) {
             const outcome = await deliverScheduleFired(event, hop, options);
-            options.onOutcome?.(event, outcome);
+            // Observation only: a throwing observer must not fail the firing and
+            // send the Schedule actor into a retry that would repeat the side effects.
+            try {
+                await (options.onOutcome?.(event, outcome) as unknown);
+            } catch {
+                // best effort
+            }
         }
     };
+}
+
+/** The `TaskError.code` a `fail` offline policy records. */
+const OFFLINE_CODE = 'environment-offline';
+
+/**
+ * Tell the inbox a scheduled task failed — once. The Schedule actor retries a
+ * firing that threw, and `task.fail` may already have landed when the push
+ * did not; so the notification is keyed by the task it is about and only
+ * pushed when the inbox has none for it yet.
+ */
+async function notifyTaskFailedOnce(inbox: ActorClient<typeof Inbox>, taskId: TaskId, title: string, body: string): Promise<void> {
+    const existing = await inbox.list();
+    if (existing.some((n) => n.kind === 'task-failed' && n.ref?.kind === 'task' && n.ref.taskId === taskId)) return;
+    await inbox.push({ kind: 'task-failed', title, body, ref: { kind: 'task', taskId } });
 }
 
 function taskOutcome(taskId: TaskId, status: TaskStatus, wait: WaitReason | undefined): ScheduleTriggerOutcome {

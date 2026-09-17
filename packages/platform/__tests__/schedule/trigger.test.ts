@@ -170,6 +170,40 @@ describe('deliverScheduleFired', () => {
         expect(rows[0]!.deliveries.map((d) => d.ok)).toEqual([true]);
     });
 
+    it('AST-05 fail: a retry after the task-failed push threw delivers the notification exactly once', async () => {
+        const event = agentEntry({ environmentId: ENV, offlinePolicy: 'fail' });
+        const id = scheduledTaskId(SCH, AT);
+        // The first attempt: `task.fail` lands, the inbox push throws — what the Schedule actor retries.
+        let pushesToFail = 1;
+        const flaky: TriggerHop = {
+            actor: (def, key) => {
+                const client = hop.actor(def, key);
+                if ((def as { type?: string }).type !== 'Inbox') return client;
+                return new Proxy(client, {
+                    get: (target, prop) =>
+                        prop === 'push' && pushesToFail > 0
+                            ? () => {
+                                  pushesToFail--;
+                                  return Promise.reject(new Error('inbox unreachable'));
+                              }
+                            : Reflect.get(target, prop)
+                }) as typeof client;
+            }
+        };
+        await expect(deliverScheduleFired(event, flaky)).rejects.toThrow('inbox unreachable');
+        expect((await task(id).get()).status).toBe('failed');
+        expect(await inbox().list()).toEqual([]);
+
+        // The retry finds the task already failed and still owes the inbox its word.
+        expect(await deliverScheduleFired(event, hop)).toEqual({ kind: 'task', taskId: id, status: 'failed' });
+        expect((await inbox().list()).map((n) => [n.kind, n.ref])).toEqual([['task-failed', { kind: 'task', taskId: id }]]);
+
+        // A further retry adds nothing.
+        await deliverScheduleFired(event, hop);
+        expect(await inbox().list()).toHaveLength(1);
+        expect((await task(id).get()).transitions).toHaveLength(1);
+    });
+
     it('an environment the probe reports online leaves the task queued', async () => {
         const asked: [WorkspaceId, EnvironmentId][] = [];
         const environments = {
@@ -206,6 +240,18 @@ describe('deliverScheduleFired', () => {
             ['reminder', 'notified'],
             ['agent-task', 'task']
         ]);
+    });
+
+    it('onOutcome is observation only: a throw or a rejection never fails the firing (no retry, no duplicate)', async () => {
+        const throwing = scheduleTrigger({
+            onOutcome: () => {
+                throw new Error('observer down');
+            }
+        });
+        await expect(throwing.fired(fired(), hop)).resolves.toBeUndefined();
+        const rejecting = scheduleTrigger({ onOutcome: () => Promise.reject(new Error('observer down')) as unknown as void });
+        await expect(rejecting.fired(fired({ scheduledFor: AT + 1 }), hop)).resolves.toBeUndefined();
+        expect((await inbox().list()).map((n) => n.kind)).toEqual(['reminder', 'reminder']);
     });
 });
 
