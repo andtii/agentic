@@ -4,3 +4,4 @@ export const PACKAGE = '@agentic/platform';
 export * from './auth/index.js';
 export * from './workspace/index.js';
 export * from './notify/index.js';
+export * from './memory/index.js';
