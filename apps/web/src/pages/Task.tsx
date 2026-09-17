@@ -46,6 +46,7 @@ export const Task = component(() => {
         const selected = v.tree.find((t) => t.id === st.selected) ?? v.task;
         const contract = v.contracts[selected.id]!;
         const assignee = agentNamed(contract.assigneeId);
+        const originator = contract.originAgentId ? agentNamed(contract.originAgentId) : undefined;
         const approval = v.approvals[selected.id];
         const result = v.results[selected.id]!;
         const depth = Math.max(...v.tree.map((t) => t.depth)) + 1;
@@ -84,7 +85,7 @@ export const Task = component(() => {
                     <Panel label="Task contract" slots={{ aside: () => <code data-ref>{contract.ref}</code> }}>
                         <KeyValue rows={[
                             { label: 'Objective', value: () => contract.objective },
-                            { label: 'Origin', value: () => <span data-inline-tile><AgentTile name={assignee.name} hue={assignee.hue} size={18} /> {contract.origin}</span> },
+                            { label: 'Origin', value: () => <span data-inline-tile>{originator ? <AgentTile name={originator.name} hue={originator.hue} size={18} /> : <AgentTile name="You" person size={18} />} {contract.origin}</span> },
                             { label: 'Assignee', value: () => <span data-inline-tile><AgentTile name={assignee.name} hue={assignee.hue} size={18} /> {assignee.name}</span> },
                             { label: 'Environment', value: () => <span data-kv-stack><EnvironmentLine tone="live" {...contract.environment} /><small>Fixed at creation. Never switched silently.</small></span> },
                             { label: 'Constraints', value: () => contract.constraints },

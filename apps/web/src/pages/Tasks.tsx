@@ -42,7 +42,7 @@ export const Tasks = component(() => {
                             ))}
                         </DataTable>
                     )
-                    : <EmptyState variant="generic" caption={`No ${st.filter} tasks.`} />}
+                    : <EmptyState variant="generic" caption={st.filter === 'all' ? 'No tasks yet.' : `No ${st.filter} tasks.`} />}
             </Page>
         );
     };

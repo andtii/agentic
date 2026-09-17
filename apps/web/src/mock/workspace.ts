@@ -521,6 +521,8 @@ export interface TaskContract {
     readonly ref: string;
     readonly objective: string;
     readonly origin: string;
+    /** Who created the task: the delegating agent's id, or `undefined` for the person. */
+    readonly originAgentId?: string;
     readonly assigneeId: string;
     readonly environment: EnvironmentParts;
     readonly constraints: string;
@@ -533,6 +535,7 @@ const contractOf = (t: MockTaskRow): TaskContract => ({
     ref: t.ref,
     objective: t.objective,
     origin: t.parentId ? `${agentNamed(taskRow(t.parentId)!.agentId).name} · delegate call c_03 · from your message at ${formatTime(minutesAgo(14))}` : `your message at ${formatTime(t.createdAt)}`,
+    originAgentId: t.parentId ? taskRow(t.parentId)!.agentId : undefined,
     assigneeId: t.agentId,
     environment: t.environment,
     constraints: 'Owner paths packages/ui/**. No push without approval. Policy inherited from Atlas, never wider.',

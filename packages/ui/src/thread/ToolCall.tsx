@@ -217,7 +217,7 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
                 {output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
-                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} toolName={p.name} input={p.input} {...props.describeRequest?.(request!)} />}
+                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...props.describeRequest?.(request!)} toolName={p.name} input={p.input} />}
                 {agent && <AgentCard agent={agent} transcript={props.transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={props.onCancelAgent} />}
             </div>
         );
