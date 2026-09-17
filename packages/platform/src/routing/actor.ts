@@ -25,8 +25,8 @@
  *   running work has stopped once the turn actually ends.
  * - a delegated task (`origin.kind === 'agent'`, #39) runs outside any chat;
  *   its session opens with the approval rules of every ancestor's agent as
- *   `approvalConstraints`, so the child's policy is never wider (AC-12), and
- *   a `request` it raises is pushed to the Inbox when one is wired.
+ *   `approvalConstraints`, so the child's policy is never wider (AC-12). A
+ *   `request` it raises reaches the Inbox through the Session itself (#40).
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -44,7 +44,6 @@ import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
 import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
-import { inboxKey, type NotificationInput } from '../notify/index.js';
 import { isInterruptedTurnEnd, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
@@ -70,11 +69,6 @@ interface SessionClient {
 interface MachineClient {
     get(): Promise<MachineView>;
     openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: { agentId: string; cwd: string; system: string; model?: string; maxTurns?: number; maxBudgetUsd?: number; tools: readonly string[]; resume?: unknown }, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
-}
-
-/** The slice of the Inbox actor the router notifies (`defineInbox`). */
-interface InboxClient {
-    push(input: NotificationInput): Promise<unknown>;
 }
 
 /** `Routing.get()`. */
@@ -463,9 +457,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const context = asPrincipal(driverOf(ids.workspaceId));
                 const taskClient = actor(TaskActor, taskKey(ids.workspaceId, route.taskId)).with({ context });
                 const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${route.sessionId}`).with({ context }) as unknown as SessionClient;
-                const inboxDef = ports.inbox?.();
-                const inbox = inboxDef ? (actor(inboxDef, inboxKey(ids.workspaceId)).with({ context }) as unknown as InboxClient) : undefined;
-                const { turnId, sessionId, agentId } = route;
+                const { turnId, sessionId } = route;
 
                 /** Settle the task, forget the route, and close the session: a daemon session holds an environment slot (EXE-09), and the record keeps its `ref` for a resume. */
                 const settled = async (fn: (c: ActorContext<RoutingState>) => Promise<void>): Promise<void> => {
@@ -514,11 +506,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         const ev = next.value;
                         if (ev.turnId !== turnId) continue;
                         if (ev.type === 'request') {
+                            // The Session already told the Inbox and the chat; the Task record says what it waits for.
                             const kind = ev.kind === 'permission' ? 'approval' : 'input';
                             await tryTask(() => taskClient.reportWaiting({ kind, requestId: ev.requestId, sessionId }, ROUTER));
-                            await inbox
-                                ?.push({ kind, title: kind === 'approval' ? `${agentId} asks for approval${ev.toolName ? `: ${ev.toolName}` : ''}` : `${agentId} needs input`, ...(ev.message ? { body: ev.message } : {}), ref: { kind: 'session', sessionId, requestId: ev.requestId } })
-                                .catch(() => undefined);
                         } else if (ev.type === 'request-resolved') {
                             // Only the wait this request parked: a policy decision resolves with no request, and a task waiting on a child stays waiting.
                             const wait = (await taskClient.get()).wait;

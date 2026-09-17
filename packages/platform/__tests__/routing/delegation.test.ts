@@ -84,9 +84,9 @@ let Routing: ReturnType<typeof defineRoutingActor>;
 let Inbox: ReturnType<typeof defineInbox>;
 
 async function start(factory: (routing: () => ReturnType<typeof defineRoutingActor>) => SessionFactory): Promise<void> {
-    Session = defineSessionActor({ factory: factory(() => Routing) });
     Inbox = defineInbox({});
-    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session, inbox: () => Inbox });
+    Session = defineSessionActor({ factory: factory(() => Routing), inbox: () => Inbox });
+    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     app = testActorApp([Routing, Session, TaskActor, AgentActor, Memory, Inbox]);
     await app.start();
 }

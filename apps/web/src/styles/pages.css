@@ -77,6 +77,12 @@
 [data-page="home"] > [data-scope="ag-empty"] { grid-column: 1 / -1; }
 [data-home-needs] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 [data-needs-list] { display: flex; flex-direction: column; gap: var(--space-md); }
+[data-needs-row] { display: contents; }
+[data-needs-answer] { display: flex; flex-direction: column; gap: var(--space-sm); inline-size: 100%; }
+[data-needs-answer] > textarea { inline-size: 100%; min-block-size: 56px; padding: var(--space-sm); font: inherit; color: inherit; background: var(--color-base-100); border: var(--border) solid var(--ag-line); border-radius: var(--radius-field); resize: vertical; }
+[data-needs-question] { margin: 0; color: var(--ag-text-muted); }
+[data-needs-answered] { margin: 0; color: var(--ag-text-muted); font-size: 13px; }
+[data-needs-error] { margin: 0; color: var(--color-error); font-size: 13px; }
 [data-home-rail] { display: flex; flex-direction: column; gap: var(--space-lg); }
 [data-home-tasks] { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 [data-today] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

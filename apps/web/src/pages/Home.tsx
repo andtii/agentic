@@ -1,11 +1,12 @@
 import { component, signal } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, ApprovalPrompt, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, NeedsItem, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
+import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
 import { Age } from '../components/Age';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar } from '../components/topbar';
-import { agentNamed, formatAge, loadHome, rootOf, type MockNeedsItem, type MockTaskRow } from '../mock/workspace';
+import { agentNamed, loadHome, rootOf, type MockTaskRow } from '../mock/workspace';
+import { NeedsYou, useNeedsSource } from './inbox';
 
 /** The Home tasks table template (docs/design/HANDOFF.md → tables). */
 export const HOME_TASK_COLS = '100px 1fr 140px 270px 60px';
@@ -40,38 +41,12 @@ export const TaskRowCells = component<{ task: MockTaskRow }>(({ props }) => () =
     );
 });
 
-/** A link that looks like a default button (the kit's button anatomy on an `<a>`). */
-export const LinkButton = component<{ to: string; label: string }>(({ props }) => () => (
-    <Link to={props.to} data-scope="button" data-part="root" data-color="neutral" data-variant="solid" data-intent="default"><span>{props.label}</span></Link>
-));
-
-const NeedsRow = component<{ item: MockNeedsItem }>(({ props }) => () => {
-    const item = props.item;
-    const agent = agentNamed(item.agentId);
-    return (
-        <NeedsItem kind={item.kind} title={item.title} age={formatAge(item.at)} slots={{
-            tile: () => <AgentTile name={agent.name} hue={agent.hue} size={32} />,
-            context: () => (
-                <>
-                    {item.environment ? <EnvironmentLine tone="dim" {...item.environment} /> : null}
-                    <span>{item.context}</span>
-                </>
-            )
-        }}>
-            {item.kind === 'approval' && item.request
-                ? <ApprovalPrompt request={item.request} {...item.approval} onRespond={() => undefined} />
-                : null}
-            {item.primary ? <Button intent="wait" icon={item.kind === 'interrupted' ? 'play' : undefined}>{item.primary.label}</Button> : null}
-            <LinkButton to={item.href} label={item.hrefLabel} />
-        </NeedsItem>
-    );
-});
-
 defineTopbar('home', () => ({ actions: () => <Button intent="primary" icon="plus">New chat</Button> }));
 
-/** `/` — what needs you, today and spend, every active task. */
+/** `/` — what needs you (live through `useNeedsSource`, #40), today and spend, every active task. */
 export const Home = component(() => {
     const view = loadHome();
+    const needs = useNeedsSource()();
     const st = signal({ stopAll: false });
     const chains = () => [...new Set(view.tasks.map((t) => rootOf(t).objective))];
     return () => {
@@ -85,12 +60,7 @@ export const Home = component(() => {
         const spendPct = Math.min(100, Math.round((view.spend.monthUsd / view.spend.limitUsd) * 100));
         return (
             <Page title="Home" page="home" hideTitle>
-                <section data-home-needs aria-label="Needs you">
-                    <SectionHeading count={`${view.needs.length} open`} slots={{ aside: () => 'answer here, in the chat, or on your phone' }}>Needs you</SectionHeading>
-                    {view.needs.length
-                        ? <div data-needs-list>{view.needs.map((item) => <NeedsRow item={item} />)}</div>
-                        : <EmptyState variant="inbox" />}
-                </section>
+                <NeedsYou source={needs} />
 
                 <aside data-home-rail aria-label="Today and spend">
                     <Panel label={`Today · ${view.timeZone}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>

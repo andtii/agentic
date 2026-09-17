@@ -9,6 +9,7 @@
  */
 
 import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AnyActorDefinition } from '@sigx/actors';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 import type { LearningPorts, SkippedScope } from '../task/driver.js';
@@ -119,6 +120,12 @@ export interface SessionPorts {
     readonly learning?: LearningPorts;
     /** Where permission requests and their decisions are recorded (`approval.*`, OPS-03). Default `auditPort()` — one-way to `{ws}:audit`. */
     readonly audit?: AuditPort;
+    /**
+     * The Inbox actor definition (`defineInbox`), when the app has one: every `request` the session
+     * raises — both paths, task or chat — becomes an `approval` / `input` notification with a session
+     * ref, and its `request-resolved` marks that notification read (OPS-02). Best effort, one-way.
+     */
+    readonly inbox?: () => AnyActorDefinition;
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }

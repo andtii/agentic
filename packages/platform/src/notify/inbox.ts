@@ -16,6 +16,7 @@ import type {
     InboxNotification,
     NotificationChannel,
     NotificationInput,
+    NotificationRef,
     PushSubscriptionRecord
 } from './types.js';
 
@@ -24,6 +25,13 @@ export const INBOX_CAP = 500;
 
 export function inboxKey(workspace: WorkspaceId): string {
     return `${workspace}:inbox`;
+}
+
+/** Two refs name the same thing: every field of `b` matches `a` (a ref without a `requestId` matches the whole session). */
+export function sameRef(a: NotificationRef, b: NotificationRef): boolean {
+    if (a.kind !== b.kind) return false;
+    for (const [k, v] of Object.entries(b)) if ((a as Record<string, unknown>)[k] !== v) return false;
+    return true;
 }
 
 export interface InboxState {
@@ -171,6 +179,19 @@ export function defineInbox(options: InboxOptions = {}) {
                     const changed = before - ctx.state.notifications.filter((n) => !n.read).length;
                     if (changed > 0) await ctx.save();
                     return changed;
+                },
+
+                /**
+                 * Mark every notification about `ref` read — what a Session calls once a
+                 * request is answered from any client, so the other clients' "needs you"
+                 * lists drop it (OPS-02). Returns how many changed.
+                 */
+                async ackRef(ref: NotificationRef): Promise<number> {
+                    const ids = ctx.state.notifications.filter((n) => !n.read && n.ref !== undefined && sameRef(n.ref, ref)).map((n) => n.id);
+                    if (ids.length === 0) return 0;
+                    reduceInbox(ctx.state, { type: 'ack', ids }, cap);
+                    await ctx.save();
+                    return ids.length;
                 },
 
                 async subscribe(subscription: Omit<PushSubscriptionRecord, 'addedAt'>): Promise<void> {

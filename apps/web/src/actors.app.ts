@@ -27,7 +27,7 @@
  * probe reads the Machines, and every task a firing creates — queued, or
  * parked `waiting {environment-offline}` — is handed to `Routing.run`.
  * Delegation (#39): the same tool ports serve `delegate` on both paths; a
- * child session's `request` reaches the Inbox through the router. Memory and
+ * session's `request` reaches the Inbox through the Session (#40). Memory and
  * learning (#41) run through `platformLearningPorts` over the default
  * `@agentic/learning` plugin. Retention (#100, `docs/retention.md`): the
  * Workspace exports to the `ARTIFACTS` bucket and purges each record
@@ -161,14 +161,16 @@ export const daemonSockets = createDaemonSocketRegistry();
 export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
     // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
     const anthropic = ports.anthropic ?? defaultPorts.anthropic;
+    const Inbox = defineInbox({ channels: ports.channels });
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, ...(anthropic ? { anthropic } : {}) }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
-        learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) })
+        learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),
+        // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
+        inbox: () => Inbox
     });
-    const Inbox = defineInbox({ channels: ports.channels });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, inbox: () => Inbox });
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,

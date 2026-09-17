@@ -8,6 +8,9 @@
  * Sessions open under the policy compiled from the agent's config
  * (`sessionPolicy`: approval rules, tool grants, then allow), constrained by
  * the ancestors' rules on a delegated task (AC-12) — `policy` overrides it.
+ * An `ask` decision raises a `request` the user answers from any client
+ * through `Session.respond` (OPS-02); the daemon path's harness asks on its
+ * own terms until the policy travels in the `OpenSpec` (#121).
  */
 
 import type { WorkspaceId } from '@agentic/core';
