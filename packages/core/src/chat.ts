@@ -29,7 +29,12 @@ export type ChatEntry =
     | {
           readonly t: 'status';
           readonly agentId: AgentId;
-          readonly kind: 'typing' | 'session-started' | 'session-ended' | 'task';
+          /**
+           * `request`: the session raised a request a person must answer (`ref` is
+           * `approval:{requestId}` or `input:{requestId}`, COL-10 / CHT-09);
+           * `request-resolved`: it settled (`ref` is the same, so the two pair up).
+           */
+          readonly kind: 'typing' | 'session-started' | 'session-ended' | 'task' | 'request' | 'request-resolved';
           readonly ref?: string;
           readonly at: number;
       }
