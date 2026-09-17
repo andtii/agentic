@@ -12,6 +12,12 @@
       "development": "./dist/index.js",
       "production": "./dist/index.prod.js",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "development": "./dist/node.js",
+      "production": "./dist/node.prod.js",
+      "import": "./dist/node.js"
     }
   },
   "sideEffects": false,
@@ -22,6 +28,7 @@
     "@agentic/core": "workspace:*",
     "@sigx/ai": "catalog:",
     "@sigx/ai-agent": "catalog:",
+    "@sigx/ai-agent-node": "catalog:",
     "zod": "^4.6.5"
   },
   "devDependencies": {
