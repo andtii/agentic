@@ -3,3 +3,6 @@ export const PACKAGE = '@agentic/ui';
 export * from './layout';
 export * from './shell';
 export * from './forms';
+export * from './thread/index.js';
+export * from './composer/index.js';
+export { fragment, recipes, SCOPES } from './fragment/index.js';

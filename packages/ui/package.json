@@ -14,13 +14,19 @@
       "import": "./dist/index.js"
     },
     "./layout.css": "./src/layout/layout.css",
-    "./shell.css": "./src/shell/shell.css"
+    "./shell.css": "./src/shell/shell.css",
+    "./fragment": {
+      "types": "./dist/fragment/index.d.ts",
+      "development": "./dist/fragment.js",
+      "production": "./dist/fragment.prod.js",
+      "import": "./dist/fragment.js"
+    }
   },
   "sideEffects": [
     "**/*.css"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && node scripts/emit-fragment.mjs"
   },
   "dependencies": {
     "@agentic/core": "workspace:*",
@@ -40,5 +46,9 @@
     "@sigx/zero-daisyui": "catalog:",
     "@sigx/zero-kit": "catalog:",
     "shiki": "^4.4.3"
+  },
+  "sigx-zero": {
+    "fragment": "./dist/fragment.js",
+    "requires": ">=0.2.0-beta.1"
   }
 }

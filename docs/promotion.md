@@ -13,8 +13,8 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | DelegateTool (`packages/runtimes/src/tools/delegate.ts`) | `@sigx/ai-agent` | after limit semantics settle |
 | Daemon-protocol envelope + relay (`packages/daemon-protocol`, `apps/daemon`) | `@sigx/ai-agent/wire` + `@sigx/ai-agent-node` | later |
 | NDJSON `EventLogStore` with platform-keyed files + reconnecting bearer WebSocket with backoff (`apps/daemon/src/event-log.ts`, `src/connection.ts`) | `@sigx/ai-agent-node` | when a second Node host needs them |
-| `ai-thread` / `ai-message` / `ai-composer` / `ai-tool-call` / `ai-reasoning` fragment (`packages/ui`) | signalxjs/ai `@sigx/ai-ui` (signalxjs/ai#17) | soon — generic from day one |
 | `MultiSelect` (`packages/ui/src/_zero-gaps/multi-select.tsx`) | `@sigx/zero` Combobox multiple mode (andtii/zero-wip#479) | when zero ships it — delete the gap, re-point `MultiSelectField` |
+| `ai-thread` / `ai-message` / `ai-composer` / `ai-tool-call` / `ai-reasoning` / `ai-approval` fragment + recipe pack, part-windowed `Thread`, `@mention` model (`packages/ui/src/{thread,composer,fragment}`) | signalxjs/ai `@sigx/ai-ui` (signalxjs/ai#17) | soon — generic from day one |
 | Stack / Row / Col / Spacer on `data-l-*` + `useMediaQuery` (`packages/ui/src/layout`) | `@sigx/zero` layout tier (andtii/zero-wip#473, landed on main) | when a zero release ships it — delete the folder, re-point the imports |
 | Schedule / timezone reminder actor (`packages/platform/src/schedule`) | `@sigx/actors-workflow` schedule actor (signalxjs/actors#390) | later |
 | Claude Code profile isolation + doctor (`packages/runtimes/src/claude-code`: per-profile child env, shared-config-dir check, credentials-file auth status) | `@sigx/ai-agent-claude-code` | once validated on macOS |
