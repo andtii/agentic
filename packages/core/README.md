@@ -15,5 +15,6 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `principal` | `Principal` (user, machine, agent, external), `Scope`, `sameWorkspace`, `hasScope` |
 | `daemon` | `DaemonFrame<F, R>`, `PlatformFrame<C>`, `Cursor`, `OpenSpec`, `DAEMON_PROTOCOL_VERSION` — generic over the `@sigx/ai-agent/wire` types so this package needs no dependency |
 | `usage` | `Usage`, `UsageRow`, `addUsage`, `ZERO_USAGE` |
+| `workspace` | `WorkspaceSettings`, `NotificationPrefs`, `NotificationKind`, `NOTIFICATION_KINDS` |
 
 Design: `docs/architecture.md` §1, §4, §5b, §8, §9.

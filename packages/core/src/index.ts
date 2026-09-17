@@ -16,3 +16,4 @@ export * from './learning.js';
 export * from './principal.js';
 export * from './daemon.js';
 export * from './usage.js';
+export * from './workspace.js';
