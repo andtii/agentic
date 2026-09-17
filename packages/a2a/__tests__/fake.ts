@@ -24,6 +24,7 @@ export interface FakeServerOptions {
     readonly agents?: readonly ExposedAgent[];
     readonly authorize?: (request: Request) => boolean;
     readonly cancelWaitMs?: number;
+    readonly now?: () => number;
 }
 
 export function fakeServer(options: FakeServerOptions = {}): FakeServer {
@@ -44,7 +45,7 @@ export function fakeServer(options: FakeServerOptions = {}): FakeServer {
         },
         ...(options.authorize ? { authorize: options.authorize } : {})
     };
-    const handler = createA2aHandler({ port, tasks: store, ...(options.cancelWaitMs !== undefined ? { cancelWaitMs: options.cancelWaitMs } : {}) });
+    const handler = createA2aHandler({ port, tasks: store, ...(options.cancelWaitMs !== undefined ? { cancelWaitMs: options.cancelWaitMs } : {}), ...(options.now ? { now: options.now } : {}) });
     return {
         handler,
         port,

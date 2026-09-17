@@ -193,6 +193,13 @@ describe('GetTask / ListTasks / CancelTask', () => {
         expect((await rpc(server, 'ListTasks', { pageToken: 'garbage' })).error?.code).toBe(A2A_ERROR.invalidParams);
         expect((await rpc(server, 'ListTasks', { pageSize: 0 })).error?.code).toBe(A2A_ERROR.invalidParams);
     });
+    it('orders tasks updated in the same millisecond newest first', async () => {
+        const server = fakeServer({ now: () => 1_000 });
+        const a = asTask(await rpc(server, 'SendMessage', { message: userMessage('a') }));
+        const b = asTask(await rpc(server, 'SendMessage', { message: userMessage('b') }));
+        const listed = (await rpc(server, 'ListTasks', {})).result as { tasks: A2aTask[] };
+        expect(listed.tasks.map((t) => t.id)).toEqual([b.id, a.id]);
+    });
     it('cancels a running task and refuses a finished one', async () => {
         const server = fakeServer({ steps: [{ tool: { name: 'slow', delayMs: 60_000 } }] });
         const task = asTask(await rpc(server, 'SendMessage', { message: userMessage('go'), configuration: { returnImmediately: true } }));

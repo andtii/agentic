@@ -52,6 +52,7 @@ export interface TaskRecord {
 export interface TaskStore {
     get(id: string): Promise<TaskRecord | undefined> | TaskRecord | undefined;
     put(record: TaskRecord): Promise<void> | void;
+    /** Every record, in the order the tasks were created (`ListTasks` breaks same-millisecond ties with it). */
     list(): Promise<readonly TaskRecord[]> | readonly TaskRecord[];
 }
 

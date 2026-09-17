@@ -121,12 +121,15 @@ export function createA2aHandler(options: A2aHandlerOptions): A2aHandler {
         const merged = new Map<string, TaskRecord>();
         for (const r of await store.list()) merged.set(r.task.id, r);
         for (const l of live.values()) merged.set(l.id, { agentId: l.agentId, task: l.task, updatedAt: l.updatedAt });
+        // Ties (same millisecond) go to the later record: the store lists in creation order.
         const all = [...merged.values()]
-            .filter((r) => r.agentId === agentId)
-            .filter((r) => params.contextId === undefined || r.task.contextId === params.contextId)
-            .filter((r) => params.status === undefined || r.task.status.state === params.status)
-            .filter((r) => after === undefined || r.updatedAt >= after)
-            .sort((a, b) => b.updatedAt - a.updatedAt);
+            .map((r, order) => ({ r, order }))
+            .filter(({ r }) => r.agentId === agentId)
+            .filter(({ r }) => params.contextId === undefined || r.task.contextId === params.contextId)
+            .filter(({ r }) => params.status === undefined || r.task.status.state === params.status)
+            .filter(({ r }) => after === undefined || r.updatedAt >= after)
+            .sort((a, b) => b.r.updatedAt - a.r.updatedAt || b.order - a.order)
+            .map(({ r }) => r);
         const pageSize = params.pageSize ?? DEFAULT_PAGE;
         const offset = params.pageToken ? Number.parseInt(params.pageToken, 10) : 0;
         if (!Number.isInteger(offset) || offset < 0 || (params.pageToken && String(offset) !== params.pageToken)) throw new A2aError(A2A_ERROR.invalidParams, 'pageToken is not a token this server issued');
