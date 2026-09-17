@@ -14,7 +14,7 @@ import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprot
 import { describe, expect, it } from 'vitest';
 import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { createOAuthServer, memoryOAuthStore, type OAuthUser } from '@agentic/platform';
-import { PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
+import { PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
 
 const ORIGIN = 'https://app.test';
 const MCP_URL = `${ORIGIN}/_agentic/mcp`;
@@ -37,9 +37,17 @@ const ENV: EnvironmentDescriptor = {
 function fakePlatform() {
     const opened: (OpenSessionInput & { principal: ExternalPrincipal })[] = [];
     const prompts: { sessionId: string; text: string }[] = [];
+    const delegated: DelegateTaskInput[] = [];
     const port = (principal: ExternalPrincipal): PlatformPort => ({
         machines: { list: async () => [{ machineId: ENV.machineId, name: 'laptop', online: true, os: 'windows', environments: [ENV] }] },
-        environments: { list: async (machineId) => (machineId === undefined || machineId === ENV.machineId ? [ENV] : []) },
+        environments: {
+            list: async (machineId) => (machineId === undefined || machineId === ENV.machineId ? [ENV] : []),
+            doctor: async (machineId, environmentId) => {
+                if (machineId !== ENV.machineId) throw new Error(`machine ${machineId} is not paired`);
+                if (environmentId !== undefined && environmentId !== ENV.id) throw new Error(`machine ${machineId} has no environment ${environmentId}`);
+                return { machineId, online: true, ok: true, unverified: [], environments: [{ environmentId: ENV.id, name: ENV.name, runtime: ENV.runtime, verdict: { ok: true, findings: [], checkedAt: 1 } }] };
+            }
+        },
         agents: {
             list: async () => [{ agentId: 'agent_ada' as AgentId, name: 'Ada', runtime: 'claude-code', defaultEnvironmentId: ENV.id }],
             get: async (agentId) => ({ id: agentId, config: { name: 'Ada' } })
@@ -72,6 +80,10 @@ function fakePlatform() {
         },
         tasks: {
             create: async (input) => ({ taskId: 'task_2' as TaskId, status: 'queued', assignee: input.agentId, owner: input.agentId, objective: input.objective, children: [] }),
+            delegate: async (input) => {
+                delegated.push(input);
+                return { taskId: `${input.taskId}.${input.callId ?? 'auto'}` as TaskId, status: 'queued', assignee: input.agentId, owner: 'agent_ada' as AgentId, objective: input.objective, parentId: input.taskId, children: [] };
+            },
             get: async (taskId) => ({ taskId, status: 'active', assignee: 'agent_ada' as AgentId, owner: 'agent_ada' as AgentId, objective: 'x', children: [] }),
             tree: async (taskId) => ({ taskId, status: 'active', assignee: 'agent_ada' as AgentId, objective: 'x', depth: 0, children: [] }),
             cancel: async (taskId) => ({ taskId, stopped: true, notStopped: [] })
@@ -83,7 +95,7 @@ function fakePlatform() {
         },
         schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) }
     });
-    return { port, opened, prompts };
+    return { port, opened, prompts, delegated };
 }
 
 /** The Worker, in process: OAuth routes + the MCP mount, sessions by a `session=<userId>` cookie. */
@@ -206,6 +218,7 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
             [
                 'machines_list',
                 'environments_list',
+                'environments_doctor',
                 'agents_list',
                 'agents_get',
                 'sessions_open',
@@ -308,13 +321,19 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
         await client.close().catch(() => {});
     });
 
-    it('tasks_delegate is declared but unsupported until #39, and the gap list says so', async () => {
+    it('tasks_delegate creates a child under the parent (COL-03) and environments_doctor reports verdicts per machine; the gap list names what is left out', async () => {
         const s = server();
-        const { client } = await connect(s, ['tasks']);
-        const res = await client.callTool({ name: 'tasks_delegate', arguments: { taskId: 'task_1', agentId: 'agent_ada', objective: 'x' } });
-        expect(res.isError).toBe(true);
-        expect((res.content as { text: string }[])[0]!.text).toContain('unsupported');
-        expect(PLATFORM_MCP_UNSUPPORTED.map((u) => u.op)).toEqual(['tasks.delegate', 'environments.doctor', 'resources']);
+        const { client } = await connect(s, ['tasks', 'environments']);
+        const res = await client.callTool({ name: 'tasks_delegate', arguments: { taskId: 'task_1', agentId: 'agent_ada', objective: 'review the diff', callId: 'c1', environmentId: 'env_laptop' } });
+        expect(res.isError).toBeFalsy();
+        expect(res.structuredContent).toMatchObject({ taskId: 'task_1.c1', parentId: 'task_1', status: 'queued', assignee: 'agent_ada' });
+        expect(s.platform.delegated).toEqual([{ taskId: 'task_1', agentId: 'agent_ada', objective: 'review the diff', callId: 'c1', environmentId: 'env_laptop' }]);
+
+        const doctor = await client.callTool({ name: 'environments_doctor', arguments: { machineId: 'm_laptop' } });
+        expect(doctor.structuredContent).toMatchObject({ machineId: 'm_laptop', ok: true, unverified: [], environments: [{ environmentId: 'env_laptop', verdict: { ok: true } }] });
+        const unknown = await client.callTool({ name: 'environments_doctor', arguments: { machineId: 'm_other' } });
+        expect(unknown.isError).toBe(true);
+        expect(PLATFORM_MCP_UNSUPPORTED.map((u) => u.op)).toEqual(['resources', 'prompts']);
         await client.close();
     });
 

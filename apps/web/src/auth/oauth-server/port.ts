@@ -35,7 +35,7 @@ import {
     type TaskView
 } from '@agentic/platform';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
-import { ServerFnError } from '@sigx/server';
+import { ServerFnError, isServerFnError } from '@sigx/server';
 
 export interface ActorPortOptions {
     /** The registry this deployment built (`platformActors()`); Session, Machine, Routing and Schedule are looked up by type. */
@@ -121,7 +121,8 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 const out: EnvironmentDescriptor[] = [];
                 for (const m of await machines()) out.push(...m.environments);
                 return out;
-            }
+            },
+            doctor: (machineId, environmentId) => machine(machineId).doctor(environmentId)
         },
         agents: {
             list: async () => {
@@ -199,6 +200,28 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                         ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {})
                     })
                 ),
+            /**
+             * COL-03 from outside: `Task.delegate` on the parent under the external principal (limits, depth, the
+             * parent parked `waiting {child}`), then the child is placed by the router as the workspace driver — a child
+             * already routed (a repeated `callId`) answers 409 there and is simply returned as it stands.
+             */
+            delegate: async (input) => {
+                const callId = input.callId ?? `mcp_${crypto.randomUUID()}`;
+                const childId = await task(input.taskId).delegate({
+                    callId,
+                    objective: input.objective,
+                    assignee: input.agentId,
+                    ...(input.context !== undefined ? { context: input.context } : {}),
+                    ...(input.constraints !== undefined ? { constraints: input.constraints } : {}),
+                    ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {})
+                });
+                try {
+                    await as(Routing, routingKey(workspaceId), driver).run(childId);
+                } catch (e) {
+                    if (!(isServerFnError(e) && e.status === 409)) throw e;
+                }
+                return summary(await task(childId).get());
+            },
             get: async (taskId) => summary(await task(taskId).get()),
             tree: async (taskId) => tree(await task(taskId).tree()),
             cancel: async (taskId) => {

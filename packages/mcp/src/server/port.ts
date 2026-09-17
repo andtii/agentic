@@ -74,6 +74,32 @@ export interface CreateTaskInput {
     readonly constraints?: { readonly maxTurns?: number; readonly maxCostUsd?: number; readonly maxWallMs?: number };
 }
 
+export interface DelegateTaskInput {
+    /** The parent task (must be active — a task the client opened or created). */
+    readonly taskId: TaskId;
+    readonly agentId: AgentId;
+    readonly objective: string;
+    readonly context?: readonly PromptPart[];
+    readonly constraints?: { readonly maxTurns?: number; readonly maxCostUsd?: number; readonly maxWallMs?: number };
+    readonly environmentId?: EnvironmentId;
+    /** Idempotency key: the same call id finds the same child (`childTaskId(parent, callId)`). Default: a fresh id. */
+    readonly callId?: string;
+}
+
+/** One environment's doctor verdict as the machine last reported it; `verdict` absent = the daemon sent none. */
+export interface DoctorReport {
+    readonly machineId: MachineId;
+    readonly online: boolean;
+    readonly ok: boolean;
+    readonly unverified: readonly EnvironmentId[];
+    readonly environments: readonly {
+        readonly environmentId: EnvironmentId;
+        readonly name: string;
+        readonly runtime: string;
+        readonly verdict?: { readonly ok: boolean; readonly findings: readonly unknown[]; readonly checkedAt: number };
+    }[];
+}
+
 export interface EventCursor {
     readonly epoch: number;
     readonly seq: number;
@@ -138,6 +164,8 @@ export interface PlatformPort {
     readonly environments: {
         /** Every environment the workspace's machines report; narrowed to one machine when given. */
         list(machineId?: MachineId): Promise<readonly EnvironmentDescriptor[]>;
+        /** The daemon's per-environment doctor verdicts as last reported on one machine (`Machine.doctor`, EXE-05/07). */
+        doctor(machineId: MachineId, environmentId?: EnvironmentId): Promise<DoctorReport>;
     };
     readonly agents: {
         list(): Promise<readonly AgentSummary[]>;
@@ -153,6 +181,8 @@ export interface PlatformPort {
     };
     readonly tasks: {
         create(input: CreateTaskInput): Promise<TaskSummary>;
+        /** `Task.delegate` on the parent + `Routing.run` on the child; resolves with the child as created (the client polls `get` / `tree`). */
+        delegate(input: DelegateTaskInput): Promise<TaskSummary>;
         get(taskId: TaskId): Promise<TaskSummary>;
         tree(taskId: TaskId): Promise<TaskTreeNode>;
         cancel(taskId: TaskId): Promise<{ readonly taskId: TaskId; readonly stopped: boolean; readonly notStopped: readonly TaskId[] }>;

@@ -17,14 +17,13 @@
 import { hasScope, type AgentId, type ChatId, type EnvironmentId, type MachineId, type MemoryScope, type Scope, type SessionId, type TaskId } from '@agentic/core';
 import { defineTool, type AnyTool, type ToolAnnotations } from '@sigx/ai';
 import { z } from 'zod';
-import { McpScopeError, McpUnsupportedError } from './errors.js';
+import { McpScopeError } from './errors.js';
 import type { ExternalPrincipal, PlatformPort } from './port.js';
 
 /** What the surface declares but does not do yet — enumerated, never implied (PLG-09). */
 export const PLATFORM_MCP_UNSUPPORTED: readonly { readonly op: string; readonly reason: string }[] = [
-    { op: 'tasks.delegate', reason: 'delegation semantics land with #39; the tool is declared and answers unsupported until then' },
-    { op: 'environments.doctor', reason: 'the daemon doctor is not exposed on the Machine actor yet (#43); omitted rather than stubbed' },
-    { op: 'resources', reason: 'sessions_tail is the only read stream; MCP resources and prompts are out of scope for the orchestration surface' }
+    { op: 'resources', reason: 'sessions_tail is the only read stream; MCP resources and prompts are out of scope for the orchestration surface' },
+    { op: 'prompts', reason: 'no prompt templates; the instructions string is the only guidance the server offers' }
 ];
 
 const READ: ToolAnnotations = { readOnly: true, idempotent: true };
@@ -79,6 +78,14 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal):
             input: z.object({ machineId: id('Limit to this machine.').optional() }),
             annotations: READ,
             run: (input) => port.environments.list(input.machineId as MachineId | undefined)
+        }),
+        tool({
+            name: 'environments_doctor',
+            scope: 'environments',
+            description: 'The daemon’s doctor verdicts (isolation, account auth — EXE-05/07) for one machine’s environments, as last reported; `unverified` lists environments the daemon sent no verdict for.',
+            input: z.object({ machineId: id('The machine to inspect.'), environmentId: z.string().min(1).optional().describe('One environment only.') }),
+            annotations: READ,
+            run: (input) => port.environments.doctor(input.machineId as MachineId, input.environmentId as EnvironmentId | undefined)
         }),
 
         // ---- agents --------------------------------------------------------------------
@@ -187,10 +194,28 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal):
         tool({
             name: 'tasks_delegate',
             scope: 'tasks',
-            description: 'Delegate a sub-task from an existing task to another agent (COL-03). Declared; unsupported until #39 lands.',
-            input: z.object({ taskId: id('The parent task.'), agentId: id('The assignee.'), objective: z.string().min(1) }),
+            description:
+                'Delegate a sub-task from an active task to another agent (COL-03): the child is created under the parent’s limits, the parent waits on it, and the router places the child on its own runtime and environment. Returns the child task; follow it with tasks_get / tasks_tree. `callId` makes the call idempotent.',
+            input: z.object({
+                taskId: id('The parent task (active).'),
+                agentId: id('The assignee.'),
+                objective: z.string().min(1).describe('What the child must achieve.'),
+                context: z.array(z.object({ type: z.literal('text'), text: z.string() })).optional(),
+                constraints: z.object({ maxTurns: z.number().int().positive().optional(), maxCostUsd: z.number().positive().optional(), maxWallMs: z.number().int().positive().optional() }).optional(),
+                environmentId: z.string().min(1).optional().describe('The child’s environment; explicit beats the assignee’s default.'),
+                callId: z.string().min(1).optional().describe('Idempotency key: the same id re-finds the same child.')
+            }),
             annotations: WRITE,
-            run: () => Promise.reject(new McpUnsupportedError('tasks_delegate', PLATFORM_MCP_UNSUPPORTED[0]!.reason))
+            run: (input) =>
+                port.tasks.delegate({
+                    taskId: input.taskId as TaskId,
+                    agentId: input.agentId as AgentId,
+                    objective: input.objective,
+                    ...(input.context !== undefined ? { context: input.context } : {}),
+                    ...(input.constraints !== undefined ? { constraints: input.constraints } : {}),
+                    ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                    ...(input.callId !== undefined ? { callId: input.callId } : {})
+                })
         }),
         tool({
             name: 'tasks_get',

@@ -7,6 +7,8 @@ export type {
     TaskSummary,
     TaskTreeNode,
     CreateTaskInput,
+    DelegateTaskInput,
+    DoctorReport,
     EventCursor,
     SessionEventsPage,
     RespondDecision,

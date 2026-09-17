@@ -60,14 +60,14 @@ const mcp = createPlatformMcpHandler({ authenticate: (request) => oauth.verify(r
   | Family / scope | Tools | Hints |
   |---|---|---|
   | `machines` | `machines_list` | readOnly |
-  | `environments` | `environments_list(machineId?)` | readOnly |
+  | `environments` | `environments_list(machineId?)`, `environments_doctor(machineId, environmentId?)` | readOnly |
   | `agents` | `agents_list`, `agents_get(agentId)` | readOnly |
   | `sessions` | `sessions_open(agentId, machineId, environmentId, cwd?, objective?)`, `sessions_prompt(sessionId, text)`, `sessions_respond(sessionId, requestId, decision)`, `sessions_cancel(sessionId)`, `sessions_tail(sessionId, from?, limit?)` | open/prompt/respond write, cancel destructive, tail readOnly |
-  | `tasks` | `tasks_create(agentId, objective, environmentId?, context?, constraints?)`, `tasks_get`, `tasks_tree`, `tasks_cancel`, `tasks_delegate` (unsupported until #39) | get/tree readOnly, cancel destructive |
+  | `tasks` | `tasks_create(agentId, objective, environmentId?, context?, constraints?)`, `tasks_get`, `tasks_tree`, `tasks_cancel`, `tasks_delegate(taskId, agentId, objective, context?, constraints?, environmentId?, callId?)` | get/tree readOnly, cancel destructive |
   | `chats` | `chats_post(chatId, text, mentions?)`, `chats_history(chatId, cursor?, limit?)` | history readOnly |
   | `memory` | `memory_search(scope, …)`, `memory_remember(scope, kind, text, …)` | search readOnly |
   | `schedules` | `schedules_create(title, kind, recurrence, agentId?, environmentId?, prompt?, offlinePolicy?)` | write |
 
   `tools/list` carries the hints as MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`), merged by the handler until the harness emits them itself (signalxjs/ai#37). Machine selection is explicit in every call that opens execution (EXE-12): `sessions_open` needs the machine AND the environment, and the app's port refuses a machine that does not report the environment. `sessions_tail` returns a bounded page (default 100, max 500) with a `next` cursor and `truncated`.
 - **`PlatformPort`**: the seam the tools call (`machines.list`, `sessions.open`, `tasks.create`, …), one instance per principal (`PlatformPortFactory`). Tests hand in fakes; `apps/web/src/auth/oauth-server/port.ts` is the real one over `actor()`.
-- **Declared gaps** (`PLATFORM_MCP_UNSUPPORTED`, PLG-09): `tasks.delegate` (declared, answers `unsupported` until #39), `environments.doctor` (omitted until the Machine actor exposes it, #43), resources/prompts (`sessions_tail` is the only read stream).
+- **Declared gaps** (`PLATFORM_MCP_UNSUPPORTED`, PLG-09): MCP resources and prompts — `sessions_tail` is the only read stream. `tasks_delegate` is `Task.delegate` on the parent (COL-03, #39) + `Routing.run` on the child; `environments_doctor` is `Machine.doctor` (#43): the daemon's isolation/auth verdicts as last reported, with `unverified` for environments that sent none.
