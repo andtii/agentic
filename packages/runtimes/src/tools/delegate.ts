@@ -79,7 +79,8 @@ export function delegateTool(port: TaskPort) {
         input: delegateInput,
         annotations: { openWorld: true },
         execute: async (input, ctx) => {
-            const emit = (ctx as Partial<AgentToolContext>).emit;
+            const hostEmit = (ctx as Partial<AgentToolContext>).emit;
+            const emit = typeof hostEmit === 'function' ? hostEmit : undefined;
             const outcome = await port.delegate(
                 {
                     assignee: input.assignee as AgentId,

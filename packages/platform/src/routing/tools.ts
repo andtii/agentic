@@ -58,7 +58,7 @@ export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
 /** The Task actor's own errors carry a `code`; map them onto the codes a daemon (and the model) sees. */
 function asToolCallError(e: unknown): unknown {
     if (e instanceof ToolCallError) return e;
-    const code = (e as { code?: unknown }).code;
+    const code = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
     const message = e instanceof Error ? e.message : String(e);
     if (code === 'limit') return new ToolCallError('limit', `delegate: ${message}`);
     if (code === 'not-active' || code === 'wrong-state' || code === 'no-session' || code === 'not-created') return new ToolCallError('invalid', `delegate: ${message}`);

@@ -502,7 +502,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         }
                     }
                 } finally {
-                    await it.return?.();
+                    await Promise.resolve(it.return?.()).catch(() => undefined);
                     await outcomes.return?.().catch(() => undefined);
                 }
                 if (!end) return;
