@@ -21,6 +21,8 @@ export interface AgentIdentity {
     readonly id: string;
     readonly name: string;
     readonly role: string;
+    /** The config's description — the roster card's line under the name (#35); the mock identities carry none. */
+    readonly description?: string;
     readonly hue: AgentHue;
     readonly environment: EnvironmentParts;
     readonly configVersion: number;
@@ -31,7 +33,7 @@ export type AgentLookup = (id: string) => AgentIdentity;
 const UNKNOWN_ENVIRONMENT: EnvironmentParts = { machine: '—', runtime: '—', account: '—' };
 
 /** An agent the directory has not loaded (or that no longer exists): its id as the name, the muted first hue. */
-export const unknownAgent = (id: string): AgentIdentity => ({ id, name: id, role: '', hue: 1, environment: UNKNOWN_ENVIRONMENT, configVersion: 0 });
+export const unknownAgent = (id: string): AgentIdentity => ({ id, name: id, role: '', description: '', hue: 1, environment: UNKNOWN_ENVIRONMENT, configVersion: 0 });
 
 /**
  * `Agent.get()` → identity. The hue is the agent's creation index in the
@@ -48,6 +50,7 @@ export function identityOf(view: AgentView, index: number): AgentIdentity {
         id: view.id,
         name: config.name || view.id,
         role: config.role || config.description || '',
+        description: config.description,
         hue: hueFor(index),
         environment: {
             machine: platform ? 'platform' : (config.execution.defaultEnvironmentId ?? 'unassigned'),

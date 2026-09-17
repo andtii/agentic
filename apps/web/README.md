@@ -21,7 +21,7 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 
 - `src/App.tsx` — the root: `ThemeProvider` + `AppShell` (from `@agentic/ui`) around `RouterView`; `themeInitScript` goes into `<head>` through `useHead`.
 - `src/router.ts` — the route table (docs/architecture.md §10): `/`, `/chats`, `/chats/:id`, `/agents`, `/agents/:id`, `/tasks/:id`, `/sessions/:id`, `/machines`, `/machines/:id`, `/schedules`, `/plugins`, `/settings`, `/pair`, `/history`, `/usage` (`/chats`, `/history`, `/usage` are placeholders until #88 / #90).
-- `src/pages/` — one component per route. Chats and Sessions read the platform in `live` mode (`src/data-mode.ts`: `VITE_AGENTIC_DATA=mock|live`, default `live` in a production build, `mock` under the dev server and vitest — the Playwright specs drive the mock workspace); every other page reads `src/mock/*` until its lane lands. `src/actors/` holds the browser's actor stubs and the `useActorDefs` / `useViewer` injectables both entries provide.
+- `src/pages/` — one component per route. Agents, Chats and Sessions read the platform in `live` mode (`src/data-mode.ts`: `VITE_AGENTIC_DATA=mock|live`, default `live` in a production build, `mock` under the dev server and vitest — the Playwright specs drive the mock workspace); every other page reads `src/mock/*` until its lane lands. `src/actors/` holds the browser's actor stubs and the `useActorDefs` / `useViewer` injectables both entries provide.
 - `src/nav.ts` — the sidebar groups (Primary / Workspace), the Home badge count and the breadcrumb roots.
 - `src/styles.css` (document surface) and `src/styles/pages.css` (per-screen grids, one section per page).
 - `src/entry-client.tsx` / `src/entry-server.tsx` — import `@agentic/ui/css` (after `@sigx/zero/css`), call `installThemes()` from `@agentic/ui/design-system`, build the app.
@@ -54,6 +54,8 @@ pnpm --filter @agentic/web e2e:mobile      # the phone only
 ```
 
 CI runs the whole suite in the `e2e` job (`.github/workflows/ci.yml`, ubuntu, Chromium with system deps) after `pnpm build`; a failed run uploads `playwright-report`.
+
+`e2e/demo1.spec.ts` is not part of it: it is the demo 1 walk-through (#35) against a DEPLOYED Worker — `BASE_URL=… AGENTIC_DEV_LOGIN=… pnpm --filter @agentic/web smoke:demo1` (`playwright.demo1.config.ts`, video always on). See `docs/runbook.md` → "Demo 1 smoke".
 
 ## Deploy (Cloudflare Workers)
 

@@ -111,6 +111,12 @@ export interface PlatformEnv {
      * (architecture §5a). Absent → an API-runtime task fails `no-api-key`.
      */
     readonly ANTHROPIC_API_KEY?: string;
+    /**
+     * PREVIEW ONLY (#35): when set (≥ 16 chars), `POST /auth/dev-login` mints a
+     * `dev_<user>` session for a caller presenting it, so a scripted walk-through
+     * can sign in without GitHub. Never set it on production; unset → no route.
+     */
+    readonly AGENTIC_DEV_LOGIN?: string;
 }
 
 /** The seams an app (or a test) may override; the defaults are the real wiring. */
