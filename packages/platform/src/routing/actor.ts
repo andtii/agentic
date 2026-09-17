@@ -18,7 +18,15 @@
  * - `follow` (a detached actor task, restarted after an eviction) tails the
  *   Session and settles the Task at the turn's end: completed with the final
  *   text (and a `task_report` output when one was given), failed on an
- *   error, `waiting {input}` on an interrupted turn ("Resume?").
+ *   error, `waiting {input}` on an interrupted turn ("Resume?"). It is also
+ *   the Task's session driver for the stop cascade (COL-12): a task settled
+ *   from outside while its turn runs (cancelled, or failed on budget) has
+ *   its session cancelled, and `Task.sessionStopped` is the word that the
+ *   running work has stopped once the turn actually ends.
+ * - a delegated task (`origin.kind === 'agent'`, #39) runs outside any chat;
+ *   its session opens with the approval rules of every ancestor's agent as
+ *   `approvalConstraints`, so the child's policy is never wider (AC-12), and
+ *   a `request` it raises is pushed to the Inbox when one is wired.
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -26,7 +34,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { createId, hasScope, isTerminal, type AgentId, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type PromptPart, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
+import { createId, hasScope, isTerminal, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type PromptPart, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -35,8 +43,9 @@ import { isServerFnError, ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey } from '../agent/index.js';
 import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
+import { inboxKey, type NotificationInput } from '../notify/index.js';
 import { isInterruptedTurnEnd, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
-import { TaskActor, taskKey, type TaskView } from '../task/index.js';
+import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
@@ -52,6 +61,7 @@ interface SessionClient {
     get(): Promise<SessionInfo>;
     transcript(): Promise<AgentTranscript | undefined>;
     tail(from?: { epoch: number; seq: number }): AsyncIterable<AgentEvent>;
+    cancel(): Promise<SessionCommandResult>;
     close(): Promise<SessionCommandResult>;
 }
 
@@ -59,6 +69,11 @@ interface SessionClient {
 interface MachineClient {
     get(): Promise<MachineView>;
     openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: { agentId: string; cwd: string; system: string; model?: string; maxTurns?: number; maxBudgetUsd?: number; tools: readonly string[]; resume?: unknown }, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
+}
+
+/** The slice of the Inbox actor the router notifies (`defineInbox`). */
+interface InboxClient {
+    push(input: NotificationInput): Promise<unknown>;
 }
 
 /** `Routing.get()`. */
@@ -94,6 +109,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const now = ports.now ?? Date.now;
     const newSessionId = ports.newSessionId ?? ((): SessionId => createId('session') as SessionId);
     const driverOf = ports.driver ?? ((ws: WorkspaceId): Principal => userPrincipal(ws, ws));
+    /** Per activation (by actor key): what `prompt` pokes so the `follow` supervisor rescans the routes. */
+    const wakers = new Map<string, () => void>();
 
     return defineActor({
         type: ROUTING_TYPE,
@@ -162,7 +179,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 route.status = 'running';
                 route.turnId = turnId;
                 touch(route);
-                await ctx.tasks.start('follow', { taskId: route.taskId });
+                await ctx.tasks.start('follow');
+                wakers.get(ctx.key)?.();
             }
 
             /** Open a local (`anthropic-api`) Session for the route and prompt it. */
@@ -175,6 +193,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
                     config: ctx.snapshot(route.config),
+                    ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     tools: grantedToolNames(route)
                 };
                 try {
@@ -251,6 +270,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     environmentId,
                     machineId,
                     config: ctx.snapshot(route.config),
+                    ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     system: route.config.instructions,
                     tools: grantedToolNames(route)
                 };
@@ -327,7 +347,14 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                     const runtime = config.execution.runtime;
                     const chatId: ChatId | undefined = t.origin.kind === 'user' ? t.origin.chatId : undefined;
-                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, createdAt: at, updatedAt: at };
+                    // A delegated task inherits the approval constraints of its whole chain: the parent route's, then the parent's own rules (AC-12).
+                    let constraints: readonly ApprovalRule[] | undefined;
+                    if (t.origin.kind === 'agent') {
+                        const parent = s.routes[t.origin.taskId];
+                        const parentRules = parent ? parent.config.approvalPolicy : (await agent(t.origin.agentId).get()).config.approvalPolicy;
+                        constraints = [...(parent?.constraints ?? []), ...parentRules];
+                    }
+                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), createdAt: at, updatedAt: at };
                     if (runtime === 'anthropic-api') {
                         s.routes[taskId] = { ...base, status: 'opening' };
                         await placeLocal(s.routes[taskId]!, 'started');
@@ -393,24 +420,23 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 }
             };
         },
-        tasks: (ctx) => ({
+        tasks: (ctx) => {
+            const ids = parseRoutingKey(ctx.key);
+            const signal = ctx.abortSignal;
+
             /**
-             * Follow the route's turn on its Session and settle the Task at the
-             * end. Restarted by the runtime's task ledger after an eviction:
-             * the replay from the log finds the turn end again, and a task
-             * already settled is left alone.
+             * Follow one route's turn on its Session and settle the Task at the
+             * end. A task already settled is left alone; a replay from the log
+             * after an eviction finds the turn end again.
              */
-            async follow(input: { readonly taskId: TaskId }): Promise<void> {
-                const snap = ctx.snapshot();
-                const route = snap.routes[input.taskId];
-                if (!route || route.status !== 'running' || !route.sessionId || !route.turnId) return;
-                const ids = parseRoutingKey(ctx.key);
-                if (!ids) return;
+            async function followOne(route: Route): Promise<void> {
+                if (!ids || !route.sessionId || !route.turnId) return;
                 const context = asPrincipal(driverOf(ids.workspaceId));
                 const taskClient = actor(TaskActor, taskKey(ids.workspaceId, route.taskId)).with({ context });
                 const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${route.sessionId}`).with({ context }) as unknown as SessionClient;
-                const { turnId, sessionId } = route;
-                const signal = ctx.abortSignal;
+                const inboxDef = ports.inbox?.();
+                const inbox = inboxDef ? (actor(inboxDef, inboxKey(ids.workspaceId)).with({ context }) as unknown as InboxClient) : undefined;
+                const { turnId, sessionId, agentId } = route;
 
                 /** Settle the task, forget the route, and close the session: a daemon session holds an environment slot (EXE-09), and the record keeps its `ref` for a resume. */
                 const settled = async (fn: (c: ActorContext<RoutingState>) => Promise<void>): Promise<void> => {
@@ -436,17 +462,40 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (signal.aborted) done();
                     else signal.addEventListener('abort', done, { once: true });
                 });
+                // The Task settling while the turn runs — cancelled by a user or a parent's cascade, failed on budget — is the
+                // cue to cancel the session (COL-12); the turn then ends `cancelled` and the task hears `sessionStopped`.
+                const never = new Promise<IteratorResult<AgentEvent>>(() => undefined);
+                const outcomes = taskClient.result()[Symbol.asyncIterator]();
+                let settledEarly: Promise<IteratorResult<AgentEvent> & { settled?: TaskOutcome }> = outcomes.next().then((r) => (r.done ? never : { value: undefined as never, done: false, settled: r.value }));
+                // One `next()` in flight at a time: a race the tail loses must not discard the event it will resolve with.
+                let pending: Promise<IteratorResult<AgentEvent>> | undefined;
                 let end: Extract<AgentEvent, { type: 'turn-end' }> | undefined;
                 try {
                     for (;;) {
-                        const next = await Promise.race([it.next(), aborted]);
+                        pending ??= it.next();
+                        const next = await Promise.race([pending, aborted, settledEarly]);
                         if (signal.aborted || next.done) return;
+                        const early = (next as { settled?: TaskOutcome }).settled;
+                        if (early) {
+                            settledEarly = never;
+                            if (early.status !== 'completed') await sessionClient.cancel().catch(() => undefined);
+                            continue;
+                        }
+                        pending = undefined;
                         const ev = next.value;
                         if (ev.turnId !== turnId) continue;
                         if (ev.type === 'request') {
-                            await tryTask(() => taskClient.reportWaiting({ kind: ev.kind === 'permission' ? 'approval' : 'input', requestId: ev.requestId, sessionId }, ROUTER));
+                            const kind = ev.kind === 'permission' ? 'approval' : 'input';
+                            await tryTask(() => taskClient.reportWaiting({ kind, requestId: ev.requestId, sessionId }, ROUTER));
+                            await inbox
+                                ?.push({ kind, title: kind === 'approval' ? `${agentId} asks for approval${ev.toolName ? `: ${ev.toolName}` : ''}` : `${agentId} needs input`, ...(ev.message ? { body: ev.message } : {}), ref: { kind: 'session', sessionId, requestId: ev.requestId } })
+                                .catch(() => undefined);
                         } else if (ev.type === 'request-resolved') {
-                            await tryTask(() => taskClient.resolveWaiting(ROUTER, `request ${ev.requestId}: ${ev.outcome}`));
+                            // Only the wait this request parked: a policy decision resolves with no request, and a task waiting on a child stays waiting.
+                            const wait = (await taskClient.get()).wait;
+                            if (wait && (wait.kind === 'approval' || wait.kind === 'input') && wait.requestId === ev.requestId) {
+                                await tryTask(() => taskClient.resolveWaiting(ROUTER, `request ${ev.requestId}: ${ev.outcome}`));
+                            }
                         } else if (ev.type === 'turn-end') {
                             end = ev;
                             break;
@@ -454,11 +503,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                 } finally {
                     await it.return?.();
+                    await outcomes.return?.().catch(() => undefined);
                 }
                 if (!end) return;
                 const t = await taskClient.get();
                 if (isTerminal(t.status)) {
-                    await settled(async () => undefined);
+                    // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
+                    await settled(() => tryTask(() => taskClient.sessionStopped()));
                     return;
                 }
                 if (end.stopReason === 'error') {
@@ -490,7 +541,40 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     )
                 );
             }
-        })
+
+            return {
+                /**
+                 * The one follower of this router: `ctx.tasks` is single-flight per
+                 * name, and a workspace runs many routes at once (a parent and the
+                 * child it delegated to, at the least), so `follow` supervises — it
+                 * runs `followOne` for every `running` route, picks up a route the
+                 * next `prompt` marks running (`wake`), and lives as long as the
+                 * activation does. Restarted by the runtime's task ledger after an
+                 * eviction, it finds every running route again; a route whose
+                 * follower ended is dropped or settled and never followed twice.
+                 */
+                async follow(): Promise<void> {
+                    const active = new Map<TaskId, Promise<void>>();
+                    const aborted = new Promise<void>((resolve) => {
+                        if (signal.aborted) resolve();
+                        else signal.addEventListener('abort', () => resolve(), { once: true });
+                    });
+                    while (!signal.aborted) {
+                        // Arm the wake-up before looking, so a route marked running meanwhile is never missed.
+                        const woken = new Promise<void>((resolve) => wakers.set(ctx.key, resolve));
+                        for (const route of Object.values(ctx.snapshot().routes)) {
+                            if (route.status !== 'running' || active.has(route.taskId)) continue;
+                            const run = followOne(route)
+                                .catch(() => undefined)
+                                .finally(() => active.delete(route.taskId));
+                            active.set(route.taskId, run);
+                        }
+                        await Promise.race([woken, aborted, ...active.values()]);
+                        wakers.delete(ctx.key);
+                    }
+                }
+            };
+        }
     });
 }
 

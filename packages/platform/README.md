@@ -234,7 +234,26 @@ await actor(Routing, routingKey(ws)).run(taskId);   // queued → active (local 
 
 - `run(taskId)` resolves the runtime and the environment once (task `environmentId`, else the agent's default) and never changes them: `anthropic-api` opens a local Session and prompts; a daemon runtime goes through `Machine.openSession` — `opened` (prompted on `sessionOpened`), `queued` (Task `waiting {capacity, position}`), offline, or not reported by any machine yet (Task `waiting {environment-offline, policy}` then `queue` / `fail` / `fallback-api` — the last only when configured, through a transition that says why; a `queue` route binds to the first machine that reports the environment and never moves). `createEnvironmentProbe({ machines })` answers the schedule trigger's `EnvironmentProbe` with the same scan, and `run` adopts a task the trigger parked `waiting {environment-offline}`.
 - `machineOnline` / `sessionOpened` / `sessionClosed` are the Machine's one-way notifications (machine principal); `report(taskId, report)` is `task_report` from the task's agent; the `follow` task settles the Task at the turn end and closes the session.
-- `createSessionFactory({ routing, anthropic?, model?, policy? })` — the concrete `SessionFactory` (`anthropic-api` → `createPlatformModelAgent`; other runtimes → `null`). `createToolCallPort({ routing, sessions })` — the Machine's `ToolCallPort` over the same tool definitions. `createActorToolPorts({ principal, chatId?, routing? })` — the `PlatformPorts` both use (`delegate` / `ask_user` are `unsupported` until #39).
+- `createSessionFactory({ routing, anthropic?, model?, policy? })` — the concrete `SessionFactory` (`anthropic-api` → `createPlatformModelAgent`; other runtimes → `null`); every session opens under `sessionPolicy(spec)` from `src/policy` unless `policy` overrides it. `createToolCallPort({ routing, sessions })` — the Machine's `ToolCallPort` over the same tool definitions. `createActorToolPorts({ principal, chatId?, routing? })` — the `PlatformPorts` both use (`ask_user` is `unsupported` until #40).
+- `RoutingPorts.inbox` (optional): a `request` a task session raises becomes an `approval` / `input` Inbox notification with a `{ kind: 'session', sessionId, requestId }` ref.
+- `follow` is one supervisor task per router that follows every `running` route (`ctx.tasks` is single-flight per name) and is the Task's session driver for the stop cascade: a task settled from outside while its turn runs has its session cancelled, and `Task.sessionStopped` is sent when the turn ends.
+
+### Delegation (`src/routing/tools.ts`, #39)
+
+`createActorToolPorts().task.delegate(spec, call)` is what the `delegate` tool does on both paths (architecture §7; COL-03..10, AC-05, AC-12):
+
+```ts
+const ports = createActorToolPorts({ principal: agentPrincipal, routing: () => Routing });
+const outcome = await ports.task.delegate({ assignee, objective, context, constraints }, { callId, signal, onDelegated });
+// { taskId, status: 'completed', result } | { taskId, status: 'failed', error } | { taskId, status: 'cancelled', notStopped }
+```
+
+- Collaborators first (`forbidden`), then `Task.delegate` under the limits (`limit` / `invalid` with the Task's message), then `Routing.run(childId)` — a child already routed or already settled is left as it stands — then the child's `result` stream. The child id is `childTaskId(parentTaskId, callId)`, so a restarted parent re-issuing the call re-awaits the same child; a parent turn aborted mid-wait answers `cancelled` with `notStopped` naming the child unless its stop is confirmed.
+- The child runs on its agent's runtime and environment with no chat; its record is the Task tree. Its session opens with `approvalConstraints` = the approval rules of every ancestor's agent, so `sessionPolicy` never widens the chain; a child `request` parks it `waiting {approval}` (the parent is `waiting {child}`) and reaches the Inbox; the decision goes to the child session (`Session.respond`).
+
+## Policy (`src/policy`)
+
+`compilePolicy(rules)` turns `ApprovalRule`s into a `@sigx/ai-agent` `Policy` (first match; `tools` / `categories` / `source`; no match → no opinion; input requests always go to the client), `grantPolicy(grants)` decides per `ToolGrant` (`ask` / `deny` / allow), `agentPolicy(config)` = `firstMatch(rules, grants, allowAll)`, `constrainPolicy(policy, constraints)` lets the stricter answer win (deny > ask > allow), and `sessionPolicy(spec)` is what a session opens under — the agent's own, constrained by `spec.approvalConstraints` when it works a delegated task.
 
 ## PairingDirectory (`src/pairing`)
 

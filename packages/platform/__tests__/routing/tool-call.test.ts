@@ -2,8 +2,9 @@
  * `createToolCallPort` — a daemon session's `tool.call` runs the platform
  * tool over the actors under the agent principal (architecture §5b, #37):
  * memory in the agent's own scope, chat posts attributed to the agent, task
- * reports kept by the router; `delegate` / `ask_user` refused as
- * unsupported, bad input as invalid, a non-agent principal as forbidden.
+ * reports kept by the router; `delegate` without a task and `ask_user`
+ * refused as unsupported (delegation itself: `delegation.test.ts`), bad
+ * input as invalid, a non-agent principal as forbidden.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { actorKey, type AgentId, type ChatId, type FrozenAgentConfig, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
@@ -99,7 +100,8 @@ describe('createToolCallPort', () => {
     });
 
     it('refuses what it does not serve, with the code the daemon reports', async () => {
-        expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }))).toBe('unsupported');
+        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+        expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }, taskless))).toBe('unsupported');
         expect(await codeOf(call('ask_user', { question: 'Which?' }))).toBe('unsupported');
         expect(await codeOf(call('shell', {}))).toBe('unsupported');
         expect(await codeOf(call('memory_search', { nope: 1 }))).toBe('invalid');

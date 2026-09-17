@@ -156,6 +156,9 @@ importers:
       '@agentic/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentic/learning':
+        specifier: workspace:*
+        version: link:../../packages/learning
       '@agentic/platform':
         specifier: workspace:*
         version: link:../../packages/platform

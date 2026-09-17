@@ -5,14 +5,18 @@
  * expects frames from a Machine). Keys are BYO (§5a): `anthropic` resolves
  * the provider options per workspace and a missing key fails the open with
  * a clear error, never a silent fallback to the deployment's environment.
+ * Sessions open under the policy compiled from the agent's config
+ * (`sessionPolicy`: approval rules, tool grants, then allow), constrained by
+ * the ancestors' rules on a delegated task (AC-12) — `policy` overrides it.
  */
 
 import type { WorkspaceId } from '@agentic/core';
 import { createPlatformModelAgent, type PlatformAgentDeps } from '@agentic/runtimes';
-import { allowAll, type Policy } from '@sigx/ai-agent';
+import type { Policy } from '@sigx/ai-agent';
 import type { AnyActorDefinition } from '@sigx/actors';
 
 import { mintAgentPrincipal } from '../auth/index.js';
+import { sessionPolicy } from '../policy/index.js';
 import type { SessionFactory } from '../session/ports.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
@@ -23,7 +27,7 @@ export interface SessionFactoryOptions {
     readonly anthropic?: (workspaceId: WorkspaceId) => PlatformAgentDeps['anthropic'] | Promise<PlatformAgentDeps['anthropic']>;
     /** A model to run every session on instead of the provider — tests pass `mockModel`. */
     readonly model?: PlatformAgentDeps['model'];
-    /** The approval policy sessions open with. Default `allowAll` (the compiled `approvalPolicy` is a follow-up). */
+    /** The approval policy every session opens with, replacing the compiled one (`sessionPolicy(spec)`). Tests pass `allowAll`. */
     readonly policy?: Policy;
 }
 
@@ -44,7 +48,7 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
             ...(options.model ? { model: options.model } : { anthropic: provider }),
             store: c.transcripts
         });
-        const session = await built.agent.session({ policy: options.policy ?? allowAll, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
+        const session = await built.agent.session({ policy: options.policy ?? sessionPolicy(c.spec), signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
         return {
             session,
             agentId: built.agent.id,

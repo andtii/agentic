@@ -8,7 +8,7 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 import type { LearningPorts, SkippedScope } from '../task/driver.js';
@@ -36,6 +36,11 @@ export interface SessionOpenSpec {
     readonly machineId?: MachineId;
     /** The agent configuration this session runs with (AGT-06/07). */
     readonly config: FrozenAgentConfig;
+    /**
+     * Set by the router on a delegated task's session: the approval rules of every ancestor task's
+     * agent, oldest first. The session's policy is its own constrained by these — never wider (AC-12).
+     */
+    readonly approvalConstraints?: readonly ApprovalRule[];
     /** The task objective the session starts on — what memory retrieval ranks on and learning records (MEM-07, LRN-05). */
     readonly objective?: string;
     /** The prompt parts the work starts from (the task's context); the last text part is the latest user message. */
