@@ -42,3 +42,27 @@ import { Row, Col, Spacer } from '@agentic/ui';
 - The form edits a draft; a valid submit writes the config back through the model and emits `submit`. An invalid submit is blocked, errors render beside their fields (`Field.Error`, `role="alert"`, wired to the control by `aria-describedby`) and `invalid` fires; `reset()` restores the draft.
 - Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
 - Persistence is the caller's: the forms emit, they never write to an actor.
+
+## Transcript (`src/thread`) and composer (`src/composer`)
+
+Driven by a reactive `AgentTranscript` — `useAgentSession(session).transcript` or anything the `@sigx/ai-agent` reducer folds in place. Each part is its own component, so a streaming delta re-renders one part.
+
+- `Thread` windows its rows: at most `window` parts (default 150) in the DOM; it follows the tail while the reader is at the bottom (`data-state="on"`), freezes the window on scroll-up, and offers "Show earlier" and "Jump to latest".
+- `Message` sits on zero `Chat`: the user at `end`, everyone else at `start`, a `Badge` naming the author on every row.
+- `ToolCall` paints the lifecycle on zero's governed states — `loading` (pending, awaiting approval), `active` (running), `complete`, `error` (failed, cancelled), `closed` (denied) — with the phase as the `status` text (andtii/zero-wip#483).
+- `ApprovalPrompt` answers with `onRespond(requestId, { type: 'permission', outcome, scope })` — exactly what `session.respond()` takes.
+- `Composer` emits `send(text)` and `cancel`; pass `busy` / `steers` / `canCancel` from the agent's capabilities and `mentions` for the `@` popup.
+
+```tsx
+const view = useAgentSession(session);
+
+<Thread transcript={view.transcript} onRespond={(id, d) => void view.respond(id, d)}
+    onCancelAgent={(id) => void view.cancelAgent(id)} />
+<Composer busy={view.state === 'running' || view.state === 'awaiting'}
+    steers={view.capabilities?.steer} canCancel={view.capabilities?.cancel}
+    onSend={(text) => void view.prompt(text)} onCancel={() => void view.cancel()} />
+```
+
+## Fragment (`@agentic/ui/fragment`)
+
+The six `ai-*` anatomies as a zero manifest fragment plus a recipe pack on the recommended token grammar, pure data (no sigx runtime). Declared through `"sigx-zero": { "fragment": "./dist/fragment.js" }`; `build` also writes `dist/fragment.json` for `--extra-manifest`. A design system adopts it with `mergeManifests(zeroManifest, fragment)` + `recipes`, or `sigx zero:extend` once a kit carrying it is published (andtii/zero-wip#482). `__tests__/fragment.test.ts` runs the `zero:fragment` checks until then.

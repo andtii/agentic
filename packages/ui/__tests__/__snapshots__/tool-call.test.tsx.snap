@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a snapshot per UIToolState > renders the approved card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="active"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">running</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><!----><!----><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the awaiting card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="loading"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">awaiting approval</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><!----><!----><div data-scope="ai-approval" data-part="root" role="group" aria-label="Allow ToolSearch?"><p data-scope="ai-approval" data-part="title">Allow <code>ToolSearch</code>?</p><p data-scope="ai-approval" data-part="description">Reads the tool list.</p><div data-scope="ai-approval" data-part="actions"><button type="button" data-scope="button" data-part="root" data-size="sm">Allow once</button><!----><button type="button" data-scope="button" data-part="root" data-color="primary" data-size="sm">Allow for session</button><!----><button type="button" data-scope="button" data-part="root" data-size="sm">Deny once</button><!----><button type="button" data-scope="button" data-part="root" data-color="error" data-size="sm">Deny for session</button><!----></div></div><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the denied card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="closed"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">denied</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><!----><p data-scope="ai-tool-call" data-part="error">The operator denied this call.</p><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the done card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="complete"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">done</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><details data-scope="ai-tool-call" data-part="output" data-state="open" open=""><summary>output</summary><pre>[{"id":"INC-41"}]</pre></details><!----><!----><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the error card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="error"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">error</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><!----><p data-scope="ai-tool-call" data-part="error">boom</p><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the pending card 1`] = `
+"<div data-scope="ai-tool-call" data-part="root" data-state="loading"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch(query: select:Read)</code><span data-scope="ai-tool-call" data-part="status">pending</span></div><details data-scope="ai-tool-call" data-part="input" data-state="closed"><summary>input</summary><pre>{
+  "query": "select:Read"
+}</pre></details><!----><!----><!----><!----><!----></div><!---->"
+`;
+
+exports[`a snapshot per UIToolState > renders the streaming card 1`] = `"<div data-scope="ai-tool-call" data-part="root" data-state="loading"><div data-scope="ai-tool-call" data-part="header"><code>ToolSearch({"query":"sel…)</code><span data-scope="ai-tool-call" data-part="status">writing arguments</span></div><!----><!----><!----><!----><!----></div><!---->"`;
