@@ -110,7 +110,7 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    tool.call {callId, sessionId, tool, input} · pong
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · session.open {sessionId, environmentId, spec}
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
-                   tool.result {callId, output | error} · ping
+                   tool.result {callId, exactly one of output | error} · ping
 ```
 
 - Machine DO routes `session.frame` → `actor(Session, id).forwardFrames(frames)` (one-way); `session.reply` → `Session.commandReplied`; `tool.call` → the platform tool under an **agent principal** `{kind: 'agent', ws, agentId, sessionId, taskId}` so Memory/Task authorize correctly.
@@ -118,6 +118,7 @@ platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · ses
 - Reconnect: the daemon redials with backoff; `welcome.wanted` cursors drive gapless replay from the daemon's per-session NDJSON log (`%LOCALAPPDATA%/agentic/sessions/{id}.ndjson`); beyond that a `gap` marks the Session `disconnected` with "events lost" (OPS-04, distinct from failure).
 - Multi-account isolation = `CLAUDE_CONFIG_DIR` per environment (the adapter's env allowlist passes it through). macOS Keychain behaviour is unverified, so v1 validates Windows only; `doctor()` implements EXE-07.
 - Platform tools reach Claude Code through the adapter's local MCP tool server; their `execute` sends `tool.call` over the same socket and awaits `tool.result`.
+- Envelope contract (`@agentic/daemon-protocol`): one frame per WebSocket text message; `v` is checked before `t` before the schema, so a peer on another version is refused with `unsupported-version` and a malformed message with one of `too-large` (1 MiB, checked before parsing) · `not-json` · `not-object` · `unknown-type` · `invalid`. Every frame kind has a Standard Schema (zod) with bounded strings and lists (`LIMITS`); unknown keys are stripped. A daemon drops what it cannot decode and keeps the socket. `session.frame` traffic waits for `welcome`, so a replay driven by `wanted` always precedes live frames; `wanted` is the last cursor the platform holds and replay starts right after it; a cursor older than the log yields a `gap` frame, never silence. `daemonConformance(harness)` on `@agentic/daemon-protocol/testing` pins all of this from the platform seat (hello/welcome, malformed input, env, heartbeat, session, reconnect replay, gap, tool round trip); `inMemoryHarness()` is the reference daemon it is proven against and a stand-in for tests of the Machine actor.
 
 ## 6. Chat model
 

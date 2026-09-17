@@ -1,0 +1,54 @@
+/** Daemon → platform frames, one schema per kind plus the union. */
+
+import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
+import { z } from 'zod';
+import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
+import { capabilityReport, cursor, cursors, environments, machineId, name, nonNegativeInt, os, sessionId, text } from './common.js';
+import { LIMITS } from './limits.js';
+import { sessionRef, wireFrame, wireReply } from './wire.js';
+
+const v = z.literal(DAEMON_PROTOCOL_VERSION);
+
+const hello = z.object({
+    v,
+    t: z.literal('hello'),
+    machineId,
+    daemonVersion: name,
+    os,
+    environments,
+    capabilities: z.array(capabilityReport).max(LIMITS.list),
+    resume: cursors
+});
+const env = z.object({ v, t: z.literal('env'), environments });
+const heartbeat = z.object({ v, t: z.literal('heartbeat'), at: nonNegativeInt, active: z.array(sessionId).max(LIMITS.list) });
+const sessionOpened = z.object({ v, t: z.literal('session.opened'), sessionId, ref: sessionRef, capabilities: capabilityReport, head: cursor });
+const sessionFrame = z.object({ v, t: z.literal('session.frame'), sessionId, frame: wireFrame });
+const sessionReply = z.object({ v, t: z.literal('session.reply'), sessionId, reply: wireReply });
+const sessionClosed = z.object({ v, t: z.literal('session.closed'), sessionId, reason: text });
+const toolCall = z.object({ v, t: z.literal('tool.call'), callId: name, sessionId, tool: name, input: z.unknown() });
+const pong = z.object({ v, t: z.literal('pong'), at: nonNegativeInt });
+
+export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
+export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
+export const heartbeatFrame: z.ZodType<DaemonFrameOf<'heartbeat'>> = heartbeat;
+export const sessionOpenedFrame: z.ZodType<DaemonFrameOf<'session.opened'>> = sessionOpened;
+export const sessionFrameFrame: z.ZodType<DaemonFrameOf<'session.frame'>> = sessionFrame;
+export const sessionReplyFrame: z.ZodType<DaemonFrameOf<'session.reply'>> = sessionReply;
+export const sessionClosedFrame: z.ZodType<DaemonFrameOf<'session.closed'>> = sessionClosed;
+export const toolCallFrame: z.ZodType<DaemonFrameOf<'tool.call'>> = toolCall;
+export const pongFrame: z.ZodType<DaemonFrameOf<'pong'>> = pong;
+
+/** Every daemon frame kind by its `t`. */
+export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
+    hello: helloFrame,
+    env: envFrame,
+    heartbeat: heartbeatFrame,
+    'session.opened': sessionOpenedFrame,
+    'session.frame': sessionFrameFrame,
+    'session.reply': sessionReplyFrame,
+    'session.closed': sessionClosedFrame,
+    'tool.call': toolCallFrame,
+    pong: pongFrame
+};
+
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionFrame, sessionReply, sessionClosed, toolCall, pong]);
