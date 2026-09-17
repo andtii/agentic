@@ -110,7 +110,7 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    tool.call {callId, sessionId, tool, input} · pong
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · session.open {sessionId, environmentId, spec}
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
-                   tool.result {callId, output | error} · ping
+                   tool.result {callId, exactly one of output | error} · ping
 ```
 
 - Machine DO routes `session.frame` → `actor(Session, id).forwardFrames(frames)` (one-way); `session.reply` → `Session.commandReplied`; `tool.call` → the platform tool under an **agent principal** `{kind: 'agent', ws, agentId, sessionId, taskId}` so Memory/Task authorize correctly.

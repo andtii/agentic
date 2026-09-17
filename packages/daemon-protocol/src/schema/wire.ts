@@ -60,8 +60,8 @@ export const promptPart: z.ZodType<PromptPart> = z.custom<PromptPart>(isPromptPa
 export const decision: z.ZodType<Decision> = z.custom<Decision>((v) => isRecord(v) && typeof v.type === 'string' && DECISION_TYPES.has(v.type), {
     message: 'expected a permission, input or cancel decision'
 });
-export const outputSpec: z.ZodType<WireOutputSpec> = z.custom<WireOutputSpec>((v) => isRecord(v) && isRecord(v.schema) && (v.name === undefined || typeof v.name === 'string'), {
-    message: 'expected { schema: JSON Schema, name? }'
+export const outputSpec: z.ZodType<WireOutputSpec> = z.custom<WireOutputSpec>((v) => isRecord(v) && isRecord(v.schema) && (v.name === undefined || name.safeParse(v.name).success), {
+    message: `expected { schema: JSON Schema, name? } with name 1-${LIMITS.id} chars`
 });
 
 export const wireFrame: z.ZodType<WireFrame> = z.discriminatedUnion('kind', [
@@ -81,10 +81,14 @@ export const wireReply: z.ZodType<WireReply> = z.discriminatedUnion('kind', [
     })
 ]);
 
+const configurePatch = z
+    .record(name, z.string().max(LIMITS.text))
+    .refine((r) => Object.keys(r).length <= LIMITS.list, { message: `at most ${LIMITS.list} patch keys` });
+
 export const wireCommand: z.ZodType<WireCommand> = z.discriminatedUnion('type', [
     z.object({ v: wireVersion, commandId: name, type: z.literal('prompt'), turnId: name, input: z.array(promptPart).max(LIMITS.list), output: outputSpec.optional() }),
     z.object({ v: wireVersion, commandId: name, type: z.literal('respond'), requestId: name, decision }),
     z.object({ v: wireVersion, commandId: name, type: z.literal('cancel'), agentId: name.optional() }),
-    z.object({ v: wireVersion, commandId: name, type: z.literal('configure'), patch: z.record(z.string().max(LIMITS.id), z.string().max(LIMITS.text)) }),
+    z.object({ v: wireVersion, commandId: name, type: z.literal('configure'), patch: configurePatch }),
     z.object({ v: wireVersion, commandId: name, type: z.literal('close') })
 ]);

@@ -116,6 +116,28 @@ describe('daemon frame schemas', () => {
         expect(platformFrameSchemas.welcome.safeParse({ v: V, t: 'welcome', serverTime: 1, wanted }).success).toBe(false);
     });
 
+    it('bound the wire command payloads: output spec name and configure patch', () => {
+        const command = (c: Record<string, unknown>) => platformFrameSchemas['session.command'].safeParse({ v: V, t: 'session.command', sessionId: 's1', command: { v: W, commandId: 'c1', ...c } }).success;
+        const prompt = { type: 'prompt', turnId: 't1', input: [{ type: 'text', text: 'hi' }] };
+        expect(command({ ...prompt, output: { schema: {}, name: 'answer' } })).toBe(true);
+        expect(command({ ...prompt, output: { schema: {}, name: 'x'.repeat(LIMITS.id + 1) } })).toBe(false);
+        expect(command({ ...prompt, output: { schema: {}, name: '' } })).toBe(false);
+        expect(command({ type: 'configure', patch: { model: 'opus' } })).toBe(true);
+        expect(command({ type: 'configure', patch: { '': 'opus' } })).toBe(false);
+        const patch = Object.fromEntries(Array.from({ length: LIMITS.list + 1 }, (_, i) => [`k${i}`, 'v']));
+        expect(command({ type: 'configure', patch })).toBe(false);
+    });
+
+    it('require exactly one of output or error on tool.result', () => {
+        const result = (f: Record<string, unknown>) => platformFrameSchemas['tool.result'].safeParse({ v: V, t: 'tool.result', callId: 'k1', ...f });
+        expect(result({ output: { x: 1 } }).success).toBe(true);
+        expect(result({ output: null }).success).toBe(true);
+        expect(result({ error: { code: 'boom', message: 'no' } }).success).toBe(true);
+        const neither = result({});
+        expect(neither.success).toBe(false);
+        expect(neither.error?.issues[0]?.path).toEqual(['output']);
+    });
+
     it('refuse the wrong protocol version at the schema level too', () => {
         expect(daemonFrameSchemas.pong.safeParse({ v: V + 1, t: 'pong', at: 1 }).success).toBe(false);
         expect(platformFrameSchemas['session.command'].safeParse({ ...platformCases['session.command'].valid, command: { ...platformCases['session.command'].valid.command, v: W + 1 } }).success).toBe(false);

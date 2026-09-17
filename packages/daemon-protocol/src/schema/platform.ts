@@ -14,7 +14,8 @@ const sessionCommand = z.object({ v, t: z.literal('session.command'), sessionId,
 const sessionClose = z.object({ v, t: z.literal('session.close'), sessionId });
 const toolResult = z
     .object({ v, t: z.literal('tool.result'), callId: name, output: z.unknown().optional(), error: z.object({ code: name, message: text }).optional() })
-    .refine((f) => f.output === undefined || f.error === undefined, { message: 'tool.result carries output or error, not both', path: ['error'] });
+    .refine((f) => f.output === undefined || f.error === undefined, { message: 'tool.result carries output or error, not both', path: ['error'] })
+    .refine((f) => f.output !== undefined || f.error !== undefined, { message: 'tool.result carries output or error (a void tool sends output: null)', path: ['output'] });
 const ping = z.object({ v, t: z.literal('ping') });
 
 export const welcomeFrame: z.ZodType<PlatformFrameOf<'welcome'>> = welcome;

@@ -25,7 +25,7 @@ daemonFrameSchemas['session.frame'];         // by `t`
 platformFrame.safeParse(value);              // the union
 ```
 
-`LIMITS` bounds every field: 1 MiB per frame, 256 chars per id/name, 4096 per reason/message/path, 512 KiB for `OpenSpec.system`, 4096 entries per list or cursor record. Unknown keys are stripped, not refused (forward compatibility within a version).
+`LIMITS` bounds every field: 1 MiB per frame, 256 chars per id/name, 4096 per reason/message/path, 512 KiB for `OpenSpec.system`, 4096 entries per list or record (cursors, `configure` patch keys). `tool.result` carries exactly one of `output` or `error` — a void tool sends `output: null`. Unknown keys are stripped, not refused (forward compatibility within a version).
 
 ## Framing
 
