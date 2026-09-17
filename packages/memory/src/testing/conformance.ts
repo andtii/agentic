@@ -17,8 +17,19 @@ import { exportToString, fromNdjson, ndjsonLines, parseExportHeader, MEMORY_EXPO
 import { byteLength } from '../rank/index.js';
 import { assert, assertEqual, assertRejects } from './assert.js';
 
+/**
+ * Behaviour beyond the `MemoryStore` core that a narrower plugin may leave
+ * out (MEM-09: it then reports the fields instead): `conditions` matching as
+ * tags, kind-weighted ranking, `working` expiry by `ttl`, per-task record
+ * compaction through `supersedes`.
+ */
+export type MemoryFeature = 'conditions' | 'kindWeights' | 'ttl' | 'supersedes';
+export const MEMORY_FEATURES: readonly MemoryFeature[] = ['conditions', 'kindWeights', 'ttl', 'supersedes'];
+
 export interface MemoryConformanceCase {
     readonly name: string;
+    /** The features this case exercises; empty for the core every plugin must pass. */
+    readonly requires: readonly MemoryFeature[];
     run(): Promise<void>;
 }
 
@@ -30,6 +41,8 @@ export interface MemoryConformanceOptions {
     readonly now?: () => number;
     /** A scope per case; default `agent:<prefix>_<n>`. */
     readonly scope?: (index: number, name: string) => MemoryScope;
+    /** Features the plugin under test does not have: the cases requiring them are left out. Default: none. */
+    readonly without?: readonly MemoryFeature[];
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -49,11 +62,13 @@ const byId = (a: MemoryEntry, b: MemoryEntry) => (a.id < b.id ? -1 : a.id > b.id
 export function memoryConformance(make: MemoryStoreFactory, options: MemoryConformanceOptions = {}): readonly MemoryConformanceCase[] {
     const now = options.now ?? Date.now;
     const scopeFor = options.scope ?? ((i: number) => `agent:agent_conformance_${i}` as MemoryScope);
+    const without = options.without ?? [];
     const cases: MemoryConformanceCase[] = [];
-    const define = (name: string, body: (store: MemoryStore, fresh: () => Promise<MemoryStore>) => Promise<void>) => {
+    const define = (name: string, body: (store: MemoryStore, fresh: () => Promise<MemoryStore>) => Promise<void>, requires: readonly MemoryFeature[] = []) => {
         const index = cases.length;
         cases.push({
             name,
+            requires,
             run: async () => {
                 let n = 0;
                 const fresh = async () => make(`${scopeFor(index, name)}_${++n}` as MemoryScope);
@@ -148,7 +163,7 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         await store.put(entry('Unrelated lesson', { kind: 'lesson' }));
         const ids = (await store.query({ tags: ['windows'], limit: 10 })).map((r) => r.entry.id);
         assertEqual(ids, [lesson.id], 'a token of `conditions` satisfies a tags filter');
-    });
+    }, ['conditions']);
 
     define('kind weights: preference > lesson > fact > record > assumption', async (store) => {
         const at = now();
@@ -157,7 +172,7 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         const [assumption, record, fact, lesson, preference] = [await put('assumption'), await put('record'), await put('fact'), await put('lesson'), await put('preference')];
         const ids = (await store.query({ text, limit: 10 })).map((r) => r.entry.id);
         assertEqual(ids, [preference, lesson, fact, record, assumption], 'ties on text break by kind weight');
-    });
+    }, ['kindWeights']);
 
     define('recency: a newer entry outranks an identical older one', async (store) => {
         const text = 'identical text, different age';
@@ -173,7 +188,7 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         const ids = (await store.query({ kinds: ['working'], limit: 10 })).map((r) => r.entry.id);
         assertEqual(ids, [live.id], 'an expired working entry is never returned');
         assertEqual(await store.get(expired.id), undefined, 'an expired working entry is compacted away');
-    });
+    }, ['ttl']);
 
     define('records are compacted per task: one live record, superseding the last', async (store) => {
         const taskId = 'task_compact' as TaskId;
@@ -185,7 +200,7 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         assertEqual(ids, [third.id, other.id].sort(), 'only the newest record per task is live');
         assertEqual(third.supersedes, second.id, 'the new record supersedes the previous one');
         assert((await store.get(first.id))?.retired === true && (await store.get(second.id))?.retired === true, 'older records are retired, not deleted');
-    });
+    }, ['supersedes']);
 
     define('export is versioned NDJSON and round-trips through import', async (store, fresh) => {
         const at = now() - DAY;
@@ -232,5 +247,5 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         assertEqual(junk, { imported: 0, skipped: 2, droppedFields: [] }, 'rows that are not entries are skipped');
     });
 
-    return cases;
+    return without.length ? cases.filter((c) => !c.requires.some((f) => without.includes(f))) : cases;
 }

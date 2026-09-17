@@ -116,9 +116,10 @@ export function applyMemoryLog(state: MemoryState, log: MemoryLogEntry): void {
     switch (log.op) {
         case 'put': {
             let entry = log.entry;
-            if (entry.kind === 'record' && entry.provenance.taskId) {
+            if (entry.kind === 'record' && entry.provenance.taskId && !entry.retired) {
                 // MEM-12 / architecture §8: records are compacted per task — one
-                // live record per task; the newest supersedes the rest.
+                // live record per task; the newest supersedes the rest. A record
+                // arriving already retired (an import) supersedes nothing.
                 let latest: MemoryEntry | undefined;
                 for (const id in state.entries) {
                     const other = state.entries[id]!;
