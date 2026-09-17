@@ -87,7 +87,7 @@ for await (const ev of turn) await ctx.turn((s) => apply(s, ev)); // ctx.append(
 
 The daemon runs one `claudeCode({ settingSources: [], env: { CLAUDE_CONFIG_DIR: env.profileDir }, models })` per environment. Sessions open with `cwd` from `cwdRoots`, `system` = instructions + skills + retrieved memory block with `systemPromptPreset: true`, `maxTurns` / `maxBudgetUsd` from limits, policy compiled from the agent's approval rules. Per session: `serveSession(claudeSession, { agentId, capabilities, eventLog: diskLog })` and pump `served.events(from)` upward.
 
-**One hibernatable WebSocket** from the daemon to its Machine DO carries the daemon-protocol envelope (types in `@agentic/core`, validators in `@agentic/daemon-protocol`):
+**One hibernatable WebSocket** from the daemon to its Machine DO carries the daemon-protocol envelope (types in `@agentic/core` as `DaemonFrame<F, R>` / `PlatformFrame<C>`, generic over the `@sigx/ai-agent/wire` frame, reply and command types so core stays dependency-free; `@agentic/daemon-protocol` instantiates and validates them):
 
 ```
 daemon → platform: hello {machineId, daemonVersion, os, environments[], capabilities[], resume: {sessionId → cursor}}
