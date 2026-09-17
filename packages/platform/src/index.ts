@@ -9,3 +9,4 @@ export * from './schedule/index.js';
 export * from './agent/index.js';
 export * from './session/index.js';
 export * from './chat/index.js';
+export * from './task/index.js';

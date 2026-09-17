@@ -1,0 +1,158 @@
+/** Task actor state, log entries and method shapes (architecture §4 Task, §7). */
+
+import type {
+    AgentId,
+    EnvironmentId,
+    JsonSchemaObject,
+    Limits,
+    PromptPart,
+    SessionId,
+    TaskContract,
+    TaskError,
+    TaskId,
+    TaskOrigin,
+    TaskResult,
+    TaskSnapshot,
+    TaskStatus,
+    TaskTransition,
+    Usage,
+    WaitReason,
+    WorkspaceId
+} from '@agentic/core';
+
+/** What `create` needs beyond the contract. */
+export interface TaskInit {
+    /** The agent responsible for the outcome (COL-07): the delegating agent for a child, the assignee for a root task. */
+    readonly owner: AgentId;
+    readonly depth?: number;
+    readonly parentId?: TaskId;
+    readonly configVersion?: number;
+}
+
+/** `delegate(spec)` — what the DelegateTool hands the parent task (architecture §7). */
+export interface DelegateSpec {
+    /** The tool call id; the child id is `childTaskId(parentId, callId)`, so a restarted parent re-awaits the same child. */
+    readonly callId: string;
+    readonly objective: string;
+    readonly assignee: AgentId;
+    readonly context?: readonly PromptPart[];
+    /** Requested limits; clamped to the parent's remaining budget, never widened. */
+    readonly constraints?: Limits;
+    readonly expected?: string | JsonSchemaObject;
+    readonly environmentId?: EnvironmentId;
+    /** The delegating session; defaults to the parent's own. */
+    readonly sessionId?: SessionId;
+    /** Defaults to the parent's assignee. */
+    readonly owner?: AgentId;
+}
+
+export interface CancelOptions {
+    /** How long the cascade waits for acknowledgements before listing stragglers. Default `DEFAULT_STOP_TIMEOUT_MS`. */
+    readonly timeoutMs?: number;
+}
+
+/** What `cancel` resolves to (COL-12): `notStopped` is the work that could not be confirmed stopped, this task included. */
+export interface StopReport {
+    readonly id: TaskId;
+    readonly stopped: boolean;
+    readonly notStopped: readonly TaskId[];
+}
+
+/** One node of `tree()` (COL-09). */
+export interface TaskTree {
+    readonly id: TaskId;
+    readonly status: TaskStatus;
+    readonly wait?: WaitReason;
+    readonly owner: AgentId;
+    readonly assignee: AgentId;
+    readonly objective: string;
+    readonly depth: number;
+    readonly stopped?: boolean;
+    readonly children: readonly TaskTree[];
+}
+
+/** `get()`: the AC-05 snapshot plus the delegation link and the stop bookkeeping. */
+export interface TaskView extends TaskSnapshot {
+    readonly parentId?: TaskId;
+    readonly notStopped: readonly TaskId[];
+}
+
+/** What the `result` stream yields once, on the terminal state. */
+export interface TaskOutcome {
+    readonly id: TaskId;
+    readonly status: 'completed' | 'failed' | 'cancelled';
+    readonly result?: TaskResult;
+    readonly error?: TaskError;
+    readonly cancel?: TaskSnapshot['cancel'];
+}
+
+/** One entry of the append log; `applyTaskEntry` folds it into the state. */
+export type TaskEntry =
+    | {
+          readonly t: 'created';
+          readonly at: number;
+          readonly contract: TaskContract;
+          readonly owner: AgentId;
+          readonly depth: number;
+          readonly parentId?: TaskId;
+          readonly configVersion: number;
+      }
+    | {
+          readonly t: 'transition';
+          readonly from: TaskStatus;
+          readonly to: TaskStatus;
+          readonly at: number;
+          readonly by: string;
+          readonly why: string;
+          readonly wait?: WaitReason;
+          readonly sessionId?: SessionId;
+          readonly result?: TaskResult;
+          readonly error?: TaskError;
+      }
+    | { readonly t: 'wait'; readonly at: number; readonly wait: WaitReason }
+    | { readonly t: 'child'; readonly at: number; readonly id: TaskId; readonly constraints: Limits }
+    | { readonly t: 'child-settled'; readonly at: number; readonly id: TaskId; readonly status: TaskStatus }
+    | { readonly t: 'cancel'; readonly at: number; readonly by: string; readonly deadline: number }
+    | { readonly t: 'cancel-settled'; readonly at: number; readonly stopped: boolean; readonly notStopped: readonly TaskId[] }
+    | {
+          readonly t: 'child-stopped';
+          readonly at: number;
+          readonly id: TaskId;
+          readonly stopped: boolean;
+          readonly notStopped: readonly TaskId[];
+      }
+    | { readonly t: 'session-stopped'; readonly at: number }
+    | { readonly t: 'usage'; readonly at: number; readonly usage: Usage; readonly costUsd: number };
+
+export interface TaskState {
+    created: boolean;
+    readonly id: TaskId;
+    readonly workspaceId: WorkspaceId;
+    objective: string;
+    origin: TaskOrigin;
+    assignee: AgentId;
+    context: PromptPart[];
+    constraints: Limits;
+    expected?: string | JsonSchemaObject;
+    environmentId?: EnvironmentId;
+    owner: AgentId;
+    depth: number;
+    parentId?: TaskId;
+    configVersion: number;
+    status: TaskStatus;
+    wait?: WaitReason;
+    sessionId?: SessionId;
+    /** The session driver confirmed the running work stopped (`sessionStopped()`), or nothing ever ran. */
+    sessionStopped: boolean;
+    startedAt?: number;
+    children: TaskId[];
+    /** Budget reserved by children that have not settled, by child id. */
+    live: Record<string, Limits>;
+    result?: TaskResult;
+    error?: TaskError;
+    cancel?: { requestedAt: number; by: string; stopped: boolean; deadline: number; settled: boolean };
+    notStopped: TaskId[];
+    usage: Usage;
+    costUsd: number;
+    transitions: TaskTransition[];
+}

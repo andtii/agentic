@@ -132,3 +132,26 @@ const hits = await chat.search('deploy');            // newest-first substring s
 - History access: an agent principal reads from its `historyFrom` (the join entry for `'from-now'`); non-members read nothing; users and external clients with the `chats` scope read everything.
 - Persistence: the state keeps the last 200 entries and a `{seq, at}` index; every 100 older entries move to a `ChatPage` actor (`{chatKey}:p{n}`), so a post is one bounded write. Register `Chat` and `ChatPage` together.
 - Sessions publish `SessionEvent`s on `sessionEvents(chatKey)` (`topic('session-events', chatKey)`); the chat folds status and final messages into entries and tracks `activeSessions`. `typing` is not durable. A payload that is not a well-formed `SessionEvent` (missing ids or `at`, unknown `kind` or `status`) throws, so `host.publish` reports a delivery failure and nothing is recorded.
+
+## Task actor (`src/task/`)
+
+`TaskActor` is the traceable unit of work (architecture §4 Task, §7). Key: `taskKey(workspaceId, taskId)` → `{ws}:task:{id}`; `authorize` admits principals of the same workspace.
+
+```ts
+import { actor } from '@sigx/actors';
+import { TaskActor, taskKey } from '@agentic/platform';
+
+const task = actor(TaskActor, taskKey(ws, id));
+await task.create(contract, { owner: agentId });        // idempotent
+await task.start('user:u1', sessionId);                  // queued → active
+await task.reportWaiting({ kind: 'input', requestId }, 'agent:a');
+await task.explain();                                    // the WaitReason, or null
+const childId = await task.delegate({ callId, objective, assignee });   // parent → waiting {child}
+for await (const outcome of task.result()) { /* yields once, on the terminal state */ }
+const report = await task.cancel('user:u1', { timeoutMs: 10_000 });    // { stopped, notStopped }
+```
+
+- Every mutation is one `TaskEntry` folded by the pure reducer `applyTaskEntry` and made durable inside the turn — `ctx.append` where the runtime has it (@sigx/actors #312), otherwise the reducer plus `ctx.save()`.
+- Illegal transitions throw `IllegalTransitionError`; limits throw `TaskLimitError` (`kind: 'depth' | 'concurrency' | 'budget'`). Defaults when the contract sets none: `DEFAULT_MAX_DEPTH = 5`, `DEFAULT_MAX_CONCURRENT_CHILDREN = 8`.
+- `delegate` clamps every budget the parent carries (`maxCostUsd`, `maxTokens`, `maxWallMs`, `maxTurns`, `maxSteps`) to the parent's remaining share after its own spend and its live children's reservations; a child settling frees its reservation and, when it was the last one waited on, resumes the parent.
+- `cancel` transitions to `cancelled`, fans `stop` out to unsettled children one-way, waits for their acknowledgements and — when a session is attached — for `sessionStopped()` from the session driver, until the deadline. Each hop keeps a 20 % margin of the remaining time so a child's own report arrives before the parent's deadline. Whatever did not acknowledge lands in `notStopped`; late acknowledgements still update the snapshot.
