@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@agentic/core": "workspace:*",
+    "@agentic/learning": "workspace:*",
     "@agentic/platform": "workspace:*",
     "@agentic/ui": "workspace:*",
     "@sigx/actors": "catalog:",

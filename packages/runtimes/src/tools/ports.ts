@@ -32,10 +32,16 @@ export interface DelegateSpec {
     readonly expected?: string;
 }
 
+/** A `delegate` call: the port tells the tool the child's id as soon as it exists, so the parent transcript can show it. */
+export interface DelegateCall extends ToolCall {
+    readonly onDelegated?: (taskId: TaskId) => void;
+}
+
 export type DelegateOutcome =
     | { readonly taskId: TaskId; readonly status: 'completed'; readonly result: TaskResult }
     | { readonly taskId: TaskId; readonly status: 'failed'; readonly error: TaskError }
-    | { readonly taskId: TaskId; readonly status: 'cancelled' };
+    /** Cancelled — by the parent's stop cascade or the turn's abort; `notStopped` is the work that could not be confirmed stopped (COL-12). */
+    | { readonly taskId: TaskId; readonly status: 'cancelled'; readonly notStopped: readonly TaskId[] };
 
 export interface TaskReport {
     readonly status: 'progress' | 'blocked' | 'done';
@@ -50,7 +56,7 @@ export interface TaskPort {
      * `waiting {child}`, and settle when the child does — idempotent across
      * restarts because the id is deterministic (architecture §7).
      */
-    delegate(spec: DelegateSpec, call: ToolCall): Promise<DelegateOutcome>;
+    delegate(spec: DelegateSpec, call: DelegateCall): Promise<DelegateOutcome>;
     report(report: TaskReport, call: ToolCall): Promise<void>;
 }
 

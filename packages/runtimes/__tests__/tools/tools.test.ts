@@ -67,7 +67,7 @@ describe('memory tools', () => {
 });
 
 describe('delegate', () => {
-    it('passes the contract and the call id (the child id key) to the task port and returns the outcome', async () => {
+    it('passes the contract and the call id (the child id key) to the task port and returns the result flattened', async () => {
         const { ports, tool } = byName();
         const controller = new AbortController();
         const out = await tool('delegate').run({ assignee: 'agent_bob', objective: 'Audit the deps.', context: 'Repo is pnpm.', expected: 'A list.', constraints: { maxCostUsd: 1 } }, ctx('call_7', controller.signal));
@@ -77,7 +77,7 @@ describe('delegate', () => {
             args: { assignee: 'agent_bob', objective: 'Audit the deps.', context: [{ type: 'text', text: 'Repo is pnpm.' }], constraints: { maxCostUsd: 1 }, expected: 'A list.' }
         });
         expect(ports.calls[0]!.call.signal).toBe(controller.signal);
-        expect(out).toEqual({ taskId: 'task_p.call_7', status: 'completed', result: { text: 'done: Audit the deps.', artifacts: [], verified: false } });
+        expect(out).toEqual({ taskId: 'task_p.call_7', status: 'completed', text: 'done: Audit the deps.', artifacts: [], verified: false });
     });
     it('defaults context and constraints to empty', async () => {
         const { ports, tool } = byName();

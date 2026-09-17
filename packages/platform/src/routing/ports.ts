@@ -15,6 +15,11 @@ export interface RoutingPorts {
     /** The Machine actor definition this app built (`defineMachineActor`). */
     readonly machines: () => AnyActorDefinition;
     /**
+     * The Inbox actor definition (`defineInbox`), when the app has one: a `request` a task session
+     * raises becomes an `approval` / `input` notification with a session ref (AC-12). Best effort.
+     */
+    readonly inbox?: () => AnyActorDefinition;
+    /**
      * The principal the router drives Task, Session, Machine and Agent with.
      * Default: the workspace's user (v1: `workspaceId === userId`, see
      * `auth/same-workspace.ts`), which every driver-facing policy admits.
