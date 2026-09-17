@@ -15,7 +15,7 @@ test('roster → agent → Config → Memory, with every config field labelled',
     await expect(builder.locator('[data-agent-card-stats] dt')).toHaveText(['config', 'memories', 'corrections / wk']);
     await expect(page.locator('[data-agent-card="a3"] [data-agent-card-noenv]')).toHaveText('No environment');
 
-    if (info.project.name === 'phone-400') return;
+    if (info.project.name !== 'desktop-1280') return; // the phone and tablet regimes are #91's specs
 
     // two equal columns at 1280
     const first = await cards.nth(0).boundingBox();

@@ -46,8 +46,11 @@ export const all = (root: ParentNode, scope: string, part: string): HTMLElement[
 export const one = (root: ParentNode, scope: string, part: string): HTMLElement | null => root.querySelector<HTMLElement>(`[data-scope="${scope}"][data-part="${part}"]`);
 
 /** A button found by its visible text. */
+/** A button's accessible name: its `aria-label`, else its text. */
+export const buttonName = (b: Element): string => (b.getAttribute('aria-label') ?? b.textContent ?? '').trim();
+
 export function buttonNamed(root: ParentNode, text: string): HTMLButtonElement {
-    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === text);
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => buttonName(b) === text);
     if (!button) throw new Error(`no button "${text}"`);
     return button;
 }

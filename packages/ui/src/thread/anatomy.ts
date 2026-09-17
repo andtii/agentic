@@ -108,5 +108,8 @@ export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
     description: { element: 'p', parent: 'root', tokens: ['text'] },
     context: { element: 'dl', parent: 'root', tokens: ['text'] },
     actions: { element: 'div', parent: 'root' },
+    /** The session answer's label at full length, and the short one the phone shows instead ("Mobile specifics"). */
+    'label-full': { element: 'span', parent: 'actions', tokens: ['text'] },
+    'label-short': { element: 'span', parent: 'actions', tokens: ['text'] },
     record: { element: 'p', parent: 'root', tokens: ['text'] }
 });

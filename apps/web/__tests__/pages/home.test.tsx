@@ -34,7 +34,8 @@ describe('/ (Home)', () => {
         expect(approval).not.toBeNull();
         expect(approval!.textContent).toContain('ask on destructive');
         expect(approval!.textContent).toContain('delegated by Atlas');
-        expect(texts(all(approval!, 'button', 'root'))).toEqual(['Allow once', 'Allow for this session', 'Deny']);
+        // Accessible names: the session answer carries a short phone label beside the full one (#91).
+        expect(all(approval!, 'button', 'root').map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual(['Allow once', 'Allow for this session', 'Deny']);
     });
 
     it('counts the same items in the sidebar badge as it lists under Needs you', async () => {

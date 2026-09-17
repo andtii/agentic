@@ -43,7 +43,9 @@ const icons = {
     key: () => (<><circle cx="8" cy="14" r="4" /><path d="m11 11 9-9" /><path d="m16 6 3 3" /></>),
     warning: () => (<><path d="M12 4 2.5 20h19z" /><path d="M12 10v4" /><path d="M12 17v.5" /></>),
     play: () => <path d="M7 5v14l12-7z" />,
-    menu: () => <path d="M4 7h16M4 12h16M4 17h16" />
+    menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
+    back: () => <path d="m15 5-7 7 7 7" />,
+    tree: () => (<><circle cx="6" cy="6" r="2" /><circle cx="18" cy="12" r="2" /><circle cx="18" cy="19" r="2" /><path d="M6 8v11" /><path d="M6 12h6a4 4 0 0 1 4 0" /><path d="M6 19h10" /></>)
 } satisfies Record<string, () => JSXElement>;
 
 export type IconName = keyof typeof icons;

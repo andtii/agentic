@@ -1,21 +1,45 @@
 import { component, signal } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
+import { Drawer } from '@sigx/zero';
 import { Button, Composer, EmptyState, NOBODY_HINT, Thread, type Mention } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId } from '../components/topbar';
-import { agentNamed, loadChat, loadChats, mentionedIn, resolveAddressing } from '../mock/workspace';
-import { ChatList } from './chat/ChatList';
+import { agentNamed, loadChat, loadChats, mentionedIn, resolveAddressing, type MockChatSummary } from '../mock/workspace';
+import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
+import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
 
-defineTopbar('chat', (route) => ({
-    crumb: loadChat(routeId(route))?.chat.title,
-    actions: () => (
-        <>
-            <Button intent="icon" icon="search" label="Search this chat" />
-            <Button intent="icon" icon="settings" label="Chat settings" />
-        </>
-    )
-}));
+/** "1 waiting · 1 active" — the app bar's status summary under the chat title. */
+export function memberSummary(chat: MockChatSummary): string {
+    const count = (status: string) => chat.members.filter((m) => m.status === status).length;
+    const parts = [count('waiting') ? `${count('waiting')} waiting` : '', count('active') ? `${count('active')} active` : ''].filter(Boolean);
+    return parts.length ? parts.join(' · ') : `${chat.members.length} ${chat.members.length === 1 ? 'member' : 'members'}`;
+}
+
+const tasksButton = () => <Button intent="icon" icon="tree" label="Tasks in this chat" class="ag-chat-tasks" onClick={openContextDrawer} />;
+
+defineTopbar('chat', (route) => {
+    const chat = loadChat(routeId(route))?.chat;
+    return {
+        crumb: chat?.title,
+        // The member tiles at 16 px plus the status summary — the app bar's sub-line.
+        subtitle: chat ? () => (
+            <>
+                <MemberTiles agentIds={chat.members.map((m) => m.agentId)} size={18} />
+                <span data-chat-summary>{memberSummary(chat)}</span>
+            </>
+        ) : undefined,
+        // Below 1280 the tasks button reveals the context panel; on the phone it is the one right slot.
+        phoneAction: chat ? tasksButton : undefined,
+        actions: () => (
+            <>
+                {chat ? tasksButton() : null}
+                <Button intent="icon" icon="search" label="Search this chat" />
+                <Button intent="icon" icon="settings" label="Chat settings" />
+            </>
+        )
+    };
+});
 
 /**
  * `/chats/:id` — chat list, thread and composer, members and tasks. The
@@ -71,6 +95,13 @@ export const Chat = component(() => {
                     </div>
                 </section>
                 <ContextPanel chat={v.chat} tasks={v.tasks} />
+                <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
+                    <Drawer.Panel>
+                        <div data-context-drawer>
+                            <ContextPanel chat={v.chat} tasks={v.tasks} />
+                        </div>
+                    </Drawer.Panel>
+                </Drawer.Root>
             </Page>
         );
     };

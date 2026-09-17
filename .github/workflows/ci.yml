@@ -57,6 +57,42 @@ jobs:
         if: matrix.node-version == '22'
         run: pnpm --filter @agentic/web test:workers
 
+  # Playwright against the dev server at 400 / 1024 / 1280 px: the phone
+  # regime, the tablet rails drop and the desktop flows (apps/web/e2e).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The app resolves workspace packages through their `exports`, so every
+      # dist must exist before the dev server starts.
+      - name: Build
+        run: pnpm build
+
+      - name: Install Chromium
+        run: pnpm --filter @agentic/web exec playwright install --with-deps chromium
+
+      - name: Playwright
+        run: pnpm --filter @agentic/web test:e2e
+
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
   coverage:
     runs-on: ubuntu-latest
     steps:

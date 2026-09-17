@@ -2,6 +2,7 @@ import { component, signal, type Define } from 'sigx';
 import { AgentTile, Button, DataTable, EnvironmentLine, Icon, Switch, Tag } from '@agentic/ui';
 import { dstRule, offlinePolicyLine, opsAgent, opsMachine, opsSchedules, type OpsSchedule } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar } from '../components/topbar';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
 export const SCHEDULES_COLS = '110px 1fr 140px 140px 310px 44px';
@@ -30,10 +31,12 @@ const RunsOn = component<Define.Prop<'schedule', OpsSchedule, true>>(({ props })
  * a schedule bound to an offline environment shows the amber policy line
  * under its name, and the footer states the DST rule (AST-07).
  */
+defineTopbar('schedules', () => ({ actions: () => <Button intent="primary" icon="plus">New schedule</Button> }));
+
 export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
     const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.schedules.map(s => [s.id, s.enabled])));
     return () => (
-        <OpsPage page="schedules" title="Schedules" slots={{ actions: () => <Button intent="primary" icon="plus">New schedule</Button> }}>
+        <OpsPage page="schedules" title="Schedules">
             <DataTable
                 cols={SCHEDULES_COLS}
                 label="Schedules"

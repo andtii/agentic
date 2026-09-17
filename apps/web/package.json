@@ -11,6 +11,7 @@
     "preview": "wrangler dev",
     "deploy": "wrangler deploy",
     "test:e2e": "playwright test",
+    "e2e:mobile": "playwright test --project=phone-400",
     "deploy:preview": "pnpm run build && wrangler deploy --env preview",
     "test:workers": "tsc -p __tests__/workers && vitest run --config vitest.workers.config.ts"
   },

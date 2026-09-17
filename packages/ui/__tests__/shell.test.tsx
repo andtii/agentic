@@ -113,10 +113,75 @@ describe('AppShell', () => {
         expect(host.querySelector(part('main'))?.hasAttribute('data-flush')).toBe(true);
     });
 
-    it('renders the drawer closed on first paint with a trigger in the bar', () => {
+    it('renders the drawer closed on first paint with a 44 px icon trigger in the bar', () => {
         const host = mount(<AppShell items={items} />);
-        const trigger = host.querySelector(`${part('menu')} [data-scope="drawer"][data-part="trigger"]`);
-        expect(trigger?.textContent).toBe('Menu');
-        expect(host.querySelector('[data-scope="drawer"][data-part="panel"]')?.getAttribute('data-state')).toBe('closed');
+        const trigger = host.querySelector(`${part('menu')} button[data-scope="drawer"][data-part="trigger"]`);
+        expect(trigger?.getAttribute('aria-label')).toBe('Menu');
+        expect(trigger?.querySelector('svg[data-icon="menu"]')).not.toBeNull();
+        const panel = host.querySelector('[data-scope="drawer"][data-part="panel"]');
+        expect(panel?.getAttribute('data-state')).toBe('closed');
+        // The drawer's head: brand + a labelled close button; the connection strip stays at its foot.
+        expect(panel?.querySelector(`${part('drawer-head')} ${part('brand-name')}`)?.textContent).toBe('agentic');
+        expect(panel?.querySelector(`${part('drawer-head')} button[data-scope="drawer"][data-part="close"]`)?.getAttribute('aria-label')).toBe('Close');
+        expect(panel?.querySelector('[data-scope="drawer"][data-part="title"]')?.textContent).toBe('agentic navigation');
+    });
+
+    it('renders an item icon inside the fallback link and hands it to the link slot', () => {
+        const iconItems: NavItem[] = [{ href: '/', label: 'Home', icon: 'home' }, { href: '/agents', label: 'Agents' }];
+        const plain = mount(<AppShell items={iconItems} currentPath="/" />);
+        const links = Array.from(plain.querySelectorAll('[data-part="sidebar"] a'));
+        expect(links[0]!.querySelector('svg[data-icon="home"]')).not.toBeNull();
+        expect(links[0]!.textContent).toBe('Home');
+        expect(links[1]!.querySelector('svg')).toBeNull();
+
+        const slotted = mount(
+            <AppShell items={iconItems} slots={{ link: ({ item, icon }) => <a href={item.href} class={icon ? 'with-icon' : 'plain'}>{icon}{item.label}</a> }} />
+        );
+        const custom = Array.from(slotted.querySelectorAll('[data-part="sidebar"] a'));
+        expect(custom.map(a => a.className)).toEqual(['with-icon', 'plain']);
+        expect(custom[0]!.querySelector('svg[data-icon="home"]')).not.toBeNull();
+    });
+
+    it('renders the app-bar regime: title with sub-line, the phone action beside the actions, and a menu on a root route', () => {
+        const host = mount(
+            <AppShell
+                items={items}
+                title="Home"
+                slots={{
+                    subtitle: () => <span id="sub">3 open</span>,
+                    actions: () => <button id="act">New chat</button>,
+                    phoneAction: () => <button id="phone">+</button>
+                }}
+            />
+        );
+        const bar = host.querySelector(part('bar'))!;
+        expect(bar.getAttribute('data-regime')).toBe('root');
+        expect(bar.querySelector(`${part('title')} ${part('title-text')}`)?.textContent).toBe('Home');
+        expect(bar.querySelector(`${part('title')} ${part('subtitle')} #sub`)).not.toBeNull();
+        expect(bar.querySelector(`${part('actions')} #act`)).not.toBeNull();
+        expect(bar.querySelector(`${part('phone-action')} #phone`)).not.toBeNull();
+        expect(bar.querySelector(part('menu'))).not.toBeNull();
+        expect(bar.querySelector(part('back'))).toBeNull();
+        // Without a title the bar falls back to the brand mark.
+        expect(bar.querySelector(`[data-scope="navbar"][data-part="start"] > ${part('brand')}`)).toBeNull();
+        const untitled = mount(<AppShell items={items} />);
+        expect(untitled.querySelector(`${part('bar')} [data-scope="navbar"][data-part="start"] > ${part('brand')}`)).not.toBeNull();
+        expect(untitled.querySelector(part('title'))).toBeNull();
+        expect(untitled.querySelector(part('phone-action'))).toBeNull();
+    });
+
+    it('renders a back link on a detail route, through the back slot when given', () => {
+        const plain = mount(<AppShell items={items} title="Scout" back="/agents" />);
+        const bar = plain.querySelector(part('bar'))!;
+        expect(bar.getAttribute('data-regime')).toBe('detail');
+        const back = bar.querySelector(`${part('back')} a`);
+        expect(back?.getAttribute('href')).toBe('/agents');
+        expect(back?.getAttribute('aria-label')).toBe('Back');
+        expect(back?.querySelector('svg[data-icon="back"]')).not.toBeNull();
+
+        const slotted = mount(
+            <AppShell items={items} title="Scout" back="/agents" slots={{ back: ({ href, icon }) => <a id="custom-back" href={`${href}?from=slot`}>{icon}</a> }} />
+        );
+        expect(slotted.querySelector(`${part('back')} #custom-back`)?.getAttribute('href')).toBe('/agents?from=slot');
     });
 });

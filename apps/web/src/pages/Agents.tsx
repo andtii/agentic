@@ -2,6 +2,7 @@ import { component, useHead } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, Button, EnvironmentLine, Icon, Label, Row, Stack, StatusPill } from '@agentic/ui';
 import { agentProfiles, type AgentProfile } from '../mock/agents';
+import { defineTopbar } from '../components/topbar';
 
 /** The roster's status pill: the agent's presence in the handoff's vocabulary. */
 export function presencePill(presence: AgentProfile['presence']): { status: string; label?: string; hollow?: boolean } {
@@ -14,6 +15,8 @@ export function presencePill(presence: AgentProfile['presence']): { status: stri
  * in mono (config version, memory count, corrections per week — LRN-09).
  * A `claude-code` agent without an environment shows `No environment`.
  */
+defineTopbar('agents', () => ({ actions: () => <Button intent="primary" icon="plus">New agent</Button> }));
+
 export const Agents = component(() => {
     useHead({ title: 'Agents' });
     return () => {
@@ -22,7 +25,6 @@ export const Agents = component(() => {
                 <div data-page="agents">
                     <div data-page-head="">
                         <h1 data-page-title>Agents</h1>
-                        <Button intent="primary" icon="plus">New agent</Button>
                     </div>
                     <ul data-agent-grid="" aria-label="Agents">
                         {rows.map((p) => {

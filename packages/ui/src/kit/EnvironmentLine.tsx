@@ -24,6 +24,8 @@ export type EnvironmentLineProps =
     & Define.Prop<'account', string, true>
     /** `muted` (default), `dim` for captions, `live` (base-content) where it is the headline. */
     & Define.Prop<'tone', Tone>
+    /** `drop-machine`: below 768 px the machine segment is hidden when the line would not fit (the `title` keeps all three). */
+    & Define.Prop<'fit', 'drop-machine'>
     & Define.Prop<'class', string>;
 
 export const EnvironmentLine = component<EnvironmentLineProps>(({ props }) => () => {
@@ -31,7 +33,7 @@ export const EnvironmentLine = component<EnvironmentLineProps>(({ props }) => ()
         throw new Error('[@agentic/ui] EnvironmentLine needs machine, runtime and account — never render one part alone where work is attributed (EXE-06)');
     }
     return (
-        <span data-scope={SCOPE} data-part="root" data-tone={props.tone ?? 'muted'} class={props.class} title={`${props.machine} / ${props.runtime} / ${props.account}`}>
+        <span data-scope={SCOPE} data-part="root" data-tone={props.tone ?? 'muted'} data-fit={props.fit} class={props.class} title={`${props.machine} / ${props.runtime} / ${props.account}`}>
             <span data-scope={SCOPE} data-part="machine">{props.machine}</span>
             <span data-scope={SCOPE} data-part="sep" aria-hidden="true">/</span>
             <span data-scope={SCOPE} data-part="runtime">{props.runtime}</span>

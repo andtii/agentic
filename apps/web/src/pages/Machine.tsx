@@ -7,6 +7,7 @@ import { EnvironmentGrid } from './machines/MachineGroup';
 import { SessionsTable } from './machines/SessionsTable';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
+import { defineTopbar, routeId } from '../components/topbar';
 
 export type MachineViewProps =
     & Define.Prop<'machine', OpsMachine, true>
@@ -90,6 +91,14 @@ export const MachineView = component<MachineViewProps>(({ props }) => {
                 </div>
             </OpsPage>
         );
+    };
+});
+
+defineTopbar('machine', (route) => {
+    const m = opsMachine(routeId(route));
+    return {
+        crumb: m?.name,
+        subtitle: m ? () => <span>{m.online ? `${m.osLabel} · heartbeat ${m.seen}` : `${m.osLabel} · last seen ${m.seen}`}</span> : undefined
     };
 });
 

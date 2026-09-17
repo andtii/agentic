@@ -17,7 +17,7 @@ function watchConsole(page: Page): string[] {
 }
 
 test.describe('core flow', () => {
-    test.skip(({ viewport }) => (viewport?.width ?? 0) < 768, 'desktop only; #91 covers the phone');
+    test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, 'desktop only; mobile.spec and tablet.spec cover the other regimes');
 
     test('navigates Home → chat → task → session through links, with the badge counting what needs you', async ({ page }) => {
         const errors = watchConsole(page);
