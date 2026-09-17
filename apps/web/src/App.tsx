@@ -5,6 +5,7 @@ import { Breadcrumbs } from '@sigx/zero-daisyui/components';
 import { AppShell } from '@agentic/ui';
 import { CRUMBS, NAV_GROUPS } from './nav';
 import { machines } from './mock/data';
+import { topbarFor } from './components/topbar';
 
 /** Schibsted Grotesk (interface) + JetBrains Mono (anything a machine said), 400–700, swapped in. */
 const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
@@ -36,7 +37,7 @@ export const App = component(() => {
         if (!root) return [];
         const id = route.params.id;
         const isRoot = route.path === root.href;
-        return isRoot || !id ? [{ ...root, current: true }] : [root, { label: String(id), href: route.path, current: true }];
+        return isRoot || !id ? [{ ...root, current: true }] : [root, { label: topbarFor(route)?.crumb ?? String(id), href: route.path, current: true }];
     };
 
     return () => (
@@ -48,6 +49,7 @@ export const App = component(() => {
                 flush={route.name === 'chat'}
                 slots={{
                     link: ({ item }) => <Link to={item.href}>{item.label}</Link>,
+                    actions: () => topbarFor(route)?.actions?.() ?? null,
                     breadcrumb: () => (
                         <Breadcrumbs label="Breadcrumb">
                             {crumbs().map(crumb => (

@@ -1,10 +1,11 @@
 import { routes, createServerRouter } from '../src/router';
 import { CRUMBS, NAV, NAV_GROUPS, needsYouCount } from '../src/nav';
 import { agentById, chatById, machineById, sampleIds, sessionById, taskById } from '../src/mock/data';
+import { loadChat, loadSession, loadTask } from '../src/mock/workspace';
 
 /** The route skeleton docs/architecture.md §10 and issue #23 require. */
 const REQUIRED = [
-    '/', '/chats', '/chats/:id', '/agents', '/agents/:id', '/tasks/:id', '/sessions/:id',
+    '/', '/chats', '/chats/:id', '/agents', '/agents/:id', '/tasks', '/tasks/:id', '/sessions/:id',
     '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair', '/history', '/usage'
 ];
 
@@ -29,8 +30,9 @@ describe('route skeleton', () => {
         expect(NAV.some(i => i.href === '/pair')).toBe(false);
     });
 
-    it('has a breadcrumb root for every named route', () => {
+    it('has a breadcrumb root for every named route, and the task crumb leads to the tasks list', () => {
         for (const r of routes) expect(CRUMBS[String(r.name)], String(r.name)).toBeDefined();
+        expect(CRUMBS.task!.href).toBe('/tasks');
     });
 
     it('serves History and Usage as real pages (#90)', async () => {
@@ -58,6 +60,12 @@ describe('mock data', () => {
         expect(taskById(sampleIds.task)).toBeDefined();
         expect(sessionById(sampleIds.session)).toBeDefined();
         expect(machineById(sampleIds.machine)).toBeDefined();
+    });
+
+    it('has a workspace view behind every sample id the core pages load', () => {
+        expect(loadChat(sampleIds.chat)).toBeDefined();
+        expect(loadTask(sampleIds.task)).toBeDefined();
+        expect(loadSession(sampleIds.session)).toBeDefined();
     });
 
     it('finds nested tasks in the tree', () => {

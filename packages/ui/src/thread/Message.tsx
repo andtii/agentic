@@ -27,7 +27,7 @@ import { aiMessageAnatomy } from './anatomy.js';
 import type { RespondFn } from './ApprovalPrompt.js';
 import { Reasoning } from './Reasoning.js';
 import { StreamingMarkdown } from './StreamingMarkdown.js';
-import { ToolCall, type ToolMetaFn } from './ToolCall.js';
+import { ToolCall, type DescribeRequestFn, type ToolMetaFn } from './ToolCall.js';
 import { nonBlank } from './text.js';
 
 const SCOPE = aiMessageAnatomy.scope;
@@ -58,6 +58,7 @@ export type MessageProps =
     & Define.Prop<'toolMeta', ToolMetaFn, false>
     & Define.Prop<'logHref', string, false>
     & Define.Prop<'onRespond', RespondFn, false>
+    & Define.Prop<'describeRequest', DescribeRequestFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>;
 
 /** The display name a row is attributed to. */
@@ -71,6 +72,7 @@ type PartProps =
     & Define.Prop<'toolMeta', ToolMetaFn, false>
     & Define.Prop<'logHref', string, false>
     & Define.Prop<'onRespond', RespondFn, false>
+    & Define.Prop<'describeRequest', DescribeRequestFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>;
 
 const Part = component<PartProps>(({ props }) => {
@@ -89,6 +91,7 @@ const Part = component<PartProps>(({ props }) => {
                         meta={props.toolMeta?.(p as ToolPartState)}
                         logHref={props.logHref}
                         onRespond={props.onRespond}
+                        describeRequest={props.describeRequest}
                         onCancelAgent={props.onCancelAgent}
                     />
                 );
@@ -162,6 +165,7 @@ export const Message = component<MessageProps>(({ props }) => {
                                 toolMeta={props.toolMeta}
                                 logHref={props.logHref}
                                 onRespond={props.onRespond}
+                                describeRequest={props.describeRequest}
                                 onCancelAgent={props.onCancelAgent}
                             />
                         ))}

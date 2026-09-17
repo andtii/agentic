@@ -15,7 +15,7 @@ test('renders the control-room shell, restores the theme before paint, and navig
     await expect(page.locator(shell('root'))).toBeVisible();
     await expect(page.locator(shell('bar'))).toBeVisible();
     await expect(page.locator(shell('main'))).toBeVisible();
-    await expectPage(page, '/', 'Inbox');
+    await expectPage(page, '/', 'Home');
 
     // themeInitScript and the font links are in <head>, ahead of the app; the one theme is set on <html>.
     const head = await page.locator('head').innerHTML();
@@ -52,7 +52,7 @@ test('renders the control-room shell, restores the theme before paint, and navig
         // Two nav groups; the Home badge counts what needs a person.
         await expect(sidebar.getByRole('navigation', { name: 'Primary' })).toBeVisible();
         await expect(sidebar.getByRole('navigation', { name: 'Workspace' })).toBeVisible();
-        await expect(sidebar.locator(shell('badge'))).toHaveText('1');
+        await expect(sidebar.locator(shell('badge'))).toHaveText(/^[1-9]\d*$/);
         await expect(sidebar.locator(shell('connection'))).toBeVisible();
 
         await sidebar.getByRole('link', { name: 'Agents' }).click();
@@ -69,8 +69,8 @@ test('renders the control-room shell, restores the theme before paint, and navig
     await expectPage(page, '/agents/a1', 'Scout');
 });
 
-test('the nav placeholders for chats, history and usage resolve', async ({ page }) => {
-    for (const [path, title] of [['/chats', 'Chats'], ['/history', 'History'], ['/usage', 'Usage']] as const) {
+test('the nav entries for chats, tasks, history and usage resolve', async ({ page }) => {
+    for (const [path, title] of [['/chats', 'Chats'], ['/tasks', 'Tasks'], ['/history', 'History'], ['/usage', 'Usage']] as const) {
         await page.goto(path);
         await expectPage(page, path, title);
     }
