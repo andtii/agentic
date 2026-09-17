@@ -36,6 +36,45 @@ import { PAGE, WINDOW, applyChatEntry, entryMatches, initialChatState, memberIds
 /** The topic a Session publishes on for its chat; the Chat actor subscribes under its own key. */
 export const sessionEvents = (chatKey: string): Topic<SessionEvent> => topic<SessionEvent>(SESSION_EVENTS_TOPIC, chatKey);
 
+const STATUS_KINDS: ReadonlySet<string> = new Set<Extract<SessionEvent, { kind: 'status' }>['status']>([
+    'typing',
+    'session-started',
+    'session-ended',
+    'task'
+]);
+
+/**
+ * Check a published payload is a `SessionEvent` before anything is folded:
+ * a bad or unknown event throws, so `host.publish` reports a delivery
+ * failure instead of persisting `undefined` fields or dropping it silently.
+ */
+function parseSessionEvent(payload: unknown, chatKey: string): SessionEvent {
+    const malformed = (why: string): Error => new Error(`Chat: malformed session event on ${chatKey}: ${why}`);
+    if (payload === null || typeof payload !== 'object') throw malformed('not an object');
+    const e = payload as Record<string, unknown>;
+    if (typeof e.agentId !== 'string' || e.agentId === '') throw malformed('agentId');
+    if (typeof e.sessionId !== 'string' || e.sessionId === '') throw malformed('sessionId');
+    if (typeof e.at !== 'number' || !Number.isFinite(e.at)) throw malformed('at');
+    switch (e.kind) {
+        case 'status':
+            if (typeof e.status !== 'string' || !STATUS_KINDS.has(e.status)) throw malformed(`status "${String(e.status)}"`);
+            if (e.ref !== undefined && typeof e.ref !== 'string') throw malformed('ref');
+            break;
+        case 'message':
+            if (!Array.isArray(e.parts) || !e.parts.every((p) => p !== null && typeof p === 'object' && typeof p.type === 'string')) {
+                throw malformed('parts');
+            }
+            if (e.mentions !== undefined && !(Array.isArray(e.mentions) && e.mentions.every((m) => typeof m === 'string'))) {
+                throw malformed('mentions');
+            }
+            if (e.taskId !== undefined && typeof e.taskId !== 'string') throw malformed('taskId');
+            break;
+        default:
+            throw malformed(`unknown kind "${String(e.kind)}"`);
+    }
+    return payload as SessionEvent;
+}
+
 /** Who a post addresses: specific agents, or `'all'` — the group (CHT-03). */
 export type Mentions = readonly AgentId[] | 'all';
 
@@ -244,13 +283,12 @@ export const Chat = defineActor({
          * so it is not made durable here.
          */
         [SESSION_EVENTS_TOPIC]: async (ctx: ActorContext<ChatState>, event: TopicEvent) => {
-            const e = event.payload as SessionEvent | null;
-            if (!e || typeof e !== 'object' || !('kind' in e)) throw new Error(`Chat: malformed session event on ${ctx.key}`);
+            const e = parseSessionEvent(event.payload, ctx.key);
             if (e.kind === 'status') {
                 if (e.status === 'typing') return;
                 await archive(ctx);
                 await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
-            } else if (e.kind === 'message') {
+            } else {
                 await archive(ctx);
                 await appendEntry(ctx, {
                     t: 'msg',

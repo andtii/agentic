@@ -228,6 +228,22 @@ describe('session events (CHT-11)', () => {
         expect(report.failures).toHaveLength(1);
         expect(report.failures[0]!.message).toMatch(/malformed session event/);
     });
+
+    it.each([
+        ['a status with no ids', { kind: 'status' }],
+        ['an unknown status', { kind: 'status', agentId: A, sessionId: 's1', status: 'dancing', at: 1 }],
+        ['a status without at', { kind: 'status', agentId: A, sessionId: 's1', status: 'session-started' }],
+        ['a message without parts', { kind: 'message', agentId: A, sessionId: 's1', at: 1 }],
+        ['a message with a non-array mentions', { kind: 'message', agentId: A, sessionId: 's1', parts: [], mentions: B, at: 1 }],
+        ['an unknown kind', { kind: 'delta', agentId: A, sessionId: 's1', at: 1 }]
+    ])('refuses %s as a delivery failure and records nothing', async (_name, payload) => {
+        const before = (await chatAs(user).history()).entries.length;
+        const report = await app.host.publish(sessionEvents(chatKey()), payload as never);
+        expect(report.failures).toHaveLength(1);
+        expect(report.failures[0]!.message).toMatch(/malformed session event/);
+        expect((await chatAs(user).history()).entries).toHaveLength(before);
+        expect((await chatAs(user).get()).activeSessions).toEqual({});
+    });
 });
 
 describe('authorization (§9)', () => {
