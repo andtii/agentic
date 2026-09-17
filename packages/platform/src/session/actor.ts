@@ -16,13 +16,14 @@
  *   frames to `forwardFrames` and its replies to `commandReplied`.
  */
 
-import { actorKey, hasScope, SESSION_EVENTS_TOPIC, type Principal, type SessionEvent } from '@agentic/core';
+import { actorKey, hasScope, SESSION_EVENTS_TOPIC, type Principal, type SessionEvent, type TaskError, type UsageRow } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
 import { sameWorkspace } from '../auth/index.js';
+import type { UsageVerdict } from '../ledger/recorder.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
 import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { appendEntry, createTranscriptStore } from './store.js';
@@ -170,10 +171,45 @@ export function defineSessionActor(ports: SessionPorts) {
                 const next = await Promise.race([it.next(), tick()]);
                 if (!next || next.done) return;
                 await appendEntry(c, { t: 'ev', ev: next.value } satisfies SessionEntry);
+                await recordUsage(c, next.value); // the turn is over: the books get the row, the verdict has nothing left to stop
             }
         } finally {
             await it.return?.();
         }
+    }
+
+    /**
+     * After a turn-scoped `usage` event is durable: price it (the runtime's
+     * `usageRow`, else the event's own cost as reported, else unpriced), hand
+     * it to the recorder (Ledger + Task budget, OPS-07/08) and return the
+     * verdict. Session-scoped events are cumulative totals and never counted.
+     * The books never fail a turn: a recorder that throws is a `null` verdict.
+     */
+    async function recordUsage(c: ActorContext<SessionState>, ev: AgentEvent): Promise<UsageVerdict | null> {
+        if (ev.type !== 'usage' || ev.scope !== 'turn' || !ports.usage) return null;
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        if (!spec || !parsed) return null;
+        const at = { sessionId: parsed.sessionId, ...(spec.taskId !== undefined ? { taskId: spec.taskId } : {}), at: now() };
+        const live = lives.get(c.key);
+        // `@sigx/ai` leaves the counters optional; a ledger row always carries both.
+        const usage = { ...ev.usage, inputTokens: ev.usage.inputTokens ?? 0, outputTokens: ev.usage.outputTokens ?? 0 };
+        const event = { usage, ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}) };
+        const priced: UsageRow = live?.usageRow ? live.usageRow(event, at) : { ...at, ...event, agentId: spec.agentId, estimated: false };
+        const row = { ...priced, agentId: spec.agentId, sessionId: parsed.sessionId, key: `${ev.sessionId}:${ev.epoch}:${ev.seq}`, ...(ev.turnId !== undefined ? { turnId: ev.turnId } : {}) };
+        try {
+            return await ports.usage.record(c, parsed.workspaceId, row);
+        } catch {
+            return null;
+        }
+    }
+
+    /** The budget is spent (OPS-08): cancel the running turn on the live session and record the exchange. */
+    async function cancelLocal(c: ActorContext<SessionState>, live: Live, error: TaskError): Promise<void> {
+        const command: WireCommand = { v: V, commandId: newCommandId('cancel'), type: 'cancel' };
+        const reply = await live.served.handleCommand(command);
+        await appendEntry(c, { t: 'reply', command, reply, at: now() } satisfies SessionEntry);
+        await publishChat(c, { kind: 'status', status: 'task', ref: `${error.code}:${error.message}` });
     }
 
     /** Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. */
@@ -413,6 +449,9 @@ export function defineSessionActor(ports: SessionPorts) {
                             case 'event': {
                                 const runningTurn = s.running?.turnId;
                                 await appendEntry(ctx, { t: 'ev', ev: frame.event } satisfies SessionEntry);
+                                const verdict = await recordUsage(ctx, frame.event);
+                                // Over budget on the daemon path: the cancel travels the CommandSink like any other command.
+                                if (verdict && !verdict.ok && s.running) await dispatch({ v: V, commandId: newCommandId('cancel'), type: 'cancel' });
                                 if (frame.event.type === 'turn-end' && runningTurn !== undefined && runningTurn === frame.event.turnId) await finishTurn(ctx, runningTurn);
                                 break;
                             }
@@ -482,6 +521,9 @@ export function defineSessionActor(ports: SessionPorts) {
                         if (signal.aborted || next.done) return;
                         const ev = next.value;
                         await ctx.turn((c) => appendEntry(c, { t: 'ev', ev } satisfies SessionEntry));
+                        const verdict = await ctx.turn((c) => recordUsage(c, ev));
+                        // Over budget: the task has already failed itself; the turn stops here and no child starts (COL-11, OPS-08).
+                        if (verdict && !verdict.ok && !signal.aborted) await ctx.turn((c) => cancelLocal(c, live, verdict.error));
                         if (ev.type === 'turn-end' && ev.turnId === turnId) {
                             ended = true;
                             break;

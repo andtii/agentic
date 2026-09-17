@@ -98,7 +98,7 @@ Each occurrence is a one-shot `ctx.reminders` entry re-armed from `onReminder`, 
 
 ## Session (`src/session`)
 
-`defineSessionActor({ factory, commands?, now? })` builds the `session` actor, keyed `{ws}:session:{id}`. It never imports a runtime adapter: the `SessionFactory` port turns a runtime id into a live `AgentSession` (the platform-managed path) or `null` (a daemon hosts it), and the `CommandSink` port carries wire commands to that daemon's machine.
+`defineSessionActor({ factory, commands?, usage?, now? })` builds the `session` actor, keyed `{ws}:session:{id}`. It never imports a runtime adapter: the `SessionFactory` port turns a runtime id into a live `AgentSession` (the platform-managed path) or `null` (a daemon hosts it), and the `CommandSink` port carries wire commands to that daemon's machine.
 
 ```ts
 const Session = defineSessionActor({ factory: runtimesFactory, commands: { send: (t, cmd) => actor(Machine, machineKey(t)).sendCommand(t.sessionId, cmd) } });
@@ -155,3 +155,22 @@ const report = await task.cancel('user:u1', { timeoutMs: 10_000 });    // { stop
 - Illegal transitions throw `IllegalTransitionError`; `start` runs only from `queued` and `resolveWaiting` only from `waiting` (otherwise `TaskStateError` `wrong-state`); limits throw `TaskLimitError` (`kind: 'depth' | 'concurrency' | 'budget'`). Defaults when the contract sets none: `DEFAULT_MAX_DEPTH = 5`, `DEFAULT_MAX_CONCURRENT_CHILDREN = 8`.
 - `delegate` clamps every budget the parent carries (`maxCostUsd`, `maxTokens`, `maxWallMs`, `maxTurns`, `maxSteps`) to the parent's remaining share after its own spend and its live children's reservations; a child settling frees its reservation and, when it was the last one waited on, resumes the parent.
 - `cancel` transitions to `cancelled`, fans `stop` out to unsettled children one-way, waits for their acknowledgements and — when a session is attached — for `sessionStopped()` from the session driver, until the deadline. Each hop keeps a 20 % margin of the remaining time so a child's own report arrives before the parent's deadline. Whatever did not acknowledge lands in `notStopped`; late acknowledgements still update the snapshot.
+- Budgets (COL-11, OPS-08): `recordUsage` and `delegate` run `checkBudget(constraints, spent)` from `src/ledger`; once a budget is spent (`spent >= max`) the task ends `failed` with `error.code === 'budget'` (`system:budget`), every unsettled child is cancelled one-way, and `delegate` throws `TaskLimitError('budget')` before any child is created.
+
+## Ledger (`src/ledger`)
+
+`LedgerActor` keeps the books of one workspace month: key `ledgerKey(ws, ledgerMonth(at))` → `{ws}:ledger:{yyyy-mm}` (UTC months). `authorize: [sameWorkspace]`.
+
+```ts
+const books = actor(LedgerActor, ledgerKey(ws, ledgerMonth(Date.now())));
+await books.append(row);                                   // idempotent by row.key; a row of another month is refused
+await books.rows({ taskId, limit: 50 });                   // newest first
+await books.summary({ by: 'task' });                       // 'agent' | 'task' | 'session' | 'turn' | 'day' (+ timeZone)
+await books.recordCorrection({ agentId, week, what, at });  // LRN-09 — the @agentic/learning CorrectionLedger
+```
+
+- A `LedgerRow` is the core `UsageRow` (`at`, `sessionId`, `agentId`, `taskId?`, `usage`, `costUsd?`, `estimated`) plus an idempotency `key` (`{sessionId}:{epoch}:{seq}` for a row born of a session event) and `turnId?`. Every mutation is one `LedgerEntry` folded by the pure `applyLedgerEntry` — `ctx.append` where the runtime has it, otherwise the reducer plus `ctx.save()`.
+- `summary` (OPS-07) never presents a guess as fact: `costUsd` sums only the rows that carry a cost and is `null` when none does (never `0` for unreported data), `estimatedCostUsd` / `estimatedRows` break the guessed share out, `unpricedRows` counts provider data that is unavailable, and `quality` is `reported` | `estimated` | `partly-estimated` | `not-reported`. `summarize(rows, options)` is the pure function behind it.
+- `checkBudget(limits, spent)` / `remainingBudget` / `budgetError` / `isBudgetFailure` are the budget rules the Task actor and the Session driver share (`BUDGET_ERROR_CODE = 'budget'`). Estimated costs count in full.
+- `ledgerRecorder()` is the Session's `usage` port: `defineSessionActor({ factory, usage: ledgerRecorder() })`. For every **turn-scoped** `usage` event (session-scoped events are cumulative totals and never counted) the driver prices the row — the `OpenedSession.usageRow` the factory returned (`createPlatformModelAgent(...).usageRow`, `estimated: true` for an unlisted model), else the event's own `costUsd` as reported, else unpriced — appends it to the month's Ledger one-way, and, when the session works a task, `Task.recordUsage` charges it. A `failed {budget}` task comes back as the verdict and the driver cancels the running turn (locally on the served session; on the daemon path through the `CommandSink`). The books never fail a turn: a recorder that throws is ignored.
+- `ledgerCorrectionLedger(hops, ws)` adapts the actor to `@agentic/learning`'s `CorrectionLedger` by the month of each correction.

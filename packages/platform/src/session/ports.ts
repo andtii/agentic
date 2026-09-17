@@ -8,9 +8,11 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, RuntimeId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
+
+import type { UsageRecorder } from '../ledger/recorder.js';
 
 /** What `Session.open` is handed — everything a factory needs to open the runtime session. Plain JSON: it is recorded on the actor. */
 export interface SessionOpenSpec {
@@ -52,6 +54,12 @@ export interface OpenedSession {
     /** The `Agent.id` (`'sigx'`, `'mock'`, …) — for the wire hello and logs, never for branching. */
     readonly agentId: string;
     readonly capabilities: AgentCapabilities;
+    /**
+     * Price a `usage` event as a Ledger row (OPS-07) — `createPlatformModelAgent(...).usageRow`
+     * on the API path, with `estimated: true` when the rate was a guess. Without it the driver
+     * records the event's own `costUsd` as reported, or the row as unpriced when there is none.
+     */
+    usageRow?(event: { readonly usage?: Usage; readonly costUsd?: number }, at: { readonly sessionId: string; readonly taskId?: string; readonly at: number }): UsageRow;
     /** Release the agent behind the session, if the factory created one per session. */
     dispose?(): Promise<void>;
 }
@@ -71,6 +79,8 @@ export interface SessionPorts {
     readonly factory: SessionFactory;
     /** Required for the daemon path; without it a remote command is refused as `unsupported`. */
     readonly commands?: CommandSink;
+    /** Where turn-scoped `usage` events go (the Ledger, OPS-07) and who says when the task's budget is spent (OPS-08); `ledgerRecorder()` in the app. */
+    readonly usage?: UsageRecorder;
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }
