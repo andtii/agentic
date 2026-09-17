@@ -20,8 +20,9 @@ import {
 } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorDefinition, type ActorOptions } from '@sigx/actors';
 import { sameWorkspace } from '../auth/index.js';
+import { budgetError, checkBudget, type BudgetVerdict } from '../ledger/budget.js';
 import { applyTaskEntry, initialTaskState } from './entries.js';
-import { IllegalTransitionError, TaskStateError } from './errors.js';
+import { IllegalTransitionError, TaskLimitError, TaskStateError } from './errors.js';
 import { TASK_TYPE, taskKey } from './key.js';
 import { checkConcurrency, checkDepth, splitBudget, type Spent } from './limits.js';
 import type { CancelOptions, DelegateSpec, StopReport, TaskEntry, TaskInit, TaskOutcome, TaskState, TaskTree, TaskView } from './types.js';
@@ -189,6 +190,21 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             if (parent) await parent.childStopped(s.id, r).catch(() => undefined);
         };
 
+        /**
+         * The budget is spent (COL-11, OPS-08): the task ends `failed {budget}` and every
+         * unsettled child is cancelled one-way, so nothing below it starts or goes on.
+         */
+        const overBudget = async (verdict: Exclude<BudgetVerdict, { ok: true }>, by: string): Promise<void> => {
+            if (isTerminal(s.status)) return;
+            await transition('failed', by, 'failed: budget', { error: budgetError(verdict) });
+            for (const id of liveChildren()) {
+                childClient(id)
+                    .with({ oneWay: true })
+                    .cancel(by)
+                    .catch(() => undefined);
+            }
+        };
+
         /** The stop cascade (COL-12): cancel, fan out one-way, wait for acks until the deadline, list the rest. */
         const runStop = async (by: string, deadline: number, ack: boolean): Promise<StopReport> => {
             requireCreated();
@@ -295,6 +311,12 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 const sessionId = spec.sessionId ?? s.sessionId;
                 if (sessionId === undefined) throw new TaskStateError('no-session', `task ${s.id} has no session to delegate from`);
                 const now = Date.now();
+                // A task that has already spent its budget ends here; the child is never created (COL-11, OPS-08).
+                const budget = checkBudget(s.constraints, spentOf(s, now));
+                if (!budget.ok) {
+                    await overBudget(budget, 'system:budget');
+                    throw new TaskLimitError('budget', budgetError(budget).message, budget.limit);
+                }
                 const live = liveChildren();
                 const depth = checkDepth(s.depth, s.constraints);
                 checkConcurrency(live.length, s.constraints);
@@ -322,7 +344,10 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             },
             async recordUsage(usage, costUsd = 0) {
                 requireCreated();
-                await commit(ctx, { t: 'usage', at: Date.now(), usage, costUsd });
+                const now = Date.now();
+                await commit(ctx, { t: 'usage', at: now, usage, costUsd });
+                const budget = checkBudget(s.constraints, spentOf(s, now));
+                if (!budget.ok) await overBudget(budget, 'system:budget');
                 return view();
             },
             async sessionStopped() {
