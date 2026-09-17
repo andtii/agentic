@@ -9,7 +9,7 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['reminder', 'tas
 
 /** Which notification kinds the user wants, and whether they also go to push subscriptions. */
 export interface NotificationPrefs {
-    readonly kinds: { readonly [K in NotificationKind]: boolean };
+    readonly kinds: Readonly<Record<NotificationKind, boolean>>;
     readonly push: boolean;
 }
 
