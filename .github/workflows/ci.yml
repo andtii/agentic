@@ -51,6 +51,12 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The Worker + ActorHost Durable Object inside workerd (Miniflare).
+      # wrangler/miniflare need Node >= 22.
+      - name: Workers tests
+        if: matrix.node-version == '22'
+        run: pnpm --filter @agentic/web test:workers
+
   coverage:
     runs-on: ubuntu-latest
     steps:

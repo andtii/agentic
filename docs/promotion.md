@@ -19,3 +19,4 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | Schedule / timezone reminder actor (`packages/platform/src/schedule`) | `@sigx/actors-workflow` schedule actor (signalxjs/actors#390) | later |
 | Claude Code profile isolation + doctor (`packages/runtimes/src/claude-code`: per-profile child env, shared-config-dir check, credentials-file auth status) | `@sigx/ai-agent-claude-code` | once validated on macOS |
 | Pricing table for Anthropic models (`packages/runtimes/src/anthropic/pricing.ts`) | `@sigx/ai-anthropic` | when a second consumer appears |
+| Server-app stamp in both Worker halves (`apps/web/src/actors.app.ts` `ensureServerApp`: `createServerApp` before `super()` in the `ActorHost` constructor so principals decode after the hop) | `@sigx/actors-cloudflare` `createHostDurableObject({ serverApp: (env) => … })` / `createWorkerHandler` | when a second Cloudflare app needs it |

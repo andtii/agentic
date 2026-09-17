@@ -10,10 +10,16 @@
     "zero:validate": "sigx zero:validate ./node_modules/@sigx/zero-daisyui/dist/design-system.js",
     "preview": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "deploy:preview": "pnpm run build && wrangler deploy --env preview",
+    "test:workers": "tsc -p __tests__/workers && vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
+    "@agentic/core": "workspace:*",
+    "@agentic/platform": "workspace:*",
     "@agentic/ui": "workspace:*",
+    "@sigx/actors": "catalog:",
+    "@sigx/actors-cloudflare": "catalog:",
     "@sigx/router": "catalog:",
     "@sigx/server": "catalog:",
     "@sigx/server-renderer": "catalog:",
@@ -22,6 +28,7 @@
     "sigx": "catalog:"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260917.1",
     "@playwright/test": "^1.63.0",
     "@sigx/cli": "^0.11.0",
