@@ -362,4 +362,107 @@ const envCard: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard];
+/** Failure card: base-200, border = the state ink at 33 %, radius 8, padding 16, gap 10; icon 16 and name 14 / 600 in the ink, mono signal, 13 px detail, one action (OPS-04). */
+const failure: RecipeInput = {
+    component: 'ag-failure',
+    tokens: { '--ag-ink': 'var(--ag-text-muted)' },
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                padding: 'var(--space-lg)',
+                border: 'var(--border) solid color-mix(in oklab, var(--ag-ink) 33%, transparent)',
+                borderRadius: 'var(--radius-box)',
+                background: 'var(--color-base-200)',
+                color: 'var(--color-base-content)',
+                minInlineSize: '0'
+            }
+        },
+        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0' } },
+        icon: { base: { display: 'inline-flex', color: 'var(--ag-ink)', flexShrink: '0' } },
+        name: { base: { fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)', color: 'var(--ag-ink)', flex: '1 1 auto', minInlineSize: '0' } },
+        signal: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap', marginInlineStart: 'auto' } },
+        detail: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)', textWrap: 'pretty' } },
+        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' } }
+    },
+    variants: {
+        // Six kinds, three inks: muted for the browser, amber where a person can act on the machine, red where work stopped.
+        kind: {
+            offline: { root: { base: { '--ag-ink': 'var(--ag-text-muted)' } } },
+            machine: { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
+            auth: { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
+            runtime: { root: { base: { '--ag-ink': 'var(--color-error)' } } },
+            task: { root: { base: { '--ag-ink': 'var(--color-error)' } } },
+            interrupted: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
+        },
+        tone: {
+            muted: { root: { base: { '--ag-ink': 'var(--ag-text-muted)' } } },
+            'needs-you': { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
+            failed: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
+        }
+    }
+};
+
+/** Banner over the content: a full-width strip on base-200 with the ink's 33 % border, icon + text + mono state. */
+const banner: RecipeInput = {
+    component: 'ag-banner',
+    tokens: { '--ag-ink': 'var(--ag-text-muted)' },
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-sm)',
+                padding: 'var(--space-sm) var(--space-lg)',
+                border: 'var(--border) solid color-mix(in oklab, var(--ag-ink) 33%, transparent)',
+                borderRadius: 'var(--radius-box)',
+                background: 'color-mix(in oklab, var(--ag-ink) 6%, var(--color-base-200))',
+                color: 'var(--color-base-content)',
+                fontSize: 'var(--text-md)'
+            }
+        },
+        icon: { base: { display: 'inline-flex', color: 'var(--ag-ink)', flexShrink: '0' } },
+        text: { base: { fontWeight: 'var(--weight-semibold)', color: 'var(--ag-ink)' } },
+        state: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', marginInlineStart: 'auto', whiteSpace: 'nowrap' } },
+        actions: { base: { display: 'inline-flex', gap: 'var(--space-sm)' } }
+    },
+    variants: {
+        tone: {
+            muted: { root: { base: { '--ag-ink': 'var(--ag-text-muted)' } } },
+            'needs-you': { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
+            failed: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
+        }
+    }
+};
+
+/** Empty state: a centred card on base-200 (dashed with `outline`), or one muted line with `compact`. */
+const empty: RecipeInput = {
+    component: 'ag-empty',
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 'var(--space-sm)',
+                padding: 'var(--space-xl)',
+                border: 'var(--border) solid var(--ag-line)',
+                borderRadius: 'var(--radius-box)',
+                background: 'var(--color-base-200)',
+                color: 'var(--color-base-content)'
+            }
+        },
+        icon: { base: { display: 'inline-flex', color: 'var(--ag-text-muted)' } },
+        title: { base: { fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-semibold)', lineHeight: 'var(--leading-tight)' } },
+        caption: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)', textWrap: 'pretty' } },
+        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginBlockStart: 'var(--space-xs)' } }
+    },
+    modifiers: {
+        compact: { root: { base: { padding: '0', border: 'none', background: 'transparent' } } },
+        outline: { root: { base: { borderStyle: 'dashed', borderColor: 'var(--ag-line-strong)', background: 'transparent' } } }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty];

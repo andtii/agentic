@@ -41,8 +41,8 @@ describe('the agentic design system', () => {
         const result = validateDesignSystem(designSystem, mergeManifests(zeroManifest, fragment));
         expect(result.errors).toEqual([]);
         expect(result.ok).toBe(true);
-        // The only warnings are the axes and modifiers declared ahead of the kit (#85) and states (#87) issues.
-        for (const w of result.warnings) expect(w.where, w.message).toMatch(/^tokens\.(axes|modifiers)/);
+        // Every declared axis value and modifier is wired by a recipe (kit #85, states #87): strict mode holds.
+        expect(result.warnings).toEqual([]);
     });
 
     it('ships exactly one theme, dark, as both scheme defaults', () => {

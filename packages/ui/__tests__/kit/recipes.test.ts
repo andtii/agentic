@@ -14,9 +14,9 @@ import { kitAnatomies, kitRecipes, kitScopes, NEEDS_KINDS } from '../../src/kit'
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
 
 describe('the ag-* kit', () => {
-    it('declares eight scopes, every one in the fragment with a recipe and a vocabulary claim', () => {
+    it('declares eleven scopes, every one in the fragment with a recipe and a vocabulary claim', () => {
         const scopes = kitAnatomies.map((a) => a.scope);
-        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card']);
+        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty']);
         for (const scope of scopes) {
             expect(fragment.components.some((c) => c.scope === scope), scope).toBe(true);
             expect(kitRecipes.some((r) => r.component === scope), scope).toBe(true);
@@ -30,10 +30,10 @@ describe('the ag-* kit', () => {
         for (const tone of TONES) expect(wiredTones.has(tone), tone).toBe(true);
         const wiredMods = new Set(kitRecipes.flatMap((r) => Object.keys(r.modifiers ?? {})));
         for (const mod of AG_MODIFIERS) expect(wiredMods.has(mod), mod).toBe(true);
-        // The inbox kinds are wired here; the five failure kinds belong to the states issue.
+        // The inbox kinds ride the needs-item, the six failure kinds the failure card (`interrupted` is both): every declared kind is wired.
         const wiredKinds = new Set(kitRecipes.flatMap((r) => Object.keys(r.variants?.['kind'] ?? {})));
-        expect([...wiredKinds].sort()).toEqual([...NEEDS_KINDS].sort());
-        expect(KINDS.filter((k) => !wiredKinds.has(k))).toEqual(['offline', 'machine', 'auth', 'runtime', 'task']);
+        for (const kind of NEEDS_KINDS) expect(wiredKinds.has(kind), kind).toBe(true);
+        expect(KINDS.filter((k) => !wiredKinds.has(k))).toEqual([]);
     });
 
     it('styles only declared parts, and the design system validates with 0 errors', () => {
@@ -44,7 +44,7 @@ describe('the ag-* kit', () => {
         }
         const result = validateDesignSystem(designSystem, mergeManifests(zeroManifest, fragment));
         expect(result.errors).toEqual([]);
-        // What is left: the failure kinds declared ahead of the states issue.
-        expect(result.warnings.map((w) => w.where)).toEqual(['tokens.axes.kind', 'tokens.axes.kind', 'tokens.axes.kind', 'tokens.axes.kind', 'tokens.axes.kind']);
+        // Nothing declared is left unwired: the web build validates with `--strict`.
+        expect(result.warnings).toEqual([]);
     });
 });
