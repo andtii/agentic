@@ -78,25 +78,67 @@ function onlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>, 
     }
 }
 
+/** Plain data only: a class instance or proxy-like object could hide fields from the key scan. */
+function isPlain(value: unknown): value is Record<string, unknown> {
+    if (!isRecord(value)) return false;
+    const proto = Object.getPrototypeOf(value) as unknown;
+    return proto === Object.prototype || proto === null;
+}
+
+const MEMORY_KINDS: ReadonlySet<unknown> = new Set(['working', 'fact', 'preference', 'assumption', 'lesson', 'record']);
+const CONFIDENCES: ReadonlySet<unknown> = new Set(['verified', 'stated', 'assumed']);
+const SOURCES: ReadonlySet<unknown> = new Set(['user', 'agent', 'verification', 'import']);
+
+function check(ok: boolean, path: string, reason: string): void {
+    if (!ok) throw new LearningPermissionError(path, reason);
+}
+
+const isStringArray = (v: unknown): boolean => Array.isArray(v) && v.every((x) => typeof x === 'string');
+const optional = (v: unknown, test: (v: unknown) => boolean): boolean => v === undefined || test(v);
+const isString = (v: unknown): boolean => typeof v === 'string';
+
+/** The `NewMemoryEntry` shape, field by field. */
+function checkEntry(entry: Record<string, unknown>, path: string): void {
+    onlyKeys(entry, MEMORY_ENTRY_KEYS, path);
+    check(MEMORY_KINDS.has(entry.kind), `${path}.kind`, 'a memory entry needs a known kind');
+    check(isString(entry.text), `${path}.text`, 'a memory entry needs text');
+    check(isStringArray(entry.tags), `${path}.tags`, 'tags are a string array');
+    check(CONFIDENCES.has(entry.confidence), `${path}.confidence`, 'a memory entry needs a known confidence');
+    check(optional(entry.subject, isString), `${path}.subject`, 'subject is text');
+    check(optional(entry.conditions, isString), `${path}.conditions`, 'conditions are text');
+    check(optional(entry.supersedes, isString), `${path}.supersedes`, 'supersedes is an id');
+    check(optional(entry.evidence, isStringArray), `${path}.evidence`, 'evidence is a string array');
+    check(optional(entry.retired, (v) => typeof v === 'boolean'), `${path}.retired`, 'retired is a boolean');
+    check(optional(entry.ttl, (v) => typeof v === 'number' && Number.isFinite(v)), `${path}.ttl`, 'ttl is a number');
+    const provenance = entry.provenance;
+    check(isPlain(provenance), `${path}.provenance`, 'a memory entry needs provenance');
+    const p = provenance as Record<string, unknown>;
+    onlyKeys(p, PROVENANCE_KEYS, `${path}.provenance`);
+    check(SOURCES.has(p.source), `${path}.provenance.source`, 'provenance needs a known source');
+    check(optional(p.at, (v) => typeof v === 'number' && Number.isFinite(v)), `${path}.provenance.at`, 'at is a number');
+    for (const k of ['sessionId', 'taskId', 'messageId'] as const) check(optional(p[k], isString), `${path}.provenance.${k}`, `${k} is an id`);
+}
+
 /**
  * Throw unless every proposal is exactly a memory entry or a review-gated
- * instruction patch: no permission key at any depth, no field outside the
- * contract, `requiresReview: true` on every instruction.
+ * instruction patch: plain data, no permission key at any depth, no field
+ * outside the contract, every required field present with its type,
+ * `requiresReview: true` on every instruction.
  */
 export function assertPermissionFree(proposals: readonly unknown[]): asserts proposals is readonly Proposal[] {
     proposals.forEach((p, i) => {
         const path = `proposals[${i}]`;
-        if (!isRecord(p)) throw new LearningPermissionError(path, 'a proposal must be an object');
+        if (!isPlain(p)) throw new LearningPermissionError(path, 'a proposal must be a plain object');
         scanForbidden(p, path);
         if (p.kind === 'memory') {
             onlyKeys(p, MEMORY_PROPOSAL_KEYS, path);
-            if (!isRecord(p.entry)) throw new LearningPermissionError(`${path}.entry`, 'a memory proposal needs an entry');
-            onlyKeys(p.entry, MEMORY_ENTRY_KEYS, `${path}.entry`);
-            if (isRecord(p.entry.provenance)) onlyKeys(p.entry.provenance, PROVENANCE_KEYS, `${path}.entry.provenance`);
+            if (!isPlain(p.entry)) throw new LearningPermissionError(`${path}.entry`, 'a memory proposal needs an entry');
+            checkEntry(p.entry, `${path}.entry`);
         } else if (p.kind === 'instruction') {
             onlyKeys(p, INSTRUCTION_KEYS, path);
-            if (p.requiresReview !== true) throw new LearningPermissionError(`${path}.requiresReview`, 'an instruction proposal always requires review');
-            if (typeof p.patch !== 'string') throw new LearningPermissionError(`${path}.patch`, 'an instruction patch is text');
+            check(p.requiresReview === true, `${path}.requiresReview`, 'an instruction proposal always requires review');
+            check(isString(p.patch), `${path}.patch`, 'an instruction patch is text');
+            check(isString(p.reason), `${path}.reason`, 'an instruction proposal needs a reason');
         } else {
             throw new LearningPermissionError(`${path}.kind`, 'unknown proposal kind');
         }

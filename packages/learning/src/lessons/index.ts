@@ -42,9 +42,18 @@ export function correctionEvidence(c: Correction): string {
     return `${EVIDENCE_CORRECTION_PREFIX}${c.what}) by ${c.by} at ${new Date(c.at).toISOString()} in ${c.sessionId}/${c.messageId}: ${c.text}`;
 }
 
-/** How many corrections a lesson's evidence records. */
+/** The evidence line that carries a merged lesson's running total, independent of the evidence cap. */
+export const EVIDENCE_TOTAL_PREFIX = 'corrections in total: ';
+
+/** How many corrections a lesson stands for: the running total when merged, else the correction lines. */
 export function correctionOccurrences(entry: Pick<MemoryEntry, 'evidence'>): number {
-    return (entry.evidence ?? []).filter((e) => e.startsWith(EVIDENCE_CORRECTION_PREFIX)).length;
+    const evidence = entry.evidence ?? [];
+    const total = evidence.find((e) => e.startsWith(EVIDENCE_TOTAL_PREFIX));
+    if (total) {
+        const n = Number.parseInt(total.slice(EVIDENCE_TOTAL_PREFIX.length), 10);
+        if (Number.isSafeInteger(n) && n >= 0) return n;
+    }
+    return evidence.filter((e) => e.startsWith(EVIDENCE_CORRECTION_PREFIX)).length;
 }
 
 function conditionsFor(c: Correction, context: LearningContext | undefined): string {
@@ -90,16 +99,19 @@ function mergeConditions(a: string | undefined, b: string | undefined): string |
 /**
  * The replacement for `previous` after the same correction came again: the
  * latest wording, both sets of tags and conditions, evidence accumulated (the
- * newest `evidenceCap` lines), `supersedes` pointing at the old lesson.
+ * newest `evidenceCap` lines, behind a running-total line the cap never
+ * trims), `supersedes` pointing at the old lesson.
  */
 export function mergeLesson(previous: MemoryEntry, next: NewMemoryEntry, evidenceCap: number): NewMemoryEntry {
-    const evidence = [...(previous.evidence ?? []), ...(next.evidence ?? [])];
+    const total = correctionOccurrences(previous) + correctionOccurrences(next);
+    const lines = [...(previous.evidence ?? []), ...(next.evidence ?? [])].filter((e) => !e.startsWith(EVIDENCE_TOTAL_PREFIX));
+    const kept = lines.slice(Math.max(0, lines.length - Math.max(1, evidenceCap)));
     const conditions = mergeConditions(previous.conditions, next.conditions);
     return {
         ...next,
         tags: [...previous.tags, ...next.tags],
         ...(conditions ? { conditions } : {}),
-        evidence: evidence.slice(Math.max(0, evidence.length - evidenceCap)),
+        evidence: total > 0 ? [`${EVIDENCE_TOTAL_PREFIX}${total}`, ...kept] : kept,
         confidence: previous.confidence === 'stated' || next.confidence === 'stated' ? 'stated' : next.confidence,
         supersedes: previous.id
     };

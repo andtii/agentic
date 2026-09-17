@@ -17,6 +17,7 @@ export type { LearningContext, RelevantLessonsOptions } from './lessons/index.js
 export {
     CORRECTION_TAG,
     EVIDENCE_CORRECTION_PREFIX,
+    EVIDENCE_TOTAL_PREFIX,
     words,
     similarity,
     correctionEvidence,

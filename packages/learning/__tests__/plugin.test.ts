@@ -60,7 +60,7 @@ describe('learningPlugin: corrections', () => {
         expect(p).toMatchObject({ kind: 'memory', entry: { supersedes: first.id } });
         const live = await memory.query({ kinds: ['lesson'], limit: 10 });
         expect(live).toHaveLength(1);
-        expect(live[0]!.entry.evidence).toHaveLength(2);
+        expect(live[0]!.entry.evidence).toEqual(['corrections in total: 2', expect.stringMatching(/^correction\(prefer\)/), expect.stringMatching(/^correction\(prefer\)/)]);
         expect(live[0]!.entry.text).toBe('Always answer in Swedish when the user writes in Swedish');
         expect(await memory.get(first.id)).toMatchObject({ retired: true });
     });
@@ -91,6 +91,20 @@ describe('learningPlugin: corrections', () => {
         // Memory is written, instructions are not applied anywhere: the store holds lessons only.
         const kinds = (await memory.query({ limit: 50 })).map((h) => h.entry.kind);
         expect(new Set(kinds)).toEqual(new Set(['lesson']));
+    });
+
+    it('counts repetitions past the evidence cap, proposing exactly at each multiple of the threshold', async () => {
+        const memory = store();
+        const plugin = learningPlugin({ repeatThreshold: 3, evidenceCap: 2 });
+        const instructionsAt: number[] = [];
+        for (let n = 1; n <= 9; n++) {
+            const proposals = await plugin.onCorrection(correction('Never force-push shared branches', { what: 'never' }), memory);
+            if (proposals.some((p) => p.kind === 'instruction')) instructionsAt.push(n);
+        }
+        expect(instructionsAt).toEqual([3, 6, 9]);
+        const [lesson] = await memory.query({ kinds: ['lesson'], limit: 10 });
+        expect(lesson!.entry.evidence).toHaveLength(3); // the running total + the newest two
+        expect(lesson!.entry.evidence![0]).toBe('corrections in total: 9');
     });
 
     it('counts corrections per agent per ISO week (LRN-09)', async () => {

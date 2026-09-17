@@ -32,7 +32,7 @@ export interface LearningPluginOptions {
     readonly similarity?: number;
     /** Repetitions of one user correction that trigger an instruction proposal (and every multiple after). Default 3. */
     readonly repeatThreshold?: number;
-    /** Evidence lines kept on a lesson. Default 50. */
+    /** Evidence lines kept on a lesson (the repetition count is kept apart and never capped). Default 50. */
     readonly evidenceCap?: number;
 }
 

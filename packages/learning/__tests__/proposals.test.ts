@@ -62,9 +62,37 @@ describe('no proposal ever contains permission fields (runtime)', () => {
             { kind: 'grant', scope: 'tools:*' },
             { kind: 'instruction', patch: 'p', reason: 'r', requiresReview: false },
             { kind: 'instruction', patch: 1, reason: 'r', requiresReview: true },
+            { kind: 'instruction', patch: 'p', requiresReview: true },
             'memory'
         ];
         for (const p of bad) expect(() => assertPermissionFree([p])).toThrow(LearningPermissionError);
+    });
+
+    it('rejects memory entries missing required fields or with the wrong types, and non-plain objects', () => {
+        const ok = { kind: 'lesson', text: 'x', tags: ['t'], confidence: 'stated', provenance: { source: 'user' } };
+        const cases: [Record<string, unknown>, string][] = [
+            [{ ...ok, kind: 'rule' }, 'proposals[0].entry.kind'],
+            [{ ...ok, text: undefined }, 'proposals[0].entry.text'],
+            [{ ...ok, tags: 'deploy' }, 'proposals[0].entry.tags'],
+            [{ ...ok, confidence: 'certain' }, 'proposals[0].entry.confidence'],
+            [{ ...ok, evidence: [1] }, 'proposals[0].entry.evidence'],
+            [{ ...ok, ttl: Number.NaN }, 'proposals[0].entry.ttl'],
+            [{ ...ok, provenance: undefined }, 'proposals[0].entry.provenance'],
+            [{ ...ok, provenance: { source: 'root' } }, 'proposals[0].entry.provenance.source'],
+            [{ ...ok, provenance: { source: 'user', taskId: 7 } }, 'proposals[0].entry.provenance.taskId']
+        ];
+        expect(() => assertPermissionFree([{ kind: 'memory', entry: ok }])).not.toThrow();
+        for (const [entry, path] of cases) {
+            expect(() => assertPermissionFree([{ kind: 'memory', entry }]), path).toThrow(expect.objectContaining({ path }));
+        }
+        class Sneaky {
+            kind = 'memory';
+            get entry() {
+                return ok;
+            }
+        }
+        expect(() => assertPermissionFree([new Sneaky()])).toThrow(expect.objectContaining({ path: 'proposals[0]' }));
+        expect(() => assertPermissionFree([{ kind: 'memory', entry: Object.assign(Object.create({ permissions: ['tools:*'] }), ok) }])).toThrow(LearningPermissionError);
     });
 
     it('applyProposals writes nothing when any proposal is rejected', async () => {
