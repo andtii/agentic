@@ -41,6 +41,7 @@ import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey } from '../agent/index.js';
+import { auditPort } from '../audit/port.js';
 import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
 import { inboxKey, type NotificationInput } from '../notify/index.js';
@@ -109,6 +110,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const now = ports.now ?? Date.now;
     const newSessionId = ports.newSessionId ?? ((): SessionId => createId('session') as SessionId);
     const driverOf = ports.driver ?? ((ws: WorkspaceId): Principal => userPrincipal(ws, ws));
+    const audit = ports.audit ?? auditPort();
     /** Per activation (by actor key): what `prompt` pokes so the `follow` supervisor rescans the routes. */
     const wakers = new Map<string, () => void>();
 
@@ -223,13 +225,26 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     case 'fail':
                         await fail(route, { code: 'environment-offline', message: `${where} is offline; the agent's offline policy is "fail"`, recoverable: true });
                         return;
-                    case 'fallback-api':
+                    case 'fallback-api': {
                         // Explicitly allowed by the config: the record says the task left its environment, and why (EXE-11/12).
+                        const why = `fallback-api: ${where} is offline; running on anthropic-api as the agent's offline policy allows`;
+                        const from = { runtime: route.runtime, environmentId, ...(route.machineId ? { machineId: route.machineId } : {}) };
                         route.runtime = 'anthropic-api';
                         delete route.sessionId;
                         touch(route);
-                        await placeLocal(route, `fallback-api: ${where} is offline; running on anthropic-api as the agent's offline policy allows`);
+                        await audit.record(ctx, workspaceId, {
+                            key: `${taskKey(workspaceId, route.taskId)}:environment:fallback`,
+                            kind: 'environment.chosen',
+                            at: now(),
+                            by: ROUTER,
+                            summary: why,
+                            agentId: route.agentId,
+                            taskId: route.taskId,
+                            data: { runtime: 'anthropic-api', policy: route.policy, fallback: true, from, why }
+                        });
+                        await placeLocal(route, why);
                         return;
+                    }
                 }
             }
 
@@ -355,8 +370,21 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         constraints = [...(parent?.constraints ?? []), ...parentRules];
                     }
                     const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), createdAt: at, updatedAt: at };
+                    /** The one resolution of where this task runs (EXE-12), recorded before placement so a placement that fails still shows the choice (OPS-03). */
+                    const chosen = (why: string, environmentId?: EnvironmentId): Promise<void> =>
+                        audit.record(ctx, workspaceId, {
+                            key: `${taskKey(workspaceId, taskId)}:environment`,
+                            kind: 'environment.chosen',
+                            at,
+                            by: ROUTER,
+                            summary: why,
+                            agentId: t.assignee,
+                            taskId,
+                            data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, why }
+                        });
                     if (runtime === 'anthropic-api') {
                         s.routes[taskId] = { ...base, status: 'opening' };
+                        await chosen(`runtime anthropic-api (the agent's runtime); no environment needed`);
                         await placeLocal(s.routes[taskId]!, 'started');
                         await ctx.save();
                         return task(taskId).get();
@@ -367,6 +395,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await task(taskId).fail({ code: 'no-environment', message: `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`, recoverable: false }, ROUTER);
                         return task(taskId).get();
                     }
+                    await chosen(`runtime ${runtime} in environment ${environmentId} (${t.environmentId ? "the task's own" : "the agent's default"}); offline policy ${config.execution.offlinePolicy}`, environmentId);
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
                     // reports yet is "offline" under the agent's policy — `queue` waits for the machine that will (AST-05).
                     s.routes[taskId] = { ...base, environmentId, status: 'opening' };

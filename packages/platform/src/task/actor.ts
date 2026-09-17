@@ -19,6 +19,7 @@ import {
     type WaitReason
 } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorDefinition, type ActorOptions } from '@sigx/actors';
+import { recordAudit } from '../audit/port.js';
 import { sameWorkspace } from '../auth/index.js';
 import { budgetError, checkBudget, type BudgetVerdict } from '../ledger/budget.js';
 import { applyTaskEntry, initialTaskState } from './entries.js';
@@ -165,7 +166,21 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             requireCreated();
             const from = s.status;
             if (!canTransition(from, to)) throw new IllegalTransitionError(from, to, s.id);
-            await commit(ctx, { t: 'transition', from, to, at: Date.now(), by, why, ...extra });
+            const at = Date.now();
+            await commit(ctx, { t: 'transition', from, to, at, by, why, ...extra });
+            const sessionId = extra.sessionId ?? s.sessionId;
+            // The record of the edge (OPS-03), one-way: keyed by its position in the log so a replay folds once.
+            await recordAudit(ctx, s.workspaceId, {
+                key: `${ctx.key}:transition:${s.transitions.length}`,
+                kind: 'task.transition',
+                at,
+                by,
+                summary: `task ${s.id}: ${from} → ${to} (${why})`,
+                agentId: s.assignee,
+                taskId: s.id,
+                ...(sessionId === undefined ? {} : { sessionId }),
+                data: { from, to, why, ...(extra.wait ? { wait: extra.wait } : {}) }
+            });
             if (isTerminal(to)) {
                 const parent = parentClient();
                 if (parent) await parent.childSettled(s.id, to).catch(() => undefined);
@@ -335,8 +350,30 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                     ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                     ...((spec.environmentId ?? s.environmentId) !== undefined ? { environmentId: spec.environmentId ?? s.environmentId } : {})
                 };
-                await childClient(id).create(contract, { owner: spec.owner ?? s.assignee, depth, parentId: s.id, configVersion: s.configVersion });
+                const owner = spec.owner ?? s.assignee;
+                await childClient(id).create(contract, { owner, depth, parentId: s.id, configVersion: s.configVersion });
                 await commit(ctx, { t: 'child', at: now, id, constraints });
+                // The one `delegation.*` record (COL-09): the DelegateTool calls `delegate` and emits nothing of its own.
+                await recordAudit(ctx, s.workspaceId, {
+                    key: `${ctx.key}:child:${id}`,
+                    kind: 'delegation.created',
+                    at: now,
+                    by: `agent:${s.assignee}`,
+                    summary: `task ${s.id} delegated ${id} to ${spec.assignee}: ${spec.objective}`,
+                    agentId: s.assignee,
+                    taskId: s.id,
+                    sessionId,
+                    data: {
+                        parentTaskId: s.id,
+                        childTaskId: id,
+                        assignee: spec.assignee,
+                        owner,
+                        objective: spec.objective,
+                        callId: spec.callId,
+                        constraints,
+                        ...(contract.environmentId !== undefined ? { environmentId: contract.environmentId } : {})
+                    }
+                });
                 const wait: WaitReason = { kind: 'child', childTaskIds: liveChildren() };
                 if (s.status === 'active') await transition('waiting', `agent:${s.assignee}`, `delegated ${id}`, { wait });
                 else await commit(ctx, { t: 'wait', at: now, wait });

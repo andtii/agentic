@@ -34,6 +34,7 @@
 import type { Principal, WorkspaceId } from '@agentic/core';
 import {
     AgentActor,
+    AuditActor,
     Chat,
     ChatPage,
     LedgerActor,
@@ -157,7 +158,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
                     .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
             }
         });
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox];
 }
 
 /**

@@ -19,6 +19,8 @@ import { capabilities as agentCapabilities, type AgentCapabilities, type Session
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { ServerFnError } from '@sigx/server';
 
+import { principalLabel } from '../agent/index.js';
+import { recordAudit } from '../audit/port.js';
 import { asPrincipal, issueMachineToken, machinePrincipal, mintAgentPrincipal, sameWorkspace, workspaceKey, type MachineTokenRecord } from '../auth/index.js';
 import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
@@ -419,12 +421,22 @@ export function defineMachineActor(ports: MachinePorts) {
                     const claimed = await ctx.actor(Workspace, workspaceKey(workspaceId)).claimPairing(code);
                     if (!claimed || claimed.machineId !== machineId) throw new ServerFnError(401, 'pairing code refused');
                     const issued = await issueMachineToken({ workspaceId, machineId });
+                    const at = now();
                     s.tokenHash = issued.tokenHash;
-                    s.pairedAt = now();
+                    s.pairedAt = at;
                     if (info.name?.trim()) s.name = info.name.trim();
                     if (info.os) s.os = info.os;
                     if (info.daemonVersion) s.daemonVersion = info.daemonVersion;
                     await ctx.save();
+                    // A machine pairs once (409 after): the key needs no counter.
+                    await recordAudit(ctx, workspaceId, {
+                        key: `${ctx.key}:paired`,
+                        kind: 'machine.paired',
+                        at,
+                        by: principalLabel(ctx.principal),
+                        summary: `machine ${machineId}${s.name ? ` (${s.name})` : ''} paired`,
+                        data: { machineId, name: s.name, ...(s.os ? { os: s.os } : {}), ...(s.daemonVersion ? { daemonVersion: s.daemonVersion } : {}) }
+                    });
                     return { token: issued.token, workspaceId, machineId };
                 },
 
@@ -438,11 +450,23 @@ export function defineMachineActor(ports: MachinePorts) {
                 /** Refuse the token from now on and drop the daemon (USR-04). */
                 async revoke(): Promise<MachineView> {
                     const s = ctx.state;
-                    if (s.revokedAt === undefined || s.revokedAt === null) s.revokedAt = now();
+                    const first = s.revokedAt === undefined || s.revokedAt === null;
+                    if (first) s.revokedAt = now();
                     s.online = false;
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
                     await ctx.save();
+                    // Revoking is idempotent; the record says it happened once.
+                    if (first) {
+                        await recordAudit(ctx, workspaceId, {
+                            key: `${ctx.key}:revoked`,
+                            kind: 'machine.revoked',
+                            at: s.revokedAt!,
+                            by: principalLabel(ctx.principal),
+                            summary: `machine ${machineId}${s.name ? ` (${s.name})` : ''} revoked`,
+                            data: { machineId, name: s.name }
+                        });
+                    }
                     return view(ctx);
                 },
 
