@@ -71,7 +71,7 @@ export interface MockPlugin {
 
 export interface MockInboxItem {
     id: string;
-    kind: 'approval' | 'mention' | 'done' | 'failed';
+    kind: 'approval' | 'input' | 'interrupted' | 'mention' | 'done' | 'failed';
     title: string;
     href: string;
     at: string;
@@ -125,9 +125,10 @@ export const plugins: MockPlugin[] = [
 ];
 
 export const inbox: MockInboxItem[] = [
-    { id: 'i1', kind: 'approval', title: 'Builder wants to run `pnpm publish`', href: '/sessions/s1', at: '2026-09-17T08:10:00Z' },
-    { id: 'i2', kind: 'failed', title: 'Nightly hygiene 2026-09-16 failed', href: '/tasks/t3', at: '2026-09-16T23:06:00Z' },
-    { id: 'i3', kind: 'done', title: 'Layout tier on data-l-* is done', href: '/tasks/t1-1', at: '2026-09-17T07:55:00Z' }
+    { id: 'i1', kind: 'approval', title: 'Forge wants to run git push origin 47-mobile-drawer', href: '/chats/c1', at: '2026-09-17T12:14:00Z' },
+    { id: 'i2', kind: 'input', title: 'Scout asks: which A2A clients should the interop note cover?', href: '/tasks/t2', at: '2026-09-17T11:58:00Z' },
+    { id: 'i3', kind: 'interrupted', title: 'Atlas was interrupted mid-turn while drafting the weekly summary', href: '/sessions/s3', at: '2026-09-17T11:58:00Z' },
+    { id: 'i4', kind: 'done', title: 'Layout tier on data-l-* is done', href: '/tasks/t1-1', at: '2026-09-17T07:55:00Z' }
 ];
 
 export const agentById = (id: string) => agents.find(a => a.id === id);

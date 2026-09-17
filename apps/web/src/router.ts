@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory, createMemoryHistory, type RouteRecordRaw } from '@sigx/router';
 import { Home } from './pages/Home';
 import { Chat } from './pages/Chat';
+import { Chats } from './pages/Chats';
+import { Tasks } from './pages/Tasks';
 import { Agents } from './pages/Agents';
 import { Agent } from './pages/Agent';
 import { Task } from './pages/Task';
@@ -11,7 +13,6 @@ import { Schedules } from './pages/Schedules';
 import { Plugins } from './pages/Plugins';
 import { Settings } from './pages/Settings';
 import { Pair } from './pages/Pair';
-import { Chats } from './pages/Placeholder';
 import { History } from './pages/History';
 import { Usage } from './pages/Usage';
 
@@ -22,6 +23,7 @@ export const routes: RouteRecordRaw[] = [
     { path: '/chats/:id', name: 'chat', component: Chat },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id', name: 'agent', component: Agent },
+    { path: '/tasks', name: 'tasks', component: Tasks },
     { path: '/tasks/:id', name: 'task', component: Task },
     { path: '/sessions/:id', name: 'session', component: Session },
     { path: '/machines', name: 'machines', component: Machines },

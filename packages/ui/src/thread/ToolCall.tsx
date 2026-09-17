@@ -22,7 +22,7 @@ import { Button } from '../kit/Button.js';
 import { Icon, type IconName } from '../kit/icons.js';
 import { StatusPill } from '../kit/StatusPill.js';
 import { aiToolCallAnatomy } from './anatomy.js';
-import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
+import { ApprovalPrompt, type ApprovalPromptProps, type RespondFn } from './ApprovalPrompt.js';
 import { Message } from './Message.js';
 import { agentState, toolCallState, type ToolCallPhase } from './tool-state.js';
 import { inputText, nonBlank, oneLine, outputText, reportedOutput, signature } from './text.js';
@@ -37,10 +37,16 @@ export const OUTPUT_LOG = 200;
 /** What the page knows about a call that the part does not — `3.4s`, `+18 −6`, `t_8f2c`. */
 export type ToolMetaFn = (part: ToolPartState) => string | undefined;
 
+/** What the page knows about a request that the transcript does not: the rule it matched, who asked, where it runs, the delegation path, a settled decision. */
+export type ApprovalContext = Pick<ApprovalPromptProps, 'toolName' | 'input' | 'rule' | 'requestedBy' | 'environment' | 'via' | 'decision' | 'compact'>;
+/** Resolves the approval card's context rows for a request (`docs/design/HANDOFF.md` → `ai-approval`); absent = the bare card. */
+export type DescribeRequestFn = (request: OpenRequest) => ApprovalContext | undefined;
+
 /** What every card in a thread shares: the transcript (for sub-agents), the way to answer a request, the way to stop an agent. */
 export interface ThreadContextProps {
     readonly transcript?: AgentTranscript;
     readonly onRespond?: RespondFn;
+    readonly describeRequest?: DescribeRequestFn;
     /** Offered only when the agent controls its sub-agents (`capabilities.subagents === 'control'`). */
     readonly onCancelAgent?: (agentId: string) => void;
 }
@@ -53,6 +59,7 @@ export type ToolCallProps =
     /** The session log an output past 200 lines links to. */
     & Define.Prop<'logHref', string, false>
     & Define.Prop<'onRespond', RespondFn, false>
+    & Define.Prop<'describeRequest', DescribeRequestFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>;
 
 /** The 15 px header icon: what a machine did, by tool name. */
@@ -168,7 +175,7 @@ const AgentCard = component<Define.Prop<'agent', AgentState, true> & ThreadConte
                     <details open={running}>
                         <summary>{running ? 'Working…' : `Its work (${messages.length} message${messages.length === 1 ? '' : 's'})`}</summary>
                         {messages.map((m) => (
-                            <Message key={m.id} message={m} transcript={transcript} onRespond={props.onRespond} onCancelAgent={cancel} />
+                            <Message key={m.id} message={m} transcript={transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={cancel} />
                         ))}
                     </details>
                 )}
@@ -210,8 +217,8 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
                 {output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
-                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} toolName={p.name} input={p.input} />}
-                {agent && <AgentCard agent={agent} transcript={props.transcript} onRespond={props.onRespond} onCancelAgent={props.onCancelAgent} />}
+                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...props.describeRequest?.(request!)} toolName={p.name} input={p.input} />}
+                {agent && <AgentCard agent={agent} transcript={props.transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={props.onCancelAgent} />}
             </div>
         );
     };
