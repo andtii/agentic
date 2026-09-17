@@ -420,6 +420,35 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         expect(await session(S1).prompt('late', 't9')).toMatchObject({ kind: 'error', code: 'internal' });
     });
 
+    it('doctor() returns the stored per-environment verdicts and is ok only when every environment is verified and clean (EXE-05/07)', async () => {
+        const verdict = (id: EnvironmentId, ok: boolean, code: string) => ({ ok, findings: [{ level: ok ? ('info' as const) : ('error' as const), code, message: code, environmentIds: [id] }], checkedAt: 42 });
+        const d = daemon(M1, [
+            { ...inMemoryEnvironment(M1, E1), isolation: 'config-dir', doctor: verdict(E1, true, 'auth-ok') },
+            { ...inMemoryEnvironment(M1, E2), name: 'second', account: { label: 'work', authStatus: 'missing' } }
+        ]);
+        connect(K1, d);
+        await until(async () => (await machine(K1).get()).online, 'online');
+        expect(await machine(K1).doctor()).toEqual({
+            machineId: M1,
+            online: true,
+            lastSeen: expect.any(Number),
+            ok: false,
+            unverified: [E2],
+            environments: [
+                { environmentId: E1, name: 'in-memory', runtime: 'in-memory', account: { label: 'fake', authStatus: 'ok' }, isolation: 'config-dir', verdict: verdict(E1, true, 'auth-ok') },
+                { environmentId: E2, name: 'second', runtime: 'in-memory', account: { label: 'work', authStatus: 'missing' }, isolation: 'none' }
+            ]
+        });
+        // An `env` update replaces the verdicts; a clean set is ok.
+        d.setEnvironments([{ ...inMemoryEnvironment(M1, E1), isolation: 'config-dir', doctor: verdict(E1, true, 'auth-ok') }, { ...inMemoryEnvironment(M1, E2), isolation: 'config-dir', doctor: verdict(E2, false, 'shared-config-dir') }]);
+        await until(async () => (await machine(K1).doctor()).unverified.length === 0, 'env update');
+        expect((await machine(K1).doctor()).ok).toBe(false);
+        expect((await machine(K1).doctor(E2)).environments[0]?.verdict?.findings[0]?.code).toBe('shared-config-dir');
+        expect(await statusOf(machine(K1).doctor('env_nope' as EnvironmentId))).toBe(404);
+        // Readers of the workspace only.
+        expect(await statusOf(app.as(userPrincipal('u2')).actor(Machine, K1).doctor())).toBe(403);
+    });
+
     it('a session closed by the daemon frees its slot and answers its open commands', async () => {
         const d = daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { max: 1, active: 0 } }]);
         connect(K1, d);
