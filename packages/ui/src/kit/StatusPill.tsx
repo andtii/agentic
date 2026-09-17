@@ -1,9 +1,13 @@
 /**
- * `StatusPill`, `Tag` and `WaitReasonLine` on the `ag-pill` scope
- * (`docs/design/HANDOFF.md` → "Task status", "Components"). A pill is 22 px:
- * a 6 px dot plus a mono label; its colour is the `tone` axis, a hollow dot
- * says nothing is happening. A tag is the same box outlined, without a
- * dot — for kinds (memory, schedule, plugin) and wait reasons.
+ * `StatusPill` and `Tag` on the `ag-pill` scope (`docs/design/HANDOFF.md`
+ * → "Task status", "Components"). A pill is 22 px: a 6 px dot plus a mono
+ * label; its colour is the `tone` axis, a hollow dot says nothing is
+ * happening. A tag is the same box outlined, without a dot — for kinds
+ * (memory, schedule, plugin) and wait reasons.
+ *
+ * `WaitReasonLine` is the amber mono line that follows WAITING; it is the
+ * `wait` part of `ag-task-node` (the one place the recipe paints it), so a
+ * table row or a node render the same line.
  */
 import { component, type Define } from '@sigx/runtime-core';
 import type { WaitReason } from '@agentic/core';

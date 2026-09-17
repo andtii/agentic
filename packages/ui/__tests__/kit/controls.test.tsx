@@ -146,9 +146,15 @@ describe('ConfirmDialog', () => {
         expect(cancel.getAttribute('data-part')).toBe('cancel');
         confirm.click();
         expect(events).toEqual(['confirm']);
-        cancel.click();
+        // The caller closing after a confirm is not a cancel.
+        state.open = false;
+        await tick();
+        expect(events).toEqual(['confirm']);
+        state.open = true;
+        await tick();
+        buttonNamed(root.querySelector('[data-scope="dialog"][data-part="popup"]')!, 'Cancel').click();
         await tick();
         expect(state.open).toBe(false);
-        expect(events).toContain('cancel');
+        expect(events).toEqual(['confirm', 'cancel']);
     });
 });
