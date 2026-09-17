@@ -209,7 +209,12 @@ export function createDaemon(options: DaemonOptions): Daemon {
         // environments with an error verdict, never a silent "ok".
         const nextVerdicts = new Map<EnvironmentId, EnvironmentVerdict>();
         const byRuntime = new Map<string, LocalEnvironment[]>();
-        for (const env of environments) if (next.has(env.id)) byRuntime.set(env.runtime, [...(byRuntime.get(env.runtime) ?? []), env]);
+        for (const env of environments) {
+            if (!next.has(env.id)) continue;
+            const group = byRuntime.get(env.runtime);
+            if (group) group.push(env);
+            else byRuntime.set(env.runtime, [env]);
+        }
         for (const [runtime, envs] of byRuntime) {
             const checkedAt = Date.now();
             let report: DoctorReport;
@@ -217,7 +222,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 report = await drivers.get(runtime)!.doctor(envs);
             } catch (e) {
                 logger.warn('driver doctor failed', { runtime, error: e });
-                report = { ok: false, findings: [{ level: 'error', code: 'driver-doctor-failed', message: `the ${runtime} driver's checks failed: ${(e as Error).message}`, environmentIds: envs.map((env) => env.id) }] };
+                const reason = e instanceof Error && e.message ? e.message : String(e);
+                report = { ok: false, findings: [{ level: 'error', code: 'driver-doctor-failed', message: `the ${runtime} driver's checks failed: ${reason}`, environmentIds: envs.map((env) => env.id) }] };
             }
             for (const env of envs) nextVerdicts.set(env.id, environmentVerdict(report, env.id, checkedAt));
         }

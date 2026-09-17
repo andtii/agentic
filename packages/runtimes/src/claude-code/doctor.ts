@@ -31,6 +31,14 @@ export const CLAUDE_CODE_DOCTOR_CODES = {
     authExpired: 'auth-expired'
 } as const;
 
+/** The auth finding per `AuthStatus` — one spelling, from the table above. */
+const AUTH_CODES: Record<EnvironmentInspection['authStatus'], string> = {
+    ok: CLAUDE_CODE_DOCTOR_CODES.authOk,
+    unknown: CLAUDE_CODE_DOCTOR_CODES.authUnknown,
+    missing: CLAUDE_CODE_DOCTOR_CODES.authMissing,
+    expired: CLAUDE_CODE_DOCTOR_CODES.authExpired
+};
+
 export interface DoctorInput {
     readonly env: LocalEnvironment;
     /** The config dir the CLI will actually use: `profileDir`, or the default when there is none. */
@@ -70,9 +78,10 @@ export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
         }
         const who = inspection.identity === undefined ? '' : ` (${inspection.identity})`;
         const auth = `Environment "${env.name}" at ${configDir}: auth ${inspection.authStatus}${who}.`;
-        if (inspection.authStatus === 'ok') findings.push({ level: 'info', code: CLAUDE_CODE_DOCTOR_CODES.authOk, message: auth, environmentIds: [env.id] });
-        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code: CLAUDE_CODE_DOCTOR_CODES.authUnknown, message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
-        else findings.push({ level: 'warn', code: `auth-${inspection.authStatus}`, message: `${auth} Sign in with CLAUDE_CONFIG_DIR=${configDir} claude /login.`, environmentIds: [env.id] });
+        const code = AUTH_CODES[inspection.authStatus];
+        if (inspection.authStatus === 'ok') findings.push({ level: 'info', code, message: auth, environmentIds: [env.id] });
+        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code, message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
+        else findings.push({ level: 'warn', code, message: `${auth} Sign in with CLAUDE_CONFIG_DIR=${configDir} claude /login.`, environmentIds: [env.id] });
     }
 
     return { ok: !findings.some((f) => f.level === 'error'), findings };
