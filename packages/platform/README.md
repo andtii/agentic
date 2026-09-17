@@ -110,16 +110,18 @@ Authorization: `memoryAuthorize` on the definition (same workspace; a user or a 
 ## Schedule (`src/schedule`)
 
 ```ts
-import { defineScheduleActor, type TriggerPort } from '@agentic/platform';
+import { defineScheduleActor, scheduleTrigger } from '@agentic/platform';
 
-const trigger: TriggerPort = { fired: (event) => inbox.push(event) }; // or create a Task
-export const Schedule = defineScheduleActor({ trigger });
+// The platform's TriggerPort: Inbox reminder, or a Task for an entry with an agent (#42).
+export const Schedule = defineScheduleActor({ trigger: scheduleTrigger({ environments /* the Machine actor's online status, wired by routing #37 */ }) });
 
 const s = host.actor(Schedule, 'ws_alice:schedule:sch_1');
 await s.create({ kind: 'reminder', title: 'standup', recurrence: { kind: 'cron', cron: '0 9 * * 1-5', tz: 'Europe/Stockholm' } });
 await s.get(); // { next, lastRun, runs, log, ... }
 await s.disable(); await s.enable(); await s.update({ recurrence: { kind: 'at', at: Date.now() + 3_600_000 } });
 ```
+
+`TriggerPort.fired(event, hop)` — `hop` is the Schedule actor's own `ctx.actor`, so a port reaches other actors as trusted hops (a reminder runs with no principal; an in-process `actor()` would be refused by `sameWorkspace`). `scheduleTrigger({ environments?, onOutcome? })` is the platform's port (`trigger.ts`): a `reminder` entry, or any entry without an `agentId`, becomes one Inbox notification of kind `reminder` (`body` = the prompt, `ref: { kind: 'schedule' }`) pushed through every channel; an entry with an agent becomes a Task owned by and assigned to that agent, `origin { kind: 'schedule', scheduleId }`, id `scheduledTaskId(scheduleId, scheduledFor)` — deterministic, so a retried firing finds the task it already routed. An entry with an `environmentId` follows its offline policy when the `EnvironmentProbe` says offline (no probe → everything is offline; routing, #37, wires the Machine actor's online status): `queue` / `fallback-api` record `waiting { kind: 'environment-offline', policy }` for the router (#37); `fail` fails the task (`code: 'environment-offline'`) and pushes a `task-failed` notification. `deliverScheduleFired(event, hop, options)` is the same logic returning the `ScheduleTriggerOutcome`.
 
 Each occurrence is a one-shot `ctx.reminders` entry re-armed from `onReminder`, so it fires from a Durable Object alarm with nothing else online. Cron subset: `*`, `n`, `a-b`, `a,b`, `*/n`, `a-b/n` over minute hour day month weekday (7 = Sunday). DST: a wall time inside the spring gap is skipped; one inside the fall overlap fires its first occurrence only. Catch-up policy is `skip` (fire once, log what was missed). `recur.ts` is pure and exported on its own (`parseCron`, `nextCron`, `resolveWallTime`, `nextOccurrence`).
 

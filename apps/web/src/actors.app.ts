@@ -18,8 +18,11 @@
  * the object and every `ctx.actor()` call after it.
  *
  * Ports that later issues fill are explicit and fail loudly until then:
- * the Session factory (`anthropic-api`, #35), the platform tools a daemon
- * session calls back (#37) and the Schedule trigger (#42).
+ * the Session factory (`anthropic-api`, #35) and the platform tools a daemon
+ * session calls back (#37). The Schedule trigger is the platform's
+ * `scheduleTrigger()` (#42): a reminder lands in the Inbox from the entry's
+ * own alarm, an agent entry becomes a Task; with no environment probe wired
+ * yet every environment counts as offline (the router, #37, resolves it).
  */
 import type { Principal } from '@agentic/core';
 import {
@@ -37,6 +40,7 @@ import {
     machineKey,
     machinePrincipal,
     principalCodec,
+    scheduleTrigger,
     serverAuth,
     type MachineActor,
     type NotificationChannel,
@@ -80,11 +84,10 @@ export interface PlatformPorts {
 export const defaultPorts: PlatformPorts = {
     // `null` = not platform-managed; the Session then expects daemon frames. The `anthropic-api` factory is wired by #35.
     factory: () => null,
-    trigger: {
-        fired(event) {
-            throw new Error(`[actors.app] schedule trigger not wired (#42): dropped ${event.kind} ${event.key}`);
-        }
-    },
+    // Inbox reminder / Task under the entry's offline policy (#42). No `environments`
+    // probe wired yet: a task that needs an environment waits `environment-offline`
+    // for the router (#37).
+    trigger: scheduleTrigger(),
     // Web Push lands with VAPID keys (architecture §3).
     channels: []
 };

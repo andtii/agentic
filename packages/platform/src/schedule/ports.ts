@@ -4,6 +4,7 @@
  * only knows this port (AST-03: nothing here needs a browser or a chat).
  */
 import type { AgentId, EnvironmentId, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { ActorClient, AnyActorDefinition } from '@sigx/actors';
 
 export type ScheduleKind = 'reminder' | 'recurring' | 'agent-task';
 
@@ -34,12 +35,23 @@ export interface ScheduleFired {
 }
 
 /**
- * The outbound seam. In integration this creates a Task (`kind:
- * 'agent-task'`, `TaskOrigin {kind: 'schedule'}`) or posts an Inbox
- * notification (`'reminder'`); in tests it is a recorder. A rejection is
- * retried by the actor a bounded number of times, then logged and skipped —
- * the calendar never wedges on a failing consumer.
+ * How the port reaches the rest of the platform: the Schedule actor's own
+ * `ctx.actor`, handed over per firing. A hop is not an entry point — no
+ * `authorize` re-runs on the callee — which is what a reminder needs: it
+ * runs with no principal (nothing entered the system), so an in-process
+ * `actor()` call from the port would be refused by `sameWorkspace`.
+ */
+export interface TriggerHop {
+    actor<D extends AnyActorDefinition>(def: D, key: string): ActorClient<D>;
+}
+
+/**
+ * The outbound seam. `scheduleTrigger()` (trigger.ts) is the platform's
+ * implementation: a Task (`TaskOrigin {kind: 'schedule'}`) for an entry with
+ * an agent, an Inbox notification (`'reminder'`) otherwise; in tests it is a
+ * recorder. A rejection is retried by the actor a bounded number of times,
+ * then logged and skipped — the calendar never wedges on a failing consumer.
  */
 export interface TriggerPort {
-    fired(event: ScheduleFired): void | Promise<void>;
+    fired(event: ScheduleFired, hop: TriggerHop): void | Promise<void>;
 }
