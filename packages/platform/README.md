@@ -20,6 +20,17 @@ Keys: the Workspace root is `workspaceKey(id)` = `ws:{workspaceId}`; children ar
 
 `ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat`, `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (detached-task stubs for OPS-10).
 
+## Notifications (`src/notify`)
+
+- `Inbox` — the `{ws}:inbox` actor (`inboxKey(workspaceId)`): `append`, `push`, `list({ unreadOnly, limit })` newest first, `unread`, `ack(ids | 'all')`, `subscribe` / `unsubscribe` / `subscriptions`. `authorize: [sameWorkspace]`. Capped at `INBOX_CAP` (500); every mutation is a `reduceInbox` entry followed by `ctx.save()`. `list` and `unread` are declared `reads`, so `useActorState(Inbox, key).list(...)` is a live subscription.
+- `NotificationChannel` — the outbound seam: `{ id, deliver(notification, { workspaceId, subscriptions }) → { ok, error?, expired? } }`. `defineInbox({ channels })` builds the Inbox the app registers; `push` records first, then fans out through `deliverAll`, and every channel's outcome — a rejection included — lands on the record as a `DeliveryAttempt`, never as a throw.
+- `webPushChannel({ fetch, vapid, ttlSeconds })` — RFC 8030 push with VAPID (ES256 over WebCrypto, edge-safe). Contentless in v1: the service worker re-reads `Inbox.list` on a push event. `vapidSigner(keys)` is exported on its own.
+
+```ts
+const Inbox = defineInbox({ channels: [webPushChannel({ vapid: { publicKey, privateKey, subject } })] });
+await actor(Inbox, inboxKey(ws)).push({ kind: 'task-done', title: 'Report ready', ref: { kind: 'task', taskId } });
+```
+
 ## Test harness (`src/testing`, test-only)
 
 Imported by `__tests__` through a relative path — it depends on `@sigx/server/testing`.
