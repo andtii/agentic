@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { clearSessionCookie, openSession, readCookie, seal, open, sealSession, serializeCookie, sessionCookie, sessionFromRequest, SESSION_COOKIE, fromBase64Url, toBase64Url } from '../../src/index';
+import { clearSessionCookie, openSession, readCookie, seal, open, sealSession, serializeCookie, sessionCookie, sessionFromRequest, SESSION_COOKIE } from '../../src/index';
+import { fromBase64Url, toBase64Url } from '../../src/auth/encoding';
 import type { WorkspaceId } from '@agentic/core';
 
 const SECRET = 'test-session-secret-that-is-long-enough';

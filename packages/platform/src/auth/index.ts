@@ -69,4 +69,5 @@ export { KEK_VERSION, importWorkspaceKek, generateWorkspaceKek, encryptSecret, d
 export { authenticateRequest, createAuthenticate, serverAuth, type AuthenticateFn, type AuthenticateOptions, type MachineTokenLookup } from './authenticate.js';
 
 export { seal, open, hmacKey, type SealedPayload } from './seal.js';
-export { toBase64Url, fromBase64Url, randomBytes, sha256, timingSafeEqual, timingSafeEqualText } from './encoding.js';
+// `encoding.ts` (base64url, sha256, timing-safe compare) stays internal: the
+// package surface would otherwise collide with sibling modules' own helpers.
