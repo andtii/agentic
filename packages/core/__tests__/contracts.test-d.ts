@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AgentId, ChatEntry, ChatId, DaemonFrame, PlatformFrame, Principal, Proposal, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AgentId, ChatEntry, ChatId, DaemonFrame, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -19,6 +19,14 @@ describe('contract type tests', () => {
         expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
         expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
         expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping'>();
+    });
+    it('runtime drivers are generic over the session and policy types', () => {
+        type S = { readonly id: string };
+        type P = { readonly rules: readonly string[] };
+        expectTypeOf<Awaited<ReturnType<RuntimeDriver<S, P>['open']>>['session']>().toEqualTypeOf<S>();
+        expectTypeOf<Parameters<RuntimeDriver<S, P>['open']>[1]>().toEqualTypeOf<OpenSpec>();
+        expectTypeOf<Parameters<RuntimeDriver<S, P>['open']>[2]>().toEqualTypeOf<RuntimeOpenContext<P>>();
+        expectTypeOf<RuntimeOpenContext['callTool']>().returns.toEqualTypeOf<Promise<unknown>>();
     });
     it('ids do not mix', () => {
         expectTypeOf<AgentId>().not.toEqualTypeOf<ChatId>();

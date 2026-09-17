@@ -14,6 +14,7 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `learning` | `LearningPlugin`, `Proposal`, `Correction`, `TaskOutcome` |
 | `principal` | `Principal` (user, machine, agent, external), `Scope`, `sameWorkspace`, `hasScope` |
 | `daemon` | `DaemonFrame<F, R>`, `PlatformFrame<C>`, `Cursor`, `OpenSpec`, `DAEMON_PROTOCOL_VERSION` — generic over the `@sigx/ai-agent/wire` types so this package needs no dependency |
+| `runtime` | `RuntimeDriver<S, P>` (`inspect` / `open` / `doctor`), `LocalEnvironment`, `EnvironmentInspection`, `RuntimeOpenContext`, `PlatformToolCaller`, `DoctorReport`, `toEnvironmentDescriptor` — the seam between the daemon and a runtime driver, generic over the session and policy types |
 | `usage` | `Usage`, `UsageRow`, `addUsage`, `ZERO_USAGE` |
 | `workspace` | `WorkspaceSettings`, `NotificationPrefs`, `NotificationKind`, `NOTIFICATION_KINDS` |
 

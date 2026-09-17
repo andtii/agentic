@@ -1,5 +1,5 @@
-import { actorKey, addUsage, canTransition, childTaskId, createId, hasScope, isTerminal, resolveActivation, sameWorkspace, workspaceOfKey } from '../src/index';
-import type { AgentId, Principal, TaskId, TaskStatus, WorkspaceId } from '../src/index';
+import { actorKey, addUsage, canTransition, childTaskId, createId, hasScope, isTerminal, resolveActivation, sameWorkspace, toEnvironmentDescriptor, workspaceOfKey } from '../src/index';
+import type { AgentId, CapabilityReport, EnvironmentId, LocalEnvironment, MachineId, Principal, TaskId, TaskStatus, WorkspaceId } from '../src/index';
 
 const ws = 'ws_1' as WorkspaceId;
 const a = 'agent_a' as AgentId;
@@ -74,5 +74,50 @@ describe('usage', () => {
     it('adds well-known and extra keys', () => {
         const sum = addUsage({ inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 5 }, { inputTokens: 10, outputTokens: 20, custom: 1 });
         expect(sum).toEqual({ inputTokens: 11, outputTokens: 22, cacheReadInputTokens: 5, custom: 1 });
+    });
+});
+
+describe('runtime seam', () => {
+    const env: LocalEnvironment = {
+        id: 'environment_a' as EnvironmentId,
+        name: 'work',
+        runtime: 'claude-code',
+        profileDir: 'C:/profiles/work',
+        cwdRoots: ['C:/src'],
+        concurrency: 2
+    };
+    const capabilities: CapabilityReport = {
+        runtime: 'claude-code',
+        supported: ['prompt'],
+        unsupported: [],
+        resume: 'local',
+        cancel: true,
+        steer: false,
+        permissions: 'every-call',
+        tools: 'mcp'
+    };
+    it('toEnvironmentDescriptor keeps local-only fields off the wire', () => {
+        const d = toEnvironmentDescriptor(env, 'machine_1' as MachineId, { authStatus: 'ok', isolation: 'config-dir', capabilities }, 1);
+        expect(d).toEqual({
+            id: 'environment_a',
+            machineId: 'machine_1',
+            name: 'work',
+            runtime: 'claude-code',
+            account: { label: 'work', authStatus: 'ok' },
+            cwdRoots: ['C:/src'],
+            concurrency: { max: 2, active: 1 },
+            isolation: 'config-dir'
+        });
+        expect(d).not.toHaveProperty('profileDir');
+    });
+    it('toEnvironmentDescriptor uses the account label and identity when present', () => {
+        const d = toEnvironmentDescriptor({ ...env, accountLabel: 'Work account' }, 'machine_1' as MachineId, {
+            authStatus: 'expired',
+            identity: 'me@example.com',
+            isolation: 'config-dir',
+            capabilities
+        });
+        expect(d.account).toEqual({ label: 'Work account', authStatus: 'expired', identity: 'me@example.com' });
+        expect(d.concurrency.active).toBe(0);
     });
 });
