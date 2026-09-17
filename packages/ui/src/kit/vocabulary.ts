@@ -11,7 +11,7 @@ import type { ScopeVocabulary } from '@sigx/zero-kit';
 export const TONES = ['muted', 'dim', 'live', 'working', 'needs-you', 'failed'] as const;
 export type Tone = (typeof TONES)[number];
 
-/** The `data-kind` values an inbox row carries; the failure kinds join in the states issue. */
+/** The `data-kind` values an inbox row carries (`kit/states/kinds.ts` holds the failure kinds; `interrupted` is both). */
 export const NEEDS_KINDS = ['approval', 'input', 'interrupted'] as const;
 export type NeedsKind = (typeof NEEDS_KINDS)[number];
 
@@ -23,5 +23,9 @@ export const kitScopes: Record<string, ScopeVocabulary> = {
     'ag-task-node': { modifiers: ['selected'] },
     'ag-connection': { axes: { tone: [...TONES] }, modifiers: ['hollow'] },
     'ag-version': { axes: { tone: ['needs-you'] }, modifiers: ['current'] },
-    'ag-env-card': { axes: { tone: [...TONES] }, modifiers: ['selected'] }
+    'ag-env-card': { axes: { tone: [...TONES] }, modifiers: ['selected'] },
+    // The six named failure states — the `kind` values `FAILURES[kind].axis` renders (`client-offline` → `offline`).
+    'ag-failure': { axes: { kind: ['offline', 'machine', 'auth', 'runtime', 'task', 'interrupted'], tone: ['muted', 'needs-you', 'failed'] } },
+    'ag-banner': { axes: { tone: ['muted', 'needs-you', 'failed'] } },
+    'ag-empty': { modifiers: ['compact', 'outline'] }
 };

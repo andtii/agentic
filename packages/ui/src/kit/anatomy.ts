@@ -92,6 +92,35 @@ export const agEnvCardAnatomy = defineAnatomy('ag-env-card', {
     actions: { element: 'div', parent: 'root' }
 });
 
+/** One of the six named failure states (OPS-04): icon + name + mono signal caption, a detail, one action; the `kind` axis paints it. */
+export const agFailureAnatomy = defineAnatomy('ag-failure', {
+    root: { element: 'article', tokens: ['color', 'radius-box'] },
+    header: { element: 'div', parent: 'root' },
+    icon: { element: 'span', parent: 'header', tokens: ['color'] },
+    name: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    signal: { element: 'span', parent: 'header', tokens: ['text'] },
+    detail: { element: 'p', parent: 'root', tokens: ['text'] },
+    actions: { element: 'div', parent: 'root' }
+});
+
+/** The banner over the content ("This browser is offline · Reconnecting…"): icon, text, mono state, an optional action. */
+export const agBannerAnatomy = defineAnatomy('ag-banner', {
+    root: { element: 'div', tokens: ['color', 'radius-box', 'text'] },
+    icon: { element: 'span', parent: 'root', tokens: ['color'] },
+    text: { element: 'span', parent: 'root', tokens: ['text'] },
+    state: { element: 'span', parent: 'root', tokens: ['text'] },
+    actions: { element: 'span', parent: 'root' }
+});
+
+/** An empty screen: one card (or one line with `compact`; dashed with `outline`) instead of an empty table. */
+export const agEmptyAnatomy = defineAnatomy('ag-empty', {
+    root: { element: 'div', tokens: ['color', 'radius-box'] },
+    icon: { element: 'span', parent: 'root', tokens: ['color'] },
+    title: { element: 'span', parent: 'root', tokens: ['text'] },
+    caption: { element: 'p', parent: 'root', tokens: ['text'] },
+    actions: { element: 'div', parent: 'root' }
+});
+
 export const kitAnatomies = [
     agPillAnatomy,
     agAgentTileAnatomy,
@@ -100,5 +129,8 @@ export const kitAnatomies = [
     agTaskNodeAnatomy,
     agConnectionAnatomy,
     agVersionAnatomy,
-    agEnvCardAnatomy
+    agEnvCardAnatomy,
+    agFailureAnatomy,
+    agBannerAnatomy,
+    agEmptyAnatomy
 ] as const;

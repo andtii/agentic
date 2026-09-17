@@ -30,7 +30,7 @@ describe('the ai-* fragment', () => {
 
     it('owns the six transcript scopes of the architecture and the kit ag-* scopes, vendor-prefixed', () => {
         expect(SCOPES.slice(0, 6)).toEqual(['ai-thread', 'ai-message', 'ai-tool-call', 'ai-reasoning', 'ai-approval', 'ai-composer']);
-        expect(SCOPES.slice(6)).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card']);
+        expect(SCOPES.slice(6)).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty']);
         for (const scope of SCOPES) expect(scope).toMatch(/^a[ig]-/);
     });
 
