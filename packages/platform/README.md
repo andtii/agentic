@@ -113,6 +113,23 @@ for await (const ev of s.tail({ epoch: 0, seq: 0 })) render(ev);   // replay, th
 - Daemon path: `forwardFrames(frames)` and `commandReplied(reply)` are internal (only the machine the session was opened on); a command sent to a daemon answers `pending` until its reply arrives.
 - `authorize: [sameWorkspace, sessions scope]`. The chat hears `session-started`, `typing`, the final assistant `message` and `session-ended` on `SESSION_EVENTS_TOPIC`.
 
+## Machine (`src/machine`)
+
+`defineMachineActor({ socket, sessions?, tools?, now?, heartbeatWindowMs?, commandTimeoutMs? })` builds the `machine` actor, keyed `machineKey(ws, id)` = `{ws}:machine:{id}`. The host owns the socket (`MachineSocketPort`: send / close by actor key — on Cloudflare the Machine's Durable Object holds the daemon's hibernated WebSocket, `apps/web/src/daemon`); the actor owns the protocol and the record.
+
+```ts
+const Machine = defineMachineActor({ socket: daemonSockets.port, sessions: () => Session, tools: platformTools });
+const Session = defineSessionActor({ factory, commands: { send: (t, cmd) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) } });
+const m = actor(Machine, machineKey(ws, id));
+await m.pair(code, { name: 'laptop' });                // → { token, workspaceId, machineId }; only the hash is kept
+await m.openSession(sessionId, environmentId, spec);   // 'opened' | 'queued' (EXE-09)
+```
+
+- Methods: `pair(code, info)` (redeems through `Workspace.claimPairing`), `tokenRecord()` (for `serverAuth({ machines })` and the socket handshake), `revoke()`, `rename(name)`, `get()` → `MachineView` (online, lastSeen, os, daemonVersion, capabilities, environments, hosted / queued sessions, pending commands, recent closures), `openSession` / `closeSession` / `sendCommand` (session drivers), and the socket entry points `socketMessage(raw)` / `socketClosed()` / `heartbeat()` (the machine itself).
+- Routing (§5b): `session.opened` → a synthesized wire `hello` to the Session; `session.frame` → `Session.forwardFrames`; `session.reply` → `Session.commandReplied`; `session.closed` frees the slot and dequeues; `tool.call` → `ToolCallPort.call(input, agentPrincipal)` → `tool.result` (a `ToolCallError` names the error code).
+- Liveness: a socket close is offline at once; a silent daemon is offline after `heartbeatWindowMs` (90 s) on the `liveness` reminder, which also answers pending commands past `commandTimeoutMs` (120 s) with `error internal`. On reconnect `welcome.wanted` carries the last forwarded cursor per session and pending commands are re-sent.
+- `authorize: [sameWorkspace, machines scope]`; `pair` / `tokenRecord` for the owner or the machine itself, `revoke` / `rename` for the owner, the socket entry points for the machine only, session methods for anyone but a machine.
+
 ## Chat (`src/chat`)
 
 `Chat` is keyed `{ws}:chat:{id}` (`actorKey(ws, 'chat', id)`). It stores attributed entries, knows who is a member and since when, and decides which agents a message activates — it never starts a session or task.

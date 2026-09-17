@@ -384,6 +384,9 @@ importers:
       '@agentic/core':
         specifier: workspace:*
         version: link:../core
+      '@agentic/daemon-protocol':
+        specifier: workspace:*
+        version: link:../daemon-protocol
       '@agentic/memory':
         specifier: workspace:*
         version: link:../memory

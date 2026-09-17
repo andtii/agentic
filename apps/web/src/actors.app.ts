@@ -6,18 +6,20 @@
  * - `ActorHost` — the Durable Object class. One object per actor, SQLite
  *   backed; `createHostDurableObject` derives `durableObjectStorage()` and
  *   `durableObjectReminders()` from the object's own state, and terminates
- *   client sockets inside the object (`socket`), hibernation-ready.
+ *   client sockets inside the object (`socket`), hibernation-ready. A
+ *   Machine's object also accepts its daemon's socket (`src/daemon`, #36).
  * - `createActorWorker()` — the Worker half: the HTTP actor mount
- *   (`/_sigx/actor`) and the forwarded socket upgrade
- *   (`/_sigx/socket/{type}/{key}`), everything else to `fallback`.
+ *   (`/_sigx/actor`), the forwarded socket upgrade
+ *   (`/_sigx/socket/{type}/{key}`), the daemon upgrade
+ *   (`/_agentic/daemon/{machineId}`), everything else to `fallback`.
  *
  * Both halves stamp the same server app (`authenticate` + principal `codec`)
  * on first use, so a principal resolved in the Worker survives the hop into
  * the object and every `ctx.actor()` call after it.
  *
  * Ports that later issues fill are explicit and fail loudly until then:
- * the Session factory (`anthropic-api`, #35), the daemon command sink
- * (Machine actor, #36) and the Schedule trigger (#42).
+ * the Session factory (`anthropic-api`, #35), the platform tools a daemon
+ * session calls back (#37) and the Schedule trigger (#42).
  */
 import type { Principal } from '@agentic/core';
 import {
@@ -27,18 +29,27 @@ import {
     Memory,
     TaskActor,
     Workspace,
+    asPrincipal,
     defineInbox,
+    defineMachineActor,
     defineScheduleActor,
     defineSessionActor,
+    machineKey,
+    machinePrincipal,
     principalCodec,
     serverAuth,
+    type MachineActor,
     type NotificationChannel,
-    type SessionPorts,
+    type SessionFactory,
+    type ToolCallPort,
     type TriggerPort
 } from '@agentic/platform';
-import type { AnyActorDefinition } from '@sigx/actors';
-import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike } from '@sigx/actors-cloudflare';
+import { actor, type AnyActorDefinition } from '@sigx/actors';
+import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp } from '@sigx/server/server';
+import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
+
+export { DAEMON_SOCKET_PREFIX };
 
 /** Bindings and secrets the worker reads (wrangler.jsonc; secrets via `wrangler secret put`). */
 export interface PlatformEnv {
@@ -58,17 +69,17 @@ export interface PlatformEnv {
 
 /** The seams later issues plug. Every default refuses with the issue that owns it. */
 export interface PlatformPorts {
-    readonly session: SessionPorts;
+    /** Runtime id → in-process session, or `null` for a daemon-hosted runtime. */
+    readonly factory: SessionFactory;
     readonly trigger: TriggerPort;
     readonly channels: readonly NotificationChannel[];
+    /** Platform tools a daemon session calls back through `tool.call` (#37). Absent → answered `unsupported`. */
+    readonly tools?: ToolCallPort;
 }
 
 export const defaultPorts: PlatformPorts = {
-    session: {
-        // `null` = not platform-managed; the Session then expects daemon frames.
-        // The `anthropic-api` factory is wired by #35; the daemon `commands` sink by #36.
-        factory: () => null
-    },
+    // `null` = not platform-managed; the Session then expects daemon frames. The `anthropic-api` factory is wired by #35.
+    factory: () => null,
     trigger: {
         fired(event) {
             throw new Error(`[actors.app] schedule trigger not wired (#42): dropped ${event.kind} ${event.key}`);
@@ -78,19 +89,31 @@ export const defaultPorts: PlatformPorts = {
     channels: []
 };
 
-/** Every platform actor this deployment hosts. The Machine actor joins in #36. */
+/** The daemon sockets every Machine object in this isolate holds — the Machine actor's `MachineSocketPort`. */
+export const daemonSockets = createDaemonSocketRegistry();
+
+/** Every platform actor this deployment hosts. */
 export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
-    return [
-        Workspace,
-        AgentActor,
-        Chat,
-        ChatPage,
-        TaskActor,
-        defineSessionActor(ports.session),
-        defineScheduleActor({ trigger: ports.trigger }),
-        Memory,
-        defineInbox({ channels: ports.channels })
-    ];
+    // Session and Machine reference each other: the sink resolves the Machine at call time, the Machine gets the Session lazily.
+    const Session = defineSessionActor({
+        factory: ports.factory,
+        commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) }
+    });
+    const Machine: MachineActor = defineMachineActor({ socket: daemonSockets.port, sessions: () => Session, ...(ports.tools ? { tools: ports.tools } : {}) });
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, defineScheduleActor({ trigger: ports.trigger }), Memory, defineInbox({ channels: ports.channels })];
+}
+
+let shared: readonly AnyActorDefinition[] | undefined;
+/** One registry per isolate, so the Worker, the objects and the `machines` lookup agree on the definitions. */
+function defaultActors(): readonly AnyActorDefinition[] {
+    return (shared ??= platformActors());
+}
+
+/** The Machine definition in a registry — what the daemon socket and the token lookup dispatch on. */
+export function machineDefinition(actors: readonly AnyActorDefinition[]): MachineActor {
+    const def = actors.find((d) => (d as { type: string }).type === 'machine');
+    if (!def) throw new Error('[actors.app] no `machine` actor in the registry');
+    return def as MachineActor;
 }
 
 /** The minimum a signing secret must be; shorter is treated as absent. */
@@ -102,13 +125,22 @@ let stampedFor: string | undefined;
  * Stamp `createServerApp` once per isolate (last-wins seam in `@sigx/server`).
  * Without `SESSION_SECRET` the app still decodes principals propagated by a
  * hop but authenticates nobody — fail-closed, never a dev fallback secret.
+ * A machine bearer token is checked against the Machine actor's stored hash
+ * (`tokenRecord`, read as that machine: the ids in a token are an address,
+ * the hash match is the proof).
  */
-export function ensureServerApp(env: PlatformEnv): void {
+export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefinition[] = defaultActors()): void {
     const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
     if (stampedFor === secret) return;
     stampedFor = secret;
     if (secret) {
-        createServerApp<Principal>({ ...serverAuth({ sessionSecret: secret }) });
+        const Machine = machineDefinition(actors);
+        createServerApp<Principal>({
+            ...serverAuth({
+                sessionSecret: secret,
+                machines: (ref) => actor(Machine, machineKey(ref.workspaceId, ref.machineId)).with({ context: asPrincipal(machinePrincipal(ref.workspaceId, ref.machineId)) }).tokenRecord()
+            })
+        });
     } else {
         console.warn('[actors.app] SESSION_SECRET is not set: every request is anonymous (set it with `wrangler secret put SESSION_SECRET` or .dev.vars)');
         createServerApp<Principal>({ authenticate: () => null, codec: principalCodec });
@@ -122,13 +154,36 @@ export function resetServerAppStamp(): void {
 
 const namespace = (env: PlatformEnv): DurableObjectNamespaceLike => env.ACTORS;
 
-/** Build the Durable Object class over `actors`. */
-export function createActorHost(actors: readonly AnyActorDefinition[] = platformActors()) {
+/**
+ * Build the Durable Object class over `actors`. A Machine's object also
+ * accepts its daemon socket: the upgrade at `/_agentic/daemon/{machineId}`
+ * is verified against the actor's token hash and accepted under the
+ * `agentic:daemon` tag; the hibernation handlers route those sockets to the
+ * Machine actor and everything else back to the actor host's own session.
+ */
+export function createActorHost(actors: readonly AnyActorDefinition[] = defaultActors()) {
     const Base = createHostDurableObject<PlatformEnv>({ actors: [...actors], namespace, socket: {} });
+    const Machine = machineDefinition(actors);
     return class ActorHost extends Base {
+        readonly #daemon;
         constructor(state: DurableObjectStateLike, env: PlatformEnv) {
-            ensureServerApp(env);
+            ensureServerApp(env, actors);
             super(state, env);
+            const own = actorKeyOfObject(state);
+            if (own?.type === 'machine') daemonSockets.bind(own.key, state);
+            this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
+        }
+        override fetch(request: Request): Promise<Response> {
+            return this.#daemon.fetch(request) ?? super.fetch(request);
+        }
+        override webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
+            return this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message);
+        }
+        override webSocketClose(ws: DurableWebSocketLike): Promise<void> {
+            return this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketClose(ws);
+        }
+        override webSocketError(ws: DurableWebSocketLike): Promise<void> {
+            return this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketError(ws);
         }
     };
 }
@@ -139,28 +194,20 @@ export interface ActorWorkerOptions {
     readonly fallback?: (request: Request) => Response | Promise<Response> | undefined;
 }
 
-/** The Worker half: actor HTTP mount + object-terminated socket forwarding. */
+/** The Worker half: daemon socket forwarding, actor HTTP mount, object-terminated socket forwarding. */
 export function createActorWorker(options: ActorWorkerOptions = {}) {
+    const actors = options.actors ?? defaultActors();
     const handler = createWorkerHandler<PlatformEnv>({
-        actors: [...(options.actors ?? platformActors())],
+        actors: [...actors],
         namespace,
         socket: { terminate: 'object' },
         ...(options.fallback ? { fetch: { fallback: options.fallback } } : {})
     });
     return {
         fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-            ensureServerApp(env);
+            ensureServerApp(env, actors);
+            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
             return handler.fetch(request, env, ctx);
         }
     };
-}
-
-/** The daemon socket (`/_agentic/daemon/{machineId}`) is accepted by the Machine object — #36. */
-export const DAEMON_SOCKET_PREFIX = '/_agentic/daemon/';
-
-export function daemonSocketStub(): Response {
-    return new Response(JSON.stringify({ error: 'machine_actor_unavailable', detail: 'the daemon socket is accepted by the Machine actor (#36)' }), {
-        status: 501,
-        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
-    });
 }

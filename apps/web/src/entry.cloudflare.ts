@@ -3,14 +3,14 @@
 // this code — wrangler's `assets` config serves matching files first.
 // What is left, in order:
 //
-//     daemon socket stub  ->  auth routes  ->  actor mount + actor sockets
-//                         ->  server functions  ->  document render
+//     auth routes  ->  daemon socket + actor mount + actor sockets
+//                  ->  server functions  ->  document render
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
-import { createActorHost, createActorWorker, daemonSocketStub, DAEMON_SOCKET_PREFIX, ensureServerApp, type PlatformEnv } from './actors.app';
+import { createActorHost, createActorWorker, ensureServerApp, type PlatformEnv } from './actors.app';
 import { createWebAuth, defaultResolveUser, type RouteHandler, type WebAuth } from './auth';
 
 const render = createFetchHandler({
@@ -19,6 +19,8 @@ const render = createFetchHandler({
     document: { assets }
 });
 
+// The daemon socket (`/_agentic/daemon/{machineId}`) is forwarded by the actor
+// worker to the Machine's Durable Object, which verifies the token and accepts it (#36).
 const actors = createActorWorker({
     fallback: (request) => {
         if (matchesServerFn(request, serverFnBase)) {
@@ -45,7 +47,8 @@ function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined
     if (auth?.secret !== secret) {
         const web = createWebAuth(
             { SESSION_SECRET: secret, GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET, APP_ORIGIN: env.APP_ORIGIN },
-            // Pairing redeems through the Machine actor — #36 supplies `pairing` and `machines`.
+            // `POST /auth/pair` needs a code → workspace resolution no actor provides yet (the code alone names no
+            // workspace); the platform-side redemption is `Machine.pair(code, info)` — the wiring issue after #90 binds it.
             { resolveUser: defaultResolveUser }
         );
         auth = { secret, routes: web.routes };
@@ -56,8 +59,6 @@ function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined
 
 export default {
     async fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        const { pathname } = new URL(request.url);
-        if (pathname.startsWith(DAEMON_SOCKET_PREFIX)) return daemonSocketStub();
         const route = authRoute(request, env);
         if (route) {
             ensureServerApp(env);

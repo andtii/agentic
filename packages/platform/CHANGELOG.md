@@ -4,6 +4,7 @@ All notable changes to `@agentic/platform` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Machine actor (#36): `defineMachineActor({ socket, sessions, tools?, heartbeatWindowMs?, commandTimeoutMs? })` keyed `{ws}:machine:{id}` — `pair(code, info)` through `Workspace.claimPairing` (hash only, `tokenRecord()` for `serverAuth({ machines })`), `revoke`, `rename`, `get`; the daemon envelope over `socketMessage` / `socketClosed` (`hello` → `welcome {wanted}`, `env`, `heartbeat`, `session.opened` → wire `hello` to the Session, `session.frame` → `forwardFrames`, `session.reply` → `commandReplied`, `session.closed`, `tool.call` → `ToolCallPort` under the agent principal); `openSession` → `opened | queued` per environment concurrency, `closeSession`, `sendCommand` with pending replies and deadlines; the `liveness` reminder (offline after the heartbeat window, timed-out commands answered `internal`). `MachineSocketPort` / `ToolCallPort` / `ToolCallError`, `machineKey` / `parseMachineKey`, `toAgentCapabilities`. Depends on `@agentic/daemon-protocol` for the codec. `testing`: `testActorApp` takes a `scheduler`.
 - Package skeleton.
 - `auth`: `sameWorkspace` / `workspaceOwner` policies, `workspaceKey`, `workspaceOfActorKey` (#14).
 - `workspace`: the `Workspace` root actor — owner, agent/chat/machine/schedule index, settings, pairing codes, `exportAll` / `deleteAll` task stubs (#14).

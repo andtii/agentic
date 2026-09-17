@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@agentic/core": "workspace:*",
+    "@agentic/daemon-protocol": "workspace:*",
     "@agentic/memory": "workspace:*",
     "@sigx/actors": "catalog:",
     "@sigx/ai-agent": "catalog:"

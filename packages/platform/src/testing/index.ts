@@ -21,7 +21,7 @@
 
 import type { Principal } from '@agentic/core';
 import { actor, type ActorClient, type AnyActorDefinition } from '@sigx/actors';
-import { defineActorApp, memoryStorage, type ActorApp, type ActorStorage, type Host, type HostDefaults } from '@sigx/actors/host';
+import { defineActorApp, memoryStorage, type ActorApp, type ActorAppOptions, type ActorStorage, type Host, type HostDefaults } from '@sigx/actors/host';
 import { isServerFnError } from '@sigx/server';
 import { createTestServerFnContext, stubServerApp } from '@sigx/server/testing';
 
@@ -55,6 +55,8 @@ export const QUIET_DEFAULTS: HostDefaults = { sweepIntervalMs: 600_000, reminder
 export interface TestActorAppOptions {
     readonly storage?: ActorStorage;
     readonly defaults?: HostDefaults;
+    /** A `manualScheduler()` when the test drives reminder ticks itself. */
+    readonly scheduler?: ActorAppOptions['scheduler'];
 }
 
 export interface PrincipalBinding {
@@ -83,7 +85,7 @@ const codec = {
 export function testActorApp(actors: readonly AnyActorDefinition[], options: TestActorAppOptions = {}): TestActorApp {
     const storage = options.storage ?? recordingStorage();
     const saves = (storage as Partial<RecordingStorage>).saves ?? [];
-    const app = defineActorApp({ actors, storage, defaults: { ...QUIET_DEFAULTS, ...options.defaults } });
+    const app = defineActorApp({ actors, storage, ...(options.scheduler ? { scheduler: options.scheduler } : {}), defaults: { ...QUIET_DEFAULTS, ...options.defaults } });
     let restore: (() => void) | null = null;
     return {
         app,

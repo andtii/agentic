@@ -68,10 +68,4 @@ describe('worker: platform actors over the HTTP actor mount', () => {
         await expect(ws.get()).rejects.toMatchObject({ status: 403 });
     });
 
-    it('stubs the daemon socket until the Machine actor lands (#36)', async () => {
-        const { daemonSocketStub } = await import('../../src/actors.app');
-        const response = daemonSocketStub();
-        expect(response.status).toBe(501);
-        expect(await response.json()).toMatchObject({ error: 'machine_actor_unavailable' });
-    });
 });
