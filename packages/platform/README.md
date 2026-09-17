@@ -46,3 +46,10 @@ expect(await statusOf(app.as(userPrincipal('u2')).actor(Workspace, workspaceKey(
 ```
 
 `as(principal)` binds a per-call context carrying that principal through the real in-process pipeline (policies, identity gate); `start()` stamps a JSON principal codec so `ctx.principal` reaches methods and survives `ctx.actor()` hops. `memoryStorage`, `recordingStorage`, `QUIET_DEFAULTS`, `rejectionStatus` and `statusOf` are exported alongside.
+## Memory (`src/memory`)
+
+`Memory` is one actor per scope, keyed `{ws}:memory:{scope}` (`agent:{id}` or `shared:{name}`): the `@agentic/memory` core state plus a shared-scope ACL. Methods: `put`, `update`, `retire`, `get`, `query`, `exportPage(after, size)`, `importBatch(rows, { onConflict })`, `compact`, `setAcl` / `getAcl` (owner only / read), `stats`. Every mutating turn ends in `ctx.save()` (Workers eviction rule); the reducer `applyMemoryActorEntry` is shaped for `ctx.append` once `@sigx/actors` ships it.
+
+Authorization: `memoryAuthorize` on the definition (same workspace; a user or a `memory`-scoped external client owns every scope; an agent reaches `agent:{id}` only as that agent; a machine nothing) and `aclAllows` inside every method for `shared:*` (`{ read, write }` lists or `"*"`; no ACL means no agent access — AC-10, MEM-11). The app must configure a principal `codec` on `createServerApp`, or `ctx.principal` is `null` and every in-turn check fails closed.
+
+`memoryActorPlugin({ workspace })` is the platform's default `MemoryPlugin`: `open(scope)` returns `actorMemoryStore(actor(Memory, key))`, streaming `export()` by id-ordered pages and batching `import()`.

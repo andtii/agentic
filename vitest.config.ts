@@ -21,6 +21,7 @@ export default defineConfig({
             { find: '@agentic/platform', replacement: pkg('platform') },
             { find: '@agentic/runtimes', replacement: pkg('runtimes') },
             { find: '@agentic/learning', replacement: pkg('learning') },
+            { find: '@agentic/memory/testing', replacement: resolve(__dirname, 'packages/memory/src/testing/index.ts') },
             { find: '@agentic/memory', replacement: pkg('memory') },
             { find: '@agentic/core', replacement: pkg('core') },
             { find: '@agentic/ui', replacement: pkg('ui') },

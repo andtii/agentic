@@ -25,6 +25,9 @@
       "@agentic/memory": [
         "./packages/memory/src/index.ts"
       ],
+      "@agentic/memory/testing": [
+        "./packages/memory/src/testing/index.ts"
+      ],
       "@agentic/learning": [
         "./packages/learning/src/index.ts"
       ],
