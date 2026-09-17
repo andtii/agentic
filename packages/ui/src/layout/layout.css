@@ -1,0 +1,190 @@
+/*
+ * @agentic/ui layout tier — hand-written until zero ships its own
+ * (andtii/zero-wip#473). Unlayered on purpose: app CSS always beats a design
+ * system's `@layer zero.*`, and this IS app-side CSS.
+ *
+ * Two halves, mirroring the shape zero's kit will generate:
+ *  1. the carriers — `stack` and `spacer` — which read their spacing from
+ *     `--l-gap` / `--l-pad` and declare the defaults ON the carrier, so a
+ *     nested stack never inherits its parent's gap;
+ *  2. a scope-agnostic step table mapping every `data-l-*` value onto the
+ *     design system's `--space-*` ramp, once per breakpoint tier.
+ *
+ * Every step falls back to zero's recommended ramp value so the layout holds
+ * before any design system loads (`var(--space-md, 0.5rem)`).
+ */
+
+/* ---- carriers ---------------------------------------------------------- */
+
+[data-scope="stack"][data-part="root"] {
+    --l-gap: 0;
+    --l-pad: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--l-gap);
+    padding: var(--l-pad);
+    min-inline-size: 0;
+    min-block-size: 0;
+    margin: 0;
+    list-style: none;
+}
+
+[data-scope="stack"][data-part="root"][data-orientation="horizontal"] {
+    flex-direction: row;
+    align-items: center;
+}
+
+[data-scope="spacer"][data-part="root"] {
+    flex: 1 1 auto;
+    align-self: stretch;
+}
+
+/* ---- step table: base tier ------------------------------------------- */
+
+[data-l-gap="none"] { --l-gap: 0; }
+[data-l-gap="2xs"] { --l-gap: var(--space-2xs, 0.125rem); }
+[data-l-gap="xs"] { --l-gap: var(--space-xs, 0.25rem); }
+[data-l-gap="sm"] { --l-gap: var(--space-sm, 0.375rem); }
+[data-l-gap="md"] { --l-gap: var(--space-md, 0.5rem); }
+[data-l-gap="lg"] { --l-gap: var(--space-lg, 0.75rem); }
+[data-l-gap="xl"] { --l-gap: var(--space-xl, 1rem); }
+[data-l-gap="2xl"] { --l-gap: var(--space-2xl, 1.5rem); }
+
+[data-l-pad="none"] { --l-pad: 0; }
+[data-l-pad="2xs"] { --l-pad: var(--space-2xs, 0.125rem); }
+[data-l-pad="xs"] { --l-pad: var(--space-xs, 0.25rem); }
+[data-l-pad="sm"] { --l-pad: var(--space-sm, 0.375rem); }
+[data-l-pad="md"] { --l-pad: var(--space-md, 0.5rem); }
+[data-l-pad="lg"] { --l-pad: var(--space-lg, 0.75rem); }
+[data-l-pad="xl"] { --l-pad: var(--space-xl, 1rem); }
+[data-l-pad="2xl"] { --l-pad: var(--space-2xl, 1.5rem); }
+
+[data-l-align="start"] { align-items: flex-start; }
+[data-l-align="center"] { align-items: center; }
+[data-l-align="end"] { align-items: flex-end; }
+[data-l-align="stretch"] { align-items: stretch; }
+[data-l-align="baseline"] { align-items: baseline; }
+
+[data-l-justify="start"] { justify-content: flex-start; }
+[data-l-justify="center"] { justify-content: center; }
+[data-l-justify="end"] { justify-content: flex-end; }
+[data-l-justify="between"] { justify-content: space-between; }
+[data-l-justify="around"] { justify-content: space-around; }
+[data-l-justify="evenly"] { justify-content: space-evenly; }
+
+[data-l-wrap] { flex-wrap: wrap; }
+[data-l-grow] { flex: 1 1 0%; min-inline-size: 0; }
+
+/* ---- step table: sm (640px) ------------------------------------------ */
+
+@media (min-width: 640px) {
+    [data-l-sm-gap="none"] { --l-gap: 0; }
+    [data-l-sm-gap="2xs"] { --l-gap: var(--space-2xs, 0.125rem); }
+    [data-l-sm-gap="xs"] { --l-gap: var(--space-xs, 0.25rem); }
+    [data-l-sm-gap="sm"] { --l-gap: var(--space-sm, 0.375rem); }
+    [data-l-sm-gap="md"] { --l-gap: var(--space-md, 0.5rem); }
+    [data-l-sm-gap="lg"] { --l-gap: var(--space-lg, 0.75rem); }
+    [data-l-sm-gap="xl"] { --l-gap: var(--space-xl, 1rem); }
+    [data-l-sm-gap="2xl"] { --l-gap: var(--space-2xl, 1.5rem); }
+
+    [data-l-sm-pad="none"] { --l-pad: 0; }
+    [data-l-sm-pad="2xs"] { --l-pad: var(--space-2xs, 0.125rem); }
+    [data-l-sm-pad="xs"] { --l-pad: var(--space-xs, 0.25rem); }
+    [data-l-sm-pad="sm"] { --l-pad: var(--space-sm, 0.375rem); }
+    [data-l-sm-pad="md"] { --l-pad: var(--space-md, 0.5rem); }
+    [data-l-sm-pad="lg"] { --l-pad: var(--space-lg, 0.75rem); }
+    [data-l-sm-pad="xl"] { --l-pad: var(--space-xl, 1rem); }
+    [data-l-sm-pad="2xl"] { --l-pad: var(--space-2xl, 1.5rem); }
+
+    [data-l-sm-align="start"] { align-items: flex-start; }
+    [data-l-sm-align="center"] { align-items: center; }
+    [data-l-sm-align="end"] { align-items: flex-end; }
+    [data-l-sm-align="stretch"] { align-items: stretch; }
+    [data-l-sm-align="baseline"] { align-items: baseline; }
+
+    [data-l-sm-justify="start"] { justify-content: flex-start; }
+    [data-l-sm-justify="center"] { justify-content: center; }
+    [data-l-sm-justify="end"] { justify-content: flex-end; }
+    [data-l-sm-justify="between"] { justify-content: space-between; }
+    [data-l-sm-justify="around"] { justify-content: space-around; }
+    [data-l-sm-justify="evenly"] { justify-content: space-evenly; }
+
+    [data-l-sm-wrap] { flex-wrap: wrap; }
+    [data-l-sm-grow] { flex: 1 1 0%; min-inline-size: 0; }
+}
+
+/* ---- step table: md (768px) ------------------------------------------ */
+
+@media (min-width: 768px) {
+    [data-l-md-gap="none"] { --l-gap: 0; }
+    [data-l-md-gap="2xs"] { --l-gap: var(--space-2xs, 0.125rem); }
+    [data-l-md-gap="xs"] { --l-gap: var(--space-xs, 0.25rem); }
+    [data-l-md-gap="sm"] { --l-gap: var(--space-sm, 0.375rem); }
+    [data-l-md-gap="md"] { --l-gap: var(--space-md, 0.5rem); }
+    [data-l-md-gap="lg"] { --l-gap: var(--space-lg, 0.75rem); }
+    [data-l-md-gap="xl"] { --l-gap: var(--space-xl, 1rem); }
+    [data-l-md-gap="2xl"] { --l-gap: var(--space-2xl, 1.5rem); }
+
+    [data-l-md-pad="none"] { --l-pad: 0; }
+    [data-l-md-pad="2xs"] { --l-pad: var(--space-2xs, 0.125rem); }
+    [data-l-md-pad="xs"] { --l-pad: var(--space-xs, 0.25rem); }
+    [data-l-md-pad="sm"] { --l-pad: var(--space-sm, 0.375rem); }
+    [data-l-md-pad="md"] { --l-pad: var(--space-md, 0.5rem); }
+    [data-l-md-pad="lg"] { --l-pad: var(--space-lg, 0.75rem); }
+    [data-l-md-pad="xl"] { --l-pad: var(--space-xl, 1rem); }
+    [data-l-md-pad="2xl"] { --l-pad: var(--space-2xl, 1.5rem); }
+
+    [data-l-md-align="start"] { align-items: flex-start; }
+    [data-l-md-align="center"] { align-items: center; }
+    [data-l-md-align="end"] { align-items: flex-end; }
+    [data-l-md-align="stretch"] { align-items: stretch; }
+    [data-l-md-align="baseline"] { align-items: baseline; }
+
+    [data-l-md-justify="start"] { justify-content: flex-start; }
+    [data-l-md-justify="center"] { justify-content: center; }
+    [data-l-md-justify="end"] { justify-content: flex-end; }
+    [data-l-md-justify="between"] { justify-content: space-between; }
+    [data-l-md-justify="around"] { justify-content: space-around; }
+    [data-l-md-justify="evenly"] { justify-content: space-evenly; }
+
+    [data-l-md-wrap] { flex-wrap: wrap; }
+    [data-l-md-grow] { flex: 1 1 0%; min-inline-size: 0; }
+}
+
+/* ---- step table: lg (1024px) ----------------------------------------- */
+
+@media (min-width: 1024px) {
+    [data-l-lg-gap="none"] { --l-gap: 0; }
+    [data-l-lg-gap="2xs"] { --l-gap: var(--space-2xs, 0.125rem); }
+    [data-l-lg-gap="xs"] { --l-gap: var(--space-xs, 0.25rem); }
+    [data-l-lg-gap="sm"] { --l-gap: var(--space-sm, 0.375rem); }
+    [data-l-lg-gap="md"] { --l-gap: var(--space-md, 0.5rem); }
+    [data-l-lg-gap="lg"] { --l-gap: var(--space-lg, 0.75rem); }
+    [data-l-lg-gap="xl"] { --l-gap: var(--space-xl, 1rem); }
+    [data-l-lg-gap="2xl"] { --l-gap: var(--space-2xl, 1.5rem); }
+
+    [data-l-lg-pad="none"] { --l-pad: 0; }
+    [data-l-lg-pad="2xs"] { --l-pad: var(--space-2xs, 0.125rem); }
+    [data-l-lg-pad="xs"] { --l-pad: var(--space-xs, 0.25rem); }
+    [data-l-lg-pad="sm"] { --l-pad: var(--space-sm, 0.375rem); }
+    [data-l-lg-pad="md"] { --l-pad: var(--space-md, 0.5rem); }
+    [data-l-lg-pad="lg"] { --l-pad: var(--space-lg, 0.75rem); }
+    [data-l-lg-pad="xl"] { --l-pad: var(--space-xl, 1rem); }
+    [data-l-lg-pad="2xl"] { --l-pad: var(--space-2xl, 1.5rem); }
+
+    [data-l-lg-align="start"] { align-items: flex-start; }
+    [data-l-lg-align="center"] { align-items: center; }
+    [data-l-lg-align="end"] { align-items: flex-end; }
+    [data-l-lg-align="stretch"] { align-items: stretch; }
+    [data-l-lg-align="baseline"] { align-items: baseline; }
+
+    [data-l-lg-justify="start"] { justify-content: flex-start; }
+    [data-l-lg-justify="center"] { justify-content: center; }
+    [data-l-lg-justify="end"] { justify-content: flex-end; }
+    [data-l-lg-justify="between"] { justify-content: space-between; }
+    [data-l-lg-justify="around"] { justify-content: space-around; }
+    [data-l-lg-justify="evenly"] { justify-content: space-evenly; }
+
+    [data-l-lg-wrap] { flex-wrap: wrap; }
+    [data-l-lg-grow] { flex: 1 1 0%; min-inline-size: 0; }
+}

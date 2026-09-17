@@ -12,9 +12,13 @@
       "development": "./dist/index.js",
       "production": "./dist/index.prod.js",
       "import": "./dist/index.js"
-    }
+    },
+    "./layout.css": "./src/layout/layout.css",
+    "./shell.css": "./src/shell/shell.css"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "*.css"
+  ],
   "scripts": {
     "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
   },

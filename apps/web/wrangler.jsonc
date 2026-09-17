@@ -1,0 +1,13 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "agentic-web",
+    "main": "dist/server/entry.cloudflare.js",
+    "compatibility_date": "2026-08-01",
+    // node:async_hooks carries the request into server functions called during SSR.
+    "compatibility_flags": ["nodejs_compat"],
+    "assets": {
+        "directory": "dist/client",
+        // Never serve the raw index.html template — the worker renders the document.
+        "html_handling": "none"
+    }
+}
