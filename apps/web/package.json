@@ -18,6 +18,7 @@
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@agentic/learning": "workspace:*",
+    "@agentic/mcp": "workspace:*",
     "@agentic/platform": "workspace:*",
     "@agentic/ui": "workspace:*",
     "@sigx/ai-agent": "catalog:",

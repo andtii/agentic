@@ -71,3 +71,6 @@ export { authenticateRequest, createAuthenticate, serverAuth, type AuthenticateF
 export { seal, open, hmacKey, type SealedPayload } from './seal.js';
 // `encoding.ts` (base64url, sha256, timing-safe compare) stays internal: the
 // package surface would otherwise collide with sibling modules' own helpers.
+
+// OAuth 2.1 authorization server + DCR for external MCP clients (#50).
+export * from './oauth-server/index.js';

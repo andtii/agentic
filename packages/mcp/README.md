@@ -43,4 +43,31 @@ await github.close();
 
 ## Server
 
-The platform MCP server (`/_agentic/mcp`, orchestration surface) is a separate issue; see `docs/architecture.md` §9.
+The platform MCP server — the orchestration surface (`docs/architecture.md` §9, #50): an external MCP client (Claude Code on a laptop, any orchestrator) drives every daemon on every machine through the same actor methods the web UI uses.
+
+```ts
+import { createPlatformMcpHandler, type PlatformPortFactory } from '@agentic/mcp';
+
+const port: PlatformPortFactory = (principal) => createActorPlatformPort(principal, { actors }); // apps/web binds it to the actors
+const mcp = createPlatformMcpHandler({ authenticate: (request) => oauth.verify(request), port, resourceMetadataUrl: oauth.resourceMetadataUrl });
+// mount: every method of /_agentic/mcp → mcp(request)
+```
+
+- **Transport**: `@sigx/ai-agent/harness`'s `createMcpToolHandler` — Streamable HTTP, JSON responses, tools only, stateless (GET/DELETE are 405, which the official client accepts). Built per request for the authenticated principal, so the tool set and the scope decision are made for that identity.
+- **Auth**: bearer = the OAuth 2.1 access token from `@agentic/platform`'s `createOAuthServer` (RFC 8414 / 7591 / 9728, PKCE). No or bad token → 401 with `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/_agentic/mcp"`, which is where an MCP client starts discovery; `claude mcp add --transport http agentic https://<origin>/_agentic/mcp` then registers itself and opens the browser for login + consent.
+- **Tools** (`platformTools(port, principal)`), named `<family>_<op>` because provider tool names cannot carry a dot; the family is the OAuth scope that gates it — a call without it is an `isError` result naming the scope, never a silent no-op:
+
+  | Family / scope | Tools | Hints |
+  |---|---|---|
+  | `machines` | `machines_list` | readOnly |
+  | `environments` | `environments_list(machineId?)`, `environments_doctor(machineId, environmentId?)` | readOnly |
+  | `agents` | `agents_list`, `agents_get(agentId)` | readOnly |
+  | `sessions` | `sessions_open(agentId, machineId, environmentId, cwd?, objective?)`, `sessions_prompt(sessionId, text)`, `sessions_respond(sessionId, requestId, decision)`, `sessions_cancel(sessionId)`, `sessions_tail(sessionId, from?, limit?)` | open/prompt/respond write, cancel destructive, tail readOnly |
+  | `tasks` | `tasks_create(agentId, objective, environmentId?, context?, constraints?)`, `tasks_get`, `tasks_tree`, `tasks_cancel`, `tasks_delegate(taskId, agentId, objective, context?, constraints?, environmentId?, callId?)` | get/tree readOnly, cancel destructive |
+  | `chats` | `chats_post(chatId, text, mentions?)`, `chats_history(chatId, cursor?, limit?)` | history readOnly |
+  | `memory` | `memory_search(scope, …)`, `memory_remember(scope, kind, text, …)` | search readOnly |
+  | `schedules` | `schedules_create(title, kind, recurrence, agentId?, environmentId?, prompt?, offlinePolicy?)` | write |
+
+  `tools/list` carries the hints as MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`), merged by the handler until the harness emits them itself (signalxjs/ai#37). Machine selection is explicit in every call that opens execution (EXE-12): `sessions_open` needs the machine AND the environment, and the app's port refuses a machine that does not report the environment. `sessions_tail` returns a bounded page (default 100, max 500) with a `next` cursor and `truncated`.
+- **`PlatformPort`**: the seam the tools call (`machines.list`, `sessions.open`, `tasks.create`, …), one instance per principal (`PlatformPortFactory`). Tests hand in fakes; `apps/web/src/auth/oauth-server/port.ts` is the real one over `actor()`.
+- **Declared gaps** (`PLATFORM_MCP_UNSUPPORTED`, PLG-09): MCP resources and prompts — `sessions_tail` is the only read stream. `tasks_delegate` is `Task.delegate` on the parent (COL-03, #39) + `Routing.run` on the child; `environments_doctor` is `Machine.doctor` (#43): the daemon's isolation/auth verdicts as last reported, with `unverified` for environments that sent none.
