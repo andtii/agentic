@@ -44,7 +44,34 @@ export const app = createServerApp<Principal>({
 
 ## Workspace (`src/workspace`)
 
-`ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat`, `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (detached-task stubs for OPS-10).
+`ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat`, `createSchedule` / `removeSchedule` (index only; the Schedule actor is created under the id), `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (OPS-10 detached tasks; progress in `get().ops`).
+
+`defineWorkspace({ sink, store })` binds the OPS-10 ports; the bare `Workspace` records `ops.<task>.error` and changes nothing. `ArtifactSink.put(path, body)` receives `{ws}/{stamp}/{kind}.ndjson` per actor kind (workspace, agents, memory, chats, schedules, inbox, registry — plus tasks and sessions when the store can `list`) and `manifest.json`; every row comes from the owning actor's `get` / `export` as the owner, secrets by name only, no pairing codes. `WorkspaceStore.purge({ type, key })` deletes one record (deactivate, then clear); the cascade purges every child the index implies, then `clearState()`s the root. `docs/retention.md` has the full table, the windows and what stays outside platform control.
+
+```ts
+const Workspace = defineWorkspace({
+    sink: { put: (path, body) => env.ARTIFACTS.put(path, body) },
+    store: { purge: (ref) => purgeDurableObject(ref) }
+});
+```
+
+## Registry (`src/registry`)
+
+`Registry` is the `{ws}:registry` actor (`registryKey(ws)`): plugins `{ manifest, enabled, config, grantedPermissions }`, MCP connectors, and secrets sealed under `WORKSPACE_KEK`. The app registers `defineRegistry({ kek: importWorkspaceKek(env.WORKSPACE_KEK) })`; the bare `Registry` refuses secrets with `no-kek`.
+
+- **Lifecycle (PLG-03, AC-13):** `register(manifest, { enabled?, config?, grant? })` validates the manifest and stores it disabled with no grants unless told otherwise (`grant: 'declared'` for built-ins, PLG-05); re-registering keeps `enabled` / `config` and drops grants the new manifest no longer declares. `enable(id)`, `disable(id)` → `{ plugin, dependents }`, `remove(id, { force? })` refuses `plugin-in-use` while anything depends on the plugin and drops its connectors. `dependents(id)` → `{ agents: [{ id, name, via: ('connector' | 'tool' | 'runtime')[] }], schedules: [{ id, title, agentId }] }`, computed from the Workspace index and each Agent's config (a `connectors[]` ref, a `tools[]` grant in the plugin's `tools:<id>` namespace — `<id>.x`, `<id>:x`, `<id>/x`, `<id>__x` — or `execution.runtime`) and each Schedule's agent.
+- **Gate:** `requireEnabled(ctx, workspaceId, pluginId)` from any actor (or `actor(Registry, key).requireEnabled(id)` in process) throws `PluginDisabledError { pluginId, state: 'disabled' | 'missing' }` — call it before a session opens on a runtime, a schedule fires through a connector, or a tool is exposed. Running work is never interrupted by a disable.
+- **No implicit authority (PLG-04):** `grant(id, scopes)` accepts only scopes the manifest declares; `revoke` removes them. `openSecret(name, pluginId)` returns plaintext only for an enabled plugin holding `secret:<name>` (or `secret:*`), and is the only method that does — `secrets()` lists names, `exportRows()` carries names, state holds `kek1.…` ciphertext bound to `{ws}:secret:{name}`.
+- **Connectors:** `putConnector({ id, pluginId, transport: 'streamable-http' | 'stdio', url | command, args?, machine?, secrets? })`, `removeConnector`, `connectors()` (read), `getConnector`, `setConnectorStatus(id, { state, error? }, tools?)` after a probe.
+- Authorization: `sameWorkspace` for reads (`list`, `connectors`, `secrets` are live `reads`); every mutation is `ownerOnly`; `openSecret` admits the owner and agent principals.
+
+```ts
+await registry.register(mcpConnector({ id: 'github', name: 'GitHub', transport: 'streamable-http', url, secret: 'github-token' }));
+await registry.setSecret('github-token', token);
+await registry.grant('github', ['secret:github-token', 'tools:github']);
+await registry.enable('github');
+const { dependents } = await registry.disable('github'); // → the agents and schedules still referencing it
+```
 
 ## Notifications (`src/notify`)
 

@@ -12,3 +12,4 @@ export * from './chat/index.js';
 export * from './task/index.js';
 export * from './ledger/index.js';
 export * from './machine/index.js';
+export * from './registry/index.js';

@@ -8,12 +8,19 @@
  *
  * Persistence is explicit and every mutation ends in `ctx.save()` inside the
  * turn — on Cloudflare `onDeactivate` never runs (architecture §3).
+ *
+ * `exportAll` / `deleteAll` (OPS-10) are detached tasks over the app-level
+ * `ArtifactSink` / `WorkspaceStore` ports (`defineWorkspace({ sink, store })`);
+ * the cascade itself lives in `cascade.ts`. The default `Workspace` has no
+ * ports: its tasks record the failure in `ops` and change nothing.
  */
 
 import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId } from '@agentic/core';
 import { createId } from '@agentic/core';
-import { defineActor } from '@sigx/actors';
+import { defineActor, type ActorPolicy } from '@sigx/actors';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
+import { deleteWorkspace, exportWorkspace } from './cascade.js';
+import type { ArtifactSink, WorkspaceStore } from './ports.js';
 
 export const WORKSPACE_STATE_VERSION = 1;
 
@@ -28,7 +35,7 @@ export interface NotificationPrefs {
     readonly push: boolean;
 }
 
-/** Retention windows in days (OPS-10). */
+/** Retention windows in days (OPS-10, `docs/retention.md`). */
 export interface RetentionSettings {
     readonly sessionLogDays: number;
     readonly artifactDays: number;
@@ -68,6 +75,22 @@ export interface MachineIndexEntry {
     readonly pairing?: { readonly code: string; readonly expiresAt: number };
 }
 
+/** The last run of one OPS-10 task. `finishedAt` without `error` is success. */
+export interface WorkspaceOpRecord {
+    readonly startedAt: number;
+    readonly finishedAt?: number;
+    readonly error?: string;
+    /** Export only: the `{ws}/{stamp}` prefix the files went under. */
+    readonly prefix?: string;
+    /** Export: files written; delete: records purged. */
+    readonly count?: number;
+}
+
+export interface WorkspaceOps {
+    export?: WorkspaceOpRecord;
+    delete?: WorkspaceOpRecord;
+}
+
 export interface WorkspaceState {
     v: number;
     /** The owning user; the key's `{userId}` segment. */
@@ -78,6 +101,8 @@ export interface WorkspaceState {
     machines: MachineIndexEntry[];
     schedules: ScheduleId[];
     settings: WorkspaceSettings;
+    /** OPS-10 task log; absent on records written before it existed. */
+    ops?: WorkspaceOps;
 }
 
 /** What `get` returns: the state, detached from the actor. */
@@ -109,6 +134,16 @@ export interface SettingsPatch {
     readonly retention?: Partial<RetentionSettings>;
 }
 
+export interface WorkspaceOptions {
+    /** Where `exportAll` writes (R2 on Cloudflare). */
+    readonly sink?: ArtifactSink;
+    /** How `deleteAll` reaches child records (the actor storage). */
+    readonly store?: WorkspaceStore;
+    readonly now?: () => number;
+    /** Override the policy chain. Default `[sameWorkspace, workspaceOwner]`. */
+    readonly authorize?: ActorPolicy | readonly ActorPolicy[];
+}
+
 /** The `{userId}` of a `ws:{userId}` key. */
 export function ownerOfWorkspaceKey(key: string): string {
     return key.startsWith(WORKSPACE_KEY_PREFIX) ? key.slice(WORKSPACE_KEY_PREFIX.length) : key;
@@ -130,124 +165,181 @@ function codesMatch(a: string, b: string): boolean {
     return diff === 0;
 }
 
-export const Workspace = defineActor({
-    type: 'Workspace',
-    authorize: [sameWorkspace, workspaceOwner],
-    persistence: 'explicit',
-    state: (key): WorkspaceState => ({
-        v: WORKSPACE_STATE_VERSION,
-        owner: ownerOfWorkspaceKey(key),
-        createdAt: Date.now(),
-        agents: [],
-        chats: [],
-        machines: [],
-        schedules: [],
-        settings: DEFAULT_SETTINGS
-    }),
-    methods: (ctx) => ({
-        async get(): Promise<WorkspaceView> {
-            return ctx.snapshot();
-        },
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-        /** Records the id in the index; the Agent actor's config is written by the Agent lane. */
-        async createAgent(input: CreateAgentInput): Promise<{ agentId: AgentId }> {
-            if (!input.name.trim()) throw new Error('[Workspace] createAgent: name is required');
-            const agentId = createId('agent') as AgentId;
-            ctx.state.agents.push(agentId);
-            await ctx.save();
-            return { agentId };
-        },
+export function defineWorkspace(options: WorkspaceOptions = {}) {
+    // Resolved per call, not captured: tests replace `Date.now` after this module loaded.
+    const now = options.now ?? (() => Date.now());
+    const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? [sameWorkspace, workspaceOwner];
+    const cascade = { ...(options.sink ? { sink: options.sink } : {}), ...(options.store ? { store: options.store } : {}), now };
 
-        async createChat(_input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
-            const chatId = createId('chat') as ChatId;
-            ctx.state.chats.push(chatId);
-            await ctx.save();
-            return { chatId };
-        },
+    return defineActor({
+        type: 'Workspace',
+        authorize,
+        persistence: 'explicit',
+        methodReentrancy: { get: 'always' },
+        state: (key): WorkspaceState => ({
+            v: WORKSPACE_STATE_VERSION,
+            owner: ownerOfWorkspaceKey(key),
+            createdAt: now(),
+            agents: [],
+            chats: [],
+            machines: [],
+            schedules: [],
+            settings: DEFAULT_SETTINGS,
+            ops: {}
+        }),
+        methods: (ctx) => ({
+            async get(): Promise<WorkspaceView> {
+                return ctx.snapshot();
+            },
 
-        /**
-         * Register a machine that has not paired yet. The daemon presents the
-         * code to `Machine.pair`, which redeems it here through a hop; the
-         * machine token itself is minted by the auth lane, never stored here.
-         */
-        async registerMachinePending(input: RegisterMachineInput): Promise<RegisterMachineResult> {
-            if (!input.name.trim()) throw new Error('[Workspace] registerMachinePending: name is required');
-            const machineId = createId('machine') as MachineId;
-            const now = Date.now();
-            const pairing = { code: createPairingCode(), expiresAt: now + PAIRING_CODE_TTL_MS };
-            ctx.state.machines.push({ id: machineId, name: input.name, status: 'pending', registeredAt: now, pairing });
-            await ctx.save();
-            return { machineId, pairingCode: pairing.code, expiresAt: pairing.expiresAt };
-        },
+            /** Records the id in the index; the Agent actor's config is written by the Agent lane. */
+            async createAgent(input: CreateAgentInput): Promise<{ agentId: AgentId }> {
+                if (!input.name.trim()) throw new Error('[Workspace] createAgent: name is required');
+                const agentId = createId('agent') as AgentId;
+                ctx.state.agents.push(agentId);
+                await ctx.save();
+                return { agentId };
+            },
 
-        /**
-         * Redeem a pairing code: single use, expiring. Returns the machine it
-         * belonged to, or `null` for an unknown, used or expired code — the
-         * caller cannot tell which, by design. An expired entry is dropped.
-         */
-        async claimPairing(code: string): Promise<{ machineId: MachineId } | null> {
-            const now = Date.now();
-            const i = ctx.state.machines.findIndex((m) => m.pairing !== undefined && codesMatch(m.pairing.code, code));
-            if (i < 0) return null;
-            const entry = ctx.state.machines[i]!;
-            if (entry.pairing!.expiresAt <= now) {
+            async createChat(_input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
+                const chatId = createId('chat') as ChatId;
+                ctx.state.chats.push(chatId);
+                await ctx.save();
+                return { chatId };
+            },
+
+            /** Allocates and indexes a schedule id; the caller then `create`s the Schedule actor under it. */
+            async createSchedule(): Promise<{ scheduleId: ScheduleId }> {
+                const scheduleId = createId('schedule') as ScheduleId;
+                ctx.state.schedules.push(scheduleId);
+                await ctx.save();
+                return { scheduleId };
+            },
+
+            async removeSchedule(scheduleId: ScheduleId): Promise<boolean> {
+                const i = ctx.state.schedules.indexOf(scheduleId);
+                if (i < 0) return false;
+                ctx.state.schedules.splice(i, 1);
+                await ctx.save();
+                return true;
+            },
+
+            /**
+             * Register a machine that has not paired yet. The daemon presents the
+             * code to `Machine.pair`, which redeems it here through a hop; the
+             * machine token itself is minted by the auth lane, never stored here.
+             */
+            async registerMachinePending(input: RegisterMachineInput): Promise<RegisterMachineResult> {
+                if (!input.name.trim()) throw new Error('[Workspace] registerMachinePending: name is required');
+                const machineId = createId('machine') as MachineId;
+                const at = now();
+                const pairing = { code: createPairingCode(), expiresAt: at + PAIRING_CODE_TTL_MS };
+                ctx.state.machines.push({ id: machineId, name: input.name, status: 'pending', registeredAt: at, pairing });
+                await ctx.save();
+                return { machineId, pairingCode: pairing.code, expiresAt: pairing.expiresAt };
+            },
+
+            /**
+             * Redeem a pairing code: single use, expiring. Returns the machine it
+             * belonged to, or `null` for an unknown, used or expired code — the
+             * caller cannot tell which, by design. An expired entry is dropped.
+             */
+            async claimPairing(code: string): Promise<{ machineId: MachineId } | null> {
+                const at = now();
+                const i = ctx.state.machines.findIndex((m) => m.pairing !== undefined && codesMatch(m.pairing.code, code));
+                if (i < 0) return null;
+                const entry = ctx.state.machines[i]!;
+                if (entry.pairing!.expiresAt <= at) {
+                    ctx.state.machines.splice(i, 1);
+                    await ctx.save();
+                    return null;
+                }
+                ctx.state.machines[i] = { id: entry.id, name: entry.name, status: 'paired', registeredAt: entry.registeredAt, pairedAt: at };
+                await ctx.save();
+                return { machineId: entry.id };
+            },
+
+            /** Every machine, without the pairing codes — those were shown once, at registration. */
+            async listMachines(): Promise<readonly MachineIndexEntry[]> {
+                return ctx.state.machines.map((m) => {
+                    const { pairing: _pairing, ...rest } = ctx.snapshot(m);
+                    return rest;
+                });
+            },
+
+            async removeMachine(machineId: MachineId): Promise<boolean> {
+                const i = ctx.state.machines.findIndex((m) => m.id === machineId);
+                if (i < 0) return false;
                 ctx.state.machines.splice(i, 1);
                 await ctx.save();
-                return null;
+                return true;
+            },
+
+            async updateSettings(patch: SettingsPatch): Promise<WorkspaceSettings> {
+                const s = ctx.state.settings;
+                ctx.state.settings = {
+                    timeZone: patch.timeZone ?? s.timeZone,
+                    notifications: { ...s.notifications, ...patch.notifications },
+                    defaults: { ...s.defaults, ...patch.defaults },
+                    retention: { ...s.retention, ...patch.retention }
+                };
+                await ctx.save();
+                return ctx.snapshot(ctx.state.settings);
+            },
+
+            /** OPS-10: write everything as NDJSON through the `ArtifactSink`. Progress lands in `get().ops.export`. */
+            async exportAll(): Promise<{ started: true }> {
+                ctx.state.ops = { ...ctx.state.ops, export: { startedAt: now() } };
+                await ctx.save();
+                await ctx.tasks.start('exportAll');
+                return { started: true };
+            },
+
+            /** OPS-10: purge every child record, then this one. `get()` afterwards is a fresh workspace. */
+            async deleteAll(): Promise<{ started: true }> {
+                ctx.state.ops = { ...ctx.state.ops, delete: { startedAt: now() } };
+                await ctx.save();
+                await ctx.tasks.start('deleteAll');
+                return { started: true };
             }
-            ctx.state.machines[i] = { id: entry.id, name: entry.name, status: 'paired', registeredAt: entry.registeredAt, pairedAt: now };
-            await ctx.save();
-            return { machineId: entry.id };
-        },
+        }),
+        tasks: (ctx) => ({
+            async exportAll(): Promise<void> {
+                const startedAt = (await ctx.turn((c) => c.snapshot())).ops?.export?.startedAt ?? now();
+                let record: WorkspaceOpRecord;
+                try {
+                    const report = await exportWorkspace(ctx, cascade);
+                    record = { startedAt, finishedAt: now(), prefix: report.prefix, count: report.files.length };
+                } catch (error) {
+                    record = { startedAt, finishedAt: now(), error: errorText(error) };
+                }
+                await ctx.turn(async (c) => {
+                    c.state.ops = { ...c.state.ops, export: record };
+                    await c.save();
+                });
+            },
+            async deleteAll(): Promise<void> {
+                const startedAt = (await ctx.turn((c) => c.snapshot())).ops?.delete?.startedAt ?? now();
+                try {
+                    await deleteWorkspace(ctx, cascade);
+                    // Success leaves nothing to write to: the record is gone.
+                } catch (error) {
+                    await ctx.turn(async (c) => {
+                        c.state.ops = { ...c.state.ops, delete: { startedAt, finishedAt: now(), error: errorText(error) } };
+                        await c.save();
+                    });
+                }
+            }
+        })
+    });
+}
 
-        /** Every machine, without the pairing codes — those were shown once, at registration. */
-        async listMachines(): Promise<readonly MachineIndexEntry[]> {
-            return ctx.state.machines.map((m) => {
-                const { pairing: _pairing, ...rest } = ctx.snapshot(m);
-                return rest;
-            });
-        },
+/** The Workspace with no ports: everything but the OPS-10 tasks. The app registers `defineWorkspace({ sink, store })`. */
+export const Workspace = defineWorkspace();
 
-        async removeMachine(machineId: MachineId): Promise<boolean> {
-            const i = ctx.state.machines.findIndex((m) => m.id === machineId);
-            if (i < 0) return false;
-            ctx.state.machines.splice(i, 1);
-            await ctx.save();
-            return true;
-        },
+export type WorkspaceActor = ReturnType<typeof defineWorkspace>;
 
-        async updateSettings(patch: SettingsPatch): Promise<WorkspaceSettings> {
-            const s = ctx.state.settings;
-            ctx.state.settings = {
-                timeZone: patch.timeZone ?? s.timeZone,
-                notifications: { ...s.notifications, ...patch.notifications },
-                defaults: { ...s.defaults, ...patch.defaults },
-                retention: { ...s.retention, ...patch.retention }
-            };
-            await ctx.save();
-            return ctx.snapshot(ctx.state.settings);
-        },
-
-        /** OPS-10: stream everything to R2 as NDJSON. v1 stub — starts the detached task. */
-        async exportAll(): Promise<{ started: true }> {
-            await ctx.tasks.start('exportAll');
-            return { started: true };
-        },
-
-        /** OPS-10: cascade-delete every child actor. v1 stub — starts the detached task. */
-        async deleteAll(): Promise<{ started: true }> {
-            await ctx.tasks.start('deleteAll');
-            return { started: true };
-        }
-    }),
-    tasks: () => ({
-        async exportAll(): Promise<void> {
-            // Stub: the R2 export lands with the retention issue (OPS-10).
-        },
-        async deleteAll(): Promise<void> {
-            // Stub: the cascade lands once the child actors exist (OPS-10).
-        }
-    })
-});
-
-export type WorkspaceActor = typeof Workspace;
+export type { ActorRecordRef, ArtifactSink, WorkspaceStore } from './ports.js';
+export { childRecords, deleteWorkspace, exportWorkspace, type CascadeOptions, type DeleteReport, type ExportReport } from './cascade.js';
