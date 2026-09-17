@@ -90,12 +90,14 @@ describe('cli', () => {
 
 describe('Windows service scripts', () => {
     const scripts = resolve(import.meta.dirname, '..', 'scripts');
-    it.runIf(process.platform === 'win32')('install and uninstall parse as PowerShell', () => {
-        for (const name of ['install-service.ps1', 'uninstall-service.ps1']) {
-            const file = join(scripts, name);
-            const check = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file.replace(/'/g, "''")}', [ref]$null, [ref]$e); if ($e.Count) { $e | ForEach-Object { $_.Message }; exit 1 }`;
-            const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', check], { encoding: 'utf8' });
-            expect(result.status, `${name}: ${result.stdout}${result.stderr}`).toBe(0);
-        }
+    // One PowerShell process for both scripts; a cold windows runner takes >10 s to start it.
+    it.runIf(process.platform === 'win32')('install and uninstall parse as PowerShell', { timeout: 60_000 }, () => {
+        const checks = ['install-service.ps1', 'uninstall-service.ps1'].map((name) => {
+            const file = join(scripts, name).replace(/'/g, "''");
+            return `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file}', [ref]$null, [ref]$e); if ($e.Count) { '${name}:'; $e | ForEach-Object { $_.Message }; $bad = $true }`;
+        });
+        const script = `$bad = $false; ${checks.join('; ')}; if ($bad) { exit 1 }`;
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
+        expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
     });
 });
