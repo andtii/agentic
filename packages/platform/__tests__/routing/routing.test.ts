@@ -411,3 +411,77 @@ describe('AC-07: the selected machine is offline (EXE-11, EXE-12)', () => {
         expect(edges(t)).toEqual(['queued>waiting']);
     });
 });
+
+describe('multi-account environments on one machine (EXE-04/05/07, AC-02)', () => {
+    const E2 = 'env_2' as EnvironmentId;
+    const E3 = 'env_3' as EnvironmentId;
+    /** One account per environment, isolated by its own config dir, with the daemon's doctor verdict as `hello` carries it. */
+    const profile = (m: MachineId, id: EnvironmentId, label: string, identity: string, verdict: { ok: boolean; code: string; level: 'error' | 'info' } = { ok: true, code: 'auth-ok', level: 'info' }) => ({
+        ...inMemoryEnvironment(m, id),
+        name: label,
+        account: { label, authStatus: 'ok' as const, identity },
+        isolation: 'config-dir' as const,
+        doctor: { ok: verdict.ok, findings: [{ level: verdict.level, code: verdict.code, message: `${label}: ${verdict.code}`, environmentIds: [id] }], checkedAt: 1 }
+    });
+    const picks: [string, EnvironmentId][] = [
+        ['t1', E1],
+        ['t2', E2],
+        ['t3', E3]
+    ];
+
+    it('three accounts are each selectable, every session opens on the environment its task chose, and no run changes another account', async () => {
+        const m1 = await pairMachine('laptop');
+        connect(m1, daemon(m1, [profile(m1, E1, 'work', 'me@work.example'), profile(m1, E2, 'personal', 'me@home.example'), profile(m1, E3, 'client', 'me@client.example')]));
+        await online(m1);
+        const before = (await machine(m1).get()).environments;
+        expect(before.map((e) => e.account.identity)).toEqual(['me@work.example', 'me@home.example', 'me@client.example']);
+
+        const a = await agent('agent_cc', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        // One after another, as a user switching accounts would: each run must leave the others' accounts untouched.
+        for (const [id, environmentId] of picks) {
+            await createTask(id, a, { environmentId });
+            await routing().run(id as TaskId);
+            await settled(id);
+        }
+
+        const opens = sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open') as unknown as { sessionId: string; environmentId: string }[];
+        expect(opens).toHaveLength(3);
+        for (const [id, environmentId] of picks) {
+            const t = await task(id).get();
+            expect(t.status).toBe('completed');
+            expect((await session(t.sessionId!).get()).spec).toMatchObject({ environmentId, machineId: m1 });
+            // The daemon was told exactly that environment for this session — the account is chosen by the task, never switched (EXE-12).
+            expect(opens.filter((o) => o.sessionId === t.sessionId).map((o) => o.environmentId)).toEqual([environmentId]);
+        }
+
+        // Execution changed no environment's account or verdict: what the machine reports is what it reported before (EXE-05).
+        const after = (await machine(m1).get()).environments;
+        expect(after.map((e) => ({ id: e.id, account: e.account, isolation: e.isolation, doctor: e.doctor }))).toEqual(before.map((e) => ({ id: e.id, account: e.account, isolation: e.isolation, doctor: e.doctor })));
+
+        const verdicts = await machine(m1).doctor();
+        expect(verdicts).toMatchObject({ machineId: m1, online: true, ok: true, unverified: [] });
+        expect(verdicts.environments.map((e) => [e.environmentId, e.account.identity, e.isolation, e.verdict?.ok])).toEqual([
+            [E1, 'me@work.example', 'config-dir', true],
+            [E2, 'me@home.example', 'config-dir', true],
+            [E3, 'me@client.example', 'config-dir', true]
+        ]);
+        expect((await machine(m1).doctor(E2)).environments.map((e) => e.environmentId)).toEqual([E2]);
+        expect(await statusOf(machine(m1).doctor('env_nope' as EnvironmentId))).toBe(404);
+    });
+
+    it('two accounts on one config dir are reported by the machine, never tolerated as ok', async () => {
+        const m1 = await pairMachine('laptop');
+        const shared = { ok: false, code: 'shared-config-dir', level: 'error' as const };
+        const { doctor: _none, ...unverified } = profile(m1, E3, 'client', 'me@client.example');
+        connect(m1, daemon(m1, [profile(m1, E1, 'work', 'me@work.example', shared), profile(m1, E2, 'work-again', 'me@work.example', shared), unverified]));
+        await online(m1);
+        const verdicts = await machine(m1).doctor();
+        expect(verdicts.ok).toBe(false);
+        expect(verdicts.unverified).toEqual([E3]);
+        expect(verdicts.environments.map((e) => [e.environmentId, e.verdict?.ok, e.verdict?.findings[0]?.code])).toEqual([
+            [E1, false, 'shared-config-dir'],
+            [E2, false, 'shared-config-dir'],
+            [E3, undefined, undefined]
+        ]);
+    });
+});
