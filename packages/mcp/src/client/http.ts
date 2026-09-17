@@ -38,20 +38,31 @@ export interface StreamableHttpTransport extends McpTransport {
     protocolVersion: string | undefined;
 }
 
-const anySignal = (signals: readonly AbortSignal[]): AbortSignal | undefined => {
-    if (signals.length === 0) return undefined;
-    if (signals.length === 1) return signals[0];
+/** One signal aborting when any source does, plus `dispose` to detach from sources that never aborted. */
+const anySignal = (signals: readonly AbortSignal[]): { readonly signal: AbortSignal | undefined; readonly dispose: () => void } => {
+    const none = () => {};
+    if (signals.length <= 1) return { signal: signals[0], dispose: none };
     const any = (AbortSignal as unknown as { any?: (s: readonly AbortSignal[]) => AbortSignal }).any;
-    if (any) return any(signals);
+    if (any) return { signal: any(signals), dispose: none };
     const controller = new AbortController();
+    const detach: (() => void)[] = [];
+    const dispose = () => {
+        for (const d of detach.splice(0)) d();
+    };
     for (const s of signals) {
         if (s.aborted) {
             controller.abort(s.reason);
             break;
         }
-        s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+        const onAbort = () => {
+            dispose();
+            controller.abort(s.reason);
+        };
+        s.addEventListener('abort', onAbort, { once: true });
+        detach.push(() => s.removeEventListener('abort', onAbort));
     }
-    return controller.signal;
+    if (controller.signal.aborted) dispose();
+    return { signal: controller.signal, dispose };
 };
 
 export function createStreamableHttpTransport(options: StreamableHttpTransportOptions): StreamableHttpTransport {
@@ -110,7 +121,13 @@ export function createStreamableHttpTransport(options: StreamableHttpTransportOp
         }
         const type = (response.headers.get('content-type') ?? '').toLowerCase();
         if (type.startsWith('application/json')) {
-            const body: unknown = await response.json();
+            let body: unknown;
+            try {
+                body = await response.json();
+            } catch (e) {
+                if (signal?.aborted) throw e;
+                throw new McpTransportError(`MCP response for "${method}" from ${url} is invalid JSON`, response.status, e);
+            }
             for (const m of Array.isArray(body) ? body : [body]) {
                 if (isPlainObject(m) && m.id === id && typeof m.method !== 'string') return m as unknown as JsonRpcResponse;
                 dispatch(m);
@@ -145,7 +162,7 @@ export function createStreamableHttpTransport(options: StreamableHttpTransportOp
         async request<R>(method: string, params?: unknown, reqOptions: McpRequestOptions = {}): Promise<R> {
             const id = ++nextId;
             const timeout = AbortSignal.timeout(timeoutMs);
-            const signal = anySignal(reqOptions.signal ? [reqOptions.signal, timeout] : [timeout]);
+            const { signal, dispose } = anySignal(reqOptions.signal ? [reqOptions.signal, timeout] : [timeout]);
             try {
                 const response = await post({ jsonrpc: '2.0', id, method, ...(params !== undefined ? { params } : {}) }, signal);
                 const reply = await settle(response, id, method, signal);
@@ -156,6 +173,8 @@ export function createStreamableHttpTransport(options: StreamableHttpTransportOp
                 if (signal?.aborted && !closed) void transport.notify('notifications/cancelled', { requestId: id, reason: reqOptions.signal?.aborted ? 'aborted' : 'timeout' }).catch(() => {});
                 if (signal?.aborted && !(e instanceof McpTransportError)) throw new McpTransportError(`MCP request "${method}" ${reqOptions.signal?.aborted ? 'was aborted' : `timed out after ${timeoutMs} ms`}`, undefined, e);
                 throw e;
+            } finally {
+                dispose();
             }
         },
         async notify(method, params) {

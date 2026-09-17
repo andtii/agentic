@@ -31,7 +31,7 @@ export function inputSchemaFor(schema: McpToolDefinition['inputSchema']): Standa
             vendor: 'agentic-mcp',
             validate(value: unknown) {
                 if (typeof value !== 'object' || value === null || Array.isArray(value)) return { issues: [{ message: 'Expected an object of arguments' }] };
-                const issues = required.filter((k) => !(k in value)).map((k) => ({ message: `Missing required argument "${k}"`, path: [k] }));
+                const issues = required.filter((k) => !Object.hasOwn(value, k)).map((k) => ({ message: `Missing required argument "${k}"`, path: [k] }));
                 return issues.length > 0 ? { issues } : { value: value as Record<string, unknown> };
             },
             jsonSchema: { input: () => schema, output: () => schema }

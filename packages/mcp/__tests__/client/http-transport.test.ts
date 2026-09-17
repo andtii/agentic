@@ -69,6 +69,43 @@ describe('createStreamableHttpTransport', () => {
         await expect(transport.request('tools/call', { name: 'nope' })).rejects.toMatchObject({ name: 'McpError', code: -32602, message: 'Tool nope not found', data: { tool: 'nope' } });
     });
 
+    it('turns a JSON content-type with an unparsable body into McpTransportError', async () => {
+        const transport = createStreamableHttpTransport({ url: 'http://x/mcp', fetch: async () => new Response('{not json', { headers: { 'content-type': 'application/json' } }) });
+        await expect(transport.request('ping')).rejects.toMatchObject({ name: 'McpTransportError', message: expect.stringContaining('invalid JSON') });
+    });
+
+    it('removes its abort listeners from a long-lived caller signal once a request settles (no AbortSignal.any)', async () => {
+        const original = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+        Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true, writable: true });
+        try {
+            const caller = new AbortController().signal;
+            let live = 0;
+            const add = caller.addEventListener.bind(caller);
+            const remove = caller.removeEventListener.bind(caller);
+            caller.addEventListener = ((type: string, l: EventListenerOrEventListenerObject, o?: AddEventListenerOptions | boolean) => {
+                if (type === 'abort') live++;
+                add(type, l, o);
+            }) as typeof caller.addEventListener;
+            caller.removeEventListener = ((type: string, l: EventListenerOrEventListenerObject, o?: EventListenerOptions | boolean) => {
+                if (type === 'abort') live--;
+                remove(type, l, o);
+            }) as typeof caller.removeEventListener;
+            const transport = createStreamableHttpTransport({
+                url: 'http://x/mcp',
+                fetch: async (_u, init) => {
+                    const { id } = JSON.parse(String(init?.body));
+                    return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: {} }), { headers: { 'content-type': 'application/json' } });
+                }
+            });
+            for (let i = 0; i < 5; i++) await transport.request('ping', undefined, { signal: caller });
+            await expect(transport.request('ping', undefined, { signal: caller })).resolves.toEqual({});
+            expect(live).toBe(0);
+        } finally {
+            if (original) Object.defineProperty(AbortSignal, 'any', original);
+            else delete (AbortSignal as unknown as { any?: unknown }).any;
+        }
+    });
+
     it('times out a request that never answers', async () => {
         const transport = createStreamableHttpTransport({ url: 'http://x/mcp', timeoutMs: 20, fetch: (_u, init) => new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))) });
         await expect(transport.request('ping')).rejects.toThrow();

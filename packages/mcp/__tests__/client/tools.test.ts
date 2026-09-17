@@ -61,6 +61,8 @@ describe('mcpTool', () => {
         expect(std.validate({ path: '/a', mode: 'r' })).toEqual({ value: { path: '/a', mode: 'r' } });
         expect(std.validate({ path: '/a' })).toEqual({ issues: [{ message: 'Missing required argument "mode"', path: ['mode'] }] });
         expect(std.validate('nope')).toEqual({ issues: [{ message: 'Expected an object of arguments' }] });
+        // An inherited key is not an argument: JSON.stringify would drop it on the wire.
+        expect(std.validate(Object.assign(Object.create({ mode: 'r' }), { path: '/a' }))).toEqual({ issues: [{ message: 'Missing required argument "mode"', path: ['mode'] }] });
         expect(inputSchemaFor({ type: 'object' })['~standard'].validate({ anything: 1 })).toEqual({ value: { anything: 1 } });
         const seen: unknown[] = [];
         const tool = mcpTool(def, async (_n, args) => {
