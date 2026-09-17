@@ -29,7 +29,10 @@
  * Delegation (#39): the same tool ports serve `delegate` on both paths; a
  * child session's `request` reaches the Inbox through the router. Memory and
  * learning (#41) run through `platformLearningPorts` over the default
- * `@agentic/learning` plugin.
+ * `@agentic/learning` plugin. Retention (#100, `docs/retention.md`): the
+ * Workspace exports to the `ARTIFACTS` bucket and purges each record
+ * through its own object (`src/retention.ts`); the Registry seals secrets
+ * under `WORKSPACE_KEK`.
  */
 import type { Principal, WorkspaceId } from '@agentic/core';
 import {
@@ -41,17 +44,20 @@ import {
     Memory,
     PAIRING_DIRECTORY_KEY,
     PairingDirectory,
+    RegistryError,
     TaskActor,
-    Workspace,
     asPrincipal,
     createEnvironmentProbe,
     createSessionFactory,
     createToolCallPort,
     defineInbox,
     defineMachineActor,
+    defineRegistry,
     defineRoutingActor,
     defineScheduleActor,
     defineSessionActor,
+    defineWorkspace,
+    importWorkspaceKek,
     ledgerRecorder,
     machineKey,
     machinePrincipal,
@@ -67,7 +73,10 @@ import {
     type SessionFactory,
     type SessionFactoryOptions,
     type ToolCallPort,
-    type TriggerPort
+    type TriggerPort,
+    type WorkspaceStore,
+    type ArtifactSink,
+    type KekSource
 } from '@agentic/platform';
 import { learningPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
@@ -75,6 +84,7 @@ import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespa
 import { createServerApp, setPrincipal } from '@sigx/server/server';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
+import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -82,8 +92,8 @@ export { DAEMON_SOCKET_PREFIX };
 export interface PlatformEnv {
     /** The one Durable Object namespace — every actor is an `ActorHost` object. */
     readonly ACTORS: DurableObjectNamespaceLike;
-    /** Artifacts and exports. */
-    readonly ARTIFACTS?: unknown;
+    /** Artifacts and exports (`Workspace.exportAll`). */
+    readonly ARTIFACTS?: R2BucketLike;
     /** ≥ 32 chars; signs `__Host-session`, OAuth transients and agent tokens. Absent → every call is anonymous. */
     readonly SESSION_SECRET?: string;
     readonly GITHUB_CLIENT_ID?: string;
@@ -111,13 +121,26 @@ export interface PlatformPorts {
     readonly channels: readonly NotificationChannel[];
     /** Platform tools a daemon session calls back through `tool.call`. Default: `createToolCallPort` over the actors. */
     readonly tools?: ToolCallPort;
+    /** Where `Workspace.exportAll` writes. Default: the `ARTIFACTS` R2 bucket. */
+    readonly sink?: ArtifactSink;
+    /** How `Workspace.deleteAll` purges a record. Default: each actor's own Durable Object (`PURGE_PATH`). */
+    readonly store?: WorkspaceStore;
+    /** The Registry's secret key. Default: `importWorkspaceKek(WORKSPACE_KEK)`; absent → `no-kek`. */
+    readonly kek?: KekSource;
 }
 
-/** Secrets the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
-const secrets: { anthropicApiKey?: string } = {};
+/** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
+const secrets: { anthropicApiKey?: string; sessionSecret?: string; workspaceKek?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
 
 export const defaultPorts: PlatformPorts = {
     anthropic: () => (secrets.anthropicApiKey ? { apiKey: secrets.anthropicApiKey } : undefined),
+    sink: r2ArtifactSink(() => secrets.artifacts),
+    store: durableObjectWorkspaceStore({ namespace: () => secrets.actors, secret: () => secrets.sessionSecret }),
+    // Throws before the import when the secret is missing, so the Registry does not cache the refusal.
+    kek: () => {
+        if (!secrets.workspaceKek) throw new RegistryError('no-kek', '[actors.app] WORKSPACE_KEK is not set: secrets cannot be stored (wrangler secret put WORKSPACE_KEK)');
+        return importWorkspaceKek(secrets.workspaceKek);
+    },
     // Web Push lands with VAPID keys (architecture §3).
     channels: []
 };
@@ -158,7 +181,12 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
                     .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
             }
         });
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox];
+    const sink = ports.sink ?? defaultPorts.sink;
+    const store = ports.store ?? defaultPorts.store;
+    const kek = ports.kek ?? defaultPorts.kek;
+    const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}) });
+    const Registry = defineRegistry(kek ? { kek } : {});
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry];
 }
 
 /**
@@ -208,8 +236,12 @@ let stampedFor: string | undefined;
  * the hash match is the proof).
  */
 export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefinition[] = defaultActors()): void {
-    secrets.anthropicApiKey = env.ANTHROPIC_API_KEY || undefined;
     const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
+    secrets.anthropicApiKey = env.ANTHROPIC_API_KEY || undefined;
+    secrets.sessionSecret = secret || undefined;
+    secrets.workspaceKek = env.WORKSPACE_KEK || undefined;
+    secrets.actors = env.ACTORS;
+    secrets.artifacts = env.ARTIFACTS;
     if (stampedFor === secret) return;
     stampedFor = secret;
     if (secret) {
@@ -245,15 +277,17 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
     const Machine = machineDefinition(actors);
     return class ActorHost extends Base {
         readonly #daemon;
+        readonly #purge;
         constructor(state: DurableObjectStateLike, env: PlatformEnv) {
             ensureServerApp(env, actors);
             super(state, env);
             const own = actorKeyOfObject(state);
             if (own?.type === 'machine') daemonSockets.bind(own.key, state);
             this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
+            this.#purge = createPurgeHandler({ state, host: () => this.host(), own, secret: () => secrets.sessionSecret });
         }
         override fetch(request: Request): Promise<Response> {
-            return this.#daemon.fetch(request) ?? super.fetch(request);
+            return this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request);
         }
         override webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
             return this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message);

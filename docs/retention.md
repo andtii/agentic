@@ -79,10 +79,15 @@ checks that no record of the workspace remains in storage.
 
 `WorkspaceStore.purge(ref)` is the deployment's: in tests it is
 `host.deactivate` + `storage.clear` over `memoryStorage`. On Cloudflare each
-actor is its own Durable Object, so the binding must delete the target
-object's storage — `apps/web` wires it (follow-up: per-actor purge through
-`@sigx/actors-cloudflare`); until it does, the default `Workspace` records
-`ops.delete.error` and deletes nothing, rather than deleting half.
+actor is its own Durable Object, so `apps/web` (`src/retention.ts`, #100)
+asks the target object to purge itself: a `POST /_agentic/purge` to that
+object, authenticated with `SESSION_SECRET` and never forwarded by the
+Worker, deactivates the actor and runs `storage.deleteAll()` +
+`deleteAlarm()`. A namespace cannot be enumerated, so the Cloudflare store
+has no `list`: tasks, sessions, ledger months and audit records stay behind
+until their own retention lands. Without `SESSION_SECRET` every purge is
+refused and `ops.delete.error` records it; the purge of already-reached
+children is not rolled back.
 
 Deletion is not reversible; there is no grace period. Export first.
 
