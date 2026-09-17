@@ -5,7 +5,7 @@ Work that starts in this repo but is generic. Each row gets a `promote` label on
 | Piece (here) | Lands in | When |
 |---|---|---|
 | DO-backed `EventLogStore` / `TranscriptStore` (`packages/platform/src/session`) | signalxjs/ai `@sigx/ai-actors` (signalxjs/ai#19) | after v1 stabilises |
-| MCP client (`packages/mcp/src/client`) | `@sigx/ai-agent/harness` | after resources/prompts are added |
+| MCP client (`packages/mcp/src/client`: Streamable HTTP over fetch, tool mapping, capability report; stdio in `packages/mcp/src/node`) | `@sigx/ai-agent/harness` (+ `@sigx/ai-agent-node` for stdio) | after resources/prompts are added |
 | A2A server + client adapter (`packages/a2a`) | `@sigx/ai-agent-a2a` | after the conformance subset passes |
 | Memory / Learning interfaces (`packages/core`) | `@sigx/ai-agent` (`./memory`) | once two implementations exist |
 | BM25-ish memory ranking + versioned NDJSON export (`packages/memory/src/rank`, `src/export`) | `@sigx/ai-agent` (`./memory`), beside the interfaces | once a second MemoryPlugin exists |
