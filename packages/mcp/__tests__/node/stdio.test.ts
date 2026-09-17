@@ -9,7 +9,8 @@ const fixture = resolve(import.meta.dirname, '../fixtures/stdio-server.mjs');
 const open = (args: string[] = [], env?: Record<string, string>) => createStdioMcpClient({ command: process.execPath, args: [fixture, ...args], env, name: 'stdio-test', timeoutMs: 10_000 });
 const ctx = () => ({ signal: new AbortController().signal, toolCallId: 'c' });
 
-describe('createStdioMcpClient', () => {
+// Each case spawns a node child; a loaded runner can take seconds to start one.
+describe('createStdioMcpClient', { timeout: 30_000 }, () => {
     let client: StdioMcpClient | undefined;
     afterEach(async () => {
         await client?.close();

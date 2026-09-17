@@ -130,7 +130,8 @@ describe('history access (CHT-04, MEM-11)', () => {
 });
 
 describe('persistence', () => {
-    it('500 posts append without a full-state rewrite: every save is bounded by the window', async () => {
+    // 500 turns; coverage instrumentation makes this several times slower.
+    it('500 posts append without a full-state rewrite: every save is bounded by the window', { timeout: 30_000 }, async () => {
         await app.stop();
         const { storage, writes } = countingStorage();
         app = await startChatApp(storage);
