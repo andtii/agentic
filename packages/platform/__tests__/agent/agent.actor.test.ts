@@ -66,6 +66,31 @@ describe('Agent actor', () => {
         expect(content(await a.snapshotForSession())).toEqual(content(v4));
     });
 
+    it('rollback reproduces the target exactly — nested keys added later do not survive it', async () => {
+        const a = actor(AgentActor, KEY);
+        await a.update({ name: 'Ada', execution: { limits: { maxTurns: 5 } } }, 'create');
+        const v1 = await a.snapshotForSession();
+
+        await a.update({ execution: { model: 'claude-opus-5', limits: { maxCostUsd: 10 } } }, 'budget');
+        const v2 = await a.snapshotForSession();
+        expect(v2.execution.limits).toEqual({ maxTurns: 5, maxCostUsd: 10 });
+
+        await a.rollback(1);
+        const v3 = await a.snapshotForSession();
+        expect(content(v3)).toEqual(content(v1));
+        expect(v3.execution.limits).toEqual({ maxTurns: 5 });
+        expect(v3.execution.model).toBeUndefined();
+
+        // and the replay agrees with the live fold, before and after a restart
+        await a.update({ role: 'reviewer' }, 'role');
+        const storage = h.storage;
+        await h.stop();
+        h = await startHarness([AgentActor], { storage });
+        const again = actor(AgentActor, KEY);
+        await again.rollback(3);
+        expect(content(await again.snapshotForSession())).toEqual(content(v3));
+    });
+
     it('a snapshot taken before an update is unchanged after it (AGT-07)', async () => {
         const a = actor(AgentActor, KEY);
         await a.update({ name: 'Ada', instructions: 'v1', skills: [{ id: 's1' }] }, 'create');
@@ -107,6 +132,8 @@ describe('Agent actor', () => {
         await expect(a.update({ name: 'x' }, '')).rejects.toThrow(/reason/);
         await expect(a.update({ nickname: 'x' } as never, 'typo')).rejects.toThrow(/unknown agent config field "nickname"/);
         await expect(a.update('nope' as never, 'typo')).rejects.toThrow(TypeError);
+        await expect(a.rollback(1, '')).rejects.toThrow(/reason/);
+        await expect(a.rollback(1, '   ')).rejects.toThrow(/reason/);
         await expect(a.rollback(0)).rejects.toThrow(RangeError);
         await expect(a.rollback(2)).rejects.toThrow(RangeError);
         expect((await a.listVersions()).length).toBe(1);

@@ -107,6 +107,7 @@ export const AgentActor = defineActor({
              * never rewritten, so the rollback itself is reversible (AGT-06).
              */
             async rollback(toVersion: number, reason?: string): Promise<AgentVersionInfo> {
+                if (reason !== undefined) assertReason(reason);
                 const target = configAtVersion(ctx.state.versions, toVersion);
                 return commit(target, reason ?? `rollback to v${toVersion}`, toVersion);
             },

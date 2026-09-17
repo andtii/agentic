@@ -23,6 +23,7 @@ export interface AgentConfigEntry {
     readonly t: 'config';
     /** 1-based, dense: entry `v` is `versions[v - 1]`. */
     readonly v: number;
+    /** A merge patch — or, on a rollback entry, the WHOLE target config, which replaces rather than merges. */
     readonly patch: AgentConfigPatch;
     /** Who made the change — `user:<id>`, `agent:<id>`, `external:<clientId>`, or `system`. */
     readonly by: string;
@@ -73,9 +74,20 @@ export function applyAgentEntry(state: AgentState, entry: unknown): void {
     if (e.v !== state.configVersion + 1) {
         throw new RangeError(`agent entry v${e.v} does not follow v${state.configVersion}`);
     }
-    state.config = mergeAgentConfig(state.config, e.patch);
+    state.config = foldEntry(state.config, e);
     state.configVersion = e.v;
     state.versions.push(e);
+}
+
+/**
+ * `config` after `entry`. A rollback replaces the config wholesale: merging
+ * the target into the current config would keep nested keys (`execution.limits`,
+ * `execution.model`) that later versions added, so it would not reproduce it.
+ */
+function foldEntry(config: AgentConfig, entry: AgentConfigEntry): AgentConfig {
+    return entry.rollbackOf === undefined
+        ? mergeAgentConfig(config, entry.patch)
+        : mergeAgentConfig(defaultAgentConfig(), entry.patch);
 }
 
 /** The config as it stood at `version` — replayed from the defaults. */
@@ -84,7 +96,7 @@ export function configAtVersion(versions: readonly AgentConfigEntry[], version: 
         throw new RangeError(`no agent config version ${version} (have 1..${versions.length})`);
     }
     let config = defaultAgentConfig();
-    for (let i = 0; i < version; i++) config = mergeAgentConfig(config, versions[i]!.patch);
+    for (let i = 0; i < version; i++) config = foldEntry(config, versions[i]!);
     return config;
 }
 
