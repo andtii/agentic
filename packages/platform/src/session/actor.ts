@@ -192,15 +192,16 @@ export function defineSessionActor(ports: SessionPorts) {
         if (!spec || !parsed) return null;
         const at = { sessionId: parsed.sessionId, ...(spec.taskId !== undefined ? { taskId: spec.taskId } : {}), at: now() };
         const live = lives.get(c.key);
-        // `@sigx/ai` leaves the counters optional; a ledger row always carries both.
-        const usage = { ...ev.usage, inputTokens: ev.usage.inputTokens ?? 0, outputTokens: ev.usage.outputTokens ?? 0 };
-        const event = { usage, ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}) };
-        const priced: UsageRow = live?.usageRow ? live.usageRow(event, at) : { ...at, ...event, agentId: spec.agentId, estimated: false };
-        const row = { ...priced, agentId: spec.agentId, sessionId: parsed.sessionId, key: `${ev.sessionId}:${ev.epoch}:${ev.seq}`, ...(ev.turnId !== undefined ? { turnId: ev.turnId } : {}) };
         try {
+            // `@sigx/ai` leaves the counters optional (and an adapter may omit `usage`); a ledger row always carries both.
+            const reported = (ev.usage ?? {}) as Partial<UsageRow['usage']>;
+            const usage = { ...reported, inputTokens: reported.inputTokens ?? 0, outputTokens: reported.outputTokens ?? 0 };
+            const event = { usage, ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}) };
+            const priced: UsageRow = live?.usageRow ? live.usageRow(event, at) : { ...at, ...event, agentId: spec.agentId, estimated: false };
+            const row = { ...priced, agentId: spec.agentId, sessionId: parsed.sessionId, key: `${ev.sessionId}:${ev.epoch}:${ev.seq}`, ...(ev.turnId !== undefined ? { turnId: ev.turnId } : {}) };
             return await ports.usage.record(c, parsed.workspaceId, row);
         } catch {
-            return null;
+            return null; // a pricer or recorder that throws never fails the turn
         }
     }
 

@@ -184,7 +184,9 @@ describe('budgets stop work (COL-11, OPS-08)', () => {
         await sleep(20);
         const attempt = task('task_1').delegate({ callId: 'c1', objective: 'sub', assignee: PLAIN });
         await expect(attempt).rejects.toMatchObject({ name: TaskLimitError.name, kind: 'budget', limit: 'maxWallMs' });
-        expect(await task('task_1').get()).toMatchObject({ status: 'failed', error: { code: 'budget' }, children: [] });
+        const failed = await task('task_1').get();
+        expect(failed).toMatchObject({ status: 'failed', error: { code: 'budget' }, children: [] });
+        expect(failed.transitions.at(-1)).toMatchObject({ to: 'failed', by: 'system:budget' });
         await expect(task('task_1.c1').get()).rejects.toThrow(/has not been created/);
     });
 

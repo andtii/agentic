@@ -314,7 +314,7 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 // A task that has already spent its budget ends here; the child is never created (COL-11, OPS-08).
                 const budget = checkBudget(s.constraints, spentOf(s, now));
                 if (!budget.ok) {
-                    await overBudget(budget, `agent:${s.assignee}`);
+                    await overBudget(budget, 'system:budget');
                     throw new TaskLimitError('budget', budgetError(budget).message, budget.limit);
                 }
                 const live = liveChildren();
