@@ -172,6 +172,46 @@ const message: RecipeInput = {
                 minInlineSize: '0'
             }
         },
+        // An image part: a thumbnail at most 320 px on its long edge, full size one click away.
+        image: {
+            base: {
+                display: 'inline-flex',
+                alignSelf: 'flex-start',
+                maxInlineSize: 'min(100%, 20rem)',
+                overflow: 'hidden',
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-box)',
+                background: 'var(--color-base-200)'
+            },
+            selectors: {
+                '& > img': { display: 'block', maxInlineSize: '100%', maxBlockSize: '20rem', objectFit: 'contain' },
+                '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '2px' }
+            }
+        },
+        // A file part: a download chip — icon, name, dim mono size.
+        file: {
+            base: {
+                display: 'inline-flex',
+                alignSelf: 'flex-start',
+                alignItems: 'center',
+                gap: 'var(--space-xs)',
+                maxInlineSize: '100%',
+                paddingInline: 'var(--space-sm)',
+                paddingBlock: 'var(--space-xs)',
+                border: `var(--border) solid ${lineStrong}`,
+                borderRadius: 'var(--radius-selector)',
+                background: 'var(--color-base-200)',
+                color: 'var(--color-base-content)',
+                fontSize: 'var(--text-md)',
+                textDecoration: 'none'
+            },
+            selectors: {
+                '&:hover': { borderColor: linkHover },
+                '&:focus-visible': { outline: '2px solid var(--color-primary)', outlineOffset: '2px' }
+            }
+        },
+        'file-name': { base: { minInlineSize: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        'file-size': { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } },
         tools: { base: { gridArea: 'tools', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', minInlineSize: '0' } },
         footer: { base: { gridArea: 'footer', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } }
     }
@@ -483,7 +523,9 @@ const composer: RecipeInput = {
             },
             selectors: {
                 '&:focus-within': { borderColor: textDim }
-            }
+            },
+            // A drag carrying files hovers the card: the drop zone lights up.
+            states: { highlighted: { borderColor: 'var(--color-primary)', borderStyle: 'dashed', background: 'var(--color-base-300)' } }
         },
         addressing: {
             base: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: textMuted }
@@ -520,9 +562,35 @@ const composer: RecipeInput = {
                 fontFamily: mono,
                 fontSize: 'var(--text-xs)',
                 paddingInline: 'var(--space-sm)',
-                paddingBlock: 'var(--space-2xs)'
+                paddingBlock: 'var(--space-2xs)',
+                maxInlineSize: '100%'
+            },
+            selectors: {
+                // The remove control is chip-sized, not the 36 px icon button.
+                '& > [data-scope="button"]': { inlineSize: '1.5rem', blockSize: '1.5rem', minBlockSize: '0', padding: '0' }
+            },
+            states: {
+                loading: { color: textMuted },
+                complete: {},
+                error: { borderColor: 'var(--color-error)', color: 'var(--color-error)' }
             }
         },
+        thumbnail: { base: { inlineSize: '1.5rem', blockSize: '1.5rem', objectFit: 'cover', borderRadius: 'var(--radius-selector)' } },
+        'attachment-name': { base: { minInlineSize: '0', maxInlineSize: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        'attachment-size': { base: { color: textDim } },
+        // A 12 px ring that turns — the keyframes are in `fragmentCss`.
+        spinner: {
+            base: {
+                display: 'inline-block',
+                inlineSize: '0.75rem',
+                blockSize: '0.75rem',
+                border: '2px solid currentColor',
+                borderInlineEndColor: 'transparent',
+                borderRadius: '50%',
+                animation: 'ai-spin 800ms linear infinite'
+            }
+        },
+        'attachment-error': { base: { color: 'var(--color-error)' } },
         input: {
             base: { position: 'relative' },
             selectors: {
@@ -581,7 +649,7 @@ thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${ro
 
 /**
  * Raw CSS the design system appends verbatim: the keyframes the running dot
- * and the STREAMING pill pulse on, and the phone regime recipes cannot
+ * and the STREAMING pill pulse on, the attachment spinner's turn, and the phone regime recipes cannot
  * express (`docs/design/HANDOFF.md` → "Mobile specifics"): below 768 px the
  * composer docks to the bottom as one 48 px row (attach, single-line input
  * at 15 px, square Send) under the "To" row, the message meta drops the
@@ -589,9 +657,11 @@ thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${ro
  * with the other two answers sharing the next.
  */
 export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
 [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: ai-pulse 1200ms ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
     [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: none; }
+    [data-scope="ai-composer"][data-part="spinner"] { animation-duration: 2400ms; }
 }
 @media (max-width: 767.98px) {
     [data-scope="ai-message"][data-part="environment"] { display: none; }

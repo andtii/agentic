@@ -86,13 +86,139 @@ describe('the composer', () => {
         expect([...mute.querySelectorAll('button')].some((b) => b.textContent === 'Cancel')).toBe(false);
     });
 
-    it('lists the attachments it is given, with a Remove per item', () => {
+    it('lists the attachments it is given, with a named Remove per item', () => {
         const removed: string[] = [];
         const dom = mount(<Composer onSend={() => {}} attachments={[{ id: 'f1', name: 'notes.md' }]} onRemoveAttachment={(id) => removed.push(id)} />);
-        expect(all(dom, 'ai-composer', 'attachment').map((el) => el.textContent)).toEqual(['notes.mdRemove']);
-        buttonNamed(dom, 'Remove').click();
+        expect(all(dom, 'ai-composer', 'attachment').map((el) => el.textContent)).toEqual(['notes.md']);
+        buttonNamed(dom, 'Remove notes.md').click();
         expect(removed).toEqual(['f1']);
         expectAnatomy(dom, aiComposerAnatomy);
+    });
+
+    describe('attachments', () => {
+        const png = (name = 'shot.png'): File => new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' });
+
+        /** A `DataTransfer`-shaped carrier — happy-dom's clipboard / drag events carry no real transfer. */
+        function transfer(files: File[], types: string[] = files.length ? ['Files'] : []): DataTransfer {
+            return { files, types, dropEffect: 'none' } as unknown as DataTransfer;
+        }
+
+        function fire(target: EventTarget, type: string, field: 'clipboardData' | 'dataTransfer', data: DataTransfer): Event {
+            const e = new Event(type, { bubbles: true, cancelable: true });
+            Object.defineProperty(e, field, { value: data });
+            target.dispatchEvent(e);
+            return e;
+        }
+
+        it('a paste carrying files emits them as `files`, and a text paste passes through untouched', () => {
+            const got: File[][] = [];
+            const dom = mount(<Composer onSend={() => {}} onFiles={(f) => got.push(f)} />);
+            const file = png();
+            const paste = fire(textarea(dom), 'paste', 'clipboardData', transfer([file]));
+            expect(got).toEqual([[file]]);
+            expect(paste.defaultPrevented).toBe(true);
+            const text = fire(textarea(dom), 'paste', 'clipboardData', transfer([], ['text/plain']));
+            expect(got).toHaveLength(1);
+            expect(text.defaultPrevented).toBe(false);
+        });
+
+        it('a drop emits `files`, and the card is highlighted while the drag hovers', async () => {
+            const got: File[][] = [];
+            const dom = mount(<Composer onSend={() => {}} onFiles={(f) => got.push(f)} />);
+            const root = one(dom, 'ai-composer', 'root')!;
+            const files = [png('a.png'), png('b.png')];
+            expect(fire(textarea(dom), 'dragenter', 'dataTransfer', transfer(files)).defaultPrevented).toBe(true);
+            expect(fire(textarea(dom), 'dragover', 'dataTransfer', transfer(files)).defaultPrevented).toBe(true);
+            await tick();
+            expect(root.hasAttribute('data-highlighted')).toBe(true);
+            expectAnatomy(dom, aiComposerAnatomy);
+            fire(textarea(dom), 'drop', 'dataTransfer', transfer(files));
+            await tick();
+            expect(got).toEqual([files]);
+            expect(root.hasAttribute('data-highlighted')).toBe(false);
+        });
+
+        it('a drag leaving the card clears the highlight, and a drag of text is not a drop target', async () => {
+            const dom = mount(<Composer onSend={() => {}} />);
+            const root = one(dom, 'ai-composer', 'root')!;
+            fire(root, 'dragenter', 'dataTransfer', transfer([png()]));
+            await tick();
+            expect(root.hasAttribute('data-highlighted')).toBe(true);
+            root.dispatchEvent(new Event('dragleave', { bubbles: true }));
+            await tick();
+            expect(root.hasAttribute('data-highlighted')).toBe(false);
+            expect(fire(root, 'dragover', 'dataTransfer', transfer([], ['text/plain'])).defaultPrevented).toBe(false);
+        });
+
+        it('Attach opens the hidden multi-file picker, and a pick emits `files`', () => {
+            const got: File[][] = [];
+            const attached: number[] = [];
+            const dom = mount(<Composer onSend={() => {}} onFiles={(f) => got.push(f)} onAttach={() => attached.push(1)} accept="image/*" />);
+            const input = dom.querySelector<HTMLInputElement>('input[type="file"]')!;
+            expect(input.multiple).toBe(true);
+            expect(input.hidden).toBe(true);
+            expect(input.getAttribute('accept')).toBe('image/*');
+            let opened = 0;
+            input.click = () => {
+                opened++;
+            };
+            buttonNamed(dom, 'Attach file').click();
+            expect(opened).toBe(1);
+            expect(attached).toEqual([1]);
+            const file = png();
+            Object.defineProperty(input, 'files', { value: [file], configurable: true });
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            expect(got).toEqual([[file]]);
+        });
+
+        it('a disabled composer takes no files', () => {
+            const got: File[][] = [];
+            const dom = mount(<Composer onSend={() => {}} onFiles={(f) => got.push(f)} disabled />);
+            fire(textarea(dom), 'paste', 'clipboardData', transfer([png()]));
+            fire(textarea(dom), 'drop', 'dataTransfer', transfer([png()]));
+            expect(got).toEqual([]);
+        });
+
+        it('chips render each status: thumbnail, size, spinner while uploading, the error line', () => {
+            const dom = mount(
+                <Composer
+                    onSend={() => {}}
+                    attachments={[
+                        { id: 'a', name: 'shot.png', size: 1536, status: 'uploading', previewUrl: 'blob:shot' },
+                        { id: 'b', name: 'notes.md', status: 'ready' },
+                        { id: 'c', name: 'big.pdf', status: 'error', error: 'Too large' }
+                    ]}
+                />
+            );
+            const chips = all(dom, 'ai-composer', 'attachment');
+            expect(chips.map((c) => c.getAttribute('data-state'))).toEqual(['loading', 'complete', 'error']);
+            expect(chips[0]!.querySelector('img')!.getAttribute('src')).toBe('blob:shot');
+            expect(one(chips[0]!, 'ai-composer', 'attachment-size')!.textContent).toBe('1.5 kB');
+            expect(one(chips[0]!, 'ai-composer', 'spinner')!.getAttribute('aria-label')).toBe('Uploading shot.png');
+            expect(chips[0]!.getAttribute('aria-busy')).toBe('true');
+            expect(chips[1]!.querySelector('img')).toBeNull();
+            expect(chips[1]!.querySelector('[data-icon="file"]')).not.toBeNull();
+            expect(one(chips[1]!, 'ai-composer', 'spinner')).toBeNull();
+            expect(one(chips[2]!, 'ai-composer', 'attachment-error')!.textContent).toBe('Too large');
+            expectAnatomy(dom, aiComposerAnatomy);
+        });
+
+        it('Send waits while any chip is uploading', () => {
+            const sent: string[] = [];
+            const dom = mount(<Composer onSend={(t) => sent.push(t)} attachments={[{ id: 'a', name: 'a.png', status: 'uploading' }]} />);
+            expect(buttonNamed(dom, 'Send').disabled).toBe(true);
+            type(dom, 'look');
+            key(dom, 'Enter');
+            expect(sent).toEqual([]);
+        });
+
+        it('Send goes with attachments and an empty draft', () => {
+            const sent: string[] = [];
+            const dom = mount(<Composer onSend={(t) => sent.push(t)} attachments={[{ id: 'a', name: 'a.png', status: 'ready' }]} />);
+            expect(buttonNamed(dom, 'Send').disabled).toBe(false);
+            dom.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            expect(sent).toEqual(['']);
+        });
     });
 
     describe('the addressing row', () => {

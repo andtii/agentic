@@ -44,7 +44,8 @@ export const aiThreadAnatomy = defineAnatomy('ai-thread', {
  * (name, environment line, time, the STREAMING pill while the session is
  * mid-turn), `body` and `tools` runs in reading order, and a `footer` when
  * the row shows a slice of a long message. The root carries the logical
- * side (`end` for the user's own rows).
+ * side (`end` for the user's own rows). Attachments sit in the body: an
+ * `image` thumbnail link and a `file` download chip.
  */
 export const aiMessageAnatomy = defineAnatomy('ai-message', {
     root: { element: 'div', placements: ['start', 'end'], tokens: ['color'] },
@@ -55,6 +56,12 @@ export const aiMessageAnatomy = defineAnatomy('ai-message', {
     environment: { element: 'span', parent: 'meta', tokens: ['text'] },
     time: { element: 'time', parent: 'meta', tokens: ['text'] },
     body: { element: 'div', parent: 'root', tokens: ['text'] },
+    /** An image part: a lazy thumbnail (≤ 320 px) that opens full size in a new tab. */
+    image: { element: 'a', parent: 'body', tokens: ['color', 'radius-box'] },
+    /** A file part: a download chip — icon, `file-name`, `file-size`. */
+    file: { element: 'a', parent: 'body', tokens: ['color', 'radius-selector', 'text'] },
+    'file-name': { element: 'span', parent: 'file', tokens: ['text'] },
+    'file-size': { element: 'span', parent: 'file', tokens: ['color', 'text'] },
     tools: { element: 'div', parent: 'root' },
     footer: { element: 'span', parent: 'root', tokens: ['text'] }
 });

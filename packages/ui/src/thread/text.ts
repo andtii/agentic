@@ -16,6 +16,19 @@ export function nonBlank(text: string | undefined): string | undefined {
     return text !== undefined && text.trim() !== '' ? text : undefined;
 }
 
+/** `1536` → `1.5 kB`: SI units, one decimal below 10, none above — zero's `formatBytes` rule, without pulling in its file-upload module. */
+export function formatBytes(size: number): string {
+    if (size < 1000) return `${size} B`;
+    const units = ['kB', 'MB', 'GB', 'TB'];
+    let value = size / 1000;
+    let unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+        value /= 1000;
+        unit++;
+    }
+    return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${units[unit]}`;
+}
+
 /** One line, whitespace collapsed, capped. */
 export function oneLine(text: string, max = HEAD_CHARS): string {
     const flat = text.replace(/\s+/g, ' ').trim();
