@@ -21,9 +21,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $bin = (Resolve-Path $DaemonBin).Path
-$credentials = Join-Path $env:APPDATA 'agentic\credentials.json'
+$home_ = if ($env:AGENTIC_DAEMON_HOME) { $env:AGENTIC_DAEMON_HOME } else { Join-Path $env:APPDATA 'agentic' }
+$credentials = Join-Path $home_ 'credentials.json'
 if (-not (Test-Path $credentials)) {
     throw "This machine is not paired ($credentials is missing). Run: agentic-daemon pair <code> --url <platform>"
+}
+
+# Upgrade: a task by this name may be running an older copy - stop it so the new one starts.
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 
 $logDir = Join-Path $env:LOCALAPPDATA 'agentic\logs'
