@@ -95,12 +95,13 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
             );
         }
         const agents = directory.all();
+        const now = Date.now();
         return (
             <>
                 <MachineView
-                    machine={machineOf(v, id, Date.now())}
+                    machine={machineOf(v, id, now)}
                     environments={v.environments}
-                    sessions={sessionsOf(v, objectives.value ?? {})}
+                    sessions={sessionsOf(v, objectives.value ?? {}, now)}
                     doctor={doctor.value ? doctorChecksOf(doctor.value) : []}
                     footnote={LIVE_DOCTOR_FOOTNOTE}
                     queued={queuedByEnvironment(routing.value ?? undefined, v.machineId)}

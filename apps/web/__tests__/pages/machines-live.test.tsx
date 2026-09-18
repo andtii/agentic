@@ -258,8 +258,8 @@ describe('the machine view model', () => {
     });
 
     it('rows the hosted sessions with their objective and environment name', () => {
-        expect(sessionsOf(base, { t1: 'Fix the drawer' })).toMatchObject([{ id: 's1', task: 'Fix the drawer', agentId: 'forge', environment: 'work', machineId: 'm1', status: 'active' }]);
-        expect(sessionsOf({ ...base, activeSessions: [{ ...base.activeSessions[0]!, status: 'opening' }] }, {})).toMatchObject([{ task: 't1', status: 'waiting' }]);
+        expect(sessionsOf(base, { t1: 'Fix the drawer' }, now)).toEqual([{ id: 's1', task: 'Fix the drawer', agentId: 'forge', environment: 'work', machineId: 'm1', status: 'active', age: '10m ago' }]);
+        expect(sessionsOf({ ...base, activeSessions: [{ ...base.activeSessions[0]!, status: 'opening' }] }, {}, now)).toMatchObject([{ task: 't1', status: 'waiting' }]);
     });
 
     it('turns Machine.doctor into the checklist, never passing an unverified environment', () => {

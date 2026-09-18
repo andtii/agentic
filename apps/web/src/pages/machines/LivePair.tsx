@@ -13,7 +13,7 @@ import { component, effect, onMounted, onUnmounted, signal, type JSXElement } fr
 import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { EmptyState, TextField } from '@agentic/ui';
+import { Button, EmptyState, TextField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { pairing } from '../../mock/ops';
@@ -93,9 +93,17 @@ export const LivePair = component(() => {
             );
         }
         if (!st.code) {
+            // Minting failed (network, auth): say so and offer the same mint again, never a dead page.
             return (
                 <OpsPage page="pair" title="Pair a machine" hero>
-                    <div data-pair-pending aria-busy={st.error ? undefined : 'true'}>{st.error ? <p data-pair-error role="alert">{st.error}</p> : null}</div>
+                    <div data-pair-pending aria-busy={st.error ? undefined : 'true'}>
+                        {st.error ? (
+                            <>
+                                <p data-pair-error role="alert">{st.error}</p>
+                                <Button intent="primary" disabled={st.busy} onClick={() => { if (ws) void mint(ws); }}>Try again</Button>
+                            </>
+                        ) : null}
+                    </div>
                 </OpsPage>
             );
         }

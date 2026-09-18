@@ -75,7 +75,7 @@ export function environmentName(environments: readonly EnvironmentDescriptor[], 
  * `objectives` is what the Task reads resolved; a session without a task, or
  * one still loading, shows its task id.
  */
-export function sessionsOf(view: MachineView, objectives: Readonly<Record<string, string>>): OpsSession[] {
+export function sessionsOf(view: MachineView, objectives: Readonly<Record<string, string>>, now: number): OpsSession[] {
     return view.activeSessions.map((h) => ({
         id: h.sessionId,
         task: (h.taskId && objectives[h.taskId]) || h.taskId || '—',
@@ -83,7 +83,7 @@ export function sessionsOf(view: MachineView, objectives: Readonly<Record<string
         environment: environmentName(view.environments, h.environmentId),
         machineId: view.machineId,
         status: h.status === 'open' ? 'active' : 'waiting',
-        age: seenLabel(h.openedAt ?? h.requestedAt, Date.now())
+        age: seenLabel(h.openedAt ?? h.requestedAt, now)
     }));
 }
 
