@@ -163,4 +163,30 @@ describe('/chats (live)', () => {
         expect(texts(dom.querySelectorAll('[data-chat-last]'))).toEqual(['You: newer', 'You: older']);
         setDataMode('mock');
     });
+
+    it('a chat created with a title shows it in the list and the topbar instead of its members, and follows a rename (#124)', async () => {
+        const { chat, atlas } = await seedChat();
+        await chat.post('untitled');
+        const ws = h.app.as(owner).actor(Workspace, workspaceKey(WS));
+        const { chatId } = await ws.createChat({ title: 'Release plan' });
+        const titled = h.app.as(owner).actor(Chat, chatKeyOf(USER, chatId));
+        await titled.addAgent(atlas, 'all');
+        await titled.post('titled');
+        expect((await titled.get()).title).toBe('Release plan');
+
+        const list = await mountLive('/chats', h);
+        await until(() => list.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
+        expect(texts(list.querySelectorAll('[data-chat-title]'))).toEqual(['Release plan', 'Atlas']);
+
+        const page = await mountLive(`/chats/${chatId}`, h);
+        await until(() => page.querySelector('[data-chat-row][data-current] [data-chat-title]')?.textContent === 'Release plan', 'the titled row');
+        // The head follows the page's own summary read, a separate read from the list's batch.
+        await until(() => chatHead.value?.id === chatId && chatHead.value.title === 'Release plan', 'the titled head');
+        expect(topbarFor({ name: 'chat', path: `/chats/${chatId}`, params: { id: chatId } })?.crumb).toBe('Release plan');
+
+        // The page's summary is live, so a rename reaches the topbar without a reload (the list rows are one batch read, #34).
+        await titled.rename('Release plan v2');
+        await until(() => chatHead.value?.title === 'Release plan v2', 'the renamed head');
+        setDataMode('mock');
+    });
 });

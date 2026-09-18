@@ -79,12 +79,13 @@ export function membersOf(summary: ChatSummary): MockChatMember[] {
 }
 
 /**
- * The chat's title: its members' names (a direct chat with Atlas is
- * "Atlas"; a group is "Atlas, Forge, Lint"), "New chat" before anyone has
- * joined. The Chat actor stores no title yet — a named chat is a
- * follow-up on the platform lane (see the PR).
+ * The chat's title: the one it was given (`Chat.get().title`, set by
+ * `createChat({ title })` or `rename`, #124) when there is one; else its
+ * members' names (a direct chat with Atlas is "Atlas"; a group is "Atlas,
+ * Forge, Lint"), "New chat" before anyone has joined.
  */
-export function chatTitle(members: readonly MockChatMember[], lookup: AgentLookup): string {
+export function chatTitle(members: readonly MockChatMember[], lookup: AgentLookup, title?: string): string {
+    if (title) return title;
     return members.length ? members.map((m) => lookup(m.agentId).name).join(', ') : 'New chat';
 }
 
@@ -113,7 +114,7 @@ export function chatRow(id: string, summary: ChatSummary, newest: readonly Index
     const last = newest[newest.length - 1];
     return {
         id,
-        title: chatTitle(members, lookup),
+        title: chatTitle(members, lookup, summary.title),
         members,
         lastLine: last ? entryLine(last.entry, lookup) : '',
         unread: 0,

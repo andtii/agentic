@@ -4,7 +4,7 @@
  * (CHT-11) and the authorization chain (architecture §9).
  */
 import type { AgentId, ChatEntry, MachineId, Principal, Scope, SessionId, WorkspaceId } from '@agentic/core';
-import { Chat, ChatPage, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
+import { Chat, ChatPage, MAX_TITLE_LENGTH, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
 import { statusOf, type TestActorApp } from '../../src/testing/index.js';
 import { A, B, C, WS, agent, chatKey, countingStorage, startChatApp, user } from './helpers.js';
 
@@ -283,5 +283,43 @@ describe('membership bookkeeping', () => {
         expect(entries[0]!.entry).toMatchObject({ t: 'member', op: 'add', agentId: A, historyAccess: 'from-now' });
         const ids: AgentId[] = Object.keys((await chat.get()).members) as AgentId[];
         expect(ids).toEqual([A]);
+    });
+});
+
+describe('title (#124)', () => {
+    it('is absent until rename sets it; a rename is one entry, idempotent, and survives a restart', async () => {
+        const chat = chatAs(user);
+        expect((await chat.get()).title).toBeUndefined();
+        expect('title' in (await chat.get())).toBe(false);
+        await chat.rename('  Release   plan ');
+        expect((await chat.get()).title).toBe('Release plan');
+        await chat.rename('Release plan');
+        const { entries } = await chat.history();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.entry).toMatchObject({ t: 'rename', title: 'Release plan' });
+        await chat.rename('Release plan v2');
+        const before = await chat.get();
+        expect(before.title).toBe('Release plan v2');
+
+        const { storage } = app;
+        await app.stop();
+        app = await startChatApp(storage);
+        expect(await chatAs(user).get()).toEqual(before);
+    });
+
+    it('rejects a blank or overlong title without storing anything', async () => {
+        const chat = chatAs(user);
+        await expect(chat.rename('   ')).rejects.toThrow(/title is required/);
+        await expect(chat.rename('x'.repeat(MAX_TITLE_LENGTH + 1))).rejects.toThrow(/longer than/);
+        expect((await chat.get()).seq).toBe(0);
+        expect((await chat.get()).title).toBeUndefined();
+    });
+
+    it('is the user’s (or an external client’s) call, never an agent’s', async () => {
+        await chatAs(user).addAgent(A, 'all');
+        expect(await statusOf(chatAs(agent(A)).rename('mine'))).toBe(403);
+        const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'cli', scopes: ['chats'] };
+        await chatAs(external).rename('from the CLI');
+        expect((await chatAs(agent(A)).get()).title).toBe('from the CLI');
     });
 });

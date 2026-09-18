@@ -78,7 +78,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const s = summary.value;
         const members = s ? membersOf(s) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
-        chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup) : props.id, members, identities };
+        chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities };
     });
     onUnmounted(stopHead);
 
@@ -148,7 +148,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
             );
         }
         const members = s ? membersOf(s) : [];
-        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup) : '…', members, lastLine: '', unread: 0, waiting: false, updatedAt: 0 };
+        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: '', unread: 0, waiting: false, updatedAt: 0 };
         const addressing = resolveAddressing(members, mentionsIn(st.draft, members, directory.lookup), directory.lookup);
         const mentions: Mention[] = members.map((m) => {
             const a = directory.lookup(m.agentId);

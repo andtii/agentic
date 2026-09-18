@@ -133,9 +133,11 @@ describe('Workspace.exportAll', () => {
             ['shared:team', 'shared fact']
         ]);
         const chats = at('chats');
-        expect(chats[0]).toMatchObject({ kind: 'chat', id: chatId });
-        expect(chats.slice(1).map((r) => r.kind)).toEqual(['chat-entry', 'chat-entry', 'chat-entry']);
-        expect(chats.slice(1).map((r) => r.seq)).toEqual([0, 1, 2]);
+        // The title (#124) is the chat's first entry and rides in its summary.
+        expect(chats[0]).toMatchObject({ kind: 'chat', id: chatId, chat: { title: 'general' } });
+        expect(chats.slice(1).map((r) => r.kind)).toEqual(['chat-entry', 'chat-entry', 'chat-entry', 'chat-entry']);
+        expect(chats.slice(1).map((r) => r.seq)).toEqual([0, 1, 2, 3]);
+        expect(chats[1]).toMatchObject({ entry: { t: 'rename', title: 'general' } });
         expect(at('schedules')).toMatchObject([{ kind: 'schedule', id: scheduleId, schedule: { title: 'stand-up' } }]);
         expect(at('inbox')).toMatchObject([{ kind: 'notification', notification: { title: 'Stand-up' } }]);
         expect(at('registry').map((r) => r.kind)).toEqual(['plugin', 'secret']);

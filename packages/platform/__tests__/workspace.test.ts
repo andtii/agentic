@@ -1,5 +1,6 @@
-import type { MachineId, Principal, WorkspaceId } from '@agentic/core';
+import { actorKey, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
 import { workspaceKey } from '../src/auth/index';
+import { Chat, ChatPage } from '../src/chat/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 import { PairingDirectory } from '../src/pairing/index';
 import { DEFAULT_SETTINGS, PAIRING_CODE_LENGTH, PAIRING_CODE_TTL_MS, Workspace, type WorkspaceState } from '../src/workspace/index';
@@ -9,7 +10,7 @@ const KEY = workspaceKey('u1');
 
 let app: TestActorApp;
 beforeEach(() => {
-    app = testActorApp([Workspace, PairingDirectory]);
+    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage]);
     return app.start();
 });
 afterEach(async () => {
@@ -70,16 +71,27 @@ describe('Workspace index', () => {
         const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
         expect(stored.agents).toEqual([agentId]);
         expect(stored.chats).toEqual([chatId]);
+        // The title went to the Chat actor as its first entry (#124).
+        expect((await app.as(owner).actor(Chat, actorKey('u1' as WorkspaceId, 'chat', chatId)).get()).title).toBe('general');
 
         // A fresh host over the same storage activates from what was saved.
         const storage = app.storage;
         await app.stop();
-        app = testActorApp([Workspace, PairingDirectory], { storage });
+        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage], { storage });
         await app.start();
         const view = await ws().get();
         expect(view.agents).toEqual([agentId]);
         expect(view.chats).toEqual([chatId]);
         expect(view.owner).toBe('u1');
+    });
+
+    it('createChat without a title, or with a blank one, leaves the chat untitled (#124)', async () => {
+        const { chatId } = await ws().createChat({});
+        const blank = await ws().createChat({ title: '   ' });
+        const chat = (id: string) => app.as(owner).actor(Chat, actorKey('u1' as WorkspaceId, 'chat', id));
+        expect((await chat(chatId).get()).title).toBeUndefined();
+        expect((await chat(blank.chatId).get()).seq).toBe(0);
+        expect((await ws().get()).chats).toEqual([chatId, blank.chatId]);
     });
 
     it('refuses a nameless agent without saving', async () => {

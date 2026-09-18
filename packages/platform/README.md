@@ -45,7 +45,7 @@ export const app = createServerApp<Principal>({
 
 ## Workspace (`src/workspace`)
 
-`ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat`, `createSchedule` / `removeSchedule` (index only; the Schedule actor is created under the id), `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (OPS-10 detached tasks; progress in `get().ops`).
+`ws:{userId}`; save persistence; every mutation ends in `ctx.save()` inside the turn. Methods: `get`, `createAgent`, `createChat({ title? })` (a title goes to the Chat actor's `rename` over a hop, #124), `createSchedule` / `removeSchedule` (index only; the Schedule actor is created under the id), `registerMachinePending` → `{machineId, pairingCode, expiresAt}`, `claimPairing(code)` (single use, 10 min), `listMachines`, `removeMachine`, `updateSettings`, `exportAll` / `deleteAll` (OPS-10 detached tasks; progress in `get().ops`).
 
 `defineWorkspace({ sink, store })` binds the OPS-10 ports; the bare `Workspace` records `ops.<task>.error` and changes nothing. `ArtifactSink.put(path, body)` receives `{ws}/{stamp}/{kind}.ndjson` per actor kind (workspace, agents, memory, chats, schedules, inbox, registry — plus tasks and sessions when the store can `list`) and `manifest.json`; every row comes from the owning actor's `get` / `export` as the owner, secrets by name only, no pairing codes. `WorkspaceStore.purge({ type, key })` deletes one record (deactivate, then clear); the cascade purges every child the index implies, then `clearState()`s the root. `docs/retention.md` has the full table, the windows and what stays outside platform control.
 
@@ -197,6 +197,7 @@ const hits = await chat.search('deploy');            // newest-first substring s
 - Activation (architecture §6): mentioned members → coordinator → the sole agent member → nobody. An agent's own post never activates itself.
 - History access: an agent principal reads from its `historyFrom` (the join entry for `'from-now'`); non-members read nothing; users and external clients with the `chats` scope read everything.
 - Persistence: the state keeps the last 200 entries and a `{seq, at}` index; every 100 older entries move to a `ChatPage` actor (`{chatKey}:p{n}`), so a post is one bounded write. Register `Chat` and `ChatPage` together.
+- Title (#124): `rename(title)` — trimmed, one line, at most `MAX_TITLE_LENGTH` (120) characters, a user's or external client's call — appends a `rename` entry; `get().title` is the last one, absent until then (the web pages then title the chat by its members). `Workspace.createChat({ title })` writes the first one over a hop.
 - Sessions publish `SessionEvent`s on `sessionEvents(chatKey)` (`topic('session-events', chatKey)`); the chat folds status and final messages into entries and tracks `activeSessions`. `typing` is not durable. A payload that is not a well-formed `SessionEvent` (missing ids or `at`, unknown `kind` or `status`) throws, so `host.publish` reports a delivery failure and nothing is recorded.
 
 ## Task actor (`src/task/`)
