@@ -13,7 +13,7 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 ### Acceptance
 
-- [ ] Acceptance suite (#51, PR #138): every AC id of requirements §17 maps to a spec under `apps/web/__tests__/acceptance/` or a manual entry in `docs/acceptance.md`; `pnpm --filter @agentic/web test:acceptance` green; the one `it.fails` (AC-09, #135) is either fixed or still documented as the known gap.
+- [ ] Acceptance suite (#51, PR #138): every AC id of requirements §17 maps to a spec under `apps/web/__tests__/acceptance/` or a manual entry in `docs/acceptance.md`; `pnpm --filter @agentic/web test:acceptance` green; no `it.fails` left (AC-09's gap #135 landed in PR #141).
 - [ ] Manual checklist M1–M4 in `docs/acceptance.md` run on real machines (two machines, three accounts on one machine, return on a phone, push delivery) and the results recorded in the release PR.
 
 ### Demos
@@ -47,7 +47,6 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 Each must be open with a label, linked from the release notes, and — where it affects production — mitigated in the runbook:
 
-- [ ] #135 — retrieved memories do not reach the model on the routed local path.
 - [ ] #129 — the Cloudflare adapter's entry emits non-handler re-exports (the `worker.mjs` façade is the workaround; `main` must stay on it).
 - [ ] The ops pages (Machines, Machine, Pair, Schedules, Plugins, Settings, History, Usage, Tasks, Home) render mock data in production; pairing codes come from the console call in `docs/runbook.md` §5.2.
 

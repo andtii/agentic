@@ -322,7 +322,6 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
 | Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | — |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
-| Retrieved memories on the routed local path (`spec.memories` → model, objective in the open spec) | retained with provenance and delivered to the next similar session's spec; the model does not see them yet | #135 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |
 | Web Push channel (VAPID keys) | no channels; the Inbox holds notifications (`Inbox.list`) | — (architecture §3) |
 | Second Worker for the Durable Object host, so UI deploys do not evict live sessions | one Worker; a deploy interrupts live sessions, which resume as "interrupted" | follow-up (architecture §3) |
