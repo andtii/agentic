@@ -237,7 +237,8 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 const r = await as(Chat, agentChatKey(workspaceId, input.chatId)).post(input.text, input.mentions ?? []);
                 return { messageId: r.messageId };
             },
-            history: (chatId, cursor, limit) => as(Chat, agentChatKey(workspaceId, chatId)).history(cursor, limit)
+            history: (chatId, cursor, limit) => as(Chat, agentChatKey(workspaceId, chatId)).history(cursor, limit),
+            fileAccess: (chatId, fileId) => as(Chat, agentChatKey(workspaceId, chatId)).fileAccess(fileId)
         },
         memory: {
             search: (scope, query) => as(Memory, memoryActorKey(workspaceId, scope)).query(query),

@@ -14,11 +14,101 @@
  * (`sessions_open` needs `machineId` AND `environmentId`, EXE-12); nothing
  * here ever picks a machine on the client's behalf.
  */
-import { hasScope, type AgentId, type ChatId, type EnvironmentId, type MachineId, type MemoryScope, type Scope, type SessionId, type TaskId } from '@agentic/core';
+import {
+    CHAT_FILE_TEXT_MAX_BYTES,
+    MODEL_IMAGE_TYPES,
+    chatFileUri,
+    hasScope,
+    isTextLikeMediaType,
+    type AgentId,
+    type ChatFile,
+    type ChatFileStore,
+    type ChatId,
+    type EnvironmentId,
+    type MachineId,
+    type MemoryScope,
+    type Scope,
+    type SessionId,
+    type TaskId,
+    type WorkspaceId
+} from '@agentic/core';
 import { defineTool, type AnyTool, type ToolAnnotations } from '@sigx/ai';
 import { z } from 'zod';
 import { McpScopeError } from './errors.js';
 import type { ExternalPrincipal, PlatformPort } from './port.js';
+
+/** What the tool set needs besides the port. */
+export interface PlatformToolsOptions {
+    /** Where chat attachment bytes live (R2 in the web app). Absent: `chats_file_get` returns metadata only. */
+    readonly files?: ChatFileStore;
+}
+
+/** An MCP content block a tool hands back as is (the harness only emits JSON text). */
+export type ToolContentBlock = { readonly type: 'text'; readonly text: string } | { readonly type: 'image'; readonly data: string; readonly mimeType: string };
+
+/**
+ * The key a tool result carries its own MCP `content` under. The handler
+ * lifts it into `result.content` for the tools in `MCP_CONTENT_TOOLS` and
+ * leaves the rest of the result as `structuredContent`.
+ */
+export const MCP_CONTENT_KEY = 'mcpContent';
+/** The tools whose results carry `MCP_CONTENT_KEY` — no other tool's result is ever rewritten. */
+export const MCP_CONTENT_TOOLS: ReadonlySet<string> = new Set(['chats_file_get']);
+
+/** What `chats_file_get` returns as `structuredContent`; the text or image itself is in `content`. */
+export interface ChatFileGetResult {
+    readonly file: ChatFile;
+    /** The file's `agentic-file:` URI — how chat history references it. */
+    readonly uri: string;
+    /** `text` and `image`: the content block carries the file; `metadata`: this record is all there is. */
+    readonly kind: 'text' | 'image' | 'metadata';
+    readonly truncated?: boolean;
+    readonly note?: string;
+}
+
+export const CHAT_FILE_BYTES_UNAVAILABLE = 'file bytes unavailable on this host';
+
+const kb = (bytes: number): string => `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/** Base64 without `node:` APIs (edge-safe), in chunks so a large image does not blow the argument limit. */
+function toBase64(bytes: Uint8Array): string {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+}
+
+/** The first `max` bytes of UTF-8 as a string, cut on a character boundary. */
+function utf8Prefix(bytes: Uint8Array, max: number): { readonly text: string; readonly truncated: boolean } {
+    if (bytes.length <= max) return { text: new TextDecoder().decode(bytes), truncated: false };
+    let end = max;
+    while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+    return { text: new TextDecoder().decode(bytes.subarray(0, end)), truncated: true };
+}
+
+const isModelImage = (mediaType: string): boolean => MODEL_IMAGE_TYPES.includes(mediaType.split(';')[0]!.trim().toLowerCase());
+
+/**
+ * `chats_file_get`: the chat decides (`Chat.fileAccess` as this client), the
+ * store only holds bytes. Missing and not visible are the same answer, so a
+ * client cannot probe for files it may not read.
+ */
+async function getChatFile(port: PlatformPort, files: ChatFileStore | undefined, workspaceId: WorkspaceId, chatId: ChatId, fileId: string): Promise<ChatFileGetResult & { readonly [MCP_CONTENT_KEY]: readonly ToolContentBlock[] }> {
+    if (!port.chats.fileAccess) throw new Error(`chats_file_get: chat files are not available on this host`);
+    const file = await port.chats.fileAccess(chatId, fileId);
+    if (!file) throw new Error(`not found: file "${fileId}" does not exist in chat "${chatId}" or this client may not read it`);
+    const uri = chatFileUri(chatId, fileId);
+    const reply = (result: ChatFileGetResult, blocks: readonly ToolContentBlock[] = []) => ({ ...result, [MCP_CONTENT_KEY]: [{ type: 'text' as const, text: JSON.stringify(result) }, ...blocks] });
+    const text = isTextLikeMediaType(file.mediaType);
+    const image = !text && isModelImage(file.mediaType);
+    if (!text && !image) return reply({ file, uri, kind: 'metadata', note: `binary file (${file.mediaType}, ${kb(file.bytes)}): only its metadata is returned` });
+    if (!files) return reply({ file, uri, kind: 'metadata', note: CHAT_FILE_BYTES_UNAVAILABLE });
+    const body = await files.get(workspaceId, chatId, fileId);
+    if (!body) return reply({ file, uri, kind: 'metadata', note: 'file bytes are missing from the store' });
+    if (image) return reply({ file, uri, kind: 'image' }, [{ type: 'image', data: toBase64(body.bytes), mimeType: file.mediaType }]);
+    const { text: content, truncated } = utf8Prefix(body.bytes, CHAT_FILE_TEXT_MAX_BYTES);
+    const result: ChatFileGetResult = truncated ? { file, uri, kind: 'text', truncated: true, note: `truncated: the first ${kb(CHAT_FILE_TEXT_MAX_BYTES)} of ${kb(file.bytes)}` } : { file, uri, kind: 'text' };
+    return reply(result, [{ type: 'text', text: content }]);
+}
 
 /** What the surface declares but does not do yet — enumerated, never implied (PLG-09). */
 export const PLATFORM_MCP_UNSUPPORTED: readonly { readonly op: string; readonly reason: string }[] = [
@@ -35,6 +125,8 @@ const TAIL_MAX = 500;
 const HISTORY_MAX = 200;
 
 const id = (what: string) => z.string().min(1).describe(what);
+/** A url-safe id segment, as `agentic-file:<chatId>/<fileId>` requires. */
+const segment = (what: string) => z.string().regex(/^[A-Za-z0-9_-]+$/, 'expected a url-safe id').describe(what);
 const cursor = z.object({ epoch: z.number().int().min(0), seq: z.number().int().min(0) }).describe('An event cursor from a previous sessions_tail `next`.');
 
 const memoryScope = z
@@ -45,7 +137,7 @@ const memoryScope = z
 const memoryKind = z.enum(['working', 'fact', 'preference', 'assumption', 'lesson', 'record']);
 
 /** Every tool of the surface, gated by the principal's scopes. */
-export function platformTools(port: PlatformPort, principal: ExternalPrincipal): AnyTool[] {
+export function platformTools(port: PlatformPort, principal: ExternalPrincipal, options: PlatformToolsOptions = {}): AnyTool[] {
     const gate = (tool: string, scope: Scope): void => {
         if (!hasScope(principal, scope)) throw new McpScopeError(tool, scope);
     };
@@ -258,10 +350,18 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal):
         tool({
             name: 'chats_history',
             scope: 'chats',
-            description: `A page of a chat’s history, newest page first; pass \`cursor\` from \`next\` for older entries (max ${HISTORY_MAX} per page).`,
+            description: `A page of a chat’s history, newest page first; pass \`cursor\` from \`next\` for older entries (max ${HISTORY_MAX} per page). Attachments are \`image\` / \`file\` parts whose \`url\` is an \`agentic-file:<chatId>/<fileId>\` URI — fetch one with chats_file_get.`,
             input: z.object({ chatId: id('The chat id.'), cursor: z.number().int().min(0).nullable().optional(), limit: z.number().int().min(1).max(HISTORY_MAX).optional() }),
             annotations: READ,
             run: (input) => port.chats.history(input.chatId as ChatId, input.cursor ?? null, input.limit ?? 50)
+        }),
+        tool({
+            name: 'chats_file_get',
+            scope: 'chats',
+            description: `A file attached to a chat, as referenced by an \`agentic-file:<chatId>/<fileId>\` URI in chats_history. The first content block is always a JSON summary (file record, uri, kind, truncated?, note?); a second block follows with the text of a text file (cut at ${kb(CHAT_FILE_TEXT_MAX_BYTES)}) or an image block for a ${MODEL_IMAGE_TYPES.join(' / ')} image. Anything else is the summary alone.`,
+            input: z.object({ chatId: segment('The chat id.'), fileId: segment('The file id — the part after the chat id in the URI.') }),
+            annotations: READ,
+            run: (input) => getChatFile(port, options.files, principal.workspaceId, input.chatId as ChatId, input.fileId)
         }),
 
         // ---- memory ---------------------------------------------------------------------

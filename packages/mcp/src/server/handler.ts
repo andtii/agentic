@@ -11,18 +11,23 @@
  * harness handler is created over it — cheap, and it keeps the scope
  * decision next to the identity it was made for. `tools/list` is patched
  * to carry the annotations as MCP hints, which the harness does not emit
- * yet (signalxjs/ai#37).
+ * yet (signalxjs/ai#37); a `tools/call` of a tool in `MCP_CONTENT_TOOLS`
+ * is patched to carry the result's own content blocks (an image, a file's
+ * text), since the harness only emits the result as JSON text.
  */
 import { createMcpToolHandler, MCP_PROTOCOL_VERSION } from '@sigx/ai-agent/harness';
 import type { AnyTool } from '@sigx/ai';
+import type { ChatFileStore } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPortFactory } from './port.js';
-import { platformTools } from './tools.js';
+import { MCP_CONTENT_KEY, MCP_CONTENT_TOOLS, platformTools } from './tools.js';
 
 export interface PlatformMcpHandlerOptions {
     /** The bearer token's principal, or `null` (→ 401). Typically `OAuthServer.verify`. */
     readonly authenticate: (request: Request) => Promise<ExternalPrincipal | null>;
     /** The port for a principal — `apps/web` binds it to the actors. */
     readonly port: PlatformPortFactory;
+    /** Where chat attachment bytes live — the same store the platform's actors write (R2 in the web app). Absent: `chats_file_get` returns metadata only. */
+    readonly files?: ChatFileStore;
     /** Absolute URL of the RFC 9728 document the 401 names. */
     readonly resourceMetadataUrl: string;
     readonly name?: string;
@@ -38,7 +43,7 @@ export type PlatformMcpHandler = (request: Request) => Promise<Response>;
 
 export const PLATFORM_MCP_NAME = 'agentic';
 export const PLATFORM_MCP_INSTRUCTIONS =
-    'The agentic platform orchestration surface. Every daemon on every machine of the workspace is reachable here: list machines and environments, then open sessions on an explicitly chosen machine (sessions_open), prompt and follow them (sessions_prompt, sessions_tail), create and inspect tasks, post into chats, search memory, create schedules. Tool families are gated by the OAuth scopes granted to this client; a tool reports "forbidden" with the scope it needs.';
+    'The agentic platform orchestration surface. Every daemon on every machine of the workspace is reachable here: list machines and environments, then open sessions on an explicitly chosen machine (sessions_open), prompt and follow them (sessions_prompt, sessions_tail), create and inspect tasks, post into chats and read their files, search memory, create schedules. Tool families are gated by the OAuth scopes granted to this client; a tool reports "forbidden" with the scope it needs.';
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -54,14 +59,27 @@ function hintsOf(tool: AnyTool): Record<string, boolean> | undefined {
     return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** The JSON-RPC method a POST carries, without consuming the body the harness will read. */
-async function peekMethod(request: Request): Promise<string | null> {
+/** The JSON-RPC method a POST carries (and the tool, for `tools/call`), without consuming the body the harness will read. */
+async function peekMethod(request: Request): Promise<{ readonly method: string | null; readonly tool: string | null }> {
     try {
         const body = (await request.clone().json()) as unknown;
-        return isPlainObject(body) && typeof body.method === 'string' ? body.method : null;
+        if (!isPlainObject(body) || typeof body.method !== 'string') return { method: null, tool: null };
+        const tool = isPlainObject(body.params) && typeof body.params.name === 'string' ? body.params.name : null;
+        return { method: body.method, tool };
     } catch {
-        return null;
+        return { method: null, tool: null };
     }
+}
+
+/** Lift a result's own content blocks into `content`; the rest of it stays `structuredContent`. */
+async function withOwnContent(response: Response): Promise<Response> {
+    const body = (await response.json()) as { result?: { content?: unknown; structuredContent?: Record<string, unknown>; isError?: boolean } };
+    const structured = body.result?.structuredContent;
+    if (body.result && !body.result.isError && isPlainObject(structured) && Array.isArray(structured[MCP_CONTENT_KEY])) {
+        const { [MCP_CONTENT_KEY]: content, ...rest } = structured;
+        body.result = { ...body.result, content, structuredContent: rest };
+    }
+    return new Response(JSON.stringify(body), { status: 200, headers: response.headers });
 }
 
 export function createPlatformMcpHandler(options: PlatformMcpHandlerOptions): PlatformMcpHandler {
@@ -82,16 +100,18 @@ export function createPlatformMcpHandler(options: PlatformMcpHandlerOptions): Pl
         const principal = await options.authenticate(request);
         if (!principal) return challenge('the access token is invalid, expired or revoked');
 
-        const tools = options.tools ? options.tools(principal) : platformTools(options.port(principal), principal);
+        const tools = options.tools ? options.tools(principal) : platformTools(options.port(principal), principal, options.files ? { files: options.files } : {});
         const handler = createMcpToolHandler(tools, {
             name,
             version,
             instructions,
             ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {})
         });
-        const method = await peekMethod(request);
+        const { method, tool } = await peekMethod(request);
         const response = await handler(request);
-        if (method !== 'tools/list' || response.status !== 200) return response;
+        if (response.status !== 200) return response;
+        if (method === 'tools/call' && tool !== null && MCP_CONTENT_TOOLS.has(tool)) return withOwnContent(response);
+        if (method !== 'tools/list') return response;
         // Merge the annotations in (readOnlyHint & co.), keeping everything else the harness said.
         const body = (await response.json()) as { result?: { tools?: Record<string, unknown>[] } };
         const byName = new Map(tools.map((t) => [t.name, t]));

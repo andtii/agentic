@@ -8,7 +8,7 @@
  * The shapes are deliberately plain (JSON-serializable, no branded ids on
  * the wire beyond strings) — they are what an external client sees.
  */
-import type { AgentId, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 
 export type ExternalPrincipal = Extract<Principal, { kind: 'external' }>;
 
@@ -191,6 +191,13 @@ export interface PlatformPort {
     readonly chats: {
         post(input: ChatPostInput): Promise<{ readonly messageId: string }>;
         history(chatId: ChatId, cursor: number | null, limit: number): Promise<ChatHistoryPage>;
+        /**
+         * `Chat.fileAccess` under this client (#209, CHT-04): the file's record
+         * when the client may read it (every posted file, its own pending
+         * uploads), `null` when it is missing or not visible. Absent: this host
+         * cannot resolve chat files, and `chats_file_get` says so.
+         */
+        fileAccess?(chatId: ChatId, fileId: string): Promise<ChatFile | null>;
     };
     readonly memory: {
         search(scope: MemoryScope, query: MemoryQuery): Promise<readonly RankedMemory[]>;
