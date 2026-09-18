@@ -4,6 +4,8 @@ export { TaskActor, DEFAULT_STOP_TIMEOUT_MS, type TaskMethods, type TaskStreams 
 export { applyTaskEntry, initialTaskState } from './entries.js';
 export { IllegalTransitionError, TaskLimitError, TaskStateError, type TaskLimitKind } from './errors.js';
 export { TASK_TYPE, parseTaskKey, taskKey } from './key.js';
+export { TASK_INDEX_CAP, TASK_INDEX_TYPE, TaskIndex, initialTaskIndexState, newestFirst, taskIndexKey, taskIndexRowOf, trimIndex, type TaskIndexMethods, type TaskIndexQuery, type TaskIndexRow, type TaskIndexState } from './task-index.js';
+export { indexTask, type TaskIndexHops } from './index-port.js';
 export {
     BUDGET_KEYS,
     DEFAULT_MAX_CONCURRENT_CHILDREN,
