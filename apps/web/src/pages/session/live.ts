@@ -5,6 +5,13 @@
  * transcript folded over the log, the event log itself summarised one
  * line per event, the capability report from what the runtime declared
  * (AC-15: unsupported operations are listed, their controls never drawn).
+ *
+ * Nothing here is a literal (#154): the open time is the instant `open`
+ * stamped on the spec (`retrieval.at`, present when the platform has its
+ * learning ports — 0 otherwise, and the header says only where it was opened
+ * from), the working dir is the environment's first `cwdRoots` entry — what
+ * the router hands the daemon — and empty for a platform session, and the
+ * current tool call carries no duration: agent events have no timestamps.
  */
 import type { CapabilityReport, MachineId, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { MachineView, SessionInfo } from '@agentic/platform';
@@ -137,7 +144,7 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         ref: info.ref?.id ?? id,
         agentId: spec?.agentId ?? agent.id,
         state: info.status,
-        openedAt: 0,
+        openedAt: spec?.retrieval?.at ?? 0,
         openedFrom: spec?.chatId ? `chat ${spec.chatId}` : spec?.taskId ? `task ${spec.taskId}` : 'the platform',
         ...(spec?.chatId ? { chatId: spec.chatId } : {}),
         ...(spec?.taskId ? { taskId: spec.taskId as TaskId } : {}),
@@ -149,7 +156,7 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         authStatus: env ? authPillOf(env.account.authStatus) : 'auth-ok',
         ...(env ? { auth: { status: env.account.authStatus, account: env.account.label } } : {}),
         ...(error ? { error } : {}),
-        cwd: '—',
+        cwd: env?.cwdRoots[0] ?? '',
         head: info.head,
         configVersion: spec?.config.configVersion ?? agent.configVersion,
         ...(running ? { current: { part: running, transcript } } : {}),

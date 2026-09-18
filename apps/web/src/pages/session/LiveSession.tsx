@@ -15,6 +15,7 @@ import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import type { MockSessionView } from '../../mock/workspace';
+import { useWorkspaceZone, zoneFormat } from '../../time';
 import { useAgentDirectory } from '../chat/directory';
 import { SessionView } from '../Session';
 import { liveSessionView } from './live';
@@ -26,6 +27,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const directory = useAgentDirectory(defs, viewer);
+    const zone = useWorkspaceZone(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? sessionKeyOf(viewer.workspaceId, props.id) : null);
     const info = useActorState(defs.Session, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const events = useActorState(defs.Session, () => { const k = key(); return k && ([k, 'events'] as const); }, { live: true });
@@ -78,7 +80,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
         }
         return (
             <>
-                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} />
+                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} />
                 {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
             </>
         );

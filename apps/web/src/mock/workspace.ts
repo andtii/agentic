@@ -301,7 +301,7 @@ export interface MockSessionView {
     readonly head: { readonly epoch: number; readonly seq: number };
     readonly configVersion: number;
     /** The current tool call and the open request, if any. */
-    readonly current?: { readonly part: ToolPartState; readonly transcript: AgentTranscript };
+    readonly current?: { readonly part: ToolPartState; readonly transcript: AgentTranscript; /** The call's duration as the tool row prints it; the platform reports none (#154). */ readonly meta?: string };
     readonly request?: { readonly request: OpenRequest; readonly context: ApprovalContext };
     readonly events: readonly MockEvent[];
     /** Events lost across a reconnect, if any. */
@@ -351,7 +351,7 @@ function forgeSession(): MockSessionView {
         id: sid('s1'), ref: 's_41aa', agentId: 'forge', state: 'awaiting', openedAt: minutesAgo(14), openedFrom: 'chat "Mobile pass #47"', chatId: 'c1', taskId: tid('t1-1'),
         environment: agentNamed('forge').environment, machine: ALIEN01, runtimeVersion: 'claude-code 2.4', authStatus: 'auth-ok',
         cwd: 'C:\\Dev\\agentic\\branches\\47-mobile-drawer', head: { epoch: 1, seq: 318 }, configVersion: 7,
-        current: { part: tool('c_test', 'Bash', { command: 'pnpm test packages/ui' }, { output: '42 passed · 0 failed · 3.1s' }), transcript },
+        current: { part: tool('c_test', 'Bash', { command: 'pnpm test packages/ui' }, { output: '42 passed · 0 failed · 3.1s' }), transcript, meta: '3.4s' },
         request: { request: PUSH_REQUEST, context: { ...PUSH_CONTEXT, compact: true } },
         events: [
             { seq: 309, kind: 'tool-call', text: 'Edit packages/ui/src/shell/shell.css' },
