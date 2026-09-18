@@ -17,8 +17,9 @@
  * same child and re-awaits it. An aborted turn (the parent's stop cascade)
  * answers `cancelled` with what could not be confirmed stopped.
  *
- * `ask_user` stays `unsupported` until input requests land (#40) — the error
- * says so, the tool never silently succeeds.
+ * `ask_user` stays `unsupported` until a platform-raised input request lands
+ * (#122: the port has no way into the engine's `resolveRequest`)
+ * — the error says so, the tool never silently succeeds.
  */
 
 import { isTerminal, type ChatId, type MemoryEntry, type Principal, type TaskId, type WorkspaceId } from '@agentic/core';
@@ -127,7 +128,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 return { messageId: result.messageId };
             },
             ask() {
-                return Promise.reject(new ToolCallError('unsupported', 'ask_user: not available until input requests land (#40)'));
+                return Promise.reject(new ToolCallError('unsupported', 'ask_user: not available until a platform-raised input request lands (#122)'));
             }
         },
         task: {

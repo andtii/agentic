@@ -16,6 +16,7 @@ export {
     Inbox,
     defineInbox,
     inboxKey,
+    sameRef,
     initialInboxState,
     reduceInbox,
     INBOX_CAP,

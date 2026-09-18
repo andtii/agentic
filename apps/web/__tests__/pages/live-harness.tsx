@@ -15,10 +15,9 @@ import { actorsPlugin } from '@sigx/actors/app';
 import { configureActors, fetchTransport, type ActorTransport } from '@sigx/actors/client';
 import { createFetchHandler } from '@sigx/actors/server';
 import { stubServerApp } from '@sigx/server/testing';
-import { allowAll } from '@sigx/ai-agent';
 import { mockAgent, type MockAgent, type MockAgentOptions } from '@sigx/ai-agent/testing';
 import type { AgentId, Principal, WorkspaceId } from '@agentic/core';
-import { AgentActor, AuditActor, Chat, ChatPage, LedgerActor, Memory, TaskActor, Workspace, agentKey, defineInbox, defineRoutingActor, defineSessionActor, workspaceKey, type SessionFactory } from '@agentic/platform';
+import { AgentActor, AuditActor, Chat, ChatPage, LedgerActor, Memory, TaskActor, Workspace, agentKey, defineInbox, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type SessionFactory } from '@agentic/platform';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../../packages/platform/src/testing/index';
 import { clientDefs } from '../../src/actors/client';
 import { useActorDefs, useViewer } from '../../src/actors/defs';
@@ -51,16 +50,17 @@ export interface LiveHarness {
 function localFactory(agent: MockAgent): SessionFactory {
     return async (runtime, c) => {
         if (runtime !== 'anthropic-api') return null;
-        const session = await agent.session({ policy: allowAll, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
+        // The agent's own compiled policy (#40): no rules → allow, an `ask` rule → a request the pages answer.
+        const session = await agent.session({ policy: sessionPolicy(c.spec), signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
         return { session, agentId: agent.id, capabilities: agent.capabilities };
     };
 }
 
 /** Start the host, the wire and the stubbed identity. `agentScript` is the mock runtime every session runs. */
 export async function startLive(agentScript: MockAgentOptions = { respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] }): Promise<LiveHarness> {
-    const Session = defineSessionActor({ factory: localFactory(mockAgent(agentScript)) });
     const Inbox = defineInbox({ channels: [] });
-    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session, inbox: () => Inbox });
+    const Session = defineSessionActor({ factory: localFactory(mockAgent(agentScript)), inbox: () => Inbox });
+    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     const app = testActorApp([Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Routing, Inbox, Memory, LedgerActor, AuditActor]);
     await app.start();
     // After `start()` (last-wins seam): the wire authenticates the `x-user` header; hops keep the JSON codec.

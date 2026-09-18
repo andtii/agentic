@@ -146,7 +146,7 @@ describe('the session wire over the actor', () => {
         const sent: string[] = [];
         const reply = (commandId: string): WireReply => ({ v: WIRE_PROTOCOL_VERSION, kind: 'ack', commandId });
         const client: SessionActorClient = {
-            get: async () => ({ key: 'u1:session:s1', opened: true, spec: { agentId: 'a1' as AgentId, runtime: 'anthropic-api', config: {} as never }, status: 'running', head: { epoch: 1, seq: 2 }, openRequests: [], eventCount: 2, corrections: [] }),
+            get: async () => ({ key: 'u1:session:s1', opened: true, spec: { agentId: 'a1' as AgentId, runtime: 'anthropic-api', config: {} as never }, status: 'running', head: { epoch: 1, seq: 2 }, openRequests: [], eventCount: 2, corrections: [], grants: [] }),
             prompt: async (input, turnId, _output, commandId) => (sent.push(`prompt ${turnId} ${commandId} ${JSON.stringify(input)}`), reply(commandId!)),
             respond: async (requestId, decision, commandId) => (sent.push(`respond ${requestId} ${(decision as { outcome: string }).outcome} ${commandId}`), { v: 1, kind: 'pending' as const, commandId: commandId! }),
             cancel: async (agentId, commandId) => (sent.push(`cancel ${agentId ?? '-'} ${commandId}`), reply(commandId!)),

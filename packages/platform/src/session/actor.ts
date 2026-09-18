@@ -16,7 +16,7 @@
  *   frames to `forwardFrames` and its replies to `commandReplied`.
  */
 
-import { actorKey, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type TaskError, type TaskResult, type UsageRow } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
@@ -27,6 +27,8 @@ import { mintAgentPrincipal, sameWorkspace } from '../auth/index.js';
 import type { UsageVerdict } from '../ledger/recorder.js';
 import { agentMemoryScope } from '../agent/agent.actor.js';
 import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
+import { inboxKey, type NotificationInput, type NotificationRef } from '../notify/index.js';
+import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, type RequestEvent, type RequestRecord, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
 import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
@@ -58,6 +60,31 @@ export interface SessionInfo {
     readonly learning?: LearningRecord;
     /** Corrections made through `correct`, oldest first. */
     readonly corrections: readonly CorrectionRecord[];
+    /**
+     * Session-scoped grants in force (`scope: 'session'` allows, by a person or a rule), derived
+     * from the log. Listed, never revocable: the adapter keeps its grants private (`policy/requests.ts`).
+     */
+    readonly grants: readonly SessionGrant[];
+}
+
+/**
+ * `Session.request(id)` / `requests()` — one request as an approval card renders it
+ * (CHT-09): the record from the log plus who asks, where it belongs and the rule
+ * of the agent's `approvalPolicy` that decided to ask, when one matches.
+ */
+export interface SessionRequestView extends RequestRecord {
+    readonly sessionId: SessionId;
+    readonly agentId: AgentId;
+    readonly chatId?: ChatId;
+    readonly taskId?: TaskId;
+    /** `ask on destructive` — `describeRule(ruleFor(approvalPolicy, …))`. */
+    readonly rule?: string;
+}
+
+/** The slice of the Inbox actor a session notifies (`defineInbox`). */
+interface InboxClient {
+    push(input: NotificationInput): Promise<unknown>;
+    ackRef(ref: NotificationRef): Promise<unknown>;
 }
 
 /** What `correct` returns: the correction as the plugin saw it and what it proposed. */
@@ -126,10 +153,14 @@ export function defineSessionActor(ports: SessionPorts) {
     const set = (patch: SessionPatch): SessionEntry => ({ t: 'set', patch });
 
     /**
-     * One event durable — then, for a permission request or its decision, its
-     * audit record (`approval.requested` / `approval.resolved`, OPS-03), keyed
-     * by the event's `(epoch, seq)` so a replayed frame folds once. One-way: the
-     * history never fails the turn. Input requests are the chat's business.
+     * One event durable — then, for a request, what the user must hear
+     * (OPS-02, CHT-09): a chat status entry and an Inbox notification on
+     * `request`, the matching `request-resolved` status and the notification
+     * marked read on the decision, wherever it came from; and, for a
+     * permission request or its decision, the audit record
+     * (`approval.requested` / `approval.resolved`, OPS-03) keyed by the
+     * event's `(epoch, seq)` so a replayed frame folds once. All one-way:
+     * neither the history nor a notification ever fails the turn.
      */
     async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
         await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
@@ -140,6 +171,8 @@ export function defineSessionActor(ports: SessionPorts) {
         const key = `${c.key}:${ev.epoch}:${ev.seq}`;
         const common = { at: now(), agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) };
         if (ev.type === 'request') {
+            await publishChat(c, { kind: 'status', status: 'request', ref: requestRef(ev) });
+            await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.push(requestNotification(spec.agentId, parsed.sessionId, ev)));
             if (ev.kind !== 'permission') return;
             await audit.record(c, parsed.workspaceId, {
                 ...common,
@@ -158,7 +191,11 @@ export function defineSessionActor(ports: SessionPorts) {
             return;
         }
         const request = c.state.events.find((e) => e.type === 'request' && e.requestId === ev.requestId);
-        if (!request || request.type !== 'request' || request.kind !== 'permission') return;
+        if (!request || request.type !== 'request') return;
+        await publishChat(c, { kind: 'status', status: 'request-resolved', ref: requestRef(request) });
+        const ref: NotificationRef = { kind: 'session', sessionId: parsed.sessionId, requestId: ev.requestId };
+        await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.ackRef(ref));
+        if (request.kind !== 'permission') return;
         await audit.record(c, parsed.workspaceId, {
             ...common,
             key,
@@ -174,6 +211,44 @@ export function defineSessionActor(ports: SessionPorts) {
                 ...(ev.ruleId ? { ruleId: ev.ruleId } : {})
             }
         });
+    }
+
+    /** One-way to the workspace's Inbox when the app wired one; a refusal or an absent inbox never fails the turn. */
+    async function notifyInbox(c: ActorContext<SessionState>, workspaceId: WorkspaceId, send: (inbox: InboxClient) => Promise<unknown>): Promise<void> {
+        const def = ports.inbox?.();
+        if (!def) return;
+        try {
+            await send(c.actor(def, inboxKey(workspaceId)).with({ oneWay: true }) as unknown as InboxClient);
+        } catch {
+            // A notification is never a gate on the work.
+        }
+    }
+
+    /** The Inbox row for a request: what is asked, by which agent, deep-linked to the session and the request. */
+    function requestNotification(agentId: string, sessionId: SessionId, ev: RequestEvent): NotificationInput {
+        const kind = needOf(ev.kind);
+        return {
+            kind,
+            title: kind === 'approval' ? `${agentId} asks for approval${ev.toolName ? `: ${ev.toolName}` : ''}` : `${agentId} needs input`,
+            ...(ev.message ? { body: ev.message } : {}),
+            ref: { kind: 'session', sessionId, requestId: ev.requestId }
+        };
+    }
+
+    /** A record plus the session's who / where and the agent's rule that matched (a `policy` decision's `ruleId` names the exact rule). */
+    function requestView(c: ActorContext<SessionState>, record: RequestRecord): SessionRequestView {
+        const spec = c.state.spec;
+        const parsed = parseSessionKey(c.key);
+        const rules = spec?.config.approvalPolicy ?? [];
+        const rule = (record.resolved?.ruleId && rules.find((r) => r.id === record.resolved!.ruleId)) || (record.request.kind === 'permission' ? ruleFor(rules, policyRequestOf(record)) : undefined);
+        return {
+            ...record,
+            sessionId: parsed?.sessionId ?? (c.key as SessionId),
+            agentId: spec?.agentId ?? ('' as AgentId),
+            ...(spec?.chatId ? { chatId: spec.chatId } : {}),
+            ...(spec?.taskId ? { taskId: spec.taskId } : {}),
+            ...(rule ? { rule: describeRule(rule) } : {})
+        };
     }
 
     function info(c: ActorContext<SessionState>): SessionInfo {
@@ -194,7 +269,8 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.gap ? { gap: c.snapshot(s.gap) } : {}),
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
-            corrections: c.snapshot(s.corrections ?? [])
+            corrections: c.snapshot(s.corrections ?? []),
+            grants: sessionGrantsOf(s.events)
         };
     }
 
@@ -435,6 +511,7 @@ export function defineSessionActor(ports: SessionPorts) {
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
         methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy },
+        reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         onDeactivate: (ctx) => dispose(ctx.key),
         methods: (ctx) => {
@@ -608,6 +685,20 @@ export function defineSessionActor(ports: SessionPorts) {
                 transcript(): AgentTranscript | undefined {
                     const t = ctx.state.transcript;
                     return t ? ctx.snapshot(t) : undefined;
+                },
+
+                /** One request with its call input and, once decided, the decision — what an approval card renders (CHT-09). A live read. */
+                request(requestId: string): SessionRequestView | null {
+                    const s = ctx.state;
+                    const record = requestRecordOf(s.events, requestId, s.transcript);
+                    return record ? requestView(ctx, ctx.snapshot(record)) : null;
+                },
+
+                /** Every request of the session, oldest first; `openOnly` keeps the ones still waiting for a person. A live read. */
+                requests(options: { readonly openOnly?: boolean } = {}): SessionRequestView[] {
+                    const s = ctx.state;
+                    const all = requestRecordsOf(s.events, s.transcript);
+                    return ctx.snapshot(options.openOnly ? all.filter((r) => !r.resolved) : all).map((r) => requestView(ctx, r));
                 },
 
                 /**

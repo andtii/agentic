@@ -26,7 +26,15 @@ import { nonBlank, signature } from './text.js';
 
 const SCOPE = aiApprovalAnatomy.scope;
 
-export type RespondFn = (requestId: string, decision: Decision) => void;
+/**
+ * How a decision leaves the card — `session.respond()` in some form. A
+ * returned promise is awaited: while it is out the buttons stay disabled,
+ * a rejection re-enables them and shows its message (the request is still
+ * open; the user tries again), a resolution leaves them disabled until the
+ * caller passes the `decision` the session recorded — which may come from
+ * another client altogether (OPS-02).
+ */
+export type RespondFn = (requestId: string, decision: Decision) => unknown;
 
 /** Who is asking — the agent's name and identity slot. */
 export interface ApprovalRequester {
@@ -73,18 +81,32 @@ export function decisionText(d: ApprovalDecision): string {
 }
 
 export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal }) => {
-    /** The button that was clicked, until the request resolves or the caller passes the decision. */
-    const st = signal({ pending: undefined as 'once' | 'session' | 'deny' | undefined });
+    /** The button that was clicked, until the request resolves or the caller passes the decision; `error` when the answer did not get through. */
+    const st = signal({ pending: undefined as 'once' | 'session' | 'deny' | undefined, error: '' });
 
     const decide = (outcome: 'allow' | 'deny', scope: 'once' | 'session'): void => {
         if (st.pending) return;
         st.pending = outcome === 'deny' ? 'deny' : scope;
-        props.onRespond(props.request.requestId, {
-            type: 'permission',
-            outcome,
-            scope,
-            ...(outcome === 'deny' ? { message: DENY_MESSAGE } : {})
-        });
+        st.error = '';
+        let out: unknown;
+        try {
+            out = props.onRespond(props.request.requestId, {
+                type: 'permission',
+                outcome,
+                scope,
+                ...(outcome === 'deny' ? { message: DENY_MESSAGE } : {})
+            });
+        } catch (e) {
+            failed(e);
+            return;
+        }
+        if (out && typeof (out as Promise<unknown>).then === 'function') void (out as Promise<unknown>).then(undefined, failed);
+    };
+
+    /** The answer never reached the session: say so and let the user try again. */
+    const failed = (e: unknown): void => {
+        st.pending = undefined;
+        st.error = e instanceof Error ? e.message : String(e);
     };
 
     return () => {
@@ -145,6 +167,7 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                         )}
                     </dl>
                 )}
+                {st.error && !decision ? <p data-scope={SCOPE} data-part="description" role="alert">{`Could not answer: ${st.error}`}</p> : null}
                 {decision ? (
                     <p data-scope={SCOPE} data-part="record">{decisionText(decision)}</p>
                 ) : (
