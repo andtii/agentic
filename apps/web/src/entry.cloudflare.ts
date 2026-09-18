@@ -6,13 +6,14 @@
 //     auth routes  ->  daemon socket + actor mount + actor sockets
 //                  ->  server functions  ->  document render
 //
-// all of it inside ONE `runWithHost` scope — the Worker's own host (#137, #172).
+// all of it inside ONE `runWithHost` scope — the Worker's own host (#137, #172), booted from `env`
+// before an auth route runs (#182) and by the actor mount otherwise.
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
-import { createActorHost, createActorWorker, ensureServerApp, pairingWiring, platformRegistry, type PlatformEnv } from './actors.app';
+import { createActorHost, createActorWorker, pairingWiring, platformRegistry, type PlatformEnv } from './actors.app';
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { createAuthMount, githubEnabled } from './auth/mount';
 import { setSignInOptions } from './auth/sign-in';
@@ -65,7 +66,9 @@ export default {
             // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
             const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
             if (route) {
-                ensureServerApp(env);
+                // The auth routes hop (`pairingWiring`, the token lookup): the Worker host must exist before
+                // one runs, and on a cold isolate nothing else has booted it yet (#182).
+                await actors.boot(env);
                 return route(request);
             }
             return actors.fetch(request, env, ctx);
