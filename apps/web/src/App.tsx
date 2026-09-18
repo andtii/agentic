@@ -1,4 +1,4 @@
-import { component, useHead } from 'sigx';
+import { component, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Breadcrumbs } from '@sigx/zero-daisyui/components';
@@ -9,6 +9,54 @@ import { machines } from './mock/data';
 import { topbarFor } from './components/topbar';
 import { clientConnection, LiveConnection } from './components/status';
 import { dataMode } from './data-mode';
+import { useViewer } from './actors/defs';
+import { signInOptions } from './api/sign-in.server';
+import { DEV_LOGIN_PATH } from './auth/dev-login';
+
+/**
+ * The sidebar foot in live mode (#143): the signed-in workspace, or — for
+ * nobody — the doors this deployment has open. Its own component so the
+ * async reads (`whoami`, `signInOptions`) resolve into ITS render: the server
+ * renderer re-renders the component that owns a pending read, not a slot
+ * closure a parent handed down.
+ */
+const UserFoot = component(() => {
+    const viewer = useViewer()();
+    const doors = useData(signInOptions);
+    return () => {
+        if (!viewer.pending && !viewer.workspaceId) {
+            const open = doors.value;
+            return (
+                <span data-sign-in="">
+                    {open?.github ? <a href="/auth/login" data-sign-in-github="">Sign in with GitHub</a> : null}
+                    {open?.devLogin ? <a href={DEV_LOGIN_PATH} data-sign-in-dev="">Dev login</a> : null}
+                    {!open?.github && !open?.devLogin ? <span data-sign-in-none="">Signed out</span> : null}
+                </span>
+            );
+        }
+        const ws = viewer.workspaceId ?? '…';
+        return (
+            <>
+                <span data-user-avatar aria-hidden="true">{initials(ws)}</span>
+                <span data-user-name>Workspace<small>{ws}</small></span>
+            </>
+        );
+    };
+}, { name: 'UserFoot' });
+
+/** The design track's user, what mock mode shows. */
+const mockUserFoot = (): JSXElement => (
+    <>
+        <span data-user-avatar aria-hidden="true">WS</span>
+        <span data-user-name>Workspace<small>ws:local</small></span>
+    </>
+);
+
+/** Two letters for the avatar: `dev_ada` → `AD`, `gh_123` → `12`, `ws:local` → `WS`. */
+function initials(id: string): string {
+    const tail = id.replace(/^(dev_|gh_)/, '');
+    return (tail.slice(0, 2) || 'WS').toUpperCase();
+}
 
 /** Schibsted Grotesk (interface) + JetBrains Mono (anything a machine said), 400–700, swapped in. */
 const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
@@ -78,12 +126,8 @@ export const App = component(() => {
                         connection: () => (dataMode() === 'live'
                             ? <LiveConnection />
                             : <ConnectionStrip rows={connectionRows(clientConnection(), machines.map(m => ({ id: m.id, name: m.name, online: m.online })))} />),
-                        user: () => (
-                            <>
-                                <span data-user-avatar aria-hidden="true">WS</span>
-                                <span data-user-name>Workspace<small>ws:local</small></span>
-                            </>
-                        )
+                        // Live mode: who is signed in, or the doors open to a visitor (#143); mock mode keeps the design track's user.
+                        user: () => (dataMode() === 'live' ? <UserFoot /> : mockUserFoot())
                     }}
                 >
                     {clientConnection() === 'reconnecting' ? <OfflineBanner /> : null}

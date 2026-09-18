@@ -8,7 +8,7 @@ import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
 import { createWebAuth, defaultResolveUser, type RouteHandler } from '../../src/auth';
-import { createDevLoginRoute, DEV_LOGIN_PATH } from '../../src/auth/dev-login';
+import { devLoginRouteFor } from '../../src/auth/dev-login';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -49,15 +49,11 @@ const worker = createActorWorker({
     }
 });
 
-// The preview-only dev login (#35) is mounted here exactly as `entry.cloudflare.ts` mounts it,
-// so the demo walk-through signs in over the wire the way the Playwright smoke does.
+// The preview-only dev login (#35, #143: GET form + POST) is mounted here exactly as
+// `entry.cloudflare.ts` mounts it, so the demo walk-through signs in over the wire the way the Playwright smoke does.
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        if (request.method === 'POST' && new URL(request.url).pathname === DEV_LOGIN_PATH) {
-            const route = createDevLoginRoute({ ...(env.SESSION_SECRET ? { SESSION_SECRET: env.SESSION_SECRET } : {}), ...(env.AGENTIC_DEV_LOGIN ? { AGENTIC_DEV_LOGIN: env.AGENTIC_DEV_LOGIN } : {}) });
-            if (route) return route(request);
-        }
         currentEnv = env;
-        return worker.fetch(request, env, ctx);
+        return devLoginRouteFor(request, env)?.(request) ?? worker.fetch(request, env, ctx);
     }
 };
