@@ -5,26 +5,35 @@
  * (`profileOf`), the Config tab persisting through `Agent.update` /
  * `Agent.rollback` — its environment picker offering every paired machine's
  * environments (#144) — and "Start chat" creating a direct chat with this agent.
+ *
+ * #153: presence and the Sessions tab from the task index, the Memory tab on
+ * the agent's private Memory scope, the week's corrections from the Ledger,
+ * a pending instruction proposal in the rail (`Agent.reviewProposal`), the
+ * form's other pickers from `./catalog`, times in the workspace's zone.
  */
 import { component, effect, onUnmounted, signal, useData, type JSXElement } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Tabs } from '@sigx/zero-daisyui/components';
-import type { AgentConfig, AgentConfigVersion } from '@agentic/core';
+import type { AgentConfig, AgentConfigVersion, MemoryEntry } from '@agentic/core';
 import { AgentTile, Button, EmptyState, EnvironmentLine, Row, Stack, StatusPill } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { agentKeyOf } from '../../actors/keys';
+import { agentKeyOf, memoryKeyOf } from '../../actors/keys';
 import type { MockAgent } from '../../mock/data';
+import { useWorkspaceZone } from '../../time';
+import { presencePill } from '../Agents';
 import { useAgentDirectory } from '../chat/directory';
 import { createChatWith } from '../chat/LiveChats';
 import { useEnvironmentOptions } from '../machines/environments';
 import { AGENT_TABS, type AgentTab } from '../Agent';
+import { useAgentActivity } from './activity';
+import { useAgentCatalog } from './catalog';
 import { ConfigTab, type ConfigStore } from './ConfigTab';
 import { agentHead } from './head';
-import { configPatch, profileOf } from './live';
-import { MemoryTab } from './MemoryTab';
+import { configPatch, learningPatch, profileOf, sessionRowsOf } from './live';
+import { MemoryTab, type MemoryTabStore } from './MemoryTab';
 import { OverviewTab } from './OverviewTab';
 import { SessionsTab } from './SessionsTab';
 
@@ -40,6 +49,9 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
     const client = () => actor(defs.AgentActor, key()!);
 
     const view = useActorState(defs.AgentActor, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
+    const activity = useAgentActivity(defs, viewer, () => props.id, () => view.value);
+    const catalog = useAgentCatalog(defs, viewer);
+    const zone = useWorkspaceZone(defs, viewer);
     // Keyed by the config version, so a save (ours or another tab's) re-reads the log.
     const versions = useData(
         () => { const k = key(); return k && view.value ? (['agent-versions', k, view.value.configVersion] as const) : false; },
@@ -65,7 +77,26 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
 
     const store: ConfigStore = {
         save: (config: AgentConfig, reason: string) => client().update(configPatch(config), reason),
-        rollback: (version: number) => client().rollback(version)
+        rollback: (version: number) => client().rollback(version),
+        config: async () => (await client().get()).config,
+        // The rail shows the oldest pending proposal; accepting lands it as a new version (LRN-08).
+        async review(decision) {
+            const proposal = activity.activity().proposal;
+            if (!proposal) return null;
+            const reviewed = await client().reviewProposal(proposal.id, decision);
+            if (decision !== 'accept' || reviewed.review?.version === undefined) return null;
+            const [versions, after] = await Promise.all([client().listVersions(), client().get()]);
+            const version = versions.find((v) => v.version === reviewed.review!.version);
+            return version ? { version, config: after.config } : null;
+        }
+    };
+
+    const memory = () => actor(defs.Memory, memoryKeyOf(viewer.workspaceId!, `agent:${props.id}`));
+    const memoryStore: MemoryTabStore = {
+        correct: (entry: MemoryEntry, text: string) => memory().update(entry.id, { text, confidence: 'stated', provenance: { ...entry.provenance, source: 'user', at: Date.now() } }),
+        retire: (entry: MemoryEntry) => memory().retire(entry.id, 'retired by you'),
+        remove: (entry: MemoryEntry) => memory().delete(entry.id),
+        setLearning: (on: boolean) => client().update(learningPatch(view.value!.config, on), on ? 'Learning on' : 'Learning off')
     };
 
     const startChat = async (): Promise<void> => {
@@ -98,10 +129,13 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                 </Page>
             );
         }
-        if (!v || !log.versions) return <div data-page="agent" data-agent={id} aria-busy="true" />;
+        // The Config tab copies the versions at mount, so it waits for the log and for a pending proposal.
+        if (!v || !log.versions || activity.pending()) return <div data-page="agent" data-agent={id} aria-busy="true" />;
         const index = Math.max(0, directory.all().findIndex((a) => a.id === id));
-        const profile = profileOf(v, log.versions, index);
-        const agent: MockAgent = { id, name: v.config.name || id, description: v.config.description, runtime: v.config.execution.runtime === 'claude-code' ? 'claude-code' : 'anthropic-api', status: 'idle', configVersion: v.configVersion };
+        const profile = profileOf(v, log.versions, index, activity.activity());
+        const pill = presencePill(profile.presence);
+        const sessions = sessionRowsOf(activity.activity().tasks ?? [], profile.environment!);
+        const agent: MockAgent = { id, name: v.config.name || id, description: v.config.description, runtime: v.config.execution.runtime === 'claude-code' ? 'claude-code' : 'anthropic-api', status: profile.presence === 'idle' ? 'idle' : 'busy', configVersion: v.configVersion };
         const collaborators = directory.all().filter((a) => a.id !== id).map((a) => ({ value: a.id, label: a.name }));
         return (
             <div data-page="agent" data-agent={id}>
@@ -119,7 +153,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         </Stack>
                     </Row>
                     <Row gap="md" align="center">
-                        <StatusPill status="idle" label="IDLE" hollow />
+                        <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                         <Button icon="chats" disabled={st.starting} onClick={() => { void startChat(); }}>Start chat</Button>
                     </Row>
                 </header>
@@ -131,10 +165,10 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         <Tabs.Tab value="memory">Memory</Tabs.Tab>
                         <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
                     </Tabs.List>
-                    <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} /></Tabs.Panel>
-                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} /></Tabs.Panel>
-                    <Tabs.Panel value="memory"><MemoryTab profile={profile} /></Tabs.Panel>
-                    <Tabs.Panel value="sessions"><SessionsTab agentId={id} /></Tabs.Panel>
+                    <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} sessions={sessions} zone={zone()} /></Tabs.Panel>
+                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} catalog={catalog(v.config)} /></Tabs.Panel>
+                    <Tabs.Panel value="memory"><MemoryTab profile={profile} store={memoryStore} zone={zone()} /></Tabs.Panel>
+                    <Tabs.Panel value="sessions"><SessionsTab agentId={id} rows={sessions} agent={{ name: agent.name, hue: profile.hue }} zone={zone()} /></Tabs.Panel>
                 </Tabs>
             </div>
         );
