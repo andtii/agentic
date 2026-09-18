@@ -249,7 +249,9 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         Session: byType('session') as ActorDefs['Session'],
         Routing: byType('routing') as ActorDefs['Routing'],
         Inbox: byType('Inbox') as ActorDefs['Inbox'],
-        Machine: byType('machine') as ActorDefs['Machine']
+        Machine: byType('machine') as ActorDefs['Machine'],
+        Schedule: byType('Schedule') as ActorDefs['Schedule'],
+        Registry: byType('Registry') as ActorDefs['Registry']
     };
 }
 
