@@ -14,7 +14,7 @@
  * Tests provide either, plus their own transport.
  */
 import { defineInjectable } from 'sigx';
-import type { AgentActor, Chat, RoutingActor, SessionActor, TaskActor, Workspace } from '@agentic/platform';
+import type { AgentActor, Chat, Inbox, RoutingActor, SessionActor, TaskActor, Workspace } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -23,6 +23,8 @@ export interface ActorDefs {
     readonly TaskActor: typeof TaskActor;
     readonly Session: SessionActor;
     readonly Routing: RoutingActor;
+    /** The workspace Inbox — "Needs you" (#40). */
+    readonly Inbox: typeof Inbox;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });

@@ -245,7 +245,8 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         AgentActor: byType('Agent') as ActorDefs['AgentActor'],
         TaskActor: byType('task') as ActorDefs['TaskActor'],
         Session: byType('session') as ActorDefs['Session'],
-        Routing: byType('routing') as ActorDefs['Routing']
+        Routing: byType('routing') as ActorDefs['Routing'],
+        Inbox: byType('Inbox') as ActorDefs['Inbox']
     };
 }
 

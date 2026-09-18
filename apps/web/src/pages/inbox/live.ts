@@ -7,27 +7,23 @@
  * changed them, whoever caused it — a decision from the chat, the phone or
  * another tab drops the row here and collapses the card to its record.
  *
- * The definitions come from the caller: during SSR they are the platform's
- * own (`actor()` dispatches in-process through the host seam), in the
- * browser the `__actorRef` stubs that speak the actor mount over HTTP —
- * the entry decides which, this module never imports `@agentic/platform`
- * at runtime.
+ * The definitions come from `useActorDefs` (during SSR the platform's own —
+ * `actor()` dispatches in-process through the host seam — in the browser
+ * the `__actorRef` stubs that speak the actor mount over HTTP) and the
+ * workspace from `useViewer`, reactively: while the viewer is pending the
+ * reads park in `idle` and the list is empty. This module never imports
+ * `@agentic/platform` at runtime.
  */
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { actorKey, type SessionId, type WorkspaceId } from '@agentic/core';
-import type { Inbox, InboxNotification, SessionActor } from '@agentic/platform';
+import type { InboxNotification } from '@agentic/platform';
 import type { AgentHue } from '@agentic/ui';
+import type { ActorDefs, ViewerState } from '../../actors/defs';
+import { inboxKeyOf, sessionKeyOf } from '../../actors/keys';
 import { formatAge } from '../../mock/workspace';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
-export interface LiveNeedsDefs {
-    readonly Inbox: typeof Inbox;
-    readonly Session: SessionActor;
-}
-
-/** `{ws}:inbox` — the Inbox actor's key (`inboxKey` in the platform, spelled here so the client bundle stays free of it). */
-const inboxKeyOf = (workspaceId: WorkspaceId): string => `${workspaceId}:inbox`;
+export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session'>;
 
 /** A stable identity hue for an agent id the page has no record for. */
 export function hueOf(id: string): AgentHue {
@@ -50,15 +46,19 @@ export function rowOf(n: InboxNotification): NeedsRow | null {
     };
 }
 
-export function liveNeedsSource(defs: LiveNeedsDefs, workspaceId: WorkspaceId): NeedsSource {
-    const sessionKey = (ref: RequestRef): string => actorKey(workspaceId, 'session', ref.sessionId as SessionId);
+/** `viewer` is the reactive state `useViewer()()` returns — read at call time, never captured. */
+export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, 'workspaceId'>): NeedsSource {
+    const sessionKey = (ref: RequestRef): string | null => (viewer.workspaceId ? sessionKeyOf(viewer.workspaceId, ref.sessionId) : null);
     return {
         useRows() {
-            const list = useActorState(defs.Inbox, () => [inboxKeyOf(workspaceId), 'list'] as const, { live: true });
+            const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
             return () => (list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null);
         },
         useRequest(ref) {
-            const state = useActorState(defs.Session, sessionKey(ref), 'request', ref.requestId, { live: true });
+            const state = useActorState(defs.Session, () => {
+                const key = sessionKey(ref);
+                return key && ([key, 'request', ref.requestId] as const);
+            }, { live: true });
             return (): RequestState => {
                 const view = state.value ?? null;
                 return {
@@ -69,7 +69,9 @@ export function liveNeedsSource(defs: LiveNeedsDefs, workspaceId: WorkspaceId): 
             };
         },
         async respond(ref, decision) {
-            const reply = await actor(defs.Session, sessionKey(ref)).respond(ref.requestId, decision);
+            const key = sessionKey(ref);
+            if (!key) throw new Error('not signed in');
+            const reply = await actor(defs.Session, key).respond(ref.requestId, decision);
             if (reply.kind === 'error') throw new Error(reply.message);
         },
         age: (at) => formatAge(at, Date.now())

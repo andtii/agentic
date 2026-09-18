@@ -1,10 +1,13 @@
 /**
- * The inbox page module (#40): "Needs you" over a `NeedsSource`. The
- * default source is the mock workspace; an entry that hosts actors provides
- * the live one — `app.defineProvide(useNeedsSource, () => () =>
- * liveNeedsSource(defs, workspaceId))` — and every page renders from it.
+ * The inbox page module (#40): "Needs you" over a `NeedsSource`. In `live`
+ * mode (`data-mode.ts`) the source is the platform — the Inbox and Session
+ * definitions from `useActorDefs`, the workspace from `useViewer` — else the
+ * mock workspace; a test provides its own with `defineProvide`.
  */
 import { defineInjectable } from 'sigx';
+import { useActorDefs, useViewer } from '../../actors/defs';
+import { dataMode } from '../../data-mode';
+import { liveNeedsSource } from './live';
 import { mockNeedsSource } from './memory';
 import type { NeedsSource } from './source';
 
@@ -14,5 +17,5 @@ export { memoryNeedsSource, mockNeedsSource, type MemoryNeedsOptions, type Memor
 export { liveNeedsSource, rowOf, hueOf, type LiveNeedsDefs } from './live';
 export { NeedsYou, openRequestOf, decisionOf, hrefOf } from './NeedsYou';
 
-/** The source "Needs you" renders from: a factory, called once per page render. */
-export const useNeedsSource = defineInjectable<() => NeedsSource>(() => mockNeedsSource, { name: 'NeedsSource' });
+/** The source "Needs you" renders from: a factory a page calls in its setup (it resolves `useActorDefs` / `useViewer` there in live mode). */
+export const useNeedsSource = defineInjectable<() => NeedsSource>(() => () => (dataMode() === 'live' ? liveNeedsSource(useActorDefs(), useViewer()()) : mockNeedsSource()), { name: 'NeedsSource' });
