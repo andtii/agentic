@@ -1,6 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import type { ApprovalRule, CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -95,4 +96,24 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     tools: z.array(name).max(LIMITS.list),
     policy: openSpecPolicy.optional(),
     resume: z.unknown().optional()
+});
+
+/** What `fs.request` asks (#185): list one folder, or add a git worktree. Paths are bounded text; the daemon decides what they mean. */
+export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('list'), path: text.min(1) }),
+    z.object({ kind: z.literal('worktree'), repo: text.min(1), branch: name, base: name.optional(), path: text.min(1) })
+]);
+
+const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.optional(), head: name.optional() });
+const fsEntry = z.object({ name: text.min(1), path: text.min(1), git: fsGitInfo.optional() });
+
+/** What `fs.response` answers: a listing of at most `FS_LIST_MAX_ENTRIES` folders, or the worktree that was added. */
+export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('list'), path: text.min(1), parent: text.min(1).optional(), git: fsGitInfo.optional(), entries: z.array(fsEntry).max(FS_LIST_MAX_ENTRIES), truncated: z.boolean() }),
+    z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name })
+]);
+
+export const fsError: z.ZodType<FsError> = z.object({
+    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'internal']),
+    message: text
 });

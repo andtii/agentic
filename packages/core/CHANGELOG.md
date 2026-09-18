@@ -6,8 +6,8 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- `fs.request` / `fs.response` on `PlatformFrame` / `DaemonFrame` (#187), carrying the `FsOp` / `FsResult` / `FsError` vocabulary from #186. Both frame-type lists include them.
 - `ChatRoster` / `ChatRosterMember` (#194, CHT-07): who a session's agent shares its chat with — the members by id, name and role, the coordinator, and which member the session runs as (`self`). The router fills it in for a chat-originated task; the runtime renders it into the system prompt.
-
 - Working folders (#186, part of #185):
   - `TaskContract.workdir`, `ExecutionDefaults.defaultWorkdir` and `ChatMember.workdir` (`WorkdirRef`) say which folder a task's session runs in. The folder is absolute, machine-native and within the environment's `cwdRoots`.
   - The `fs.request` vocabulary: `FsOp` (`list` | `worktree`), `FsResult`, `FsListResult` / `FsEntry` / `FsGitInfo`, `FsWorktreeResult`, `FsError` / `FsErrorCode`, `FS_LIST_MAX_ENTRIES`. The frames themselves land with their schemas (#187).

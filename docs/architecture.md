@@ -148,10 +148,18 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    env {environments[]} · heartbeat · session.opened {sessionId, ref, capabilities, head}
                    session.frame {sessionId, frame: WireFrame} · session.reply {sessionId, reply} · session.closed {sessionId, reason}
                    tool.call {callId, sessionId, tool, input} · pong
+                   fs.response {requestId, exactly one of result: FsResult | error: {code, message}}
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · session.open {sessionId, environmentId, spec}
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
                    tool.result {callId, exactly one of output | error} · ping
+                   fs.request {requestId, environmentId, op: list {path} | worktree {repo, branch, base?, path}}
 ```
+
+**Folder browsing** (#185, frames #187): `fs.request` asks a daemon for the immediate subfolders of a folder, or to `git worktree add` a new branch, always inside the named environment's `cwdRoots`. `fs.response` answers with one of two things:
+- a listing `{ path, parent?, git?, entries: [{ name, path, git? }] ≤ FS_LIST_MAX_ENTRIES, truncated }`, where `parent` is absent on a root and `git` is `{ kind: repo | worktree, branch? | head? }`;
+- the added worktree `{ path, branch }`.
+
+Refusals are named: `outside-roots`, `not-found`, `not-a-repo`, `branch-exists`, `invalid-branch`, `exists`, `timeout`, `unknown-environment`, `unsupported` and `internal`. The shared lexical check is core's `pathWithin`, and the daemon additionally resolves symlinks. `daemonConformance` has an `fs-list` case for daemons that declare the `fs` feature.
 
 - Machine DO routes `session.frame` → `actor(Session, id).forwardFrames(frames)` (one-way; `hello` records ref + capabilities, `event` folds, `gap` marks `disconnected` and moves the head); `session.reply` → `Session.commandReplied` (a prompt ack marks the turn running, its `turn-end` frame snapshots the transcript and posts to the chat); `tool.call` → the platform tool under an **agent principal** `{kind: 'agent', ws, agentId, sessionId, taskId}` so Memory/Task authorize correctly.
 - Session → daemon: `Session.prompt` records the command as pending (idempotent while the reply is out) and hands it to the `CommandSink` port — the app binds it to `actor(Machine).sendCommand(sessionId, cmd)` → socket. Pending replies are stored in Machine state with a deadline so evictions do not leak promises.

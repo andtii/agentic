@@ -18,7 +18,7 @@ describe('contract type tests', () => {
         type F = { readonly kind: 'event' };
         expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
         expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
-        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping'>();
+        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping' | 'fs.request'>();
     });
     it('fs operations and results are closed unions', () => {
         expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree'>();
