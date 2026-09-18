@@ -3,7 +3,8 @@
  * rows a person must answer, approvals first, then input, then interrupted,
  * oldest first inside each kind. An approval row carries the `ai-approval`
  * card wired to `Session.respond` with `once` | `session` scope; an input
- * row an answer box; every row links to where it came from. The card's
+ * row an answer box; an interrupted row a Resume that goes through the
+ * router (`source.resume`, OPS-05); every row links to where it came from. The card's
  * data is the Session's record, so a decision from any client — this tab,
  * the chat, the phone — collapses the card here and the row leaves the
  * list once the Session marks the notification read.
@@ -68,6 +69,18 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
         }
     };
 
+    /** Resume an interrupted row; the row leaves with the live read once the route runs again. */
+    const resume = (): void => {
+        if (!source.resume || st.busy) return;
+        st.busy = true;
+        st.error = '';
+        source.resume(row).catch((e: unknown) => {
+            st.error = e instanceof Error ? e.message : String(e);
+        }).finally(() => {
+            st.busy = false;
+        });
+    };
+
     const answer = (): void => {
         const text = st.answer.trim();
         if (!text) return;
@@ -116,10 +129,10 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                         </div>
                     )
                 ) : null}
-                {row.kind === 'interrupted' && row.primary ? <Button intent="wait" icon="play">{row.primary.label}</Button> : null}
+                {row.kind === 'interrupted' && row.primary && source.resume ? <Button intent="wait" icon="play" loading={st.busy} disabled={st.busy} onClick={resume}>{row.primary.label}</Button> : null}
                 {r?.loading && !view ? <p data-panel-note>Loading the request…</p> : null}
                 {r?.error ? <p data-needs-error role="alert">{`Could not load the request: ${r.error.message}`}</p> : null}
-                {st.error && row.kind !== 'approval' ? <p data-needs-error role="alert">{`Could not answer: ${st.error}`}</p> : null}
+                {st.error && row.kind !== 'approval' ? <p data-needs-error role="alert">{`Could not ${row.kind === 'interrupted' ? 'resume' : 'answer'}: ${st.error}`}</p> : null}
                 <LinkButton to={link.to} label={link.label}>{link.label}</LinkButton>
             </NeedsItem>
         );

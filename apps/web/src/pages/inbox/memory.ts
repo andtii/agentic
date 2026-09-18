@@ -3,7 +3,8 @@
  * what the mock workspace renders and what the tests drive. It behaves
  * like the platform does: a decision lands on the request's record as
  * `resolved` (every card over it collapses to the same record) and the
- * notification is marked read, so the row leaves every list at once.
+ * notification is marked read, so the row leaves every list at once; a
+ * resumed `interrupted` row leaves the same way.
  */
 import { signal } from 'sigx';
 import type { AgentId, ChatId, SessionId, TaskId } from '@agentic/core';
@@ -19,19 +20,25 @@ export interface MemoryNeedsOptions {
     readonly now?: () => number;
     /** Intercept a decision — a test makes it fail. */
     readonly onRespond?: (ref: RequestRef, decision: Decision) => void | Promise<void>;
+    /** Intercept a resume — a test makes it fail. */
+    readonly onResume?: (row: NeedsRow) => void | Promise<void>;
 }
 
 export interface MemoryNeedsSource extends NeedsSource {
     /** Every decision that got through, in order. */
     readonly decisions: readonly { readonly ref: RequestRef; readonly decision: Decision }[];
+    /** Every row resumed, in order. */
+    readonly resumed: readonly NeedsRow[];
 }
 
 export function memoryNeedsSource(options: MemoryNeedsOptions): MemoryNeedsSource {
     const now = options.now ?? Date.now;
     const store = signal({ rows: [...options.rows] as NeedsRow[], requests: { ...options.requests } as Record<string, RequestView> });
     const decisions: { ref: RequestRef; decision: Decision }[] = [];
+    const resumed: NeedsRow[] = [];
     return {
         decisions,
+        resumed,
         useRows: () => () => store.rows,
         useRequest: (ref) => () => ({ loading: false, value: store.requests[ref.requestId] ?? null, error: null }),
         async respond(ref, decision) {
@@ -49,6 +56,12 @@ export function memoryNeedsSource(options: MemoryNeedsOptions): MemoryNeedsSourc
                       : { type: 'request-resolved', requestId: ref.requestId, outcome: 'cancel', by: 'client', at, sessionId: ref.sessionId, epoch: 1, seq: current.view.request.seq + 1 };
             store.requests = { ...store.requests, [ref.requestId]: { ...current, view: { ...current.view, resolved } } };
             store.rows = store.rows.filter((r) => r.ref?.requestId !== ref.requestId);
+        },
+        async resume(row) {
+            if (!store.rows.some((r) => r.id === row.id)) return; // already running again
+            await options.onResume?.(row);
+            resumed.push(row);
+            store.rows = store.rows.filter((r) => r.id !== row.id);
         },
         age: (at) => formatAge(at, now())
     };

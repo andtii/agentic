@@ -7,6 +7,11 @@
  * changed them, whoever caused it — a decision from the chat, the phone or
  * another tab drops the row here and collapses the card to its record.
  *
+ * Interrupted work (OPS-05, #151) is not a notification: it is the router's
+ * own record. The rows also carry every route parked `interrupted`
+ * (`Routing.get()`, live), and "Resume" is `Routing.resume(taskId)` — the
+ * route runs again and the row leaves, here and in every other tab.
+ *
  * The definitions come from `useActorDefs` (during SSR the platform's own —
  * `actor()` dispatches in-process through the host seam — in the browser
  * the `__actorRef` stubs that speak the actor mount over HTTP) and the
@@ -16,14 +21,18 @@
  */
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import type { InboxNotification } from '@agentic/platform';
+import type { InboxNotification, RoutingView } from '@agentic/platform';
+import type { TaskId } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { inboxKeyOf, sessionKeyOf } from '../../actors/keys';
-import { formatAge } from '../../mock/workspace';
+import { inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
+import { clockNow, zoneFormat } from '../../time';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
-export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session'>;
+export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing'>;
+
+/** What an interrupted row says under its title (OPS-05: nothing is replayed, the person decides). */
+export const INTERRUPTED_CONTEXT = 'The platform restarted the session. Nothing was replayed. The transcript is intact.';
 
 /** A stable identity hue for an agent id the page has no record for. */
 export function hueOf(id: string): AgentHue {
@@ -46,13 +55,38 @@ export function rowOf(n: InboxNotification): NeedsRow | null {
     };
 }
 
-/** `viewer` is the reactive state `useViewer()()` returns — read at call time, never captured. */
-export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, 'workspaceId'>): NeedsSource {
+/** The router's routes parked `interrupted`, as rows: the agent by its frozen config, the chat the task came from (else the task), Resume. */
+export function interruptedRows(view: Pick<RoutingView, 'routes'> | null | undefined): NeedsRow[] {
+    return (view?.routes ?? [])
+        .filter((route) => route.status === 'interrupted')
+        .map((route): NeedsRow => {
+            const name = route.config.name || route.agentId;
+            return {
+                id: `interrupted:${route.taskId}`,
+                kind: 'interrupted',
+                title: `${name} was interrupted mid-turn`,
+                at: route.updatedAt,
+                taskId: route.taskId,
+                agent: { name, hue: hueOf(route.agentId) },
+                context: INTERRUPTED_CONTEXT,
+                href: route.chatId ? `/chats/${route.chatId}` : `/tasks/${route.taskId}`,
+                hrefLabel: route.chatId ? 'Open chat' : 'Open task',
+                primary: { label: 'Resume' }
+            };
+        });
+}
+
+/**
+ * `viewer` is the reactive state `useViewer()()` returns — read at call time, never captured.
+ * `zone` is the workspace's IANA zone (`useWorkspaceZone`), a getter for the same reason; absent, UTC.
+ */
+export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, 'workspaceId'>, zone?: () => string): NeedsSource {
     const sessionKey = (ref: RequestRef): string | null => (viewer.workspaceId ? sessionKeyOf(viewer.workspaceId, ref.sessionId) : null);
     return {
         useRows() {
             const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
-            return () => (list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null);
+            const routing = useActorState(defs.Routing, () => viewer.workspaceId && ([routingKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+            return () => [...(list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows(routing.value)];
         },
         useRequest(ref) {
             const state = useActorState(defs.Session, () => {
@@ -74,6 +108,11 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
             const reply = await actor(defs.Session, key).respond(ref.requestId, decision);
             if (reply.kind === 'error') throw new Error(reply.message);
         },
-        age: (at) => formatAge(at, Date.now())
+        async resume(row) {
+            if (!row.taskId) return;
+            if (!viewer.workspaceId) throw new Error('not signed in');
+            await actor(defs.Routing, routingKeyOf(viewer.workspaceId)).resume(row.taskId as TaskId);
+        },
+        age: (at) => zoneFormat(zone?.()).age(at, clockNow())
     };
 }

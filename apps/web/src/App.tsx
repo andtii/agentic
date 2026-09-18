@@ -2,7 +2,7 @@ import { component, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Breadcrumbs } from '@sigx/zero-daisyui/components';
-import { AppShell, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
+import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
 import { NAV_GROUPS } from './nav';
 import { backOf, titleOf, trailFor } from './crumbs';
 import { machines } from './mock/data';
@@ -12,6 +12,7 @@ import { dataMode } from './data-mode';
 import { useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
+import { useNeedsSource } from './pages/inbox';
 
 /**
  * The sidebar foot in live mode (#143): the signed-in workspace, or — for
@@ -39,6 +40,11 @@ const UserFoot = component(() => {
             <>
                 <span data-user-avatar aria-hidden="true">{initials(ws)}</span>
                 <span data-user-name>Workspace<small>{ws}</small></span>
+                {viewer.workspaceId ? (
+                    <form data-user-signout method="post" action="/auth/logout" style="margin-inline-start:auto">
+                        <Button type="submit">Sign out</Button>
+                    </form>
+                ) : null}
             </>
         );
     };
@@ -89,6 +95,8 @@ export const App = component(() => {
     const route = useRoute();
     const topbar = () => topbarFor(route);
     const trail = () => trailFor(route, topbar());
+    // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source.
+    const needs = useNeedsSource()().useRows();
 
     return () => {
         const top = topbar();
@@ -97,7 +105,7 @@ export const App = component(() => {
             <ThemeProvider>
                 <AppShell
                     brand="agentic"
-                    groups={NAV_GROUPS()}
+                    groups={NAV_GROUPS(needs().length)}
                     currentPath={route.path}
                     flush={route.name === 'chat'}
                     title={titleOf(crumbs)}

@@ -2,8 +2,9 @@
  * Where "Needs you" reads from and how it answers (OPS-02, CHT-09, #40).
  *
  * The rows are the workspace Inbox's unread `approval` / `input`
- * notifications (plus what the mock lists as interrupted); each carries a
- * `ref` to the session and the request. The card behind a row is the
+ * notifications, each carrying a `ref` to the session and the request, plus
+ * the work an eviction cut short (OPS-05): the router's `interrupted`
+ * routes, resumed from the row (#151). The card behind a row is the
  * Session's own `request(id)` view — the question, the call's input, the
  * rule that asked, and the decision once any client made one — so two open
  * tabs, the chat and the phone all render the same record and one answer
@@ -46,6 +47,8 @@ export interface NeedsRow {
     readonly hrefLabel?: string;
     /** An `interrupted` row's action (`Resume`). */
     readonly primary?: { readonly label: string };
+    /** Behind an `interrupted` row: the task the router resumes. */
+    readonly taskId?: string;
 }
 
 /** The card's data: the Session's record plus how the page names the requester. */
@@ -71,6 +74,8 @@ export interface NeedsSource {
     useRequest(ref: RequestRef): () => RequestState;
     /** `Session.respond` — one decision per request; rejects when the answer did not get through. */
     respond(ref: RequestRef, decision: Decision): Promise<void>;
+    /** `Routing.resume` for an `interrupted` row — the row leaves once the route runs again; rejects when it did not get through. */
+    resume?(row: NeedsRow): Promise<void>;
     /** A relative age in the workspace zone. */
     age(at: number): string;
 }
