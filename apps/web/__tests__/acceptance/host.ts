@@ -118,8 +118,9 @@ const byType = (actors: readonly AnyActorDefinition[], type: string): AnyActorDe
 export async function startHost(options: StartHostOptions = {}): Promise<AcceptanceHost> {
     let actors: readonly AnyActorDefinition[] = [];
     const routing = () => byType(actors, 'routing');
+    const sessions = () => byType(actors, 'session');
     const model = options.factory ? undefined : scriptedModel();
-    const factory = options.factory ? options.factory(routing) : createSessionFactory({ routing, model: model! });
+    const factory = options.factory ? options.factory(routing) : createSessionFactory({ routing, sessions, model: model! });
     actors = platformActors({ ...defaultPorts, factory, kek: () => importWorkspaceKek(TEST_WORKSPACE_KEK), channels: [], ...options.ports });
     const app = testActorApp(actors);
     await app.start();
