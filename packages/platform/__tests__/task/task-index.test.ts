@@ -41,14 +41,14 @@ describe('TaskIndex with the Task actor', () => {
 
     it('create writes a row, every transition updates it, and list is newest first', async () => {
         await task(id('t1')).create(contract({ objective: 'first' }), { owner: a });
-        await new Promise((r) => setTimeout(r, 2));
         await task(id('t2')).create(contract({ objective: 'second', assignee: b }), { owner: b });
         let rows = await index().list();
+        // Newest first: by `createdAt`, and by id descending when two land in the same millisecond.
         expect(rows.map((r) => [r.id, r.status, r.origin, r.chatId, r.n])).toEqual([
             ['t2', 'queued', 'user', 'chat_1', 0],
             ['t1', 'queued', 'user', 'chat_1', 0]
         ]);
-        expect(rows[1]!.createdAt).toBeLessThan(rows[0]!.createdAt);
+        expect(rows[1]!.createdAt).toBeLessThanOrEqual(rows[0]!.createdAt);
 
         await task(id('t1')).start('user:u1', 'sess_1' as SessionId);
         await task(id('t1')).reportWaiting({ kind: 'input', requestId: 'rq_1' }, 'agent:agent_a');

@@ -59,7 +59,7 @@ export interface TaskIndexRow {
 export interface TaskIndexQuery {
     /** Only these statuses; default all. */
     readonly status?: readonly TaskStatus[];
-    readonly assignee?: string;
+    readonly assignee?: AgentId;
     /** Only children of this task; `null` for root tasks only. */
     readonly parentId?: TaskId | null;
     /** Newest (by `createdAt`) first; default all. */
