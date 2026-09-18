@@ -34,8 +34,11 @@ function wallOf(instant: number, tz: string): number {
 export function wallToInstant(value: string, tz: string): number | null {
     const m = WALL.exec(value.trim());
     if (!m) return null;
-    const wanted = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
-    if (Number.isNaN(wanted)) return null;
+    const [year, month, day, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
+    // `Date.UTC` normalises overflow (month 13, day 40, hour 99); the dialog must not.
+    if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59) return null;
+    const wanted = Date.UTC(year, month - 1, day, hour, minute);
+    if (Number.isNaN(wanted) || new Date(wanted).getUTCMonth() !== month - 1) return null;
     try {
         const H = 3_600_000;
         const off1 = wallOf(wanted, tz) - wanted;

@@ -43,7 +43,10 @@ describe('wallToInstant', () => {
 
     it('rejects anything that is not a wall time or a zone', () => {
         expect(wallToInstant('tomorrow', 'UTC')).toBeNull();
-        expect(wallToInstant('2026-13-40 99:99', 'UTC')).not.toBeNaN();
+        expect(wallToInstant('2026-13-40 99:99', 'UTC')).toBeNull();
+        expect(wallToInstant('2026-02-30 10:00', 'UTC')).toBeNull();
+        expect(wallToInstant('2026-09-18 24:00', 'UTC')).toBeNull();
+        expect(wallToInstant('2026-09-18 23:60', 'UTC')).toBeNull();
         expect(wallToInstant('2026-09-18 15:00', 'Mars/Olympus')).toBeNull();
     });
 });
