@@ -19,7 +19,7 @@
 import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
-import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type UnstampedEvent } from '@sigx/ai-agent';
+import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
 import { auditPort } from '../audit/port.js';
@@ -103,6 +103,29 @@ export const INTERRUPTED_MESSAGE = 'interrupted: the session was evicted mid-tur
 /** The `turn-end` a resumed driver writes for a turn the eviction cut short. */
 export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
     return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && ev.error.message === INTERRUPTED_MESSAGE;
+}
+
+/** The turn id `resume()` prompts with for an interrupted `turnId` — deterministic, so the router and the session agree. */
+export const resumeTurnId = (turnId: string): string => `${turnId}:resume`;
+
+/** The command id of a `resume()` for an interrupted `turnId` — one resume per interruption (OPS-06). */
+export const resumeCommandId = (turnId: string): string => `resume:${turnId}`;
+
+/**
+ * The turn a `resume()` would re-prompt (OPS-05): the log's last turn is closed as
+ * interrupted and nothing has started since. `null` when the session is not in that state.
+ */
+export function interruptedTurn(events: readonly AgentEvent[]): { readonly turnId: string; readonly input: readonly PromptPart[] } | null {
+    const end = events.findLast((e) => e.type === 'turn-end' || e.type === 'turn-start');
+    return end && end.type === 'turn-end' && isInterruptedTurnEnd(end) ? cutTurnOf(events, end) : null;
+}
+
+/** The interrupted turn `end` closed: its id and the input its `turn-start` carried. */
+function cutTurnOf(events: readonly AgentEvent[], end: AgentEvent): { readonly turnId: string; readonly input: readonly PromptPart[] } | null {
+    const turnId = end.turnId;
+    if (turnId === undefined) return null;
+    const start = events.find((e) => e.type === 'turn-start' && e.turnId === turnId);
+    return start?.type === 'turn-start' ? { turnId, input: start.input } : null;
 }
 
 /** After `sameWorkspace`: an external client needs the `sessions` scope. */
@@ -641,6 +664,32 @@ export function defineSessionActor(ports: SessionPorts) {
                 /** Run a turn. `commandId` defaults to `turnId`, so a retried prompt executes once (OPS-06). */
                 prompt(input: PromptInput, turnId: string, output?: WireOutputSpec, commandId: string = turnId): Promise<SessionCommandResult> {
                     return dispatch({ v: V, commandId, type: 'prompt', turnId, input: toPromptParts(input), ...(output ? { output } : {}) });
+                },
+
+                /**
+                 * Resume an interrupted turn (OPS-05): a NEW prompt carrying the cut turn's
+                 * input over the intact transcript — nothing is replayed, the runtime sees
+                 * the partial turn it already recorded. One resume per interruption
+                 * (`resume:{turnId}`, OPS-06); an `invalid` error reply when the last turn
+                 * was not interrupted or something has started since.
+                 */
+                async resume(commandId?: string): Promise<SessionCommandResult> {
+                    const s = ctx.state;
+                    if (s.status === 'closed') return errorReply(commandId ?? newCommandId('resume'), 'closed', `session "${ctx.key}" is closed`);
+                    // A local turn an eviction cut short settles first, so the log says `interrupted` before it is read.
+                    if (s.running && s.mode === 'local' && s.opened) {
+                        const live = await ensureLive();
+                        if (!live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
+                    }
+                    // The last interruption's resume, already sent: the remembered reply, whatever ran since (OPS-06).
+                    const lastCut = s.events.findLast(isInterruptedTurnEnd);
+                    const previous = lastCut && cutTurnOf(s.events, lastCut);
+                    if (previous && s.commands[commandId ?? resumeCommandId(previous.turnId)]) {
+                        return dispatch({ v: V, commandId: commandId ?? resumeCommandId(previous.turnId), type: 'prompt', turnId: resumeTurnId(previous.turnId), input: ctx.snapshot(previous.input) });
+                    }
+                    const cut = interruptedTurn(s.events);
+                    if (!cut) return errorReply(commandId ?? newCommandId('resume'), 'invalid', `session "${ctx.key}" has no interrupted turn to resume`);
+                    return dispatch({ v: V, commandId: commandId ?? resumeCommandId(cut.turnId), type: 'prompt', turnId: resumeTurnId(cut.turnId), input: ctx.snapshot(cut.input) });
                 },
 
                 /** Answer an open request (CHT-09). One decision per request: `commandId` defaults to `respond:{requestId}`. */

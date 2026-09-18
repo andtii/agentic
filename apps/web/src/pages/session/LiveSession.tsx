@@ -9,10 +9,11 @@ import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { Decision } from '@sigx/ai-agent';
+import type { TaskId } from '@agentic/core';
 import { EmptyState } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { sessionKeyOf } from '../../actors/keys';
+import { machineKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import type { MockSessionView } from '../../mock/workspace';
 import { useAgentDirectory } from '../chat/directory';
 import { SessionView } from '../Session';
@@ -28,14 +29,33 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const key = (): string | null => (viewer.workspaceId ? sessionKeyOf(viewer.workspaceId, props.id) : null);
     const info = useActorState(defs.Session, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const events = useActorState(defs.Session, () => { const k = key(); return k && ([k, 'events'] as const); }, { live: true });
-    const st = signal({ error: '' });
+    // A daemon session's machine, live: `Machine.online` and the environment's account are two of the four failure signals (OPS-04).
+    const machine = useActorState(defs.Machine, () => { const ws = viewer.workspaceId; const m = info.value?.spec?.machineId; return ws && m && ([machineKeyOf(ws, m), 'get'] as const); }, { live: true });
+    const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const client = () => actor(defs.Session, key()!);
 
     const view = (): MockSessionView | null => {
         const i = info.value;
         if (!i || !i.opened) return null;
-        return liveSessionView(props.id, i, events.value ?? [], directory.lookup(i.spec?.agentId ?? ''));
+        return liveSessionView(props.id, i, events.value ?? [], directory.lookup(i.spec?.agentId ?? ''), machine.value ?? undefined);
+    };
+
+    /** "Resume" on an interrupted turn (OPS-05): through the router when the session runs a task (it follows the new turn), else the session itself. */
+    const resume = async (): Promise<void> => {
+        const ws = viewer.workspaceId;
+        const taskId = info.value?.spec?.taskId;
+        if (!ws || st.recovering) return;
+        st.recovering = true;
+        st.error = '';
+        try {
+            if (taskId) await actor(defs.Routing, routingKeyOf(ws)).resume(taskId as TaskId);
+            else await client().resume();
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.recovering = false;
+        }
     };
 
     const stopHead = effect(() => {
@@ -58,7 +78,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
         }
         return (
             <>
-                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} />
+                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} />
                 {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
             </>
         );

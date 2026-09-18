@@ -8,8 +8,9 @@ import './styles/pages.css';
 import '@agentic/ui/register';
 import { defineApp } from 'sigx';
 import { ssrClientPlugin } from '@sigx/server-renderer/client';
-import { actorsPlugin } from '@sigx/actors/app';
+import { actorsPlugin, fetchTransport } from '@sigx/actors/app';
 import { ACTOR_ENDPOINT, clientDefs } from './actors/client';
+import { installClientConnection, setClientConnection, watchTransport } from './components/status';
 import { useActorDefs, useViewer } from './actors/defs';
 import { viewerHook } from './actors/viewer';
 import { installThemes } from '@agentic/ui/design-system';
@@ -28,7 +29,9 @@ const app = defineApp(<App />);
 app.use(createAppRouter());
 // The platform actors over the Worker's HTTP mount (#34): calls as POSTs, live reads on one held-open stream.
 // Actor refs are hand-built stubs (`actors/client.ts`): the platform's definitions are not `*.actor.ts` modules.
-app.use(actorsPlugin({ transport: { endpoint: ACTOR_ENDPOINT } }));
+// The transport reports this browser's connection (OPS-04, #46): frames and answers say live, a dropped stream or the network says reconnecting.
+app.use(actorsPlugin({ transport: watchTransport(fetchTransport({ endpoint: ACTOR_ENDPOINT })), live: { onError: () => setClientConnection('reconnecting') } }));
+installClientConnection();
 app.defineProvide(useActorDefs, clientDefs);
 app.defineProvide(useViewer, () => viewerHook);
 app.use(ssrClientPlugin).hydrate!('#app');

@@ -5,4 +5,4 @@ export { MAX_COMMANDS, initialSessionState, applySessionEntry, cursorAfter, pars
 export type { SessionStoreContext } from './store.js';
 export { appendEntry, createEventLogStore, createTranscriptStore } from './store.js';
 export type { SessionCommandResult, SessionInfo, SessionActor, CorrectionResult, SessionRequestView } from './actor.js';
-export { defineSessionActor, isInterruptedTurnEnd, INTERRUPTED_CODE, INTERRUPTED_MESSAGE } from './actor.js';
+export { defineSessionActor, isInterruptedTurnEnd, interruptedTurn, resumeTurnId, resumeCommandId, INTERRUPTED_CODE, INTERRUPTED_MESSAGE } from './actor.js';
