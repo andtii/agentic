@@ -110,7 +110,7 @@ describe('the question card', () => {
         expect(buttonNamed(dom, 'Answer').disabled).toBe(true);
     });
 
-    it('a single choice toggles like a radio, a multi-select like checkboxes', async () => {
+    it('a single choice is one pressed toggle at a time, a multi-select any number (aria-pressed)', async () => {
         const { dom } = card(form);
         option(dom, 'Clear the open bugs').click();
         await tick();
@@ -122,7 +122,7 @@ describe('the question card', () => {
         await tick();
         option(dom, 'large').click();
         await tick();
-        expect(['small', 'large'].map((l) => option(dom, l).getAttribute('aria-checked'))).toEqual(['true', 'true']);
+        expect(['small', 'large'].map((l) => option(dom, l).getAttribute('aria-pressed'))).toEqual(['true', 'true']);
     });
 
     it('answers a form keyed by question — never a bare string the runtime would drop', async () => {

@@ -176,7 +176,8 @@ export const QuestionPrompt = component<QuestionPromptProps>(({ props, signal })
                                 {field.label ? <legend data-scope={SCOPE} data-part="label">{field.label}</legend> : null}
                                 {field.prompt ? <p data-scope={SCOPE} data-part="prompt">{field.prompt}</p> : null}
                                 {field.choices.length ? (
-                                    <div data-scope={SCOPE} data-part="options" role={field.multi ? 'group' : 'radiogroup'}>
+                                    // Toggle buttons in a labelled group: radio / checkbox roles would promise arrow-key navigation the card does not implement.
+                                    <div data-scope={SCOPE} data-part="options" role="group" aria-label={`${field.label ?? field.prompt ?? 'Answer'}${field.multi ? ' (choose any)' : ' (choose one)'}`}>
                                         {field.choices.map((c) => {
                                             const on = (st.chosen[i] ?? []).includes(c.label);
                                             return (
@@ -185,8 +186,7 @@ export const QuestionPrompt = component<QuestionPromptProps>(({ props, signal })
                                                     data-scope={SCOPE}
                                                     data-part="option"
                                                     data-state={on ? 'on' : 'off'}
-                                                    role={field.multi ? 'checkbox' : 'radio'}
-                                                    aria-checked={on ? 'true' : 'false'}
+                                                    aria-pressed={on ? 'true' : 'false'}
                                                     disabled={st.pending}
                                                     onClick={() => toggle(i, field, c.label)}
                                                 >
