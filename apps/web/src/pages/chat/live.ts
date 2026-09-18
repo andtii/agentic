@@ -6,14 +6,14 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import type { AgentId, ChatEntry, ChatId, MessageId, PromptPart, TaskContract, TaskId } from '@agentic/core';
-import type { AgentView, ChatSummary, IndexedEntry, SessionInfo } from '@agentic/platform';
+import { isTerminal, type AgentId, type ChatEntry, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId } from '@agentic/core';
+import type { AgentView, ChatSummary, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
 import { failureOf, INTERRUPTED_CODE, type FailureState } from '../../components/status';
-import { formatTime, USER, type MockChatMember, type MockChatSummary } from '../../mock/workspace';
+import { formatTime, USER, type MockChatMember, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
 
 // ---- identities --------------------------------------------------------------
 
@@ -69,11 +69,17 @@ export function lookupOver(agents: Readonly<Record<string, AgentIdentity>>): Age
 
 // ---- membership and summaries ------------------------------------------------
 
-/** `Chat.get()` → the members as the panel and the composer read them. */
-export function membersOf(summary: ChatSummary): MockChatMember[] {
+const NOBODY: ReadonlySet<string> = new Set();
+
+/**
+ * `Chat.get()` → the members as the panel and the composer read them. A
+ * member in `waiting` has a request open in this chat (`openRequests`) —
+ * it reads WAITING, ahead of its session being active.
+ */
+export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: summary.activeSessions[agentId] ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since }
     }));
@@ -109,19 +115,134 @@ export function entryLine(entry: ChatEntry, lookup: AgentLookup): string {
     }
 }
 
-/** A chat row for the list: `Chat.get()` plus its newest entries (the last line and the update time). */
-export function chatRow(id: string, summary: ChatSummary, newest: readonly IndexedEntry[], lookup: AgentLookup): MockChatSummary {
-    const members = membersOf(summary);
+/**
+ * What a list row says last and when: the newest message when the entries read hold one — a turn ends in session
+ * bookkeeping (`ended its session`), which is not what was said — else the newest entry; the time is the newest entry's.
+ */
+export function lastOf(newest: readonly IndexedEntry[], lookup: AgentLookup): { readonly line: string; readonly at: number } {
     const last = newest[newest.length - 1];
+    if (!last) return { line: '', at: 0 };
+    let said: IndexedEntry | undefined;
+    for (let i = newest.length - 1; i >= 0 && !said; i--) if (newest[i]!.entry.t === 'msg') said = newest[i];
+    return { line: entryLine((said ?? last).entry, lookup), at: last.entry.at };
+}
+
+/** How many of a chat's newest entries a list row reads: enough to pair a request with its resolution and to count what is unread. */
+export const LIST_TAIL = 30;
+
+/** A request a session raised in the chat that has not settled: a `request` status entry without its `request-resolved`. */
+export interface OpenChatRequest {
+    readonly ref: string;
+    readonly agentId: string;
+    readonly at: number;
+}
+
+/**
+ * The requests open in these entries (COL-10 / CHT-09), oldest first. A
+ * `request` and its `request-resolved` carry the same `ref`, so the fold
+ * is a pairing; a resolution whose request is older than the entries read
+ * resolves nothing here, which is right — that request is not in view.
+ */
+export function openRequests(entries: readonly IndexedEntry[]): OpenChatRequest[] {
+    const open = new Map<string, OpenChatRequest>();
+    for (const { entry } of entries) {
+        if (entry.t !== 'status') continue;
+        if (entry.kind === 'request') open.set(entry.ref, { ref: entry.ref, agentId: entry.agentId, at: entry.at });
+        else if (entry.kind === 'request-resolved') open.delete(entry.ref);
+    }
+    return [...open.values()];
+}
+
+/** The agents with a request open in these entries — who reads WAITING in the members panel. */
+export const waitingAgents = (entries: readonly IndexedEntry[]): Set<string> => new Set(openRequests(entries).map((r) => r.agentId));
+
+/**
+ * How many agent messages arrived since this device last had the chat open.
+ * `seen` is the chat's `seq` at that moment (entries below it were on
+ * screen); `undefined` — the chat has no marker on this device yet — counts
+ * nothing, so a first visit does not paint every chat unread.
+ */
+export function unreadOf(entries: readonly IndexedEntry[], seen: number | undefined): number {
+    if (seen === undefined) return 0;
+    let n = 0;
+    for (const { seq, entry } of entries) if (seq >= seen && entry.t === 'msg' && entry.author.kind === 'agent') n++;
+    return n;
+}
+
+/**
+ * A chat row for the list: `Chat.get()` plus its newest entries — the last
+ * line and the update time, the amber pill while a request is open, the
+ * unread count against this device's marker (`seen`, see `read-marks.ts`).
+ */
+export function chatRow(id: string, summary: ChatSummary, newest: readonly IndexedEntry[], lookup: AgentLookup, seen?: number): MockChatSummary {
+    const waiting = waitingAgents(newest);
+    const members = membersOf(summary, waiting);
+    const last = lastOf(newest, lookup);
     return {
         id,
         title: chatTitle(members, lookup, summary.title),
         members,
-        lastLine: last ? entryLine(last.entry, lookup) : '',
-        unread: 0,
-        waiting: false,
-        updatedAt: last?.entry.at ?? 0
+        lastLine: last.line,
+        unread: unreadOf(newest, seen),
+        waiting: waiting.size > 0,
+        updatedAt: last.at
     };
+}
+
+// ---- tasks in this chat --------------------------------------------------------
+
+/** What the context panel draws of a task — the fields of the mock row it reads. */
+export type ChatTaskRow = Pick<MockTaskRow, 'id' | 'parentId' | 'depth' | 'status' | 'objective' | 'agentId'>;
+
+/** Most rows the panel's mini-tree lists; "Open tree" shows the rest. */
+export const CHAT_TASKS_CAP = 8;
+
+/**
+ * The chat's tasks out of the workspace's index (`TaskIndex.list()`), as
+ * the mini-tree lists them: a root is a task whose origin is a message of
+ * THIS chat (`chatId`); its delegated children carry no `chatId` and hang
+ * off it by `parentId`. Depth-first, a chain that is still running before
+ * a settled one, newest first within that, a parent's children oldest first
+ * (the order they were delegated in); `depth` is the distance from the
+ * root. Capped at `cap` rows.
+ */
+export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: number = CHAT_TASKS_CAP): ChatTaskRow[] {
+    const children = new Map<string, TaskIndexRow[]>();
+    for (const r of rows) {
+        if (r.parentId === undefined) continue;
+        const list = children.get(r.parentId);
+        if (list) list.push(r);
+        else children.set(r.parentId, [r]);
+    }
+    const running = (r: TaskIndexRow): boolean => !isTerminal(r.status) || (children.get(r.id) ?? []).some(running);
+    const roots = rows.filter((r) => r.chatId === chatId && r.parentId === undefined).sort((a, b) => Number(running(b)) - Number(running(a)) || b.createdAt - a.createdAt);
+    const out: ChatTaskRow[] = [];
+    const visit = (r: TaskIndexRow, depth: number): void => {
+        if (out.length >= cap) return;
+        out.push({ id: r.id, ...(r.parentId !== undefined ? { parentId: r.parentId } : {}), depth, status: r.status, objective: r.objective, agentId: r.assignee });
+        for (const c of [...(children.get(r.id) ?? [])].sort((a, b) => a.createdAt - b.createdAt)) visit(c, depth + 1);
+    };
+    for (const r of roots) visit(r, 0);
+    return out;
+}
+
+/** The tasks "Stop task chain" would stop: everything in the panel that has not settled. */
+export const stoppable = (tasks: readonly ChatTaskRow[]): ChatTaskRow[] => tasks.filter((t) => !isTerminal(t.status));
+
+/** Where the stop goes: a root that has not settled — `Task.cancel` takes its subtree with it (COL-12) — or a child still running under a settled root. */
+export function stopTargets(tasks: readonly ChatTaskRow[]): ChatTaskRow[] {
+    const live = new Set(stoppable(tasks).map((t) => t.id as string));
+    return tasks.filter((t) => live.has(t.id) && (t.parentId === undefined || !live.has(t.parentId)));
+}
+
+/**
+ * What a stop could not confirm (COL-12), as the page's error line says it: each `Task.cancel` report names the work
+ * it could not stop — by objective where the index knows it, by id otherwise. `null` when every chain stopped.
+ */
+export function notStoppedLine(reports: readonly { readonly notStopped: readonly string[] }[], rows: readonly Pick<TaskIndexRow, 'id' | 'objective'>[]): string | null {
+    const left = [...new Set(reports.flatMap((r) => r.notStopped))];
+    if (!left.length) return null;
+    return `Could not be stopped: ${left.map((id) => rows.find((r) => r.id === id)?.objective ?? id).join('; ')}`;
 }
 
 // ---- the transcript --------------------------------------------------------------
@@ -158,7 +279,8 @@ function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string {
     }
 }
 
-const timeOf = (at: number): MessageAuthor['time'] => ({ text: formatTime(at), dateTime: new Date(at).toISOString() });
+/** `14:02` for an instant — the workspace zone's on the live pages (`time.ts`), the mock workspace's by default. */
+export type TimeText = (at: number) => string;
 
 export interface EntryTranscript {
     readonly messages: AgentMessage[];
@@ -169,9 +291,11 @@ export interface EntryTranscript {
  * Chat entries → thread rows. A `msg` is a user or assistant message; a
  * `status` entry is an assistant row of the responsible agent (CHT-02)
  * with the status in italics; membership and coordinator entries are not
- * rows (the members panel shows them).
+ * rows (the members panel shows them). The live page passes who the user
+ * reads as ("You") and its workspace's clock face.
  */
-export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentLookup, userName = USER.name): EntryTranscript {
+export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentLookup, userName: string = USER.name, time: TimeText = formatTime): EntryTranscript {
+    const timeOf = (at: number): MessageAuthor['time'] => ({ text: time(at), dateTime: new Date(at).toISOString() });
     const messages: AgentMessage[] = [];
     const authors: Record<string, MessageAuthor> = {};
     for (const { seq, entry } of entries) {

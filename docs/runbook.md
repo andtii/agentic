@@ -331,3 +331,5 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 | Web Push channel (VAPID keys) | no channels; the Inbox holds notifications (`Inbox.list`) | — (architecture §3) |
 | Second Worker for the Durable Object host, so UI deploys do not evict live sessions | one Worker; a deploy interrupts live sessions, which resume as "interrupted" | follow-up (architecture §3) |
 | macOS / Linux daemon install | the daemon runs there (`agentic-daemon run` in the foreground; `AGENTIC_DAEMON_HOME` for paths); no launchd / systemd unit and no zip for those platforms | decisions §2 |
+| Chat read state across devices | unread counts on the chat list are device-local: the chat's `seq` when this browser last had it open, in `localStorage` (`apps/web/src/pages/chat/read-marks.ts`); another device, or cleared site data, starts from the chat's present end | #157 |
+| Jump from a search hit to its message | "Search this chat" lists the hits (`Chat.search`, whole history) with who and when; the Thread's rows carry no DOM id, and a hit may be older than the entries the thread has loaded | follow-up on `@agentic/ui` Thread + "Load earlier" |

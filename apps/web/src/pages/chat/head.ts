@@ -17,3 +17,11 @@ export const chatHead = signal<{ value: { id: string; title: string; members: Mo
 export const newChatRequest = signal({ open: false });
 export const openNewChat = (): void => { newChatRequest.open = true; };
 export const closeNewChat = (): void => { newChatRequest.open = false; };
+
+/** "Search this chat" and "Chat settings" (#152): the topbar's buttons raise them, the live page answers — the same seam as `newChatRequest`. */
+export const chatSearchRequest = signal({ open: false });
+export const toggleChatSearch = (): void => { chatSearchRequest.open = !chatSearchRequest.open; };
+export const closeChatSearch = (): void => { chatSearchRequest.open = false; };
+export const chatSettingsRequest = signal({ open: false });
+export const openChatSettings = (): void => { chatSettingsRequest.open = true; };
+export const closeChatSettings = (): void => { chatSettingsRequest.open = false; };

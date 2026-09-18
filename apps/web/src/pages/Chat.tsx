@@ -9,7 +9,7 @@ import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
 import { dataMode } from '../data-mode';
-import { chatHead } from './chat/head';
+import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
 
@@ -25,7 +25,8 @@ const tasksButton = () => <Button intent="icon" icon="tree" label="Tasks in this
 defineTopbar('chat', (route) => {
     const id = routeId(route);
     // Live: what the page published for THIS chat (`chat/head.ts`); mock: the workspace's view.
-    const head = dataMode() === 'live' ? (chatHead.value?.id === id ? chatHead.value : undefined) : loadChat(id)?.chat;
+    const live = dataMode() === 'live';
+    const head = live ? (chatHead.value?.id === id ? chatHead.value : undefined) : loadChat(id)?.chat;
     const chat = head ? { title: head.title, members: head.members } : undefined;
     const lookup = head && 'identities' in head ? lookupOver(head.identities) : undefined;
     return {
@@ -42,8 +43,9 @@ defineTopbar('chat', (route) => {
         actions: () => (
             <>
                 {chat ? tasksButton() : null}
-                <Button intent="icon" icon="search" label="Search this chat" />
-                <Button intent="icon" icon="settings" label="Chat settings" />
+                {/* Live: the page answers both (`chat/head.ts`, #152); the mock page has nothing to search or save. */}
+                <Button intent="icon" icon="search" label="Search this chat" {...(live ? { onClick: toggleChatSearch } : {})} />
+                <Button intent="icon" icon="settings" label="Chat settings" {...(live && chat ? { onClick: openChatSettings } : {})} />
             </>
         )
     };

@@ -1,4 +1,4 @@
-import { component, type Define } from 'sigx';
+import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, Button, StatusPill } from '@agentic/ui';
 import { agentNamed, type MockChatSummary } from '../../mock/workspace';
@@ -30,20 +30,33 @@ export const MemberTiles = component<{ agentIds: readonly string[]; size?: 18 | 
     );
 });
 
+/** The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search keeps all. */
+export function matchingChats(chats: readonly MockChatSummary[], q: string): readonly MockChatSummary[] {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return chats;
+    return chats.filter((c) => {
+        const text = `${c.title}\n${c.lastLine}`.toLowerCase();
+        return words.every((w) => text.includes(w));
+    });
+}
+
 /**
  * The chat list: the left column of `/chats/:id` and the whole of `/chats`.
  * Title, unread badge, member tiles + last line, an amber pill while an
- * approval is open in the chat.
+ * approval is open in the chat. The search box filters the rows by title
+ * and last line as you type.
  */
-export const ChatList = component<ChatListProps>(({ props, emit }) => () => (
+export const ChatList = component<ChatListProps>(({ props, emit }) => {
+    const st = signal({ q: '' });
+    return () => (
     <nav data-chat-list data-wide={props.wide ? '' : undefined} aria-label="Chats">
         <div data-chat-search>
             <label data-visually-hidden for="chat-search">Search chats</label>
-            <input id="chat-search" type="search" placeholder="Search chats" data-scope="input" data-part="input" />
+            <input id="chat-search" type="search" placeholder="Search chats" data-scope="input" data-part="input" value={st.q} onInput={(e: Event) => { st.q = (e.target as HTMLInputElement).value; }} />
             <Button intent="icon" icon="plus" label="New chat" onClick={() => emit('newChat')} />
         </div>
         <ul data-chat-rows>
-            {props.chats.map((chat) => (
+            {matchingChats(props.chats, st.q).map((chat) => (
                 <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined}>
                     <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined}>
                         <span data-chat-row-head>
@@ -59,4 +72,5 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => () => (
             ))}
         </ul>
     </nav>
-));
+    );
+});

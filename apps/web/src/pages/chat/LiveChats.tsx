@@ -1,10 +1,12 @@
 /**
  * The chat list on the platform (#34): the Workspace's chat index read
- * live, each chat's summary and newest entry fetched in one `useData`
- * batch (per-row live reads are a follow-up), rendered through the same
- * `ChatList` the mock page uses.
+ * live, each chat's summary and newest entries fetched in one `useData`
+ * batch for the first paint, then kept current by one renderless watcher
+ * per chat (#152) — a reply in another chat moves its row, raises its
+ * unread count and shows its amber pill without a reload. Rendered through
+ * the same `ChatList` the mock page uses.
  */
-import { component, signal, useData, type Define } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, useData, type Define, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { useRouter } from '@sigx/router';
@@ -18,7 +20,8 @@ import type { MockChatSummary } from '../../mock/workspace';
 import { ChatList } from './ChatList';
 import { useAgentDirectory, type AgentDirectory } from './directory';
 import { closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatRow } from './live';
+import { LIST_TAIL, chatRow } from './live';
+import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
 import { NewChatDialog } from './NewChatDialog';
 
 interface ChatRead {
@@ -27,8 +30,19 @@ interface ChatRead {
     readonly newest: readonly IndexedEntry[];
 }
 
+export interface ChatRows {
+    /** `currentId`: the chat that is open — everything in it is on screen, so it never counts as unread. */
+    rows(currentId?: string): MockChatSummary[];
+    /** The chats read so far, for the watchers. */
+    ids(): string[];
+    /** A watcher's newer read of one chat. */
+    report(read: ChatRead): void;
+    readonly loading: boolean;
+}
+
 /** The workspace's chats, newest activity first, as list rows. */
-export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): { rows(): MockChatSummary[]; readonly loading: boolean } {
+export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): ChatRows {
+    const live = signal<{ map: Record<string, ChatRead> }>({ map: {} });
     const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const reads = useData(
         () => {
@@ -42,7 +56,7 @@ export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: Age
                 ids.map(async (id): Promise<ChatRead | null> => {
                     try {
                         const chat = actor(defs.Chat, chatKeyOf(ws, id));
-                        const [summary, page] = await Promise.all([chat.get(), chat.history(null, 1)]);
+                        const [summary, page] = await Promise.all([chat.get(), chat.history(null, LIST_TAIL)]);
                         return { id, summary, newest: page.entries };
                     } catch {
                         return null;
@@ -52,8 +66,34 @@ export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: Age
             return out.filter((r): r is ChatRead => r !== null);
         }
     );
+    const marksLoaded = signal({ value: false });
+    const current = (): ChatRead[] => (reads.value ?? []).map((r) => live.map[r.id] ?? r);
+    // First sight of a chat on this device starts its marker at the chat's present end (client only: the marks are loaded on mount).
+    const stopBaseline = effect(() => {
+        const ws = viewer.workspaceId;
+        const list = reads.value;
+        if (!ws || !list || !marksLoaded.value) return;
+        baselineReadMarks(ws, list.map((r) => ({ id: r.id, seq: r.summary.seq })));
+    });
+    onMounted(() => {
+        if (viewer.workspaceId) loadReadMarks(viewer.workspaceId);
+        marksLoaded.value = true;
+    });
+    onUnmounted(stopBaseline);
     return {
-        rows: () => (reads.value ?? []).map((r) => chatRow(r.id, r.summary, r.newest, directory.lookup)).sort((a, b) => b.updatedAt - a.updatedAt),
+        rows: (currentId) => {
+            const marks = readMarks(viewer.workspaceId);
+            return current()
+                .map((r) => chatRow(r.id, r.summary, r.newest, directory.lookup, r.id === currentId ? Number.POSITIVE_INFINITY : marks[r.id]))
+                .sort((a, b) => b.updatedAt - a.updatedAt);
+        },
+        ids: () => (marksLoaded.value ? (reads.value ?? []).map((r) => r.id) : []),
+        report(read) {
+            const prev = live.map[read.id];
+            // Every change to a chat is an entry, so its seq says whether this read is news; the tail may trail the summary by a frame.
+            if (prev && prev.summary.seq === read.summary.seq && prev.newest.length === read.newest.length && prev.newest[prev.newest.length - 1]?.seq === read.newest[read.newest.length - 1]?.seq) return;
+            live.map = { ...live.map, [read.id]: read };
+        },
         get loading() {
             return index.loading || reads.loading;
         }
@@ -66,12 +106,32 @@ export type LiveChatListProps =
     & Define.Prop<'directory', AgentDirectory, true>
     & Define.Event<'newChat'>;
 
+/** Renderless: keeps one chat's row current through live reads of `Chat.get` and its newest entries (the `MachineWatch` pattern). */
+const ChatWatch = component<{ id: string; workspaceId: string; onRead: (read: ChatRead) => void }>(({ props }) => {
+    const defs = useActorDefs();
+    const summary = useActorState(defs.Chat, () => [chatKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
+    const tail = useActorState(defs.Chat, () => [chatKeyOf(props.workspaceId, props.id), 'history', null, LIST_TAIL] as const, { live: true });
+    const stop = effect(() => {
+        if (summary.value && tail.value) props.onRead({ id: props.id, summary: summary.value, newest: tail.value.entries });
+    });
+    onUnmounted(stop);
+    return (): JSXElement => null;
+});
+
 /** The list column, live. */
 export const LiveChatList = component<LiveChatListProps>(({ props, emit }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const chats = useChatRows(defs, viewer, props.directory);
-    return () => <ChatList chats={chats.rows()} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} onNewChat={() => emit('newChat')} />;
+    return () => {
+        const ws = viewer.workspaceId;
+        return (
+            <>
+                <ChatList chats={chats.rows(props.currentId)} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} onNewChat={() => emit('newChat')} />
+                {ws ? chats.ids().map((id) => <ChatWatch key={id} id={id} workspaceId={ws} onRead={chats.report} />) : null}
+            </>
+        );
+    };
 });
 
 /** Create a chat with `agentIds` as members (all history) and an optional coordinator; resolves to the new id. */

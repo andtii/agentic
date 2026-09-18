@@ -5,6 +5,14 @@
  * `connectSession`, the composer posting to `Chat.post` and starting the
  * activated agents' tasks through the router. Same columns, same
  * components as the mock page — only the data source differs.
+ *
+ * #152: the context panel's tasks are this chat's chains out of the
+ * workspace's task index (`chatTasks`), "Stop task chain" cancels them
+ * (`Task.cancel`, which takes the subtree), a member with a request open
+ * reads WAITING, the user reads as "You", times follow the workspace's
+ * zone, the topbar's search and settings buttons open a panel over
+ * `Chat.search` and a dialog over `rename` / `setCoordinator` /
+ * `removeAgent`, and having the chat open moves this device's read marker.
  */
 import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
@@ -17,16 +25,23 @@ import { Composer, EmptyState, NOBODY_HINT, Thread, type Mention, type MessageAu
 import { Page } from '../../components/Page';
 import { FailureNotice } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { chatKeyOf, routingKeyOf, sessionKeyOf, taskKeyOf } from '../../actors/keys';
-import { resolveAddressing, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
+import { chatKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { resolveAddressing, type MockChatSummary } from '../../mock/workspace';
+import { useWorkspaceZone, zoneFormat } from '../../time';
+import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
+import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
 import { ContextPanel } from './ContextPanel';
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
-import { chatHead, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, chatTitle, chatTranscript, composeTranscript, entryTranscript, membersOf, mentionsIn, runActivation, type SessionActorClient } from './live';
+import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
+import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
+import { markSeen } from './read-marks';
+
+/** Who the user reads as in their own thread. */
+export const YOU = 'You';
 
 /** Entries read per chat — the Chat actor's page maximum; older ones are a follow-up ("Load earlier"). */
 export const HISTORY_LIMIT = 200;
@@ -41,7 +56,12 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const summary = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const history = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'history', null, HISTORY_LIMIT] as const); }, { live: true });
 
-    const st = signal({ draft: '', error: '', sending: false, recovering: false });
+    // Every task of the workspace, live: the panel keeps this chat's chains (`chatTasks`).
+    const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    const zone = useWorkspaceZone(defs, viewer);
+    const time = (at: number): string => zoneFormat(zone()).time(at);
+
+    const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false });
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
@@ -65,11 +85,18 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
             stop();
             for (const f of feeds.list) f.disconnect();
         });
+        // Open on this device: everything up to the chat's end has been on screen (client only — the marker is this browser's).
+        const stopSeen = effect(() => {
+            const ws = viewer.workspaceId;
+            const seq = summary.value?.seq;
+            if (ws && seq !== undefined) markSeen(ws, props.id, seq);
+        });
+        onUnmounted(stopSeen);
     });
 
     // The thread's one transcript: the chat's rows plus every feed's in-flight rows, recomposed as either side changes.
     const stopCompose = effect(() => {
-        const entries = entryTranscript(history.value?.entries ?? [], directory.lookup);
+        const entries = entryTranscript(history.value?.entries ?? [], directory.lookup, YOU, time);
         authors.value = composeTranscript(transcript, entries, feeds.list, directory.lookup);
     });
     onUnmounted(stopCompose);
@@ -77,7 +104,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The topbar reads the title and members from here.
     const stopHead = effect(() => {
         const s = summary.value;
-        const members = s ? membersOf(s) : [];
+        const members = s ? membersOf(s, waitingAgents(history.value?.entries ?? [])) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
         chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities };
     });
@@ -143,6 +170,50 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         void actor(defs.Chat, k).addAgent(agentId as AgentId, access === 'all' ? 'all' : 'from-now').catch(fail);
     };
 
+    /** "Stop task chain": cancel every chain of this chat that still runs; `Task.cancel` stops the subtree and names what it could not (COL-12). */
+    const stopChain = async (): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws || st.stopping) return;
+        st.stopping = true;
+        st.error = '';
+        try {
+            const tasks = chatTasks(index.value ?? [], props.id);
+            const reports = await Promise.all(stopTargets(tasks).map((t) => actor(defs.TaskActor, taskKeyOf(ws, t.id)).cancel('user')));
+            st.error = notStoppedLine(reports, index.value ?? []) ?? '';
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.stopping = false;
+        }
+    };
+
+    /** "Chat settings": members leave first (a leaving coordinator takes the role with it), then the coordinator, then the title. */
+    const saveSettings = async (change: ChatSettingsChange): Promise<void> => {
+        const k = key();
+        if (!k || st.saving) return;
+        st.saving = true;
+        st.error = '';
+        try {
+            const chat = actor(defs.Chat, k);
+            for (const id of change.remove) await chat.removeAgent(id as AgentId);
+            if (change.coordinator !== undefined) await chat.setCoordinator(change.coordinator as AgentId | null);
+            if (change.title !== undefined) await chat.rename(change.title);
+            closeChatSettings();
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.saving = false;
+        }
+    };
+
+    const search = (q: string) => actor(defs.Chat, key()!).search(q, SEARCH_LIMIT);
+
+    // The topbar's requests are module-level (`head.ts`): leaving the page closes them.
+    onUnmounted(() => {
+        closeChatSearch();
+        closeChatSettings();
+    });
+
     const createChat = async (agentIds: readonly string[], coordinator: string | null): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) return;
@@ -170,8 +241,12 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                 </Page>
             );
         }
-        const members = s ? membersOf(s) : [];
-        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: '', unread: 0, waiting: false, updatedAt: 0 };
+        const entries = history.value?.entries ?? [];
+        const waiting = waitingAgents(entries);
+        const members = s ? membersOf(s, waiting) : [];
+        const last = lastOf(entries, directory.lookup);
+        // The open chat as a summary: nothing in it is unread — it is on screen.
+        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at };
         const addressing = resolveAddressing(members, mentionsIn(st.draft, members, directory.lookup), directory.lookup);
         const mentions: Mention[] = members.map((m) => {
             const a = directory.lookup(m.agentId);
@@ -179,14 +254,15 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         });
         const memberIds = new Set(members.map((m) => m.agentId));
         const candidates = directory.all().filter((a) => !memberIds.has(a.id));
-        const tasks: readonly MockTaskRow[] = [];
-        const failure = chatFailure(history.value?.entries ?? [], feeds.list);
+        const tasks = chatTasks(index.value ?? [], props.id);
+        const failure = chatFailure(entries, feeds.list);
         const empty = transcript.messages.length === 0;
         const loading = summary.loading && !s;
         return (
             <Page title={chat.title} page="chat" hideTitle flush>
                 <LiveChatList currentId={props.id} directory={directory} onNewChat={openNewChat} />
                 <section data-chat-main aria-label="Conversation" aria-busy={loading ? 'true' : undefined}>
+                    {chatSearchRequest.open && s ? <ChatSearchPanel search={search} lookup={directory.lookup} time={time} onClose={closeChatSearch} /> : null}
                     {empty
                         ? <div data-chat-empty><EmptyState variant="chat" /></div>
                         : (
@@ -219,14 +295,15 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} onAddAgent={(e) => addAgent(e.agentId, e.access)} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} onAddAgent={(e) => addAgent(e.agentId, e.access)} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
+                {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} busy={st.saving} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
                 <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
             </Page>
         );

@@ -1,25 +1,28 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
-import { agentNamed, formatTime, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
-import type { AgentIdentity, AgentLookup } from './live';
+import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
+import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
 
 export type HistoryAccessChoice = 'all' | 'from';
 
 export type ContextPanelProps =
     & Define.Prop<'chat', MockChatSummary, true>
-    & Define.Prop<'tasks', readonly MockTaskRow[], true>
+    /** The mini-tree's rows: the mock workspace's task rows, or `chatTasks` over the task index (#152). */
+    & Define.Prop<'tasks', readonly ChatTaskRow[], true>
     /** Who an agent id is; the mock workspace's `agentNamed` by default. */
     & Define.Prop<'lookup', AgentLookup>
     /** Agents of the workspace that are not members yet — the add-agent dialog's picker (#34). */
     & Define.Prop<'candidates', readonly AgentIdentity[]>
+    /** `14:02` for an instant; the mock workspace's zone by default, the workspace's on the live page. */
+    & Define.Prop<'time', TimeText>
     /** The add-agent dialog confirmed: `{ agentId, access }`. */
     & Define.Event<'addAgent', { readonly agentId: string; readonly access: HistoryAccessChoice }>
     /** "Stop task chain" confirmed. */
     & Define.Event<'stopChain'>;
 
-const historyLine = (member: MockChatSummary['members'][number]): string => {
-    const base = member.history.access === 'all' ? 'sees all history' : `Added ${formatTime(member.history.at)} · sees history from then`;
+const historyLine = (member: MockChatSummary['members'][number], time: TimeText): string => {
+    const base = member.history.access === 'all' ? 'sees all history' : `Added ${time(member.history.at)} · sees history from then`;
     return member.coordinator ? `Coordinator · ${base}` : base.charAt(0).toUpperCase() + base.slice(1);
 };
 
@@ -35,6 +38,8 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
         const lookup = props.lookup ?? agentNamed;
         const candidates = props.candidates ?? [];
         const picked = candidates.find((c) => c.id === st.pick) ?? candidates[0];
+        // What a stop would reach: a settled task is listed in the tree, never in the dialog.
+        const running = stoppable(props.tasks);
         return (
             <aside data-chat-context aria-label="Members and tasks">
                 <section data-context-section aria-label="Members">
@@ -52,7 +57,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     <span data-member-role>{a.role}</span>
                                     <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     <EnvironmentLine tone="muted" {...a.environment} />
-                                    <span data-member-history>{historyLine(member)}</span>
+                                    <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
                                 </li>
                             );
                         })}
@@ -78,7 +83,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             })}
                         </ul>
                     ) : <p data-panel-note>No tasks yet.</p>}
-                    {props.tasks.length ? <Button intent="danger" icon="stop" block onClick={() => { st.stopChain = true; }}>Stop task chain</Button> : null}
+                    {running.length ? <Button intent="danger" icon="stop" block onClick={() => { st.stopChain = true; }}>Stop task chain</Button> : null}
                 </section>
 
                 <p data-privacy-note>
@@ -115,9 +120,9 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     model={() => st.stopChain}
                     title="Stop the task chain?"
                     description="The root stops at the next safe point and every child is told to stop. Children that do not acknowledge are listed as could not be stopped."
-                    dependents={props.tasks.map((t) => t.objective)}
-                    dependentsLabel={`Stops ${props.tasks.length} ${props.tasks.length === 1 ? 'task' : 'tasks'}`}
-                    confirmLabel={`Stop ${props.tasks.length} ${props.tasks.length === 1 ? 'task' : 'tasks'}`}
+                    dependents={running.map((t) => t.objective)}
+                    dependentsLabel={`Stops ${running.length} ${running.length === 1 ? 'task' : 'tasks'}`}
+                    confirmLabel={`Stop ${running.length} ${running.length === 1 ? 'task' : 'tasks'}`}
                     onConfirm={() => { st.stopChain = false; emit('stopChain'); }}
                 />
             </aside>
