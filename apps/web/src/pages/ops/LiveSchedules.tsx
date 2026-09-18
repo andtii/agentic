@@ -65,6 +65,8 @@ const ScheduleRow = component<{ ws: string; id: string; tz: string; agents: Agen
             const client = actor(defs.Schedule, key());
             await (on ? client.enable() : client.disable());
         } catch (e) {
+            // The actor did not change: the switch goes back to what it says.
+            st.on = view.value?.enabled ?? !on;
             props.onError(e);
         } finally {
             st.busy = false;

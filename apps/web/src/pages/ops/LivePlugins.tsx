@@ -66,6 +66,11 @@ export const LivePlugins = component(() => {
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const agentName = (id: string): string => agents.lookup(id).name;
 
+    /** The switch goes back to what the Registry last said — a call that failed changed nothing. */
+    const revert = (id: string): void => {
+        if (seen[id] !== undefined) enabled[id] = seen[id];
+    };
+
     const disable = async (plugin: PluginView): Promise<void> => {
         const k = key();
         if (!k) return;
@@ -76,6 +81,7 @@ export const LivePlugins = component(() => {
             // What still references it, on the card, until the page is left.
             st.left = { ...st.left, [plugin.manifest.id]: dependents };
         } catch (e) {
+            revert(plugin.manifest.id);
             fail(e);
         } finally {
             st.busy = null;
@@ -84,32 +90,36 @@ export const LivePlugins = component(() => {
 
     const toggle = async (plugin: PluginView, next: boolean): Promise<void> => {
         const k = key();
+        const id = plugin.manifest.id;
+        // The switch holds at the Registry's value until the Registry answers.
+        revert(id);
         if (!k || st.busy) return;
         st.error = '';
         if (next) {
-            st.busy = plugin.manifest.id;
+            st.busy = id;
             try {
-                await actor(defs.Registry, k).enable(plugin.manifest.id);
-                const { [plugin.manifest.id]: _gone, ...rest } = st.left;
+                await actor(defs.Registry, k).enable(id);
+                const { [id]: _gone, ...rest } = st.left;
                 void _gone;
                 st.left = rest;
             } catch (e) {
+                revert(id);
                 fail(e);
             } finally {
                 st.busy = null;
             }
             return;
         }
-        // Off: ask who depends on it first; the dialog decides, the switch holds meanwhile.
-        enabled[plugin.manifest.id] = true;
-        st.busy = plugin.manifest.id;
+        // Off: ask who depends on it first; the dialog decides.
+        st.busy = id;
         try {
-            const dependents = await actor(defs.Registry, k).dependents(plugin.manifest.id);
+            const dependents = await actor(defs.Registry, k).dependents(id);
             st.busy = null;
             if (dependentCount(dependents)) st.confirming = { plugin, dependents };
             else await disable(plugin);
         } catch (e) {
             st.busy = null;
+            revert(id);
             fail(e);
         }
     };

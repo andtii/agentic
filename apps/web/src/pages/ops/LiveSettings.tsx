@@ -46,13 +46,22 @@ export const LiveSettings = component(() => {
     const draft = signal<SettingsDraft & { loaded: boolean }>({ loaded: false, timeZone: 'UTC', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
     const st = signal({ saving: false, saved: false, error: '', deleting: false, typed: '', exporting: false, deleteAsked: false });
     let seenSettings: unknown;
-    // The draft follows the actor until the person edits; a save writes back and the next read matches.
+    /** The draft as it was last synced from the actor: edits are what differs from it. */
+    let synced: SettingsDraft | null = null;
+    const snapshot = (): SettingsDraft => ({ timeZone: draft.timeZone, environmentId: draft.environmentId, inbox: draft.inbox, push: draft.push, sessionLogDays: draft.sessionLogDays, artifactDays: draft.artifactDays });
+    const sameDraft = (a: SettingsDraft, b: SettingsDraft): boolean =>
+        a.timeZone === b.timeZone && a.environmentId === b.environmentId && a.inbox === b.inbox && a.push === b.push && a.sessionLogDays === b.sessionLogDays && a.artifactDays === b.artifactDays;
+    // The draft follows the actor while the form is clean; edits in progress survive another tab's write.
+    // A save's own write matches the draft, so it syncs and the form reads clean again.
     const stopSync = effect(() => {
         const settings = workspace.value?.settings;
         if (!settings || settings === seenSettings) return;
         seenSettings = settings;
-        Object.assign(draft, toDraft(settings), { loaded: true });
-        st.saved = false;
+        const incoming = toDraft(settings);
+        const dirty = synced !== null && !sameDraft(draft, synced);
+        if (dirty && !sameDraft(draft, incoming)) return;
+        synced = incoming;
+        Object.assign(draft, incoming, { loaded: true });
     });
     onUnmounted(stopSync);
 
@@ -68,6 +77,8 @@ export const LiveSettings = component(() => {
         st.error = '';
         try {
             await actor(defs.Workspace, k).updateSettings(patch);
+            // Saved: the form is clean against what was written, whatever the next read folds in.
+            synced = snapshot();
             st.saved = true;
         } catch (e) {
             fail(e);
@@ -182,7 +193,7 @@ export const LiveSettings = component(() => {
                     </Section>
 
                     <p data-settings-status role="status">
-                        {st.saving ? 'Saving…' : st.saved ? 'Saved.' : ''}
+                        {st.saving ? 'Saving…' : st.saved && synced !== null && sameDraft(draft, synced) ? 'Saved.' : ''}
                     </p>
 
                     <Section title="Your data" hint="Export streams everything as NDJSON to the artifacts bucket, secrets by name only. Delete cascades to every agent, chat, task, memory, schedule and machine pairing.">

@@ -220,9 +220,18 @@ describe('/settings (live)', () => {
             retention: { sessionLogDays: 14, artifactDays: 7 }
         });
 
-        // Another tab's write reaches the form.
+        // Another tab's write reaches the clean form.
         await ws().updateSettings({ retention: { artifactDays: 3 } });
         await until(() => input(dom, 'retention-artifacts').value === '3', 'the live read to refresh the draft');
+        // ...but never over an edit in progress — which also ends "Saved.".
+        setText(input(dom, 'retention-logs'), '21');
+        await tick();
+        expect(dom.querySelector('[data-settings-status]')!.textContent).toBe('');
+        await ws().updateSettings({ retention: { artifactDays: 5 } });
+        await until(async () => (await ws().get()).settings.retention.artifactDays === 5, 'the other tab');
+        await tick(50);
+        expect(input(dom, 'retention-logs').value).toBe('21');
+        expect(input(dom, 'retention-artifacts').value).toBe('3');
     }, 20_000);
 
     it('export writes the manifest through the sink; delete-all needs the workspace name typed', async () => {
