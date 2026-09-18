@@ -3,8 +3,8 @@
  * workspace, the chat key, and a storage that records how big every save was.
  */
 import type { ActorStorage } from '@sigx/actors';
-import { actorKey, type AgentId, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
-import { Chat, ChatPage } from '../../src/chat/index.js';
+import { actorKey, type AgentId, type ChatFile, type ChatFileBody, type ChatFileStore, type ChatId, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
+import { Chat, ChatPage, defineChatActor } from '../../src/chat/index.js';
 import { memoryStorage, testActorApp, type TestActorApp } from '../../src/testing/index.js';
 
 export const WS = 'ws_test' as WorkspaceId;
@@ -45,9 +45,59 @@ export function countingStorage(): { storage: ActorStorage; writes: Write[] } {
     return { storage, writes };
 }
 
-/** A started app serving `Chat` and `ChatPage`. */
-export async function startChatApp(storage?: ActorStorage): Promise<TestActorApp> {
-    const app = testActorApp([Chat, ChatPage], storage ? { storage } : {});
+/** A started app serving `Chat` (over `files` when given) and `ChatPage`. */
+export async function startChatApp(storage?: ActorStorage, files?: ChatFileStore): Promise<TestActorApp> {
+    const app = testActorApp([files ? defineChatActor({ files }) : Chat, ChatPage], storage ? { storage } : {});
     await app.start();
     return app;
 }
+
+/** An in-memory `ChatFileStore` (#203) that records `markPosted` / `deleteChat` and counts `get`s. */
+export interface MemoryFileStore extends ChatFileStore {
+    readonly bodies: Map<string, ChatFileBody>;
+    readonly posted: string[];
+    readonly deleted: string[];
+    gets: number;
+    /** Put a file's record and bytes straight in (what the web upload route's R2 write does). */
+    add(workspaceId: WorkspaceId, file: ChatFile, bytes: Uint8Array | string): void;
+    /** Make `markPosted` throw from now on. */
+    failMarks: boolean;
+}
+
+export function memoryFileStore(): MemoryFileStore {
+    const bodies = new Map<string, ChatFileBody>();
+    const k = (ws: string, chatId: string, fileId: string) => `${ws}/${chatId}/${fileId}`;
+    const store: MemoryFileStore = {
+        bodies,
+        posted: [],
+        deleted: [],
+        gets: 0,
+        failMarks: false,
+        add(workspaceId, file, bytes) {
+            bodies.set(k(workspaceId, file.chatId, file.id), { file, bytes: typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes });
+        },
+        async put(workspaceId, file, body) {
+            const bytes = body instanceof Uint8Array ? body : body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(await new Response(body).arrayBuffer());
+            store.add(workspaceId, file, bytes);
+        },
+        async get(workspaceId, chatId, fileId) {
+            store.gets++;
+            return bodies.get(k(workspaceId, chatId, fileId)) ?? null;
+        },
+        async markPosted(workspaceId, chatId, fileId) {
+            if (store.failMarks) throw new Error('store down');
+            store.posted.push(k(workspaceId, chatId, fileId));
+        },
+        async deleteChat(workspaceId, chatId) {
+            store.deleted.push(`${workspaceId}/${chatId}`);
+            for (const key of bodies.keys()) if (key.startsWith(`${workspaceId}/${chatId}/`)) bodies.delete(key);
+        },
+        async sweepOrphans() {
+            return 0;
+        }
+    };
+    return store;
+}
+
+/** A `ChatFile` record of chat `chatId`. */
+export const chatFile = (id: string, extra: Partial<ChatFile> = {}, chatId = 'c1'): ChatFile => ({ id, chatId: chatId as ChatId, name: `${id}.png`, mediaType: 'image/png', bytes: 3, at: 1_000, ...extra });

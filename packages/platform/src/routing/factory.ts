@@ -17,7 +17,7 @@
  * as the prompt's memory block — the one rendering on the local path (§8, #135).
  */
 
-import type { WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, WorkspaceId } from '@agentic/core';
 import { createPlatformModelAgent, type PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy } from '@sigx/ai-agent';
 import type { AnyActorDefinition } from '@sigx/actors';
@@ -38,6 +38,8 @@ export interface SessionFactoryOptions {
     readonly model?: PlatformAgentDeps['model'];
     /** The approval policy every session opens with, replacing the compiled one (`sessionPolicy(spec)`). Tests pass `allowAll`. */
     readonly policy?: Policy;
+    /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
+    readonly files?: ChatFileStore;
 }
 
 export const NO_API_KEY_CODE = 'no-api-key';
@@ -46,7 +48,7 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
     return async (runtime, c) => {
         if (runtime !== 'anthropic-api') return null;
         const principal = mintAgentPrincipal({ workspaceId: c.workspaceId, agentId: c.spec.agentId, sessionId: c.sessionId, ...(c.spec.taskId ? { taskId: c.spec.taskId } : {}) }) as AgentPrincipal;
-        const ports = createActorToolPorts({ principal, ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}), routing: options.routing, ...(options.sessions ? { sessions: options.sessions } : {}) });
+        const ports = createActorToolPorts({ principal, ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}), routing: options.routing, ...(options.sessions ? { sessions: options.sessions } : {}), ...(options.files ? { files: options.files } : {}) });
         let provider: PlatformAgentDeps['anthropic'];
         if (!options.model) {
             provider = await options.anthropic?.(c.workspaceId);
