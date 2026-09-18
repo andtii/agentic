@@ -104,7 +104,7 @@ const CATEGORY_LABELS: Record<ApprovalCategory, string> = {
     destructive: 'Destructive'
 };
 const CATEGORY_HINTS: Record<ApprovalCategory, string> = {
-    read: 'Read, Grep, memory.search',
+    read: 'Read, Grep, memory_search',
     write: 'Edit, Write under the owner paths',
     execute: 'Bash and other commands',
     network: 'network, delegate, connectors',
