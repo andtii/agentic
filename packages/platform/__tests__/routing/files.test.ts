@@ -85,6 +85,7 @@ describe('the router and the tool ports over the actors', () => {
     let store: MemoryFileStore;
     let prompts: PromptPart[][];
     let Routing: ReturnType<typeof defineRoutingActor>;
+    let Session: ReturnType<typeof defineSessionActor>;
 
     const factory = (): SessionFactory => {
         const agent = mockAgent({
@@ -103,7 +104,7 @@ describe('the router and the tool ports over the actors', () => {
     beforeEach(async () => {
         store = memoryFileStore();
         prompts = [];
-        const Session = defineSessionActor({ factory: factory() });
+        Session = defineSessionActor({ factory: factory() });
         Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session, files: store });
         app = testActorApp([Routing, Session, TaskActor, AgentActor, defineChatActor({ files: store }), ChatPage]);
         await app.start();
@@ -162,6 +163,35 @@ describe('the router and the tool ports over the actors', () => {
             { type: 'text', text: `[file "doc.txt" (text/plain, 1 KB) ${uri('doc')} — read it with chat_file_read]` },
             { type: 'text', text: FILE_UNAVAILABLE }
         ]);
+    });
+
+    describe('chat_file_read is granted implicitly to a chat task', () => {
+        const specTools = async (taskId: string): Promise<readonly string[] | undefined> => {
+            const t = await task(taskId).get();
+            return (await app.as(owner).actor(Session, `${WS}:session:${t.sessionId}`).get()).spec?.tools;
+        };
+
+        it('adds chat_file_read to a chat task of an agent granted no tools', async () => {
+            await chat().addAgent(ADA, 'all');
+            const { messageId } = await chat().post('hi', [ADA]);
+            await runChatTask('t1', ADA, messageId);
+            expect(await specTools('t1')).toEqual(['chat_file_read']);
+        });
+
+        it('leaves a task from outside any chat without it', async () => {
+            await task('t2').create({ objective: 'x', origin: { kind: 'external', clientId: 'c' }, assignee: ADA, context: [], constraints: {} }, { owner: ADA });
+            await app.as(owner).actor(Routing, routingKey(WS)).run('t2' as TaskId);
+            await until(async () => (await task('t2').get()).status === 'completed', 'task t2 to complete');
+            expect(await specTools('t2')).toEqual([]);
+        });
+
+        it('keeps an explicit deny', async () => {
+            await app.as(owner).actor(AgentActor, agentKey(WS, BOB)).update({ tools: [{ name: 'chat_file_read', mode: 'deny' }] }, 'deny');
+            await chat().addAgent(BOB, 'all');
+            const { messageId } = await chat().post('hi', [BOB]);
+            await runChatTask('t3', BOB, messageId);
+            expect(await specTools('t3')).toEqual([]);
+        });
     });
 
     describe('createActorToolPorts', () => {

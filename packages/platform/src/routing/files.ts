@@ -12,7 +12,21 @@
  * or whose bytes are gone, is `[file unavailable]`.
  */
 
-import { CHAT_FILE_INLINE_BUDGET, CHAT_FILE_TEXT_MAX_BYTES, MODEL_IMAGE_TYPES, isChatFilePart, isTextLikeMediaType, parseChatFileUri, type ChatFile, type ChatFileRead, type ChatFileStore, type ChatId, type PromptPart, type WorkspaceId } from '@agentic/core';
+import { CHAT_FILE_INLINE_BUDGET, CHAT_FILE_TEXT_MAX_BYTES, MODEL_IMAGE_TYPES, isChatFilePart, isTextLikeMediaType, parseChatFileUri, type ChatFile, type ChatFileRead, type ChatFileStore, type ChatId, type PromptPart, type ToolGrant, type WorkspaceId } from '@agentic/core';
+
+/** The tool an agent reads a chat attachment with (`@agentic/runtimes`, #206). */
+export const CHAT_FILE_READ = 'chat_file_read';
+
+/**
+ * A chat task may always read its chat's files (#205): `chat_file_read` is
+ * read-only and every read is decided by `Chat.fileAccess`, so it is an
+ * implicit grant, like reading the chat itself. A config that names the tool
+ * already (`ask`, or `deny` outright) keeps its own grant.
+ */
+export function withChatFileRead<C extends { readonly tools: readonly ToolGrant[] }>(config: C): C {
+    if (config.tools.some((g) => g.name === CHAT_FILE_READ)) return config;
+    return { ...config, tools: [...config.tools, { name: CHAT_FILE_READ }] };
+}
 
 /** The chat's word on a file for the agent: its record, or `null` when missing or not visible. */
 export type FileAccess = (chatId: ChatId, fileId: string) => Promise<ChatFile | null>;

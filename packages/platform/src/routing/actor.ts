@@ -54,7 +54,7 @@ import { machineKey, type MachineView, type OpenSessionResult } from '../machine
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
-import { hydrateChatFiles } from './files.js';
+import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
@@ -506,6 +506,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                     const runtime = config.execution.runtime;
                     const chatId: ChatId | undefined = t.origin.kind === 'user' ? t.origin.chatId : undefined;
+                    // A chat task reads its chat's attachments without a grant of its own (#205): `chat_file_read` is read-only, gated by `Chat.fileAccess`.
+                    if (chatId) config = withChatFileRead(config);
                     // A delegated task inherits the approval constraints of its whole chain: the parent route's, then the parent's own rules (AC-12).
                     let constraints: readonly ApprovalRule[] | undefined;
                     if (t.origin.kind === 'agent') {
