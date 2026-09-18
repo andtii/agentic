@@ -10,6 +10,7 @@ import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createActorHost, createActorWorker, defaultPorts, platformActors, type PlatformEnv } from '../../src/actors.app';
 import { createDevLoginRoute, DEV_LOGIN_PATH } from '../../src/auth/dev-login';
+import { runWithHost } from '../../src/host-scope';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -26,12 +27,15 @@ export const ActorHost = createActorHost(actors);
 
 const worker = createActorWorker({ actors });
 
+// Every route under ONE scope, the Worker's own host — as `entry.cloudflare.ts` does it (#172).
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        if (request.method === 'POST' && new URL(request.url).pathname === DEV_LOGIN_PATH) {
-            const route = createDevLoginRoute({ ...(env.SESSION_SECRET ? { SESSION_SECRET: env.SESSION_SECRET } : {}), ...(env.AGENTIC_DEV_LOGIN ? { AGENTIC_DEV_LOGIN: env.AGENTIC_DEV_LOGIN } : {}) });
-            if (route) return route(request);
-        }
-        return worker.fetch(request, env, ctx);
+        return runWithHost(worker.host, async () => {
+            if (request.method === 'POST' && new URL(request.url).pathname === DEV_LOGIN_PATH) {
+                const route = createDevLoginRoute({ ...(env.SESSION_SECRET ? { SESSION_SECRET: env.SESSION_SECRET } : {}), ...(env.AGENTIC_DEV_LOGIN ? { AGENTIC_DEV_LOGIN: env.AGENTIC_DEV_LOGIN } : {}) });
+                if (route) return route(request);
+            }
+            return worker.fetch(request, env, ctx);
+        });
     }
 };
