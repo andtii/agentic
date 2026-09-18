@@ -4,19 +4,20 @@ import { inbox } from './mock/data';
 /** The inbox kinds that need a person — the Home badge counts them (docs/design/HANDOFF.md → nav badge). */
 export const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(['approval', 'input', 'interrupted']);
 
-/** The Home badge: open inbox items of a kind in `NEEDS_YOU_KINDS`. */
+/** The Home badge of the mock workspace: open inbox items of a kind in `NEEDS_YOU_KINDS`. */
 export const needsYouCount = (): number => inbox.filter(item => NEEDS_YOU_KINDS.has(item.kind)).length;
 
 /**
  * The sidebar navigation in its two groups (`docs/design/HANDOFF.md` →
  * "Layout and shell"; routes per docs/architecture.md §10). `/pair` is
- * reached from Machines, not the nav.
+ * reached from Machines, not the nav. `badge` is Home's: the shell passes
+ * the "Needs you" count it reads (#151) — the same rows Home lists.
  */
-export const NAV_GROUPS = (): readonly NavGroup[] => [
+export const NAV_GROUPS = (badge: number = needsYouCount()): readonly NavGroup[] => [
     {
         label: 'Primary',
         items: [
-            { href: '/', label: 'Home', icon: 'home', badge: needsYouCount() },
+            { href: '/', label: 'Home', icon: 'home', badge },
             { href: '/chats', label: 'Chats', icon: 'chats' },
             { href: '/agents', label: 'Agents', icon: 'agents' },
             { href: '/machines', label: 'Machines', icon: 'machines' },

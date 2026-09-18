@@ -3,11 +3,14 @@
  * whose policy asks on destructive calls raises a request that lands in
  * the Inbox; two tabs list it with the approval card; one answers from the
  * card and the row leaves both; the task completes. The input request
- * takes the same road through the answer box.
+ * takes the same road through the answer box. An evicted turn parks its
+ * route as `interrupted` (OPS-05): that is a row too, and its Resume goes
+ * through the router (#151).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { MessageId, TaskId } from '@agentic/core';
+import { actorKey, type MessageId, type TaskId } from '@agentic/core';
 import { AgentActor, TaskActor, Workspace, agentKey, taskKey, workspaceKey } from '@agentic/platform';
+import { interruptedRows, mockNeedsSource } from '../../src/pages/inbox';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
 import { buttonNamed, setText } from './helpers';
 
@@ -17,6 +20,7 @@ beforeEach(async () => {
         respond: (input) => {
             const text = input.map((p) => (p.type === 'text' ? p.text : '')).join('');
             if (text.startsWith('push')) return [{ tool: { name: 'push', category: 'destructive', input: { cmd: 'git push' }, output: 'ok', permissionKey: 'push:origin' } }, { text: 'pushed' }];
+            if (text.startsWith('slow')) return [{ text: 'working ' }, { tool: { name: 'slow', input: {}, output: 'done', delayMs: 1_500 } }, { text: 'after' }];
             if (text.startsWith('ask')) return [{ request: { kind: 'input', message: 'Which branch?' } }, { text: 'thanks' }];
             return [{ text: `echo: ${text}` }];
         }
@@ -80,5 +84,57 @@ describe('/ Needs you (live)', () => {
         await until(() => rows(dom).length === 0, 'the row to leave');
         await settled(task);
         expect((await task.get()).result?.text).toBe('thanks');
+    });
+
+    it('an interrupted turn is a row: it names the agent, leads to the chat, and Resume re-prompts through the router', { timeout: 20_000 }, async () => {
+        const { task, chatId, taskId } = await seed('slow please');
+        const dom = await mountLive('/', h);
+        expect(rows(dom)).toHaveLength(0);
+        // Mid-turn: the tool call is in the session log; evict the session object.
+        const routing = h.app.as(owner).actor(h.Routing, `${USER}:routing:main`);
+        let sessionId = '';
+        await until(async () => {
+            sessionId = (await routing.get()).routes[0]?.sessionId ?? '';
+            return sessionId !== '';
+        }, 'the session');
+        const session = h.app.as(owner).actor(h.Session, actorKey(WS, 'session', sessionId));
+        await until(async () => (await session.events()).some((e) => e.type === 'tool-call'), 'the tool call');
+        await h.app.host.deactivate({ type: 'session', key: actorKey(WS, 'session', sessionId) });
+
+        await until(() => rows(dom).length === 1, 'the interrupted row', 8_000);
+        const row = rows(dom)[0]!;
+        expect(row.getAttribute('data-kind')).toBe('interrupted');
+        expect(row.textContent).toContain('Forge was interrupted mid-turn');
+        expect(dom.querySelector('[data-home-needs] a[data-scope="button"]')!.getAttribute('href')).toBe(`/chats/${chatId}`);
+        expect((await task.get()).status).toBe('waiting');
+
+        buttonNamed(row, 'Resume').click();
+        await until(() => rows(dom).length === 0, 'the row to leave', 8_000);
+        await settled(task);
+        // The result carries the cut turn's partial text, then the resumed turn's answer.
+        expect((await task.get()).result?.text).toContain('after');
+        expect((await session.events()).filter((e) => e.type === 'turn-start').map((e) => e.turnId)).toEqual([`${taskId}:turn:1`, `${taskId}:turn:1:resume`]);
+    });
+});
+
+describe('interrupted rows (model)', () => {
+    const route = (over: Record<string, unknown>) => ({ taskId: 't1', agentId: 'a1', status: 'interrupted', updatedAt: 42, config: { name: 'Atlas' }, ...over }) as never;
+
+    it('only the routes parked interrupted become rows; the chat is where they lead, else the task', () => {
+        const rows = interruptedRows({ routes: [route({}), route({ taskId: 't2', status: 'running' }), route({ taskId: 't3', chatId: 'c9', config: { name: '' } })] });
+        expect(rows.map((r) => [r.id, r.kind, r.title, r.at, r.taskId, r.href, r.hrefLabel, r.primary?.label])).toEqual([
+            ['interrupted:t1', 'interrupted', 'Atlas was interrupted mid-turn', 42, 't1', '/tasks/t1', 'Open task', 'Resume'],
+            ['interrupted:t3', 'interrupted', 'a1 was interrupted mid-turn', 42, 't3', '/chats/c9', 'Open chat', 'Resume']
+        ]);
+        expect(interruptedRows(null)).toEqual([]);
+    });
+
+    it('the mock source resumes in memory: the row leaves, once', async () => {
+        const source = mockNeedsSource();
+        const row = source.useRows()().find((r) => r.kind === 'interrupted')!;
+        await source.resume!(row);
+        await source.resume!(row);
+        expect(source.useRows()().some((r) => r.kind === 'interrupted')).toBe(false);
+        expect(source.resumed).toEqual([row]);
     });
 });

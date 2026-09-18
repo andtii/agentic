@@ -27,6 +27,9 @@ describe('route skeleton', () => {
         expect(groups[0]!.items.map(i => i.href)).toEqual(['/', '/chats', '/agents', '/machines', '/schedules']);
         expect(groups[1]!.items.map(i => i.href)).toEqual(['/history', '/usage', '/plugins', '/settings']);
         expect(groups[0]!.items[0]!.badge).toBe(needsYouCount());
+        // The shell passes the count it reads from "Needs you" (#151); nothing open draws no badge.
+        expect(NAV_GROUPS(5)[0]!.items[0]!.badge).toBe(5);
+        expect(NAV_GROUPS(0)[0]!.items[0]!.badge).toBe(0);
         expect(NAV.some(i => i.href === '/pair')).toBe(false);
     });
 
