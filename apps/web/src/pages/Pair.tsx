@@ -1,7 +1,9 @@
-import { component, onMounted, onUnmounted, signal, type Define } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, type Define } from 'sigx';
 import { Countdown } from '@sigx/zero';
 import { Button, Icon, Label } from '@agentic/ui';
 import { pairing } from '../mock/ops';
+import { dataMode } from '../data-mode';
+import { LivePair } from './machines/LivePair';
 import { mmss } from './ops/format';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
@@ -15,7 +17,16 @@ export type PairViewProps =
     /** Seconds left when the page opens. */
     & Define.Prop<'expiresIn', number, true>
     & Define.Prop<'install', string, true>
-    & Define.Prop<'grants', readonly string[], true>;
+    & Define.Prop<'grants', readonly string[], true>
+    /** The step-2 command; `agentic-daemon pair <code>` unless given (the live page adds `--url` and `--name`). */
+    & Define.Prop<'command', string>
+    /** Above the step-2 command: the live page's machine-name field. */
+    & Define.Slot<'name'>
+    /**
+     * "New code" after expiry: with a listener the platform mints a fresh code and the
+     * page restarts when `code` / `expiresIn` change; without one the same code restarts the clock.
+     */
+    & Define.Prop<'onRenew', () => void>;
 
 /**
  * `/pair` — three numbered steps: install the daemon, enter the six
@@ -26,7 +37,7 @@ export type PairViewProps =
  */
 defineTopbar('pair', () => ({ crumb: 'Pair a machine', actions: () => <LinkButton to="/machines">Cancel</LinkButton> }));
 
-export const PairView = component<PairViewProps>(({ props }) => {
+export const PairView = component<PairViewProps>(({ props, slots }) => {
     const state = signal({ remaining: props.expiresIn, code: props.code });
     let timer: ReturnType<typeof setInterval> | undefined;
     const stop = () => {
@@ -43,8 +54,26 @@ export const PairView = component<PairViewProps>(({ props }) => {
     };
     onMounted(start);
     onUnmounted(stop);
-    // A new code from the platform lands with #36; until then the same sample code restarts the clock.
+    // A new code from the platform (#144) lands as new props: the cells and the clock follow.
+    let first = true;
+    const follow = effect(() => {
+        const code = props.code;
+        const expiresIn = props.expiresIn;
+        if (first) {
+            first = false;
+            return;
+        }
+        state.code = code;
+        state.remaining = expiresIn;
+        start();
+    });
+    onUnmounted(follow);
+    // With nobody minting, the same sample code restarts the clock (the mock page).
     const renew = () => {
+        if (props.onRenew) {
+            props.onRenew();
+            return;
+        }
         state.code = props.code;
         state.remaining = CODE_LIFETIME;
         start();
@@ -54,7 +83,7 @@ export const PairView = component<PairViewProps>(({ props }) => {
 
     return () => {
         const expired = state.remaining <= 0;
-        const pairCommand = `agentic-daemon pair ${state.code}`;
+        const pairCommand = props.command ?? `agentic-daemon pair ${state.code}`;
         return (
             <OpsPage page="pair" title="Pair a machine" hero>
                 <div data-pair-grid>
@@ -74,6 +103,7 @@ export const PairView = component<PairViewProps>(({ props }) => {
                             <span data-step-marker aria-hidden="true">2</span>
                             <div data-step-body>
                                 <h2 data-step-title>Enter this code there</h2>
+                                {slots.name ? <div data-pair-name>{slots.name()}</div> : null}
                                 <div data-command-well>
                                     <span data-command-prompt aria-hidden="true">&gt;</span>
                                     <code>{pairCommand}</code>
@@ -122,4 +152,5 @@ export const PairView = component<PairViewProps>(({ props }) => {
     };
 });
 
-export const Pair = component(() => () => <PairView code={pairing.code} expiresIn={pairing.expiresIn} install={pairing.install} grants={pairing.grants} />);
+/** `/pair`: a code minted by the Workspace on the platform (`LivePair`, #144), or the sample code. */
+export const Pair = component(() => () => (dataMode() === 'live' ? <LivePair /> : <PairView code={pairing.code} expiresIn={pairing.expiresIn} install={pairing.install} grants={pairing.grants} />));

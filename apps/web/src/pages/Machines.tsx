@@ -1,7 +1,9 @@
 import { component, type Define } from 'sigx';
 import { EmptyState } from '@agentic/ui';
-import { environmentsOf, opsMachines, platformRow, type OpsMachine } from '../mock/ops';
-import { MachineGroup, PlatformRow } from './machines/MachineGroup';
+import { environmentsOf, opsAgent, opsMachines, platformRow, queuedFor, type OpsMachine } from '../mock/ops';
+import { dataMode } from '../data-mode';
+import { MachineGroup, PlatformRow, mockDefaultFor } from './machines/MachineGroup';
+import { LiveMachines } from './machines/LiveMachines';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
@@ -16,12 +18,13 @@ export type MachinesViewProps = Define.Prop<'machines', readonly OpsMachine[], t
  */
 export const MachinesView = component<MachinesViewProps>(({ props }) => () => (
     <OpsPage page="machines" title="Machines">
-        {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} />)}
-        <PlatformRow defaultFor={platformRow.defaultFor} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
+        {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} queued={queuedFor} defaultFor={mockDefaultFor} />)}
+        <PlatformRow defaultFor={platformRow.defaultFor.map(id => ({ name: opsAgent(id).name, hue: opsAgent(id).hue }))} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
         {props.machines.length === 0 ? <EmptyState variant="machines" /> : null}
     </OpsPage>
 ));
 
 defineTopbar('machines', () => ({ actions: () => <LinkButton to="/pair" intent="primary" icon="plus">Pair a machine</LinkButton> }));
 
-export const Machines = component(() => () => <MachinesView machines={opsMachines} />);
+/** `/machines`: the workspace's paired machines on the platform (`LiveMachines`, #144), or the mock workspace. */
+export const Machines = component(() => () => (dataMode() === 'live' ? <LiveMachines /> : <MachinesView machines={opsMachines} />));

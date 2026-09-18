@@ -17,7 +17,9 @@ export type ConfigTabProps =
     /** Live mode: persist through the actor; absent, a submit appends a version locally (the mock page). */
     & Define.Prop<'store', ConfigStore>
     /** The collaborator options; default: the mock workspace's other agents. */
-    & Define.Prop<'collaborators', readonly FieldOption[]>;
+    & Define.Prop<'collaborators', readonly FieldOption[]>
+    /** The environment picker's options (`execution.defaultEnvironmentId`, #144); default: the mock workspace's. */
+    & Define.Prop<'environments', readonly FieldOption[]>;
 
 const SKILLS = [{ value: 'sigx-actors' }, { value: 'zero-anatomy' }, { value: 'git-worktree' }, { value: 'web-research' }];
 const TOOLS = [{ value: 'Read' }, { value: 'Edit' }, { value: 'Bash' }, { value: 'WebFetch' }, { value: 'memory.*' }, { value: 'memory.search' }, { value: 'task.report' }, { value: 'ask_user' }];
@@ -134,7 +136,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 skills={SKILLS}
                 tools={TOOLS}
                 connectors={CONNECTORS}
-                environments={ENVIRONMENTS}
+                environments={props.environments ?? ENVIRONMENTS}
                 memoryScopes={SCOPES}
                 agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
                 onSubmit={onSubmit}

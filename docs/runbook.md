@@ -179,7 +179,12 @@ pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-d
 
 Pairing codes come from `Workspace.registerMachinePending({ name })`: six characters, single use, valid 10 minutes; the daemon presents it to `POST /auth/pair` and receives the machine token.
 
-The Machines page's **Pair machine** button is not on the platform yet (§10) — until it is, mint the code from the browser's console while signed in (same origin, the session cookie rides along):
+Signed in, open **Machines → Pair a machine** (`/pair`, #144). The page mints a code the moment it opens, under the name in its **Machine name** field (`machine-N` by default — change it and a fresh code is minted under the new name, so the platform's record and the daemon agree), and shows two ready-to-copy lines that carry the code, this origin and the name:
+
+- step 1, the installer: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url <origin> -Code <code> -Name <name>` (§5.3);
+- step 2, by hand: `agentic-daemon pair <code> --url <origin> --name <name>`.
+
+The countdown runs from 10:00; at zero **New code** mints another. The page watches the record: as soon as the daemon redeems the code it moves to the machine's page. Without the browser (a script, a headless box), the same call over the actor mount while signed in:
 
 ```js
 const { principal } = await (await fetch('/auth/me')).json();
@@ -204,7 +209,7 @@ On the machine, as the user who owns the Claude Code accounts:
 
    `install.ps1` checks Node ≥ 22.12, runs `agentic-daemon pair` (stores `%APPDATA%\agentic\credentials.json` owner-only), runs `agentic-daemon doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07), then registers the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user) and starts it.
 
-4. Within a minute the machine is `online` with its environments and their doctor verdicts (`Machine.get()` / `Machine.doctor()`; the MCP surface's `machines_list` and `environments_doctor`).
+4. Within a minute the machine is `online` on **Machines** with its environments, and its page (`/machines/:id`) lists the daemon's doctor verdicts per environment (`Machine.get()` / `Machine.doctor()`; the MCP surface's `machines_list` and `environments_doctor`). An agent's Config tab now offers those environments as its default environment.
 
 Already paired (upgrade, or `pair` run by hand)? `install.ps1` with no arguments.
 
@@ -229,7 +234,7 @@ Stop-ScheduledTask -TaskName agentic-daemon; Start-ScheduledTask -TaskName agent
 ### 5.5 Upgrade and uninstall
 
 - **Upgrade:** unpack the new zip to a new folder, run its `install.ps1` with no arguments — the pairing is reused, the task is stopped, re-registered to the new folder and restarted — then delete the old folder.
-- **Uninstall:** `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the task and keeps `%APPDATA%\agentic` and `%LOCALAPPDATA%\agentic`; delete them by hand. Revoke the machine on the platform (`Machine.revoke()`; the Machines page once §10 lands) so the token stops working — a revoked daemon redials forever at the backoff ceiling until re-paired.
+- **Uninstall:** `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the task and keeps `%APPDATA%\agentic` and `%LOCALAPPDATA%\agentic`; delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
 
 ## 6. Demo 1 smoke (`smoke:demo1`, #35)
 
@@ -318,7 +323,7 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 
 | Seam | Today | Issue |
 |---|---|---|
-| Machines, Machine, Pair, History, Usage, Tasks and Home pages on the platform | these pages render **mock data** in every mode; only Agents, Agent, Chats, Chat, Task, Session, Schedules, Plugins and Settings read the actors (`dataMode() === 'live'`). Pairing codes: §5.2's console call. Machine state: `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | live wiring after #108 (follow-up of #36 / #90) |
+| History, Usage, Tasks and Home pages on the platform | these pages render **mock data** in every mode; Agents, Agent, Chats, Chat, Task, Session, Schedules, Plugins, Settings, Machines, Machine and Pair read the actors (`dataMode() === 'live'`). Machine state is also `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | live wiring after #108 (follow-up of #36 / #90); #144 did the machine pages |
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
 | Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | — |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
