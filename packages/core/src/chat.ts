@@ -13,6 +13,13 @@ export type Author = { readonly kind: 'user' } | { readonly kind: 'agent'; reado
 
 export type HistoryAccess = 'all' | 'from-now';
 
+/** The `ref` of a `request` / `request-resolved` status entry: what is asked (an approval, or an input) and the request id. */
+export type RequestStatusRef = `approval:${string}` | `input:${string}`;
+
+export function isRequestStatusRef(ref: unknown): ref is RequestStatusRef {
+    return typeof ref === 'string' && /^(approval|input):.+/.test(ref);
+}
+
 export type ChatEntry =
     | {
           readonly t: 'msg';
@@ -29,13 +36,19 @@ export type ChatEntry =
     | {
           readonly t: 'status';
           readonly agentId: AgentId;
-          /**
-           * `request`: the session raised a request a person must answer (`ref` is
-           * `approval:{requestId}` or `input:{requestId}`, COL-10 / CHT-09);
-           * `request-resolved`: it settled (`ref` is the same, so the two pair up).
-           */
-          readonly kind: 'typing' | 'session-started' | 'session-ended' | 'task' | 'request' | 'request-resolved';
+          readonly kind: 'typing' | 'session-started' | 'session-ended' | 'task';
           readonly ref?: string;
+          readonly at: number;
+      }
+    | {
+          readonly t: 'status';
+          readonly agentId: AgentId;
+          /**
+           * `request`: the session raised a request a person must answer (COL-10 / CHT-09);
+           * `request-resolved`: it settled. `ref` is the same on both, so the two pair up.
+           */
+          readonly kind: 'request' | 'request-resolved';
+          readonly ref: RequestStatusRef;
           readonly at: number;
       }
     | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number };
