@@ -4,6 +4,7 @@ All notable changes to `@agentic/web` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- The platform MCP server reads chat attachments (#209): `chats_file_get` goes through `Chat.fileAccess` as the external client (`createActorPlatformPort`'s `chats.fileAccess`), and `createAuthMount({ …, files: platformFiles })` → `createOAuthRoutes(…, { files })` → `createPlatformMcpHandler({ files })` hands it the same R2 store the actors use.
 - Pick where agent work runs (#193, part of #185; AGT-05, EXE-02, EXE-06):
   - A folder picker over the daemon's `fs.request`, with repo/worktree badges and "New worktree…" (`pages/workdir/`).
   - **Where you can pick a folder:**

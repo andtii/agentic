@@ -21,6 +21,7 @@
  */
 import { createPlatformMcpHandler, type PlatformMcpHandler, type PlatformPortFactory } from '@agentic/mcp';
 import { actorOAuthStore, createOAuthServer, sessionFromRequest, type OAuthServer, type OAuthStore, type OAuthUser } from '@agentic/platform';
+import type { ChatFileStore } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { RouteHandler } from '../index';
 import { createActorPlatformPort } from './port';
@@ -44,6 +45,8 @@ export interface OAuthServerWiring {
     readonly actors?: readonly AnyActorDefinition[];
     /** Override the port (tests). */
     readonly port?: PlatformPortFactory;
+    /** The chat file store `chats_file_get` reads (#209). Absent: the tool returns metadata only. */
+    readonly files?: ChatFileStore;
     readonly now?: () => number;
     readonly version?: string;
 }
@@ -90,6 +93,7 @@ export function createOAuthRoutes(env: OAuthServerEnv, wiring: OAuthServerWiring
     const mcp = createPlatformMcpHandler({
         authenticate: (request) => oauth.verify(request),
         port,
+        ...(wiring.files ? { files: wiring.files } : {}),
         resourceMetadataUrl: oauth.resourceMetadataUrl,
         ...(wiring.version !== undefined ? { version: wiring.version } : {}),
         // A browser page on this origin must not drive the surface with a leaked token; native clients send no Origin.

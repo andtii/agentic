@@ -15,6 +15,7 @@
  * A `pnpm dev` with the dev login alone therefore pairs a machine: the daemon's
  * `POST /auth/pair` never falls through to the document again.
  */
+import type { ChatFileStore } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import { isLocalhost } from './dev-login';
 import { createWebAuth, defaultResolveUser, loginConfigured, type AuthWiring, type RouteHandler, type WebAuth } from './index';
@@ -33,6 +34,8 @@ export interface AuthMountWiring {
     readonly pairing: NonNullable<AuthWiring['pairing']>;
     /** The registry the MCP mount binds to (`platformRegistry()`). */
     readonly actors: readonly AnyActorDefinition[];
+    /** The chat file store the MCP mount's `chats_file_get` reads (`platformFiles`, #209) — the one the actors use. */
+    readonly files?: ChatFileStore;
 }
 
 /** The session secret when it can sign anything; `''` otherwise. */
@@ -67,7 +70,7 @@ export function createAuthMount(wiring: AuthMountWiring): (request: Request, env
                 // `POST /auth/pair`: the code is resolved through the global `PairingDirectory`, then redeemed with `Machine.pair` (#37).
                 { resolveUser: defaultResolveUser, pairing: wiring.pairing }
             );
-            const oauth = origin ? createOAuthRoutes({ SESSION_SECRET: secret, APP_ORIGIN: origin }, { actors: wiring.actors }) : null;
+            const oauth = origin ? createOAuthRoutes({ SESSION_SECRET: secret, APP_ORIGIN: origin }, { actors: wiring.actors, ...(wiring.files ? { files: wiring.files } : {}) }) : null;
             built = { key, routes: web.routes, oauth };
         }
         const { pathname } = new URL(request.url);

@@ -53,7 +53,7 @@ export const ActorHost = createActorHost();
  * `POST /auth/pair`: the code is resolved through the global `PairingDirectory`,
  * then redeemed with `Machine.pair` (#37).
  */
-const authRoute = createAuthMount({ pairing: pairingWiring(), actors: platformRegistry() });
+const authRoute = createAuthMount({ pairing: pairingWiring(), actors: platformRegistry(), files: platformFiles });
 
 /** Chat attachments (#207): `POST /files/chats/:chatId` and `GET /files/chats/:chatId/:fileId` over R2, decided by the Chat actor. */
 const filesRoute = createFilesMount({ store: platformFiles });

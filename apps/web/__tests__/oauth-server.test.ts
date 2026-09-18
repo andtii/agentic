@@ -7,7 +7,7 @@
  */
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { WorkspaceId } from '@agentic/core';
+import { chatFileUri, type ChatFile, type ChatFileBody, type ChatFileStore, type ChatId, type WorkspaceId } from '@agentic/core';
 import {
     AgentActor,
     Chat,
@@ -17,8 +17,10 @@ import {
     PairingDirectory,
     TaskActor,
     Workspace,
+    agentChatKey,
     codeChallengeS256,
     createCodeVerifier,
+    defineChatActor,
     defineMachineActor,
     defineRoutingActor,
     defineScheduleActor,
@@ -36,22 +38,39 @@ const ORIGIN = 'https://app.test';
 const REDIRECT = 'http://localhost:7777/cb';
 const WS = 'gh_1' as WorkspaceId;
 
-function registry(): readonly AnyActorDefinition[] {
+/** The chat file store the MCP mount must share with the Chat actor (#209). */
+function memoryFiles(): ChatFileStore {
+    const bodies = new Map<string, ChatFileBody>();
+    const k = (ws: string, chatId: string, fileId: string) => `${ws}/${chatId}/${fileId}`;
+    return {
+        async put(workspaceId, file, body) {
+            bodies.set(k(workspaceId, file.chatId, file.id), { file, bytes: body instanceof Uint8Array ? body : new Uint8Array(body as ArrayBuffer) });
+        },
+        get: async (workspaceId, chatId, fileId) => bodies.get(k(workspaceId, chatId, fileId)) ?? null,
+        markPosted: async () => {},
+        deleteChat: async () => {},
+        sweepOrphans: async () => 0
+    };
+}
+
+function registry(files: ChatFileStore): readonly AnyActorDefinition[] {
     const Session = defineSessionActor({ factory: () => null });
     const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
     const Machine = defineMachineActor({ socket: { send: () => false, close: () => {} }, sessions: () => Session, routing: () => Routing });
     const Schedule = defineScheduleActor({ trigger: { fired: async () => {} } });
-    return [Workspace, AgentActor, Chat, TaskActor, Session, Machine, Routing, Schedule, Memory, PairingDirectory, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, defineChatActor({ files }), TaskActor, Session, Machine, Routing, Schedule, Memory, PairingDirectory, OAuthClients, OAuthGrants];
 }
 
 let app: TestActorApp;
 let web: WebOAuthServer;
 let cookie: string;
+let files: ChatFileStore;
 beforeEach(async () => {
-    const actors = registry();
+    files = memoryFiles();
+    const actors = registry(files);
     app = testActorApp(actors);
     await app.start();
-    web = createOAuthRoutes({ SESSION_SECRET: SECRET, APP_ORIGIN: ORIGIN }, { actors });
+    web = createOAuthRoutes({ SESSION_SECRET: SECRET, APP_ORIGIN: ORIGIN }, { actors, files });
     cookie = sessionCookie(await sealSession({ userId: 'gh_1', workspaceId: WS }, SECRET)).split(';')[0]!;
 });
 afterEach(() => app.stop());
@@ -149,5 +168,29 @@ describe('apps/web OAuth server + MCP mount', () => {
         const revoked = await web.routes['POST /oauth/revoke'](new Request(`${ORIGIN}/oauth/revoke`, form({ token })));
         expect(revoked.status).toBe(200);
         expect((await rpc(token, 'tools/list')).status).toBe(401);
+    });
+
+    it('chats_file_get reads a posted attachment through Chat.fileAccess and the store the actors share (#209)', async () => {
+        const chatId = 'c1' as ChatId;
+        const file: ChatFile = { id: 'f_notes', chatId, name: 'notes.txt', mediaType: 'text/plain', bytes: 5, at: 1 };
+        const chat = app.as(userPrincipal('gh_1')).actor(Chat, agentChatKey(WS, chatId));
+        await files.put(WS, file, new TextEncoder().encode('hello'));
+        await chat.registerUpload(file);
+        await chat.post([{ type: 'text', text: 'see' }, { type: 'file', mediaType: 'text/plain', name: 'notes.txt', url: chatFileUri(chatId, file.id) }]);
+        // Another upload of the user's, never posted: pending uploads are the uploader's alone.
+        const pending: ChatFile = { ...file, id: 'f_pending' };
+        await files.put(WS, pending, new TextEncoder().encode('draft'));
+        await chat.registerUpload(pending);
+
+        const token = await accessToken(['chats']);
+        const got = await rpc(token, 'tools/call', { name: 'chats_file_get', arguments: { chatId, fileId: file.id } });
+        expect(got.body.result).not.toMatchObject({ isError: true });
+        expect((got.body.result as { content: { type: string; text?: string }[] }).content[1]).toEqual({ type: 'text', text: 'hello' });
+        expect(got.body.result!.structuredContent).toMatchObject({ kind: 'text', uri: 'agentic-file:c1/f_notes', file: { name: 'notes.txt' } });
+        for (const fileId of ['f_pending', 'f_nope']) {
+            const refused = await rpc(token, 'tools/call', { name: 'chats_file_get', arguments: { chatId, fileId } });
+            expect(refused.body.result).toMatchObject({ isError: true });
+            expect((refused.body.result as { content: { text: string }[] }).content[0]!.text).toContain('not found');
+        }
     });
 });
