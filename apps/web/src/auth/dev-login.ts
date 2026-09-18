@@ -5,8 +5,9 @@
  * `AGENTIC_DEV_LOGIN` secret lets a caller who presents it mint a user
  * session for a dev identity. The route is not mounted at all when the
  * secret is unset (404 like any unknown path), so production — which never
- * sets it — has no such door; a wrong token is 403 and never says which
- * part was wrong.
+ * sets it — has no such door. A wrong token is 403, compared in constant
+ * time; the token is checked before the user, so nothing about the user is
+ * learned without it, and the answer never says how close the token was.
  *
  * Two shapes on one path:
  *   `POST` with a JSON body `{ token, user }` → `{ principal }` + the cookie
