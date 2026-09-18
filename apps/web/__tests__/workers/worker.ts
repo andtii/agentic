@@ -6,7 +6,7 @@
 // every other port is the production wiring.
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
-import { createActorHost, createActorWorker, defaultPorts, ensureServerApp, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
+import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
 import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
 import { runWithHost } from '../../src/host-scope';
@@ -44,7 +44,8 @@ export default {
         return runWithHost(worker.host, async () => {
             const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
             if (route) {
-                ensureServerApp(env, actors);
+                // The Worker host boots from `env` before an auth route hops (#182).
+                await worker.boot(env);
                 return route(request);
             }
             return worker.fetch(request, env, ctx);

@@ -84,7 +84,8 @@ import {
 import { learningPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
 import { defineActorApp, type ActorApp } from '@sigx/actors/host';
-import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
+import { createFetchHandler } from '@sigx/actors/server';
+import { createHostDurableObject, durableObjectStubResolver, durableObjects, objectSocketRoute, unhostedStorage, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
@@ -376,29 +377,58 @@ export interface ActorWorkerOptions {
  * Worker's own host (`runWithHost`, #137): the Worker hosts nothing, so a hop
  * it makes ambiently (the machine token lookup in `serverAuth`, `pairingWiring`,
  * the MCP mount) must go OUT to the object — never run locally because an
- * object sharing the isolate stamped the global last. The host boots lazily
- * on the first request, so `host` is a thunk that resolves to it. The scope
- * is entered ONCE, at the top of the Worker's `fetch`, around every route —
- * the auth routes hop too (#172) — as `runWithHost(worker.host, ...)`; this
- * `fetch` does not wrap itself, so the entry's scope is the only one.
+ * object sharing the isolate stamped the global last. The scope is entered
+ * ONCE, at the top of the Worker's `fetch`, around every route — the auth
+ * routes hop too (#172) — as `runWithHost(worker.host, ...)`; this `fetch`
+ * does not wrap itself, so the entry's scope is the only one.
+ *
+ * The host boots once per isolate, from `env` alone (`boot`, #182): the app
+ * is built the way `createWorkerHandler` builds it (`unhostedStorage`, the
+ * `durableObjects` placement, the object-terminated socket route, the public
+ * mount with `fallback`) but started on demand rather than by the first
+ * MOUNT request — an auth route hops before any mount request on a cold
+ * isolate (a daemon's `POST /auth/pair` retry), and found no host
+ * (upstream: signalxjs/actors#457 asks for `boot(env)` on the handler). `host` is
+ * a thunk the entry's `runWithHost` reads at call time, so a scope entered
+ * before the boot resolves to the host once it is up. A failed boot is never
+ * cached: the next request retries instead of poisoning the isolate.
  */
 export function createActorWorker(options: ActorWorkerOptions = {}) {
     const actors = options.actors ?? defaultActors();
     let app: ActorApp | undefined;
-    const handler = createWorkerHandler<PlatformEnv>({
-        actors: [...actors],
-        namespace,
-        socket: { terminate: 'object' },
-        app: (base) => (app = defineActorApp(base)),
-        ...(options.fallback ? { fetch: { fallback: options.fallback } } : {})
-    });
+    let booting: Promise<(request: Request) => Promise<Response>> | undefined;
+    const build = async (env: PlatformEnv): Promise<(request: Request) => Promise<Response>> => {
+        const built = defineActorApp({ storage: unhostedStorage(), actors: [...actors] });
+        // The BINDING is captured once (safe: a stub, which workerd refuses to carry across requests, is derived fresh per dispatch); no `isSelf` — the Worker hosts nothing.
+        built.use(durableObjects({ namespace: namespace(env), hostId: 'cf-worker' }));
+        // `/_sigx/socket/{type}/{key}` is forwarded to that actor's object, which terminates it (`createActorHost`'s `socket`).
+        const socket = objectSocketRoute({ resolver: durableObjectStubResolver({ namespace: namespace(env) }) });
+        built.use({ name: 'cloudflare:object-socket', setup: (registry) => registry.route(socket) });
+        const handle = createFetchHandler(built, options.fallback ? { fallback: options.fallback } : {});
+        await built.start();
+        app = built;
+        return handle;
+    };
+    const boot = (env: PlatformEnv): Promise<(request: Request) => Promise<Response>> => {
+        ensureServerApp(env, actors);
+        return (booting ??= build(env).catch((e: unknown) => {
+            booting = undefined;
+            throw e;
+        }));
+    };
     return {
-        /** The Worker's own host once the mount booted it — what the entry's `runWithHost` resolves through. */
+        /** The Worker's own host once `boot` ran — what the entry's `runWithHost` resolves through. */
         host: (): Host | undefined => app?.host ?? undefined,
-        fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-            ensureServerApp(env, actors);
-            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
-            return handler.fetch(request, env, ctx);
+        /** Stamp the server app for `env` and start the Worker host if this isolate has none yet — before any route that hops. */
+        boot: async (env: PlatformEnv): Promise<void> => {
+            await boot(env);
+        },
+        async fetch(request: Request, env: PlatformEnv, _ctx?: unknown): Promise<Response> {
+            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) {
+                ensureServerApp(env, actors);
+                return forwardDaemonSocket(request, env.ACTORS);
+            }
+            return (await boot(env))(request);
         }
     };
 }
