@@ -4,7 +4,7 @@ import type { Options, SpawnOptions, SpawnedProcess } from '@anthropic-ai/claude
 import { allowAll, type AgentEvent, type AgentTurn } from '@sigx/ai-agent';
 import type { EnvironmentId, LocalEnvironment, OpenSpec, SessionId } from '@agentic/core';
 import { buildSystemPrompt } from '../../src/anthropic/index';
-import { claudeCodeDriver, PLATFORM_MEMORY_HEADING, type ClaudeCodeDriverOptions } from '../../src/claude-code/index';
+import { claudeCodeDriver, PLATFORM_MEMORY_HEADING, withoutCrossSessionTools, type ClaudeCodeDriverOptions } from '../../src/claude-code/index';
 import { fakeListen, fakeQuery, messageStart, messageStop, RESULT, textBlocks, toolResult, toolUseBlocks, type TurnScript } from './fake-query';
 import { frozenConfig, memoryEntry } from '../anthropic/helpers';
 
@@ -63,6 +63,25 @@ describe('claudeCodeDriver', () => {
         expect(opts.env?.CLAUDE_CONFIG_DIR).toBe('C:\\profiles\\work');
         await session.close();
         await driver.dispose();
+    });
+
+    it("takes Claude Code's cross-session tools out of every session: they reach the operator's own sessions, not chat members", async () => {
+        const { driver, fake } = driverWith(hello);
+        const { session } = await driver.open(envA, spec(), ctx());
+        await drain(session.prompt('Hello'));
+        expect(fake.calls[0]!.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'SendMessage']));
+        await session.close();
+        await driver.dispose();
+    });
+
+    it('keeps whatever else the caller disallows beside them', () => {
+        const seen: (string[] | undefined)[] = [];
+        const query = withoutCrossSessionTools(((params: { options?: Options }) => {
+            seen.push(params.options?.disallowedTools);
+            return undefined as never;
+        }) as never);
+        query({ prompt: 'x', options: { disallowedTools: ['WebFetch', 'SendMessage'] } });
+        expect(seen[0]).toEqual(['WebFetch', 'SendMessage', 'ListAgents']);
     });
 
     it('refuses a cwd outside the environment cwdRoots', async () => {

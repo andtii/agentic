@@ -113,3 +113,27 @@ export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
     'label-short': { element: 'span', parent: 'actions', tokens: ['text'] },
     record: { element: 'p', parent: 'root', tokens: ['text'] }
 });
+
+/**
+ * An input request as a question card: the `header` ("Question", who asks),
+ * then one `question` per form property — its `label` (the short header),
+ * its `prompt` (the question itself), the `options` as toggles (`on` when
+ * chosen, with a `hint` line each) and a free-text `other` — the `actions`
+ * with the answer button, an `error` line when the answer did not get
+ * through, and the one-line `record` an answered question collapses to.
+ */
+export const aiQuestionAnatomy = defineAnatomy('ai-question', {
+    root: { element: 'div', tokens: ['color', 'radius-box'] },
+    header: { element: 'div', parent: 'root', tokens: ['text'] },
+    title: { element: 'span', parent: 'header', tokens: ['text'] },
+    question: { element: 'fieldset', parent: 'root', tokens: ['text'] },
+    label: { element: 'legend', parent: 'question', tokens: ['text'] },
+    prompt: { element: 'p', parent: 'question', tokens: ['text'] },
+    options: { element: 'div', parent: 'question' },
+    option: { element: 'button', parent: 'options', states: ['on', 'off'], tokens: ['color', 'radius-field', 'text'] },
+    hint: { element: 'span', parent: 'option', tokens: ['text'] },
+    other: { element: 'textarea', parent: 'question', tokens: ['color', 'radius-field', 'text'] },
+    actions: { element: 'div', parent: 'root' },
+    error: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
+    record: { element: 'p', parent: 'root', tokens: ['text'] }
+});

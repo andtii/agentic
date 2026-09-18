@@ -56,7 +56,8 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
             ports,
             ...(options.model ? { model: options.model } : { anthropic: provider }),
             store: c.transcripts,
-            ...(c.spec.memories?.length ? { memories: c.spec.memories } : {})
+            ...(c.spec.memories?.length ? { memories: c.spec.memories } : {}),
+            ...(c.spec.roster ? { roster: c.spec.roster } : {})
         });
         const session = await built.agent.session({ policy: options.policy ?? sessionPolicy(c.spec), signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
         return {

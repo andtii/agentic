@@ -1,6 +1,6 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
-import type { AgentId, MessageId, SessionId, TaskId } from './ids.js';
+import type { AgentId, ChatId, MessageId, SessionId, TaskId } from './ids.js';
 import type { TaskError } from './task.js';
 import type { WorkdirRef } from './workdir.js';
 
@@ -127,3 +127,28 @@ export type SessionEvent =
           readonly mentions?: readonly AgentId[];
           readonly at: number;
       };
+
+/** One agent of a chat, as a member's system prompt names it. */
+export interface ChatRosterMember {
+    readonly agentId: AgentId;
+    readonly name: string;
+    /** The agent's responsibilities (`AgentConfig.role`), when it has any. */
+    readonly role?: string;
+}
+
+/**
+ * Who a session's agent shares its chat with (CHT-07): the members, the
+ * coordinator if the chat has one, and which member the session runs as.
+ * The router reads it from the Chat and the members' configs when it opens
+ * a chat-originated session; the runtime renders it into the system prompt,
+ * so an agent knows the others are platform agents it reaches with
+ * `delegate` / `chat_post` — not anything on the machine it runs on.
+ */
+export interface ChatRoster {
+    readonly chatId: ChatId;
+    readonly title?: string;
+    /** The member the session runs as. */
+    readonly self: AgentId;
+    readonly coordinator?: AgentId;
+    readonly members: readonly ChatRosterMember[];
+}

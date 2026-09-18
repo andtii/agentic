@@ -157,3 +157,27 @@ export function describeRule(rule: ApprovalRule): string {
     const on = m.categories?.length && !m.tools?.length ? ' on ' : ' ';
     return `${rule.outcome}${on}${what}${rule.scope === 'session' ? ' for session' : ''}`.replace(/\s+/g, ' ').trim();
 }
+
+/**
+ * An input decision's `answers` fitted to the request's form. A request that
+ * carries a `schema` (Claude Code's `AskUserQuestion`: one property per
+ * question, `q1`, `q2`, …) is answered with an object keyed by those
+ * properties; the adapter reads nothing else and reports "The user did not
+ * answer the questions." for a bare string. A client that sends one line of
+ * free text (a phone, an older card) still gets through: the text answers
+ * every question — an array for a multi-select. Anything already an object,
+ * and every answer to a request without a form, is left as it is.
+ */
+export function shapeAnswers(schema: unknown, answers: unknown): unknown {
+    if (typeof answers !== 'string') return answers;
+    const properties = (schema as { properties?: unknown } | undefined)?.properties;
+    if (!properties || typeof properties !== 'object') return answers;
+    const keys = Object.keys(properties);
+    if (keys.length === 0) return answers;
+    const shaped: Record<string, unknown> = {};
+    for (const key of keys) {
+        const type = (properties as Record<string, { type?: unknown } | undefined>)[key]?.type;
+        shaped[key] = type === 'array' ? [answers] : answers;
+    }
+    return shaped;
+}

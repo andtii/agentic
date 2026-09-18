@@ -36,14 +36,15 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
-import type { TaskReport } from '@agentic/runtimes';
+import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
+import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
+import { Chat } from '../chat/index.js';
 import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
@@ -148,6 +149,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
             const as = <D extends AnyActorDefinition>(def: D, key: string): ActorClientWith<D> => actor(def, key).with({ context }) as ActorClientWith<D>;
             const task = (id: TaskId) => as(TaskActor, taskKey(workspaceId, id));
             const agent = (id: AgentId) => as(AgentActor, agentKey(workspaceId, id));
+            const chat = (id: ChatId) => as(Chat, actorKey(workspaceId, 'chat', id));
             const session = (id: SessionId): SessionClient => actor(ports.sessions(), `${workspaceId}:session:${id}`).with({ context }) as unknown as SessionClient;
             const machine = (id: MachineId): MachineClient => actor(ports.machines(), machineKey(workspaceId, id)).with({ context }) as unknown as MachineClient;
 
@@ -213,9 +215,40 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * a lesson learned from it names the task (architecture §8; MEM-07, LRN-05).
              * `run` passes the view it already read; a retry reads the task once.
              */
-            async function work(route: Route, t?: Pick<TaskView, 'objective' | 'context'>): Promise<Pick<SessionOpenSpec, 'objective' | 'context'>> {
+            async function work(route: Route, t?: Pick<TaskView, 'objective' | 'context'>): Promise<Pick<SessionOpenSpec, 'objective' | 'context' | 'roster'>> {
                 const { objective, context } = t ?? (await task(route.taskId).get());
-                return { objective, context };
+                const roster = await rosterOf(route);
+                return { objective, context, ...(roster ? { roster } : {}) };
+            }
+
+            /**
+             * The chat the task came from, as the session's prompt names it (CHT-07): every member by
+             * name and role, the coordinator, and which member this session runs as — so an agent reaches
+             * the others through `delegate` / `chat_post`, never through a runtime's own agent messaging.
+             * Best effort: a chat or member that cannot be read leaves the prompt without the section or
+             * the member by its id, and never fails the placement.
+             */
+            async function rosterOf(route: Route): Promise<ChatRoster | undefined> {
+                if (!route.chatId) return undefined;
+                try {
+                    const summary = await chat(route.chatId).get();
+                    const members = await Promise.all(
+                        Object.keys(summary.members).map(async (id) => {
+                            const config = id === route.agentId ? route.config : await agent(id as AgentId).snapshotForSession().catch(() => null);
+                            const role = config?.role.trim();
+                            return { agentId: id as AgentId, name: config?.name || id, ...(role ? { role } : {}) };
+                        })
+                    );
+                    return {
+                        chatId: route.chatId,
+                        ...(summary.title ? { title: summary.title } : {}),
+                        self: route.agentId,
+                        ...(summary.coordinator ? { coordinator: summary.coordinator } : {}),
+                        members
+                    };
+                } catch {
+                    return undefined;
+                }
             }
 
             /** Open a local (`anthropic-api`) Session for the route and prompt it. */
@@ -311,6 +344,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     return;
                 }
                 const sessionId = (route.sessionId ??= newSessionId());
+                const opening = await work(route, t);
+                const tools = grantedToolNames(route);
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
                     runtime: route.runtime,
@@ -318,11 +353,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     taskId: route.taskId,
                     environmentId,
                     machineId,
-                    ...(await work(route, t)),
+                    ...opening,
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
-                    system: route.config.instructions,
-                    tools: grantedToolNames(route)
+                    // The same prompt the API path builds (identity, role, instructions, skills, the chat, the tools);
+                    // `open` appends the memory block. The daemon's runtime appends it to its own preset.
+                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}) }),
+                    tools
                 };
                 // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
                 // is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
@@ -338,7 +375,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         {
                             agentId: route.agentId,
                             cwd: env.cwdRoots[0] ?? '',
-                            system: opened.spec?.system ?? route.config.instructions,
+                            system: opened.spec?.system ?? spec.system ?? route.config.instructions,
                             ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),

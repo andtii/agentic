@@ -393,6 +393,78 @@ const approval: RecipeInput = {
     }
 };
 
+/** The approval card's frame in the `info` ink — a question waits on a person too, but gates nothing; options are toggles, `on` in the live ink. */
+const question: RecipeInput = {
+    component: 'ai-question',
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-md)',
+                border: 'var(--border) solid color-mix(in oklab, var(--color-info) 40%, transparent)',
+                borderRadius: 'var(--radius-box)',
+                background: 'color-mix(in oklab, var(--color-info) 6%, transparent)',
+                color: 'var(--color-base-content)',
+                padding: 'var(--space-lg)',
+                minInlineSize: '0'
+            }
+        },
+        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-info)' } },
+        title: { base: { fontWeight: 'var(--weight-semibold, 600)', fontSize: 'var(--text-lg)' } },
+        question: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', margin: '0', padding: '0', border: '0', minInlineSize: '0' } },
+        label: { base: { padding: '0', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, textTransform: 'uppercase', letterSpacing: '0.04em' } },
+        prompt: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--color-base-content)', overflowWrap: 'anywhere' } },
+        options: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' } },
+        option: {
+            base: {
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: '2px',
+                padding: 'var(--space-sm) var(--space-md)',
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-100)',
+                color: 'var(--color-base-content)',
+                font: 'inherit',
+                fontSize: 'var(--text-sm)',
+                textAlign: 'start',
+                cursor: 'pointer',
+                transition: `border-color ${motion}, background ${motion}`
+            },
+            selectors: { '&:disabled': { cursor: 'default', opacity: '0.7' } },
+            states: {
+                on: { borderColor: 'var(--color-info)', background: 'color-mix(in oklab, var(--color-info) 14%, var(--color-base-100))' },
+                off: { borderColor: line }
+            }
+        },
+        hint: { base: { fontSize: 'var(--text-xs)', color: textMuted, overflowWrap: 'anywhere' } },
+        other: {
+            base: {
+                boxSizing: 'border-box',
+                inlineSize: '100%',
+                minBlockSize: '56px',
+                padding: 'var(--space-sm)',
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-100)',
+                color: 'var(--color-base-content)',
+                font: 'inherit',
+                fontSize: 'var(--text-sm)',
+                resize: 'vertical'
+            }
+        },
+        actions: {
+            base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' },
+            selectors: { '& > [data-scope="button"]': { blockSize: '2.5rem' } }
+        },
+        error: { base: { margin: '0', fontSize: 'var(--text-sm)', color: 'var(--color-error)' } },
+        // The one-line record an answer collapses to.
+        record: { base: { margin: '0', fontSize: 'var(--text-sm)', color: textMuted, overflowWrap: 'anywhere' } }
+    }
+};
+
 /** Card base-200, `line-strong` border, radius 10; "To" row; borderless textarea 14; attach · key hint · Send 44. */
 const composer: RecipeInput = {
     component: 'ai-composer',
@@ -580,4 +652,4 @@ export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% {
 }
 `;
 
-export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, composer];
+export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer];

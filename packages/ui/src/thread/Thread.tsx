@@ -27,6 +27,7 @@ import { spawnedAgent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
+import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message, type MessageAuthor } from './Message.js';
 import type { DescribeRequestFn, ToolMetaFn } from './ToolCall.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
@@ -63,10 +64,10 @@ export function threadMessages(transcript: AgentTranscript): AgentMessage[] {
     return transcript.messages.filter((m) => m.parentCallId === undefined || !spawnedAgent(transcript, m.parentCallId));
 }
 
-/** Open permission requests with no tool call of their own — the rest render on their card. */
+/** Open requests with no tool call of their own — the rest render on their card. */
 export function looseRequests(transcript: AgentTranscript): OpenRequest[] {
     return Object.values(transcript.requests)
-        .filter((r) => r.kind === 'permission' && r.callId === undefined)
+        .filter((r) => r.callId === undefined)
         .sort((a, b) => a.seq - b.seq);
 }
 
@@ -172,7 +173,9 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                     {props.onRespond &&
                         loose.map((r) => (
                             <li key={`request:${r.requestId}`} data-scope={SCOPE} data-part="row">
-                                <ApprovalPrompt request={r} onRespond={props.onRespond!} {...props.describeRequest?.(r)} />
+                                {r.kind === 'input'
+                                    ? <QuestionPrompt request={r} onRespond={props.onRespond!} requestedBy={props.describeRequest?.(r)?.requestedBy} />
+                                    : <ApprovalPrompt request={r} onRespond={props.onRespond!} {...props.describeRequest?.(r)} />}
                             </li>
                         ))}
                 </ol>

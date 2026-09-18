@@ -36,10 +36,10 @@ import type { UsageVerdict } from '../ledger/recorder.js';
 import { agentMemoryScope } from '../agent/agent.actor.js';
 import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
 import { inboxKey, type NotificationInput, type NotificationRef } from '../notify/index.js';
-import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
+import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, platformCursor, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, cursorAfter, eventsAfter, initialSessionState, parseSessionKey, platformCursor, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { appendEntry, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
@@ -132,6 +132,14 @@ export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
     return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && ev.error.message === INTERRUPTED_MESSAGE;
 }
 
+/**
+ * How often a follower (`tail`, `resolution`) takes a snapshot of the record at most. Every
+ * snapshot clones the WHOLE state, and a streaming turn mutates it once per delta: unthrottled,
+ * a long turn clones megabytes per event per follower. Each snapshot carries every event since
+ * the last, and the trailing edge is always delivered, so nothing is lost — only coalesced.
+ */
+const CHANGE_THROTTLE_MS = 50;
+
 /** The turn id `resume()` prompts with for an interrupted `turnId` — deterministic, so the router and the session agree. */
 export const resumeTurnId = (turnId: string): string => `${turnId}:resume`;
 
@@ -171,6 +179,12 @@ interface Live extends OpenedSession {
     readonly served: ServedSession;
     /** Turns started on THIS runtime session — a `running` turn not in here belongs to an evicted activation. */
     readonly turns: Set<string>;
+}
+
+/** A usage event something is billed for: a cost, or any token count besides the reasoning estimate (input, output, cache). */
+function billable(usage: Readonly<Record<string, number | undefined>>, costUsd?: number): boolean {
+    if (costUsd !== undefined && costUsd > 0) return true;
+    return Object.entries(usage).some(([k, n]) => k !== 'reasoningTokens' && typeof n === 'number' && n > 0);
 }
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -501,6 +515,9 @@ export function defineSessionActor(ports: SessionPorts) {
             // `@sigx/ai` leaves the counters optional (and an adapter may omit `usage`); a ledger row always carries both.
             const reported = (ev.usage ?? {}) as Partial<UsageRow['usage']>;
             const usage = { ...reported, inputTokens: reported.inputTokens ?? 0, outputTokens: reported.outputTokens ?? 0 };
+            // Nothing billed — Claude Code's thinking-token ticks are estimates the turn's own usage covers — is no row:
+            // a row per tick is a Ledger write per streamed tick, and a count the books never charge.
+            if (!billable(usage, ev.costUsd)) return null;
             const event = { usage, ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}) };
             const priced: UsageRow = live?.usageRow ? live.usageRow(event, at) : { ...at, ...event, agentId: spec.agentId, estimated: false };
             const row = { ...priced, agentId: spec.agentId, sessionId: parsed.sessionId, key: `${ev.sessionId}:${ev.epoch}:${ev.seq}`, ...(ev.turnId !== undefined ? { turnId: ev.turnId } : {}) };
@@ -593,6 +610,8 @@ export function defineSessionActor(ports: SessionPorts) {
         methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
+        // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
+        applyEntry: (state: SessionState, entry: unknown) => applySessionEntry(state, entry as SessionEntry),
         onDeactivate: (ctx) => dispose(ctx.key),
         methods: (ctx) => {
             // A fresh activation starts with no live session — whatever a previous one left here is stale.
@@ -776,6 +795,11 @@ export function defineSessionActor(ports: SessionPorts) {
 
                 /** Answer an open request (CHT-09). One decision per request: `commandId` defaults to `respond:{requestId}`. */
                 respond(requestId: string, decision: Decision, commandId: string = `respond:${requestId}`): Promise<SessionCommandResult> {
+                    if (decision.type === 'input') {
+                        // A question form takes answers keyed by question: a bare string would reach the runtime as "no answer".
+                        const schema = requestRecordOf(ctx.state.events, requestId)?.request.schema;
+                        decision = { ...decision, answers: shapeAnswers(schema, decision.answers) };
+                    }
                     return dispatch({ v: V, commandId, type: 'respond', requestId, decision });
                 },
 
@@ -935,7 +959,7 @@ export function defineSessionActor(ports: SessionPorts) {
             /** Replay from `from` (exclusive; `{ epoch: 0, seq: 0 }` for everything), then follow until the session closes. */
             async *tail(from?: EventCursor): AsyncIterable<AgentEvent> {
                 let last: EventCursor = from ?? { epoch: 0, seq: 0 };
-                for await (const s of ctx.changes({ initial: true })) {
+                for await (const s of ctx.changes({ initial: true, throttleMs: CHANGE_THROTTLE_MS })) {
                     for (const ev of eventsAfter(s.events, last)) {
                         if (!cursorAfter(last, ev)) continue;
                         last = { epoch: ev.epoch, seq: ev.seq };
@@ -946,7 +970,7 @@ export function defineSessionActor(ports: SessionPorts) {
             },
             /** The decision on `requestId` — yielded once it is in the log (at once when it already is); ends without one when the session closes first. */
             async *resolution(requestId: string): AsyncIterable<RequestResolvedEvent> {
-                for await (const s of ctx.changes({ initial: true })) {
+                for await (const s of ctx.changes({ initial: true, throttleMs: CHANGE_THROTTLE_MS })) {
                     const ev = s.events.find((e) => e.type === 'request-resolved' && e.requestId === requestId);
                     if (ev) {
                         yield ev as RequestResolvedEvent;

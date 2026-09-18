@@ -1,4 +1,5 @@
-import { buildSystemPrompt } from '../../src/index';
+import type { AgentId, ChatId } from '@agentic/core';
+import { buildSystemPrompt, chatSection } from '../../src/index';
 import { frozenConfig, memoryEntry } from './helpers';
 
 describe('buildSystemPrompt', () => {
@@ -55,5 +56,46 @@ describe('buildSystemPrompt', () => {
     it('is stable across calls with the same input (a cacheable prefix)', () => {
         const input = { config: frozenConfig(), tools: ['memory_search'], memories: [memoryEntry] };
         expect(buildSystemPrompt(input)).toBe(buildSystemPrompt(input));
+    });
+});
+
+describe('buildSystemPrompt: the chat section (CHT-07)', () => {
+    const roster = {
+        chatId: 'chat_1' as ChatId,
+        title: 'Release',
+        self: 'agent_ada' as AgentId,
+        coordinator: 'agent_ada' as AgentId,
+        members: [
+            { agentId: 'agent_ada' as AgentId, name: 'Ada', role: 'Research' },
+            { agentId: 'agent_forge' as AgentId, name: 'Forge', role: 'Builds and ships' },
+            { agentId: 'agent_eve' as AgentId, name: 'Eve' }
+        ]
+    };
+
+    it('names every member by name and platform id, marks who you are and who coordinates, and says how to reach them', () => {
+        const prompt = buildSystemPrompt({ config: frozenConfig(), tools: ['delegate', 'chat_post'], roster });
+        expect(prompt).toContain('## This chat');
+        expect(prompt).toContain('titled "Release"');
+        expect(prompt).toContain('not sessions or processes on the machine you run on');
+        expect(prompt).toContain('- Ada (agent_ada) [you, coordinator]: Research');
+        expect(prompt).toContain('- Forge (agent_forge): Builds and ships');
+        expect(prompt).toContain('- Eve (agent_eve)\n');
+        expect(prompt).toContain('You are the coordinator');
+        expect(prompt).toContain("`delegate` with the agent's id as `assignee`");
+        expect(prompt).toContain('`chat_post` mentioning @Name');
+        expect(prompt).toContain("never use a runtime's own agent or session messaging");
+        // Stable before the tools, so the cacheable prefix keeps it.
+        expect(prompt.indexOf('## This chat')).toBeLessThan(prompt.indexOf('## Tools'));
+    });
+
+    it('offers only the tools the session has, says when none reaches the others, and says who else coordinates', () => {
+        expect(chatSection(roster, ['chat_post'])).not.toContain('delegate');
+        expect(chatSection(roster, [])).toContain('You have no tool that reaches the other members');
+        expect(chatSection({ ...roster, coordinator: 'agent_forge' as AgentId }, ['delegate'])).toContain('Another member coordinates this chat');
+        expect(chatSection({ ...roster, coordinator: undefined }, ['delegate'])).not.toContain('coordinat');
+    });
+
+    it('is absent without a roster', () => {
+        expect(buildSystemPrompt({ config: frozenConfig(), tools: ['delegate'] })).not.toContain('## This chat');
     });
 });
