@@ -103,7 +103,7 @@ export function entryLine(entry: ChatEntry, lookup: AgentLookup): string {
         case 'coordinator':
             return entry.agentId ? `${lookup(entry.agentId).name} coordinates` : 'No coordinator';
         case 'rename':
-            return `Renamed to ${entry.title}`;
+            return `Renamed to ${entry.title.replace(/\s+/g, ' ').trim()}`;
     }
 }
 

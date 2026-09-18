@@ -67,7 +67,7 @@ export type ChatEntry =
           readonly at: number;
       }
     | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number }
-    /** The chat's title was set (#124): `Workspace.createChat({ title })` writes the first one, `Chat.rename` the rest. */
+    /** The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one. */
     | { readonly t: 'rename'; readonly title: string; readonly at: number };
 
 export interface ChatMember {
