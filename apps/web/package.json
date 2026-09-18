@@ -12,7 +12,9 @@
     "deploy": "wrangler deploy",
     "test:e2e": "playwright test",
     "e2e:mobile": "playwright test --project=phone-400",
+    "smoke:demo1": "playwright test --config playwright.demo1.config.ts",
     "deploy:preview": "pnpm run build && wrangler deploy --env preview",
+    "deploy:preview:dry-run": "pnpm run build && wrangler deploy --env preview --dry-run",
     "test:workers": "tsc -p __tests__/workers && vitest run --config vitest.workers.config.ts",
     "test:acceptance": "tsc -p __tests__/acceptance && vitest run --config vitest.acceptance.config.ts && vitest run --root ../.. apps/web/__tests__/acceptance"
   },

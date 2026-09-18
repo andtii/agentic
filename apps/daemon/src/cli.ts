@@ -2,6 +2,7 @@
  * `agentic-daemon pair <code> --url <platform> [--name <machine>]`
  * `agentic-daemon run [--verbose]`
  * `agentic-daemon doctor`
+ * `agentic-daemon --version` (also `version`)
  *
  * Everything the CLI touches — paths, fetch, drivers, the output streams, the
  * stop signal — is injectable, so the commands are tested end to end without
@@ -46,6 +47,7 @@ Usage:
   agentic-daemon pair <code> --url <platform> [--name <machine name>]
   agentic-daemon run [--verbose]
   agentic-daemon doctor
+  agentic-daemon --version
 `;
 
 export interface ParsedArgs {
@@ -90,8 +92,15 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     let secrets: string[] = [];
     const logger = (level: LogLevel): Logger => createLogger({ level, write: context.log ?? err, secrets: () => secrets });
 
+    if (args.command === undefined && args.flags.version === true) {
+        out(`agentic-daemon ${DAEMON_VERSION}`);
+        return 0;
+    }
     try {
         switch (args.command) {
+            case 'version':
+                out(`agentic-daemon ${DAEMON_VERSION}`);
+                return 0;
             case 'pair': {
                 const code = args.positional[0];
                 const url = args.flags.url;

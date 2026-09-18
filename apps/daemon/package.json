@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "vite build && tsc -p tsconfig.build.json",
+    "package": "node scripts/package.mjs",
     "start": "node bin/agentic-daemon.mjs"
   },
   "dependencies": {

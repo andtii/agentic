@@ -57,3 +57,6 @@ coverage/
 .cache/
 .temp/
 .tmp/
+
+# Daemon installer zips (pnpm --filter @agentic/daemon package)
+apps/daemon/release/

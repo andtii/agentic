@@ -13,6 +13,7 @@ agentic-daemon run [--verbose]
 - **pair** presents the 6-character code from the Machines page to `POST /auth/pair` and stores the machine token. Case, spaces and dashes in the code are ignored.
 - **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error. The token is never printed.
 - **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines.
+- **--version** (or `version`) prints `agentic-daemon <version>` (`DAEMON_VERSION`, what `hello.daemonVersion` reports) and exits 0 — the installer test and `install.ps1` use it.
 
 ### Files
 
@@ -38,6 +39,15 @@ agentic-daemon run [--verbose]
 ```
 
 `profileDir` becomes the runtime's per-account config dir (`CLAUDE_CONFIG_DIR`) and never leaves the machine. `concurrency` defaults to 1. A session whose `cwd` is outside `cwdRoots`, or that would exceed `concurrency`, is refused with a reason.
+
+### Installer zip (Windows)
+
+```sh
+pnpm build                                   # at the repo root: the zip is assembled from dist/ directories
+pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip
+```
+
+`scripts/package.mjs` copies `bin/`, `dist/`, the production dependency closure into a plain `node_modules/` (workspace packages as their `dist/`; `@anthropic-ai/claude-agent-sdk` with the native CLI of the building platform; no declarations or source maps), the scheduled-task scripts and, at the zip root, `install.ps1`, `uninstall.ps1` and a README (`scripts/package/`). The zip needs only Node ≥ 22.12 on the target: `install.ps1 -Url <platform> -Code <pairing code>` checks Node, pairs, runs `doctor` and registers the task below. `scripts/lib/zip.mjs` is the dependency-free zip writer/reader; `__tests__/package.test.ts` builds the zip, unpacks it and runs `--version` and `doctor` on plain Node. Install, upgrade and uninstall steps: `docs/runbook.md` → "Daemon on a Windows machine".
 
 ### Run in the background (Windows)
 
