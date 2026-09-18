@@ -3,10 +3,11 @@ import type { ApprovalRule, CapabilityReport, EnvironmentId, LocalEnvironment, O
 import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
 import { decodeDaemonFrame, DAEMON_PROTOCOL_VERSION as V, type DaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
 import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCapabilitiesOf, createDaemon, follows, withinRoots, type Daemon, type DaemonDriver } from '../src/daemon';
+import { agentCapabilitiesOf, createDaemon, follows, type Daemon, type DaemonDriver } from '../src/daemon';
+import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
 import { agentDriver, scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
@@ -108,6 +109,7 @@ describe('daemon', () => {
         expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/unknown environment/);
         open(seat, 'session_2', 'env_a', join(dir, '..'));
         expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/outside the environment's cwdRoots/);
+        await mkdir(join(dir, 'sub'));
         open(seat, 'session_3', 'env_a', join(dir, 'sub'));
         expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_3');
         open(seat, 'session_4', 'env_a');
@@ -115,6 +117,41 @@ describe('daemon', () => {
         // Opening the same session again is idempotent.
         open(seat, 'session_3', 'env_a');
         expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_3');
+    });
+
+    it('refuses a session cwd that is missing or that a symlink / junction leads out of the roots (#188)', async () => {
+        const outside = await mkdtemp(join(tmpdir(), 'agentic-daemon-outside-'));
+        try {
+            const root = join(dir, 'root');
+            await mkdir(join(root, 'inside'), { recursive: true });
+            await mkdir(join(outside, 'deeper'));
+            await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+            const { seat } = await start([env('env_a', { cwdRoots: [root], concurrency: 4 })]);
+            open(seat, 'session_1', 'env_a', join(root, 'escape'));
+            expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/outside the environment's cwdRoots/);
+            open(seat, 'session_2', 'env_a', join(root, 'escape', 'deeper'));
+            expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/outside the environment's cwdRoots/);
+            open(seat, 'session_3', 'env_a', join(root, 'missing'));
+            expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/does not exist/);
+            open(seat, 'session_4', 'env_a', join(root, 'inside'));
+            expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_4');
+        } finally {
+            await rm(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('answers fs.request with fs.response (#188)', async () => {
+        const root = join(dir, 'root');
+        await mkdir(join(root, 'b'), { recursive: true });
+        await mkdir(join(root, 'A'));
+        const { seat } = await start([env('env_a', { cwdRoots: [root] })]);
+        seat.send({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: 'env_a', op: { kind: 'list', path: root } });
+        const listed = await expectFrame(seat, 'fs.response');
+        expect(listed.requestId).toBe('fs_1');
+        expect(listed.result).toMatchObject({ kind: 'list', truncated: false });
+        expect(listed.result?.kind === 'list' && listed.result.entries.map((e) => e.name)).toEqual(['A', 'b']);
+        seat.send({ v: V, t: 'fs.request', requestId: 'fs_2', environmentId: 'env_nope', op: { kind: 'list', path: root } });
+        expect(await expectFrame(seat, 'fs.response')).toMatchObject({ requestId: 'fs_2', error: { code: 'unknown-environment' } });
     });
 
     it('a command for a session it does not run is answered, not dropped', async () => {

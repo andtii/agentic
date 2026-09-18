@@ -20,7 +20,7 @@ const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
 });
 
 const harness: DaemonConformanceHarness = {
-    features: ['env', 'gap', 'raw'],
+    features: ['env', 'gap', 'raw', 'fs'],
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
         const relay = await startRelay();
