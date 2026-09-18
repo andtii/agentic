@@ -4,8 +4,9 @@ import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment, inMemoryHarness, type InMe
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
+import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { defineMachineActor, machineKey, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { defineMachineActor, FS_RESULT_TTL_MS, machineKey, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
@@ -101,7 +102,7 @@ beforeEach(async () => {
         heartbeatWindowMs: 90_000,
         commandTimeoutMs: 120_000
     });
-    app = testActorApp([Machine, Session, Workspace, PairingDirectory], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
+    app = testActorApp([Machine, Session, Workspace, PairingDirectory, AuditActor], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
     await app.start();
 });
 
@@ -465,5 +466,163 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         await until(async () => (await session(S1).get()).status === 'closed', 'the session record to close');
         await until(async () => (await machine(K1).get()).activeSessions.length === 0, 'the slot to free');
         expect((await machine(K1).get()).closures.at(-1)).toMatchObject({ sessionId: S1 });
+    });
+});
+
+describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
+    const agentP: Principal = { kind: 'agent', workspaceId: WS, agentId: 'agent_1', sessionId: 'session_1' } as Principal;
+    const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['machines', 'sessions'] };
+    const list = (path: string) => ({ kind: 'list', path }) as const;
+    const worktree = { kind: 'worktree', repo: '/work/app', branch: 'feat/x', path: '/work/app-worktrees/feat-x' } as const;
+    const settled = (requestId: string, principal: Principal = owner) => until(async () => (await machine(K1, principal).fsResult(requestId)).status !== 'pending', `fs.response for ${requestId}`);
+
+    /** A daemon this test speaks for by hand: its hello goes in, nothing answers unless the test sends `fs.response`. */
+    async function rawDaemon() {
+        sockets.connected.add(K1);
+        const asDaemon = machine(K1, asMachine(M1));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {} }));
+        const respond = (requestId: string, body: object) => asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'fs.response', requestId, ...body }));
+        return { asDaemon, respond };
+    }
+
+    const worktrees = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['workdir.worktree-created'] })).events;
+
+    it('round-trips fs.request / fs.response over the daemon socket and stores the answer for fsResult', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+
+        const { requestId } = await machine(K1).fsRequest(E1, list('/work/app'));
+        expect(requestId).toMatch(/^fs_/);
+        expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op: list('/work/app') });
+        await settled(requestId);
+        expect(await machine(K1).fsResult(requestId)).toEqual({
+            requestId,
+            environmentId: E1,
+            op: list('/work/app'),
+            status: 'done',
+            requestedAt: expect.any(Number),
+            finishedAt: expect.any(Number),
+            result: { kind: 'list', path: '/work/app', parent: '/work', entries: [], truncated: false }
+        });
+
+        // A refusal the daemon names is stored as the error.
+        const outside = await machine(K1).fsRequest(E1, list('/etc'));
+        await settled(outside.requestId);
+        expect(await machine(K1).fsResult(outside.requestId)).toMatchObject({ status: 'error', error: { code: 'outside-roots' } });
+        const unsupported = await machine(K1).fsRequest(E1, worktree);
+        await settled(unsupported.requestId);
+        expect(await machine(K1).fsResult(unsupported.requestId)).toMatchObject({ status: 'error', error: { code: 'unsupported' } });
+
+        // A session driver (an agent, an external client with `sessions`) lists and reads; a root has no parent.
+        const byAgent = await machine(K1, agentP).fsRequest(E1, list('/work'));
+        await settled(byAgent.requestId, agentP);
+        const root = await machine(K1, agentP).fsResult(byAgent.requestId);
+        expect(root.result).toEqual({ kind: 'list', path: '/work', entries: [], truncated: false });
+        expect(await statusOf(machine(K1, external).fsRequest(E1, list('/work')))).toBeUndefined();
+        expect(await statusOf(machine(K1, { ...external, scopes: ['machines'] }).fsRequest(E1, list('/work')))).toBe(403);
+        // Not the machine itself, not another workspace.
+        expect(await statusOf(machine(K1, asMachine(M1)).fsRequest(E1, list('/work')))).toBe(403);
+        expect(await statusOf(machine(K1, asMachine(M1)).fsResult(requestId))).toBe(403);
+        expect(await statusOf(machine(K1, userPrincipal('u2')).fsResult(requestId))).toBe(403);
+
+        expect(await statusOf(machine(K1).fsResult('fs_nope'))).toBe(404);
+        expect(await statusOf(machine(K1).fsRequest(E1, list('')))).toBe(400);
+    });
+
+    it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {
+        expect(await statusOf(machine(K1).fsRequest(E1, list('/work')))).toBe(404);
+        const { seat } = connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        expect(await statusOf(machine(K1).fsRequest(E2, list('/work')))).toBe(404);
+        seat.drop();
+        await until(async () => !(await machine(K1).get()).online, 'offline');
+        expect(await statusOf(machine(K1).fsRequest(E1, list('/work')))).toBe(503);
+        expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toEqual([]);
+        await machine(K1).revoke();
+        expect(await statusOf(machine(K1).fsRequest(E1, list('/work')))).toBe(403);
+    });
+
+    it('lets only the owner create a worktree: an agent or an external client is refused', async () => {
+        await rawDaemon();
+        expect(await statusOf(machine(K1, agentP).fsRequest(E1, worktree))).toBe(403);
+        expect(await statusOf(machine(K1, external).fsRequest(E1, worktree))).toBe(403);
+        expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toEqual([]);
+        expect(await statusOf(machine(K1).fsRequest(E1, worktree))).toBeUndefined();
+    });
+
+    it('records workdir.worktree-created once when a worktree is added — by the owner who asked (OPS-03)', async () => {
+        const { respond } = await rawDaemon();
+        const { requestId } = await machine(K1).fsRequest(E1, { ...worktree, base: 'main' });
+        expect((await machine(K1).fsResult(requestId)).status).toBe('pending');
+        expect(await respond(requestId, { result: { kind: 'worktree', path: worktree.path, branch: 'feat/x' } })).toEqual({ ok: true, t: 'fs.response' });
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { kind: 'worktree', path: worktree.path, branch: 'feat/x' } });
+        await until(async () => (await worktrees()).length === 1, 'the audit record');
+        expect((await worktrees())[0]).toMatchObject({
+            key: `${K1}:worktree:${requestId}`,
+            by: 'user:u1',
+            data: { machineId: M1, environmentId: E1, repo: '/work/app', branch: 'feat/x', path: worktree.path, base: 'main' }
+        });
+
+        // A second answer, an answer for an unknown id and a refused worktree record nothing more.
+        await respond(requestId, { error: { code: 'internal', message: 'late' } });
+        expect((await machine(K1).fsResult(requestId)).status).toBe('done');
+        expect(await respond('fs_unknown', { result: { kind: 'worktree', path: '/x', branch: 'y' } })).toEqual({ ok: true, t: 'fs.response' });
+        const refused = await machine(K1).fsRequest(E1, worktree);
+        await respond(refused.requestId, { error: { code: 'branch-exists', message: 'feat/x exists' } });
+        expect(await machine(K1).fsResult(refused.requestId)).toMatchObject({ status: 'error', error: { code: 'branch-exists', message: 'feat/x exists' } });
+        // A result of the wrong kind is the daemon's bug, not a worktree.
+        const confused = await machine(K1).fsRequest(E1, worktree);
+        await respond(confused.requestId, { result: { kind: 'list', path: '/work', entries: [], truncated: false } });
+        expect(await machine(K1).fsResult(confused.requestId)).toMatchObject({ status: 'error', error: { code: 'internal' } });
+        for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+        expect(await worktrees()).toHaveLength(1);
+    });
+
+    it('times out an unanswered request through the liveness reminder; a late answer still lands', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        sockets.seats.delete(K1); // frames stop reaching the daemon; nothing tells the actor
+        const { requestId } = await machine(K1).fsRequest(E1, list('/work'));
+        expect((await machine(K1).fsResult(requestId)).status).toBe('pending');
+        await advance(TICK);
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: `no answer from machine ${M1} within 30000 ms` } });
+
+        await machine(K1, asMachine(M1)).socketMessage(JSON.stringify({ v: 1, t: 'fs.response', requestId, result: { kind: 'list', path: '/work', entries: [], truncated: false } }));
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { path: '/work' } });
+        expect((await machine(K1).fsResult(requestId)).error).toBeUndefined();
+    });
+
+    it('fails pending requests when the daemon disconnects', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        sockets.seats.delete(K1);
+        const a = await machine(K1).fsRequest(E1, list('/work'));
+        const b = await machine(K1).fsRequest(E1, list('/work/b'));
+        await machine(K1, asMachine(M1)).socketClosed();
+        for (const { requestId } of [a, b]) expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: 'machine went offline' }, finishedAt: expect.any(Number) });
+    });
+
+    it(`keeps at most ${MAX_FS_REQUESTS} entries, evicting the oldest, and prunes finished ones after ${FS_RESULT_TTL_MS / 1000} s`, async () => {
+        const { respond } = await rawDaemon();
+        const ids: string[] = [];
+        for (let i = 0; i <= MAX_FS_REQUESTS; i++) {
+            vi.setSystemTime(Date.now() + 1);
+            ids.push((await machine(K1).fsRequest(E1, list(`/work/${i}`))).requestId);
+        }
+        expect(await statusOf(machine(K1).fsResult(ids[0]!))).toBe(404);
+        for (const id of ids.slice(1)) expect((await machine(K1).fsResult(id)).status).toBe('pending');
+        expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toHaveLength(MAX_FS_REQUESTS + 1);
+        // An evicted request's answer is an unknown id: ignored.
+        expect(await respond(ids[0]!, { result: { kind: 'list', path: '/work/0', entries: [], truncated: false } })).toEqual({ ok: true, t: 'fs.response' });
+        expect(await statusOf(machine(K1).fsResult(ids[0]!))).toBe(404);
+
+        // Answer one; the reminder fails the rest at their deadline and prunes each finished entry once its TTL passes.
+        await respond(ids[1]!, { result: { kind: 'list', path: '/work/1', entries: [], truncated: false } });
+        await advance(TICK);
+        expect(await machine(K1).fsResult(ids[2]!)).toMatchObject({ status: 'error', error: { code: 'timeout' } });
+        expect((await machine(K1).fsResult(ids[1]!)).status).toBe('done');
+        await advance(TICK);
+        expect(await statusOf(machine(K1).fsResult(ids[1]!))).toBe(404);
+        expect((await machine(K1).fsResult(ids[2]!)).status).toBe('error'); // finished a tick later: not yet
     });
 });

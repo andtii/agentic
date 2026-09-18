@@ -3,7 +3,8 @@
  *
  * One paired daemon, one record: its token hash, what it reported
  * (`hello` / `env` / `heartbeat`), the sessions it hosts and those waiting
- * for capacity, and the commands whose replies are still out. The host
+ * for capacity, the commands whose replies are still out, and the folder
+ * requests (`fsRequest`) waiting on, or answered by, the daemon. The host
  * accepts the daemon's hibernatable WebSocket and hands every message to
  * `socketMessage`; the actor answers through the `MachineSocketPort`.
  *
@@ -12,8 +13,8 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentVerdict, type IsolationMechanism, type MachineId, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
-import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
+import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -26,17 +27,33 @@ import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
-import { advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import { advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneFs, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
 
-/** The reminder that watches the heartbeat window and the pending-reply deadlines. */
+/** The reminder that watches the heartbeat window and the pending-reply and folder-request deadlines. */
 export const LIVENESS = 'liveness';
 export const DEFAULT_HEARTBEAT_WINDOW_MS = 90_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+export const DEFAULT_FS_TIMEOUT_MS = 30_000;
 /** The reminder floor (architecture §2): nothing is checked more often. */
 const REMINDER_FLOOR_MS = 60_000;
+
+/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command or folder request. */
+function needsLiveness(s: MachineState): boolean {
+    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some((r) => r.status === 'pending');
+}
+
+/** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
+function failPendingFs(s: MachineState, at: number, message: string): void {
+    for (const r of Object.values(s.fs ?? {})) {
+        if (r.status !== 'pending') continue;
+        r.status = 'error';
+        r.error = { code: 'timeout', message };
+        r.finishedAt = at;
+    }
+}
 
 export interface PairInfo {
     readonly name?: string;
@@ -55,6 +72,27 @@ export type OpenSessionResult = 'opened' | 'queued';
 
 export interface OpenSessionOptions {
     readonly taskId?: TaskId;
+}
+
+/** `fsRequest` — the id `fsResult` reads the answer by. */
+export interface FsRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `fsResult(requestId)` — one folder request as stored: `pending` until the
+ * daemon's `fs.response` lands (or the deadline / a disconnect fails it with
+ * `timeout`), then `done` with `result` or `error` with `error`.
+ */
+export interface FsResultView {
+    readonly requestId: string;
+    readonly environmentId: EnvironmentId;
+    readonly op: FsOp;
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    readonly finishedAt?: number;
+    readonly result?: FsResult;
+    readonly error?: FsError;
 }
 
 /** What `socketMessage` reports back to the host, for its logs. */
@@ -156,6 +194,8 @@ export function defineMachineActor(ports: MachinePorts) {
     const now = ports.now ?? Date.now;
     const heartbeatWindowMs = ports.heartbeatWindowMs ?? DEFAULT_HEARTBEAT_WINDOW_MS;
     const commandTimeoutMs = ports.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    const fsTimeoutMs = ports.fsTimeoutMs ?? DEFAULT_FS_TIMEOUT_MS;
+    const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs));
 
     function view(c: ActorContext<MachineState>): MachineView {
         const s = c.snapshot();
@@ -198,7 +238,10 @@ export function defineMachineActor(ports: MachinePorts) {
             heartbeat: selfMachine,
             openSession: sessionDriver,
             closeSession: sessionDriver,
-            sendCommand: sessionDriver
+            sendCommand: sessionDriver,
+            // `worktree` is narrowed to the owner inside the method: a policy sees the method, not the op.
+            fsRequest: sessionDriver,
+            fsResult: sessionDriver
         },
         state: (): MachineState => initialMachineState(),
         methods: (ctx) => {
@@ -243,7 +286,7 @@ export function defineMachineActor(ports: MachinePorts) {
 
             async function armLiveness(): Promise<void> {
                 const s = ctx.state;
-                if (s.online || Object.keys(s.pending).length > 0) await ctx.reminders.set(LIVENESS, { due: Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs)) });
+                if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
                 else await ctx.reminders.clear(LIVENESS);
             }
 
@@ -378,6 +421,37 @@ export function defineMachineActor(ports: MachinePorts) {
                     .catch((e: unknown) => result({ error: e instanceof ToolCallError ? { code: e.code, message: e.message } : { code: 'internal', message: e instanceof Error ? e.message : String(e) } }));
             }
 
+            /**
+             * The daemon's answer to an `fsRequest`. Unknown ids (evicted, pruned, never ours) are ignored,
+             * and so is a second answer — except over a `timeout`: a late answer says what the daemon did.
+             * A worktree it added is audited once per request (OPS-03).
+             */
+            async function onFsResponse(frame: DaemonFrameOf<'fs.response'>): Promise<void> {
+                const r = ctx.state.fs?.[frame.requestId];
+                if (!r || r.status === 'done' || (r.status === 'error' && r.error?.code !== 'timeout')) return;
+                const at = now();
+                r.finishedAt = at;
+                const result = frame.result;
+                if (!result || result.kind !== r.op.kind) {
+                    r.status = 'error';
+                    r.error = result ? { code: 'internal', message: `the daemon answered a ${r.op.kind} request with a ${result.kind} result` } : structuredClone(frame.error ?? { code: 'internal', message: 'fs.response carried neither result nor error' });
+                    delete r.result;
+                    return;
+                }
+                r.status = 'done';
+                r.result = structuredClone(result);
+                delete r.error;
+                if (r.op.kind !== 'worktree' || result.kind !== 'worktree') return;
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:worktree:${r.requestId}`,
+                    kind: 'workdir.worktree-created',
+                    at,
+                    by: r.by,
+                    summary: `worktree ${result.branch} added at ${result.path} on machine ${machineId}`,
+                    data: { machineId, environmentId: r.environmentId, repo: r.op.repo, branch: result.branch, path: result.path, ...(r.op.base ? { base: r.op.base } : {}) }
+                });
+            }
+
             async function handle(frame: DaemonFrame): Promise<void> {
                 const s = ctx.state;
                 switch (frame.t) {
@@ -405,6 +479,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return sessionGone(frame.sessionId, frame.reason);
                     case 'tool.call':
                         return onToolCall(frame);
+                    case 'fs.response':
+                        return onFsResponse(frame);
                 }
             }
 
@@ -453,6 +529,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const first = s.revokedAt === undefined || s.revokedAt === null;
                     if (first) s.revokedAt = now();
                     s.online = false;
+                    failPendingFs(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
                     await ctx.save();
@@ -545,6 +622,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 async socketClosed(): Promise<void> {
                     const s = ctx.state;
                     s.online = false;
+                    // No socket, no answer: a folder request never outlives the connection it was sent on.
+                    failPendingFs(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
                 },
@@ -605,10 +684,56 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (hosted && s.online) send({ v: V, t: 'session.command', sessionId, command });
                     await armLiveness();
                     await ctx.save();
+                },
+
+                /**
+                 * Ask the daemon to list a folder or add a git worktree in
+                 * `environmentId` (#189): `fs.request` goes out and the answer
+                 * lands in state when its `fs.response` arrives, in a later
+                 * `socketMessage` turn — read it with `fsResult(requestId)`
+                 * (live). `list` is open to session drivers; `worktree`
+                 * changes the machine, so only its owner asks for one. 400 for
+                 * a malformed op, 403 revoked, 404 unknown environment, 503
+                 * offline (or no socket to send on).
+                 */
+                async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
+                    const parsed = fsOpSchema.safeParse(op);
+                    if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+                    if (parsed.data.kind === 'worktree' && (ctx.principal as Principal | null)?.kind !== 'user') throw new ServerFnError(403, 'machine: only the owner may create a worktree');
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    if (!s.online) throw new ServerFnError(503, `machine "${machineId}" is offline`);
+                    const at = now();
+                    const requestId = `fs_${crypto.randomUUID()}`;
+                    if (!send({ v: V, t: 'fs.request', requestId, environmentId, op: parsed.data })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
+                    const fs = (s.fs ??= {});
+                    pruneFs(fs, at);
+                    const record: FsRequestRecord = { requestId, environmentId, op: structuredClone(parsed.data), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs, by: principalLabel(ctx.principal) };
+                    fs[requestId] = record;
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /** One `fsRequest` as stored — a primitive argument, so `useActorState(Machine, () => [k, 'fsResult', id], { live: true })` can key on it. 404 for an unknown, evicted or pruned id. */
+                fsResult(requestId: string): FsResultView {
+                    const r = ctx.state.fs?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no fs request "${requestId}"`);
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        environmentId: r.environmentId,
+                        op: r.op,
+                        status: r.status,
+                        requestedAt: r.requestedAt,
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+                        ...(r.result ? { result: r.result } : {}),
+                        ...(r.error ? { error: r.error } : {})
+                    }) as FsResultView;
                 }
             };
         },
-        /** The liveness reminder: a silent daemon goes offline, an unanswered command answers `internal`. */
+        /** The liveness reminder: a silent daemon goes offline, an unanswered command answers `internal`, an unanswered folder request fails `timeout`, and finished folder requests past their TTL are pruned. */
         onReminder: async (ctx, name) => {
             if (name !== LIVENESS) return;
             const s = ctx.state;
@@ -624,7 +749,16 @@ export function defineMachineActor(ports: MachinePorts) {
                     await client.commandReplied({ v: W, kind: 'error', commandId: p.command.commandId, code: 'internal', message: `no reply from machine ${ids.machineId} within ${commandTimeoutMs} ms` });
                 }
             }
-            if (s.online || Object.keys(s.pending).length > 0) await ctx.reminders.set(LIVENESS, { due: Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs)) });
+            if (s.fs) {
+                for (const r of Object.values(s.fs)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    r.status = 'error';
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${fsTimeoutMs} ms` };
+                    r.finishedAt = at;
+                }
+                pruneFs(s.fs, at, false);
+            }
+            if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
             await ctx.save();
         }
     });

@@ -248,7 +248,8 @@ describe('the audit trail of a scripted scenario', () => {
         const [proposal] = await agentActor.propose([{ kind: 'instruction', patch: 'Always cite sources.', reason: 'asked twice', requiresReview: true }], { kind: 'task-end', sessionId: 'sess_parent' as SessionId, taskId: 't2' as TaskId });
         await agentActor.reviewProposal(proposal!.id, 'accept');
 
-        const expected: Record<AuditKind, number> = {
+        // A worktree needs a daemon that adds one: `workdir.worktree-created` is covered by the Machine tests (#189).
+        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created'>, number> = {
             'config.versioned': 3, // agent_api v1, agent_cc v1, agent_api v2 (the accepted proposal)
             'environment.chosen': 3, // t1 (api), t3 (E1), t3 fallback
             'task.transition': 9, // t1 ×4, t2 ×2, t3 ×3

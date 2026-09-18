@@ -70,4 +70,10 @@ export interface MachinePorts {
     readonly heartbeatWindowMs?: number;
     /** How long a `sendCommand` waits for its reply before answering the Session with an error. Default 120 s. */
     readonly commandTimeoutMs?: number;
+    /**
+     * How long an `fsRequest` waits for the daemon's `fs.response` before it
+     * fails with `timeout`. Default 30 s; the liveness reminder checks on its
+     * 60 s floor, so a silent daemon's request fails within one tick after.
+     */
+    readonly fsTimeoutMs?: number;
 }

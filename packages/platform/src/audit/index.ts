@@ -21,6 +21,7 @@ export {
     type PluginToggledData,
     type ProposalReviewedData,
     type SecretOpenedData,
+    type WorktreeCreatedData,
     type TaskTransitionData
 } from './events.js';
 export { AUDIT_TYPE, auditKey, auditMonth, auditMonthKey, parseAuditKey, type ParsedAuditKey } from './key.js';
