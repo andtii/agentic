@@ -24,6 +24,7 @@ import { sameWorkspace } from '../auth/index.js';
 import { budgetError, checkBudget, type BudgetVerdict } from '../ledger/budget.js';
 import { applyTaskEntry, initialTaskState } from './entries.js';
 import { IllegalTransitionError, TaskLimitError, TaskStateError } from './errors.js';
+import { indexTask } from './index-port.js';
 import { TASK_TYPE, taskKey } from './key.js';
 import { checkConcurrency, checkDepth, splitBudget, type Spent } from './limits.js';
 import type { CancelOptions, DelegateSpec, StopReport, TaskEntry, TaskInit, TaskOutcome, TaskState, TaskTree, TaskView } from './types.js';
@@ -168,6 +169,8 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             if (!canTransition(from, to)) throw new IllegalTransitionError(from, to, s.id);
             const at = Date.now();
             await commit(ctx, { t: 'transition', from, to, at, by, why, ...extra });
+            // The workspace's list (#146): awaited so rows land in order, never a gate on the work.
+            await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
             const sessionId = extra.sessionId ?? s.sessionId;
             // The record of the edge (OPS-03), one-way: keyed by its position in the log so a replay folds once.
             await recordAudit(ctx, s.workspaceId, {
@@ -277,15 +280,17 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
         return {
             async create(contract, init) {
                 if (s.created) return view();
+                const at = Date.now();
                 await commit(ctx, {
                     t: 'created',
-                    at: Date.now(),
+                    at,
                     contract,
                     owner: init.owner,
                     depth: init.depth ?? 0,
                     ...(init.parentId !== undefined ? { parentId: init.parentId } : {}),
                     configVersion: init.configVersion ?? 0
                 });
+                await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
                 return view();
             },
             async start(by, sessionId) {
@@ -376,7 +381,10 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 });
                 const wait: WaitReason = { kind: 'child', childTaskIds: liveChildren() };
                 if (s.status === 'active') await transition('waiting', `agent:${s.assignee}`, `delegated ${id}`, { wait });
-                else await commit(ctx, { t: 'wait', at: now, wait });
+                else {
+                    await commit(ctx, { t: 'wait', at: now, wait });
+                    await indexTask(ctx, s.workspaceId, ctx.snapshot(), now);
+                }
                 return id;
             },
             async recordUsage(usage, costUsd = 0) {
@@ -433,7 +441,11 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 if (s.status !== 'waiting' || s.wait?.kind !== 'child') return;
                 const rest = liveChildren();
                 if (rest.length === 0) await transition('active', `task:${id}`, `child ${status}`);
-                else await commit(ctx, { t: 'wait', at: Date.now(), wait: { kind: 'child', childTaskIds: rest } });
+                else {
+                    const at = Date.now();
+                    await commit(ctx, { t: 'wait', at, wait: { kind: 'child', childTaskIds: rest } });
+                    await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
+                }
             }
         };
     },

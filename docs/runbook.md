@@ -323,7 +323,7 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 
 | Seam | Today | Issue |
 |---|---|---|
-| History, Usage, Tasks and Home pages on the platform | these pages render **mock data** in every mode; Agents, Agent, Chats, Chat, Task, Session, Schedules, Plugins, Settings, Machines, Machine and Pair read the actors (`dataMode() === 'live'`). Machine state is also `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | live wiring after #108 (follow-up of #36 / #90); #144 did the machine pages |
+| Home's "Today" panel on the platform | every page reads the actors in live mode (`dataMode() === 'live'`; #144 the machine pages, #145 Schedules / Plugins / Settings, #146 Home, Tasks, History and Usage over the TaskIndex, the Audit log and the month's Ledger) except Home's "Today" panel, which does not read the schedules yet — the Schedules page lists them. Machine state is also `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | follow-up of #146 |
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
 | Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | — |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |

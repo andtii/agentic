@@ -14,7 +14,7 @@
  * Tests provide either, plus their own transport.
  */
 import { defineInjectable } from 'sigx';
-import type { AgentActor, Chat, Inbox, MachineActor, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, Workspace } from '@agentic/platform';
+import type { AgentActor, AuditActor, Chat, Inbox, LedgerActor, MachineActor, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -31,6 +31,12 @@ export interface ActorDefs {
     readonly Schedule: ScheduleActor;
     /** The workspace Registry — plugins, connectors, secret names (#145). */
     readonly Registry: typeof Registry;
+    /** The workspace's task list — Home's active tasks and `/tasks` (#146). */
+    readonly TaskIndex: typeof TaskIndex;
+    /** The audit log — `/history` (#146). */
+    readonly Audit: typeof AuditActor;
+    /** The month's ledger — `/usage` and Home's spend (#146). */
+    readonly Ledger: typeof LedgerActor;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });
