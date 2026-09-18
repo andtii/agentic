@@ -24,9 +24,17 @@
  * answer is the tool result; a cancel (the turn ended, the session closed) is
  * a `cancelled` error. Without a Session definition it stays `unsupported`
  * and says so; the tool never silently succeeds.
+ *
+ * Attachments (#203, #205): `files.read` (`chat_file_read`) asks
+ * `Chat.fileAccess` as the agent — a file is readable exactly when the
+ * message it was posted in is (CHT-04, MEM-11) — then reads the bytes from
+ * the `ChatFileStore`: text for a text-like file, the record alone for any
+ * other. `chat.post` turns `attachments` into file parts the same way, so an
+ * agent can re-share only what it can see. Without a store there is no
+ * `files` port.
  */
 
-import { actorKey, isTerminal, type AgentId, type ChatId, type MemoryEntry, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, chatFileUri, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type MemoryEntry, type Principal, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import type { DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -39,6 +47,7 @@ import { Memory, memoryActorKey } from '../memory/index.js';
 import type { RequestResolvedEvent } from '../policy/requests.js';
 import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
+import { readChatFile } from './files.js';
 import { routingKey } from './key.js';
 
 export type AgentPrincipal = Extract<Principal, { kind: 'agent' }>;
@@ -64,6 +73,8 @@ export interface ActorToolPortsOptions {
     readonly routing?: () => AnyActorDefinition;
     /** The Session actor definition, for `ask_user`; without it the question is refused as unsupported. */
     readonly sessions?: () => AnyActorDefinition;
+    /** Where chat attachment bytes live (#203); without it there is no `files` port and `chat_file_read` reports it unavailable. */
+    readonly files?: ChatFileStore;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -148,7 +159,32 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         return outcomeOf({ ...child, status: 'cancelled' }, straggler ? [childId] : []);
     }
 
+    /** The chat's word on a file for this agent — `null` when it is missing or the agent may not see it. */
+    const access = (chatId: ChatId, fileId: string): Promise<ChatFile | null> => as(Chat, agentChatKey(workspaceId, chatId)).fileAccess(fileId);
+
+    /** A file the agent may see, by its URI, or the tool error saying why not. */
+    async function visibleFile(uri: string, tool: string): Promise<ChatFile> {
+        const ref = parseChatFileUri(uri);
+        if (!ref) throw new ToolCallError('invalid', `${tool}: "${uri}" is not an agentic-file: URI`);
+        const file = await access(ref.chatId, ref.fileId);
+        if (!file) throw new ToolCallError('forbidden', `${tool}: no file ${uri} that agent ${agentId} may see`);
+        return file;
+    }
+
+    const store = options.files;
+    const files: PlatformPorts['files'] = store
+        ? {
+              async read(uri: string) {
+                  const file = await visibleFile(uri, 'chat_file_read');
+                  const read = await readChatFile(file, workspaceId, store);
+                  if (!read) throw new ToolCallError('not-found', `chat_file_read: the bytes of ${uri} are gone`);
+                  return read;
+              }
+          }
+        : undefined;
+
     return {
+        ...(files ? { files } : {}),
         memory: {
             search: (query) => memory().query(query),
             remember: (entry): Promise<MemoryEntry> =>
@@ -160,7 +196,15 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         chat: {
             async post(post) {
                 if (!chatId) throw new ToolCallError('unsupported', 'chat_post: this session belongs to no chat');
-                const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(post.text, post.mentions, taskId ? { taskId } : {});
+                // Attachments go in as file parts named by the chat's own record, so a re-share carries the file's real type (#205).
+                const attached: PromptPart[] = [];
+                for (const uri of post.attachments ?? []) {
+                    const file = await visibleFile(uri, 'chat_post');
+                    const url = chatFileUri(file.chatId, file.id);
+                    attached.push(MODEL_IMAGE_TYPES.includes(file.mediaType) ? { type: 'image', mediaType: file.mediaType, url } : { type: 'file', mediaType: file.mediaType, name: file.name, url });
+                }
+                const input: string | PromptPart[] = attached.length === 0 ? post.text : [...(post.text ? [{ type: 'text' as const, text: post.text }] : []), ...attached];
+                const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(input, post.mentions, taskId ? { taskId } : {});
                 return { messageId: result.messageId };
             },
             async ask(question, call) {

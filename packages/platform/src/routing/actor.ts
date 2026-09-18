@@ -40,7 +40,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -49,15 +49,19 @@ import { isServerFnError, ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
-import { asPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
+import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
+import { hydrateChatFiles } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
 import { initialRoutingState, type Route, type RoutingState } from './state.js';
+
+/** How far back (entries) the router looks for a chat task's triggering message, for its attachments. */
+const TRIGGER_LOOKBACK = 50;
 
 /** The `by` the router signs its transitions with. */
 export const ROUTER = 'system:routing';
@@ -195,6 +199,44 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 await task(route.taskId).reportWaiting(reason, ROUTER, sessionId);
             }
 
+            /** The chat as the route's agent sees it — `fileAccess` and `history` answer for that agent (CHT-04, MEM-11). */
+            const chatAsAgent = (route: Route, chatId: ChatId) =>
+                actor(Chat, actorKey(workspaceId, 'chat', chatId)).with({
+                    context: asPrincipal(mintAgentPrincipal({ workspaceId, agentId: route.agentId, sessionId: route.sessionId!, taskId: route.taskId }))
+                });
+
+            /** The chat-file parts of the message that started a chat task — best effort: a chat that cannot be read gives none. */
+            async function triggerFiles(route: Route, t: TaskView): Promise<ChatFilePart[]> {
+                if (t.origin.kind !== 'user' || !route.sessionId) return [];
+                const { chatId, messageId } = t.origin;
+                try {
+                    const { entries } = await chatAsAgent(route, chatId).history(null, TRIGGER_LOOKBACK);
+                    const entry = entries.find((e) => e.entry.t === 'msg' && e.entry.id === messageId)?.entry;
+                    return entry?.t === 'msg' ? entry.parts.filter(isChatFilePart) : [];
+                } catch {
+                    return [];
+                }
+            }
+
+            /**
+             * The turn's input: the objective, the triggering message's attachments the context does not
+             * already carry, then the context — every attachment resolved for the route's agent (#205):
+             * images inlined within `CHAT_FILE_INLINE_BUDGET` (the trigger's first, then the newest),
+             * everything else a note (`hydrateChatFiles`).
+             */
+            async function promptInput(route: Route, t: TaskView): Promise<PromptPart[]> {
+                const trigger = await triggerFiles(route, t);
+                const inContext = new Set(t.context.filter(isChatFilePart).map((p) => p.url));
+                const parts: PromptPart[] = [{ type: 'text', text: t.objective }, ...trigger.filter((p) => !inContext.has(p.url)), ...t.context];
+                if (!parts.some(isChatFilePart)) return parts;
+                return hydrateChatFiles(parts, {
+                    workspaceId,
+                    access: (chatId, fileId) => chatAsAgent(route, chatId).fileAccess(fileId),
+                    ...(ports.files ? { store: ports.files } : {}),
+                    first: trigger.map((p) => p.url)
+                });
+            }
+
             /** The one prompt of a route: objective + context, idempotent by its turn id (a retry after an eviction runs once). */
             async function prompt(route: Route): Promise<void> {
                 if (!route.sessionId) return;
@@ -204,7 +246,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     return;
                 }
                 const turnId = `${route.taskId}:turn:1`;
-                const input: PromptPart[] = [{ type: 'text', text: t.objective }, ...t.context];
+                const input = await promptInput(route, t);
                 const reply = await session(route.sessionId).prompt(input, turnId);
                 if (reply.kind === 'error') {
                     await fail(route, { code: `prompt-${reply.code}`, message: reply.message, recoverable: reply.code === 'busy' });

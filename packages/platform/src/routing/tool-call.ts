@@ -8,7 +8,7 @@
  * the daemon sees as `tool.result.error {code: 'invalid'}`.
  */
 
-import type { ChatId, Principal } from '@agentic/core';
+import type { ChatFileStore, ChatId, Principal } from '@agentic/core';
 import { isPlatformToolName, platformTools } from '@agentic/runtimes';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 
@@ -26,6 +26,8 @@ export interface ToolCallPortOptions {
     readonly routing: () => AnyActorDefinition;
     /** The Session actor definition — where a session's chat is looked up for `chat_post`, and where `ask_user` raises its request (#122). */
     readonly sessions: () => AnyActorDefinition;
+    /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
+    readonly files?: ChatFileStore;
 }
 
 /** A `tool.call` port over the actors: the Machine binds it as `MachinePorts.tools`. */
@@ -40,7 +42,7 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 const session = actor(options.sessions(), `${agent.workspaceId}:session:${agent.sessionId}`).with({ context: asPrincipal(agent) }) as unknown as SessionSpecClient;
                 chatId = (await session.get()).spec?.chatId;
             }
-            const ports = createActorToolPorts({ principal: agent, ...(chatId ? { chatId } : {}), routing: options.routing, sessions: options.sessions });
+            const ports = createActorToolPorts({ principal: agent, ...(chatId ? { chatId } : {}), routing: options.routing, sessions: options.sessions, ...(options.files ? { files: options.files } : {}) });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
             try {

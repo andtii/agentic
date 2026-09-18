@@ -15,7 +15,7 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkdirRef, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkdirRef, WorkspaceId } from '@agentic/core';
 import { actorKey, createId } from '@agentic/core';
 import { defineActor, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
@@ -153,6 +153,8 @@ export interface WorkspaceOptions {
     readonly sink?: ArtifactSink;
     /** How `deleteAll` reaches child records (the actor storage). */
     readonly store?: WorkspaceStore;
+    /** Where chat attachment bytes live (#203): `deleteAll` deletes every chat's files (`ChatFileStore.deleteChat`). */
+    readonly files?: ChatFileStore;
     readonly now?: () => number;
     /** Override the policy chain. Default `[sameWorkspace, workspaceOwner]`. */
     readonly authorize?: ActorPolicy | readonly ActorPolicy[];
@@ -185,7 +187,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
     // Resolved per call, not captured: tests replace `Date.now` after this module loaded.
     const now = options.now ?? (() => Date.now());
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? [sameWorkspace, workspaceOwner];
-    const cascade = { ...(options.sink ? { sink: options.sink } : {}), ...(options.store ? { store: options.store } : {}), now };
+    const cascade = { ...(options.sink ? { sink: options.sink } : {}), ...(options.store ? { store: options.store } : {}), ...(options.files ? { files: options.files } : {}), now };
 
     return defineActor({
         type: 'Workspace',

@@ -6,7 +6,7 @@
  * Session, Machine and Routing reference each other.
  */
 
-import type { Principal, SessionId, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, Principal, SessionId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
 
@@ -23,6 +23,12 @@ export interface RoutingPorts {
     readonly driver?: (workspaceId: WorkspaceId) => Principal;
     /** Where environment choices are recorded (`environment.chosen`, incl. a fallback; OPS-03). Default `auditPort()` — one-way to `{ws}:audit`. */
     readonly audit?: AuditPort;
+    /**
+     * Where chat attachment bytes live (#203) — R2 in the web app. The prompt's images are read from it
+     * (after `Chat.fileAccess` as the task's agent) and inlined; absent, every attachment reaches the
+     * model as a note (`hydrateChatFiles`).
+     */
+    readonly files?: ChatFileStore;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /** Session id allocation for tests. Default `createId('session')`. */

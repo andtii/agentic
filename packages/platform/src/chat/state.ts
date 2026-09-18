@@ -9,7 +9,7 @@
  * `applyEntry` hook of `ctx.append`.
  */
 
-import type { AgentId, ChatEntry, ChatMember, Principal, SessionId } from '@agentic/core';
+import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MessageId, type Principal, type SessionId } from '@agentic/core';
 
 /** Entries kept in state before the oldest page is archived. */
 export const WINDOW = 200;
@@ -26,6 +26,36 @@ export interface IndexedEntry {
     readonly seq: number;
     readonly entry: ChatEntry;
 }
+
+/**
+ * A file posted into the chat (#203): the message it was last posted in —
+ * `seq` is what visibility is decided on (CHT-04) — and what the file is.
+ * A re-share moves `entryId`/`seq` to the newer message: history access is
+ * "from a seq on", so the newest posting is the most widely visible one.
+ */
+export interface ChatFileRow {
+    readonly entryId: MessageId;
+    readonly seq: number;
+    readonly name: string;
+    readonly mediaType: string;
+    readonly bytes: number;
+    /** When it was uploaded. */
+    readonly at: number;
+}
+
+/** An upload not yet posted (`Chat.registerUpload`): only its uploader may post or read it. */
+export interface PendingUpload {
+    readonly file: ChatFile;
+    /** `principalKey` of the uploader. */
+    readonly by: string;
+    /** When it was registered — the pending entry is forgotten `PENDING_TTL_MS` later. */
+    readonly at: number;
+}
+
+/** Most uploads one principal may hold pending in one chat. */
+export const MAX_PENDING_UPLOADS = 50;
+/** A pending upload older than this is forgotten; the store's orphan sweep (`sweepOrphans`) must use at least this age. */
+export const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface ChatState {
     readonly v: 1;
@@ -44,6 +74,13 @@ export interface ChatState {
     activeSessions: Record<string, SessionId>;
     /** The title the last `rename` entry set (#124); absent until one is. Records written before it existed have none. */
     title?: string;
+    /**
+     * Every file ever posted, keyed by file id (#203). Kept in the actor's own state, never in the
+     * window, so it outlives archiving. Absent until the first file is posted.
+     */
+    files?: Record<string, ChatFileRow>;
+    /** Uploads registered but not posted yet, keyed by file id. Absent until the first upload. */
+    pending?: Record<string, PendingUpload>;
 }
 
 export function initialChatState(): ChatState {
@@ -61,6 +98,7 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
     state.index.push({ seq, at: entry.at });
     switch (entry.t) {
         case 'msg': {
+            indexFiles(state, entry, seq);
             // The note `setWorkdir` writes (#190): the member's folder for this chat, or none.
             const member = entry.workdir ? state.members[entry.workdir.agentId] : undefined;
             if (entry.workdir && member) {
@@ -91,6 +129,43 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             return;
         default:
             return;
+    }
+}
+
+/**
+ * Index the chat-file parts of a message (#203): a pending upload moves to
+ * `files`, a file already indexed (a re-share) moves to this newer message.
+ * Anything else is ignored — `Chat.post` validated the parts, and the fold
+ * never makes readable a file this state does not know. Pure over the
+ * state and the entry, so a replay rebuilds the same index.
+ */
+function indexFiles(state: ChatState, entry: Extract<ChatEntry, { t: 'msg' }>, seq: number): void {
+    for (const part of entry.parts) {
+        if (!isChatFilePart(part)) continue;
+        const ref = parseChatFileUri(part.url)!;
+        const pending = state.pending?.[ref.fileId];
+        const known = state.files?.[ref.fileId];
+        if (pending && pending.file.chatId === ref.chatId) {
+            const { file } = pending;
+            (state.files ??= {})[ref.fileId] = { entryId: entry.id, seq, name: file.name, mediaType: file.mediaType, bytes: file.bytes, at: file.at };
+            delete state.pending![ref.fileId];
+        } else if (known) {
+            state.files![ref.fileId] = { ...known, entryId: entry.id, seq };
+        }
+    }
+}
+
+/** A principal as a stable string — who a pending upload belongs to. */
+export function principalKey(principal: Principal): string {
+    switch (principal.kind) {
+        case 'user':
+            return `user:${principal.userId}`;
+        case 'external':
+            return `external:${principal.clientId}`;
+        case 'agent':
+            return `agent:${principal.agentId}`;
+        case 'machine':
+            return `machine:${principal.machineId}`;
     }
 }
 

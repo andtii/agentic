@@ -15,10 +15,12 @@
  * Delete: every child record the index and `store.list` know is purged
  * through the `WorkspaceStore` port, children first, the Workspace record
  * last (`clearState`). What is outside the platform's reach is listed in
- * `docs/retention.md`.
+ * `docs/retention.md`. Chat attachments (#203) go first, a chat at a time,
+ * through the `ChatFileStore` (`deleteChat`), while the index still names
+ * the chats — a retry after a failure finds them again.
  */
 
-import type { AgentId, ChatId, MemoryScope, Principal, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, MemoryScope, Principal, ScheduleId, WorkspaceId } from '@agentic/core';
 import { actor, type ActorTaskContext, type AnyActorDefinition } from '@sigx/actors';
 import { AgentActor, agentKey } from '../agent/index.js';
 import { asPrincipal } from '../auth/index.js';
@@ -35,6 +37,8 @@ import type { WorkspaceState } from './index.js';
 export interface CascadeOptions {
     readonly sink?: ArtifactSink;
     readonly store?: WorkspaceStore;
+    /** Where chat attachment bytes live (#203); `deleteAll` deletes every chat's files through it. */
+    readonly files?: ChatFileStore;
     readonly now?: () => number;
 }
 
@@ -248,6 +252,9 @@ export async function deleteWorkspace(ctx: Ctx, options: CascadeOptions): Promis
     };
     for (const ref of await childRecords(snap)) add(ref);
     if (store.list) for (const ref of await store.list(ws)) add(ref);
+
+    // Attachments first (#203): the bytes of every chat's files, while the index still names the chats.
+    if (options.files) for (const id of snap.chats) await options.files.deleteChat(ws, id as ChatId);
 
     const purged: ActorRecordRef[] = [];
     for (const ref of refs.values()) {

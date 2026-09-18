@@ -1,5 +1,6 @@
 /** Routing — execution routing: environment selection, offline policy, capacity queue, never a silent switch (architecture §7; EXE-09/11/12, AST-05). */
 export { defineRoutingActor, ROUTER, type RoutingActor, type RoutingView } from './actor.js';
+export { FILE_UNAVAILABLE, fileNote, hydrateChatFiles, readChatFile, type FileAccess, type HydrateOptions } from './files.js';
 export { createSessionFactory, NO_API_KEY_CODE, type SessionFactoryOptions } from './factory.js';
 export { ROUTING_TYPE, parseRoutingKey, routingKey } from './key.js';
 export { createEnvironmentProbe, locateEnvironment, type EnvironmentProbeOptions, type LocatedEnvironment } from './locate.js';

@@ -14,6 +14,7 @@ import { defineRegistry, registryKey } from '../src/registry/index';
 import { defineScheduleActor } from '../src/schedule/index';
 import { recordingStorage, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 import { PairingDirectory } from '../src/pairing/index';
+import { memoryFileStore } from './chat/helpers';
 import { defineWorkspace, type ActorRecordRef, type ArtifactSink, type WorkspaceState, type WorkspaceStore } from '../src/workspace/index';
 
 const WS = 'u1' as WorkspaceId;
@@ -73,11 +74,15 @@ const store: WorkspaceStore = {
     }
 };
 
-const Workspace = defineWorkspace({ sink, store });
+/** Chat attachment bytes (#203): `deleteAll` deletes every chat's files through it. */
+const fileStore = memoryFileStore();
+
+const Workspace = defineWorkspace({ sink, store, files: fileStore });
 
 beforeEach(() => {
     files = new Map();
     purged = [];
+    fileStore.deleted.length = 0;
     app = testActorApp([Workspace, AgentActor, Memory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory], { storage: recordingStorage() });
     return app.start();
 });
@@ -190,6 +195,8 @@ describe('Workspace.deleteAll', () => {
         expect(purgedKeys).toContain(`Memory ${memoryActorKey(WS, 'shared:team')}`);
         expect(purgedKeys).toContain(`Registry ${registryKey(WS)}`);
         expect(purgedKeys).not.toContain(`Workspace ${KEY}`);
+        // Every chat's attachments went through the file store (#205).
+        expect(fileStore.deleted).toEqual([`${WS}/${chatId}`]);
 
         // A fresh activation is an empty workspace, and the children are empty too.
         const fresh = await ws().get();
