@@ -14,6 +14,7 @@ import {
     SESSION_EVENTS_TOPIC,
     createId,
     hasScope,
+    isRequestStatusRef,
     resolveActivation,
     type AgentId,
     type Author,
@@ -40,7 +41,9 @@ const STATUS_KINDS: ReadonlySet<string> = new Set<Extract<SessionEvent, { kind: 
     'typing',
     'session-started',
     'session-ended',
-    'task'
+    'task',
+    'request',
+    'request-resolved'
 ]);
 
 /**
@@ -287,7 +290,13 @@ export const Chat = defineActor({
             if (e.kind === 'status') {
                 if (e.status === 'typing') return;
                 await archive(ctx);
-                await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
+                if (e.status === 'request' || e.status === 'request-resolved') {
+                    // A request status is only useful paired: the ref is the contract (`RequestStatusRef`), not a session id.
+                    if (!isRequestStatusRef(e.ref)) throw new Error(`Chat: malformed session event on ${ctx.key}: ${e.status} needs an approval:/input: ref`);
+                    await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref, at: e.at });
+                } else {
+                    await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
+                }
             } else {
                 await archive(ctx);
                 await appendEntry(ctx, {
