@@ -16,7 +16,7 @@
 .PARAMETER Url
     The platform origin, e.g. https://agentic.example. Required with -Code.
 .PARAMETER Code
-    The pairing code shown on the Machines page. Omit when the machine is already paired.
+    The pairing code (README.md > "Get a pairing code"). Omit when the machine is already paired.
 .PARAMETER Name
     The machine name shown on the platform (default: this computer's name).
 .PARAMETER NoService
@@ -62,7 +62,7 @@ if ($Code) {
     & $node.Source $bin @args_
     if ($LASTEXITCODE -ne 0) { Fail "pairing failed (exit $LASTEXITCODE)." }
 } elseif (-not (Test-Path $credentials)) {
-    Fail "This machine is not paired ($credentials is missing). Get a code from the Machines page and run again with -Url <platform> -Code <code>."
+    Fail "This machine is not paired ($credentials is missing). Get a code (README.md > Get a pairing code) and run again with -Url <platform> -Code <code>."
 } else {
     Write-Host "already paired ($credentials)"
 }
@@ -81,7 +81,7 @@ if ($NoService) {
 & (Join-Path $here 'scripts\install-service.ps1') -TaskName $TaskName -NodePath $node.Source -DaemonBin $bin
 $log = Join-Path $env:LOCALAPPDATA 'agentic\logs\daemon.log'
 Write-Host ""
-Write-Host "Installed. The machine shows as online on the Machines page within a minute."
+Write-Host "Installed. The machine shows as online on the platform within a minute."
 Write-Host "  status:    Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo"
 Write-Host "  logs:      Get-Content -Wait `"$log`""
 Write-Host "  uninstall: powershell -ExecutionPolicy Bypass -File `"$(Join-Path $here 'uninstall.ps1')`""

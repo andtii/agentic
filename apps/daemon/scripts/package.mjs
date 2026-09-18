@@ -99,9 +99,15 @@ export function resolveClosure(rootDir) {
     /** @type {string[]} */
     const problems = [];
 
-    const visit = (/** @type {string} */ target, /** @type {string} */ real, /** @type {boolean} */ isRoot) => {
+    // Breadth-first from the root, so the root's own dependencies claim the top level before any
+    // transitive dependency of the same name can, and a nested placement always sits under the
+    // package that needs it (a dependent's own path is never the empty root).
+    /** @type {{ target: string; real: string; isRoot: boolean }[]} */
+    const queue = [{ target: '', real: realpathSync(rootDir), isRoot: true }];
+    for (let i = 0; i < queue.length; i++) {
+        const { target, real, isRoot } = queue[i];
         const key = `${target}\0${real}`;
-        if (visited.has(key)) return;
+        if (visited.has(key)) continue;
         visited.add(key);
         const pkg = readPackage(real);
         const wanted = isRoot
@@ -116,16 +122,13 @@ export function resolveClosure(rootDir) {
             const depPkg = readPackage(depReal);
             const top = `node_modules/${name}`;
             const at = placed.get(top);
-            let depTarget;
-            if (!at || at.real === depReal) depTarget = top;
-            else depTarget = `${target}/node_modules/${name}`;
+            const depTarget = !at || at.real === depReal ? top : `${target}/node_modules/${name}`;
             const existing = placed.get(depTarget);
             if (existing && existing.real !== depReal) problems.push(`${depTarget} would hold both ${existing.real} and ${depReal}`);
             if (!existing) placed.set(depTarget, { real: depReal, name: depPkg.name, version: depPkg.version, workspace: isWorkspacePackage(depReal) });
-            visit(depTarget, depReal, false);
+            queue.push({ target: depTarget, real: depReal, isRoot: false });
         }
-    };
-    visit('', realpathSync(rootDir), true);
+    }
     if (problems.length) throw new Error(`package: the dependency closure is incomplete — run \`pnpm install\` and \`pnpm build\` first:\n  ${problems.join('\n  ')}`);
     return placed;
 }

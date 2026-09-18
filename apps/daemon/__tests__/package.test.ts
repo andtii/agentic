@@ -9,7 +9,7 @@
  * needs the repo built (`pnpm build`) and is skipped without `dist/`.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -72,6 +72,10 @@ describe('installer', () => {
         for (const name of ['vite', 'typescript', 'vitest', '@sigx/vite', '@types/ws']) expect(names, name).not.toContain(name);
         expect(closure.get('node_modules/@agentic/core')?.workspace).toBe(true);
         expect(closure.get('node_modules/ws')?.workspace).toBe(false);
+        // the daemon's own dependencies always win the top level, at the instance the daemon itself resolves
+        const rootDeps = Object.keys((JSON.parse(readFileSync(join(DAEMON_DIR, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }).dependencies);
+        for (const name of rootDeps) expect(closure.get(`node_modules/${name}`)?.real, name).toBe(realpathSync(join(DAEMON_DIR, 'node_modules', name)));
+        for (const target of closure.keys()) expect(target.startsWith('node_modules/'), target).toBe(true);
         // every nested placement is a second version of a name the top level already holds
         for (const target of closure.keys()) {
             const nested = target.match(/^(.+)\/node_modules\/((?:@[^/]+\/)?[^/]+)$/);

@@ -8,7 +8,22 @@ This folder is self-contained: the daemon (`bin/`, `dist/`), every dependency (`
 
 - Windows 10/11, signed in as the user who owns the Claude Code accounts.
 - Node.js **22.12 or newer** on PATH — https://nodejs.org (LTS).
-- A pairing code from the platform: **Machines → Pair machine** (valid 10 minutes, single use).
+- A pairing code from the platform (six characters, single use, valid 10 minutes) — see "Get a pairing code" below.
+
+## Get a pairing code
+
+The Machines page's **Pair machine** button is not wired to the platform yet. Until it is, mint the code from your browser's developer console while signed in to the platform (same origin, so the session cookie rides along):
+
+```js
+const { principal } = await (await fetch('/auth/me')).json();
+const r = await fetch('/_sigx/actor/Workspace/registerMachinePending', {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ args: [`ws:${principal.workspaceId}`, { name: 'my-desktop' }] })
+});
+console.log(await r.json());   // { machineId, pairingCode, expiresAt }
+```
+
+`pairingCode` is what `install.ps1 -Code` takes. A code is single use and expires after 10 minutes; run the call again for a new one.
 
 ## Install
 
@@ -20,7 +35,7 @@ This folder is self-contained: the daemon (`bin/`, `dist/`), every dependency (`
    powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://<your platform> -Code <pairing code>
    ```
 
-   This checks Node, pairs (`credentials.json`, owner-only), runs `doctor`, and registers a **per-user Scheduled Task** named `agentic-daemon` that starts at logon and restarts if it exits. Within a minute the machine is online on the Machines page.
+   This checks Node, pairs (`credentials.json`, owner-only), runs `doctor`, and registers a **per-user Scheduled Task** named `agentic-daemon` that starts at logon and restarts if it exits. Within a minute the machine is online on the platform (`Machine.get()`, or `machines_list` on the MCP surface — the Machines page still shows sample data).
 
 Already paired (upgrade, or you ran `pair` yourself)? Run `install.ps1` with no arguments.
 
@@ -50,7 +65,7 @@ node bin\agentic-daemon.mjs --version
 - `cwdRoots`: the folders sessions may run in. A session outside them is refused.
 - `concurrency` (default 1): sessions at once on that account.
 
-`doctor` reports a shared config dir as an error and a profile that is not signed in as a warning; the same verdict shows per environment on the Machines page.
+`doctor` reports a shared config dir as an error and a profile that is not signed in as a warning; the same verdict is sent to the platform per environment (`Machine.doctor()`).
 
 ## Files
 
@@ -85,11 +100,11 @@ Every log line is JSON; the token never appears in it.
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
-Removes the task and keeps the pairing, environments and logs (`%APPDATA%\agentic`, `%LOCALAPPDATA%\agentic`) — delete them by hand if wanted, and **revoke the machine on the Machines page** so its token stops working.
+Removes the task and keeps the pairing, environments and logs (`%APPDATA%\agentic`, `%LOCALAPPDATA%\agentic`) — delete them by hand if wanted, and **revoke the machine on the platform** so its token stops working — from the browser console as in "Get a pairing code": `POST /_sigx/actor/machine/revoke` with `{ args: ['<workspaceId>:machine:<machineId>'] }` (the Machines page's Revoke is not wired yet).
 
 ## Troubleshooting
 
-- `not paired` — run `install.ps1 -Url … -Code …` or `node bin\agentic-daemon.mjs pair …`. A code is single use and expires after 10 minutes; get a new one from the Machines page.
+- `not paired` — run `install.ps1 -Url … -Code …` or `node bin\agentic-daemon.mjs pair …`. A code is single use and expires after 10 minutes; mint a new one ("Get a pairing code").
 - `pairing failed: the code is not valid` — expired, used, or the URL is not the platform origin (no path, `https://`).
 - The machine stays offline — `daemon.log` shows the dial and the refusal reason; a revoked token retries forever at the backoff ceiling (30 s): re-pair.
 - `doctor` says `shared-config-dir` — two environments point at the same `profileDir`; give each account its own.
