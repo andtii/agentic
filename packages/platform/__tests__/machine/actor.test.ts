@@ -210,6 +210,10 @@ describe('Machine pairing (USR-04)', () => {
         expect(await machine(key).get()).toMatchObject({ revoked: true, online: false });
         expect(await statusOf(machine(key).pair(pairingCode))).toBe(403);
         await expect(seat.next()).rejects.toThrow();
+        // A heartbeat as the revoked machine (#172): refused, `online` stays false, no liveness re-armed.
+        const asMachineRevoked = machine(key, asMachine(machineId));
+        expect(await statusOf(asMachineRevoked.heartbeat())).toBe(403);
+        expect(await machine(key).get()).toMatchObject({ revoked: true, online: false });
     });
 });
 

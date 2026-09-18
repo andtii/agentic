@@ -82,7 +82,7 @@ import {
     type KekSource
 } from '@agentic/platform';
 import { learningPlugin } from '@agentic/learning';
-import { actor, type AnyActorDefinition } from '@sigx/actors';
+import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
 import { defineActorApp, type ActorApp } from '@sigx/actors/host';
 import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
@@ -372,12 +372,15 @@ export interface ActorWorkerOptions {
 
 /**
  * The Worker half: daemon socket forwarding, actor HTTP mount,
- * object-terminated socket forwarding. Its requests run under the Worker's
- * own host too (`runWithHost`, #137): the Worker hosts nothing, so a hop it
- * makes ambiently (the machine token lookup in `serverAuth`, `pairingWiring`,
+ * object-terminated socket forwarding. Its requests must run under the
+ * Worker's own host (`runWithHost`, #137): the Worker hosts nothing, so a hop
+ * it makes ambiently (the machine token lookup in `serverAuth`, `pairingWiring`,
  * the MCP mount) must go OUT to the object — never run locally because an
  * object sharing the isolate stamped the global last. The host boots lazily
- * on the first request, so the scope carries a thunk that resolves to it.
+ * on the first request, so `host` is a thunk that resolves to it. The scope
+ * is entered ONCE, at the top of the Worker's `fetch`, around every route —
+ * the auth routes hop too (#172) — as `runWithHost(worker.host, ...)`; this
+ * `fetch` does not wrap itself, so the entry's scope is the only one.
  */
 export function createActorWorker(options: ActorWorkerOptions = {}) {
     const actors = options.actors ?? defaultActors();
@@ -390,15 +393,12 @@ export function createActorWorker(options: ActorWorkerOptions = {}) {
         ...(options.fallback ? { fetch: { fallback: options.fallback } } : {})
     });
     return {
+        /** The Worker's own host once the mount booted it — what the entry's `runWithHost` resolves through. */
+        host: (): Host | undefined => app?.host ?? undefined,
         fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
             ensureServerApp(env, actors);
-            return runWithHost(
-                () => app?.host ?? undefined,
-                () => {
-                    if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
-                    return handler.fetch(request, env, ctx);
-                }
-            );
+            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
+            return handler.fetch(request, env, ctx);
         }
     };
 }
