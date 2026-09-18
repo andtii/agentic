@@ -1,0 +1,21 @@
+# Local secrets for `wrangler dev` — copy to `.dev.vars` (ignored), or just run `pnpm dev`
+# at the repo root: it generates `.dev.vars` with random values on first run.
+# See docs/runbook.md §4.
+
+# >= 32 chars: signs sessions, OAuth transients and agent tokens.
+SESSION_SECRET=replace-with-at-least-32-random-characters
+
+# base64 of 32 random bytes: AES-GCM key for API keys stored in the Registry.
+WORKSPACE_KEK=replace-with-base64-of-32-random-bytes
+
+# >= 16 chars: enables /auth/dev-login (the "Dev login" button, the link `pnpm dev` prints).
+# Never set it on production.
+AGENTIC_DEV_LOGIN=replace-with-at-least-16-random-characters
+
+# The key the anthropic-api runtime uses. Without it an agent task fails `no-api-key`.
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: a GitHub OAuth app whose callback is http://localhost:8787/auth/callback
+# enables "Sign in with GitHub" locally.
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=

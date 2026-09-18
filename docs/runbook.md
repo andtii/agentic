@@ -73,7 +73,7 @@ Secrets go in with `wrangler secret put <NAME>` (production: no `--env`), which 
 | `GITHUB_CLIENT_ID` | from §2.2 | the OAuth app |
 | `GITHUB_CLIENT_SECRET` | from §2.2 | the OAuth app |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys (`sk-ant-…`) | every `anthropic-api` session of the deployment (`createSessionFactory`, architecture §5a); absent → an API-runtime task fails `no-api-key` |
-| `AGENTIC_DEV_LOGIN` | **do not set on production** | preview-only scripted login (§3) — while set, `POST /auth/dev-login` mints a session for anyone holding the value |
+| `AGENTIC_DEV_LOGIN` | **do not set on production** | preview / local-only login (§3, §4) — while set, `/auth/dev-login` (a form on `GET`, JSON or the form on `POST`) mints a session for anyone holding the value |
 
 ```sh
 cd apps/web
@@ -108,7 +108,7 @@ The first deploy prints the `workers.dev` URL and creates the Durable Object nam
 
 1. `curl -sI ${APP_ORIGIN}/` → `200`, the SSR shell.
 2. `curl -s ${APP_ORIGIN}/auth/me` → `401 {"error":"unauthorized"}`.
-3. `curl -s -X POST ${APP_ORIGIN}/auth/dev-login` → `404` (the route must not exist on production).
+3. `curl -s -X POST ${APP_ORIGIN}/auth/dev-login` → `404`, and `GET` the same (the route must not exist on production).
 4. Open `${APP_ORIGIN}/auth/login` in a browser → GitHub consent → back on `/` signed in. `GET /auth/me` now returns `{ principal: { kind: "user", userId: "gh_<id>", workspaceId: "…" } }`.
 5. Agents → **New agent** → a name and role → the config tab shows v1 on the `anthropic-api` runtime → **Start chat** → post a message → the answer streams in. That is demo 1 by hand; §6 scripts it.
 
@@ -142,22 +142,43 @@ Smoke: `GET /` → 200; `GET /auth/me` → 401; `POST /auth/dev-login` with a wr
 
 ## 4. Local
 
+One command from the repo root (`pnpm install` done):
+
 ```sh
-pnpm build
-pnpm --filter @agentic/web preview           # wrangler dev over dist/ on http://localhost:8787, Durable Objects + R2 simulated
-pnpm --filter @agentic/web test:workers      # the Worker + ActorHost inside workerd
-pnpm --filter @agentic/web dev               # Vite dev server on mock data (no actors)
+pnpm dev
 ```
 
-Local secrets go in `apps/web/.dev.vars` (never committed):
+`scripts/dev.mjs` (Node only, Windows and Linux) does, in order:
+
+1. **Secrets.** If `apps/web/.dev.vars` is missing it is generated: a random `SESSION_SECRET` (48 chars), `WORKSPACE_KEK` (base64 of 32 bytes) and `AGENTIC_DEV_LOGIN` (32 chars), plus `ANTHROPIC_API_KEY` copied from your environment when it is set there — otherwise a commented placeholder and a warning (agents on the `anthropic-api` runtime fail `no-api-key` until you add the key and restart). An existing file is never touched; delete it to regenerate. `apps/web/.dev.vars.example` documents every line; `.dev.vars` stays ignored.
+2. **Build.** `pnpm build` runs only when `apps/web/dist` is missing or older than any file under `apps/web/src` or `packages/*/src` (mtime check); `pnpm dev --rebuild` forces it. There is no hot reload of the Worker: after a source change, Ctrl+C and `pnpm dev` again.
+3. **Serve.** `wrangler dev` over `dist/` on http://localhost:8787 (Durable Objects and R2 simulated) in the foreground, after printing the one-click sign-in link:
+
+   ```
+   [dev]     http://localhost:8787/auth/dev-login?token=<AGENTIC_DEV_LOGIN>
+   ```
+
+   Open it: `GET /auth/dev-login` is a small form (user name, the secret prefilled from `?token=` — on `localhost` / `127.0.0.1` only, a deployed preview never takes the secret from a URL) that signs you in as `dev_<user>` and lands on `/`. The shell's sidebar foot shows a **Dev login** button (and **Sign in with GitHub** when the OAuth app is configured) whenever nobody is signed in and the route is mounted; the route exists only while `AGENTIC_DEV_LOGIN` is set, so production has no such door. `/agents` renders live with an empty roster for a fresh identity.
+
+Flags: `--rebuild`, `--port <n>` (the link follows), `--mock`. Other local commands:
+
+```sh
+pnpm dev:mock                                # the Vite dev server on mock data, no actors (apps/web/server.mjs, port 3000)
+pnpm --filter @agentic/web test:workers      # the Worker + ActorHost inside workerd
+pnpm --filter @agentic/web preview           # wrangler dev alone, when dist/ and .dev.vars are already there
+```
+
+With `ANTHROPIC_API_KEY` in `.dev.vars`, "New agent" → Config → "Start chat" → a message streams an answer from the platform-managed session (the manual check). The scripted version is the demo 1 smoke against the local Worker started by `pnpm dev` (§6): `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<the value in .dev.vars> pnpm --filter @agentic/web smoke:demo1`.
+
+Every line of `apps/web/.dev.vars` (never committed):
 
 ```ini
 SESSION_SECRET=<at least 32 random characters>
-GITHUB_CLIENT_ID=<an OAuth app whose callback is http://localhost:8787/auth/callback>
-GITHUB_CLIENT_SECRET=<its secret>
 WORKSPACE_KEK=<base64 of 32 random bytes>
+AGENTIC_DEV_LOGIN=<at least 16 random characters: mounts /auth/dev-login; never on production>
 ANTHROPIC_API_KEY=<the key the anthropic-api runtime uses>
-AGENTIC_DEV_LOGIN=<optional, ≥ 16 chars: enables POST /auth/dev-login for the scripted smokes>
+GITHUB_CLIENT_ID=<optional: an OAuth app whose callback is http://localhost:8787/auth/callback>
+GITHUB_CLIENT_SECRET=<its secret>
 ```
 
 ## 5. Daemon on a Windows machine
@@ -247,7 +268,7 @@ BASE_URL=https://agentic-web-preview.<subdomain>.workers.dev AGENTIC_DEV_LOGIN=<
 
 On Windows PowerShell: `$env:BASE_URL='https://…'; $env:AGENTIC_DEV_LOGIN='…'; pnpm --filter @agentic/web smoke:demo1`.
 
-The same smoke runs against a local `wrangler dev` (`pnpm --filter @agentic/web preview` after `pnpm build`, with `ANTHROPIC_API_KEY` and `AGENTIC_DEV_LOGIN` in `apps/web/.dev.vars`) as `BASE_URL=http://localhost:8787`. Without the key every step up to the post passes and the last assertion names the missing key — the task fails `session-open` (`no-api-key`) on the platform.
+The same smoke runs against the local Worker `pnpm dev` starts (§4; `ANTHROPIC_API_KEY` in `apps/web/.dev.vars`, `AGENTIC_DEV_LOGIN` the value the file holds) as `BASE_URL=http://localhost:8787`. Without the key every step up to the post passes and the last assertion names the missing key — the task fails `session-open` (`no-api-key`) on the platform.
 
 Each run signs in as a fresh `dev_demo1-<stamp>` identity (set `DEMO1_USER` to reuse one), so the roster starts empty and the recording shows the whole flow: the empty roster → "New agent" → Ada on the platform runtime → her Config tab, a saved version (v2 in the rail) → "Start chat" → the message → Ada's answer streaming in. Video is always recorded to `apps/web/test-results/demo1/**/video.webm` (the artefact the issue asks for); the HTML report lands in `apps/web/playwright-report/demo1`. The same walk-through runs offline in CI with the mock model: `apps/web/__tests__/pages/demo1-live.test.tsx` (the pages on the live harness) and `apps/web/__tests__/workers/demo1.test.ts` (dev login + the actors inside workerd).
 
