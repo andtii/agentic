@@ -3,6 +3,8 @@
  * one-time code to `POST /auth/pair` and receive the machine token. The
  * endpoint is anonymous — the code is the proof — and answers
  * `{ token, workspaceId, machineId }` or `{ error }` with 401 / 400 / 503.
+ * Anything that is not JSON (the HTML document, a proxy page) is named as
+ * such — `not_json` with the status and content type — rather than parsed.
  */
 
 export interface PairOptions {
@@ -80,11 +82,13 @@ export async function pair(options: PairOptions): Promise<PairResult> {
     } catch (e) {
         throw new PairingError('unreachable', `could not reach ${url}: ${(e as Error).message}`);
     }
-    let body: Record<string, unknown> = {};
+    let body: Record<string, unknown>;
     try {
         body = (await response.json()) as Record<string, unknown>;
     } catch {
-        // A non-JSON answer is handled by the status checks below.
+        // Not the platform's answer at all: the document (pairing not mounted, or not the Worker), a proxy page, an empty error (#180).
+        const type = response.headers.get('content-type') ?? 'no content-type';
+        throw new PairingError('not_json', `the platform did not answer as JSON (HTTP ${response.status}, ${type}) — is the URL the agentic Worker and is pairing mounted?`, response.status);
     }
     if (!response.ok) {
         const code = typeof body.error === 'string' ? body.error : `http_${response.status}`;

@@ -101,6 +101,17 @@ describe('pair', () => {
         await expect(pair({ url: 'https://agentic.example', code: 'AAAAAA', name: 'box', fetch: fetchReturning(200, { token: TOKEN, workspaceId: 'ws_1', machineId: 'machine_2' }) })).rejects.toMatchObject({ code: 'bad_response' });
     });
 
+    it('a non-JSON answer (the HTML page, a proxy) names the status and content type, not "unexpected token" (#180)', async () => {
+        const html = (async () => new Response('<!doctype html><title>agentic</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })) as unknown as typeof fetch;
+        await expect(pair({ url: 'http://localhost:8787', code: 'AAAAAA', name: 'box', fetch: html })).rejects.toMatchObject({
+            code: 'not_json',
+            status: 200,
+            message: 'the platform did not answer as JSON (HTTP 200, text/html; charset=utf-8) — is the URL the agentic Worker and is pairing mounted?'
+        });
+        const empty = (async () => new Response(null, { status: 502 })) as unknown as typeof fetch;
+        await expect(pair({ url: 'http://localhost:8787', code: 'AAAAAA', name: 'box', fetch: empty })).rejects.toMatchObject({ code: 'not_json', status: 502, message: expect.stringMatching(/HTTP 502, no content-type/) });
+    });
+
     it('an unreachable platform is named', async () => {
         const down = (async () => {
             throw new TypeError('fetch failed');

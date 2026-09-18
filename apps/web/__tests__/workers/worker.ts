@@ -7,7 +7,7 @@
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createActorHost, createActorWorker, defaultPorts, ensureServerApp, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
-import { createWebAuth, defaultResolveUser, type RouteHandler } from '../../src/auth';
+import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
 import { runWithHost } from '../../src/host-scope';
 
@@ -25,21 +25,15 @@ const actors = platformActors({
 export const ActorHost = createActorHost(actors);
 
 /**
- * `POST /auth/pair` (#144): the daemon's redeem route over THIS worker's
- * registry, built as `entry.cloudflare.ts` builds it (the GitHub half is
- * never called here). It hops to the Machine object (`pairingWiring`), and
- * is mounted in the production route order: BEFORE the actor mount, as an
- * auth route (#172).
+ * The auth routes (#144, #180): the PRODUCTION mount (`createAuthMount`, the
+ * one `entry.cloudflare.ts` uses) over THIS worker's registry and env. The
+ * pool binds only `SESSION_SECRET`, `WORKSPACE_KEK` and `AGENTIC_DEV_LOGIN`
+ * — no GitHub app, no `APP_ORIGIN` — so what is mounted here is exactly what
+ * a fresh `pnpm dev` mounts: `POST /auth/pair` (the daemon's redeem route),
+ * `/auth/me`, `/auth/logout`; never the GitHub login. Mounted in the
+ * production route order: BEFORE the actor mount, as an auth route (#172).
  */
-let pairRoute: RouteHandler | undefined;
-function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined {
-    if (!env.SESSION_SECRET || request.method !== 'POST' || new URL(request.url).pathname !== '/auth/pair') return undefined;
-    pairRoute ??= createWebAuth(
-        { SESSION_SECRET: env.SESSION_SECRET, GITHUB_CLIENT_ID: 'test', GITHUB_CLIENT_SECRET: 'test', APP_ORIGIN: 'https://agentic.test' },
-        { resolveUser: defaultResolveUser, pairing: pairingWiring(actors) }
-    ).routes['POST /auth/pair'];
-    return pairRoute;
-}
+const authRoute = createAuthMount({ pairing: pairingWiring(actors), actors });
 
 const worker = createActorWorker({ actors });
 

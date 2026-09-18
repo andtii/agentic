@@ -4,6 +4,10 @@ All notable changes to `@agentic/daemon` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+### Changed
+
+- `agentic-daemon pair` names a non-JSON answer (#180): the HTML document, a proxy page or an empty error now fails `not_json` with "the platform did not answer as JSON (HTTP <status>, <content-type>) — is the URL the agentic Worker and is pairing mounted?" instead of "the platform answered with an unexpected token".
+
 ### Added
 
 - `session.open` policy (#121): `OpenSpec.policy` is compiled with `sessionPolicyOf` (`@agentic/runtimes`) and handed to `driver.open(env, spec, { policy })`, so a Claude Code session asks the platform only what the agent's approval rules (and a delegated task's ancestors' constraints) say to ask; without one the driver opens with no policy, as before.

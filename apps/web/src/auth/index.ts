@@ -29,16 +29,23 @@ import {
 import { authenticateRequest } from '@agentic/platform';
 import { isServerFnError } from '@sigx/server';
 
-/** Workers Secrets the auth routes read (architecture §3). Never defaults, never files. */
+/**
+ * Workers Secrets the auth routes read (architecture §3). Never defaults,
+ * never files. Only `SESSION_SECRET` is required: it alone mounts the session
+ * routes (`/auth/me`, `/auth/logout`, `/auth/pair`). The GitHub login
+ * (`/auth/login`, `/auth/callback`) is mounted only when the OAuth app's
+ * secrets AND the origin are set too (#180 — a `pnpm dev` with the dev login
+ * alone must still pair a machine).
+ */
 export interface AuthEnv {
-    readonly GITHUB_CLIENT_ID: string;
-    readonly GITHUB_CLIENT_SECRET: string;
+    readonly GITHUB_CLIENT_ID?: string;
+    readonly GITHUB_CLIENT_SECRET?: string;
     /** ≥ 32 random chars; signs `__Host-session`, `__Host-oauth` and agent tokens. */
     readonly SESSION_SECRET: string;
     /** base64, 32 bytes — see `importWorkspaceKek`. Not read here; listed so the secret set is one place. */
     readonly WORKSPACE_KEK?: string;
     /** Public origin, e.g. `https://agentic.example`; the OAuth callback is `${origin}/auth/callback`. */
-    readonly APP_ORIGIN: string;
+    readonly APP_ORIGIN?: string;
 }
 
 /** The actor-backed seams the worker entry supplies (#14 Workspace, Machine lane). */
@@ -64,12 +71,23 @@ export interface AuthWiring {
 
 export type RouteHandler = (request: Request) => Promise<Response>;
 
+/** Always mounted — the session secret is all they need. */
+export type SessionRouteKey = 'POST /auth/logout' | 'GET /auth/me' | 'POST /auth/pair';
+/** Mounted only with a login provider (the GitHub app's secrets, or `wiring.provider`) and an origin for the callback. */
+export type LoginRouteKey = 'GET /auth/login' | 'GET /auth/callback';
+
 export interface WebAuth {
-    /** Mount on the Worker: method + path → handler. */
-    readonly routes: Readonly<Record<'GET /auth/login' | 'GET /auth/callback' | 'POST /auth/logout' | 'GET /auth/me' | 'POST /auth/pair', RouteHandler>>;
+    /** Mount on the Worker: method + path → handler. The login pair is absent when it cannot be mounted. */
+    readonly routes: Readonly<Record<SessionRouteKey, RouteHandler> & Partial<Record<LoginRouteKey, RouteHandler>>>;
     /** Spread into `createServerApp<Principal>({ ...serverApp })`. */
     readonly serverApp: ReturnType<typeof serverAuth>;
-    readonly provider: AuthProvider;
+    /** The login provider; `null` when the login is not mounted. */
+    readonly provider: AuthProvider | null;
+}
+
+/** Whether `env` (with `wiring`) can mount the GitHub login: a provider and the origin its callback lives on. */
+export function loginConfigured(env: Pick<AuthEnv, 'GITHUB_CLIENT_ID' | 'GITHUB_CLIENT_SECRET' | 'APP_ORIGIN'>, wiring: Pick<AuthWiring, 'provider'> = {}): boolean {
+    return !!env.APP_ORIGIN && (!!wiring.provider || (!!env.GITHUB_CLIENT_ID && !!env.GITHUB_CLIENT_SECRET));
 }
 
 /**
@@ -94,32 +112,35 @@ const redirect = (location: string, setCookie?: string): Response => {
 
 export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
     if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32) throw new Error('[web/auth] SESSION_SECRET (≥ 32 chars) is required — set it with `wrangler secret put`');
-    const provider = wiring.provider ?? githubAuthProvider({ clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET });
-    const origin = env.APP_ORIGIN.replace(/\/+$/, '');
-    const redirectUri = `${origin}/auth/callback`;
     const secret = env.SESSION_SECRET;
     const now = wiring.now ?? Date.now;
     const resolveUser = wiring.resolveUser ?? defaultResolveUser;
     const authOptions = { sessionSecret: secret, ...(wiring.machines ? { machines: wiring.machines } : {}), now };
 
-    const login: RouteHandler = async (request) => {
-        const returnTo = new URL(request.url).searchParams.get('returnTo');
-        const { location, setCookie } = await beginOAuth(provider, { secret, redirectUri, returnTo: returnTo ?? '/', now: now() });
-        return redirect(location, setCookie);
-    };
-
-    const callback: RouteHandler = async (request) => {
-        const result = await completeOAuth(provider, request, { secret, redirectUri, now: now() });
-        if (!result.ok) {
-            const status = result.reason === 'exchange_failed' ? 502 : 400;
-            return json({ error: result.reason }, status, { 'set-cookie': result.clearCookie });
-        }
-        const user = await resolveUser(result.identity);
-        const headers = new Headers({ location: result.returnTo, 'cache-control': 'no-store' });
-        headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
-        headers.append('set-cookie', result.clearCookie);
-        return new Response(null, { status: 302, headers });
-    };
+    /** The GitHub login, when it can be mounted: `{ provider, routes }`; `null` otherwise. */
+    const login = ((): { provider: AuthProvider; routes: Record<LoginRouteKey, RouteHandler> } | null => {
+        if (!loginConfigured(env, wiring)) return null;
+        const provider = wiring.provider ?? githubAuthProvider({ clientId: env.GITHUB_CLIENT_ID!, clientSecret: env.GITHUB_CLIENT_SECRET! });
+        const redirectUri = `${env.APP_ORIGIN!.replace(/\/+$/, '')}/auth/callback`;
+        const begin: RouteHandler = async (request) => {
+            const returnTo = new URL(request.url).searchParams.get('returnTo');
+            const { location, setCookie } = await beginOAuth(provider, { secret, redirectUri, returnTo: returnTo ?? '/', now: now() });
+            return redirect(location, setCookie);
+        };
+        const callback: RouteHandler = async (request) => {
+            const result = await completeOAuth(provider, request, { secret, redirectUri, now: now() });
+            if (!result.ok) {
+                const status = result.reason === 'exchange_failed' ? 502 : 400;
+                return json({ error: result.reason }, status, { 'set-cookie': result.clearCookie });
+            }
+            const user = await resolveUser(result.identity);
+            const headers = new Headers({ location: result.returnTo, 'cache-control': 'no-store' });
+            headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
+            headers.append('set-cookie', result.clearCookie);
+            return new Response(null, { status: 302, headers });
+        };
+        return { provider, routes: { 'GET /auth/login': begin, 'GET /auth/callback': callback } };
+    })();
 
     const logout: RouteHandler = async () => redirect('/', clearSessionCookie());
 
@@ -158,9 +179,9 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
     };
 
     return {
-        routes: { 'GET /auth/login': login, 'GET /auth/callback': callback, 'POST /auth/logout': logout, 'GET /auth/me': me, 'POST /auth/pair': pair },
+        routes: { 'POST /auth/logout': logout, 'GET /auth/me': me, 'POST /auth/pair': pair, ...login?.routes },
         serverApp: serverAuth(authOptions),
-        provider
+        provider: login?.provider ?? null
     };
 }
 

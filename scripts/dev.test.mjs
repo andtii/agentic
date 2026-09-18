@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { devLoginLink, ensureDevVars, needsBuild, newestMtimeMs, parseArgs, parseDevVars, pnpmCommand, renderDevVars } from './dev.mjs';
+import { devLoginLink, ensureDevVars, githubLoginConfigured, needsBuild, newestMtimeMs, parseArgs, parseDevVars, pnpmCommand, renderDevVars } from './dev.mjs';
 
 // A deterministic "random": a counter from `seed`, so every draw is fixed for the seed and distinct from the last.
 const fakeRandom = (seed) => {
@@ -133,4 +133,11 @@ test('pnpmCommand: through the running pnpm (a JS entry) without a shell, else p
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('githubLoginConfigured: both OAuth secrets, nothing else (#180)', () => {
+    assert.equal(githubLoginConfigured({}), false);
+    assert.equal(githubLoginConfigured({ GITHUB_CLIENT_ID: 'cid' }), false);
+    assert.equal(githubLoginConfigured({ GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec' }), true);
+    assert.equal(githubLoginConfigured(renderDevVars({ random: (n) => Buffer.alloc(n, 1) }).vars), false);
 });
