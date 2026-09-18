@@ -67,7 +67,11 @@ export type SessionViewProps =
     & Define.Prop<'onRespond', RespondFn>
     /** "Resume" on an interrupted turn (OPS-05). */
     & Define.Prop<'onResume', () => void>
-    & Define.Prop<'recovering', boolean>;
+    & Define.Prop<'recovering', boolean>
+    /** `14:02` for the header; default: the mock workspace's zone. The live page passes the workspace's (`time.ts`). */
+    & Define.Prop<'time', (ms: number) => string>
+    /** Revoke one session grant. Absent — as everywhere today: the platform lists grants, it cannot revoke them — no control is drawn (AC-15). */
+    & Define.Prop<'onRevoke', (key: string) => void>;
 
 /** The page body over a resolved view — the mock workspace's, or the live session's (#34). */
 export const SessionView = component<SessionViewProps>(({ props }) => {
@@ -84,7 +88,7 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
                     <AgentTile name={agent.name} hue={agent.hue} size={44} />
                     <div data-session-title>
                         <span data-session-id>Session {v.ref}</span>
-                        <span data-session-sub>{v.openedAt ? `Opened ${formatTime(v.openedAt)} from ${v.openedFrom}` : `Opened from ${v.openedFrom}`}</span>
+                        <span data-session-sub>{v.openedAt ? `Opened ${(props.time ?? formatTime)(v.openedAt)} from ${v.openedFrom}` : `Opened from ${v.openedFrom}`}</span>
                     </div>
                     <StatusPill status={sessionPill(v)} />
                     <EnvironmentLine tone="muted" {...v.environment} />
@@ -92,7 +96,7 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
 
                 <section data-session-main aria-label="Session activity">
                     {failure ? <FailureNotice state={failure} {...(props.onResume ? { onResume: props.onResume } : {})} busy={props.recovering ?? false} /> : null}
-                    {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} meta="3.4s" /> : null}
+                    {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} {...(v.current.meta ? { meta: v.current.meta } : {})} /> : null}
                     {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={(id, d) => props.onRespond?.(id, d)} /> : null}
                     <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>
                         <ol data-event-log aria-label="Event log">
@@ -117,7 +121,8 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
                             { label: 'Machine', value: () => `${v.machine.name} · ${v.machine.os}` },
                             { label: 'Runtime', value: () => v.runtimeVersion },
                             { label: 'Account', value: () => <span data-inline-tile>{v.environment.account} <StatusPill status={v.authStatus} /></span> },
-                            { label: 'Working dir', value: () => <code>{v.cwd}</code> },
+                            // A platform session runs in no directory: the row is left out, not dashed.
+                            ...(v.cwd ? [{ label: 'Working dir', value: () => <code>{v.cwd}</code> }] : []),
                             { label: 'Head', value: () => `epoch ${v.head.epoch} · seq ${v.head.seq}` },
                             { label: 'Task', value: () => (v.taskId ? <Link to={`/tasks/${v.taskId}`}>{taskRow(v.taskId)?.ref ?? v.taskId}</Link> : '—') }
                         ]} />
@@ -144,11 +149,12 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
                                 {v.grants.map((g) => (
                                     <li data-grant>
                                         <code>{g.label}</code>
-                                        <Button intent="default">Revoke</Button>
+                                        {props.onRevoke ? <Button intent="default" onClick={() => props.onRevoke?.(g.key)}>Revoke</Button> : null}
                                     </li>
                                 ))}
                             </ul>
                         ) : <p data-panel-note>No session-scoped grants.</p>}
+                        {v.grants.length ? <p data-panel-note data-grants-note>Grants end with the session.</p> : null}
                     </Panel>
                 </aside>
             </Page>

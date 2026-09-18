@@ -111,6 +111,10 @@ describe('the session view', () => {
         expect(texts(dom.querySelectorAll('[data-event-kind]'))).toEqual(['text', 'turn-end']);
         expect(dom.querySelector('[data-session-rail]')!.textContent).toContain('Atlas');
         expect(dom.querySelectorAll('[data-capability]').length).toBe(6);
+        // No literals (#154): a platform session has no working dir, nothing prints a duration, no grant offers a Revoke.
+        expect(dom.querySelector('[data-session-rail]')!.textContent).not.toContain('Working dir');
+        expect(dom.textContent).not.toContain('3.4s');
+        expect(dom.querySelectorAll('[data-grant] button')).toHaveLength(0);
         expect(sessionHead.value?.id).toBe(sessionId);
         await until(() => sessionHead.value?.view.state === 'closed', 'the head to follow the close');
         expect(dom.querySelector('[data-session-head] [data-scope="ag-pill"]')!.textContent).toMatch(/completed/i);

@@ -55,9 +55,15 @@ describe('/sessions/:id (Session)', () => {
         expect(card.textContent).toContain('Nothing was replayed');
     });
 
-    it('lists session grants with Revoke', async () => {
+    it('lists session grants without a Revoke nobody handles: they end with the session (#154)', async () => {
         const dom = await mountRoute('/sessions/s1');
         expect(texts([...dom.querySelectorAll('[data-grant] > code')])).toEqual(['Bash  pnpm test *', 'Edit  packages/ui/**']);
-        expect(dom.querySelectorAll('[data-grant] button')).toHaveLength(2);
+        expect(dom.querySelectorAll('[data-grant] button')).toHaveLength(0);
+        expect(dom.querySelector('[data-grants-note]')!.textContent).toBe('Grants end with the session.');
+    });
+
+    it('the design workspace keeps its tool duration', async () => {
+        expect(loadSession('s1')!.current?.meta).toBe('3.4s');
+        expect((await mountRoute('/sessions/s1')).querySelector('[data-session-main]')!.textContent).toContain('3.4s');
     });
 });
