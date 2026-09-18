@@ -47,7 +47,6 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 Each must be open with a label, linked from the release notes, and — where it affects production — mitigated in the runbook:
 
-- [ ] #137 / #126 — ambient `actor()` hops with several `ActorHost` objects in one isolate (production `ActorHost` has no `AsyncLocalStorage` scope yet): the runbook says to run demo 2 with one paired machine.
 - [ ] #135 — retrieved memories do not reach the model on the routed local path.
 - [ ] #129 — the Cloudflare adapter's entry emits non-handler re-exports (the `worker.mjs` façade is the workaround; `main` must stay on it).
 - [ ] The ops pages (Machines, Machine, Pair, Schedules, Plugins, Settings, History, Usage, Tasks, Home) render mock data in production; pairing codes come from the console call in `docs/runbook.md` §5.2.

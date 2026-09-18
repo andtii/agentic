@@ -259,7 +259,7 @@ Demo 2 has no scripted runner yet (`smoke:demo2` is the open half of #38); the p
 7. AC-15: an environment whose driver reports `resume: false` shows the limitation with the runtime's reason on the Session page; nothing offers Resume.
 8. Stop the daemon task mid-turn and start it again: the session resumes from its NDJSON log with no gap (or shows `disconnected` with "events lost" if the log no longer covers the cursor), never a silent account or machine switch (AC-07, `offlinePolicy`).
 
-Record the screen for steps 3–6 and link it from #38. Known hazard while #137 is open: several `ActorHost` objects in one isolate can misroute an ambient `actor()` hop (a second machine saying `hello` after a first one is the repro), so run demo 2 with one paired machine.
+Record the screen for steps 3–6 and link it from #38. (The cross-object hop hazard the acceptance suite found, #137 / #126, is fixed by PR #142: every `ActorHost` entry point is scoped to its own host, so two paired machines are fine.)
 
 ## 8. Durable Object migrations — read before changing `wrangler.jsonc`
 
@@ -322,7 +322,6 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
 | Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | — |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
-| Ambient `actor()` hops with several `ActorHost` objects in one isolate | the acceptance worker carries an `AsyncLocalStorage` scope; production `ActorHost` does not — run demo 2 with one paired machine | #137, #126 |
 | Retrieved memories on the routed local path (`spec.memories` → model, objective in the open spec) | retained with provenance and delivered to the next similar session's spec; the model does not see them yet | #135 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |
 | Web Push channel (VAPID keys) | no channels; the Inbox holds notifications (`Inbox.list`) | — (architecture §3) |
