@@ -1,6 +1,7 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
 import type { AgentId, MessageId, SessionId, TaskId } from './ids.js';
+import type { TaskError } from './task.js';
 
 /** The content a user or agent sends. Mirrors the shape of `@sigx/ai-agent`'s prompt parts without depending on it. */
 export type PromptPart =
@@ -51,6 +52,20 @@ export type ChatEntry =
           readonly ref: RequestStatusRef;
           readonly at: number;
       }
+    | {
+          readonly t: 'status';
+          readonly agentId: AgentId;
+          /**
+           * `task-failed`: the task the agent was activated for could not run or ended in
+           * error (OPS-04 — a named failure in the thread, never silence): `ref` is the task
+           * id, `error` says why (`session-open`, `no-api-key`, `environment-offline`, …).
+           * The router writes it; an interrupted turn is a `task` status, not a failure.
+           */
+          readonly kind: 'task-failed';
+          readonly ref: TaskId;
+          readonly error: TaskError;
+          readonly at: number;
+      }
     | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number };
 
 export interface ChatMember {
@@ -94,6 +109,8 @@ export type SessionEvent =
           readonly sessionId: SessionId;
           readonly status: Extract<ChatEntry, { t: 'status' }>['kind'];
           readonly ref?: string;
+          /** With `status: 'task-failed'`: why (`ref` is then the task id). */
+          readonly error?: TaskError;
           readonly at: number;
       }
     | {

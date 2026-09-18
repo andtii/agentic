@@ -145,6 +145,8 @@ function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string {
             return 'is typing';
         case 'task':
             return entry.ref ? `task · ${entry.ref}` : 'task';
+        case 'task-failed':
+            return `could not finish: ${entry.error.code} — ${entry.error.message}`;
         case 'request':
             return entry.ref?.startsWith('input:') ? 'needs an answer' : 'needs an approval';
         case 'request-resolved':
