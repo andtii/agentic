@@ -18,7 +18,7 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'all', label: 'All', kinds: undefined },
     { id: 'approvals', label: 'Approvals', kinds: ['approval.requested', 'approval.resolved'] },
     { id: 'delegations', label: 'Delegations', kinds: ['delegation.created'] },
-    { id: 'environments', label: 'Environment choices', kinds: ['environment.chosen'] },
+    { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created'] },
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
     { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked'] },
@@ -70,6 +70,7 @@ export const KIND_TONE: Partial<Record<AuditKind, Tone>> = {
     'plugin.granted': 'live',
     'machine.paired': 'live',
     'machine.revoked': 'failed',
+    'workdir.worktree-created': 'live',
     'secret.opened': 'needs-you'
 };
 
@@ -79,6 +80,7 @@ export function kindLabel(e: AuditEvent): string {
         if (isResumeWait(e.data.wait)) return 'interrupted';
         return e.data.to === 'failed' ? 'failed' : e.data.to === 'cancelled' ? 'cancelled' : 'transition';
     }
+    if (e.kind === 'workdir.worktree-created') return 'worktree created';
     return e.kind.replace('.', ' ');
 }
 
@@ -135,6 +137,7 @@ export interface HistoryRef {
 export function refOf(e: AuditEvent): HistoryRef | null {
     if (e.kind === 'delegation.created') return { label: e.data.childTaskId, href: `/tasks/${e.data.childTaskId}` };
     if (e.kind === 'machine.paired' || e.kind === 'machine.revoked') return { label: e.data.name, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'workdir.worktree-created') return { label: e.data.branch, href: `/machines/${e.data.machineId}` };
     if (e.taskId) return { label: e.taskId, href: `/tasks/${e.taskId}` };
     if (e.sessionId) return { label: e.sessionId, href: `/sessions/${e.sessionId}` };
     if (e.agentId) return { label: e.agentId, href: `/agents/${e.agentId}` };

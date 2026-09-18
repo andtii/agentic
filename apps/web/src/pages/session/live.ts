@@ -156,7 +156,8 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         authStatus: env ? authPillOf(env.account.authStatus) : 'auth-ok',
         ...(env ? { auth: { status: env.account.authStatus, account: env.account.label } } : {}),
         ...(error ? { error } : {}),
-        cwd: env?.cwdRoots[0] ?? '',
+        // The folder the router resolved and sent in `OpenSpec.cwd` (#190); a record from before that ran in the first root.
+        cwd: spec?.cwd ?? (spec?.machineId ? (env?.cwdRoots[0] ?? '') : ''),
         head: info.head,
         configVersion: spec?.config.configVersion ?? agent.configVersion,
         ...(running ? { current: { part: running, transcript } } : {}),

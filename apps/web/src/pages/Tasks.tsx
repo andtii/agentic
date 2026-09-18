@@ -1,6 +1,8 @@
 import { component, signal } from 'sigx';
 import type { TaskStatus } from '@agentic/core';
-import { DataTable, EmptyState, SectionHeading } from '@agentic/ui';
+import { Button, DataTable, EmptyState, SectionHeading } from '@agentic/ui';
+import { defineTopbar } from '../components/topbar';
+import { openStartTask } from './task/start';
 import { Page } from '../components/Page';
 import { dataMode } from '../data-mode';
 import { loadTasks } from '../mock/workspace';
@@ -18,6 +20,9 @@ const FILTERS: readonly { readonly value: TaskStatus | 'all'; readonly label: st
 ];
 
 /** `/tasks` — every task, the Home table at full width with filter chips by status; the TaskIndex in live mode (#146). */
+/** "Start task" (#193): live only — the mock workspace has no router to hand a task to, so there it is disabled. */
+defineTopbar('tasks', () => ({ actions: () => <Button intent="primary" icon="plus" disabled={dataMode() !== 'live'} onClick={() => openStartTask()}>Start task</Button> }));
+
 export const Tasks = component(() => {
     const all = loadTasks();
     const st = signal({ filter: 'all' as TaskStatus | 'all' });

@@ -43,6 +43,7 @@ export const AGENT_FIELDS = {
     autoLearn: 'auto-learn',
     runtime: 'runtime',
     environment: 'environment',
+    workdir: 'workdir',
     model: 'model',
     offlinePolicy: 'offline-policy',
     limit: (key: LimitKey) => `limit:${key}`,
@@ -69,6 +70,8 @@ export interface AgentDraft {
     autoLearn: boolean;
     runtime: string;
     defaultEnvironmentId: string;
+    /** The folder work runs in in `defaultEnvironmentId` (#193); `''` = the environment's first root. */
+    defaultWorkdir: string;
     model: string;
     offlinePolicy: OfflinePolicy;
     limits: Record<LimitKey, number | null>;
@@ -139,6 +142,7 @@ export function toAgentDraft(config: AgentConfig): AgentDraft {
         autoLearn: config.memoryPolicy.autoLearn === 'lessons',
         runtime: config.execution.runtime,
         defaultEnvironmentId: config.execution.defaultEnvironmentId ?? '',
+        defaultWorkdir: config.execution.defaultWorkdir ?? '',
         model: config.execution.model ?? '',
         offlinePolicy: config.execution.offlinePolicy,
         limits,
@@ -176,6 +180,8 @@ export function fromAgentDraft(draft: AgentDraft): AgentConfig {
         execution: {
             runtime: draft.runtime,
             ...(draft.defaultEnvironmentId ? { defaultEnvironmentId: draft.defaultEnvironmentId as EnvironmentId } : {}),
+            // A folder only means something in its environment: without one it is dropped.
+            ...(draft.defaultEnvironmentId && draft.defaultWorkdir.trim() ? { defaultWorkdir: draft.defaultWorkdir.trim() } : {}),
             ...(draft.model ? { model: draft.model } : {}),
             limits,
             offlinePolicy: draft.offlinePolicy
@@ -219,6 +225,7 @@ export function agentDraftFromFormData(fd: FormData): AgentDraft {
         autoLearn: flag(fd, F.autoLearn),
         runtime: text(fd, F.runtime),
         defaultEnvironmentId: text(fd, F.environment),
+        defaultWorkdir: text(fd, F.workdir),
         model: text(fd, F.model),
         offlinePolicy: isOffline(offline) ? offline : 'queue',
         limits: Object.fromEntries(LIMIT_KEYS.map((k) => [k, number(fd, F.limit(k))])) as AgentDraft['limits'],

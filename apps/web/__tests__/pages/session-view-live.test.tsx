@@ -47,7 +47,9 @@ describe('liveSessionView', () => {
         expect(liveSessionView('s_live', info({}), [], forge).openedAt).toBe(0);
     });
 
-    it('the working dir is the environment’s first cwd root; a platform session has none', () => {
+    it('the working dir is the folder the router opened the session in (#193); a platform session has none', () => {
+        expect(liveSessionView('s_live', info({ machineId: 'm1', environmentId: 'env_work', cwd: 'D:/scratch/branches/47-drawer' }), [], forge, machine).cwd).toBe('D:/scratch/branches/47-drawer');
+        // A record opened before #190 carries no cwd: it ran in the first root.
         const daemon = liveSessionView('s_live', info({ machineId: 'm1', environmentId: 'env_work' }), [], forge, machine);
         expect(daemon.cwd).toBe('C:\\Dev\\agentic');
         expect(liveSessionView('s_live', info({ machineId: 'm1', environmentId: 'env_other' }), [], forge, machine).cwd).toBe('');

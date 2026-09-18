@@ -127,6 +127,28 @@ describe('addressing and activation', () => {
         expect(activationContract('a2' as AgentId, 'c1' as ChatId, 'm3' as MessageId, 'do it', [], lookup).context).toEqual([]);
     });
 
+    it("carries a member's working folder into its task, and shows the folder note by name (#193)", async () => {
+        const workdir = { environmentId: 'env_work' as never, path: 'C:\\src\\app' };
+        const withFolder: ChatSummary = { ...summary, members: { ...summary.members, a2: { ...summary.members.a2!, workdir } } };
+        expect(membersOf(withFolder)[1]).toEqual({ agentId: 'a2', status: 'idle', history: { access: 'from', at: 3000 }, workdir });
+        expect(activationContract('a2' as AgentId, 'c1' as ChatId, 'm3' as MessageId, 'do it', [], lookup, workdir)).toMatchObject({ environmentId: 'env_work', workdir: 'C:\\src\\app' });
+        const contracts: unknown[] = [];
+        await runActivation(
+            { post: async () => ({ messageId: 'm9' as MessageId, activated: ['a1' as AgentId, 'a2' as AgentId] }), createTask: async (_id, contract) => { contracts.push(contract); }, run: async () => undefined, newTaskId: () => 't' as never },
+            { chatId: 'c1' as ChatId, text: 'go', mentions: [], summary: withFolder, entries, lookup }
+        );
+        expect(contracts[0]).not.toHaveProperty('workdir');
+        expect(contracts[1]).toMatchObject({ environmentId: 'env_work', workdir: 'C:\\src\\app' });
+
+        const note = { seq: 5, entry: { t: 'msg', id: 'm5' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'Working folder for a2 → C:\\src\\app on env_work' }], at: 5000, mentions: [], workdir: { agentId: 'a2' as AgentId, ref: workdir } } } as IndexedEntry;
+        const cleared = { seq: 6, entry: { ...note.entry, id: 'm6', workdir: { agentId: 'a2', ref: null } } } as IndexedEntry;
+        expect(entryLine(note.entry, lookup)).toBe('Forge now works in C:\\src\\app (env_work)');
+        expect(entryLine(cleared.entry, lookup)).toBe("Forge's working folder was cleared");
+        const t = entryTranscript([note, cleared], lookup, 'Andii');
+        expect(t.messages.map((m) => (m.parts[0] as { text: string }).text)).toEqual(['*Forge now works in C:\\src\\app (env_work)*', "*Forge's working folder was cleared*"]);
+        expect(t.authors.m5).toMatchObject({ name: 'Andii', person: true });
+    });
+
     it('posts first, then one task per activated agent, each handed to the router', async () => {
         const calls: string[] = [];
         let n = 0;

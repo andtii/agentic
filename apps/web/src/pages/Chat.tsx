@@ -1,4 +1,5 @@
 import { component, signal } from 'sigx';
+import type { WorkdirRef } from '@agentic/core';
 import { Link, useRoute } from '@sigx/router';
 import { Drawer } from '@sigx/zero';
 import { Button, Composer, EmptyState, NOBODY_HINT, Thread, type Mention } from '@agentic/ui';
@@ -12,6 +13,7 @@ import { dataMode } from '../data-mode';
 import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
+import { mockWorkdirEnvironments } from './workdir/environments';
 
 /** "1 waiting · 1 active" — the app bar's status summary under the chat title. */
 export function memberSummary(chat: Pick<MockChatSummary, 'members'>): string {
@@ -63,7 +65,20 @@ export const Chat = component(() => {
     const route = useRoute();
     const chats = loadChats();
     const st = signal({ draft: '' });
-    const view = () => loadChat(String(route.params.id));
+    // Folders picked on the mock page: kept for the visit, like its composer.
+    const folders = signal<{ value: Record<string, WorkdirRef | null> }>({ value: {} });
+    const view = () => {
+        const v = loadChat(String(route.params.id));
+        if (!v) return v;
+        const members = v.chat.members.map((m) => {
+            const picked = folders.value[m.agentId];
+            if (picked === undefined) return m;
+            const { workdir: _old, ...rest } = m;
+            return picked ? { ...rest, workdir: picked } : rest;
+        });
+        return { ...v, chat: { ...v.chat, members } };
+    };
+    const setWorkdir = (e: { readonly agentId: string; readonly ref: WorkdirRef | null }): void => { folders.value = { ...folders.value, [e.agentId]: e.ref }; };
     return () => {
         if (dataMode() === 'live') return <LiveChat id={String(route.params.id)} />;
         const v = view();
@@ -106,11 +121,11 @@ export const Chat = component(() => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={v.chat} tasks={v.tasks} />
+                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} onSetWorkdir={setWorkdir} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={v.chat} tasks={v.tasks} />
+                            <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} onSetWorkdir={setWorkdir} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

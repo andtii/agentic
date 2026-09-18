@@ -6,7 +6,7 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isTerminal, type AgentId, type ChatEntry, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId } from '@agentic/core';
+import { isTerminal, type AgentId, type ChatEntry, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
@@ -81,7 +81,8 @@ export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = N
         agentId,
         status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
-        history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since }
+        history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
+        ...(m.workdir ? { workdir: m.workdir } : {})
     }));
 }
 
@@ -96,10 +97,20 @@ export function chatTitle(members: readonly MockChatMember[], lookup: AgentLooku
     return members.length ? members.map((m) => lookup(m.agentId).name).join(', ') : 'New chat';
 }
 
+/**
+ * The note `Chat.setWorkdir` writes (#190, #193), in names rather than ids:
+ * "Forge now works in /src/app (env_work)" / "Forge's working folder was cleared".
+ */
+export function workdirNote(change: { readonly agentId: AgentId; readonly ref: WorkdirRef | null }, lookup: AgentLookup): string {
+    const name = lookup(change.agentId).name;
+    return change.ref ? `${name} now works in ${change.ref.path} (${change.ref.environmentId})` : `${name}'s working folder was cleared`;
+}
+
 /** The text of a message entry, one line, for a list row. */
 export function entryLine(entry: ChatEntry, lookup: AgentLookup): string {
     switch (entry.t) {
         case 'msg': {
+            if (entry.workdir) return workdirNote(entry.workdir, lookup);
             const who = entry.author.kind === 'user' ? 'You' : lookup(entry.author.agentId).name;
             const text = entry.parts.map(partText).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
             return `${who}: ${text}`;
@@ -299,7 +310,12 @@ export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentL
     const messages: AgentMessage[] = [];
     const authors: Record<string, MessageAuthor> = {};
     for (const { seq, entry } of entries) {
-        if (entry.t === 'msg') {
+        if (entry.t === 'msg' && entry.workdir) {
+            // A folder change is the user's act, shown as a note rather than a message that looks addressed to someone.
+            const id = entry.id;
+            messages.push({ id, role: 'user', author: userName, parts: [{ type: 'text', id: `${id}:0`, text: `*${workdirNote(entry.workdir, lookup)}*` }] });
+            authors[id] = { name: userName, person: true, time: timeOf(entry.at) };
+        } else if (entry.t === 'msg') {
             const parts: AgentPart[] = entry.parts.map((p, i) => ({ type: 'text', id: `${entry.id}:${i}`, text: partText(p) }));
             if (entry.author.kind === 'user') {
                 messages.push({ id: entry.id, role: 'user', author: userName, parts });
@@ -552,15 +568,18 @@ export const CONTEXT_WINDOW = 50;
  * The task an activation creates (architecture §6): origin = the user's
  * message, objective = its text, context = the entries the agent may read
  * (`historyFrom`, CHT-04) — the last `CONTEXT_WINDOW` of them, oldest
- * first, each attributed — so the session starts with what was said.
+ * first, each attributed — so the session starts with what was said. The
+ * member's working folder for this chat (`Chat.setWorkdir`, #193) rides along
+ * as the task's `environmentId` + `workdir`, so the router opens the session
+ * there instead of the agent's default.
  */
-export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup): TaskContract {
+export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef): TaskContract {
     const lines = visible
         .filter((e): e is IndexedEntry & { entry: Extract<ChatEntry, { t: 'msg' }> } => e.entry.t === 'msg')
         .slice(-CONTEXT_WINDOW)
         .map((e) => entryLine(e.entry, lookup));
     const context: PromptPart[] = lines.length ? [{ type: 'text', text: `Chat so far:\n${lines.join('\n')}` }] : [];
-    return { objective: text, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {} };
+    return { objective: text, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}) };
 }
 
 /** The entries `agentId` may read: from its `historyFrom` on (CHT-04). */
@@ -594,7 +613,7 @@ export async function runActivation(ports: ActivationPorts, input: { chatId: Cha
     const tasks: { agentId: AgentId; taskId: TaskId }[] = [];
     for (const agentId of activated) {
         const taskId = ports.newTaskId();
-        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup);
+        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir);
         await ports.createTask(taskId, contract, agentId);
         await ports.run(taskId);
         tasks.push({ agentId, taskId });

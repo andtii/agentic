@@ -27,6 +27,9 @@ import { presencePill } from '../Agents';
 import { useAgentDirectory } from '../chat/directory';
 import { createChatWith } from '../chat/LiveChats';
 import { useEnvironmentOptions } from '../machines/environments';
+import { useLiveWorkdirEnvironments } from '../workdir/environments';
+import { LiveStartTask } from '../task/LiveStartTask';
+import { openStartTask } from '../task/start';
 import { AGENT_TABS, type AgentTab } from '../Agent';
 import { useAgentActivity } from './activity';
 import { useAgentCatalog } from './catalog';
@@ -45,6 +48,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
     const directory = useAgentDirectory(defs, viewer);
     // The paired machines' environments, for the Config tab's default-environment picker (#144).
     const environments = useEnvironmentOptions(defs, viewer);
+    const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? agentKeyOf(viewer.workspaceId, props.id) : null);
     const client = () => actor(defs.AgentActor, key()!);
 
@@ -155,6 +159,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                     <Row gap="md" align="center">
                         <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                         <Button icon="chats" disabled={st.starting} onClick={() => { void startChat(); }}>Start chat</Button>
+                        <Button intent="primary" icon="plus" onClick={() => openStartTask(id)}>Start task</Button>
                     </Row>
                 </header>
                 {st.error ? <p data-agent-error role="alert">{st.error}</p> : null}
@@ -166,10 +171,11 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} sessions={sessions} zone={zone()} /></Tabs.Panel>
-                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} catalog={catalog(v.config)} /></Tabs.Panel>
+                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} catalog={catalog(v.config)} workdirs={workdirs} /></Tabs.Panel>
                     <Tabs.Panel value="memory"><MemoryTab profile={profile} store={memoryStore} zone={zone()} /></Tabs.Panel>
                     <Tabs.Panel value="sessions"><SessionsTab agentId={id} rows={sessions} agent={{ name: agent.name, hue: profile.hue }} zone={zone()} /></Tabs.Panel>
                 </Tabs>
+                <LiveStartTask />
             </div>
         );
     };

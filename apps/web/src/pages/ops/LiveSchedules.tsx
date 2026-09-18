@@ -19,6 +19,7 @@ import { useEnvironmentDirectory, type EnvironmentDirectory } from './environmen
 import { closeNewSchedule, newScheduleRequest } from './head';
 import { dstRuleFor, newScheduleSpec, SCHEDULES_COLS, scheduleRow, type NewScheduleInput } from './live';
 import { NewScheduleDialog } from './NewScheduleDialog';
+import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { OpsPage } from './OpsPage';
 
 /** Create the entry in `ws`: an indexed id, then the Schedule actor under it. Resolves to the new id. */
@@ -105,6 +106,7 @@ export const LiveSchedules = component(() => {
     const viewer = useViewer()();
     const agents = useAgentDirectory(defs, viewer);
     const environments = useEnvironmentDirectory(defs, viewer);
+    const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const st = signal({ busy: false, error: '' });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
@@ -154,6 +156,7 @@ export const LiveSchedules = component(() => {
                     agents={agents.all().map((a) => ({ value: a.id, label: a.name }))}
                     environments={environments.all().map((e) => ({ value: e.id, label: e.label }))}
                     busy={st.busy}
+                    workdirs={workdirs}
                     onCancel={closeNewSchedule}
                     onCreate={(input) => { void create(input); }}
                 />

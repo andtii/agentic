@@ -19,7 +19,7 @@ import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
-import { createId, type AgentId, type ChatId, type TaskId } from '@agentic/core';
+import { createId, type AgentId, type ChatId, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { Decision } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, type Mention, type MessageAuthor } from '@agentic/ui';
 import { Page } from '../../components/Page';
@@ -39,6 +39,7 @@ import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, e
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
+import { useLiveWorkdirEnvironments } from '../workdir/environments';
 
 /** Who the user reads as in their own thread. */
 export const YOU = 'You';
@@ -59,6 +60,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // Every task of the workspace, live: the panel keeps this chat's chains (`chatTasks`).
     const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
     const zone = useWorkspaceZone(defs, viewer);
+    const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const time = (at: number): string => zoneFormat(zone()).time(at);
 
     const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false });
@@ -162,6 +164,13 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const feed = feeds.list.find((f) => f.transcript.requests[requestId]);
         if (!feed) return;
         void session(feed.sessionId).respond(requestId, decision).catch(fail);
+    };
+
+    /** A member's folder for this chat (#193): the next task the chat starts for it runs there; a running session keeps its own. */
+    const setWorkdir = (agentId: string, ref: WorkdirRef | null): void => {
+        const k = key();
+        if (!k) return;
+        void actor(defs.Chat, k).setWorkdir(agentId as AgentId, ref).catch(fail);
     };
 
     const addAgent = (agentId: string, access: 'all' | 'from'): void => {
@@ -295,11 +304,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

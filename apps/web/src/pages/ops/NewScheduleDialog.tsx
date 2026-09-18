@@ -1,7 +1,10 @@
-import { component, signal, type Define } from 'sigx';
+import { component, signal, watch, type Define } from 'sigx';
+import type { EnvironmentId } from '@agentic/core';
 import { ConfirmDialog, SelectField, TextareaField, TextField } from '@agentic/ui';
 import type { ScheduleKind } from '../../mock/ops';
 import { validateNewSchedule, type NewScheduleErrors, type NewScheduleInput } from './live';
+import type { WorkdirEnvironments } from '../workdir/environments';
+import { WorkdirInput } from '../workdir/WorkdirInput';
 
 export type NewScheduleDialogProps =
     & Define.Model<boolean>
@@ -9,6 +12,8 @@ export type NewScheduleDialogProps =
     & Define.Prop<'agents', readonly { value: string; label: string }[], true>
     & Define.Prop<'environments', readonly { value: string; label: string }[], true>
     & Define.Prop<'busy', boolean>
+    /** Where an agent task's folder can be picked (#193); absent, the dialog asks for none. */
+    & Define.Prop<'workdirs', WorkdirEnvironments>
     & Define.Event<'create', NewScheduleInput>
     & Define.Event<'cancel'>;
 
@@ -25,8 +30,11 @@ const KINDS: readonly { value: ScheduleKind; label: string }[] = [
  * keeps the dialog open with the field marked.
  */
 export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emit }) => {
-    const st = signal<NewScheduleInput & { attempted: boolean }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', prompt: '', attempted: false });
-    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, prompt: st.prompt });
+    const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', prompt: '', attempted: false });
+    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, workdir: st.workdir, prompt: st.prompt });
+    // A folder belongs to its environment: choosing another one in the select drops it.
+    let picking = false;
+    watch(() => st.environmentId, () => { if (picking) picking = false; else st.workdir = ''; });
     return () => {
         const errors: NewScheduleErrors = st.attempted ? validateNewSchedule(input(), props.timeZone) : {};
         return (
@@ -54,6 +62,24 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
                         <>
                             <SelectField model={() => st.agentId} name="schedule-agent" label="Agent" options={props.agents} placeholder="Pick an agent" required error={errors.agentId} />
                             <SelectField model={() => st.environmentId} name="schedule-environment" label="Environment" options={[{ value: '', label: 'platform (no machine needed)' }, ...props.environments]} description="An offline machine queues the task until it returns." />
+                            {props.workdirs ? (
+                                <WorkdirInput
+                                    value={st.workdir && st.environmentId ? { environmentId: st.environmentId as EnvironmentId, path: st.workdir } : null}
+                                    environments={props.workdirs.list()}
+                                    machineOf={props.workdirs.machineOf}
+                                    preferred={(st.environmentId || null) as EnvironmentId | null}
+                                    label="Working folder"
+                                    description="Where each run works. Empty: the environment's first working root."
+                                    name="schedule-workdir"
+                                    onChange={(ref) => {
+                                        if (ref && ref.environmentId !== st.environmentId) {
+                                            picking = true;
+                                            st.environmentId = ref.environmentId;
+                                        }
+                                        st.workdir = ref?.path ?? '';
+                                    }}
+                                />
+                            ) : null}
                         </>
                     ) : null}
                     <TextareaField model={() => st.prompt} name="schedule-prompt" label={st.kind === 'agent-task' ? 'Prompt' : 'Note'} rows={3} description={st.kind === 'agent-task' ? 'What the agent is asked to do each time.' : 'Shown in the inbox with the reminder.'} />
