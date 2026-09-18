@@ -119,8 +119,9 @@ function parse(path: string, os: HostOs): ParsedPath | null {
 
 /**
  * `path` resolved to its canonical, machine-native form (`C:\src\app`,
- * `/home/me/src`): separators unified, `.`/`..` and duplicate or trailing
- * separators removed, case kept. `null` for a relative path.
+ * `/home/me/src`): separators unified, `.`/`..` and duplicate separators
+ * resolved, case kept. No trailing separator except on a filesystem or
+ * share root (`C:\`, `/`). `null` for a relative path.
  */
 export function normalizePath(path: string, os: HostOs): string | null {
     const p = parse(path, os);
@@ -160,7 +161,8 @@ export function suggestWorktreePath(repo: string, branch: string, os: HostOs): s
     const fold = (s: string | undefined) => (os === 'windows' ? s?.toLowerCase() : s);
     const name = fold(p.segments.at(-1));
     const parent = p.segments.slice(0, -1);
-    const segments = name === 'main' ? [...parent, 'branches', slug] : fold(parent.at(-1)) === 'branches' ? [...parent, slug] : [...parent, `${p.segments.at(-1) ?? ''}-worktrees`, slug];
+    // A worktree already under `branches/` (even one named `main`) gets a sibling; the checkout named `main` gets `branches/` beside it.
+    const segments = fold(parent.at(-1)) === 'branches' ? [...parent, slug] : name === 'main' ? [...parent, 'branches', slug] : [...parent, `${p.segments.at(-1) ?? ''}-worktrees`, slug];
     const sep = os === 'windows' ? '\\' : '/';
     return os === 'windows' ? `${p.prefix.replace(/\//g, '\\')}\\${segments.join(sep)}` : `/${segments.join(sep)}`;
 }

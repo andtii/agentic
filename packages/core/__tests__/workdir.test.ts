@@ -73,6 +73,7 @@ describe('suggestWorktreePath', () => {
         expect(suggestWorktreePath('/home/me/agentic/main/', 'fix-1', 'linux')).toBe('/home/me/agentic/branches/fix-1');
     });
     it('puts a worktree of a worktree beside it', () => {
+        expect(suggestWorktreePath('/home/me/agentic/branches/main', 'fix-2', 'linux')).toBe('/home/me/agentic/branches/fix-2');
         expect(suggestWorktreePath('C:/Dev/agentic/branches/47-drawer', '48-next', 'windows')).toBe('C:\\Dev\\agentic\\branches\\48-next');
     });
     it('uses <repo>-worktrees for any other repo', () => {
