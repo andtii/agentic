@@ -42,6 +42,7 @@ const STATUS_KINDS: ReadonlySet<string> = new Set<Extract<SessionEvent, { kind: 
     'session-started',
     'session-ended',
     'task',
+    'task-failed',
     'request',
     'request-resolved'
 ]);
@@ -62,6 +63,11 @@ function parseSessionEvent(payload: unknown, chatKey: string): SessionEvent {
         case 'status':
             if (typeof e.status !== 'string' || !STATUS_KINDS.has(e.status)) throw malformed(`status "${String(e.status)}"`);
             if (e.ref !== undefined && typeof e.ref !== 'string') throw malformed('ref');
+            if (e.status === 'task-failed') {
+                const err = e.error as Record<string, unknown> | undefined;
+                if (typeof e.ref !== 'string' || e.ref === '') throw malformed('task-failed needs the task id as ref');
+                if (!err || typeof err !== 'object' || typeof err.code !== 'string' || typeof err.message !== 'string' || typeof err.recoverable !== 'boolean') throw malformed('task-failed needs an error');
+            }
             break;
         case 'message':
             if (!Array.isArray(e.parts) || !e.parts.every((p) => p !== null && typeof p === 'object' && typeof p.type === 'string')) {
@@ -294,6 +300,9 @@ export const Chat = defineActor({
                     // A request status is only useful paired: the ref is the contract (`RequestStatusRef`), not a session id.
                     if (!isRequestStatusRef(e.ref)) throw new Error(`Chat: malformed session event on ${ctx.key}: ${e.status} needs an approval:/input: ref`);
                     await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref, at: e.at });
+                } else if (e.status === 'task-failed') {
+                    // A failure names its task and says why (OPS-04); `parseSessionEvent` checked both.
+                    await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: 'task-failed', ref: e.ref as TaskId, error: e.error!, at: e.at });
                 } else {
                     await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
                 }
