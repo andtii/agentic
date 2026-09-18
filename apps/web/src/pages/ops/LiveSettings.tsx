@@ -193,7 +193,7 @@ export const LiveSettings = component(() => {
                     </Section>
 
                     <p data-settings-status role="status">
-                        {st.saving ? 'Saving…' : st.saved ? 'Saved.' : ''}
+                        {st.saving ? 'Saving…' : st.saved && synced !== null && sameDraft(draft, synced) ? 'Saved.' : ''}
                     </p>
 
                     <Section title="Your data" hint="Export streams everything as NDJSON to the artifacts bucket, secrets by name only. Delete cascades to every agent, chat, task, memory, schedule and machine pairing.">
