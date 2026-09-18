@@ -66,7 +66,9 @@ export type ChatEntry =
           readonly error: TaskError;
           readonly at: number;
       }
-    | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number };
+    | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number }
+    /** The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one. */
+    | { readonly t: 'rename'; readonly title: string; readonly at: number };
 
 export interface ChatMember {
     readonly since: number;
