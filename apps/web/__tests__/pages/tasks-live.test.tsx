@@ -57,7 +57,8 @@ describe('/tasks (live)', () => {
         // A second task settles; the index row follows and the chips count it.
         const done = await seed('echo this', forge);
         await until(async () => (await done.task.get()).status === 'completed', 'the second task to complete');
-        await until(() => rows(dom).length === 2, 'both rows');
+        // The record settles first; the index row follows over a hop and the live read after that (#174).
+        await until(() => rows(dom).length === 2 && statusOf(rows(dom)[0]!) === 'completed', 'both rows, the new one completed');
         expect(rows(dom).map(statusOf)).toEqual(['completed', 'waiting']);
         chip(dom, 'Completed').click();
         await until(() => rows(dom).length === 1 && statusOf(rows(dom)[0]!) === 'completed', 'the completed filter');
