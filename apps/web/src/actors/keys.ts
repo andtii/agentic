@@ -15,3 +15,5 @@ export const sessionKeyOf = (ws: string, id: string): string => actorKey(ws as W
 export const routingKeyOf = (ws: string): string => `${ws}:routing:main`;
 export const inboxKeyOf = (ws: string): string => `${ws}:inbox`;
 export const machineKeyOf = (ws: string, id: string): string => `${ws}:machine:${id}`;
+export const scheduleKeyOf = (ws: string, id: string): string => `${ws}:schedule:${id}`;
+export const registryKeyOf = (ws: string): string => `${ws}:registry`;
