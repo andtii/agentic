@@ -112,7 +112,7 @@ describe('Needs you: one record, many clients', () => {
         const source = memoryNeedsSource({ rows, requests: requests() });
         const dom = await mountAt('/', <NeedsYou source={source} />);
         const input = items(dom).find((el) => el.getAttribute('data-kind') === 'input')!;
-        expect(text(input.querySelector('[data-needs-question]'))).toBe('Which one?');
+        expect(text(input.querySelector('[data-scope="ai-question"][data-part="prompt"]'))).toBe('Which one?');
         const answer = buttonNamed(input, 'Answer');
         expect(answer.disabled).toBe(true);
         setText(input.querySelector('textarea')!, 'the first');

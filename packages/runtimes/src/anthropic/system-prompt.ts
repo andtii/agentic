@@ -8,7 +8,7 @@
  * retrieval, so a provider's prompt cache keeps the long prefix.
  */
 
-import type { AgentConfig, MemoryEntry, SkillRef } from '@agentic/core';
+import type { AgentConfig, ChatRoster, MemoryEntry, SkillRef } from '@agentic/core';
 
 /** A skill's text, resolved by the platform from a `SkillRef` (AGT-04: text, never authority). */
 export interface ResolvedSkill {
@@ -26,6 +26,8 @@ export interface SystemPromptInput {
     readonly tools?: readonly string[];
     /** Memories retrieved for this session (MEM-04). */
     readonly memories?: readonly MemoryEntry[];
+    /** The chat the session works in, when it came from one (CHT-07): who else is there and who coordinates. */
+    readonly roster?: ChatRoster;
 }
 
 const TOOL_GUIDE: Readonly<Record<string, string>> = {
@@ -53,6 +55,39 @@ function resolveSkills(refs: readonly SkillRef[], resolved: readonly ResolvedSki
     return { found, missing };
 }
 
+/**
+ * The chat section: every member by name and id, the coordinator, and how
+ * to reach the others — only through the platform's own tools. Without it
+ * a runtime with agent tools of its own (Claude Code's cross-session
+ * messaging) takes "the other agents" to mean whatever it can see locally.
+ */
+export function chatSection(roster: ChatRoster, tools: readonly string[]): string {
+    const lines = roster.members.map((m) => {
+        const tags = [m.agentId === roster.self ? 'you' : '', m.agentId === roster.coordinator ? 'coordinator' : ''].filter(Boolean);
+        const role = m.role?.trim();
+        return `- ${m.name} (${m.agentId})${tags.length ? ` [${tags.join(', ')}]` : ''}${role ? `: ${role}` : ''}`;
+    });
+    const title = roster.title ? ` titled "${roster.title}"` : '';
+    const paragraphs = [
+        `You work in a chat${title} with the user and these agents. They are agents of this platform, not sessions or processes on the machine you run on.`,
+        lines.join('\n')
+    ];
+    if (roster.coordinator === roster.self) paragraphs.push('You are the coordinator: when the user mentions nobody, you answer, and you bring in the other members as the work needs them.');
+    else if (roster.coordinator) paragraphs.push('Another member coordinates this chat; answer what is addressed to you.');
+    if (roster.members.some((m) => m.agentId !== roster.self)) {
+        const ways = [
+            tools.includes('delegate') ? "`delegate` with the agent's id as `assignee`, for work you need back as a result" : '',
+            tools.includes('chat_post') ? '`chat_post` mentioning @Name, to speak to it in the chat' : ''
+        ].filter(Boolean);
+        paragraphs.push(
+            ways.length
+                ? `To involve another member use ${ways.join(', or ')}. Nothing else reaches them: never use a runtime's own agent or session messaging for chat members.`
+                : 'You have no tool that reaches the other members in this session; say so if you are asked to involve them.'
+        );
+    }
+    return `## This chat\n\n${paragraphs.join('\n\n')}`;
+}
+
 function memoryLine(m: MemoryEntry): string {
     const tags = m.tags.length ? ` [${m.tags.join(', ')}]` : '';
     const subject = m.subject !== undefined ? ` (${m.subject})` : '';
@@ -77,6 +112,8 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     }
 
     const tools = input.tools ?? [];
+    if (input.roster) sections.push(chatSection(input.roster, tools));
+
     if (tools.length) {
         const lines = tools.map((name) => (TOOL_GUIDE[name] ? `- ${name}: ${TOOL_GUIDE[name]}` : `- ${name}`));
         sections.push(`## Tools\n\nYou may call only these tools; some calls need approval, which is asked for automatically.\n\n${lines.join('\n')}`);

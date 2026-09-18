@@ -3,12 +3,13 @@
  * is one `ev` entry per event plus a read over the folded log,
  * `TranscriptStore` the snapshot the driver takes at every turn end.
  *
- * `appendEntry` is the one write path: fold through the pure reducer, then
- * persist. Today that persist is `ctx.save()` — the same cost as
- * `ctx.append` on Durable Object storage, where every append is a full
- * save; when `@sigx/actors` ships `applyEntry`/`ctx.append` (#312) this
- * becomes O(entry) without touching the reducer. Promotion candidate
- * (docs/promotion.md).
+ * `appendEntry` is the one write path: `ctx.append(entry)` (@sigx/actors
+ * 0.10, #312), which folds the entry through the definition's
+ * `applyEntry` — `applySessionEntry` — and writes the entry alone, O(entry)
+ * on a storage with `appendText` (Durable Objects since
+ * signalxjs/actors#375); a full save compacts the log. A context without
+ * `append` (a test double) folds the entry itself and saves — the same state
+ * either way. Promotion candidate (docs/promotion.md).
  */
 
 import type { AgentEvent, AgentTranscript, EventCursor, EventLogStore, TranscriptStore } from '@sigx/ai-agent';
@@ -20,10 +21,16 @@ export interface SessionStoreContext {
     readonly state: SessionState;
     save(): Promise<void>;
     snapshot(): SessionState;
+    /** `ctx.append`: fold through the definition's `applyEntry` and write the entry alone. */
+    append?(entry: unknown): Promise<void>;
 }
 
 /** Fold `entry` into the state and make it durable — call only inside a turn. */
 export async function appendEntry(ctx: SessionStoreContext, entry: SessionEntry): Promise<void> {
+    if (typeof ctx.append === 'function') {
+        await ctx.append(entry);
+        return;
+    }
     applySessionEntry(ctx.state, entry);
     await ctx.save();
 }

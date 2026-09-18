@@ -33,13 +33,19 @@ export interface SaveRecord {
     readonly key: string;
 }
 
-export type RecordingStorage = ActorStorage & { readonly saves: SaveRecord[] };
+export type RecordingStorage = ActorStorage & { readonly saves: SaveRecord[]; readonly appends: SaveRecord[] };
 
-/** `memoryStorage()` that also records every `save`, so a test can count writes per actor. */
+/**
+ * `memoryStorage()` that also records every full `save` and every `appendText`, so a test can
+ * count writes per actor. `appendText` is forwarded only when the inner storage has it: a
+ * decorator that drops it sends every `ctx.append` down the full-save path, silently.
+ */
 export function recordingStorage(inner: ActorStorage = memoryStorage()): RecordingStorage {
     const saves: SaveRecord[] = [];
-    return {
+    const appends: SaveRecord[] = [];
+    const storage: RecordingStorage = {
         saves,
+        appends,
         load: (type, key) => inner.load(type, key),
         clear: (type, key, etag) => inner.clear(type, key, etag),
         save(type, key, state, etag) {
@@ -47,6 +53,17 @@ export function recordingStorage(inner: ActorStorage = memoryStorage()): Recordi
             return inner.save(type, key, state, etag);
         }
     };
+    const appendText = inner.appendText?.bind(inner);
+    if (appendText) {
+        return {
+            ...storage,
+            appendText(type, key, json, etag) {
+                appends.push({ type, key });
+                return appendText(type, key, json, etag);
+            }
+        };
+    }
+    return storage;
 }
 
 /** Timers that never fire on their own; every test drives the host itself. */
@@ -69,6 +86,8 @@ export interface TestActorApp {
     readonly storage: ActorStorage;
     /** Every `save` the storage saw, in order (empty unless the storage is a `recordingStorage()`, the default). */
     readonly saves: readonly SaveRecord[];
+    /** Every `appendText` (`ctx.append` on the O(entry) path), in order — empty on a storage without it. */
+    readonly appends: readonly SaveRecord[];
     /** The running host; throws before `start()`. */
     readonly host: Host;
     start(): Promise<Host>;
@@ -85,12 +104,14 @@ const codec = {
 export function testActorApp(actors: readonly AnyActorDefinition[], options: TestActorAppOptions = {}): TestActorApp {
     const storage = options.storage ?? recordingStorage();
     const saves = (storage as Partial<RecordingStorage>).saves ?? [];
+    const appends = (storage as Partial<RecordingStorage>).appends ?? [];
     const app = defineActorApp({ actors, storage, ...(options.scheduler ? { scheduler: options.scheduler } : {}), defaults: { ...QUIET_DEFAULTS, ...options.defaults } });
     let restore: (() => void) | null = null;
     return {
         app,
         storage,
         saves,
+        appends,
         get host() {
             if (!app.host) throw new Error('[testActorApp] not started');
             return app.host;

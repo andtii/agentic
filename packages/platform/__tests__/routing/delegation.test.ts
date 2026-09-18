@@ -311,10 +311,13 @@ describe('stop and restart over the port (COL-12, idempotent child ids)', () => 
 
     it('a child that fails reports its error; a limit refuses the call with a code', async () => {
         await runningParent();
-        // An assignee with no configuration: the router fails the child with a reason, the tool result says so.
-        const failed = await ports.task.delegate({ ...spec, assignee: EVE }, { callId: 'c1', signal: new AbortController().signal });
-        expect(failed).toMatchObject({ status: 'failed', error: { code: 'agent-unconfigured' } });
-        await task('t_parent').get();
+        // An assignee with no configuration is refused before any child exists: `invalid`, naming the id and where real ids come from.
+        let refused: unknown;
+        await ports.task.delegate({ ...spec, assignee: EVE }, { callId: 'c1', signal: new AbortController().signal }).catch((e: unknown) => (refused = e));
+        expect(refused).toBeInstanceOf(ToolCallError);
+        expect(refused).toMatchObject({ code: 'invalid' });
+        expect((refused as Error).message).toContain(`"${EVE}" is not an agent of this workspace`);
+        expect((await task('t_parent').get()).children).toEqual([]);
         // Depth: the parent's contract allows none below it.
         await createTask('t_shallow', ADA, { objective: 'slow parent', constraints: { maxDepth: 0 } });
         const started = await routing().run('t_shallow' as TaskId);

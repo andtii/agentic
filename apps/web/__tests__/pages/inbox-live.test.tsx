@@ -77,7 +77,7 @@ describe('/ Needs you (live)', () => {
         const dom = await mountLive('/', h);
         await until(() => rows(dom).length === 1, 'the input row');
         expect(rows(dom)[0]!.getAttribute('data-kind')).toBe('input');
-        expect(rows(dom)[0]!.querySelector('[data-needs-question]')!.textContent).toBe('Which branch?');
+        expect(rows(dom)[0]!.querySelector('[data-scope="ai-question"][data-part="prompt"]')!.textContent).toBe('Which branch?');
         setText(rows(dom)[0]!.querySelector('textarea')!, 'main');
         await until(() => !buttonNamed(rows(dom)[0]!, 'Answer').disabled, 'the answer button');
         buttonNamed(rows(dom)[0]!, 'Answer').click();

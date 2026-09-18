@@ -40,11 +40,13 @@ describe('Ledger authorization', () => {
 });
 
 describe('Ledger rows', () => {
-    it('appends once per key, one save each, and lists newest first', async () => {
+    it('appends once per key, one write each, and lists newest first', async () => {
         expect(await ledger().append(row('k1'))).toBe(true);
         expect(await ledger().append(row('k1', { costUsd: 9 }))).toBe(false);
         expect(await ledger().append(row('k2', { at: AT + 1, taskId: 't1', estimated: true }))).toBe(true);
-        expect(app.saves.filter((s) => s.type === 'ledger')).toHaveLength(2);
+        // One durable write per row: the first creates the record (a save), the next is an O(entry) append.
+        expect([...app.saves, ...app.appends].filter((s) => s.type === 'ledger')).toHaveLength(2);
+        expect(app.appends.filter((s) => s.type === 'ledger')).toHaveLength(1);
         const rows = await ledger().rows();
         expect(rows.map((r) => r.key)).toEqual(['k2', 'k1']);
         expect(rows[1]!.costUsd).toBe(0.1);

@@ -9,7 +9,7 @@
  * the `--extra-manifest` path.
  */
 import { aiComposerAnatomy } from '../composer/anatomy.js';
-import { aiApprovalAnatomy, aiMessageAnatomy, aiReasoningAnatomy, aiThreadAnatomy, aiToolCallAnatomy } from '../thread/anatomy.js';
+import { aiApprovalAnatomy, aiMessageAnatomy, aiQuestionAnatomy, aiReasoningAnatomy, aiThreadAnatomy, aiToolCallAnatomy } from '../thread/anatomy.js';
 import { kitAnatomies } from '../kit/anatomy.js';
 import { recipes as transcriptRecipes } from './recipes.js';
 import { recipes as kitRecipes } from '../kit/recipes.js';
@@ -40,6 +40,7 @@ export const fragment = {
         aiToolCallAnatomy.toJSON(),
         aiReasoningAnatomy.toJSON(),
         aiApprovalAnatomy.toJSON(),
+        aiQuestionAnatomy.toJSON(),
         aiComposerAnatomy.toJSON(),
         ...kitAnatomies.map((a) => a.toJSON())
     ]

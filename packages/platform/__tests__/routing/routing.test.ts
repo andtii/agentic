@@ -6,12 +6,13 @@
  * socket, never through the heartbeat window.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, type AgentId, type EnvironmentId, type MachineId, type OfflinePolicy, type Principal, type RuntimeId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type EnvironmentId, type MachineId, type MessageId, type OfflinePolicy, type Principal, type RuntimeId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent, type MockAgent } from '@sigx/ai-agent/testing';
 
 import { AgentActor, agentKey } from '../../src/agent/index';
+import { Chat } from '../../src/chat/index';
 import { workspaceKey } from '../../src/auth/index';
 import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
@@ -82,7 +83,7 @@ beforeEach(async () => {
     Session = defineSessionActor({ factory: localFactory(scriptedAgent()), commands: sink });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
     Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
-    app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory]);
+    app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory, Chat]);
     await app.start();
 });
 
@@ -218,6 +219,52 @@ describe('daemon runtime (EXE-09)', () => {
         expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'session.open')).toMatchObject({ spec: { policy: { rules: [{ id: 'ask-destructive', match: { categories: ['destructive'] }, outcome: 'ask' }], grants: [{ name: 'task_report' }, { name: 'memory_search' }] } } });
         // The session is closed at the end, freeing the environment slot.
         await until(async () => (await machine(m1).get()).activeSessions.length === 0, 'the slot to free');
+    });
+
+    it('a chat task tells the agent who is in the chat (CHT-07): the roster on the spec and the full prompt on the daemon', async () => {
+        const m1 = await pairMachine('laptop');
+        connect(m1, daemon(m1));
+        await online(m1);
+        const cc = await agent('agent_cc', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const forge = await agent('agent_forge', { runtime: 'anthropic-api' });
+        await app.as(owner).actor(AgentActor, agentKey(WS, forge)).update({ role: 'Builds and ships' }, 'role');
+        const { chatId } = await app.as(owner).actor(Workspace, workspaceKey(WS)).createChat({ title: 'Release' });
+        const room = app.as(owner).actor(Chat, actorKey(WS, 'chat', chatId));
+        await room.addAgent(cc, 'all');
+        await room.addAgent(forge, 'all');
+        await room.setCoordinator(cc);
+        const { messageId } = await room.post('talk to everyone', []);
+        await createTask('t1', cc, { objective: 'talk to everyone', origin: { kind: 'user', chatId, messageId: messageId as MessageId } });
+        await routing().run('t1' as TaskId);
+        await settled('t1');
+
+        const info = await session((await task('t1').get()).sessionId!).get();
+        expect(info.spec?.roster).toEqual({
+            chatId,
+            title: 'Release',
+            self: cc,
+            coordinator: cc,
+            members: [
+                { agentId: cc, name: 'agent_cc' },
+                { agentId: forge, name: 'agent_forge', role: 'Builds and ships' }
+            ]
+        });
+        // The daemon runs the platform's whole prompt — identity, instructions, the chat, the tools — not the bare instructions.
+        const system = (sockets.frames(machineKey(WS, m1)).find((f) => f.t === "session.open") as unknown as { spec: { system: string } }).spec.system;
+        expect(system).toContain('# agent_cc');
+        expect(system).toContain('Be brief.');
+        expect(system).toContain('## This chat');
+        expect(system).toContain('- agent_forge (agent_forge): Builds and ships');
+        expect(system).toContain('You are the coordinator');
+        expect(system).toContain('## Tools');
+    });
+
+    it('a task that came from no chat carries no roster', async () => {
+        const a = await agent('agent_api', { runtime: 'anthropic-api' });
+        await createTask('t1', a);
+        await routing().run('t1' as TaskId);
+        await settled('t1');
+        expect((await session((await task('t1').get()).sessionId!).get()).spec?.roster).toBeUndefined();
     });
 
     it('a task with its own environmentId runs there, not on the agent default', async () => {
