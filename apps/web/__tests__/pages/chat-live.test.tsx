@@ -57,7 +57,8 @@ describe('/chats/:id (live)', () => {
         await chat.post('hello there');
         const dom = await mountLive(`/chats/${chatId}`, h);
         await until(() => names(dom).length === 1, 'the posted message');
-        expect(names(dom)).toEqual(['Andii']);
+        // The user reads as "You" on the platform — "Andii" is the mock workspace's person (#152).
+        expect(names(dom)).toEqual(['You']);
         expect(dom.querySelector('[data-page="chat"]')!.hasAttribute('data-flush')).toBe(true);
         expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-name]'))).toEqual(['Atlas']);
         expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-history]'))).toEqual(['Coordinator · sees all history']);
