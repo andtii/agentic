@@ -6,9 +6,10 @@
 // every other port is the production wiring.
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
-import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
+import { createActorHost, createActorWorker, defaultPorts, ensureServerApp, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
 import { createWebAuth, defaultResolveUser, type RouteHandler } from '../../src/auth';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
+import { runWithHost } from '../../src/host-scope';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -26,14 +27,13 @@ export const ActorHost = createActorHost(actors);
 /**
  * `POST /auth/pair` (#144): the daemon's redeem route over THIS worker's
  * registry, built as `entry.cloudflare.ts` builds it (the GitHub half is
- * never called here). It hops to the Machine object (`pairingWiring`), so it
- * runs as the actor mount's fallback — under the Worker's own host scope,
- * never the last-booted object's (#137).
+ * never called here). It hops to the Machine object (`pairingWiring`), and
+ * is mounted in the production route order: BEFORE the actor mount, as an
+ * auth route (#172).
  */
 let pairRoute: RouteHandler | undefined;
-let currentEnv: PlatformEnv | undefined;
-function pair(env: PlatformEnv): RouteHandler | undefined {
-    if (!env.SESSION_SECRET) return undefined;
+function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined {
+    if (!env.SESSION_SECRET || request.method !== 'POST' || new URL(request.url).pathname !== '/auth/pair') return undefined;
     pairRoute ??= createWebAuth(
         { SESSION_SECRET: env.SESSION_SECRET, GITHUB_CLIENT_ID: 'test', GITHUB_CLIENT_SECRET: 'test', APP_ORIGIN: 'https://agentic.test' },
         { resolveUser: defaultResolveUser, pairing: pairingWiring(actors) }
@@ -41,19 +41,19 @@ function pair(env: PlatformEnv): RouteHandler | undefined {
     return pairRoute;
 }
 
-const worker = createActorWorker({
-    actors,
-    fallback: (request) => {
-        if (request.method === 'POST' && new URL(request.url).pathname === '/auth/pair' && currentEnv) return pair(currentEnv)?.(request);
-        return undefined;
-    }
-});
+const worker = createActorWorker({ actors });
 
-// The preview-only dev login (#35, #143: GET form + POST) is mounted here exactly as
-// `entry.cloudflare.ts` mounts it, so the demo walk-through signs in over the wire the way the Playwright smoke does.
+// The same shape as `entry.cloudflare.ts`: the dev login (#35, #143: GET form + POST), the auth
+// routes, then the actor worker — all of it under ONE scope, the Worker's own host (#137, #172).
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        currentEnv = env;
-        return devLoginRouteFor(request, env)?.(request) ?? worker.fetch(request, env, ctx);
+        return runWithHost(worker.host, async () => {
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
+            if (route) {
+                ensureServerApp(env, actors);
+                return route(request);
+            }
+            return worker.fetch(request, env, ctx);
+        });
     }
 };

@@ -5,6 +5,8 @@
 //
 //     auth routes  ->  daemon socket + actor mount + actor sockets
 //                  ->  server functions  ->  document render
+//
+// all of it inside ONE `runWithHost` scope — the Worker's own host (#137, #172).
 import { createFetchHandler } from '@sigx/server-renderer/server';
 import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
@@ -15,6 +17,7 @@ import { createWebAuth, defaultResolveUser, type RouteHandler, type WebAuth } fr
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { setSignInOptions } from './auth/sign-in';
 import { createOAuthRoutes, MCP_PATH, type WebOAuthServer } from './auth/oauth-server';
+import { runWithHost } from './host-scope';
 
 const render = createFetchHandler({
     template,
@@ -71,16 +74,21 @@ function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined
 const githubEnabled = (env: PlatformEnv): boolean => (env.SESSION_SECRET ?? '').length >= 32 && !!env.GITHUB_CLIENT_ID && !!env.GITHUB_CLIENT_SECRET && !!env.APP_ORIGIN;
 
 export default {
-    async fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        // What the shell's signed-out state may offer (`signInOptions`), from this request's env.
-        setSignInOptions({ github: githubEnabled(env), devLogin: devLoginEnabled(env) });
-        // The preview / local-only dev login (#35, #143): `GET` (the form) and `POST` (JSON or the form's
-        // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
-        const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
-        if (route) {
-            ensureServerApp(env);
-            return route(request);
-        }
-        return actors.fetch(request, env, ctx);
+    // Every route runs under the Worker's own host scope (#137, #172): the auth routes hop
+    // to the objects too (`pairingWiring`, the token lookup, the MCP mount), and an unscoped
+    // hop resolves through whichever object booted last when one shares the isolate.
+    fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
+        return runWithHost(actors.host, async () => {
+            // What the shell's signed-out state may offer (`signInOptions`), from this request's env.
+            setSignInOptions({ github: githubEnabled(env), devLogin: devLoginEnabled(env) });
+            // The preview / local-only dev login (#35, #143): `GET` (the form) and `POST` (JSON or the form's
+            // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
+            if (route) {
+                ensureServerApp(env);
+                return route(request);
+            }
+            return actors.fetch(request, env, ctx);
+        });
     }
 };

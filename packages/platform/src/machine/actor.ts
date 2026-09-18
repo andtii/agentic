@@ -509,9 +509,10 @@ export function defineMachineActor(ports: MachinePorts) {
                     };
                 },
 
-                /** The daemon says it is alive (also folded from the `heartbeat` frame). */
+                /** The daemon says it is alive (also folded from the `heartbeat` frame). A revoked machine is refused: `online` never flips back (#172). */
                 async heartbeat(active: readonly SessionId[] = []): Promise<void> {
                     const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     s.lastSeen = now();
                     s.online = true;
                     void active;

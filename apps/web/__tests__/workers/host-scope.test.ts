@@ -124,4 +124,41 @@ describe('worker: several ActorHost objects in one isolate resolve ambient hops 
         socketB.ws.close(1000, 'bye');
         await until(async () => !(await a.machine.get()).online && !(await b.machine.get()).online, 'both offline');
     });
+
+    // #172: the auth routes run in the Worker, OUTSIDE the actor mount. `POST /auth/pair`
+    // hops ambiently to the PairingDirectory and the Machine object (`pairingWiring`);
+    // unscoped, that hop resolved through the last-booted object's host — a Machine's.
+    it('POST /auth/pair after two machines said hello lands on the right Machine object', async () => {
+        const a = await pairNew('gamma');
+        const b = await pairNew('delta');
+        const socketA = await connectAndHello(a.machineId, a.token);
+        const socketB = await connectAndHello(b.machineId, b.token);
+        expect(await a.machine.get()).toMatchObject({ online: true });
+        expect(await b.machine.get()).toMatchObject({ online: true });
+
+        // A third machine, paired the way the Pair page and `agentic-daemon pair` do it: the page
+        // watches the pending record (its object boots LAST), then the daemon redeems the code over
+        // the auth route — not the mount. Unscoped, `isSelf` of that last host answered for the
+        // target and `Machine.pair` ran inside the Worker on the object's storage: internal error.
+        const ws = overHttp(Workspace, workspaceKey(WS), cookie);
+        const { machineId, pairingCode } = await ws.registerMachinePending({ name: 'epsilon' });
+        const c = overHttp(Machine, machineKey(WS, machineId), cookie);
+        expect(await c.get()).toMatchObject({ paired: false });
+        const redeemed = await SELF.fetch(`${ORIGIN}/auth/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: pairingCode, name: 'epsilon' }) });
+        expect(redeemed.status).toBe(200);
+        const paired = (await redeemed.json()) as { machineId: MachineId; workspaceId: WorkspaceId; token: string };
+        expect(paired).toMatchObject({ machineId, workspaceId: WS });
+        // The token is honoured by the object it was minted in — the pair landed in the right one.
+        expect(await c.get()).toMatchObject({ paired: true, name: 'epsilon', online: false });
+        const socketC = await connectAndHello(machineId, paired.token);
+        expect(await c.get()).toMatchObject({ online: true });
+
+        // Neither of the first two objects was reset by the hop.
+        expect(await a.machine.get()).toMatchObject({ online: true });
+        expect(await b.machine.get()).toMatchObject({ online: true });
+        socketA.ws.close(1000, 'bye');
+        socketB.ws.close(1000, 'bye');
+        socketC.ws.close(1000, 'bye');
+        await until(async () => !(await a.machine.get()).online && !(await b.machine.get()).online && !(await c.get()).online, 'all offline');
+    });
 });
