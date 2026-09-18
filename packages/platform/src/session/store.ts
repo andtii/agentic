@@ -15,7 +15,7 @@
 import type { AgentEvent, AgentTranscript, EventCursor, EventLogStore, TranscriptStore } from '@sigx/ai-agent';
 import type { AgentPart } from '@sigx/ai-agent/app';
 
-import { applySessionEntry, eventsAfter, type SessionEntry, type SessionState } from './state.js';
+import { applySessionEntry, eventsAfter, jsonBytes, utf8Bytes, type SessionEntry, type SessionState } from './state.js';
 
 /** The slice of `ActorContext<SessionState>` the stores use — the real context satisfies it inside a turn. */
 export interface SessionStoreContext {
@@ -43,7 +43,7 @@ export async function appendEntry(ctx: SessionStoreContext, entry: SessionEntry)
 export const TRANSCRIPT_BYTES = 1024 * 1024;
 
 const trimmed = (bytes: number): string => `[trimmed from the stored snapshot: ${Math.max(1, Math.round(bytes / 1024))} KB — the session's events keep it]`;
-const sizeOf = (v: unknown): number => JSON.stringify(v ?? null).length;
+const sizeOf = jsonBytes;
 
 /** Drop a part's bulk (tool output, content blocks, streaming argument text; reasoning text and provider data); the bytes saved. */
 function trimBulk(part: AgentPart): number {
@@ -54,7 +54,7 @@ function trimBulk(part: AgentPart): number {
         delete p.content;
         delete p.inputText;
     } else if (part.type === 'reasoning') {
-        if (part.text.length > 256) part.text = trimmed(part.text.length);
+        if (part.text.length > 256) part.text = trimmed(utf8Bytes(part.text));
         delete part.providerData;
     }
     return before - sizeOf(part);
@@ -95,7 +95,7 @@ export function boundTranscript(transcript: AgentTranscript, budget: number = TR
             size -= trimBulk(part) + trimInput(part);
             if (part.type === 'text' && part.text.length > 256) {
                 const before = sizeOf(part);
-                part.text = trimmed(part.text.length);
+                part.text = trimmed(utf8Bytes(part.text));
                 size -= before - sizeOf(part);
             }
         }

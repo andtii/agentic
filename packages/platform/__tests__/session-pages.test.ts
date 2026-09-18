@@ -10,7 +10,7 @@ import { actorKey, type AgentId, type FrozenAgentConfig, type TaskId, type Works
 import { allowAll, createTranscript, reduceAgentEvent, type AgentEvent, type AgentTranscript, type EventCursor } from '@sigx/ai-agent';
 import { checkEventInvariants, checkReplayEquality, mockAgent, type MockAgent } from '@sigx/ai-agent/testing';
 
-import { boundTranscript, defineSessionActor, PAGE_BYTES, SessionPage, sessionPageKey, TRANSCRIPT_BYTES, WINDOW_BYTES, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
+import { boundTranscript, defineSessionActor, jsonBytes, PAGE_BYTES, SessionPage, sessionPageKey, TRANSCRIPT_BYTES, utf8Bytes, WINDOW_BYTES, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
 import { applySessionEntry, initialSessionState, knownEvents, type SessionEntry, type SessionState } from '../src/session/state';
 import { testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 
@@ -93,7 +93,7 @@ async function storedState(): Promise<{ state: SessionState; bytes: number }> {
     const record = await app.storage.load('session', KEY);
     const state = structuredClone(record!.state) as SessionState;
     for (const entry of record!.log ?? []) applySessionEntry(state, entry as SessionEntry);
-    return { state, bytes: JSON.stringify(record!.state).length + JSON.stringify(record!.log ?? []).length };
+    return { state, bytes: jsonBytes(record!.state) + jsonBytes(record!.log ?? []) };
 }
 
 describe('Session event log paging (#198)', { timeout: 60_000 }, () => {
@@ -111,7 +111,7 @@ describe('Session event log paging (#198)', { timeout: 60_000 }, () => {
         expect(bytes).toBeLessThan(2 * 1024 * 1024 - 256 * 1024);
         for (const p of state.pages!) {
             const page = await app.storage.load('session-page', sessionPageKey(KEY, p.page));
-            expect(JSON.stringify(page!.state).length).toBeLessThan(PAGE_BYTES + 64 * 1024);
+            expect(jsonBytes(page!.state)).toBeLessThan(PAGE_BYTES + 64 * 1024);
         }
     });
 
@@ -191,6 +191,25 @@ describe('Session event log paging (#198)', { timeout: 60_000 }, () => {
         // Replayed twice, a roll drops nothing more.
         applySessionEntry(state, { t: 'roll', page: { page: 0, count: 10, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: 10 } } });
         expect(state.events).toHaveLength(13);
+    });
+});
+
+describe('sizes are UTF-8 bytes, what a Durable Object value counts (#198)', () => {
+    it('counts past-ASCII text at its encoded size, surrogate pairs as four', () => {
+        for (const text of ['plain', 'åäö', '你好世界', '👍🏽 done', '\uD800 lone']) {
+            expect(utf8Bytes(text), text).toBe(new TextEncoder().encode(text).length);
+        }
+        const ev = { sessionId: 's', epoch: 1, seq: 1, type: 'part-delta', partId: 'p', delta: '你好'.repeat(1000) };
+        expect(jsonBytes(ev)).toBe(new TextEncoder().encode(JSON.stringify(ev)).length);
+        expect(jsonBytes(ev)).toBeGreaterThan(JSON.stringify(ev).length * 2);
+    });
+
+    it('bounds a multi-byte transcript by its encoded size, not its code units', () => {
+        const t = createTranscript('s');
+        for (let i = 0; i < 20; i++) t.messages.push({ id: `m${i}`, role: 'assistant', parts: [{ type: 'tool', callId: `c${i}`, name: 'Read', status: 'completed', input: {}, output: '你'.repeat(40_000) } as never] });
+        // 800 K code units — under the budget by `.length`, 2.4 MB encoded.
+        expect(JSON.stringify(t).length).toBeLessThan(TRANSCRIPT_BYTES);
+        expect(new TextEncoder().encode(JSON.stringify(boundTranscript(t))).length).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
     });
 });
 

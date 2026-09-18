@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, cursorAfter, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, bytesOf, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -242,7 +242,7 @@ export function defineSessionActor(ports: SessionPorts) {
         while ((s.windowBytes ?? bytesOf(s.events)) > WINDOW_BYTES && s.events.length > 1) {
             let bytes = 0;
             let count = 0;
-            while (count < s.events.length - 1 && bytes < PAGE_BYTES) bytes += JSON.stringify(s.events[count++]).length;
+            while (count < s.events.length - 1 && bytes < PAGE_BYTES) bytes += jsonBytes(s.events[count++]);
             const slice = c.snapshot(s.events.slice(0, count));
             const page = s.pages?.length ?? 0;
             await c.actor(SessionPage, sessionPageKey(c.key, page)).store(slice);

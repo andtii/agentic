@@ -46,9 +46,9 @@ export interface CorrectionRecord {
     readonly parked: number;
 }
 
-/** JSON bytes the window may hold before its oldest slice is paged out. */
+/** UTF-8 JSON bytes the window may hold before its oldest slice is paged out. */
 export const WINDOW_BYTES = 512 * 1024;
-/** About how many JSON bytes one page takes from the window. */
+/** About how many UTF-8 JSON bytes one page takes from the window. */
 export const PAGE_BYTES = 256 * 1024;
 
 /** One archived slice of the log: `SessionPage` `{sessionKey}:p{page}`, its first and last cursors. */
@@ -188,10 +188,32 @@ export function applySessionEntry(state: SessionState, entry: SessionEntry): voi
     }
 }
 
-/** JSON bytes of `events` — the unit the window budget counts in. */
+/**
+ * UTF-8 bytes of `text` — what a Durable Object value is measured in. `length` counts UTF-16 code
+ * units and undercounts anything past ASCII up to threefold; no allocation, so it runs per event.
+ */
+export function utf8Bytes(text: string): number {
+    let n = 0;
+    for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (c < 0x80) n += 1;
+        else if (c < 0x800) n += 2;
+        else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+            // A surrogate pair is one 4-byte code point.
+            n += 4;
+            i++;
+        } else n += 3;
+    }
+    return n;
+}
+
+/** UTF-8 bytes of `value` as JSON — the unit every budget of the record counts in. */
+export const jsonBytes = (value: unknown): number => utf8Bytes(JSON.stringify(value ?? null));
+
+/** UTF-8 JSON bytes of `events` — the unit the window budget counts in. */
 export function bytesOf(events: readonly AgentEvent[]): number {
     let n = 0;
-    for (const e of events) n += JSON.stringify(e).length;
+    for (const e of events) n += jsonBytes(e);
     return n;
 }
 
@@ -251,7 +273,7 @@ function applyEvent(state: SessionState, ev: AgentEvent): void {
     if (!cursorAfter(state.head, ev)) return;
     migrate(state);
     state.events.push(ev);
-    state.windowBytes = (state.windowBytes ?? 0) + JSON.stringify(ev).length;
+    state.windowBytes = (state.windowBytes ?? 0) + jsonBytes(ev);
     if (INDEXED.has(ev.type)) indexEvent(state, ev);
     if (ev.type === 'request' && ev.callId !== undefined) indexCall(state, ev.callId);
     state.head = { epoch: ev.epoch, seq: ev.seq };
