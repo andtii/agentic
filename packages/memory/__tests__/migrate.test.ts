@@ -129,6 +129,7 @@ describe('migrate: options', () => {
             put: (e) => flat.put(e),
             update: (id, p) => flat.update(id, p),
             retire: (id, why) => flat.retire(id, why),
+            delete: (id) => flat.delete(id),
             get: (id) => flat.get(id),
             query: (q) => flat.query(q),
             export: () => flat.export(),

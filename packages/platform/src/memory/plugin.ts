@@ -25,6 +25,7 @@ export function actorMemoryStore(client: MemoryActorClient, batch = MEMORY_WIRE_
         put: (entry: NewMemoryEntry): Promise<MemoryEntry> => client.put(entry),
         update: (id: string, patch: Partial<Omit<MemoryEntry, 'id'>>): Promise<MemoryEntry> => client.update(id, patch),
         retire: (id: string, why: string): Promise<void> => client.retire(id, why),
+        delete: (id: string): Promise<boolean> => client.delete(id),
         get: (id: string): Promise<MemoryEntry | undefined> => client.get(id),
         query: (q: MemoryQuery): Promise<readonly RankedMemory[]> => client.query(q),
         async *export(): AsyncIterable<MemoryEntry> {

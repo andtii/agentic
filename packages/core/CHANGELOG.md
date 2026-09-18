@@ -6,6 +6,7 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- `MemoryStore.delete(id): Promise<boolean>` (#149, MEM-05 / MEM-08): remove an entry for good; `false` when there is no such entry. `retire` stays the soft form that keeps the history. Every `MemoryStore` implements it.
 - `ChatEntry` kind `rename` (#124): `{ t: 'rename', title, at }` — the chat's title as an entry, so a fold over the entries carries the title (the last `rename` wins) like every other piece of chat state.
 - `ChatEntry` status kind `task-failed` (#128): the task an agent was activated for could not run or ended in error — `ref` is the task id, `error` the `TaskError`; `SessionEvent` status carries the optional `error` so the router can publish it to the chat (OPS-04).
 - `ChatEntry` status kinds `request` / `request-resolved` (#40): a session's open request and its settlement as chat status entries; their `ref` is required and typed `RequestStatusRef` (`approval:{requestId}` | `input:{requestId}`, `isRequestStatusRef`) on both so they always pair up.

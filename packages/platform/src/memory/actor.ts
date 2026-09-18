@@ -92,6 +92,13 @@ export const Memory = defineActor({
                 await store.retire(id, why);
                 await ctx.save();
             },
+            /** Removes the entry for good; `false` when there is none. `retire` keeps the history. */
+            async delete(id: string): Promise<boolean> {
+                guard('write');
+                const deleted = await store.delete(id);
+                if (deleted) await ctx.save();
+                return deleted;
+            },
             async get(id: string): Promise<MemoryEntry | undefined> {
                 guard('read');
                 const e = await store.get(id);

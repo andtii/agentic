@@ -60,6 +60,8 @@ export interface MemoryStore {
     put(entry: NewMemoryEntry): Promise<MemoryEntry>;
     update(id: string, patch: Partial<Omit<MemoryEntry, 'id'>>): Promise<MemoryEntry>;
     retire(id: string, why: string): Promise<void>;
+    /** Remove an entry for good (MEM-05, MEM-08); `false` when there is no such entry. `retire` keeps the history instead. */
+    delete(id: string): Promise<boolean>;
     get(id: string): Promise<MemoryEntry | undefined>;
     query(q: MemoryQuery): Promise<readonly RankedMemory[]>;
     export(): AsyncIterable<MemoryEntry>;

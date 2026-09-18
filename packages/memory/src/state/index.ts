@@ -34,6 +34,8 @@ export type MemoryLogEntry =
     | { readonly op: 'put'; readonly entry: MemoryEntry }
     | { readonly op: 'update'; readonly id: string; readonly patch: Partial<Omit<MemoryEntry, 'id'>> }
     | { readonly op: 'retire'; readonly id: string; readonly why: string; readonly at: number }
+    /** Remove an entry and its retirement for good (MEM-05, MEM-08). */
+    | { readonly op: 'delete'; readonly id: string }
     /** Drop expired `working` entries (MEM-12: working context is temporary). */
     | { readonly op: 'compact'; readonly now: number };
 
@@ -145,6 +147,11 @@ export function applyMemoryLog(state: MemoryState, log: MemoryLogEntry): void {
             if (!old) break;
             state.entries[log.id] = { ...old, retired: true };
             state.retirements[log.id] = { why: log.why, at: log.at };
+            break;
+        }
+        case 'delete': {
+            delete state.entries[log.id];
+            delete state.retirements[log.id];
             break;
         }
         case 'compact': {
