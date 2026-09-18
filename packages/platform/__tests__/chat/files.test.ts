@@ -70,6 +70,18 @@ describe('registerUpload', () => {
         }
     });
 
+    it('is refused (501) by a Chat without a file store, and so is posting a pending upload', async () => {
+        const storage = memoryStorage();
+        await app.stop();
+        app = await startChatApp(storage, store);
+        await chatAs(user).registerUpload(chatFile('f1'));
+        await app.stop();
+        app = await startChatApp(storage);
+        expect(await statusOf(chatAs(user).registerUpload(chatFile('f2')))).toBe(501);
+        expect(await statusOf(chatAs(user).post(withFile('f1')))).toBe(501);
+        expect((await chatAs(user).get()).seq).toBe(0);
+    });
+
     it('ends in one save', async () => {
         const before = app.saves.filter((s) => s.type === 'Chat').length;
         await chatAs(user).registerUpload(chatFile('f1'));

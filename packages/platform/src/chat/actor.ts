@@ -275,7 +275,7 @@ export interface ChatOptions {
     /**
      * Where attachment bytes live (#203) — R2 in the web app. `post` calls
      * `markPosted` when a pending upload goes into a message, so the orphan
-     * sweep keeps it. Absent: nothing is marked (a host without a store takes no uploads).
+     * sweep keeps it. Absent: `registerUpload` and a `post` of a pending upload answer 501 — a host without a store takes no uploads.
      */
     readonly files?: ChatFileStore;
 }
@@ -317,7 +317,9 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 const chatId = chatIdOfKey(ctx.key);
                 // Attachments (#203): every file part is checked before anything is stored; the uploads it posts are marked in the store first.
                 const posting = checkFileParts(ctx.state, chatId, principal, parts, Date.now());
-                if (posting.length > 0 && ports.files) {
+                if (posting.length > 0) {
+                    // No store, no way to keep the bytes from the orphan sweep: a pending upload is never posted without one.
+                    if (!ports.files) throw new ServerFnError(501, 'Chat.post: this deployment has no file store; attachments are not available');
                     const workspaceId = workspaceOfKey(ctx.key) as WorkspaceId;
                     for (const fileId of posting) await ports.files.markPosted(workspaceId, chatId, fileId);
                 }
@@ -413,11 +415,13 @@ export function defineChatActor(ports: ChatOptions = {}) {
              * its uploader only, until a `post` of theirs references it. Users and
              * external clients only; at most `MAX_PENDING_UPLOADS` per uploader,
              * and a pending upload is forgotten after `PENDING_TTL_MS`. Idempotent
-             * for the same uploader and id.
+             * for the same uploader and id. A Chat without a file store takes no
+             * uploads (501).
              */
             async registerUpload(file: ChatFile): Promise<ChatFile> {
                 const principal = principalOf(ctx);
                 if (!principal) throw new Error('Chat.registerUpload: no principal');
+                if (!ports.files) throw new ServerFnError(501, 'Chat.registerUpload: this deployment has no file store; attachments are not available');
                 const chatId = chatIdOfKey(ctx.key);
                 checkUpload(file, chatId);
                 const me = principalKey(principal);
