@@ -51,6 +51,24 @@ describe('applyMemoryLog', () => {
         expect(s.rev).toBe(2);
     });
 
+    it('delete drops the entry and its retirement; replaying folds to the same state', () => {
+        const log = [
+            { op: 'put', entry: entry('a', 'one') },
+            { op: 'put', entry: entry('b', 'two') },
+            { op: 'retire', id: 'a', why: 'stale', at: NOW },
+            { op: 'delete', id: 'a' },
+            { op: 'delete', id: 'nope' }
+        ] as const;
+        const s1 = createMemoryState();
+        const s2 = createMemoryState();
+        for (const l of log) applyMemoryLog(s1, l);
+        for (const l of log) applyMemoryLog(s2, l);
+        expect(s1).toEqual(s2);
+        expect(Object.keys(s1.entries)).toEqual(['b']);
+        expect(s1.retirements).toEqual({});
+        expect(s1.rev).toBe(5);
+    });
+
     it('compacts records per task and leaves records without a task alone', () => {
         const s = createMemoryState();
         const taskId = 'task_1' as TaskId;
@@ -122,6 +140,14 @@ describe('createMemoryStore', () => {
         await store.compact();
         expect(ops).toEqual(['put', 'compact', 'update', 'retire', 'compact']);
         expect(store.state.rev).toBe(5);
+    });
+
+    it('delete of an id that only names an Object.prototype member resolves false and commits nothing', async () => {
+        const logs: string[] = [];
+        const store = createMemoryStore({ commit: (state, log) => { logs.push(log.op); applyMemoryLog(state, log); } });
+        expect(await store.delete('toString')).toBe(false);
+        expect(await store.delete('__proto__')).toBe(false);
+        expect(logs).toEqual([]);
     });
 
     it('pages exports by id', async () => {

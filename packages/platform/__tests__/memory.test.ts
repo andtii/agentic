@@ -151,6 +151,30 @@ describe('Memory actor', () => {
         expect(status(await actor(Memory, shared).query({ limit: 5 }).catch((e: unknown) => e))).toBe(403);
     });
 
+    it('MEM-05/08: delete removes an entry for good, inside the turn, and only with write access', async () => {
+        const storage = memoryStorage();
+        await start(storage);
+        as(agentA);
+        const client = actor(Memory, privateA);
+        const keep = await client.put(fact);
+        const gone = await client.put({ ...fact, text: 'the team deploys on mondays' });
+
+        as(agentB);
+        expect(status(await actor(Memory, privateA).delete(gone.id).catch((e: unknown) => e))).toBe(403);
+
+        as(agentA);
+        expect(await client.delete(gone.id)).toBe(true);
+        expect(await client.delete(gone.id)).toBe(false);
+        expect(await client.get(gone.id)).toBeUndefined();
+        expect((await client.query({ text: 'deploys', limit: 5 })).map((r) => r.entry.id)).toEqual([keep.id]);
+        expect((await client.exportPage(null)).entries.map((e) => e.id)).toEqual([keep.id]);
+        expect(await client.stats()).toMatchObject({ entries: 1, live: 1 });
+
+        await host!.deactivate({ type: 'Memory', key: privateA });
+        expect(await actor(Memory, privateA).get(gone.id)).toBeUndefined();
+        expect((await actor(Memory, privateA).stats()).entries).toBe(1);
+    });
+
     it('persists every mutation inside the turn: state survives a deactivation', async () => {
         const storage = memoryStorage();
         await start(storage);

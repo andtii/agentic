@@ -113,6 +113,19 @@ export function memoryConformance(make: MemoryStoreFactory, options: MemoryConfo
         await assertRejects(() => store.retire('mem_missing', 'why'), 'retire of an unknown id rejects');
     });
 
+    define('delete removes an entry from get, query and export', async (store) => {
+        const keep = await store.put(entry('Keep the release notes'));
+        const gone = await store.put(entry('Delete the release notes'));
+        assertEqual(await store.delete(gone.id), true, 'delete of a stored entry resolves true');
+        assertEqual(await store.get(gone.id), undefined, 'a deleted entry is not readable');
+        const ids = (await store.query({ text: 'release notes', limit: 10 })).map((r) => r.entry.id);
+        assertEqual(ids, [keep.id], 'query never returns a deleted entry');
+        const exported: string[] = [];
+        for await (const e of store.export()) exported.push(e.id);
+        assertEqual(exported, [keep.id], 'export leaves a deleted entry out');
+        assertEqual(await store.delete(gone.id), false, 'delete of an unknown id resolves false');
+    });
+
     define('query ranks by text relevance', async (store) => {
         await store.put(entry('The user prefers tabs over spaces in TypeScript files.'));
         const target = await store.put(entry('Deploys go through the staging Cloudflare worker before production.'));

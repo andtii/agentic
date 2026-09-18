@@ -23,6 +23,7 @@ Design: `docs/architecture.md` §8. What may move into the sigx estate later: `d
 - `working` entries with a `ttl` expire `ttl` ms after `provenance.at`; expired ones never come back from `query` and are compacted away on the next `working` put or `compact()`.
 - `record` entries are compacted per task: a new record for a `taskId` retires the previous ones and `supersedes` the latest.
 - `retire` is a soft delete: hidden from `query`, still readable through `get` (flagged `retired`) and exported.
+- `delete` removes the entry and its retirement for good (MEM-05, MEM-08): gone from `get`, `query` and `export`; it resolves `false` for an unknown id instead of rejecting. In the log it is `{ op: 'delete', id }`.
 - Export is NDJSON with a header line `{ format: 'agentic-memory', version: 1, scope?, exportedAt }`; a reader refuses unknown formats and versions. `import` reports `imported`, `skipped` (invalid rows, or an existing id with `onConflict: 'skip'`, the default) and `droppedFields` (fields the entry shape cannot hold, dotted for `provenance.*`).
 
 ## Migration and fidelity (MEM-09)

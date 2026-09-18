@@ -109,6 +109,11 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
             retirements.set(id, { why, at: now() });
         },
 
+        async delete(id): Promise<boolean> {
+            retirements.delete(id);
+            return entries.delete(id);
+        },
+
         async get(id): Promise<MemoryEntry | undefined> {
             return entries.get(id);
         },
