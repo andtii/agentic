@@ -39,8 +39,9 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, cursorAfter, eventsAfter, initialSessionState, parseSessionKey, platformCursor, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
-import { appendEntry, createTranscriptStore } from './store.js';
+import { applySessionEntry, bytesOf, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { SessionPage, sessionPageKey } from './page.js';
+import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
 
@@ -230,9 +231,42 @@ export function defineSessionActor(ports: SessionPorts) {
      * the log already has (a replayed frame, a drain overlapping the driver)
      * is folded by nothing and tells nobody twice.
      */
+    /**
+     * Keep the record's window under `WINDOW_BYTES` (#198): store its oldest slice (about `PAGE_BYTES`,
+     * never the newest event) in the next `SessionPage`, then append the `roll` that drops it — the page
+     * first, so a roll entry never names a page that is not there. A record from before #198 rolls down
+     * over its next appends, a page per loop.
+     */
+    async function rollWindow(c: ActorContext<SessionState>): Promise<void> {
+        const s = c.state;
+        while ((s.windowBytes ?? bytesOf(s.events)) > WINDOW_BYTES && s.events.length > 1) {
+            let bytes = 0;
+            let count = 0;
+            while (count < s.events.length - 1 && bytes < PAGE_BYTES) bytes += jsonBytes(s.events[count++]);
+            const slice = c.snapshot(s.events.slice(0, count));
+            const page = s.pages?.length ?? 0;
+            await c.actor(SessionPage, sessionPageKey(c.key, page)).store(slice);
+            const first = slice[0]!;
+            const last = slice[slice.length - 1]!;
+            await appendEntry(c, { t: 'roll', page: { page, count, first: { epoch: first.epoch, seq: first.seq }, last: { epoch: last.epoch, seq: last.seq } } });
+        }
+    }
+
+    /** Every event after `from` (exclusive; all without one), oldest first: the pages that reach past it, then the window. */
+    async function eventsSince(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Pick<SessionState, 'pages' | 'events'>, from?: EventCursor): Promise<AgentEvent[]> {
+        const out: AgentEvent[] = [];
+        for (const p of s.pages ?? []) {
+            if (from && !cursorAfter(from, p.last)) continue;
+            out.push(...eventsAfter(await c.actor(SessionPage, sessionPageKey(c.key, p.page)).read(), from));
+        }
+        for (const ev of eventsAfter(s.events, from)) if (!from || cursorAfter(from, ev)) out.push(ev);
+        return out;
+    }
+
     async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
         if (!cursorAfter(c.state.head, ev)) return;
         await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
+        await rollWindow(c);
         if (ev.type !== 'request' && ev.type !== 'request-resolved') return;
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
@@ -259,7 +293,7 @@ export function defineSessionActor(ports: SessionPorts) {
             });
             return;
         }
-        const request = c.state.events.find((e) => e.type === 'request' && e.requestId === ev.requestId);
+        const request = knownEvents(c.state).find((e) => e.type === 'request' && e.requestId === ev.requestId);
         if (!request || request.type !== 'request') return;
         await publishChat(c, { kind: 'status', status: 'request-resolved', ref: requestRef(request) });
         const ref: NotificationRef = { kind: 'session', sessionId: parsed.sessionId, requestId: ev.requestId };
@@ -328,7 +362,7 @@ export function defineSessionActor(ports: SessionPorts) {
             status: s.status,
             head: { epoch: s.head.epoch, seq: s.head.seq },
             openRequests: [...s.openRequests],
-            eventCount: s.events.length,
+            eventCount: (s.archived ?? 0) + s.events.length,
             ...(s.spec ? { spec: c.snapshot(s.spec) } : {}),
             ...(s.mode ? { mode: s.mode } : {}),
             ...(s.ref ? { ref: c.snapshot(s.ref) } : {}),
@@ -339,7 +373,7 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
             corrections: c.snapshot(s.corrections ?? []),
-            grants: sessionGrantsOf(s.events)
+            grants: sessionGrantsOf(knownEvents(s))
         };
     }
 
@@ -418,11 +452,11 @@ export function defineSessionActor(ports: SessionPorts) {
         const principal = agentPrincipal(c);
         const plugin = learning && pluginFor(c, learning);
         if (!learning || !plugin || !spec?.taskId || !parsed || !principal) return;
-        const end = s.events.findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
+        const end = knownEvents(s).findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
         if (!end || end.type !== 'turn-end' || isInterruptedTurnEnd(end)) return;
         const status = turnStatusOf(end.stopReason);
         const result: TaskResult = { ...(text ? { text } : {}), artifacts: [], verified: false };
-        const start = s.events.find((e) => e.type === 'turn-start' && e.turnId === turnId);
+        const start = knownEvents(s).find((e) => e.type === 'turn-start' && e.turnId === turnId);
         const objective = spec.objective?.trim() || (start?.type === 'turn-start' ? lastUserText(start.input) : '');
         let record: LearningRecord = { turnId, at: now(), status, verification: 'none', written: 0, parked: 0 };
         try {
@@ -452,12 +486,12 @@ export function defineSessionActor(ports: SessionPorts) {
         }
     }
 
-    /** Fold the events since the last snapshot into a detached copy of it; the transcript itself says where it stands. */
-    function snapshotTranscript(c: ActorContext<SessionState>): AgentTranscript {
+    /** Fold the events since the last snapshot into a detached copy of it; the transcript itself says where it stands. A long turn's events reach into the pages. */
+    async function snapshotTranscript(c: ActorContext<SessionState>): Promise<AgentTranscript> {
         const s = c.state;
         const last = s.events[s.events.length - 1];
         const base = s.transcript ? c.snapshot(s.transcript) : createTranscript(last?.sessionId ?? s.ref?.id ?? '');
-        for (const ev of c.snapshot(eventsAfter(s.events, { epoch: base.epoch, seq: base.seq }))) reduceAgentEvent(base, ev);
+        for (const ev of c.snapshot(await eventsSince(c, s, { epoch: base.epoch, seq: base.seq }))) reduceAgentEvent(base, ev);
         return base;
     }
 
@@ -559,8 +593,8 @@ export function defineSessionActor(ports: SessionPorts) {
         const s = c.state;
         const live = lives.get(c.key);
         if (live) await drainBuffered(c, live);
-        const transcript = snapshotTranscript(c);
-        s.transcript = transcript;
+        const transcript = await snapshotTranscript(c);
+        s.transcript = boundTranscript(transcript);
         if (live) s.ref = structuredClone(live.session.ref);
         const text = finalText(transcript, turnId);
         if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(s.spec?.taskId ? { taskId: s.spec.taskId } : {}) });
@@ -582,8 +616,8 @@ export function defineSessionActor(ports: SessionPorts) {
         const epoch = Math.max(1, s.head.epoch);
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
         const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, epoch, seq: ++seq });
-        const before = snapshotTranscript(c);
-        if (!s.events.some((e) => e.turnId === turnId && e.type === 'turn-start')) await emit({ type: 'turn-start', turnId, input });
+        const before = await snapshotTranscript(c);
+        if (!knownEvents(s).some((e) => e.turnId === turnId && e.type === 'turn-start')) await emit({ type: 'turn-start', turnId, input });
         for (const m of before.messages) {
             if (m.turnId !== turnId) continue;
             for (const p of m.parts) {
@@ -685,7 +719,7 @@ export function defineSessionActor(ports: SessionPorts) {
                         // Closed mid-turn: the turn ends here, and the record says so.
                         await finishInterrupted(ctx, s.running.turnId);
                     } else {
-                        s.transcript = snapshotTranscript(ctx);
+                        s.transcript = boundTranscript(await snapshotTranscript(ctx));
                         await ctx.save();
                     }
                     await publishChat(ctx, { kind: 'status', status: 'session-ended' });
@@ -783,12 +817,13 @@ export function defineSessionActor(ports: SessionPorts) {
                         if (!live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
                     }
                     // The last interruption's resume, already sent: the remembered reply, whatever ran since (OPS-06).
-                    const lastCut = s.events.findLast(isInterruptedTurnEnd);
-                    const previous = lastCut && cutTurnOf(s.events, lastCut);
+                    const known = knownEvents(s);
+                    const lastCut = known.findLast(isInterruptedTurnEnd);
+                    const previous = lastCut && cutTurnOf(known, lastCut);
                     if (previous && s.commands[commandId ?? resumeCommandId(previous.turnId)]) {
                         return dispatch({ v: V, commandId: commandId ?? resumeCommandId(previous.turnId), type: 'prompt', turnId: resumeTurnId(previous.turnId), input: ctx.snapshot(previous.input) });
                     }
-                    const cut = interruptedTurn(s.events);
+                    const cut = interruptedTurn(known);
                     if (!cut) return errorReply(commandId ?? newCommandId('resume'), 'invalid', `session "${ctx.key}" has no interrupted turn to resume`);
                     return dispatch({ v: V, commandId: commandId ?? resumeCommandId(cut.turnId), type: 'prompt', turnId: resumeTurnId(cut.turnId), input: ctx.snapshot(cut.input) });
                 },
@@ -797,7 +832,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 respond(requestId: string, decision: Decision, commandId: string = `respond:${requestId}`): Promise<SessionCommandResult> {
                     if (decision.type === 'input') {
                         // A question form takes answers keyed by question: a bare string would reach the runtime as "no answer".
-                        const schema = requestRecordOf(ctx.state.events, requestId)?.request.schema;
+                        const schema = requestRecordOf(knownEvents(ctx.state), requestId)?.request.schema;
                         decision = { ...decision, answers: shapeAnswers(schema, decision.answers) };
                     }
                     return dispatch({ v: V, commandId, type: 'respond', requestId, decision });
@@ -831,9 +866,9 @@ export function defineSessionActor(ports: SessionPorts) {
                     return info(ctx);
                 },
 
-                /** Events after `from` (exclusive) — a one-shot read; `tail` follows. */
-                events(from?: EventCursor): AgentEvent[] {
-                    return ctx.snapshot(eventsAfter(ctx.state.events, from));
+                /** Events after `from` (exclusive) — a one-shot read across the pages; `tail` follows. */
+                async events(from?: EventCursor): Promise<AgentEvent[]> {
+                    return ctx.snapshot(await eventsSince(ctx, ctx.state, from));
                 },
 
                 /** The transcript snapshot from the last turn end, if any. */
@@ -854,7 +889,7 @@ export function defineSessionActor(ports: SessionPorts) {
                     if (!s.opened || !s.spec) throw new ServerFnError(409, `session "${ctx.key}" is not open`);
                     if (s.status === 'closed') throw new ServerFnError(409, `session "${ctx.key}" is closed`);
                     const requestId = platformRequestId(input.callId);
-                    if (!s.events.some((e) => e.type === 'request' && e.requestId === requestId)) {
+                    if (!knownEvents(s).some((e) => e.type === 'request' && e.requestId === requestId)) {
                         // The local driver may lag the runtime: fold what the runtime already emitted (the call itself) so the question lands after it.
                         const live = lives.get(ctx.key);
                         if (live) await drainBuffered(ctx, live, false);
@@ -869,21 +904,21 @@ export function defineSessionActor(ports: SessionPorts) {
                             ...(input.options ? { options: input.options } : {})
                         });
                     }
-                    const resolved = s.events.find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    const resolved = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
                     return { requestId, ...(resolved ? { resolved: ctx.snapshot(resolved as RequestResolvedEvent) } : {}) };
                 },
 
                 /** One request with its call input and, once decided, the decision — what an approval card renders (CHT-09). A live read. */
                 request(requestId: string): SessionRequestView | null {
                     const s = ctx.state;
-                    const record = requestRecordOf(s.events, requestId, s.transcript);
+                    const record = requestRecordOf(knownEvents(s), requestId, s.transcript);
                     return record ? requestView(ctx, ctx.snapshot(record)) : null;
                 },
 
                 /** Every request of the session, oldest first; `openOnly` keeps the ones still waiting for a person. A live read. */
                 requests(options: { readonly openOnly?: boolean } = {}): SessionRequestView[] {
                     const s = ctx.state;
-                    const all = requestRecordsOf(s.events, s.transcript);
+                    const all = requestRecordsOf(knownEvents(s), s.transcript);
                     return ctx.snapshot(options.openOnly ? all.filter((r) => !r.resolved) : all).map((r) => requestView(ctx, r));
                 },
 
@@ -901,7 +936,7 @@ export function defineSessionActor(ports: SessionPorts) {
                     if (!learning?.plugin) throw new Error(`session "${ctx.key}": no learning plugin is configured, corrections cannot be learned from`);
                     if (!s.opened || !s.spec || !parsed || !principal) throw new Error(`session "${ctx.key}" is not open`);
                     const plugin = pluginFor(ctx, learning)!;
-                    const message = snapshotTranscript(ctx).messages.find((m) => m.id === messageId);
+                    const message = (await snapshotTranscript(ctx)).messages.find((m) => m.id === messageId);
                     if (!message || message.role !== 'assistant') throw new Error(`session "${ctx.key}": "${messageId}" is not an assistant message of this session`);
                     const caller = ctx.principal as Principal | null;
                     const correction = correctionOf({
@@ -960,7 +995,8 @@ export function defineSessionActor(ports: SessionPorts) {
             async *tail(from?: EventCursor): AsyncIterable<AgentEvent> {
                 let last: EventCursor = from ?? { epoch: 0, seq: 0 };
                 for await (const s of ctx.changes({ initial: true, throttleMs: CHANGE_THROTTLE_MS })) {
-                    for (const ev of eventsAfter(s.events, last)) {
+                    // Pages first: what was archived before this follower got to it (a late joiner, or a roll between two snapshots).
+                    for (const ev of await eventsSince(ctx, s, last)) {
                         if (!cursorAfter(last, ev)) continue;
                         last = { epoch: ev.epoch, seq: ev.seq };
                         yield ev;
@@ -971,7 +1007,7 @@ export function defineSessionActor(ports: SessionPorts) {
             /** The decision on `requestId` — yielded once it is in the log (at once when it already is); ends without one when the session closes first. */
             async *resolution(requestId: string): AsyncIterable<RequestResolvedEvent> {
                 for await (const s of ctx.changes({ initial: true, throttleMs: CHANGE_THROTTLE_MS })) {
-                    const ev = s.events.find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    const ev = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
                     if (ev) {
                         yield ev as RequestResolvedEvent;
                         return;

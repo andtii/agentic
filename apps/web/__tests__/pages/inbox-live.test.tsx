@@ -64,7 +64,8 @@ describe('/ Needs you (live)', () => {
         expect(card(a)!.textContent).toContain('ask on destructive');
         expect(card(a)!.textContent).toContain('cmd: git push');
         expect(a.querySelector('[data-home-needs] a[data-scope="button"]')!.getAttribute('href')).toBe(`/chats/${chatId}`);
-        expect((await task.get()).status).toBe('waiting');
+        // The Task parks through the router's follow of the session (throttled, #196), a beat after the row shows.
+        await until(async () => (await task.get()).status === 'waiting', 'the task to park');
 
         buttonNamed(card(b)!, 'Allow once').click();
         await until(() => rows(a).length === 0 && rows(b).length === 0, 'the row to leave both tabs');
@@ -106,7 +107,8 @@ describe('/ Needs you (live)', () => {
         expect(row.getAttribute('data-kind')).toBe('interrupted');
         expect(row.textContent).toContain('Forge was interrupted mid-turn');
         expect(dom.querySelector('[data-home-needs] a[data-scope="button"]')!.getAttribute('href')).toBe(`/chats/${chatId}`);
-        expect((await task.get()).status).toBe('waiting');
+        // The Task parks through the router's follow of the session (throttled, #196), a beat after the row shows.
+        await until(async () => (await task.get()).status === 'waiting', 'the task to park');
 
         buttonNamed(row, 'Resume').click();
         await until(() => rows(dom).length === 0, 'the row to leave', 8_000);

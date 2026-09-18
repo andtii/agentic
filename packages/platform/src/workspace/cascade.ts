@@ -197,7 +197,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
 }
 
 /** Types the export reads through the index; anything else the store lists is "present, not exported". Literals: this module and the Registry import each other. */
-const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'Chat', 'ChatPage', 'Schedule', 'Inbox', 'Registry']);
+const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'Chat', 'ChatPage', 'session-page', 'Schedule', 'Inbox', 'Registry']);
 
 /** Every child record the index implies, children first; the root is NOT included. */
 export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef[]> {

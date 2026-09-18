@@ -5,6 +5,15 @@
  * entry, folded in append order by `applySessionEntry`, which must be a
  * pure function of (state, entry) — it runs once live and again on every
  * activation replaying the record's log. No clock, no ids in here.
+ *
+ * Only a WINDOW of the log stays in the record (#198): a Durable Object
+ * value is capped at 2 MB, and a long daemon turn streams megabytes. Once
+ * the window passes `WINDOW_BYTES` the actor stores its oldest slice in a
+ * `SessionPage` and appends a `roll` entry that drops it here — so a
+ * replay folds the same window. What whole-history readers need (requests
+ * and their decisions, turn boundaries, the calls requests ask about) is
+ * kept in `index`; `knownEvents` is that index before the window, then
+ * the window.
  */
 
 import type { Correction, SessionId, TaskOutcome, WorkspaceId } from '@agentic/core';
@@ -37,6 +46,19 @@ export interface CorrectionRecord {
     readonly parked: number;
 }
 
+/** UTF-8 JSON bytes the window may hold before its oldest slice is paged out. */
+export const WINDOW_BYTES = 512 * 1024;
+/** About how many UTF-8 JSON bytes one page takes from the window. */
+export const PAGE_BYTES = 256 * 1024;
+
+/** One archived slice of the log: `SessionPage` `{sessionKey}:p{page}`, its first and last cursors. */
+export interface SessionPageMeta {
+    readonly page: number;
+    readonly count: number;
+    readonly first: EventCursor;
+    readonly last: EventCursor;
+}
+
 export type SessionStatus = 'idle' | 'running' | 'awaiting' | 'closed' | 'error' | 'disconnected';
 
 /** `local`: the actor drives an in-process `AgentSession`; `remote`: a daemon does and forwards frames. */
@@ -66,8 +88,16 @@ export interface SessionState {
     status: SessionStatus;
     /** The last `(epoch, seq)` in `events`. */
     head: EventCursor;
-    /** The durable event log, in `(epoch, seq)` order (= `EventLogStore`). */
+    /** The recent end of the durable event log, in `(epoch, seq)` order (= `EventLogStore`); older events are in `pages`. */
     events: AgentEvent[];
+    /** JSON bytes of `events`, kept per event (never recomputed while it grows). Absent on a record from before #198. */
+    windowBytes?: number;
+    /** The slices paged out of `events`, oldest first. */
+    pages?: SessionPageMeta[];
+    /** How many events `pages` hold. */
+    archived?: number;
+    /** Every `request`, `request-resolved`, `turn-start` and `turn-end`, and the `tool-call` a request asks about — whole-history readers never read a page. */
+    index?: AgentEvent[];
     /** Snapshot taken at every turn end (= `TranscriptStore`). */
     transcript?: AgentTranscript;
     running?: RunningTurn;
@@ -100,7 +130,9 @@ export type SessionEntry =
     | { readonly t: 'set'; readonly patch: SessionPatch }
     /** A command sent to a daemon whose reply is still out. */
     | { readonly t: 'command'; readonly command: WireCommand; readonly at: number }
-    | { readonly t: 'reply'; readonly command: WireCommand; readonly reply: WireReply; readonly at: number };
+    | { readonly t: 'reply'; readonly command: WireCommand; readonly reply: WireReply; readonly at: number }
+    /** The oldest `page.count` events of the window are stored in page `page.page`: drop them from the record. */
+    | { readonly t: 'roll'; readonly page: SessionPageMeta };
 
 export function initialSessionState(): SessionState {
     return { opened: false, status: 'idle', head: { epoch: 0, seq: 0 }, events: [], openRequests: [], commands: {}, commandOrder: [] };
@@ -143,7 +175,88 @@ export function applySessionEntry(state: SessionState, entry: SessionEntry): voi
             remember(state, id, { command: entry.command, at: known?.at ?? entry.at, reply: entry.reply });
             return;
         }
+        case 'roll': {
+            migrate(state);
+            // Idempotent: a page already rolled (a replayed entry) drops nothing twice.
+            if ((state.pages ?? []).some((p) => p.page === entry.page.page)) return;
+            const dropped = state.events.splice(0, entry.page.count);
+            state.windowBytes = Math.max(0, (state.windowBytes ?? 0) - bytesOf(dropped));
+            (state.pages ??= []).push(entry.page);
+            state.archived = (state.archived ?? 0) + dropped.length;
+            return;
+        }
     }
+}
+
+/**
+ * UTF-8 bytes of `text` — what a Durable Object value is measured in. `length` counts UTF-16 code
+ * units and undercounts anything past ASCII up to threefold; no allocation, so it runs per event.
+ */
+export function utf8Bytes(text: string): number {
+    let n = 0;
+    for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (c < 0x80) n += 1;
+        else if (c < 0x800) n += 2;
+        else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+            // A surrogate pair is one 4-byte code point.
+            n += 4;
+            i++;
+        } else n += 3;
+    }
+    return n;
+}
+
+/** UTF-8 bytes of `value` as JSON — the unit every budget of the record counts in. */
+export const jsonBytes = (value: unknown): number => utf8Bytes(JSON.stringify(value ?? null));
+
+/** UTF-8 JSON bytes of `events` — the unit the window budget counts in. */
+export function bytesOf(events: readonly AgentEvent[]): number {
+    let n = 0;
+    for (const e of events) n += jsonBytes(e);
+    return n;
+}
+
+/** The index types: what a whole-history reader looks up. */
+const INDEXED: ReadonlySet<AgentEvent['type']> = new Set(['request', 'request-resolved', 'turn-start', 'turn-end']);
+
+/** Insert `ev` into the index in cursor order, once. */
+function indexEvent(state: SessionState, ev: AgentEvent): void {
+    const index = (state.index ??= []);
+    if (index.some((e) => e.epoch === ev.epoch && e.seq === ev.seq)) return;
+    let at = index.length;
+    while (at > 0 && cursorAfter(ev, index[at - 1]!)) at--;
+    index.splice(at, 0, ev);
+}
+
+/**
+ * A record written before #198 carries its whole log in `events` and no
+ * `windowBytes` / `index`: derive both once, from what it holds — a pure
+ * function of the state, so a replay derives the same. The next append
+ * rolls the oversized window down.
+ */
+function migrate(state: SessionState): void {
+    if (state.windowBytes === undefined) state.windowBytes = bytesOf(state.events);
+    if (state.index === undefined) {
+        state.index = [];
+        for (const ev of state.events) {
+            if (INDEXED.has(ev.type)) indexEvent(state, ev);
+            if (ev.type === 'request' && ev.callId !== undefined) indexCall(state, ev.callId);
+        }
+    }
+}
+
+/** The `tool-call` a request asks about, from the window, into the index. */
+function indexCall(state: SessionState, callId: string): void {
+    const call = state.events.findLast((e) => e.type === 'tool-call' && e.callId === callId);
+    if (call) indexEvent(state, call);
+}
+
+/** The events a whole-history reader sees without a page: the index older than the window, then the window. */
+export function knownEvents(state: Pick<SessionState, 'events' | 'index'>): AgentEvent[] {
+    const first = state.events[0];
+    const older = (state.index ?? []).filter((e) => !first || cursorAfter(e, first));
+    return [...older, ...state.events];
 }
 
 function remember(state: SessionState, id: string, record: CommandRecord): void {
@@ -158,7 +271,11 @@ function remember(state: SessionState, id: string, record: CommandRecord): void 
 function applyEvent(state: SessionState, ev: AgentEvent): void {
     // Idempotent: a frame replayed twice, or a live subscription overlapping the log, folds once.
     if (!cursorAfter(state.head, ev)) return;
+    migrate(state);
     state.events.push(ev);
+    state.windowBytes = (state.windowBytes ?? 0) + jsonBytes(ev);
+    if (INDEXED.has(ev.type)) indexEvent(state, ev);
+    if (ev.type === 'request' && ev.callId !== undefined) indexCall(state, ev.callId);
     state.head = { epoch: ev.epoch, seq: ev.seq };
     const closed = state.status === 'closed';
     switch (ev.type) {
