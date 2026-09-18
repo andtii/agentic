@@ -2,6 +2,7 @@
 
 import type { AgentId, MessageId, SessionId, TaskId } from './ids.js';
 import type { TaskError } from './task.js';
+import type { WorkdirRef } from './workdir.js';
 
 /** The content a user or agent sends. Mirrors the shape of `@sigx/ai-agent`'s prompt parts without depending on it. */
 export type PromptPart =
@@ -74,6 +75,8 @@ export interface ChatMember {
     readonly since: number;
     /** Index of the first entry this member may read. */
     readonly historyFrom: number;
+    /** The folder this agent works in for this chat (#185): copied into every task the chat activates it for. */
+    readonly workdir?: WorkdirRef;
 }
 
 /** Result of posting: who the message activates (CHT-06). */

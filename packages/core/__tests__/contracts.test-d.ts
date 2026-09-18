@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AgentId, ChatEntry, ChatId, DaemonFrame, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AgentId, ChatEntry, ChatId, DaemonFrame, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -19,6 +19,11 @@ describe('contract type tests', () => {
         expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
         expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
         expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping'>();
+    });
+    it('fs operations and results are closed unions', () => {
+        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree'>();
+        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree'>();
+        expectTypeOf<'outside-roots'>().toMatchTypeOf<FsErrorCode>();
     });
     it('runtime drivers are generic over the session and policy types', () => {
         type S = { readonly id: string };

@@ -56,6 +56,8 @@ export type OfflinePolicy = 'queue' | 'fail' | 'fallback-api';
 export interface ExecutionDefaults {
     readonly runtime: RuntimeId;
     readonly defaultEnvironmentId?: EnvironmentId;
+    /** The folder work runs in when it runs in `defaultEnvironmentId` (#185); within that environment's `cwdRoots`. */
+    readonly defaultWorkdir?: string;
     readonly model?: string;
     readonly limits: Limits;
     readonly offlinePolicy: OfflinePolicy;

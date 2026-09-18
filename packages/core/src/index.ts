@@ -18,3 +18,4 @@ export * from './daemon.js';
 export * from './runtime.js';
 export * from './usage.js';
 export * from './workspace.js';
+export * from './workdir.js';

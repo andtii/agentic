@@ -17,5 +17,6 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `runtime` | `RuntimeDriver<S, P>` (`inspect` / `open` / `doctor`), `LocalEnvironment`, `EnvironmentInspection`, `RuntimeOpenContext`, `PlatformToolCaller`, `DoctorReport`, `environmentVerdict`, `toEnvironmentDescriptor` — the seam between the daemon and a runtime driver, generic over the session and policy types |
 | `usage` | `Usage`, `UsageRow`, `addUsage`, `ZERO_USAGE` |
 | `workspace` | `WorkspaceSettings`, `NotificationPrefs`, `NotificationKind`, `NOTIFICATION_KINDS` |
+| `workdir` | `WorkdirRef`, `HostOs`, the `fs.request` vocabulary (`FsOp`, `FsResult`, `FsListResult`, `FsEntry`, `FsGitInfo`, `FsWorktreeResult`, `FsError`, `FsErrorCode`, `FS_LIST_MAX_ENTRIES`), and the pure path helpers `pathWithin`, `normalizePath`, `suggestWorktreePath` — the one lexical `cwdRoots` check every layer shares |
 
 Design: `docs/architecture.md` §1, §4, §5b, §8, §9.

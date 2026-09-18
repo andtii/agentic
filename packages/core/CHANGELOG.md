@@ -6,6 +6,13 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- Working folders (#186, part of #185):
+  - `TaskContract.workdir`, `ExecutionDefaults.defaultWorkdir` and `ChatMember.workdir` (`WorkdirRef`) say which folder a task's session runs in. The folder is absolute, machine-native and within the environment's `cwdRoots`.
+  - The `fs.request` vocabulary: `FsOp` (`list` | `worktree`), `FsResult`, `FsListResult` / `FsEntry` / `FsGitInfo`, `FsWorktreeResult`, `FsError` / `FsErrorCode`, `FS_LIST_MAX_ENTRIES`. The frames themselves land with their schemas (#187).
+  - Pure path helpers:
+    - `pathWithin(path, roots, os)`: case-insensitive and separator-agnostic on Windows; never matches a sibling prefix or a relative path.
+    - `normalizePath`.
+    - `suggestWorktreePath`: `<repo>/main` → `<repo>/branches/<slug>`, else `<repo>-worktrees/<slug>`.
 - `MemoryStore.delete(id): Promise<boolean>` (#149, MEM-05 / MEM-08): remove an entry for good; `false` when there is no such entry. `retire` stays the soft form that keeps the history. Every `MemoryStore` implements it.
 - `ChatEntry` kind `rename` (#124): `{ t: 'rename', title, at }` — the chat's title as an entry, so a fold over the entries carries the title (the last `rename` wins) like every other piece of chat state.
 - `ChatEntry` status kind `task-failed` (#128): the task an agent was activated for could not run or ended in error — `ref` is the task id, `error` the `TaskError`; `SessionEvent` status carries the optional `error` so the router can publish it to the chat (OPS-04).
