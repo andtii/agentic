@@ -5,6 +5,8 @@
   "description": "Unified Agent Platform — persistent AI agents, chats, tasks, machine daemons and Cloudflare hosting on the sigx estate",
   "type": "module",
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:mock": "node scripts/dev.mjs --mock",
     "wt": "node scripts/worktree.mjs",
     "branch-protection": "node scripts/apply-branch-protection.mjs andtii/agentic --approvals 0",
     "sync:core": "node scripts/sync-core.mjs",

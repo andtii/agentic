@@ -111,8 +111,9 @@ pnpm test:scripts     # node --test for scripts/
 pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
 ```
 
-Run the web app: `pnpm --filter @agentic/web dev`. Run the daemon:
-`pnpm --filter @agentic/daemon start`.
+Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost:8787,
+`.dev.vars` generated, dev-login link printed — `docs/runbook.md` §4) or
+`pnpm dev:mock` (Vite on mock data). Run the daemon: `pnpm --filter @agentic/daemon start`.
 
 ## Packages
 

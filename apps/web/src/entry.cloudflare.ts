@@ -12,7 +12,8 @@ import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
 import { createActorHost, createActorWorker, ensureServerApp, pairingWiring, platformRegistry, type PlatformEnv } from './actors.app';
 import { createWebAuth, defaultResolveUser, type RouteHandler, type WebAuth } from './auth';
-import { createDevLoginRoute, DEV_LOGIN_PATH } from './auth/dev-login';
+import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
+import { setSignInOptions } from './auth/sign-in';
 import { createOAuthRoutes, MCP_PATH, type WebOAuthServer } from './auth/oauth-server';
 
 const render = createFetchHandler({
@@ -66,15 +67,16 @@ function authRoute(request: Request, env: PlatformEnv): RouteHandler | undefined
     return auth.routes[key as keyof WebAuth['routes']] ?? auth.oauth.routes[key as keyof WebOAuthServer['routes']];
 }
 
-/** The preview-only dev login (#35): mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets. */
-function devLoginRoute(request: Request, env: PlatformEnv): RouteHandler | undefined {
-    if (request.method !== 'POST' || new URL(request.url).pathname !== DEV_LOGIN_PATH) return undefined;
-    return createDevLoginRoute({ ...(env.SESSION_SECRET ? { SESSION_SECRET: env.SESSION_SECRET } : {}), ...(env.AGENTIC_DEV_LOGIN ? { AGENTIC_DEV_LOGIN: env.AGENTIC_DEV_LOGIN } : {}) }) ?? undefined;
-}
+/** Whether the GitHub OAuth login can be mounted: the session secret and the OAuth app's secrets are all set. */
+const githubEnabled = (env: PlatformEnv): boolean => (env.SESSION_SECRET ?? '').length >= 32 && !!env.GITHUB_CLIENT_ID && !!env.GITHUB_CLIENT_SECRET && !!env.APP_ORIGIN;
 
 export default {
     async fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
-        const route = devLoginRoute(request, env) ?? authRoute(request, env);
+        // What the shell's signed-out state may offer (`signInOptions`), from this request's env.
+        setSignInOptions({ github: githubEnabled(env), devLogin: devLoginEnabled(env) });
+        // The preview / local-only dev login (#35, #143): `GET` (the form) and `POST` (JSON or the form's
+        // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
+        const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
         if (route) {
             ensureServerApp(env);
             return route(request);
