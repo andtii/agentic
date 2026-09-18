@@ -24,6 +24,7 @@ describe('zoneFormat', () => {
     it('is built once per zone, and an unknown zone formats as UTC', () => {
         expect(zoneFormat('Europe/Stockholm')).toBe(zoneFormat('Europe/Stockholm'));
         expect(zoneFormat('Not/AZone').time(AT)).toBe('23:30');
+        expect(zoneFormat('Not/AZone')).toBe(zoneFormat('UTC'));
         expect(zoneFormat().zone).toBe('UTC');
     });
 

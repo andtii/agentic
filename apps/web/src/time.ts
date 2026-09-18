@@ -55,7 +55,8 @@ export function zoneFormat(zone: string = DEFAULT_ZONE): ZoneFormat {
         try {
             fmt = build(zone);
         } catch {
-            fmt = zone === DEFAULT_ZONE ? build('UTC') : zoneFormat(DEFAULT_ZONE);
+            // Never cached under its own name: the zone is whatever string a workspace saved, and the map outlives the request.
+            return zoneFormat(DEFAULT_ZONE);
         }
         formats.set(zone, fmt);
     }
