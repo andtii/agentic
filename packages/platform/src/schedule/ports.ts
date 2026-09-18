@@ -30,6 +30,8 @@ export interface ScheduleFired {
     readonly skipped: number;
     readonly agentId?: AgentId;
     readonly environmentId?: EnvironmentId;
+    /** The folder the fired task runs in (#190); only with `environmentId`. */
+    readonly workdir?: string;
     readonly prompt?: string;
     readonly offlinePolicy: OfflinePolicy;
 }

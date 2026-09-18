@@ -59,7 +59,7 @@ const report = await driver.doctor(environments);         // ok: false when two 
 |---|---|---|
 | `memory_search` | `MemoryPort.search` | `readOnly`, `idempotent` |
 | `memory_remember` | `MemoryPort.remember` (provenance `source: 'agent'`) | |
-| `delegate` | `TaskPort.delegate` (child id from `callId`, §7); result flattened to `{ taskId, status, text?, output?, artifacts, verified, error?, notStopped? }`; emits `agent-start` / `agent-update` for the child when the host's tool context can emit | `openWorld` |
+| `delegate` | `TaskPort.delegate` (child id from `callId`, §7); optional `environmentId` / `workdir` for the child (#190; a `workdir` needs its `environmentId`); result flattened to `{ taskId, status, text?, output?, artifacts, verified, error?, notStopped? }`; emits `agent-start` / `agent-update` for the child when the host's tool context can emit | `openWorld` |
 | `chat_post` | `ChatPort.post` | |
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |

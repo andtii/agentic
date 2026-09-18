@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActorStorage, Host } from '@sigx/actors';
 import { defineActorApp, manualScheduler, memoryStorage, type ManualScheduler } from '@sigx/actors/host';
+import type { AgentId, EnvironmentId } from '@agentic/core';
 import { defineScheduleActor, FIRE, type ScheduleFired, type ScheduleLogEntry, type TriggerPort } from '../../src/schedule/index';
 
 const TZ = 'Europe/Stockholm';
@@ -359,5 +360,28 @@ describe('Schedule actor', () => {
         await r.advance(3 * TICK);
         expect(r.trigger.events).toHaveLength(3);
         expect(FIRE).toBe('fire');
+    });
+});
+
+describe('Schedule working folder (#190)', () => {
+    const ENV = 'env_laptop' as EnvironmentId;
+
+    it('carries its workdir into the firing, refuses one without an environment, and clears it with null', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const r = await rig();
+        const client = r.host.actor(r.Schedule, KEY);
+        const base = { kind: 'agent-task', title: 'digest', recurrence: { kind: 'at', at: T('2026-09-17T10:05:00Z') }, agentId: 'agent_a' as AgentId } as const;
+        await expect(client.create({ ...base, workdir: 'C:/src/app' })).rejects.toMatchObject({ status: 400 });
+        const created = await client.create({ ...base, environmentId: ENV, workdir: 'C:/src/app' });
+        expect(created.workdir).toBe('C:/src/app');
+        await r.runTo(T('2026-09-17T10:05:00Z'));
+        expect(r.trigger.events).toHaveLength(1);
+        expect(r.trigger.events[0]).toMatchObject({ environmentId: ENV, workdir: 'C:/src/app' });
+
+        await expect(client.update({ workdir: '  ' })).rejects.toMatchObject({ status: 400 });
+        expect((await client.update({ workdir: 'C:/src/other' })).workdir).toBe('C:/src/other');
+        const cleared = await client.update({ workdir: null });
+        expect(cleared.workdir).toBeUndefined();
+        expect('workdir' in cleared).toBe(false);
     });
 });

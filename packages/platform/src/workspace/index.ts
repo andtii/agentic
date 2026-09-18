@@ -15,9 +15,10 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkdirRef, WorkspaceId } from '@agentic/core';
 import { actorKey, createId } from '@agentic/core';
 import { defineActor, type ActorPolicy } from '@sigx/actors';
+import { ServerFnError } from '@sigx/server';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
@@ -93,6 +94,15 @@ export interface WorkspaceOps {
     delete?: WorkspaceOpRecord;
 }
 
+/** One folder work ran in lately (#190): what the folder picker offers first. */
+export interface RecentWorkdir extends WorkdirRef {
+    /** When it was last chosen. */
+    readonly at: number;
+}
+
+/** `recentWorkdirs` keeps at most this many, most recent first. */
+export const RECENT_WORKDIRS_MAX = 20;
+
 export interface WorkspaceState {
     v: number;
     /** The owning user; the key's `{userId}` segment. */
@@ -105,6 +115,8 @@ export interface WorkspaceState {
     settings: WorkspaceSettings;
     /** OPS-10 task log; absent on records written before it existed. */
     ops?: WorkspaceOps;
+    /** Folders chosen for work lately (#190), most recent first, one per `{environmentId, path}`, at most `RECENT_WORKDIRS_MAX`; absent on older records. */
+    recentWorkdirs?: RecentWorkdir[];
 }
 
 /** What `get` returns: the state, detached from the actor. */
@@ -179,7 +191,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
         type: 'Workspace',
         authorize,
         persistence: 'explicit',
-        methodReentrancy: { get: 'always' },
+        methodReentrancy: { get: 'always', recentWorkdirs: 'always' },
         state: (key): WorkspaceState => ({
             v: WORKSPACE_STATE_VERSION,
             owner: ownerOfWorkspaceKey(key),
@@ -290,6 +302,28 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 ctx.state.machines.splice(i, 1);
                 await ctx.save();
                 return true;
+            },
+
+            /**
+             * Remember a folder work was started in (#190): it moves to the front of
+             * `recentWorkdirs` (one entry per environment and path), which keeps the
+             * newest `RECENT_WORKDIRS_MAX`. The router notes a task's own `workdir`
+             * over a one-way hop; the UI may note a pick too.
+             */
+            async noteWorkdir(ref: WorkdirRef): Promise<readonly RecentWorkdir[]> {
+                if (typeof ref?.environmentId !== 'string' || !ref.environmentId || typeof ref.path !== 'string' || !ref.path.trim()) {
+                    throw new ServerFnError(400, 'Workspace.noteWorkdir: a folder needs an environmentId and a path');
+                }
+                const entry: RecentWorkdir = { environmentId: ref.environmentId, path: ref.path, at: now() };
+                const rest = (ctx.state.recentWorkdirs ?? []).filter((r) => r.environmentId !== entry.environmentId || r.path !== entry.path);
+                ctx.state.recentWorkdirs = [entry, ...rest].slice(0, RECENT_WORKDIRS_MAX);
+                await ctx.save();
+                return ctx.snapshot(ctx.state.recentWorkdirs);
+            },
+
+            /** The folders work was started in lately, most recent first (#190). */
+            async recentWorkdirs(): Promise<readonly RecentWorkdir[]> {
+                return ctx.snapshot(ctx.state.recentWorkdirs ?? []);
             },
 
             async updateSettings(patch: SettingsPatch): Promise<WorkspaceSettings> {

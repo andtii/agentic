@@ -27,8 +27,10 @@ import {
     type PromptPart,
     type SessionEvent,
     type SessionId,
-    type TaskId
+    type TaskId,
+    type WorkdirRef
 } from '@agentic/core';
+import { ServerFnError } from '@sigx/server';
 import { sameWorkspace } from '../auth/index.js';
 import { ChatPage, pageKey } from './page.js';
 import { appendEntry } from './persist.js';
@@ -184,7 +186,8 @@ export const Chat = defineActor({
         addAgent: [userOrExternal],
         removeAgent: [userOrExternal],
         setCoordinator: [userOrExternal],
-        rename: [userOrExternal]
+        rename: [userOrExternal],
+        setWorkdir: [userOrExternal]
     },
     methodReentrancy: { get: 'always', history: 'always', search: 'always' },
     state: initialChatState,
@@ -260,6 +263,29 @@ export const Chat = defineActor({
             if (ctx.state.title === next) return;
             await archive(ctx);
             await appendEntry(ctx, { t: 'rename', title: next, at: Date.now() });
+        },
+
+        /**
+         * Pick the folder `agentId` works in for this chat (#190), or clear it with
+         * `null`: stored on the member (`get().members[agentId].workdir`) and copied
+         * into the task of its next activation — a running session keeps its folder.
+         * The change is written as a visible note in the thread (a user message
+         * carrying `workdir`, activating nobody). Members only (404); the path is
+         * checked against the environment's roots when a task runs there.
+         */
+        async setWorkdir(agentId: AgentId, ref: WorkdirRef | null): Promise<ChatMember> {
+            const member = ctx.state.members[agentId];
+            if (!member) throw new ServerFnError(404, `Chat.setWorkdir: ${agentId} is not a member`);
+            if (ref !== null && (typeof ref?.environmentId !== 'string' || !ref.environmentId || typeof ref.path !== 'string' || !ref.path.trim())) {
+                throw new ServerFnError(400, 'Chat.setWorkdir: a folder needs an environmentId and a path');
+            }
+            const next: WorkdirRef | null = ref === null ? null : { environmentId: ref.environmentId, path: ref.path };
+            const current = member.workdir;
+            if (next === null ? current === undefined : current?.environmentId === next.environmentId && current.path === next.path) return ctx.snapshot(member);
+            const text = next === null ? `Working folder for ${agentId} cleared` : `Working folder for ${agentId} → ${next.path} on ${next.environmentId}`;
+            await archive(ctx);
+            await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at: Date.now(), mentions: [], workdir: { agentId, ref: next } });
+            return ctx.snapshot(ctx.state.members[agentId]!);
         },
 
         async get(): Promise<ChatSummary> {

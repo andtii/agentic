@@ -36,6 +36,8 @@ export interface SessionOpenSpec {
     readonly environmentId?: EnvironmentId;
     /** Set on the daemon path: the machine whose daemon hosts the runtime session. */
     readonly machineId?: MachineId;
+    /** Set on the daemon path (#190): the folder the runtime session runs in, as the router resolved it and sent it in `OpenSpec.cwd`. */
+    readonly cwd?: string;
     /** The agent configuration this session runs with (AGT-06/07). */
     readonly config: FrozenAgentConfig;
     /**

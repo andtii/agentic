@@ -6,6 +6,7 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- `ChatEntry` `msg` carries an optional `workdir: { agentId, ref: WorkdirRef | null }` (#190): the note `Chat.setWorkdir` writes when a member's working folder for the chat changes. Whoever folds the entries copies `ref` onto the member (`null` clears it), so the member's folder replays like every other piece of chat state.
 - Working folders (#186, part of #185):
   - `TaskContract.workdir`, `ExecutionDefaults.defaultWorkdir` and `ChatMember.workdir` (`WorkdirRef`) say which folder a task's session runs in. The folder is absolute, machine-native and within the environment's `cwdRoots`.
   - The `fs.request` vocabulary: `FsOp` (`list` | `worktree`), `FsResult`, `FsListResult` / `FsEntry` / `FsGitInfo`, `FsWorktreeResult`, `FsError` / `FsErrorCode`, `FS_LIST_MAX_ENTRIES`. The frames themselves land with their schemas (#187).

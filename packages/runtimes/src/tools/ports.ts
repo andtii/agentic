@@ -5,7 +5,7 @@
  * Memory, Task and Chat under the agent's principal.
  */
 
-import type { AgentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult } from '@agentic/core';
+import type { AgentId, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult } from '@agentic/core';
 
 /** What every port call learns about the tool call behind it. */
 export interface ToolCall {
@@ -30,6 +30,9 @@ export interface DelegateSpec {
     /** Never wider than the parent's; the port clamps (architecture §7). */
     readonly constraints: Limits;
     readonly expected?: string;
+    /** Where the child runs (#190): an environment, and a folder within its roots (which needs the environment). Absent: the child's own defaults, and the parent's folder when it lands in the parent's environment. */
+    readonly environmentId?: EnvironmentId;
+    readonly workdir?: string;
 }
 
 /** A `delegate` call: the port tells the tool the child's id as soon as it exists, so the parent transcript can show it. */

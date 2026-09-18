@@ -16,6 +16,7 @@
 import type { AgentId, EnvironmentId, ScheduleId, WorkspaceId } from '@agentic/core';
 import { workspaceOfKey } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { ServerFnError } from '@sigx/server';
 import { sameWorkspace } from '../auth/index.js';
 import type { OfflinePolicy, ScheduleFired, ScheduleKind, TriggerHop, TriggerPort } from './ports.js';
 import { countOccurrences, nextOccurrence, validateRecurrence, type Recurrence } from './recur.js';
@@ -48,6 +49,8 @@ export interface ScheduleState {
     attempts: number;
     agentId?: AgentId;
     environmentId?: EnvironmentId;
+    /** The folder a fired task runs in (#190); only with `environmentId`. */
+    workdir?: string;
     prompt?: string;
     offlinePolicy: OfflinePolicy;
     log: ScheduleLogEntry[];
@@ -61,6 +64,8 @@ export interface ScheduleSpec {
     readonly recurrence: Recurrence;
     readonly agentId?: AgentId;
     readonly environmentId?: EnvironmentId;
+    /** The folder a fired task runs in (#190): absolute, within the roots of `environmentId` — which it requires. */
+    readonly workdir?: string;
     readonly prompt?: string;
     /** Default `'queue'`. */
     readonly offlinePolicy?: OfflinePolicy;
@@ -68,7 +73,15 @@ export interface ScheduleSpec {
     readonly enabled?: boolean;
 }
 
-export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind'>>;
+/** `workdir: null` clears the folder. */
+export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir'>> & { readonly workdir?: string | null };
+
+/** A folder travels with its environment (#190): refuse one without it, or a blank one. */
+function checkWorkdir(workdir: string | undefined, environmentId: EnvironmentId | undefined): void {
+    if (workdir === undefined) return;
+    if (typeof workdir !== 'string' || !workdir.trim()) throw new ServerFnError(400, '[schedule] workdir must be a path');
+    if (environmentId === undefined) throw new ServerFnError(400, '[schedule] a workdir needs an environmentId');
+}
 
 /** What `get()` returns: the state minus the bookkeeping flag. */
 export type ScheduleView = Readonly<Omit<ScheduleState, 'created'>>;
@@ -190,6 +203,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 if (ctx.state.created) throw new Error(`[schedule] ${ctx.key} already exists`);
                 if (parseKey(ctx.key) === null) throw new Error(`[schedule] key must be "{ws}:schedule:{id}", got "${ctx.key}"`);
                 validateRecurrence(spec.recurrence);
+                checkWorkdir(spec.workdir, spec.environmentId);
                 const at = now();
                 const s = ctx.state;
                 s.created = true;
@@ -199,6 +213,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 s.enabled = spec.enabled ?? true;
                 if (spec.agentId !== undefined) s.agentId = spec.agentId;
                 if (spec.environmentId !== undefined) s.environmentId = spec.environmentId;
+                if (spec.workdir !== undefined) s.workdir = spec.workdir;
                 if (spec.prompt !== undefined) s.prompt = spec.prompt;
                 s.offlinePolicy = spec.offlinePolicy ?? 'queue';
                 s.createdAt = at;
@@ -210,10 +225,14 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 requireCreated(ctx);
                 const s = ctx.state;
                 if (patch.recurrence) validateRecurrence(patch.recurrence);
+                const workdir = patch.workdir === null ? undefined : (patch.workdir ?? s.workdir);
+                checkWorkdir(workdir, patch.environmentId ?? s.environmentId);
                 if (patch.title !== undefined) s.title = patch.title;
                 if (patch.recurrence !== undefined) s.recurrence = patch.recurrence;
                 if (patch.agentId !== undefined) s.agentId = patch.agentId;
                 if (patch.environmentId !== undefined) s.environmentId = patch.environmentId;
+                if (workdir === undefined) delete s.workdir;
+                else s.workdir = workdir;
                 if (patch.prompt !== undefined) s.prompt = patch.prompt;
                 if (patch.offlinePolicy !== undefined) s.offlinePolicy = patch.offlinePolicy;
                 if (patch.enabled !== undefined) s.enabled = patch.enabled;
@@ -273,6 +292,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 skipped,
                 ...(s.agentId !== undefined ? { agentId: s.agentId } : {}),
                 ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
+                ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
                 ...(s.prompt !== undefined ? { prompt: s.prompt } : {}),
                 offlinePolicy: s.offlinePolicy
             };

@@ -60,6 +60,15 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
     state.window.push(entry);
     state.index.push({ seq, at: entry.at });
     switch (entry.t) {
+        case 'msg': {
+            // The note `setWorkdir` writes (#190): the member's folder for this chat, or none.
+            const member = entry.workdir ? state.members[entry.workdir.agentId] : undefined;
+            if (entry.workdir && member) {
+                const { workdir: _old, ...rest } = member;
+                state.members[entry.workdir.agentId] = entry.workdir.ref ? { ...rest, workdir: entry.workdir.ref } : rest;
+            }
+            return;
+        }
         case 'member':
             if (entry.op === 'add') {
                 // `from-now` starts AT the join entry, so the member sees it joined.
