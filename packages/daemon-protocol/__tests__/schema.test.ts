@@ -120,7 +120,7 @@ describe('daemon frame schemas', () => {
         expect(platformFrameSchemas.welcome.safeParse({ v: V, t: 'welcome', serverTime: 1, wanted }).success).toBe(false);
     });
 
-it('session.open carries the compiled-policy input (#121): rules, grants and constraints survive decoding, a bad outcome is refused', () => {
+    it('session.open carries the compiled-policy input (#121): rules, grants and constraints survive decoding, a bad outcome is refused', () => {
         const spec = { ...platformCases['session.open'].valid.spec, policy: { rules: [{ id: 'r1', match: { categories: ['destructive'] }, outcome: 'ask' }], grants: [{ name: 'rm', mode: 'ask' }, { name: 'ls' }], constraints: [{ id: 'c1', match: { tools: ['rm'] }, outcome: 'deny', scope: 'once' }] } };
         const parsed = platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec });
         expect(parsed.success).toBe(true);
