@@ -101,6 +101,11 @@ describe('worker: chat file upload and download over R2 (#207)', () => {
         expect((await upload(chatId, cookie, PNG, { origin: 'https://evil.example' })).status).toBe(403);
         expect((await upload(chatId, cookie, PNG, { 'content-type': 'text/html' })).status).toBe(415);
         expect((await upload(chatId, cookie, PNG, { 'content-type': 'nonsense' })).status).toBe(415);
+        // A malformed path under the prefix fails closed, never the HTML document.
+        const bad = await SELF.fetch(`${ORIGIN}/files/chats/${chatId}/a/b`, { headers: { cookie } });
+        expect(bad.status).toBe(404);
+        expect(bad.headers.get('content-type')).toContain('application/json');
+        await bad.body?.cancel();
 
         const svg = await upload(chatId, cookie, '<svg xmlns="http://www.w3.org/2000/svg"/>', { 'content-type': 'image/svg+xml', 'x-file-name': encodeURIComponent('..\\..\\logo.svg') });
         expect(svg.status).toBe(201);

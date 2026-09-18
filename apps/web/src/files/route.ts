@@ -96,6 +96,9 @@ export function dispositionOf(file: Pick<ChatFile, 'name' | 'mediaType'>): strin
     return `${INLINE_TYPES.has(file.mediaType) ? 'inline' : 'attachment'}; filename*=UTF-8''${encoded}`;
 }
 
+/** The public word for a status `Chat.registerUpload` refuses with. */
+const REFUSALS: Readonly<Record<number, string>> = { 400: 'bad-request', 403: 'forbidden', 409: 'conflict', 413: 'too-large', 429: 'too-many-pending', 501: 'unavailable' };
+
 const json = (body: unknown, status: number): Response =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const refuse = (status: number, error: string): Response => json({ error }, status);
@@ -141,7 +144,8 @@ const secretOf = (env: AuthMountEnv): string => ((env.SESSION_SECRET ?? '').leng
 
 /**
  * Build the resolver: `(request, env, ctx) → handler | undefined` — `undefined`
- * for any path outside `/files/chats/`, so the Worker falls through.
+ * for any path outside `/files/chats/`, so the Worker falls through; a
+ * malformed path inside it is a 404.
  */
 export function createFilesMount(wiring: FilesMountWiring): (request: Request, env: AuthMountEnv, ctx?: WaitUntilLike) => RouteHandler | undefined {
     const now = wiring.now ?? Date.now;
@@ -180,7 +184,11 @@ export function createFilesMount(wiring: FilesMountWiring): (request: Request, e
             registered = await chatAs(principal, workspaceId, chatId).registerUpload(file);
         } catch (e) {
             await wiring.store.remove(workspaceId, file.chatId, file.id).catch(() => undefined);
-            if (isServerFnError(e)) return refuse(e.status, e.message);
+            if (isServerFnError(e)) {
+                // The Chat's message names internals (method, ids): logged, never sent — the client branches on the status.
+                console.warn(`[files] upload to ${chatId} refused: ${e.status} ${e.message}`);
+                return refuse(e.status, REFUSALS[e.status] ?? 'refused');
+            }
             throw e;
         }
         sweepSoon(ctx);
@@ -215,7 +223,8 @@ export function createFilesMount(wiring: FilesMountWiring): (request: Request, e
         const { pathname } = new URL(request.url);
         if (!pathname.startsWith(FILES_ROUTE_PREFIX)) return undefined;
         const segments = pathname.slice(FILES_ROUTE_PREFIX.length).split('/');
-        if (!segments.every((s) => SEGMENT.test(s)) || segments.length > 2) return undefined;
+        // Anything else under the prefix fails closed rather than falling through to the document.
+        if (!segments.every((s) => SEGMENT.test(s)) || segments.length > 2) return async () => refuse(404, 'not-found');
         const [chatId, fileId] = segments as [string, string | undefined];
         const method = fileId === undefined ? 'POST' : 'GET';
         return async (req) => {
