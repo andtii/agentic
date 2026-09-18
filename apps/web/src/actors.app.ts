@@ -32,13 +32,14 @@
  * `@agentic/learning` plugin. Retention (#100, `docs/retention.md`): the
  * Workspace exports to the `ARTIFACTS` bucket and purges each record
  * through its own object (`src/retention.ts`); the Registry seals secrets
- * under `WORKSPACE_KEK`.
+ * under `WORKSPACE_KEK`. Chat attachments (#207): one `ChatFileStore` on R2
+ * (`platformFiles`, `src/files`) reaches the Chat, the router, both tool
+ * ports and the Workspace.
  */
-import type { Principal, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, Principal, WorkspaceId } from '@agentic/core';
 import {
     AgentActor,
     AuditActor,
-    Chat,
     ChatPage,
     LedgerActor,
     Memory,
@@ -54,6 +55,7 @@ import {
     createEnvironmentProbe,
     createSessionFactory,
     createToolCallPort,
+    defineChatActor,
     defineInbox,
     defineMachineActor,
     defineRegistry,
@@ -91,6 +93,7 @@ import { createServerApp, setPrincipal } from '@sigx/server/server';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
+import { r2ChatFileStore } from './files/store';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 
@@ -100,7 +103,7 @@ export { DAEMON_SOCKET_PREFIX };
 export interface PlatformEnv {
     /** The one Durable Object namespace — every actor is an `ActorHost` object. */
     readonly ACTORS: DurableObjectNamespaceLike;
-    /** Artifacts and exports (`Workspace.exportAll`). */
+    /** Artifacts and exports (`Workspace.exportAll`); chat attachments under `files/` (`src/files`, #207). */
     readonly ARTIFACTS?: R2BucketLike;
     /** ≥ 32 chars; signs `__Host-session`, OAuth transients and agent tokens. Absent → every call is anonymous. */
     readonly SESSION_SECRET?: string;
@@ -141,14 +144,28 @@ export interface PlatformPorts {
     readonly store?: WorkspaceStore;
     /** The Registry's secret key. Default: `importWorkspaceKek(WORKSPACE_KEK)`; absent → `no-kek`. */
     readonly kek?: KekSource;
+    /**
+     * Where chat attachments live (#203, #207). Default: `r2ChatFileStore` over the `ARTIFACTS` bucket
+     * (`files/<ws>/<chat>/<fileId>`). Passed to the Chat (`markPosted`), the router (image hydration),
+     * both tool ports (`chat_file_read`) and the Workspace (the purge).
+     */
+    readonly files?: ChatFileStore;
 }
 
 /** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
 const secrets: { anthropicApiKey?: string; sessionSecret?: string; workspaceKek?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
 
+/**
+ * The deployment's chat file store (#207): R2, the `ARTIFACTS` bucket under `files/`. One per
+ * isolate — the actors' ports and the Worker's upload routes (`src/files/route.ts`) share it,
+ * and so may any other Worker route that serves chat files (the platform MCP server, #209).
+ */
+export const platformFiles = r2ChatFileStore(() => secrets.artifacts);
+
 export const defaultPorts: PlatformPorts = {
     anthropic: () => (secrets.anthropicApiKey ? { apiKey: secrets.anthropicApiKey } : undefined),
     sink: r2ArtifactSink(() => secrets.artifacts),
+    files: platformFiles,
     store: durableObjectWorkspaceStore({ namespace: () => secrets.actors, secret: () => secrets.sessionSecret }),
     // Throws before the import when the secret is missing, so the Registry does not cache the refusal.
     kek: () => {
@@ -167,20 +184,23 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
     const anthropic = ports.anthropic ?? defaultPorts.anthropic;
     const Inbox = defineInbox({ channels: ports.channels });
+    // Chat attachments (#207): one store, passed everywhere it is used (architecture §7, "Wiring the file store").
+    const files = ports.files ?? defaultPorts.files;
+    const withFiles = files ? { files } : {};
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, ...(anthropic ? { anthropic } : {}) }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, ...(anthropic ? { anthropic } : {}), ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
         inbox: () => Inbox
     });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, ...withFiles });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,
         routing: () => Routing,
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.
@@ -200,7 +220,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const sink = ports.sink ?? defaultPorts.sink;
     const store = ports.store ?? defaultPorts.store;
     const kek = ports.kek ?? defaultPorts.kek;
-    const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}) });
+    const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
+    const Chat = defineChatActor(withFiles);
     const Registry = defineRegistry(kek ? { kek } : {});
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
     return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];

@@ -26,6 +26,7 @@ in a shared table.
 | Task `{ws}:task:{id}`, Session `{ws}:session:{id}` | task transitions; session event log + transcript snapshot | **not indexed** by the Workspace — reachable only through a `WorkspaceStore.list` (see below) |
 | Ledger `{ws}:ledger:{yyyy-mm}`, Audit `{ws}:audit` | usage rows; approvals and transitions | not built yet; same rule as Task / Session |
 | Machine `{ws}:machine:{id}` | machine token hash, environments, activity | not built yet; `Workspace.machines` is the index |
+| Chat attachments (R2, not an actor) | the bytes of every file uploaded into a chat, under `files/{ws}/{chat}/{fileId}` in the `ARTIFACTS` bucket; the record (name, type, size, which message) is in the Chat's state | the Chat: `Workspace.deleteAll` deletes each indexed chat's files (`ChatFileStore.deleteChat`) before purging the records |
 
 Runtime bookkeeping the actor host keeps beside a record (task ledger
 `$sigx:tasks`, reminder shards) is not workspace data: the host clears a task
@@ -40,6 +41,16 @@ finds an empty state and disarms itself.
 |---|---|---|
 | `sessionLogDays` | 90 | Session event logs and transcripts, Task result payloads. A sweeper that retires records older than this is **not implemented in v1** — the setting is recorded and exported so the window is explicit; enforcement is a follow-up on the Session / Task actors. |
 | `artifactDays` | 30 | Objects in the `ARTIFACTS` R2 bucket: exports written by `exportAll` and task artifacts. Enforced by an R2 lifecycle rule on the bucket, configured per deployment to this number — the platform does not delete artifacts itself. |
+
+Chat attachments (#203, #207) are kept as long as their chat: the `files/`
+prefix of the `ARTIFACTS` bucket must have **no lifecycle rule** — scope the
+`artifactDays` rule to the export and artifact prefixes, never the whole
+bucket. An upload that is never posted into a message is an orphan: the Chat
+forgets it after 24 h (`PENDING_TTL_MS`) and the web app deletes its bytes
+once they are a day old — there is no cron yet, so the sweep runs
+opportunistically after an upload, at most once an hour per isolate, one
+listing page of `files/` per run, resuming where the last run stopped
+(`apps/web/src/files`). A posted file is never swept.
 
 Everything else (agent configs, memory, chats, schedules, registry) is kept
 until the user removes it or runs `deleteAll`. Memory `working` entries with a
@@ -117,6 +128,7 @@ These are NOT deleted by `deleteAll` and NOT covered by the retention settings:
 | Data an MCP connector or A2A peer received | the remote server | that operator |
 | Push notifications already delivered | the browser / push service | the user's device |
 | Exports and artifacts in R2 | the `ARTIFACTS` bucket, until `artifactDays` | the bucket lifecycle rule, or the operator |
+| Chat attachments inlined into a prompt or read with `chat_file_read` | the model provider (as for any prompt), and a claude-code session's transcript on the machine | the provider / the machine's owner |
 | Backups / point-in-time recovery of Durable Object storage | Cloudflare | Cloudflare's retention |
 | GitHub identity (`gh_<id>`) used for login | GitHub | the user, at GitHub |
 

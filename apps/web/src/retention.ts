@@ -23,9 +23,46 @@ import { durableObjectStubResolver, type DurableObjectNamespaceLike, type Durabl
 export const PURGE_PATH = '/_agentic/purge';
 export const PURGE_HEADER = 'x-agentic-purge';
 
-/** The slice of an R2 bucket the sink needs. */
+/** An object's head as R2 returns it: size, metadata, and (from `get`) its body. */
+export interface R2ObjectLike {
+    readonly key: string;
+    readonly size: number;
+    readonly uploaded?: Date;
+    readonly httpMetadata?: { readonly contentType?: string };
+    readonly customMetadata?: Readonly<Record<string, string>>;
+}
+
+export interface R2ObjectBodyLike extends R2ObjectLike {
+    readonly body: ReadableStream<Uint8Array>;
+    arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+export interface R2PutOptionsLike {
+    readonly httpMetadata?: { readonly contentType?: string };
+    readonly customMetadata?: Readonly<Record<string, string>>;
+}
+
+export interface R2ListOptionsLike {
+    readonly prefix?: string;
+    readonly cursor?: string;
+    readonly limit?: number;
+    /** R2 returns custom metadata in a listing only when asked. */
+    readonly include?: readonly ('httpMetadata' | 'customMetadata')[];
+}
+
+export interface R2ObjectsLike {
+    readonly objects: readonly R2ObjectLike[];
+    readonly truncated: boolean;
+    readonly cursor?: string;
+}
+
+/** The slice of an R2 bucket the artifact sink and the chat file store (`src/files`) need. */
 export interface R2BucketLike {
-    put(key: string, value: string, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+    put(key: string, value: ReadableStream<Uint8Array> | ArrayBuffer | ArrayBufferView | string, options?: R2PutOptionsLike): Promise<unknown>;
+    get(key: string): Promise<R2ObjectBodyLike | null>;
+    head(key: string): Promise<R2ObjectLike | null>;
+    delete(keys: string | string[]): Promise<void>;
+    list(options?: R2ListOptionsLike): Promise<R2ObjectsLike>;
 }
 
 export function r2ArtifactSink(bucket: () => R2BucketLike | undefined): ArtifactSink {
