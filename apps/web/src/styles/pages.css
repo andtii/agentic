@@ -934,6 +934,9 @@ code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
     [data-command-well] { flex-wrap: wrap; overflow-wrap: anywhere; }
     [data-today] > li { grid-template-columns: 48px minmax(0, 1fr); }
     [data-today] > li > :last-child { grid-column: 2; }
+    /* Home "Needs you · N open" is one line and the hint is dropped (docs/design/screenshots/MobileHome.png, #118) */
+    [data-home-needs] > [data-section-heading] > h2 { white-space: nowrap; }
+    [data-home-needs] > [data-section-heading] > [data-section-aside] { display: none; }
     [data-api-key] { flex-wrap: wrap; }
     [data-cell-title] { white-space: normal; }
     [data-bars] { block-size: 80px; }

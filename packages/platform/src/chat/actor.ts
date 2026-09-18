@@ -104,7 +104,12 @@ export interface ChatSummary {
     readonly members: Readonly<Record<string, ChatMember>>;
     readonly coordinator: AgentId | null;
     readonly activeSessions: Readonly<Record<string, SessionId>>;
+    /** The chat's title (#124), absent until `Workspace.createChat({ title })` or `rename` set one — the pages then title it by its members. */
+    readonly title?: string;
 }
+
+/** A title is one line of at most this many characters; `rename` trims and rejects the rest. */
+export const MAX_TITLE_LENGTH = 120;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -178,7 +183,8 @@ export const Chat = defineActor({
         post: [notMachine],
         addAgent: [userOrExternal],
         removeAgent: [userOrExternal],
-        setCoordinator: [userOrExternal]
+        setCoordinator: [userOrExternal],
+        rename: [userOrExternal]
     },
     methodReentrancy: { get: 'always', history: 'always', search: 'always' },
     state: initialChatState,
@@ -240,9 +246,25 @@ export const Chat = defineActor({
             await appendEntry(ctx, { t: 'coordinator', agentId, at: Date.now() });
         },
 
+        /**
+         * Set the chat's title (#124): whitespace collapsed and trimmed, at
+         * most `MAX_TITLE_LENGTH` characters; a blank title is rejected, not
+         * stored, so `get().title` is either a name or absent. Idempotent.
+         * `Workspace.createChat({ title })` calls this over a hop for the
+         * first title; the user renames the rest.
+         */
+        async rename(title: string): Promise<void> {
+            const next = title.replace(/\s+/g, ' ').trim();
+            if (!next) throw new Error('Chat.rename: title is required');
+            if (next.length > MAX_TITLE_LENGTH) throw new Error(`Chat.rename: title is longer than ${MAX_TITLE_LENGTH} characters`);
+            if (ctx.state.title === next) return;
+            await archive(ctx);
+            await appendEntry(ctx, { t: 'rename', title: next, at: Date.now() });
+        },
+
         async get(): Promise<ChatSummary> {
-            const { seq, members, coordinator, activeSessions } = ctx.state;
-            return ctx.snapshot({ seq, members, coordinator, activeSessions });
+            const { seq, members, coordinator, activeSessions, title } = ctx.state;
+            return ctx.snapshot({ seq, members, coordinator, activeSessions, ...(title === undefined ? {} : { title }) });
         },
 
         /**

@@ -42,6 +42,8 @@ export interface ChatState {
     coordinator: AgentId | null;
     /** Sessions currently open for this chat, keyed by `AgentId`. */
     activeSessions: Record<string, SessionId>;
+    /** The title the last `rename` entry set (#124); absent until one is. Records written before it existed have none. */
+    title?: string;
 }
 
 export function initialChatState(): ChatState {
@@ -70,6 +72,9 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             return;
         case 'coordinator':
             state.coordinator = entry.agentId;
+            return;
+        case 'rename':
+            state.title = entry.title;
             return;
         case 'status':
             if (entry.kind === 'session-started' && entry.ref) state.activeSessions[entry.agentId] = entry.ref as SessionId;

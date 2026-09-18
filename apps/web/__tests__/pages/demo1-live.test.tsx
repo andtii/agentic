@@ -88,7 +88,7 @@ describe('demo 1 on the live pages', () => {
         expect(chats).toHaveLength(1);
         const chat = h.app.as(owner).actor(Chat, chatKeyOf(USER, chats[0]!));
         expect(Object.keys((await chat.get()).members)).toEqual([agentId]);
-        await until(() => dom.querySelector('[data-scope="ai-composer"] textarea') !== null && dom.querySelector('[data-scope="ai-composer"][data-part="addressing"]')?.textContent?.includes('Ada'), 'the composer addressing Ada');
+        await until(() => dom.querySelector('[data-scope="ai-composer"] textarea') !== null && (dom.querySelector('[data-scope="ai-composer"][data-part="addressing"]')?.textContent?.includes('Ada') ?? false), 'the composer addressing Ada');
 
         // Post; the answer lands in the thread, attributed to Ada.
         type(dom.querySelector<HTMLTextAreaElement>('[data-scope="ai-composer"] textarea')!, 'Say hello in five words.');

@@ -16,9 +16,10 @@
  */
 
 import type { AgentId, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkspaceId } from '@agentic/core';
-import { createId } from '@agentic/core';
+import { actorKey, createId } from '@agentic/core';
 import { defineActor, type ActorPolicy } from '@sigx/actors';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
+import { Chat } from '../chat/index.js';
 import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
@@ -204,10 +205,18 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 return { agentId };
             },
 
-            async createChat(_input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
+            /**
+             * Records the id in the index and, when a title is given, writes it to
+             * the Chat actor over a hop (#124) — the chat's own `rename` entry, so
+             * `Chat.get().title` carries it. The index entry is saved first: a
+             * hop that fails leaves an untitled chat, never an orphan title.
+             */
+            async createChat(input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
                 const chatId = createId('chat') as ChatId;
                 ctx.state.chats.push(chatId);
                 await ctx.save();
+                const title = input.title?.trim();
+                if (title) await ctx.actor(Chat, actorKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, 'chat', chatId)).rename(title);
                 return { chatId };
             },
 

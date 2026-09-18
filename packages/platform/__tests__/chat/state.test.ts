@@ -40,6 +40,17 @@ describe('applyChatEntry', () => {
         expect(replay(script)).toEqual(replay(script));
     });
 
+    it('a rename entry sets the title; the last one wins and none leaves it absent (#124)', () => {
+        const state = replay(script);
+        expect(state.title).toBeUndefined();
+        applyChatEntry(state, { t: 'rename', title: 'Release plan', at: 9 });
+        expect(state.title).toBe('Release plan');
+        applyChatEntry(state, { t: 'rename', title: 'Release plan v2', at: 10 });
+        expect(state.title).toBe('Release plan v2');
+        expect(state.seq).toBe(10);
+        expect(state.index.slice(-2)).toEqual([{ seq: 8, at: 9 }, { seq: 9, at: 10 }]);
+    });
+
     it('from-now starts at the join entry itself', () => {
         const state = replay(script.slice(0, 3));
         expect(state.members[B]).toEqual({ since: 3, historyFrom: 2 });

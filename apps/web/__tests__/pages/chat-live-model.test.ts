@@ -56,11 +56,17 @@ describe('members and rows', () => {
         ]);
         expect(chatTitle(membersOf(summary), lookup)).toBe('Atlas, Forge');
         expect(chatTitle([], lookup)).toBe('New chat');
+        // A stored title wins over the members' names (#124); an absent one falls back.
+        expect(chatTitle(membersOf(summary), lookup, 'Release plan')).toBe('Release plan');
+        expect(chatTitle([], lookup, 'Release plan')).toBe('Release plan');
+        expect(chatTitle(membersOf(summary), lookup, undefined)).toBe('Atlas, Forge');
     });
 
     it('lines every entry kind and builds a list row from the newest entry', () => {
         expect(entries.map((e) => entryLine(e.entry, lookup))).toEqual(['Atlas joined', 'You: hi @Atlas', 'Forge joined', 'Atlas started a session', 'Atlas: hello [image]']);
+        expect(entryLine({ t: 'rename', title: 'Release plan', at: 5000 }, lookup)).toBe('Renamed to Release plan');
         expect(chatRow('c1', summary, entries.slice(-1), lookup)).toMatchObject({ id: 'c1', title: 'Atlas, Forge', lastLine: 'Atlas: hello [image]', updatedAt: 4000, unread: 0, waiting: false });
+        expect(chatRow('c1', { ...summary, title: 'Release plan' }, entries.slice(-1), lookup).title).toBe('Release plan');
         expect(chatRow('c1', summary, [], lookup).lastLine).toBe('');
     });
 });

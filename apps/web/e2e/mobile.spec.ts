@@ -116,6 +116,19 @@ test.describe('phone', () => {
         await expect(drawer).toBeHidden();
     });
 
+    test('the Home "Needs you" heading is one line with its count beside it, and the hint is dropped (#118)', async ({ page }) => {
+        await page.goto('/');
+        const heading = page.locator('[data-home-needs] > [data-section-heading] > h2');
+        await expect(heading).toHaveText(/Needs you\s*\d+ open/);
+        const [box, lineHeight] = await Promise.all([heading.boundingBox(), heading.evaluate((el) => parseFloat(getComputedStyle(el.firstElementChild!).lineHeight))]);
+        // One line: the heading is no taller than its line box; the count sits on that same line.
+        expect(box!.height).toBeLessThanOrEqual(Math.ceil(lineHeight) + 1);
+        const count = await heading.locator('[data-section-count]').boundingBox();
+        expect(Math.round(count!.y + count!.height)).toBeLessThanOrEqual(Math.round(box!.y + box!.height));
+        expect(count!.x).toBeGreaterThan(box!.x);
+        await expect(page.locator('[data-home-needs] > [data-section-heading] > [data-section-aside]')).toBeHidden();
+    });
+
     test('the approval card gives Allow once a full row and the other two answers share the next, at 48 px', async ({ page }) => {
         await page.goto('/');
         const card = page.locator('[data-scope="ag-needs-item"][data-kind="approval"] [data-scope="ai-approval"][data-part="root"]').first();
