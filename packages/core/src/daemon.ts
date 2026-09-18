@@ -8,7 +8,7 @@
  * `R` its reply, `C` a command. `@agentic/daemon-protocol` instantiates them.
  */
 
-import type { CapabilityReport, EnvironmentDescriptor, MachineId, SessionId } from './index.js';
+import type { ApprovalRule, CapabilityReport, EnvironmentDescriptor, MachineId, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -16,6 +16,19 @@ export const DAEMON_PROTOCOL_VERSION = 1 as const;
 export interface Cursor {
     readonly epoch: number;
     readonly seq: number;
+}
+
+/**
+ * The approval policy a daemon compiles for a session (`sessionPolicy` in
+ * `@agentic/runtimes`; OPS-02, COL-10, AC-12): the agent's `approvalPolicy`
+ * rules and its tool grants, plus — on a delegated task — the rules of every
+ * ancestor's agent as `constraints`, so a child on the daemon path is never
+ * wider than the chain above it. Plain JSON: it travels in `session.open`.
+ */
+export interface OpenSpecPolicy {
+    readonly rules: readonly ApprovalRule[];
+    readonly grants: readonly ToolGrant[];
+    readonly constraints?: readonly ApprovalRule[];
 }
 
 /** What a daemon needs to open a runtime session. */
@@ -28,6 +41,11 @@ export interface OpenSpec {
     readonly maxBudgetUsd?: number;
     /** Tool names the daemon must serve to the runtime and bridge back as `tool.call`. */
     readonly tools: readonly string[];
+    /**
+     * The approval policy the session runs under (#121). Without it the harness asks on its
+     * own terms (Claude Code: every non-trivial call) and every question reaches the user.
+     */
+    readonly policy?: OpenSpecPolicy;
     readonly resume?: unknown;
 }
 

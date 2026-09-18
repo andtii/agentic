@@ -120,6 +120,15 @@ describe('daemon frame schemas', () => {
         expect(platformFrameSchemas.welcome.safeParse({ v: V, t: 'welcome', serverTime: 1, wanted }).success).toBe(false);
     });
 
+    it('session.open carries the compiled-policy input (#121): rules, grants and constraints survive decoding, a bad outcome is refused', () => {
+        const spec = { ...platformCases['session.open'].valid.spec, policy: { rules: [{ id: 'r1', match: { categories: ['destructive'] }, outcome: 'ask' }], grants: [{ name: 'rm', mode: 'ask' }, { name: 'ls' }], constraints: [{ id: 'c1', match: { tools: ['rm'] }, outcome: 'deny', scope: 'once' }] } };
+        const parsed = platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec });
+        expect(parsed.success).toBe(true);
+        expect((parsed.data as { spec: unknown }).spec).toEqual(spec);
+        expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: [{ id: 'r1', match: {}, outcome: 'maybe' }], grants: [] } } }).success).toBe(false);
+        expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: Array.from({ length: LIMITS.list + 1 }, (_, i) => ({ id: `r${i}`, match: {}, outcome: 'allow' })), grants: [] } } }).success).toBe(false);
+    });
+
     it('bound the wire command payloads: output spec name and configure patch', () => {
         const command = (c: Record<string, unknown>) => platformFrameSchemas['session.command'].safeParse({ v: V, t: 'session.command', sessionId: 's1', command: { v: W, commandId: 'c1', ...c } }).success;
         const prompt = { type: 'prompt', turnId: 't1', input: [{ type: 'text', text: 'hi' }] };

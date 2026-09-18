@@ -5,7 +5,7 @@
  */
 
 export { LIMITS } from './limits.js';
-export { cursor, cursors, environment, capabilityReport, openSpec } from './common.js';
+export { cursor, cursors, environment, capabilityReport, openSpec, openSpecPolicy, approvalRule, toolGrant } from './common.js';
 export { sessionRef, agentCapabilities, agentEvent, promptPart, decision, outputSpec, wireFrame, wireReply, wireCommand } from './wire.js';
 export {
     helloFrame,
