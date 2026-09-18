@@ -17,12 +17,16 @@
  * same child and re-awaits it. An aborted turn (the parent's stop cascade)
  * answers `cancelled` with what could not be confirmed stopped.
  *
- * `ask_user` stays `unsupported` until a platform-raised input request lands
- * (#122: the port has no way into the engine's `resolveRequest`)
- * — the error says so, the tool never silently succeeds.
+ * `ask_user` (#122, COL-06, CHT-09): the port has no way into the engine's
+ * own request flow, so it asks the Session to raise an `input` request for
+ * the call (`raiseInput`, idempotent by call id), then tails `resolution`
+ * until a person answers through `Session.respond` from any client — the
+ * answer is the tool result; a cancel (the turn ended, the session closed) is
+ * a `cancelled` error. Without a Session definition it stays `unsupported`
+ * and says so; the tool never silently succeeds.
  */
 
-import { isTerminal, type ChatId, type MemoryEntry, type Principal, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, isTerminal, type ChatId, type MemoryEntry, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import type { DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -32,6 +36,8 @@ import { asPrincipal } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { ToolCallError } from '../machine/ports.js';
 import { Memory, memoryActorKey } from '../memory/index.js';
+import type { RequestResolvedEvent } from '../policy/requests.js';
+import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { routingKey } from './key.js';
 
@@ -43,6 +49,12 @@ interface RoutingClient {
     run(taskId: TaskId): Promise<TaskView>;
 }
 
+/** The slice of the Session actor `ask_user` uses (`defineSessionActor`). */
+interface SessionAskClient {
+    raiseInput(input: PlatformInputRequest): Promise<PlatformRequestRef>;
+    resolution(requestId: string): AsyncIterable<RequestResolvedEvent>;
+}
+
 export interface ActorToolPortsOptions {
     /** Whose tools these are — the session's agent principal (workspace, agent, session, task?). */
     readonly principal: AgentPrincipal;
@@ -50,6 +62,8 @@ export interface ActorToolPortsOptions {
     readonly chatId?: ChatId;
     /** The Routing actor definition, for `task_report` and `delegate`; without it both are refused. */
     readonly routing?: () => AnyActorDefinition;
+    /** The Session actor definition, for `ask_user`; without it the question is refused as unsupported. */
+    readonly sessions?: () => AnyActorDefinition;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -78,6 +92,13 @@ function outcomeOf(child: TaskView | TaskOutcome, notStopped: readonly TaskId[] 
     }
 }
 
+/** An input decision's `answers` as the text the model reads: a string as is, a choice list joined, anything else as JSON. */
+export function answerText(answers: unknown): string {
+    if (typeof answers === 'string') return answers;
+    if (Array.isArray(answers) && answers.every((a) => typeof a === 'string')) return answers.join(', ');
+    return JSON.stringify(answers) ?? '';
+}
+
 /** The tool ports of one agent session, bound to the actors. */
 export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPorts {
     const { principal, chatId } = options;
@@ -90,6 +111,21 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         if (!def) throw new ToolCallError('unsupported', `${what}: the router is not wired on this deployment`);
         return actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principal) }) as unknown as RoutingClient;
     };
+
+    /** The decision on a platform-raised request, or `undefined` when the session closed or the turn was aborted before one came. */
+    async function awaitResolution(s: SessionAskClient, requestId: string, signal: AbortSignal): Promise<RequestResolvedEvent | undefined> {
+        const it = s.resolution(requestId)[Symbol.asyncIterator]();
+        const aborted = new Promise<'aborted'>((resolve) => {
+            if (signal.aborted) resolve('aborted');
+            else signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+        });
+        try {
+            const next = await Promise.race([it.next(), aborted]);
+            return next !== 'aborted' && !next.done ? next.value : undefined;
+        } finally {
+            await it.return?.().catch(() => undefined);
+        }
+    }
 
     /** Wait for the child's terminal state, or for the parent turn to be aborted — whichever comes first. */
     async function awaitChild(childId: TaskId, signal: AbortSignal): Promise<DelegateOutcome> {
@@ -127,8 +163,17 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(post.text, post.mentions, taskId ? { taskId } : {});
                 return { messageId: result.messageId };
             },
-            ask() {
-                return Promise.reject(new ToolCallError('unsupported', 'ask_user: not available until a platform-raised input request lands (#122)'));
+            async ask(question, call) {
+                const def = options.sessions?.();
+                if (!def) throw new ToolCallError('unsupported', 'ask_user: the Session actor is not wired on this deployment');
+                if (!sessionId) throw new ToolCallError('unsupported', 'ask_user: this call belongs to no session');
+                const s = as(def, actorKey(workspaceId, 'session', sessionId as SessionId)) as unknown as SessionAskClient;
+                const choices = question.choices?.map((c) => ({ id: c, label: c }));
+                const { requestId, resolved } = await s.raiseInput({ callId: call.callId, message: question.question, toolName: 'ask_user', ...(choices ? { options: choices } : {}) });
+                const decision = resolved ?? (await awaitResolution(s, requestId, call.signal));
+                if (!decision) throw new ToolCallError('cancelled', 'ask_user: the turn ended before the user answered');
+                if (decision.outcome !== 'input') throw new ToolCallError('cancelled', `ask_user: the question was ${decision.outcome === 'cancel' ? 'cancelled' : decision.outcome}${decision.reason ? ` (${decision.reason})` : ''}`);
+                return { answer: answerText(decision.answers) };
             }
         },
         task: {

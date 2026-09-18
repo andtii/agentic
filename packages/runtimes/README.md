@@ -66,6 +66,10 @@ const report = await driver.doctor(environments);         // ok: false when two 
 
 `platformTools(ports)` gives all six; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
+## Policy (`src/policy`, #121)
+
+The approval policy compile — `compilePolicy(rules)`, `grantPolicy(grants)`, `agentPolicy(config)`, `constrainPolicy(policy, constraints)`, `sessionPolicy(spec)` and `sessionPolicyOf(OpenSpec.policy)` — lives here, below `@agentic/platform`, so the machine daemon compiles the SAME session policy from the rules an `OpenSpec` carries that a local session runs under; the platform re-exports it. Rules are first match over `tools` / `categories` / `source`; a grant decides per tool (`ask` / `deny` / allow); constraints (a delegated task's ancestors) only ever tighten (deny > ask > allow).
+
 ## Tests
 
 `pnpm test packages/runtimes`. The anthropic conformance suite runs over `mockModel`; the claude-code one runs `agentConformance` on the driver's agent over the adapter's scripted fake `query` (`__tests__/claude-code/fake-query.ts`, adapted from signalxjs/ai); `__tests__/anthropic/fixtures/tool-roundtrip.json` is a recorded `memory_search` round trip replayed through `replayAgent` (re-record with `RECORD_FIXTURES=1 pnpm test fixture`).

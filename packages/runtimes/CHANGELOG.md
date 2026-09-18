@@ -4,6 +4,7 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `src/policy` (#121): the approval policy compile (`compilePolicy`, `grantPolicy`, `agentPolicy`, `constrainPolicy`, `sessionPolicy`, `ruleMatches`) moved here from `@agentic/platform` (which re-exports it) so the daemon compiles the same session policy; `sessionPolicyOf(OpenSpec.policy)` is the compile over what travels in `session.open`.
 - `delegate` (#39): the tool result is flattened to `{ taskId, status, text?, output?, artifacts, verified, error?, notStopped? }` (`delegateResult`); `TaskPort.delegate` takes a `DelegateCall` (`ToolCall` + `onDelegated(taskId)`) and the cancelled outcome carries `notStopped`; on a host whose tool context can emit (`modelAgent`'s `AgentToolContext`) the tool writes an `agent-start` / terminal `agent-update` pair for the child, bound to its own call.
 - `claude-code` (#43): `CLAUDE_CODE_DOCTOR_CODES` names the `doctor` finding codes; `__tests__/claude-code/isolation.test.ts` pins EXE-04/05/07 — three profiles on one machine, one agent each, every child environment equal to the others except for its own `CLAUDE_CONFIG_DIR`, no session start touching another profile, two profiles on one config dir refused with `shared-config-dir` and the per-environment verdict (`environmentVerdict`) the daemon ships from it.
 - Package skeleton.

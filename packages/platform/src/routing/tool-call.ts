@@ -24,7 +24,7 @@ interface SessionSpecClient {
 export interface ToolCallPortOptions {
     /** The Routing actor definition (`task_report`). */
     readonly routing: () => AnyActorDefinition;
-    /** The Session actor definition — where a session's chat is looked up for `chat_post`. */
+    /** The Session actor definition — where a session's chat is looked up for `chat_post`, and where `ask_user` raises its request (#122). */
     readonly sessions: () => AnyActorDefinition;
 }
 
@@ -40,7 +40,7 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 const session = actor(options.sessions(), `${agent.workspaceId}:session:${agent.sessionId}`).with({ context: asPrincipal(agent) }) as unknown as SessionSpecClient;
                 chatId = (await session.get()).spec?.chatId;
             }
-            const ports = createActorToolPorts({ principal: agent, ...(chatId ? { chatId } : {}), routing: options.routing });
+            const ports = createActorToolPorts({ principal: agent, ...(chatId ? { chatId } : {}), routing: options.routing, sessions: options.sessions });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
             try {

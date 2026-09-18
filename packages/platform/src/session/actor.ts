@@ -14,12 +14,20 @@
  *   a time and `resumeTasks` restarts it after an eviction.
  * - remote: a daemon serves the session; the Machine actor forwards its
  *   frames to `forwardFrames` and its replies to `commandReplied`.
+ *
+ * Platform-raised requests (#122, COL-06): `ask_user` has no way into the
+ * runtime's own request flow, so the tool port calls `raiseInput`, which
+ * appends a synthetic `request {kind: 'input'}` — stamped strictly between
+ * the head and the runtime's next event (`platformCursor`) — and `respond`
+ * settles it here with a synthetic `request-resolved`. One record either
+ * way: the chat status, the Inbox row, the Task's `waiting {input}` and the
+ * approval card all read the same log.
  */
 
 import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
-import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type UnstampedEvent } from '@sigx/ai-agent';
+import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
 import { auditPort } from '../audit/port.js';
@@ -28,10 +36,10 @@ import type { UsageVerdict } from '../ledger/recorder.js';
 import { agentMemoryScope } from '../agent/agent.actor.js';
 import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
 import { inboxKey, type NotificationInput, type NotificationRef } from '../notify/index.js';
-import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, type RequestEvent, type RequestRecord, type SessionGrant } from '../policy/requests.js';
+import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { cursorAfter, eventsAfter, initialSessionState, parseSessionKey, platformCursor, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { appendEntry, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
@@ -87,6 +95,25 @@ interface InboxClient {
     ackRef(ref: NotificationRef): Promise<unknown>;
 }
 
+/** What a tool port hands `raiseInput` (#122): the call it asks for, and the question as a request carries it. */
+export interface PlatformInputRequest {
+    /** The tool call's id — the idempotency key: the same call re-finds the same request. */
+    readonly callId: string;
+    readonly message: string;
+    /** Default `ask_user`. */
+    readonly toolName?: string;
+    readonly options?: readonly RequestOption[];
+}
+
+/** What `raiseInput` returns: the request's id and, when the log already has one, its decision. */
+export interface PlatformRequestRef {
+    readonly requestId: string;
+    readonly resolved?: RequestResolvedEvent;
+}
+
+/** The id a platform-raised request gets for a tool call — deterministic, so a re-issued call finds it. */
+export const platformRequestId = (callId: string): string => `ask:${callId}`;
+
 /** What `correct` returns: the correction as the plugin saw it and what it proposed. */
 export interface CorrectionResult {
     readonly correction: Correction;
@@ -134,6 +161,8 @@ const sessionsScope: ActorPolicy = (principal: Principal | null) => !!principal 
 const internalPolicy: ActorPolicy = (principal: Principal | null) => principal?.kind === 'machine';
 /** A correction is a user's word — or an agent's, which the plugin drops unless configured to learn from it; never a machine's. */
 const correctorPolicy: ActorPolicy = (principal: Principal | null) => principal !== null && principal.kind !== 'machine';
+/** `raiseInput`: only the agent working THIS session (the tool port runs under its principal, on both paths). */
+const ownAgentPolicy: ActorPolicy = (principal: Principal | null, _rq, op) => principal?.kind === 'agent' && !!op.resource && parseSessionKey(op.resource.key)?.sessionId === principal.sessionId;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type SessionEventInit = DistributiveOmit<SessionEvent, 'agentId' | 'sessionId' | 'at'>;
@@ -183,9 +212,12 @@ export function defineSessionActor(ports: SessionPorts) {
      * permission request or its decision, the audit record
      * (`approval.requested` / `approval.resolved`, OPS-03) keyed by the
      * event's `(epoch, seq)` so a replayed frame folds once. All one-way:
-     * neither the history nor a notification ever fails the turn.
+     * neither the history nor a notification ever fails the turn. An event
+     * the log already has (a replayed frame, a drain overlapping the driver)
+     * is folded by nothing and tells nobody twice.
      */
     async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
+        if (!cursorAfter(c.state.head, ev)) return;
         await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
         if (ev.type !== 'request' && ev.type !== 'request-resolved') return;
         const spec = c.state.spec;
@@ -422,8 +454,12 @@ export function defineSessionActor(ports: SessionPorts) {
         return text;
     }
 
-    /** Pull what the session has already buffered (the `state` after a turn, a `config` after `configure()`) without waiting for more. */
-    async function drainBuffered(c: ActorContext<SessionState>, live: Live): Promise<void> {
+    /**
+     * Pull what the session has already buffered (the `state` after a turn, a `config` after
+     * `configure()`) without waiting for more. `record: false` folds without booking usage — for a
+     * drain mid-turn, where the driver still sees every event and books it exactly once.
+     */
+    async function drainBuffered(c: ActorContext<SessionState>, live: Live, record = true): Promise<void> {
         let source: AsyncIterable<AgentEvent>;
         try {
             source = live.session.subscribe({ epoch: c.state.head.epoch, seq: c.state.head.seq });
@@ -437,7 +473,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 const next = await Promise.race([it.next(), tick()]);
                 if (!next || next.done) return;
                 await appendEvent(c, next.value);
-                await recordUsage(c, next.value); // the turn is over: the books get the row, the verdict has nothing left to stop
+                if (record) await recordUsage(c, next.value); // the turn is over: the books get the row, the verdict has nothing left to stop
             }
         } finally {
             await it.return?.();
@@ -479,6 +515,25 @@ export function defineSessionActor(ports: SessionPorts) {
         await publishChat(c, { kind: 'status', status: 'task', ref: `${error.code}:${error.message}` });
     }
 
+    /** The runtime's session id as the log stamps it — what a platform-stamped event carries too. */
+    function sessionIdOf(c: ActorContext<SessionState>): string {
+        const s = c.state;
+        const last = s.events[s.events.length - 1];
+        return last?.sessionId ?? s.ref?.id ?? parseSessionKey(c.key)?.sessionId ?? c.key;
+    }
+
+    /**
+     * One platform-stamped event (#122): the running turn's, at `platformCursor(head)`,
+     * through the same `appendEvent` a runtime event takes — chat, Inbox and audit hear it alike.
+     */
+    async function emitPlatform(c: ActorContext<SessionState>, payload: UnstampedEvent): Promise<AgentEvent> {
+        const s = c.state;
+        const turnId = s.running?.turnId;
+        const ev: AgentEvent = { ...(turnId !== undefined ? { turnId } : {}), ...payload, sessionId: sessionIdOf(c), ...platformCursor(s.head) };
+        await appendEvent(c, ev);
+        return ev;
+    }
+
     /** Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. */
     async function finishTurn(c: ActorContext<SessionState>, turnId: string): Promise<void> {
         const s = c.state;
@@ -503,8 +558,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const run = s.running;
         if (!run || run.turnId !== turnId) return;
         const input = c.snapshot(run.input);
-        const last = s.events[s.events.length - 1];
-        const sessionId = last?.sessionId ?? s.ref?.id ?? parseSessionKey(c.key)?.sessionId ?? c.key;
+        const sessionId = sessionIdOf(c);
         const epoch = Math.max(1, s.head.epoch);
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
         const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, epoch, seq: ++seq });
@@ -533,7 +587,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         onDeactivate: (ctx) => dispose(ctx.key),
@@ -621,6 +675,30 @@ export function defineSessionActor(ports: SessionPorts) {
                 }
             }
 
+            /**
+             * A `respond` to a request the platform raised (#122): settled here, never sent to a runtime that does
+             * not know it. One decision per request — a later one is acknowledged without effect, like the wire's.
+             */
+            async function respondPlatform(command: Extract<WireCommand, { type: 'respond' }>): Promise<SessionCommandResult> {
+                const s = ctx.state;
+                const d = command.decision;
+                if (d.type === 'permission') return errorReply(command.commandId, 'invalid', `request "${command.requestId}" asks for input, not a permission`);
+                if (s.openRequests.includes(command.requestId)) {
+                    await emitPlatform(ctx, {
+                        type: 'request-resolved',
+                        requestId: command.requestId,
+                        outcome: d.type === 'input' ? 'input' : 'cancel',
+                        by: 'client',
+                        ...(d.type === 'input' ? { answers: d.answers } : {}),
+                        ...(d.ruleId ? { ruleId: d.ruleId } : {}),
+                        at: now()
+                    });
+                }
+                const ack: WireReply = { v: V, kind: 'ack', commandId: command.commandId };
+                await recordReply(command, ack);
+                return ack;
+            }
+
             /** Idempotent by `commandId`: a known command answers with what it answered before, or `pending`. */
             async function dispatch(command: WireCommand): Promise<SessionCommandResult> {
                 const s = ctx.state;
@@ -628,6 +706,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 if (known) return known.reply ? ctx.snapshot(known.reply) : pending(command.commandId);
                 if (s.status === 'closed') return errorReply(command.commandId, 'closed', `session "${ctx.key}" is closed`);
                 if (!s.opened) return errorReply(command.commandId, 'invalid', `session "${ctx.key}" is not open`);
+                if (command.type === 'respond' && s.platformRequests?.includes(command.requestId)) return respondPlatform(command);
                 const live = await ensureLive();
                 // A local turn no live session knows was cut short by an eviction: settle it before anything else runs.
                 if (s.running && s.mode === 'local' && !live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
@@ -736,6 +815,37 @@ export function defineSessionActor(ports: SessionPorts) {
                     return t ? ctx.snapshot(t) : undefined;
                 },
 
+                /**
+                 * A platform-raised input request for a tool call (#122, COL-06): `ask_user` on either
+                 * path. Appends the `request {kind: 'input'}` once per `callId` — a re-issued call (a daemon
+                 * re-sending an open `tool.call` after a reconnect, a restarted port) re-finds the same
+                 * question — and answers with what the log already knows. The turn stays the runtime's:
+                 * the request is the running turn's, so the router parks the Task `waiting {input}`.
+                 */
+                async raiseInput(input: PlatformInputRequest): Promise<PlatformRequestRef> {
+                    const s = ctx.state;
+                    if (!s.opened || !s.spec) throw new ServerFnError(409, `session "${ctx.key}" is not open`);
+                    if (s.status === 'closed') throw new ServerFnError(409, `session "${ctx.key}" is closed`);
+                    const requestId = platformRequestId(input.callId);
+                    if (!s.events.some((e) => e.type === 'request' && e.requestId === requestId)) {
+                        // The local driver may lag the runtime: fold what the runtime already emitted (the call itself) so the question lands after it.
+                        const live = lives.get(ctx.key);
+                        if (live) await drainBuffered(ctx, live, false);
+                        await appendEntry(ctx, set({ platformRequests: [...(s.platformRequests ?? []), requestId] }));
+                        await emitPlatform(ctx, {
+                            type: 'request',
+                            requestId,
+                            kind: 'input',
+                            callId: input.callId,
+                            toolName: input.toolName ?? 'ask_user',
+                            message: input.message,
+                            ...(input.options ? { options: input.options } : {})
+                        });
+                    }
+                    const resolved = s.events.find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    return { requestId, ...(resolved ? { resolved: ctx.snapshot(resolved as RequestResolvedEvent) } : {}) };
+                },
+
                 /** One request with its call input and, once decided, the decision — what an approval card renders (CHT-09). A live read. */
                 request(requestId: string): SessionRequestView | null {
                     const s = ctx.state;
@@ -827,6 +937,17 @@ export function defineSessionActor(ports: SessionPorts) {
                         if (!cursorAfter(last, ev)) continue;
                         last = { epoch: ev.epoch, seq: ev.seq };
                         yield ev;
+                    }
+                    if (s.status === 'closed') return;
+                }
+            },
+            /** The decision on `requestId` — yielded once it is in the log (at once when it already is); ends without one when the session closes first. */
+            async *resolution(requestId: string): AsyncIterable<RequestResolvedEvent> {
+                for await (const s of ctx.changes({ initial: true })) {
+                    const ev = s.events.find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    if (ev) {
+                        yield ev as RequestResolvedEvent;
+                        return;
                     }
                     if (s.status === 'closed') return;
                 }

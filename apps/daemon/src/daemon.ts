@@ -15,6 +15,10 @@
  *   (idempotent by `commandId`) and comes back as `session.reply`.
  * - A driver's `callTool` becomes `tool.call`; `tool.result` settles it.
  *   Calls still open when the socket drops are sent again after `welcome`.
+ * - `session.open` carries the agent's approval policy (`OpenSpec.policy`,
+ *   #121): the daemon compiles it with the same `sessionPolicy` a local
+ *   session runs under and hands the `Policy` to the driver, so a harness
+ *   asks the platform only what the agent's rules say to ask.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -37,6 +41,7 @@ import {
     type SessionId
 } from '@agentic/core';
 import { decodePlatformFrame, encodeFrame, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
+import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, type ServedSession } from '@sigx/ai-agent/wire';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -373,7 +378,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
 
         opening.set(sessionId, env.id);
         try {
-            const opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input) });
+            // The agent's rules, grants and the ancestors' constraints, compiled here exactly as the platform compiles them (AC-12).
+            const policy = spec.policy ? sessionPolicyOf(spec.policy) : undefined;
+            const opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input), ...(policy ? { policy } : {}) });
             if (stopped) {
                 await opened.session.close().catch(() => {});
                 return;

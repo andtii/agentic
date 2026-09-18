@@ -105,7 +105,7 @@ export function agentDriver(runtime: string, agent: Agent, report: CapabilityRep
         },
         async open(_env, spec, ctx) {
             contexts.push(ctx);
-            const session = await agent.session({ system: spec.system, ...(spec.model ? { model: spec.model } : {}) });
+            const session = await agent.session({ system: spec.system, ...(spec.model ? { model: spec.model } : {}), ...(ctx.policy ? { policy: ctx.policy } : {}) });
             return { session, capabilities: report };
         },
         async doctor() {

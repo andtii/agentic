@@ -1,5 +1,6 @@
 // @vitest-environment node
-import type { CapabilityReport, EnvironmentId, LocalEnvironment, SessionId } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, EnvironmentId, LocalEnvironment, OpenSpecPolicy, SessionId } from '@agentic/core';
+import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
 import { decodeDaemonFrame, DAEMON_PROTOCOL_VERSION as V, type DaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
 import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentCapabilitiesOf, createDaemon, follows, withinRoots, type Daemon, type DaemonDriver } from '../src/daemon';
 import { ndjsonEventLog } from '../src/event-log';
-import { scriptedDriver } from './helpers/drivers';
+import { agentDriver, scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
 async function next(seat: PlatformSeat): Promise<DaemonFrame> {
@@ -58,8 +59,8 @@ describe('daemon', () => {
         return { daemon, seat, hello };
     }
 
-    const open = (seat: PlatformSeat, sessionId: string, environmentId: string, cwd = dir) =>
-        seat.send({ v: V, t: 'session.open', sessionId: sessionId as SessionId, environmentId, spec: { agentId: 'agent_1', cwd, system: 's', tools: [] } });
+    const open = (seat: PlatformSeat, sessionId: string, environmentId: string, cwd = dir, policy?: OpenSpecPolicy) =>
+        seat.send({ v: V, t: 'session.open', sessionId: sessionId as SessionId, environmentId, spec: { agentId: 'agent_1', cwd, system: 's', tools: [], ...(policy ? { policy } : {}) } });
 
     it('dials /_agentic/daemon/{machineId} with the token as a bearer header', async () => {
         await start([env('env_a')]);
@@ -170,6 +171,97 @@ describe('daemon', () => {
             if (frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') break;
         }
         expect(frames).toContain('session.frame');
+    });
+
+    describe('daemon: the session policy compiled from OpenSpec.policy (#121; OPS-02, COL-10, AC-12)', () => {
+        const ASK_DESTRUCTIVE: ApprovalRule = { id: 'category:destructive', match: { categories: ['destructive'] }, outcome: 'ask' };
+        const ALLOW_READ: ApprovalRule = { id: 'category:read', match: { categories: ['read'] }, outcome: 'allow' };
+        const ALLOW_ALL: ApprovalRule = { id: 'allow-everything', match: {}, outcome: 'allow' };
+        const GRANTS = [{ name: 'rm' }, { name: 'ls' }];
+
+        /** The runtime: `destroy` runs a destructive tool, `read` a read-only one. */
+        function policyAgent() {
+            const rm: MockStep = { tool: { name: 'rm', category: 'destructive', input: { path: '/tmp/x' }, output: 'gone', annotations: { destructive: true } } };
+            const ls: MockStep = { tool: { name: 'ls', category: 'read', input: { path: '.' }, output: 'a b', annotations: { readOnly: true } } };
+            return mockAgent({
+                respond: (input) => {
+                    const text = input.map((p) => (p.type === 'text' ? p.text : '')).join('');
+                    return [text.startsWith('destroy') ? rm : ls, { text: 'done' }];
+                }
+            });
+        }
+
+        /** The `session.opened` for a session opened while another one's trailing frames (`state`, `usage`) may still arrive. */
+        async function opened(seat: PlatformSeat): Promise<void> {
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'session.opened') return;
+                if (frame.t !== 'session.frame' && frame.t !== 'heartbeat') throw new Error(`expected session.opened, got ${frame.t}`);
+            }
+        }
+
+        /** Drive one turn: the event frames until `turn-end`, answering every `request` with `decision`. */
+        async function turn(seat: PlatformSeat, sessionId: string, n: number, text: string, decision: 'allow' | 'deny' = 'allow'): Promise<{ requests: { toolName?: string; kind: string }[]; stopReason: string }> {
+            seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text }] } });
+            // The prompt's ack and the turn's frames interleave freely: every reply is checked, every event read.
+            let acked = false;
+            const requests: { toolName?: string; kind: string }[] = [];
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'session.reply') {
+                    expect(frame.reply.kind).toBe('ack');
+                    if (frame.reply.commandId === `c${n}`) acked = true;
+                    continue;
+                }
+                if (frame.t !== 'session.frame' || frame.frame.kind !== 'event') continue;
+                const ev = frame.frame.event;
+                if (ev.type === 'request') {
+                    requests.push({ kind: ev.kind, ...(ev.toolName ? { toolName: ev.toolName } : {}) });
+                    seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, commandId: `r${n}:${ev.requestId}`, type: 'respond', requestId: ev.requestId, decision: { type: 'permission', outcome: decision, scope: 'once' } } });
+                }
+                if (ev.type === 'turn-end') {
+                    expect(acked).toBe(true);
+                    return { requests, stopReason: ev.stopReason };
+                }
+            }
+        }
+
+        it('under `ask on destructive` a destructive call raises one request frame and a read-only one none; under `allow` neither does', async () => {
+            const driver = agentDriver('mock', policyAgent());
+            const { seat } = await start([env('env_mock', { runtime: 'mock', concurrency: 4 })], [driver]);
+            open(seat, 'session_ask', 'env_mock', dir, { rules: [ASK_DESTRUCTIVE, ALLOW_READ], grants: GRANTS });
+            await opened(seat);
+            expect(driver.contexts[0]?.policy).toBeDefined();
+            expect(await turn(seat, 'session_ask', 1, 'destroy it')).toEqual({ requests: [{ kind: 'permission', toolName: 'rm' }], stopReason: 'end_turn' });
+            expect(await turn(seat, 'session_ask', 2, 'read it')).toEqual({ requests: [], stopReason: 'end_turn' });
+
+            open(seat, 'session_allow', 'env_mock', dir, { rules: [ALLOW_ALL], grants: GRANTS });
+            await opened(seat);
+            expect(await turn(seat, 'session_allow', 3, 'destroy it')).toEqual({ requests: [], stopReason: 'end_turn' });
+            expect(await turn(seat, 'session_allow', 4, 'read it')).toEqual({ requests: [], stopReason: 'end_turn' });
+        });
+
+        it("a child's session is never wider than its ancestors: the constraints' `ask` tightens the agent's own `allow`, and a `deny` grant refuses", async () => {
+            const driver = agentDriver('mock', policyAgent());
+            const { seat } = await start([env('env_mock', { runtime: 'mock', concurrency: 4 })], [driver]);
+            open(seat, 'session_child', 'env_mock', dir, { rules: [ALLOW_ALL], grants: GRANTS, constraints: [ASK_DESTRUCTIVE] });
+            await opened(seat);
+            expect(await turn(seat, 'session_child', 1, 'destroy it')).toEqual({ requests: [{ kind: 'permission', toolName: 'rm' }], stopReason: 'end_turn' });
+            expect(await turn(seat, 'session_child', 2, 'read it')).toEqual({ requests: [], stopReason: 'end_turn' });
+
+            open(seat, 'session_denied', 'env_mock', dir, { rules: [ALLOW_ALL], grants: [{ name: 'rm', mode: 'deny' }, { name: 'ls' }] });
+            await opened(seat);
+            // Denied by its grant: no question, and the call fails in the runtime (the turn still ends).
+            expect(await turn(seat, 'session_denied', 3, 'destroy it')).toEqual({ requests: [], stopReason: 'end_turn' });
+        });
+
+        it('without a policy the driver is opened with none — the harness asks on its own terms', async () => {
+            const driver = agentDriver('mock', policyAgent());
+            const { seat } = await start([env('env_mock', { runtime: 'mock', concurrency: 4 })], [driver]);
+            open(seat, 'session_bare', 'env_mock');
+            await opened(seat);
+            expect(driver.contexts[0]?.policy).toBeUndefined();
+        });
     });
 });
 

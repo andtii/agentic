@@ -99,7 +99,7 @@ const session = (id: string) => app.as(owner).actor(Session, actorKey(WS, 'sessi
 /** An agent configured for `runtime`, with an environment and an offline policy. */
 async function agent(id: string, execution: { runtime: RuntimeId; defaultEnvironmentId?: EnvironmentId; offlinePolicy?: OfflinePolicy }): Promise<AgentId> {
     const agentId = id as AgentId;
-    await app.as(owner).actor(AgentActor, agentKey(WS, agentId)).update({ name: id, instructions: 'Be brief.', tools: [{ name: 'task_report' }, { name: 'memory_search' }], execution: { offlinePolicy: 'fail', ...execution } }, 'create');
+    await app.as(owner).actor(AgentActor, agentKey(WS, agentId)).update({ name: id, instructions: 'Be brief.', tools: [{ name: 'task_report' }, { name: 'memory_search' }], approvalPolicy: [{ id: 'ask-destructive', match: { categories: ['destructive'] }, outcome: 'ask' }], execution: { offlinePolicy: 'fail', ...execution } }, 'create');
     return agentId;
 }
 
@@ -214,6 +214,8 @@ describe('daemon runtime (EXE-09)', () => {
         expect(info.spec).toMatchObject({ runtime: 'in-memory', environmentId: E1, machineId: m1 });
         expect(info.mode).toBe('remote');
         expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'tool.result')).toMatchObject({ output: { ok: true, status: 'done' } });
+        // The daemon compiles the session policy from what travels in session.open (#121): the agent's rules and its grants, in config order.
+        expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'session.open')).toMatchObject({ spec: { policy: { rules: [{ id: 'ask-destructive', match: { categories: ['destructive'] }, outcome: 'ask' }], grants: [{ name: 'task_report' }, { name: 'memory_search' }] } } });
         // The session is closed at the end, freeing the environment slot.
         await until(async () => (await machine(m1).get()).activeSessions.length === 0, 'the slot to free');
     });

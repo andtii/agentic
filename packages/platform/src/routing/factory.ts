@@ -9,8 +9,9 @@
  * (`sessionPolicy`: approval rules, tool grants, then allow), constrained by
  * the ancestors' rules on a delegated task (AC-12) — `policy` overrides it.
  * An `ask` decision raises a `request` the user answers from any client
- * through `Session.respond` (OPS-02); the daemon path's harness asks on its
- * own terms until the policy travels in the `OpenSpec` (#121).
+ * through `Session.respond` (OPS-02); on the daemon path the same rules
+ * travel as `OpenSpec.policy` and the daemon compiles them (#121). With a
+ * Session definition, `ask_user` raises its input request there (#122).
  */
 
 import type { WorkspaceId } from '@agentic/core';
@@ -26,6 +27,8 @@ import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 export interface SessionFactoryOptions {
     /** The Routing actor definition (`task_report`). */
     readonly routing: () => AnyActorDefinition;
+    /** The Session actor definition (`ask_user`, #122); without it the tool answers `unsupported`. */
+    readonly sessions?: () => AnyActorDefinition;
     /** The workspace's Anthropic provider options (BYO key). Absent or without `apiKey` → the open fails. */
     readonly anthropic?: (workspaceId: WorkspaceId) => PlatformAgentDeps['anthropic'] | Promise<PlatformAgentDeps['anthropic']>;
     /** A model to run every session on instead of the provider — tests pass `mockModel`. */
@@ -40,7 +43,7 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
     return async (runtime, c) => {
         if (runtime !== 'anthropic-api') return null;
         const principal = mintAgentPrincipal({ workspaceId: c.workspaceId, agentId: c.spec.agentId, sessionId: c.sessionId, ...(c.spec.taskId ? { taskId: c.spec.taskId } : {}) }) as AgentPrincipal;
-        const ports = createActorToolPorts({ principal, ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}), routing: options.routing });
+        const ports = createActorToolPorts({ principal, ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}), routing: options.routing, ...(options.sessions ? { sessions: options.sessions } : {}) });
         let provider: PlatformAgentDeps['anthropic'];
         if (!options.model) {
             provider = await options.anthropic?.(c.workspaceId);

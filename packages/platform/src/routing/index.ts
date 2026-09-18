@@ -6,4 +6,4 @@ export { createEnvironmentProbe, locateEnvironment, type EnvironmentProbeOptions
 export type { RoutingPorts } from './ports.js';
 export { initialRoutingState, type Route, type RouteStatus, type RoutingState } from './state.js';
 export { createToolCallPort, type ToolCallPortOptions } from './tool-call.js';
-export { agentChatKey, createActorToolPorts, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';
+export { agentChatKey, answerText, createActorToolPorts, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';
