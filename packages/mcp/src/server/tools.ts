@@ -358,7 +358,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
         tool({
             name: 'chats_file_get',
             scope: 'chats',
-            description: `A file attached to a chat, as referenced by an \`agentic-file:<chatId>/<fileId>\` URI in chats_history. Returns the text of a text file (cut at ${kb(CHAT_FILE_TEXT_MAX_BYTES)}), an image block for a ${MODEL_IMAGE_TYPES.join(' / ')} image, and the name, type and size of anything else.`,
+            description: `A file attached to a chat, as referenced by an \`agentic-file:<chatId>/<fileId>\` URI in chats_history. The first content block is always a JSON summary (file record, uri, kind, truncated?, note?); a second block follows with the text of a text file (cut at ${kb(CHAT_FILE_TEXT_MAX_BYTES)}) or an image block for a ${MODEL_IMAGE_TYPES.join(' / ')} image. Anything else is the summary alone.`,
             input: z.object({ chatId: segment('The chat id.'), fileId: segment('The file id — the part after the chat id in the URI.') }),
             annotations: READ,
             run: (input) => getChatFile(port, options.files, principal.workspaceId, input.chatId as ChatId, input.fileId)
