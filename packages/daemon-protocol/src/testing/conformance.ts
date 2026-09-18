@@ -3,7 +3,8 @@
  * and the behaviour every platform side may rely on: pair (hello/welcome),
  * env, heartbeat, session open/opened, a stream of session frames, a
  * reconnect that replays from the platform's `wanted` cursors without a
- * gap or a duplicate (OPS-04, OPS-06), and a tool round trip. No test-runner
+ * gap or a duplicate (OPS-04, OPS-06), a tool round trip, and folder
+ * browsing that never leaves the environment's `cwdRoots` (#187). No test-runner
  * import: consumers wire the cases into theirs, e.g.
  *
  * ```ts
@@ -13,7 +14,7 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, type Cursor, type EnvironmentDescriptor, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type Cursor, type EnvironmentDescriptor, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, HelloFrame, PlatformFrame, SessionFrameFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
@@ -41,7 +42,7 @@ export interface DaemonConformanceOptions {
 
 const V = DAEMON_PROTOCOL_VERSION;
 /** Cases that need an optional harness feature. */
-const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap' };
+const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs' };
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
 
@@ -300,6 +301,37 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     assertEqual(frame.frame.from, wanted, 'gap.from is the cursor the platform asked for');
                     assert(cursorBefore(frame.frame.from, frame.frame.resumeAt), 'gap.resumeAt is after gap.from');
                     assert(!cursorBefore(head, frame.frame.resumeAt), 'gap.resumeAt is not beyond the head');
+                })
+        },
+        {
+            name: 'fs-list',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const env = hello.environments.find((e) => e.id === daemon.environmentId)!;
+                    const root = env.cwdRoots[0];
+                    assert(root !== undefined, `environment ${env.id} has a working root to browse`);
+                    const ask = async (requestId: string, environmentId: string, path: string) => {
+                        peer.send({ v: V, t: 'fs.request', requestId, environmentId, op: { kind: 'list', path } });
+                        const response = await peer.expect('fs.response');
+                        assertEqual(response.requestId, requestId, 'fs.response answers the request it was sent');
+                        return response;
+                    };
+
+                    const listed = await ask('fs_root', env.id, root);
+                    assert(listed.result?.kind === 'list', `listing a working root yields a listing (${listed.error?.code ?? ''} ${listed.error?.message ?? ''})`);
+                    assertEqual(normalizePath(listed.result.path, hello.os), normalizePath(root, hello.os), 'the listing names the folder it lists');
+                    assertEqual(listed.result.parent, undefined, 'nothing above a working root is offered');
+                    for (const e of listed.result.entries) assert(pathWithin(e.path, env.cwdRoots, hello.os), `listed folder ${e.path} is inside the working roots`);
+
+                    // A sibling of the root: outside every root unless another root covers it.
+                    const outside = normalizePath(`${root}/../__agentic_conformance_outside__`, hello.os);
+                    if (outside && !pathWithin(outside, env.cwdRoots, hello.os)) {
+                        const refused = await ask('fs_outside', env.id, outside);
+                        assertEqual(refused.error?.code, 'outside-roots', 'a folder outside the working roots is refused, not listed (OPS-01)');
+                    }
+                    const unknown = await ask('fs_unknown', 'env_conformance_unknown', root);
+                    assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
                 })
         },
         {

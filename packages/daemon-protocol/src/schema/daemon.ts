@@ -3,7 +3,7 @@
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
-import { capabilityReport, cursor, cursors, environments, machineId, name, nonNegativeInt, os, sessionId, text } from './common.js';
+import { capabilityReport, cursor, cursors, environments, fsError, fsResult, machineId, name, nonNegativeInt, os, sessionId, text } from './common.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireFrame, wireReply } from './wire.js';
 
@@ -27,6 +27,10 @@ const sessionReply = z.object({ v, t: z.literal('session.reply'), sessionId, rep
 const sessionClosed = z.object({ v, t: z.literal('session.closed'), sessionId, reason: text });
 const toolCall = z.object({ v, t: z.literal('tool.call'), callId: name, sessionId, tool: name, input: z.unknown() });
 const pong = z.object({ v, t: z.literal('pong'), at: nonNegativeInt });
+const fsResponse = z
+    .object({ v, t: z.literal('fs.response'), requestId: name, result: fsResult.optional(), error: fsError.optional() })
+    .refine((f) => f.result === undefined || f.error === undefined, { message: 'fs.response carries result or error, not both', path: ['error'] })
+    .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'fs.response carries result or error', path: ['result'] });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
 export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
@@ -37,6 +41,7 @@ export const sessionReplyFrame: z.ZodType<DaemonFrameOf<'session.reply'>> = sess
 export const sessionClosedFrame: z.ZodType<DaemonFrameOf<'session.closed'>> = sessionClosed;
 export const toolCallFrame: z.ZodType<DaemonFrameOf<'tool.call'>> = toolCall;
 export const pongFrame: z.ZodType<DaemonFrameOf<'pong'>> = pong;
+export const fsResponseFrame: z.ZodType<DaemonFrameOf<'fs.response'>> = fsResponse;
 
 /** Every daemon frame kind by its `t`. */
 export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
@@ -48,7 +53,8 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     'session.reply': sessionReplyFrame,
     'session.closed': sessionClosedFrame,
     'tool.call': toolCallFrame,
-    pong: pongFrame
+    pong: pongFrame,
+    'fs.response': fsResponseFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionFrame, sessionReply, sessionClosed, toolCall, pong]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse]);

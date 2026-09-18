@@ -8,7 +8,7 @@
  * test can check that the suite notices.
  */
 
-import { DAEMON_PROTOCOL_VERSION, type CapabilityReport, type Cursor, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type CapabilityReport, type Cursor, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type SessionId } from '@agentic/core';
 import type { AgentEvent, SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, cursorBefore, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, PlatformFrame } from '../frames.js';
@@ -22,6 +22,8 @@ export interface InMemoryFaults {
     readonly answerAnyVersion?: boolean;
     /** Never announce environment changes. */
     readonly silentEnv?: boolean;
+    /** List any folder asked for, inside the working roots or not. */
+    readonly browseAnywhere?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -230,6 +232,18 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 resolve?.({ output: frame.output, error: frame.error });
                 return;
             }
+            case 'fs.request': {
+                // An empty tree: every folder inside the roots exists and has no subfolders; worktrees are not faked.
+                const answer = (r: Pick<Extract<DaemonFrame, { t: 'fs.response' }>, 'result' | 'error'>) => this.emit({ v: V, t: 'fs.response', requestId: frame.requestId, ...r });
+                const env = this.environments.find((e) => e.id === frame.environmentId);
+                if (!env) return answer({ error: { code: 'unknown-environment', message: `no environment ${frame.environmentId}` } });
+                if (frame.op.kind !== 'list') return answer({ error: { code: 'unsupported', message: 'the in-memory daemon does not create worktrees' } });
+                const path = normalizePath(frame.op.path, 'linux');
+                if (!path || (!this.options.faults?.browseAnywhere && !pathWithin(path, env.cwdRoots, 'linux'))) return answer({ error: { code: 'outside-roots', message: `${frame.op.path} is outside the working roots` } });
+                const isRoot = env.cwdRoots.some((r) => normalizePath(r, 'linux') === path);
+                const parent = isRoot ? undefined : normalizePath(`${path}/..`, 'linux')!;
+                return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), entries: [], truncated: false } });
+            }
         }
     }
 
@@ -285,7 +299,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
 /** A conformance harness over the fake daemon; also usable directly to exercise a platform implementation. */
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     return {
-        features: ['env', 'gap', 'raw'],
+        features: ['env', 'gap', 'raw', 'fs'],
         start: (script) => new InMemoryDaemon(script, options)
     };
 }
