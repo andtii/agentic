@@ -3,7 +3,8 @@
  * its version log (`listVersions`, re-read after every save), the same
  * header and tabs as the mock page over a profile folded from them
  * (`profileOf`), the Config tab persisting through `Agent.update` /
- * `Agent.rollback`, and "Start chat" creating a direct chat with this agent.
+ * `Agent.rollback` — its environment picker offering every paired machine's
+ * environments (#144) — and "Start chat" creating a direct chat with this agent.
  */
 import { component, effect, onUnmounted, signal, useData, type JSXElement } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
@@ -18,6 +19,7 @@ import { agentKeyOf } from '../../actors/keys';
 import type { MockAgent } from '../../mock/data';
 import { useAgentDirectory } from '../chat/directory';
 import { createChatWith } from '../chat/LiveChats';
+import { useEnvironmentOptions } from '../machines/environments';
 import { AGENT_TABS, type AgentTab } from '../Agent';
 import { ConfigTab, type ConfigStore } from './ConfigTab';
 import { agentHead } from './head';
@@ -32,6 +34,8 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
     const route = useRoute();
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
+    // The paired machines' environments, for the Config tab's default-environment picker (#144).
+    const environments = useEnvironmentOptions(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? agentKeyOf(viewer.workspaceId, props.id) : null);
     const client = () => actor(defs.AgentActor, key()!);
 
@@ -128,7 +132,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} /></Tabs.Panel>
-                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} /></Tabs.Panel>
+                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} /></Tabs.Panel>
                     <Tabs.Panel value="memory"><MemoryTab profile={profile} /></Tabs.Panel>
                     <Tabs.Panel value="sessions"><SessionsTab agentId={id} /></Tabs.Panel>
                 </Tabs>
