@@ -142,6 +142,14 @@ describe('createMemoryStore', () => {
         expect(store.state.rev).toBe(5);
     });
 
+    it('delete of an id that only names an Object.prototype member resolves false and commits nothing', async () => {
+        const logs: string[] = [];
+        const store = createMemoryStore({ commit: (state, log) => { logs.push(log.op); applyMemoryLog(state, log); } });
+        expect(await store.delete('toString')).toBe(false);
+        expect(await store.delete('__proto__')).toBe(false);
+        expect(logs).toEqual([]);
+    });
+
     it('pages exports by id', async () => {
         const store = createMemoryStore({ now: () => NOW, exportPageSize: 2 });
         for (const id of ['c', 'a', 'b', 'e', 'd']) await store.importBatch([entry(id, id)]);

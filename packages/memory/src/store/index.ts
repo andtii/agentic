@@ -103,7 +103,8 @@ export function createMemoryStore(options: MemoryStoreOptions = {}): OpenMemoryS
         },
 
         async delete(id: string): Promise<boolean> {
-            if (!state.entries[id]) return false;
+            // Own entries only: the id comes off the wire, and `entries` is a plain object.
+            if (!Object.hasOwn(state.entries, id)) return false;
             await commit(state, { op: 'delete', id });
             return true;
         },
