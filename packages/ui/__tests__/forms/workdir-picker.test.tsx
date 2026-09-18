@@ -332,6 +332,18 @@ describe('WorkdirDialog', () => {
         expect(buttonNamed(p.root, 'Use this folder').disabled).toBe(false);
     });
 
+    it('never offers a listing for another folder as the one on screen', async () => {
+        // The host cleared `loading` before swapping the listing in.
+        const p = picker({ path: 'C:\\Dev\\agentic\\main', listing: agentic });
+        await tick();
+        expect(buttonNamed(p.root, 'Use this folder').disabled).toBe(true);
+        // Same folder, another spelling: it is current (Windows paths fold case and separators).
+        p.s.path = 'c:/dev/agentic';
+        await tick();
+        buttonNamed(p.root, 'Use this folder').click();
+        expect(p.events).toEqual([['select', { environmentId: W, path: 'C:\\Dev\\agentic' }]]);
+    });
+
     it('says when a folder has no subfolders, and when the listing is truncated', async () => {
         const p = picker({ path: 'C:\\Dev\\empty', listing: list('C:\\Dev\\empty', { parent: 'C:\\Dev' }) });
         await tick();

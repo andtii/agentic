@@ -32,7 +32,7 @@ import { Button } from '../kit/Button.js';
 import { Icon } from '../kit/icons.js';
 import { Tag } from '../kit/StatusPill.js';
 import { TableSkeleton } from '../kit/states/Skeletons.js';
-import { FS_ERROR_TEXT, fsErrorText, middleTruncate, workdirCrumbs, type WorkdirEnvironment, type WorkdirRecent, type WorkdirWorktreeRequest } from './workdir-model.js';
+import { FS_ERROR_TEXT, fsErrorText, middleTruncate, samePath, workdirCrumbs, type WorkdirEnvironment, type WorkdirRecent, type WorkdirWorktreeRequest } from './workdir-model.js';
 import { WorkdirWorktreeForm } from './workdir-worktree.js';
 
 const SCOPE = agWorkdirPickerAnatomy.scope;
@@ -91,10 +91,15 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
         const e = env();
         return e && !e.unavailable ? e : undefined;
     };
-    /** The listing, when it is the one for the folder on screen. */
+    /** Whether `listing` is the one for `path` — a host may swap them in either order. */
+    const listingOf = (l: FsListResult | null | undefined, path: string | null): l is FsListResult => {
+        const e = env();
+        return !!l && path !== null && (e ? samePath(l.path, path, e.os) : l.path === path);
+    };
+    /** The listing, when it is settled and for the folder on screen. */
     const current = (): FsListResult | null => {
         const l = props.listing ?? null;
-        return l && at() !== null && !props.loading ? l : null;
+        return listingOf(l, at()) && !props.loading ? l : null;
     };
 
     const close = (): void => {
@@ -107,7 +112,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
         const path = at();
         if (path === null) return;
         const l = props.listing;
-        if (l && l.path === path) return navigate(l.parent ?? null);
+        if (listingOf(l, path)) return navigate(l.parent ?? null);
         const e = env();
         const crumbs = e ? workdirCrumbs(path, e) : [];
         navigate(crumbs.length > 1 ? crumbs[crumbs.length - 2]!.path : null);
@@ -206,6 +211,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
         <div data-scope={SCOPE} data-part="envs" role="group" aria-label="Environments">
             {props.environments.map((e) => (
                 <button
+                    key={e.id}
                     type="button"
                     data-scope={SCOPE}
                     data-part="env"
@@ -226,7 +232,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
             <h3 data-scope={SCOPE} data-part="heading" id={`${id}-${heading}`}>{heading}</h3>
             <ul data-scope={SCOPE} data-part="shortcuts">
                 {paths.map((path) => (
-                    <li>
+                    <li key={path}>
                         <button type="button" data-scope={SCOPE} data-part="shortcut" title={path} onClick={() => navigate(path)}>
                             <Icon name="folder" size={14} />
                             <span>{middleTruncate(path)}</span>
@@ -277,7 +283,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
                             </button>
                         </li>
                         {crumbs.map((c, i) => (
-                            <li>
+                            <li key={c.path}>
                                 <Icon name="chevron-right" size={14} />
                                 <button
                                     type="button"
@@ -346,6 +352,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
                     >
                         {entries.map((entry, i) => (
                             <li
+                                key={entry.path}
                                 id={optionId(i)}
                                 data-scope={SCOPE}
                                 data-part="item"

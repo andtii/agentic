@@ -64,6 +64,13 @@ export function workdirLabel(ref: WorkdirRef | null | undefined, environments: r
     return `${env?.label ?? ref.environmentId} · ${path}`;
 }
 
+/** Whether two paths name the same folder on `os`: normalized, and case-insensitive on Windows. */
+export function samePath(a: string, b: string, os: HostOs): boolean {
+    const na = normalizePath(a, os) ?? a;
+    const nb = normalizePath(b, os) ?? b;
+    return os === 'windows' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
 /** `text` cut in the middle to at most `max` characters: "C:\Dev\ag…\branches\47-drawer". The tail — the folder's own name — survives. */
 export function middleTruncate(text: string, max = 44): string {
     if (text.length <= max) return text;
