@@ -32,7 +32,7 @@ function binaryNote(file: ChatFile): string {
 export function chatFileReadTool(port: ChatFilesPort | undefined) {
     return defineTool({
         name: 'chat_file_read',
-        description: 'Read a file attached to this chat by its agentic-file: URI. Returns the text of a text file (cut at 256 KB); for any other file only its name, type and size.',
+        description: `Read a file attached to this chat by its agentic-file: URI. Returns the text of a text file (cut at ${kb(CHAT_FILE_TEXT_MAX_BYTES)}); for any other file only its name, type and size.`,
         input: chatFileReadInput,
         annotations: { readOnly: true, idempotent: true },
         execute: async (input, ctx): Promise<ChatFileReadResult> => {
