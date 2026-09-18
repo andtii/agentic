@@ -11,7 +11,9 @@ import { afterEach } from 'vitest';
 import { defineApp, type JSXElement } from 'sigx';
 import '@sigx/runtime-dom';
 import { RouterView } from '@sigx/router';
+import type { AnyActorDefinition } from '@sigx/actors';
 import { actorsPlugin } from '@sigx/actors/app';
+import type { HostDefaults } from '@sigx/actors/host';
 import { configureActors, fetchTransport, type ActorTransport } from '@sigx/actors/client';
 import { createFetchHandler } from '@sigx/actors/server';
 import { stubServerApp } from '@sigx/server/testing';
@@ -64,6 +66,10 @@ const noSockets: MachineSocketPort = { send: () => false, close: () => undefined
 export interface LiveOptions {
     /** Replace the session factory — a deployment that cannot open sessions (`no-api-key`, #128). */
     readonly factory?: SessionFactory;
+    /** More actors for the host (a Schedule, a Registry, a Workspace with ports, #145); one with a type the harness already hosts replaces it. */
+    readonly actors?: readonly AnyActorDefinition[];
+    /** Host timers over the quiet defaults — a fast `reminderTickMs` when a test lets a schedule fire (#145). */
+    readonly defaults?: Partial<HostDefaults>;
 }
 
 /** Start the host, the wire and the stubbed identity. `agentScript` is the mock runtime every session runs. */
@@ -72,7 +78,10 @@ export async function startLive(agentScript: MockAgentOptions = { respond: (inpu
     const Session = defineSessionActor({ factory: options.factory ?? localFactory(mockAgent(agentScript)), inbox: () => Inbox });
     const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
     const Machine = defineMachineActor({ socket: noSockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
-    const app = testActorApp([Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Routing, Machine, PairingDirectory, Inbox, Memory, LedgerActor, AuditActor]);
+    const extra = options.actors ?? [];
+    const typeOf = (d: AnyActorDefinition): string => (d as { type: string }).type;
+    const base = [Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Routing, Machine, PairingDirectory, Inbox, Memory, LedgerActor, AuditActor].filter((d) => !extra.some((e) => typeOf(e) === typeOf(d)));
+    const app = testActorApp([...base, ...extra], options.defaults ? { defaults: options.defaults } : {});
     await app.start();
     // After `start()` (last-wins seam): the wire authenticates the `x-user` header; hops keep the JSON codec.
     const restore = stubServerApp({
@@ -142,9 +151,10 @@ export const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, 
 
 /** Poll until `check` holds — a DOM condition, or an actor read (`async` checks are awaited). */
 export async function until(check: () => boolean | Promise<boolean>, what: string, timeoutMs = 5_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
+    // `performance.now()`: a test that fakes `Date` still times out.
+    const deadline = performance.now() + timeoutMs;
     while (!(await check())) {
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
         await tick(10);
     }
 }

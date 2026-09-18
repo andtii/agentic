@@ -14,7 +14,7 @@
  * Tests provide either, plus their own transport.
  */
 import { defineInjectable } from 'sigx';
-import type { AgentActor, Chat, Inbox, MachineActor, RoutingActor, SessionActor, TaskActor, Workspace } from '@agentic/platform';
+import type { AgentActor, Chat, Inbox, MachineActor, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, Workspace } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -27,6 +27,10 @@ export interface ActorDefs {
     readonly Inbox: typeof Inbox;
     /** Machines — `online` for the connection strip and the failure cards (#46). */
     readonly Machine: MachineActor;
+    /** One entry per schedule — the Schedules page (#145). */
+    readonly Schedule: ScheduleActor;
+    /** The workspace Registry — plugins, connectors, secret names (#145). */
+    readonly Registry: typeof Registry;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });

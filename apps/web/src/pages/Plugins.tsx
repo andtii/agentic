@@ -4,6 +4,8 @@ import { AgentTile, Button, ConfirmDialog, Icon, Label, Switch, Tag } from '@age
 import { disableConsequence, opsAgent, opsPlugins, type OpsPlugin } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
+import { dataMode } from '../data-mode';
+import { LivePlugins } from './ops/LivePlugins';
 
 export type PluginsViewProps = Define.Prop<'plugins', readonly OpsPlugin[], true>;
 
@@ -96,4 +98,5 @@ export const PluginsView = component<PluginsViewProps>(({ props }) => {
     };
 });
 
-export const Plugins = component(() => () => <PluginsView plugins={opsPlugins} />);
+/** `/plugins`: the workspace Registry on the platform (`LivePlugins`, #145), or the mock cards. */
+export const Plugins = component(() => () => (dataMode() === 'live' ? <LivePlugins /> : <PluginsView plugins={opsPlugins} />));

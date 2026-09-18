@@ -3,6 +3,8 @@ import { Button, ConfirmDialog, Icon, Label, SelectField, StatusPill, Switch, Te
 import { opsSettings, type NotificationRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
+import { dataMode } from '../data-mode';
+import { LiveSettings } from './ops/LiveSettings';
 
 export type SettingsViewProps =
     & Define.Prop<'timeZone', string, true>
@@ -127,7 +129,8 @@ export const SettingsView = component<SettingsViewProps>(({ props }) => {
     );
 });
 
-export const Settings = component(() => () => (
+/** `/settings`: the Workspace's settings on the platform (`LiveSettings`, #145), or the mock draft. */
+export const Settings = component(() => () => (dataMode() === 'live' ? <LiveSettings /> : (
     <SettingsView
         timeZone={opsSettings.timeZone}
         timeZones={opsSettings.timeZones}
@@ -139,4 +142,4 @@ export const Settings = component(() => () => (
         budgets={opsSettings.budgets}
         retention={opsSettings.retention}
     />
-));
+)));

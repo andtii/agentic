@@ -3,9 +3,13 @@ import { AgentTile, Button, DataTable, EnvironmentLine, Icon, Switch, Tag } from
 import { dstRule, offlinePolicyLine, opsAgent, opsMachine, opsSchedules, type OpsSchedule } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
+import { dataMode } from '../data-mode';
+import { openNewSchedule } from './ops/head';
+import { SCHEDULES_COLS } from './ops/live';
+import { LiveSchedules } from './ops/LiveSchedules';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
-export const SCHEDULES_COLS = '110px 1fr 140px 140px 310px 44px';
+export { SCHEDULES_COLS };
 
 export type SchedulesViewProps = Define.Prop<'schedules', readonly OpsSchedule[], true> & Define.Prop<'dstRule', string, true>;
 
@@ -31,7 +35,8 @@ const RunsOn = component<Define.Prop<'schedule', OpsSchedule, true>>(({ props })
  * a schedule bound to an offline environment shows the amber policy line
  * under its name, and the footer states the DST rule (AST-07).
  */
-defineTopbar('schedules', () => ({ actions: () => <Button intent="primary" icon="plus">New schedule</Button> }));
+// The button opens the live page's dialog (#145); the mock page mounts none, so there it stays the artboard's inert control.
+defineTopbar('schedules', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={dataMode() === 'live' ? openNewSchedule : undefined}>New schedule</Button> }));
 
 export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
     const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.schedules.map(s => [s.id, s.enabled])));
@@ -73,4 +78,5 @@ export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
     );
 });
 
-export const Schedules = component(() => () => <SchedulesView schedules={opsSchedules} dstRule={dstRule} />);
+/** `/schedules`: the workspace's entries on the platform (`LiveSchedules`, #145), or the mock table. */
+export const Schedules = component(() => () => (dataMode() === 'live' ? <LiveSchedules /> : <SchedulesView schedules={opsSchedules} dstRule={dstRule} />));
