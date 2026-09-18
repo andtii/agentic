@@ -255,7 +255,8 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         Registry: byType('Registry') as ActorDefs['Registry'],
         TaskIndex: byType('task-index') as ActorDefs['TaskIndex'],
         Audit: byType('audit') as ActorDefs['Audit'],
-        Ledger: byType('ledger') as ActorDefs['Ledger']
+        Ledger: byType('ledger') as ActorDefs['Ledger'],
+        Memory: byType('Memory') as ActorDefs['Memory']
     };
 }
 
