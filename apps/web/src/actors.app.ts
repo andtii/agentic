@@ -163,7 +163,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const anthropic = ports.anthropic ?? defaultPorts.anthropic;
     const Inbox = defineInbox({ channels: ports.channels });
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, ...(anthropic ? { anthropic } : {}) }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, ...(anthropic ? { anthropic } : {}) }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),

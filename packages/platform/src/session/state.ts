@@ -83,12 +83,17 @@ export interface SessionState {
     learning?: LearningRecord;
     /** Corrections made on this session's messages, oldest first. */
     corrections?: CorrectionRecord[];
+    /**
+     * Requests the PLATFORM raised (`raiseInput`, #122) rather than the runtime — `respond` settles
+     * these itself, since the live `AgentSession` does not know them.
+     */
+    platformRequests?: string[];
 }
 
 /** Replies remembered for idempotent retries (OPS-06); the same default as `serveSession`. */
 export const MAX_COMMANDS = 256;
 
-export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections'>>;
+export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests'>>;
 
 export type SessionEntry =
     | { readonly t: 'ev'; readonly ev: AgentEvent }
@@ -104,6 +109,18 @@ export function initialSessionState(): SessionState {
 /** `ev` is strictly after `head`. */
 export function cursorAfter(head: EventCursor, ev: EventCursor): boolean {
     return ev.epoch > head.epoch || (ev.epoch === head.epoch && ev.seq > head.seq);
+}
+
+/**
+ * The cursor of an event the platform appends between two runtime events
+ * (a platform-raised request, #122): strictly after `head`, strictly before
+ * the runtime's next integer `seq` — so it is never taken for, nor skips, a
+ * runtime event on either path (`applyEvent` folds by cursor; a local driver
+ * subscribes from the head; a daemon replays from the Machine's own cursor).
+ * Fractional on purpose; a runtime never stamps one.
+ */
+export function platformCursor(head: EventCursor): EventCursor {
+    return { epoch: head.epoch, seq: (head.seq + Math.floor(head.seq) + 1) / 2 };
 }
 
 export function applySessionEntry(state: SessionState, entry: SessionEntry): void {

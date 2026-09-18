@@ -25,7 +25,9 @@
  *   running work has stopped once the turn actually ends.
  * - a delegated task (`origin.kind === 'agent'`, #39) runs outside any chat;
  *   its session opens with the approval rules of every ancestor's agent as
- *   `approvalConstraints`, so the child's policy is never wider (AC-12). A
+ *   `approvalConstraints`, so the child's policy is never wider (AC-12); on
+ *   the daemon path the same rules, grants and constraints travel as
+ *   `OpenSpec.policy` for the daemon to compile (#121). A
  *   `request` it raises reaches the Inbox through the Session itself (#40).
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
@@ -34,7 +36,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -88,7 +90,7 @@ interface SessionClient {
 /** The slice of the Machine actor the router drives (`defineMachineActor`). */
 interface MachineClient {
     get(): Promise<MachineView>;
-    openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: { agentId: string; cwd: string; system: string; model?: string; maxTurns?: number; maxBudgetUsd?: number; tools: readonly string[]; resume?: unknown }, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
+    openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: OpenSpec, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
 }
 
 /** `Routing.get()`. */
@@ -118,6 +120,9 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
 }
 
 const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
+
+/** What the daemon compiles the session policy from (#121): the agent's rules and grants, and the ancestors' rules on a delegated task (AC-12) — the same input `sessionPolicy` takes on the local path. */
+const openSpecPolicy = (route: Route): OpenSpecPolicy => ({ rules: route.config.approvalPolicy, grants: route.config.tools, ...(route.constraints?.length ? { constraints: route.constraints } : {}) });
 
 /** Build the Routing actor definition over its ports. One call per app — the actor `type` is `'routing'`. */
 export function defineRoutingActor(ports: RoutingPorts) {
@@ -323,7 +328,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
-                            tools: grantedToolNames(route)
+                            tools: grantedToolNames(route),
+                            policy: ctx.snapshot(openSpecPolicy(route))
                         },
                         { taskId: route.taskId }
                     );

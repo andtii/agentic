@@ -2,8 +2,9 @@
  * `createToolCallPort` — a daemon session's `tool.call` runs the platform
  * tool over the actors under the agent principal (architecture §5b, #37):
  * memory in the agent's own scope, chat posts attributed to the agent, task
- * reports kept by the router; `delegate` without a task and `ask_user`
- * refused as unsupported (delegation itself: `delegation.test.ts`), bad
+ * reports kept by the router; `ask_user` raised as the session's own input
+ * request and answered from `Session.respond` (#122); `delegate` without a
+ * task refused as unsupported (delegation itself: `delegation.test.ts`), bad
  * input as invalid, a non-agent principal as forbidden.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -59,6 +60,13 @@ beforeEach(async () => {
 afterEach(() => app.stop());
 
 const call = (tool: string, input: unknown, as: Principal = principal, callId = 'call_1') => port.call({ callId, sessionId: SESSION, tool, input }, as);
+const until = async (check: () => Promise<boolean> | boolean, what: string, timeoutMs = 4_000): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        await new Promise((r) => setTimeout(r, 5));
+    }
+};
 const codeOf = async (p: Promise<unknown>): Promise<string | undefined> => {
     try {
         await p;
@@ -99,10 +107,38 @@ describe('createToolCallPort', () => {
         expect(await codeOf(call('task_report', { status: 'done', summary: 'x' }, taskless))).toBe('unsupported');
     });
 
+    it('ask_user raises one input request on the session (idempotent by call id); the answer from Session.respond is the tool result, a cancel a `cancelled` error (#122)', async () => {
+        const session = app.as(owner).actor(Session, actorKey(WS, 'session', SESSION));
+        const asked = call('ask_user', { question: 'Which colour?', choices: ['red', 'blue'] }, principal, 'call_ask');
+        await until(async () => (await session.get()).openRequests.length === 1, 'the request to land');
+        // The same call again (a daemon re-sending an open `tool.call` after a reconnect) finds the same request.
+        const again = call('ask_user', { question: 'Which colour?', choices: ['red', 'blue'] }, principal, 'call_ask');
+        const info = await session.get();
+        expect(info.status).toBe('awaiting');
+        expect(info.openRequests).toEqual(['ask:call_ask']);
+        const record = (await session.request('ask:call_ask'))!;
+        expect(record).toMatchObject({ sessionId: SESSION, agentId: AGENT, chatId: CHAT, taskId: TASK, request: { kind: 'input', toolName: 'ask_user', callId: 'call_ask', message: 'Which colour?', options: [{ id: 'red', label: 'red' }, { id: 'blue', label: 'blue' }] } });
+        expect(record.resolved).toBeUndefined();
+        // A permission decision is not an answer to a question.
+        expect((await session.respond('ask:call_ask', { type: 'permission', outcome: 'allow', scope: 'once' }, 'respond:wrong-kind')).kind).toBe('error');
+        expect((await session.respond('ask:call_ask', { type: 'input', answers: 'blue' })).kind).toBe('ack');
+        expect(await asked).toEqual({ answer: 'blue' });
+        expect(await again).toEqual({ answer: 'blue' });
+        expect((await session.get()).openRequests).toEqual([]);
+        expect((await session.request('ask:call_ask'))!.resolved).toMatchObject({ outcome: 'input', by: 'client', answers: 'blue' });
+        expect((await session.events()).filter((e) => e.type === 'request')).toHaveLength(1);
+        // A late second decision is a no-op ack; a cancelled question is a cancelled tool call.
+        expect((await session.respond('ask:call_ask', { type: 'input', answers: 'red' }, 'respond:late')).kind).toBe('ack');
+        expect((await session.request('ask:call_ask'))!.resolved).toMatchObject({ answers: 'blue' });
+        const cancelled = call('ask_user', { question: 'Sure?' }, principal, 'call_cancel');
+        await until(async () => (await session.get()).openRequests.length === 1, 'the second request to land');
+        await session.respond('ask:call_cancel', { type: 'cancel' });
+        expect(await codeOf(cancelled)).toBe('cancelled');
+    });
+
     it('refuses what it does not serve, with the code the daemon reports', async () => {
         const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
         expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }, taskless))).toBe('unsupported');
-        expect(await codeOf(call('ask_user', { question: 'Which?' }))).toBe('unsupported');
         expect(await codeOf(call('shell', {}))).toBe('unsupported');
         expect(await codeOf(call('memory_search', { nope: 1 }))).toBe('invalid');
         expect(await codeOf(call('memory_search', { query: 'x' }, { kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never }))).toBe('forbidden');
