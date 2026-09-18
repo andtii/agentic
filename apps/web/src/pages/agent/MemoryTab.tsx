@@ -1,11 +1,30 @@
-import { component, signal, type Define } from 'sigx';
+import { component, effect, onUnmounted, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
 import type { MemoryEntry, MemoryKind } from '@agentic/core';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, Stack, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
 import { MEMORY_KINDS, memoryCounts, type AgentProfile } from '../../mock/agents';
-import { shortDate, dateTime } from './format';
+import { agentClock, shortDate, dateTime } from './format';
 
-export type MemoryTabProps = Define.Prop<'profile', AgentProfile, true>;
+/**
+ * Where the tab's actions go on the platform (#153): the Memory actor of the
+ * agent's private scope and, for the learning switch, the Agent's config. The
+ * tab then lists `profile.memories` as the page re-reads them — the actor is
+ * the truth. `remove` is optional: the Delete control is drawn only where a
+ * delete exists (the AC-15 rule — an unsupported control is never drawn).
+ */
+export interface MemoryTabStore {
+    correct(entry: MemoryEntry, text: string): Promise<unknown>;
+    retire(entry: MemoryEntry): Promise<unknown>;
+    remove?(entry: MemoryEntry): Promise<unknown>;
+    setLearning(on: boolean): Promise<unknown>;
+}
+
+export type MemoryTabProps =
+    & Define.Prop<'profile', AgentProfile, true>
+    /** Live mode: act through the actors; absent, the actions mutate a local copy (the mock page). */
+    & Define.Prop<'store', MemoryTabStore>
+    /** The workspace's IANA zone; absent, the mock workspace's. */
+    & Define.Prop<'zone', string>;
 
 type Filter = MemoryKind | 'all';
 
@@ -32,7 +51,7 @@ export function confidencePill(confidence: MemoryEntry['confidence']): { status:
 }
 
 /** `your correction · chat Mobile pass #47 · 17 Sep 14:20` — where the memory came from (MEM-08). */
-export function provenanceLine(entry: MemoryEntry): string {
+export function provenanceLine(entry: MemoryEntry, zone?: string): string {
     const p = entry.provenance;
     const who =
         p.source === 'user' ? (entry.kind === 'lesson' ? 'your correction' : 'your message')
@@ -43,7 +62,8 @@ export function provenanceLine(entry: MemoryEntry): string {
     if (p.taskId) refs.push(`task ${p.taskId}`);
     if (p.sessionId) refs.push(`session ${p.sessionId}`);
     if (entry.subject) refs.push(entry.subject);
-    const when = Date.now() - p.at < 86_400_000 ? dateTime(p.at) : shortDate(p.at);
+    // The page's clock: the mock workspace's frozen one in mock mode, so its rows never drift from a time to a date.
+    const when = agentClock() - p.at < 86_400_000 ? dateTime(p.at, zone) : shortDate(p.at, zone);
     return [who, ...refs, when].join(' · ');
 }
 
@@ -53,23 +73,52 @@ export function provenanceLine(entry: MemoryEntry): string {
  * confidence pill, actions), retired rows at 55 % with strikethrough and
  * the superseding reason; the rail lists scopes, what the runtime gets and
  * the learning counters (`docs/design/HANDOFF.md` → Agent memory).
- * Correct / retire / delete mutate the local copy until #41 wires the
- * Memory actor.
+ * Correct / retire / delete go through `store` on the platform (#153) and
+ * mutate a local copy on the mock page.
  */
 export const MemoryTab = component<MemoryTabProps>(({ props }) => {
-    const p = props.profile;
     const state = signal({
         filter: 'all' as Filter,
-        entries: p.memories.map((e) => ({ ...e })) as MemoryEntry[],
-        learning: p.learning,
+        entries: props.profile.memories.map((e) => ({ ...e })) as MemoryEntry[],
+        learning: props.profile.learning,
         correcting: null as MemoryEntry | null,
         correction: '',
         deleting: null as MemoryEntry | null,
         correctOpen: false,
-        deleteOpen: false
+        deleteOpen: false,
+        error: ''
     });
 
-    const visible = () => (state.filter === 'all' ? state.entries : state.entries.filter((e) => e.kind === state.filter));
+    // With a store the list is the page's read of the actor; without one, the local copy.
+    const entries = (): readonly MemoryEntry[] => (props.store ? props.profile.memories : state.entries);
+    const run = (action: Promise<unknown>): void => {
+        state.error = '';
+        void action.catch((e: unknown) => { state.error = e instanceof Error ? e.message : String(e); });
+    };
+    // The switch is bound to `state.learning`. On the platform a flip is a config version, and a
+    // change from elsewhere (another tab, a rollback) moves the switch — it is never written back.
+    let synced = props.profile.learning;
+    const stopLearning = effect(() => {
+        const remote = props.profile.learning;
+        const on = state.learning;
+        const store = props.store;
+        if (!store) return;
+        if (remote !== synced) {
+            synced = remote;
+            state.learning = remote;
+        } else if (on !== synced) {
+            synced = on;
+            state.error = '';
+            void store.setLearning(on).catch((e: unknown) => {
+                synced = props.profile.learning;
+                state.learning = synced;
+                state.error = e instanceof Error ? e.message : String(e);
+            });
+        }
+    });
+    onUnmounted(stopLearning);
+
+    const visible = () => (state.filter === 'all' ? entries() : entries().filter((e) => e.kind === state.filter));
     const update = (id: string, patch: Partial<MemoryEntry>) => {
         state.entries = state.entries.map((e) => (e.id === id ? { ...e, ...patch } : e));
     };
@@ -79,24 +128,35 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
         state.correctOpen = true;
     };
     const confirmCorrect = () => {
-        if (state.correcting) update(state.correcting.id, { text: state.correction.trim() || state.correcting.text, confidence: 'stated', provenance: { source: 'user', at: Date.now() } });
+        const entry = state.correcting;
+        const text = entry ? state.correction.trim() || entry.text : '';
+        if (entry && props.store) run(props.store.correct(entry, text));
+        else if (entry) update(entry.id, { text, confidence: 'stated', provenance: { source: 'user', at: Date.now() } });
         state.correctOpen = false;
         state.correcting = null;
     };
-    const retire = (entry: MemoryEntry) => update(entry.id, { retired: true, supersedes: `retired by you · ${dateTime(Date.now())}` });
+    const retire = (entry: MemoryEntry) => {
+        if (props.store) run(props.store.retire(entry));
+        else update(entry.id, { retired: true, supersedes: `retired by you · ${dateTime(Date.now())}` });
+    };
     const openDelete = (entry: MemoryEntry) => {
         state.deleting = entry;
         state.deleteOpen = true;
     };
     const confirmDelete = () => {
-        if (state.deleting) state.entries = state.entries.filter((e) => e.id !== state.deleting!.id);
+        const entry = state.deleting;
+        if (entry && props.store) {
+            if (props.store.remove) run(props.store.remove(entry));
+        } else if (entry) state.entries = state.entries.filter((e) => e.id !== entry.id);
         state.deleteOpen = false;
         state.deleting = null;
     };
-    const exportHref = () => `data:application/x-ndjson;charset=utf-8,${encodeURIComponent(state.entries.map((e) => JSON.stringify(e)).join('\n'))}`;
+    const exportHref = () => `data:application/x-ndjson;charset=utf-8,${encodeURIComponent(entries().map((e) => JSON.stringify(e)).join('\n'))}`;
 
     return () => {
-        const counts = memoryCounts(state.entries);
+        const p = props.profile;
+        const canDelete = !props.store || !!props.store.remove;
+        const counts = memoryCounts(entries());
         const chips: Filter[] = ['all', ...MEMORY_KINDS.filter((k) => counts[k] > 0)];
         const rows = visible();
         return (
@@ -116,6 +176,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                             <span>Export NDJSON</span>
                         </a>
                     </div>
+                    {state.error ? <p data-memory-error="" role="alert">{state.error}</p> : null}
                     {rows.length ? (
                         <ul data-memory-list="" aria-label="Memories">
                             {rows.map((e) => {
@@ -126,7 +187,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                                         <div data-memory-body="">
                                             <p data-memory-text="">{e.text}</p>
                                             {e.retired ? (
-                                                <p data-memory-superseded="">superseded by {e.supersedes ?? 'a later entry'}</p>
+                                                <p data-memory-superseded="">{e.supersedes ? `superseded by ${e.supersedes}` : 'retired'}</p>
                                             ) : (
                                                 <>
                                                     {e.conditions ? (
@@ -135,7 +196,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                                                             {e.conditions.split('·').map((c) => <Tag>{c.trim()}</Tag>)}
                                                         </p>
                                                     ) : null}
-                                                    <p data-memory-provenance="">{provenanceLine(e)}</p>
+                                                    <p data-memory-provenance="">{provenanceLine(e, props.zone)}</p>
                                                 </>
                                             )}
                                         </div>
@@ -143,7 +204,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                                         <span data-memory-actions="">
                                             <Button intent="icon" icon="edit" label="Correct this memory" disabled={!!e.retired} onClick={() => openCorrect(e)} />
                                             <Button intent="icon" icon="retire" label="Retire this memory" disabled={!!e.retired} onClick={() => retire(e)} />
-                                            <Button intent="icon" icon="trash" label="Delete this memory" onClick={() => openDelete(e)} />
+                                            {canDelete ? <Button intent="icon" icon="trash" label="Delete this memory" onClick={() => openDelete(e)} /> : null}
                                         </span>
                                     </li>
                                 );

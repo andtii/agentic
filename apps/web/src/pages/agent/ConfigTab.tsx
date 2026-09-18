@@ -4,12 +4,20 @@ import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionI
 import type { AgentConfig, AgentConfigVersion } from '@agentic/core';
 import { agents } from '../../mock/data';
 import type { AgentProfile } from '../../mock/agents';
+import type { AgentCatalog } from './catalog';
 import { dateTime } from './format';
 
 /** Where a save and a rollback go on the platform (#35): each resolves to the version the Agent actor recorded. */
 export interface ConfigStore {
     save(config: AgentConfig, reason: string): Promise<AgentConfigVersion>;
     rollback(version: number): Promise<AgentConfigVersion>;
+    /** The config the actor holds now — what the form restarts from after a rollback (#169). */
+    config?(): Promise<AgentConfig>;
+    /**
+     * Review the proposed version (#153, LRN-08): accepting resolves to the
+     * version the actor recorded and the config it now holds; rejecting to `null`.
+     */
+    review?(decision: 'accept' | 'reject'): Promise<{ readonly version: AgentConfigVersion; readonly config: AgentConfig } | null>;
 }
 
 export type ConfigTabProps =
@@ -19,7 +27,9 @@ export type ConfigTabProps =
     /** The collaborator options; default: the mock workspace's other agents. */
     & Define.Prop<'collaborators', readonly FieldOption[]>
     /** The environment picker's options (`execution.defaultEnvironmentId`, #144); default: the mock workspace's. */
-    & Define.Prop<'environments', readonly FieldOption[]>;
+    & Define.Prop<'environments', readonly FieldOption[]>
+    /** The other pickers' options on the platform (`./catalog`); a list it leaves out keeps the design track's. */
+    & Define.Prop<'catalog', AgentCatalog>;
 
 const SKILLS = [{ value: 'sigx-actors' }, { value: 'zero-anatomy' }, { value: 'git-worktree' }, { value: 'web-research' }];
 const TOOLS = [{ value: 'Read' }, { value: 'Edit' }, { value: 'Bash' }, { value: 'WebFetch' }, { value: 'memory.*' }, { value: 'memory.search' }, { value: 'task.report' }, { value: 'ask_user' }];
@@ -74,14 +84,50 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
         if (store) void persist(() => store.save(config, reason || 'Edited in the web UI'));
         else prepend({ version: current() + 1, at: Date.now(), by: 'Andy', reason: reason || 'Edited in the web UI' });
     };
-    const rollback = (version: number) => {
+    const rollback = (version: number, form: AgentFormRailProps) => {
         const store = props.store;
-        if (store) void persist(() => store.rollback(version));
-        else prepend({ version: current() + 1, at: Date.now(), by: 'Andy', reason: `Rolled back to v${version}.` });
+        if (store) {
+            void persist(async () => {
+                const recorded = await store.rollback(version);
+                // The draft still holds the config rolled away from: a later save would write it back.
+                const config = await store.config?.();
+                if (config) {
+                    state.config = config;
+                    form.reset();
+                }
+                return recorded;
+            });
+        } else prepend({ version: current() + 1, at: Date.now(), by: 'Andy', reason: `Rolled back to v${version}.` });
+    };
+
+    // On the platform the proposal is the actor's (it leaves the profile once reviewed); the mock page keeps its own.
+    const proposed = (): AgentConfigVersion | undefined => (props.store?.review ? props.profile.proposed : state.proposed);
+    const review = async (decision: 'accept' | 'reject', form: AgentFormRailProps): Promise<void> => {
+        const run = props.store?.review;
+        if (!run) {
+            state.proposed = undefined;
+            return;
+        }
+        ui.busy = true;
+        ui.error = '';
+        try {
+            const accepted = await run(decision);
+            if (accepted) {
+                // The accepted patch changed the instructions: the form restarts from the config the actor holds.
+                state.config = accepted.config;
+                prepend(accepted.version);
+                form.reset();
+            }
+        } catch (e) {
+            ui.error = e instanceof Error ? e.message : String(e);
+        } finally {
+            ui.busy = false;
+        }
     };
 
     const rail = (form: AgentFormRailProps) => {
         const dirty = form.dirty();
+        const pending = proposed();
         return (
             <div data-agent-rail="">
             <Stack gap="lg">
@@ -108,16 +154,16 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                         <Stack gap="md">
                             <Label>Versions</Label>
                             <ul data-versions-list="">
-                                {state.proposed ? (
-                                    <VersionItem version={state.proposed} state="proposed" when={dateTime(state.proposed.at)}
-                                        onReview={() => { state.proposed = undefined; }}
-                                        onDismiss={() => { state.proposed = undefined; }} />
+                                {pending ? (
+                                    <VersionItem version={pending} state="proposed" when={dateTime(pending.at)}
+                                        onReview={() => { void review('accept', form); }}
+                                        onDismiss={() => { void review('reject', form); }} />
                                 ) : null}
                                 {state.versions.map((v, i) => (
-                                    <VersionItem version={v} state={i === 0 ? 'current' : 'past'} when={dateTime(v.at)} onRollback={rollback} />
+                                    <VersionItem version={v} state={i === 0 ? 'current' : 'past'} when={dateTime(v.at)} onRollback={(version: number) => rollback(version, form)} />
                                 ))}
                             </ul>
-                            <p data-apply-line="">{applyLine(state.activeOnOlder, current())}</p>
+                            <p data-apply-line="">{applyLine(props.store ? props.profile.activeOnOlder : state.activeOnOlder, current())}</p>
                         </Stack>
                     </Card.Body>
                 </Card>
@@ -133,11 +179,11 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 model={() => state.config}
                 layout="sections"
                 approvalControl="segmented"
-                skills={SKILLS}
-                tools={TOOLS}
-                connectors={CONNECTORS}
-                environments={props.environments ?? ENVIRONMENTS}
-                memoryScopes={SCOPES}
+                skills={props.catalog?.skills ?? SKILLS}
+                tools={props.catalog?.tools ?? TOOLS}
+                connectors={props.catalog?.connectors ?? CONNECTORS}
+                environments={props.environments ?? props.catalog?.environments ?? ENVIRONMENTS}
+                memoryScopes={props.catalog?.memoryScopes ?? SCOPES}
                 agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
                 onSubmit={onSubmit}
                 slots={{ rail }}

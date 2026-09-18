@@ -3,9 +3,11 @@
  * each agent's identity through the chat directory (`Agent.get()` per id),
  * rendered as the same card grid the mock roster draws; "New agent" creates
  * the record (`Workspace.createAgent`) and its first version
- * (`Agent.update(..., 'create')`), then lands on its Config tab.
+ * (`Agent.update(..., 'create')`), then lands on its Config tab. Each card's
+ * pill follows the agent's tasks (one read of the task index for the roster)
+ * and its stats its own Memory scope and the week's corrections (#153).
  */
-import { component, signal, useHead } from 'sigx';
+import { component, signal, useHead, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import type { AgentId } from '@agentic/core';
@@ -13,8 +15,10 @@ import { AgentTile, EmptyState, EnvironmentLine, Icon, Label, Row, Stack, Status
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
+import { presencePill } from '../Agents';
+import { useAgentCorrections, useMemoryCount, useWorkspaceTasks } from './activity';
 import { closeNewAgent, newAgentRequest } from './head';
-import { CREATED_REASON, newAgentPatch, type NewAgentInput } from './live';
+import { CREATED_REASON, newAgentPatch, presenceOf, tasksByAssignee, type NewAgentInput } from './live';
 import { NewAgentDialog } from './NewAgentDialog';
 
 /** Create the agent in `ws` with its first config version; resolves to the new id. */
@@ -24,12 +28,28 @@ export async function createAgentWith(defs: ActorDefs, ws: string, input: NewAge
     return agentId as AgentId;
 }
 
+/** A card's footer stats: each card reads its own agent's Memory scope and corrections, live. */
+const CardStats = component<Define.Prop<'agentId', string, true> & Define.Prop<'configVersion', number, true>>(({ props }) => {
+    const defs = useActorDefs();
+    const viewer = useViewer()();
+    const memories = useMemoryCount(defs, viewer, () => props.agentId);
+    const corrections = useAgentCorrections(defs, viewer, () => props.agentId);
+    return () => (
+        <dl data-agent-card-stats="">
+            <div><dd>v{props.configVersion}</dd><dt>config</dt></div>
+            <div><dd>{memories()}</dd><dt>memories</dt></div>
+            <div><dd>{corrections.week()}</dd><dt>corrections / wk</dt></div>
+        </dl>
+    );
+}, { name: 'AgentCardStats' });
+
 export const LiveAgents = component(() => {
     useHead({ title: 'Agents' });
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
+    const tasks = useWorkspaceTasks(defs, viewer);
     const st = signal({ busy: false, error: '' });
     const create = async (input: NewAgentInput): Promise<void> => {
         const ws = viewer.workspaceId;
@@ -48,6 +68,7 @@ export const LiveAgents = component(() => {
     };
     return () => {
         const rows = directory.all();
+        const byAgent = tasksByAssignee(tasks());
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return (
             <div data-page="agents" aria-busy={directory.loading ? 'true' : undefined}>
@@ -60,7 +81,9 @@ export const LiveAgents = component(() => {
                         ? <EmptyState variant="generic" title="No agents yet" caption="Create one with New agent; it runs on the platform until you give it an environment." />
                         : (
                             <ul data-agent-grid="" aria-label="Agents">
-                                {rows.map((a) => (
+                                {rows.map((a) => {
+                                    const pill = presencePill(presenceOf(byAgent[a.id] ?? []));
+                                    return (
                                     <li data-agent-card={a.id}>
                                         <Link to={`/agents/${a.id}`} class="agent-card">
                                             <Row gap="md" align="center">
@@ -69,21 +92,18 @@ export const LiveAgents = component(() => {
                                                     <span data-agent-card-name="">{a.name}</span>
                                                     <span data-agent-card-role="">{a.role}</span>
                                                 </Stack>
-                                                <StatusPill status="idle" label="IDLE" hollow />
+                                                <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                                             </Row>
                                             <p data-agent-card-description="">{a.description ?? ''}</p>
                                             <Stack gap="xs">
                                                 <Label>Default environment</Label>
                                                 <EnvironmentLine machine={a.environment.machine} runtime={a.environment.runtime} account={a.environment.account} tone="live" />
                                             </Stack>
-                                            <dl data-agent-card-stats="">
-                                                <div><dd>v{a.configVersion}</dd><dt>config</dt></div>
-                                                <div><dd>0</dd><dt>memories</dt></div>
-                                                <div><dd>0</dd><dt>corrections / wk</dt></div>
-                                            </dl>
+                                            <CardStats agentId={a.id} configVersion={a.configVersion} />
                                         </Link>
                                     </li>
-                                ))}
+                                    );
+                                })}
                             </ul>
                         )}
                 {st.error ? <p data-agent-error role="alert">{st.error}</p> : null}
