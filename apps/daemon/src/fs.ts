@@ -206,9 +206,13 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
     // The new folder: inside the roots, not there yet, and whatever of its parents exists resolves inside the roots too.
     if (!isAbsolute(op.path) || !withinRoots(op.path, roots, platform)) return fail('outside-roots', `${op.path} is outside the working roots`);
     const path = resolve(op.path);
+    // Only a successful lstat means taken; a permission or I/O error is not "exists" and reaches the caller as `internal`.
     const taken = await lstat(path).then(
         () => true,
-        (e: unknown) => !isMissing(e)
+        (e: unknown) => {
+            if (isMissing(e)) return false;
+            throw e;
+        }
     );
     if (taken) return fail('exists', `${op.path} already exists`);
     const ancestor = await existingAncestor(path);
