@@ -31,6 +31,7 @@ export function clientDefs(): ActorDefs {
         Registry: ref('Registry'),
         TaskIndex: ref('task-index'),
         Audit: ref('audit'),
-        Ledger: ref('ledger')
+        Ledger: ref('ledger'),
+        Memory: ref('Memory')
     };
 }

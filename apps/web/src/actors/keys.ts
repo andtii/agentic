@@ -26,3 +26,5 @@ export const ledgerMonthOf = (at: number): string => {
     const d = new Date(at);
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 };
+/** `scope` is `agent:{id}` or `shared:{name}`. */
+export const memoryKeyOf = (ws: string, scope: string): string => actorKey(ws as WorkspaceId, 'memory', scope);
