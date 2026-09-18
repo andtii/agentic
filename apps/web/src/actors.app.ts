@@ -47,6 +47,7 @@ import {
     PAIRING_DIRECTORY_KEY,
     PairingDirectory,
     RegistryError,
+    SessionPage,
     TaskActor,
     TaskIndex,
     asPrincipal,
@@ -202,7 +203,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}) });
     const Registry = defineRegistry(kek ? { kek } : {});
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
