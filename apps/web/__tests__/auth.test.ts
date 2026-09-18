@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createWebAuth, defaultResolveUser, userOf, type AuthEnv } from '../src/auth/index';
+import { createWebAuth, defaultResolveUser, loginConfigured, userOf, type AuthEnv } from '../src/auth/index';
 import { issueMachineToken, OAUTH_COOKIE, sealSession, sessionCookie, type AuthProvider } from '@agentic/platform';
 import { ServerFnError } from '@sigx/server';
 import type { MachineId, WorkspaceId } from '@agentic/core';
@@ -27,7 +27,7 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
 
     it('login → 302 to the provider with the transient cookie; callback → session cookie + returnTo', async () => {
         const auth = createWebAuth(env, { resolveUser: defaultResolveUser, provider, now: () => NOW });
-        const login = await auth.routes['GET /auth/login'](new Request('https://app.test/auth/login?returnTo=/machines'));
+        const login = await auth.routes['GET /auth/login']!(new Request('https://app.test/auth/login?returnTo=/machines'));
         expect(login.status).toBe(302);
         const location = new URL(login.headers.get('location')!);
         expect(location.origin).toBe('https://gh.test');
@@ -35,7 +35,7 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
         const transient = setCookies(login).find((c) => c.startsWith(OAUTH_COOKIE))!;
         expect(transient).toMatch(/HttpOnly; Secure/);
 
-        const callback = await auth.routes['GET /auth/callback'](new Request(`https://app.test/auth/callback?code=good&state=${state}`, { headers: { cookie: transient.split(';')[0]! } }));
+        const callback = await auth.routes['GET /auth/callback']!(new Request(`https://app.test/auth/callback?code=good&state=${state}`, { headers: { cookie: transient.split(';')[0]! } }));
         expect(callback.status).toBe(302);
         expect(callback.headers.get('location')).toBe('/machines');
         const cookies = setCookies(callback);
@@ -50,14 +50,14 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
 
     it('callback with a forged state is 400 and clears the transient; a failed exchange is 502', async () => {
         const auth = createWebAuth(env, { resolveUser: defaultResolveUser, provider, now: () => NOW });
-        const login = await auth.routes['GET /auth/login'](new Request('https://app.test/auth/login'));
+        const login = await auth.routes['GET /auth/login']!(new Request('https://app.test/auth/login'));
         const transient = setCookies(login)[0]!.split(';')[0]!;
-        const forged = await auth.routes['GET /auth/callback'](new Request('https://app.test/auth/callback?code=good&state=nope', { headers: { cookie: transient } }));
+        const forged = await auth.routes['GET /auth/callback']!(new Request('https://app.test/auth/callback?code=good&state=nope', { headers: { cookie: transient } }));
         expect(forged.status).toBe(400);
         await expect(forged.json()).resolves.toEqual({ error: 'state_mismatch' });
         expect(setCookies(forged)[0]).toMatch(/Max-Age=0/);
         const state = new URL(login.headers.get('location')!).searchParams.get('state')!;
-        const failed = await auth.routes['GET /auth/callback'](new Request(`https://app.test/auth/callback?code=bad&state=${state}`, { headers: { cookie: transient } }));
+        const failed = await auth.routes['GET /auth/callback']!(new Request(`https://app.test/auth/callback?code=bad&state=${state}`, { headers: { cookie: transient } }));
         expect(failed.status).toBe(502);
     });
 
@@ -128,5 +128,22 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
         expect((await auth.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: '{' }))).status).toBe(400);
         const unwired = createWebAuth(env, { resolveUser: defaultResolveUser, provider });
         expect((await unwired.routes['POST /auth/pair'](new Request('https://app.test/auth/pair', { method: 'POST', body: '{}' }))).status).toBe(503);
+    });
+});
+
+describe('apps/web auth routes without the GitHub app (#180)', () => {
+    it('mounts the session routes from the secret alone; the login pair only with the OAuth secrets and an origin', () => {
+        const sessionOnly = createWebAuth({ SESSION_SECRET: env.SESSION_SECRET }, { resolveUser: defaultResolveUser });
+        expect(Object.keys(sessionOnly.routes).sort()).toEqual(['GET /auth/me', 'POST /auth/logout', 'POST /auth/pair']);
+        expect(sessionOnly.provider).toBeNull();
+        // The secrets without an origin cannot name the callback: still no login.
+        const noOrigin = createWebAuth({ SESSION_SECRET: env.SESSION_SECRET, GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec' }, { resolveUser: defaultResolveUser });
+        expect(noOrigin.routes['GET /auth/login']).toBeUndefined();
+        expect(loginConfigured({ APP_ORIGIN: 'https://app.test' })).toBe(false);
+        expect(loginConfigured({ APP_ORIGIN: 'https://app.test', GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec' })).toBe(true);
+        expect(loginConfigured({ APP_ORIGIN: 'https://app.test' }, { provider })).toBe(true);
+        const full = createWebAuth(env, { resolveUser: defaultResolveUser, provider });
+        expect(Object.keys(full.routes)).toHaveLength(5);
+        expect(full.provider).toBe(provider);
     });
 });

@@ -130,6 +130,12 @@ export function ensureDevVars(file, env = process.env, { random = randomBytes } 
     return { created: true, vars: rendered.vars, anthropic: rendered.anthropic };
 }
 
+/**
+ * What the GitHub login needs (informational, #180): both OAuth secrets. Pairing a
+ * machine, `/auth/me` and the dev login never need them — only the session secret.
+ */
+export const githubLoginConfigured = (vars) => !!vars.GITHUB_CLIENT_ID && !!vars.GITHUB_CLIENT_SECRET;
+
 /** The one-click link: the form prefills the secret from `?token=` on localhost only. */
 export const devLoginLink = (vars, port = DEFAULT_PORT) => (vars.AGENTIC_DEV_LOGIN ? `http://localhost:${port}/auth/dev-login?token=${encodeURIComponent(vars.AGENTIC_DEV_LOGIN)}` : `http://localhost:${port}/auth/dev-login`);
 
@@ -291,6 +297,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     if (!dv.vars.AGENTIC_DEV_LOGIN || dv.vars.AGENTIC_DEV_LOGIN.length < 16) warn(`AGENTIC_DEV_LOGIN is missing or shorter than 16 chars in ${rel}: the dev login will not be mounted`);
     if (!dv.vars.SESSION_SECRET || dv.vars.SESSION_SECRET.length < 32) warn(`SESSION_SECRET is missing or shorter than 32 chars in ${rel}: every request will be anonymous`);
+    log(githubLoginConfigured(dv.vars) ? 'GitHub login: configured (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set)' : `GitHub login: not configured (no GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET in ${rel}) — the dev login and machine pairing work without it`);
 
     // 2. build
     const distDir = path.join(WEB_DIR, 'dist');

@@ -160,6 +160,16 @@ pnpm dev
 
    Open it: `GET /auth/dev-login` is a small form (user name, the secret prefilled from `?token=` — on `localhost` / `127.0.0.1` only, a deployed preview never takes the secret from a URL) that signs you in as `dev_<user>` and lands on `/`. The shell's sidebar foot shows a **Dev login** button (and **Sign in with GitHub** when the OAuth app is configured) whenever nobody is signed in and the route is mounted; the route exists only while `AGENTIC_DEV_LOGIN` is set, so production has no such door. `/agents` renders live with an empty roster for a fresh identity.
 
+   The log also says whether **GitHub login** is configured (both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `.dev.vars`) — informational: the dev login and machine pairing never need it.
+
+4. **Pair a machine against it** (#180). With only the generated secrets, the Worker still mounts `POST /auth/pair`, `GET /auth/me` and `POST /auth/logout` — they need the session secret alone; only `GET /auth/login` / `GET /auth/callback` wait for the GitHub app (and the OAuth 2.1 server for MCP clients needs an origin: `APP_ORIGIN` from `wrangler.jsonc`, or on `localhost` the request's own, so `--port` needs no config edit). Signed in through the dev login, open `/pair` and run the line it shows from the machine, for example:
+
+   ```sh
+   agentic-daemon pair <code> --url http://localhost:8787 --name <name>
+   ```
+
+   If the daemon says *the platform did not answer as JSON (HTTP 200, text/html …)*, the URL is not the agentic Worker (a static server, the Vite mock on port 3000, a proxy page): check `--url`.
+
 Flags: `--rebuild`, `--port <n>` (the link follows), `--mock`. Other local commands:
 
 ```sh
