@@ -187,6 +187,11 @@ Entries: `msg {author: user | agent{agentId, sessionId?}, parts, mentions, reply
 - Each activation creates a Task (origin = user message, context = entries visible to that agent since `historyFrom`) and opens or reuses one Session per (chat, agent) when the runtime supports resume.
 - Streaming deltas never pass through Chat: the UI subscribes to `Session.tail` for `chat.activeSessions`. Chat receives only final assistant messages and status through a topic subscription — `topic(SESSION_EVENTS_TOPIC, chatKey)` carrying a `SessionEvent` (`status` → a `status` entry that also maintains `activeSessions`; `message` → a `msg` entry attributed to the agent). `typing` is ephemeral and never made durable (CHT-11: a chat coordinates N sessions, never one provider conversation).
 - History access (CHT-04): `members[agentId].historyFrom` is the index of the join entry (`'all'` → 0); `history`/`search` filter `seq >= historyFrom` when the caller is an agent principal, and an agent that is not a member reads nothing; context assembly uses the same rule; removal closes the agent's session for that chat. Membership and the coordinator are changed by user or external principals only; machines never post.
+- Attachments (#203):
+  - **Storage:** a file is uploaded once into the chat and stored in R2 under `files/<ws>/<chat>/<fileId>` (`ChatFileStore`).
+  - **References:** `msg` parts reference it as `agentic-file:<chatId>/<fileId>` in the `url` of an `image` or `file` part, and never carry the bytes, so actor state and daemon frames stay small.
+  - **Access:** reading a file is allowed exactly when the caller can see the message it was posted in, by the same `historyFrom` rule as `history`. A pending, not-yet-posted upload is visible only to its uploader.
+  - **Hydration:** when a turn starts, the router inlines the images the target agent may see as base64 `image` parts, within `CHAT_FILE_INLINE_BUDGET`. Every other file reaches the model as a text placeholder naming its URI, which the agent reads with `chat_file_read`.
 - Memory privacy (MEM-11): retrieval runs under the assignee's principal against its own scope + declared shared scopes; `Memory.authorize` enforces it.
 
 ## 7. Task and delegation

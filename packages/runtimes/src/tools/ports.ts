@@ -5,7 +5,7 @@
  * Memory, Task and Chat under the agent's principal.
  */
 
-import type { AgentId, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult } from '@agentic/core';
+import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult } from '@agentic/core';
 
 /** What every port call learns about the tool call behind it. */
 export interface ToolCall {
@@ -66,6 +66,8 @@ export interface TaskPort {
 export interface ChatPost {
     readonly text: string;
     readonly mentions: readonly AgentId[];
+    /** `agentic-file:` URIs of files the agent can see, attached to the post (#203). */
+    readonly attachments?: readonly string[];
 }
 
 export interface UserQuestion {
@@ -80,8 +82,16 @@ export interface ChatPort {
     ask(question: UserQuestion, call: ToolCall): Promise<{ readonly answer: string }>;
 }
 
+/** Chat attachments (#203): read a file of the task's chat under the agent's principal. */
+export interface ChatFilesPort {
+    /** Throws when the URI is malformed, the file is missing, or the agent may not see the message it was posted in. */
+    read(uri: string, call: ToolCall): Promise<ChatFileRead>;
+}
+
 export interface PlatformPorts {
     readonly memory: MemoryPort;
     readonly task: TaskPort;
     readonly chat: ChatPort;
+    /** Absent on hosts without a file store — `chat_file_read` then reports it unavailable. */
+    readonly files?: ChatFilesPort;
 }

@@ -4,6 +4,9 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Chat attachments ports (#204, part of #203):
+  - `PlatformPorts.files?: ChatFilesPort` (`read(uri, call)` → `ChatFileRead`). It is optional, so hosts without a file store and existing fakes keep compiling.
+  - `ChatPost.attachments?` carries the `agentic-file:` URIs an agent attaches to a post.
 - `delegate` takes an optional `environmentId` and `workdir` for the child (#190); `DelegateSpec` carries both. A `workdir` without its `environmentId` is refused (`SchemaValidationError`) before the port is called. Without a `workdir`, the router gives the child its parent's folder when the child runs in the parent's environment.
 - Chat roster in the prompt (#194, CHT-07): `buildSystemPrompt({ roster })` renders a "## This chat" section — every member by name and platform id, `[you]` / `[coordinator]`, the role, and how to reach them (`delegate` with the id as `assignee`, `chat_post` mentioning @Name, only the tools the session has), stated as platform agents and never a runtime's own agent or session messaging; `chatSection` exported, `PlatformAgentDeps.roster` passes it on the API path.
 - claude-code driver (#194): every session disallows Claude Code's cross-session tools (`ListAgents`, `SendMessage` — the SDK's `disallowedTools`, `withoutCrossSessionTools`, `CROSS_SESSION_TOOLS`); they message the operator's other Claude Code sessions on the machine and run without a permission request, so a policy could not refuse them. The build keeps `@anthropic-ai/claude-agent-sdk` external now that the driver imports its `query`.
