@@ -34,7 +34,8 @@ const TOOL_GUIDE: Readonly<Record<string, string>> = {
     memory_search: 'look up what you already know before asking or guessing',
     memory_remember: 'keep facts, preferences and lessons that outlive this session',
     delegate: 'hand work to a collaborator and wait for its result',
-    chat_post: 'speak in the chat; mention an agent to address it',
+    chat_post: 'speak in the chat; mention an agent to address it, attach chat files by their agentic-file: URI',
+    chat_file_read: 'read a file attached to the chat by its agentic-file: URI',
     task_report: 'report progress, a blocker, or the final result of your task',
     ask_user: 'ask the user only for a decision that is theirs to make'
 };

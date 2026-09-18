@@ -60,11 +60,12 @@ const report = await driver.doctor(environments);         // ok: false when two 
 | `memory_search` | `MemoryPort.search` | `readOnly`, `idempotent` |
 | `memory_remember` | `MemoryPort.remember` (provenance `source: 'agent'`) | |
 | `delegate` | `TaskPort.delegate` (child id from `callId`, §7); optional `environmentId` / `workdir` for the child (#190; a `workdir` needs its `environmentId`); result flattened to `{ taskId, status, text?, output?, artifacts, verified, error?, notStopped? }`; emits `agent-start` / `agent-update` for the child when the host's tool context can emit | `openWorld` |
-| `chat_post` | `ChatPort.post` | |
+| `chat_post` | `ChatPort.post`; optional `attachments` (`agentic-file:` URIs, #203) passed as `ChatPost.attachments` | |
+| `chat_file_read` | `ChatFilesPort.read` (`PlatformPorts.files`, #203): `{ uri }` an `agentic-file:` URI; a text file returns `{ name, mediaType, bytes, text }` (`truncated` + a note past 256 KB), any other file a `note` naming it as binary (an image: attached to the turn when it fits); no `files` port fails the call | `readOnly`, `idempotent` |
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |
 
-`platformTools(ports)` gives all six; `grantedPlatformTools(ports, grants)` the ones a config grants.
+`platformTools(ports)` gives all seven; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
 ## Policy (`src/policy`, #121)
 

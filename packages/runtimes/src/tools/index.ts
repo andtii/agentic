@@ -10,18 +10,20 @@
 import type { AnyTool } from '@sigx/ai';
 import type { ToolGrant } from '@agentic/core';
 import { askUserTool, chatPostTool } from './chat.js';
+import { chatFileReadTool } from './chatFile.js';
 import { delegateTool } from './delegate.js';
 import { memoryRememberTool, memorySearchTool } from './memory.js';
 import type { PlatformPorts } from './ports.js';
 import { taskReportTool } from './task.js';
 
-export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, UserQuestion, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, PlatformPorts } from './ports.js';
+export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, UserQuestion, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, ChatFilesPort, PlatformPorts } from './ports.js';
 export { memorySearchTool, memoryRememberTool, memorySearchInput, memoryRememberInput } from './memory.js';
 export { delegateTool, delegateInput, delegateResult, type DelegateResult } from './delegate.js';
 export { chatPostTool, askUserTool, chatPostInput, askUserInput } from './chat.js';
+export { chatFileReadTool, chatFileReadInput, chatFileUriInput, type ChatFileReadResult } from './chatFile.js';
 export { taskReportTool, taskReportInput } from './task.js';
 
-export const PLATFORM_TOOL_NAMES = ['memory_search', 'memory_remember', 'delegate', 'chat_post', 'task_report', 'ask_user'] as const;
+export const PLATFORM_TOOL_NAMES = ['memory_search', 'memory_remember', 'delegate', 'chat_post', 'chat_file_read', 'task_report', 'ask_user'] as const;
 export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number];
 
 export function isPlatformToolName(name: string): name is PlatformToolName {
@@ -30,7 +32,7 @@ export function isPlatformToolName(name: string): name is PlatformToolName {
 
 /** Every platform tool, bound to `ports`, in roster order. */
 export function platformTools(ports: PlatformPorts): readonly AnyTool[] {
-    return [memorySearchTool(ports.memory), memoryRememberTool(ports.memory), delegateTool(ports.task), chatPostTool(ports.chat), taskReportTool(ports.task), askUserTool(ports.chat)];
+    return [memorySearchTool(ports.memory), memoryRememberTool(ports.memory), delegateTool(ports.task), chatPostTool(ports.chat), chatFileReadTool(ports.files), taskReportTool(ports.task), askUserTool(ports.chat)];
 }
 
 /**

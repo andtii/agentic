@@ -4,6 +4,7 @@ All notable changes to `@agentic/web` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- The agent page's tool picker offers `chat_file_read` (#206): `PLATFORM_TOOLS` mirrors the runtimes' `PLATFORM_TOOL_NAMES`.
 - `platformActors` registers `SessionPage` (#198) beside `ChatPage`: the Session actor pages its event log out to it to stay under a Durable Object value's 2 MB.
 - MCP `sessions_open` with a `cwd` (#190, bug): the port checked the path with a case-sensitive `startsWith`, which accepted `C:/src2` for root `C:/src` and refused `c:\SRC\app`. It then only added a "Working directory: …" text part, so the session still ran in the first root. The check is now core `pathWithin` on the machine's OS, and the path becomes the task's `workdir`, so `OpenSpec.cwd` is the folder asked for. The text part is gone. `__tests__/oauth-server-sessions-open.test.ts` covers it.
 - Home "Needs you" (#194): an input row renders `QuestionPrompt` instead of a bare textarea — the question's options, free text, and an answer in the form's own shape (the old card sent a string, which Claude Code's `AskUserQuestion` read as no answer); the chat renders the same card on the call that asked.

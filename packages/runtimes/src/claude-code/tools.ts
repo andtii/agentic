@@ -6,7 +6,7 @@
  */
 
 import { defineTool, type AnyTool } from '@sigx/ai';
-import type { MemoryPort, PlatformPorts, ChatPort, TaskPort } from '../tools/index.js';
+import type { MemoryPort, PlatformPorts, ChatPort, ChatFilesPort, TaskPort } from '../tools/index.js';
 import { isPlatformToolName, platformTools } from '../tools/index.js';
 import type { PlatformToolCaller } from '@agentic/core';
 
@@ -18,7 +18,8 @@ const unreachable = (): never => {
 const DEFINITION_PORTS: PlatformPorts = {
     memory: { search: unreachable, remember: unreachable } satisfies MemoryPort,
     task: { delegate: unreachable, report: unreachable } satisfies TaskPort,
-    chat: { post: unreachable, ask: unreachable } satisfies ChatPort
+    chat: { post: unreachable, ask: unreachable } satisfies ChatPort,
+    files: { read: unreachable } satisfies ChatFilesPort
 };
 
 export interface BridgedTools {
