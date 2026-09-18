@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AgentId, ChatEntry, ChatId, DaemonFrame, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, DaemonFrame, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -32,6 +32,12 @@ describe('contract type tests', () => {
         expectTypeOf<Parameters<RuntimeDriver<S, P>['open']>[1]>().toEqualTypeOf<OpenSpec>();
         expectTypeOf<Parameters<RuntimeDriver<S, P>['open']>[2]>().toEqualTypeOf<RuntimeOpenContext<P>>();
         expectTypeOf<RuntimeOpenContext['callTool']>().returns.toEqualTypeOf<Promise<unknown>>();
+    });
+    it('chat files are referenced, never inlined, and the store is async', () => {
+        expectTypeOf<ChatFilePart['url']>().toEqualTypeOf<string>();
+        expectTypeOf<Discriminant<ChatFilePart, 'type'>>().toEqualTypeOf<'image' | 'file'>();
+        expectTypeOf<ReturnType<ChatFileStore['get']>>().toEqualTypeOf<Promise<ChatFileBody | null>>();
+        expectTypeOf<ChatFileRead['file']>().toEqualTypeOf<ChatFile>();
     });
     it('ids do not mix', () => {
         expectTypeOf<AgentId>().not.toEqualTypeOf<ChatId>();

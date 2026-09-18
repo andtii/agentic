@@ -44,3 +44,18 @@ The table answers each open decision of requirements §18 with the decision take
 ## 2026-09-18 — working folders (#185, #190)
 
 - **Where work runs is chosen within `cwdRoots`, never beyond them.** The environment's `cwdRoots` (decision 3) stay the security boundary and stay machine-local — they are edited in the daemon's `environments.json`, never from the web. Inside them a folder is picked per task (`TaskContract.workdir`), per chat member (`Chat.setWorkdir`, sticky for that chat and copied into each activation's task), as an agent's default (`execution.defaultWorkdir`, only in its `defaultEnvironmentId`) or per schedule (`ScheduleSpec.workdir`). A folder always travels with its environment (`WorkdirRef`). The router resolves it once per task (EXE-12: task → a delegating parent's folder in the same environment → the agent's default → the first root), checks it with `pathWithin` on the machine's OS, and fails the task `workdir-outside-roots` rather than open a session anywhere else. The daemon adds a realpath check against symlink escapes, and creates new git worktrees only inside the roots, for the owner only (#188).
+
+## 2026-09-18 — chat attachments (#203, #204)
+
+- **References, not bytes.** A file pasted, dropped or picked into a chat is uploaded once and stored in R2 under `files/<workspace>/<chat>/<fileId>`. A message references it as `agentic-file:<chatId>/<fileId>` in an `image` or `file` part. Actor state and daemon frames never carry attachment bytes, except the images the router inlines into one turn, within `CHAT_FILE_INLINE_BUDGET`.
+- **Access follows history visibility.** Whoever can see the message a file was posted in can read the file:
+  - users and external clients: every file in the chat;
+  - an agent member: files from its `historyFrom` onward;
+  - a non-member agent: nothing (fails closed, as in MEM-11).
+  There is no separate per-file access list. An agent may re-attach a file it can see.
+- **Retention.** Attachments live as long as their chat. There is no lifecycle rule on `files/`, unlike the 30-day artifacts rule (decision 12). They are deleted when the chat or workspace is purged. An upload never posted into a message is swept after 1 day.
+- **v1 scope.**
+  - jpeg/png/gif/webp images reach the model as image blocks.
+  - Text-like files are read through `chat_file_read`, up to 256 KiB.
+  - Any other file, up to 10 MiB, can be uploaded and downloaded by users; agents see only its name, type and size.
+  - PDFs as document blocks, image blocks in tool results, and materializing files into a claude-code cwd are follow-ups.

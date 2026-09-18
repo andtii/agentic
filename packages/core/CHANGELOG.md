@@ -6,6 +6,12 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- Chat attachments contract (#204, part of #203), in `files.ts`:
+  - `ChatFile`: a file attached to a chat. Messages reference it as `agentic-file:<chatId>/<fileId>` in the `url` of an `image` or `file` part, never inline.
+  - URI helpers: `chatFileUri`, `parseChatFileUri` (strict, url-safe segments) and `isChatFilePart` / `ChatFilePart`.
+  - `isTextLikeMediaType`.
+  - Limits: `CHAT_FILE_MAX_BYTES` (10 MiB), `CHAT_FILE_TEXT_MAX_BYTES` (256 KiB), `CHAT_FILE_INLINE_BUDGET` (700 KiB of base64 per turn, under the 1 MiB daemon frame) and `MODEL_IMAGE_TYPES`.
+  - Ports: `ChatFileStore` (`put` / `get` / `markPosted` / `deleteChat` / `sweepOrphans`, bytes only, no access decisions), `ChatFileBody` and `ChatFileRead` (what `chat_file_read` returns).
 - `ChatEntry` `msg` carries an optional `workdir: { agentId, ref: WorkdirRef | null }` (#190): the note `Chat.setWorkdir` writes when a member's working folder for the chat changes. Whoever folds the entries copies `ref` onto the member (`null` clears it), so the member's folder replays like every other piece of chat state.
 - `fs.request` / `fs.response` on `PlatformFrame` / `DaemonFrame` (#187), carrying the `FsOp` / `FsResult` / `FsError` vocabulary from #186. Both frame-type lists include them.
 - `ChatRoster` / `ChatRosterMember` (#194, CHT-07): who a session's agent shares its chat with — the members by id, name and role, the coordinator, and which member the session runs as (`self`). The router fills it in for a chat-originated task; the runtime renders it into the system prompt.
