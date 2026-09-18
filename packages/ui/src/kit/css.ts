@@ -4,6 +4,8 @@
  *
  * - an accessible-only text helper (`data-visually-hidden`) for table
  *   captions, hidden column heads and skeleton "Loading" text;
+ * - the folder picker's dialog (#191), wider than a confirm, with less
+ *   padding at phone width (the popup keeps its 16 px gutter);
  * - the responsive behaviour recipes cannot express (`docs/design/HANDOFF.md`
  *   → "Responsive behaviour", "Mobile specifics"): below 1280 px fixed table
  *   columns give up their drawn widths; below 768 px tables stack into
@@ -25,6 +27,9 @@ export const kitCss = `[data-visually-hidden] {
 
 /* the table's box: visually hidden head text is absolutely positioned and must stay inside it */
 [data-ag-table] { position: relative; min-inline-size: 0; }
+
+/* the folder picker's dialog: wider than a confirm; border-box, so width: calc(100% - 2rem) keeps the 16 px gutter with its padding */
+[data-scope="dialog"][data-part="popup"]:has([data-scope="ag-workdir-picker"]) { max-width: 640px; box-sizing: border-box; }
 
 /* a label never wraps: the button grows, the row wraps */
 [data-scope="button"][data-part="root"] { white-space: nowrap; }
@@ -133,5 +138,7 @@ export const kitCss = `[data-visually-hidden] {
     [data-scope="ag-env-card"][data-part="facts"] > *:not([data-scope="ag-env-card"][data-part="default-for"]) { display: none; }
     [data-scope="ag-env-card"][data-part="fix"] { grid-area: fix; }
     [data-scope="ag-env-card"][data-part="actions"] { grid-area: actions; }
+
+    [data-scope="dialog"][data-part="popup"]:has([data-scope="ag-workdir-picker"]) { padding: var(--space-lg); }
 }
 `;

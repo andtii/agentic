@@ -469,4 +469,136 @@ const empty: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty];
+const ring = { outline: '2px solid var(--color-primary)', outlineOffset: '2px' };
+const ellipsis = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minInlineSize: '0' };
+const bare = { appearance: 'none', border: 'none', background: 'transparent', font: 'inherit', textAlign: 'start', cursor: 'pointer' };
+
+/** Working folder field (#191): a read-only chip like an input (mono 12 on base-100); compact = a 28 px chip button for a chat header. */
+const workdir: RecipeInput = {
+    component: 'ag-workdir',
+    parts: {
+        root: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', minInlineSize: '0' } },
+        chip: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-xs)',
+                flex: '1 1 12rem',
+                minInlineSize: '0',
+                minBlockSize: 'var(--ag-input-h)',
+                padding: '0 var(--space-md)',
+                boxSizing: 'border-box',
+                border: 'var(--border) solid var(--ag-line-strong)',
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-100)',
+                color: 'var(--color-base-content)',
+                fontFamily: mono,
+                fontSize: 'var(--text-sm)'
+            },
+            selectors: {
+                '& > span': ellipsis,
+                '& > svg': { color: 'var(--ag-text-dim)' },
+                '&[data-empty]': { color: 'var(--ag-text-dim)' }
+            }
+        },
+        actions: { base: { display: 'inline-flex', gap: 'var(--space-sm)', flex: 'none' } }
+    },
+    modifiers: {
+        // A chat header: the chip alone, as the button.
+        compact: {
+            chip: {
+                base: { ...bare, fontFamily: mono, fontSize: 'var(--text-sm)', flex: '0 1 auto', minBlockSize: '28px', padding: '0 var(--space-sm)', maxInlineSize: '100%', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-selector)', background: 'var(--color-base-200)', color: 'var(--ag-text-muted)' },
+                selectors: {
+                    '&:hover:not(:disabled)': { borderColor: 'var(--ag-text-dim)', color: 'var(--color-base-content)' },
+                    '&:focus-visible': ring,
+                    '&:disabled': { opacity: 'var(--disabled-opacity)', cursor: 'not-allowed' }
+                }
+            }
+        }
+    }
+};
+
+/** The folder picker (#191): environment strip, Recent / Roots, breadcrumb bar, the folder listbox on base-100, notices, the worktree form. */
+const workdirPicker: RecipeInput = {
+    component: 'ag-workdir-picker',
+    parts: {
+        root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minInlineSize: '0', color: 'var(--color-base-content)', fontSize: 'var(--text-md)' } },
+        envs: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' } },
+        env: {
+            base: {
+                ...bare,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-2xs)',
+                maxInlineSize: '100%',
+                minInlineSize: '0',
+                padding: 'var(--space-sm) var(--space-md)',
+                border: 'var(--border) solid var(--ag-line-strong)',
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-200)',
+                color: 'var(--color-base-content)',
+                transition: `border-color ${motion}, background ${motion}`
+            },
+            selectors: {
+                '&:hover:not(:disabled)': { borderColor: 'var(--ag-text-dim)' },
+                '&:focus-visible': ring,
+                '&[aria-pressed="true"]': { background: 'var(--color-base-300)', borderColor: 'color-mix(in oklab, var(--color-primary) 53%, transparent)' },
+                // Disabled keeps its reason readable: dashed, not faded.
+                '&:disabled': { cursor: 'not-allowed', borderStyle: 'dashed', background: 'transparent' }
+            }
+        },
+        'env-name': { base: { ...ellipsis, maxInlineSize: '100%', fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' } },
+        'env-note': {
+            base: { fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' },
+            selectors: { '[data-unavailable] > &': { color: 'var(--color-warning)' } }
+        },
+        section: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' } },
+        heading: { base: { margin: '0', fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)', letterSpacing: 'var(--tracking-wider)', textTransform: 'uppercase', color: 'var(--ag-text-dim)' } },
+        shortcuts: { base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexDirection: 'column', gap: 'var(--space-2xs)' } },
+        shortcut: {
+            base: { ...bare, display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', inlineSize: '100%', padding: 'var(--space-xs) var(--space-sm)', borderRadius: 'var(--radius-field)', color: 'var(--color-base-content)', fontFamily: mono, fontSize: 'var(--text-sm)' },
+            selectors: { '& > span': ellipsis, '& > svg': { color: 'var(--ag-text-dim)' }, '&:hover': { background: 'var(--color-base-200)' }, '&:focus-visible': ring }
+        },
+        bar: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', minInlineSize: '0' } },
+        crumbs: {
+            base: { flex: '1 1 12rem', minInlineSize: '0' },
+            selectors: {
+                '& > ol': { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2xs)' },
+                '& li': { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2xs)', minInlineSize: '0', color: 'var(--ag-text-dim)' }
+            }
+        },
+        crumb: {
+            base: { ...bare, padding: '2px var(--space-2xs)', borderRadius: 'var(--radius-selector)', maxInlineSize: '100%', overflowWrap: 'anywhere', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' },
+            selectors: { '&:hover': { color: 'var(--color-base-content)' }, '&[aria-current]': { color: 'var(--color-base-content)', fontWeight: 'var(--weight-semibold)' }, '&:focus-visible': ring }
+        },
+        editor: {
+            base: { flex: '1 1 100%', display: 'flex', alignItems: 'flex-end', gap: 'var(--space-sm)', flexWrap: 'wrap', minInlineSize: '0' },
+            selectors: { '& > [data-scope="field"]': { flex: '1 1 14rem', minInlineSize: '0' } }
+        },
+        list: {
+            base: { listStyle: 'none', margin: '0', padding: 'var(--space-xs)', maxBlockSize: 'min(50vh, 22rem)', overflowY: 'auto', overscrollBehavior: 'contain', border: 'var(--border) solid var(--ag-line)', borderRadius: 'var(--radius-box)', background: 'var(--color-base-100)', transition: `opacity ${motion}` },
+            selectors: { '&:focus-visible': ring }
+        },
+        item: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0', padding: 'var(--space-xs) var(--space-sm)', borderRadius: 'var(--radius-field)', color: 'var(--ag-text-muted)', cursor: 'pointer' },
+            selectors: { '&:hover': { background: 'var(--color-base-200)' }, '&[aria-selected="true"]': { background: 'var(--color-base-300)', color: 'var(--color-base-content)' }, '& > svg': { color: 'var(--ag-text-dim)' } }
+        },
+        name: { base: { ...ellipsis, flex: '1 1 auto', fontFamily: mono, fontSize: 'var(--text-sm)' } },
+        notice: {
+            base: { margin: '0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', flexWrap: 'wrap', padding: 'var(--space-sm) var(--space-md)', border: 'var(--border) solid var(--ag-line)', borderRadius: 'var(--radius-box)', color: 'var(--ag-text-muted)' },
+            selectors: {
+                '&[data-notice="error"]': { color: 'var(--color-error)', borderColor: 'color-mix(in oklab, var(--color-error) 40%, transparent)' },
+                '&[data-notice="offline"]': { color: 'var(--color-warning)', borderColor: 'color-mix(in oklab, var(--color-warning) 40%, transparent)' },
+                '&[data-notice="truncated"]': { padding: '0', border: 'none', fontSize: 'var(--text-sm)', color: 'var(--ag-text-dim)' }
+            }
+        },
+        worktree: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', padding: 'var(--space-lg)', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-box)', background: 'var(--color-base-200)' } },
+        actions: { base: { display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-sm)', flexWrap: 'wrap' } }
+    },
+    modifiers: {
+        // A move in flight: the stale listing stays, dimmed.
+        loading: { list: { base: { opacity: '0.55' } } }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker];
