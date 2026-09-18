@@ -79,6 +79,9 @@ describe('history model', () => {
         expect(refOf(paired)).toEqual({ label: 'alien01', href: '/machines/m1' });
         expect(actorOf(paired.by, lookup).name).toBe('m1');
         expect(actorOf('user:u1', lookup)).toEqual({ name: 'You', hue: 1, person: true });
+        // The pages cancel as a bare `user`; a child settling its parent signs `task:<id>`.
+        expect(actorOf('user', lookup)).toEqual({ name: 'You', hue: 1, person: true });
+        expect(actorOf('task:p.c1', lookup).name).toBe('task p.c1');
         expect(refOf(event({ kind: 'plugin.enabled', data: { pluginId: 'p' } }))).toBeNull();
     });
 

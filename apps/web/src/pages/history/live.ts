@@ -100,14 +100,19 @@ export interface HistoryActor {
     readonly person: boolean;
 }
 
-/** Who acted: `user:<id>` is "You", `agent:<id>` the directory's identity, a machine or a system by its name. */
+/**
+ * Who acted: `user:<id>` (or the pages' bare `user`) is "You", `agent:<id>`
+ * the directory's identity, a machine, a task or a system by its name.
+ */
 export function actorOf(by: string, lookup: AgentLookup): HistoryActor {
     const i = by.indexOf(':');
-    const kind = i < 0 ? '' : by.slice(0, i);
+    const kind = i < 0 ? by : by.slice(0, i);
     const id = i < 0 ? by : by.slice(i + 1);
     switch (kind) {
         case 'user':
             return { name: 'You', hue: 1, person: true };
+        case 'task':
+            return { name: `task ${id}`, hue: 4, person: false };
         case 'agent': {
             const a = lookup(id);
             return { name: a.name, hue: a.hue, person: false };

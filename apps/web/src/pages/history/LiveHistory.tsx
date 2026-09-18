@@ -99,7 +99,7 @@ export const LiveHistory = component(() => {
                                 <span>Agent</span>
                                 <select aria-label="Filter by agent" value={ui.filters.agentId ?? ''} onChange={(ev: Event) => set({ agentId: (ev.target as HTMLSelectElement).value || null })}>
                                     <option value="">Every actor</option>
-                                    {directory.all().map((a) => <option value={a.id} selected={ui.filters.agentId === a.id}>{a.name}</option>)}
+                                    {directory.all().map((a) => <option value={a.id}>{a.name}</option>)}
                                 </select>
                             </label>
                         </div>

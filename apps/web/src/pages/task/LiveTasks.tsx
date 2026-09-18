@@ -35,7 +35,7 @@ export function useTaskRows(defs: ActorDefs, viewer: ViewerState, directory: Age
             return index.loading || directory.loading;
         },
         get error() {
-            return index.error;
+            return index.error ?? directory.error;
         }
     };
 }
