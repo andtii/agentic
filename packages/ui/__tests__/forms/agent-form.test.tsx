@@ -1,6 +1,6 @@
 import { signal } from '@sigx/reactivity';
 import type { AgentConfig } from '@agentic/core';
-import { AgentForm, AGENT_FIELDS as F, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi } from '@agentic/ui';
+import { AgentForm, AGENT_FIELDS as F, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi, type AgentFormWorkdirProps } from '@agentic/ui';
 import { controls, describedByRole, fullAgentConfig, labelOf, mount, setSelect, setText, submit, toggle } from './helpers';
 
 function mountForm(config: AgentConfig = fullAgentConfig()) {
@@ -63,6 +63,32 @@ describe('AgentForm', () => {
         expect(next.memoryPolicy.autoLearn).toBe('off');
         // the posted form agrees with what was written back
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(next);
+    });
+
+    it('hands the workdir slot the default environment and folder; a folder picked sets both and posts, another environment clears it (#193)', () => {
+        const state = signal({ config: fullAgentConfig() });
+        let slot: AgentFormWorkdirProps | null = null;
+        const root = mount(
+            <AgentForm
+                model={() => state.config}
+                environments={[{ value: 'env_1', label: 'Laptop' }, { value: 'env_2', label: 'Desktop' }]}
+                slots={{ workdir: (p: AgentFormWorkdirProps) => { slot = p; return <span data-workdir-slot>{p.environmentId}|{p.path}</span>; } }}
+            />
+        );
+        const form = root.querySelector('form')!;
+        slot!.set({ environmentId: 'env_2', path: 'D:/src/app' });
+        const picked = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+        expect(picked.execution).toMatchObject({ defaultEnvironmentId: 'env_2', defaultWorkdir: 'D:/src/app' });
+        expect(root.querySelector('[data-workdir-slot]')!.textContent).toBe('env_2|D:/src/app');
+
+        setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.environment}"]`)!, 'env_1');
+        const moved = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+        expect(moved.execution.defaultEnvironmentId).toBe('env_1');
+        expect(moved.execution).not.toHaveProperty('defaultWorkdir');
+
+        slot!.set({ environmentId: 'env_1', path: 'C:/work' });
+        slot!.set(null);
+        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution).not.toHaveProperty('defaultWorkdir');
     });
 
     it('blocks submit while invalid and shows an accessible error on the field', () => {

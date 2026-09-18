@@ -8,7 +8,7 @@
 import { useData } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import type { EnvironmentDescriptor } from '@agentic/core';
+import type { EnvironmentDescriptor, HostOs } from '@agentic/core';
 import type { EnvironmentParts } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -18,6 +18,8 @@ export interface EnvironmentEntry {
     readonly machineId: string;
     readonly machineName: string;
     readonly online: boolean;
+    /** What the daemon said in `hello`; absent until it has connected once. Paths follow its rules (#193). */
+    readonly os?: HostOs;
     readonly descriptor: EnvironmentDescriptor;
     /** The environment line's three parts. */
     readonly line: EnvironmentParts;
@@ -54,6 +56,7 @@ export function useEnvironmentDirectory(defs: Pick<ActorDefs, 'Workspace' | 'Mac
                                 machineId,
                                 machineName: m.name,
                                 online: m.online,
+                                ...(m.os ? { os: m.os } : {}),
                                 descriptor: d,
                                 line: { machine: m.name, runtime: d.runtime, account: d.account.label },
                                 label: `${m.name} / ${d.runtime} / ${d.account.label}`

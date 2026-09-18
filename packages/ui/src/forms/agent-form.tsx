@@ -58,6 +58,18 @@ export interface AgentFormRailProps extends AgentFormApi {
 
 export type AgentFormLayout = 'stack' | 'sections';
 
+/**
+ * What the `workdir` slot is handed (#193): the default environment and
+ * folder as drafted, and `set` to change both at once — a folder belongs to
+ * its environment. Choosing another environment in the select clears the
+ * folder. The folder posts through a hidden `AGENT_FIELDS.workdir` input.
+ */
+export interface AgentFormWorkdirProps {
+    readonly environmentId: string;
+    readonly path: string;
+    set(ref: { readonly environmentId: string; readonly path: string } | null): void;
+}
+
 export type AgentFormProps = Define.Model<AgentConfig> &
     Define.Prop<'skills', readonly FieldOption[]> &
     Define.Prop<'tools', readonly FieldOption[]> &
@@ -79,6 +91,8 @@ export type AgentFormProps = Define.Model<AgentConfig> &
     Define.Event<'invalid', AgentErrors> &
     /** Rendered inside the form beside the sections; when given, the default save section is not rendered. */
     Define.Slot<'rail', AgentFormRailProps> &
+    /** Rendered under "Default environment": the default working folder's picker (the app mounts one). */
+    Define.Slot<'workdir', AgentFormWorkdirProps> &
     Define.Expose<AgentFormApi>;
 
 const DEFAULT_RUNTIMES: readonly FieldOption[] = [
@@ -151,6 +165,25 @@ export const AgentForm = component<AgentFormProps>(
                 for (const t of tools) if (!draft.toolModes[t]) draft.toolModes[t] = 'allow';
             }
         );
+
+        // A folder belongs to its environment: another environment chosen in the select drops it.
+        let pickingWorkdir = false;
+        watch(
+            () => draft.defaultEnvironmentId,
+            (next, prev) => {
+                if (pickingWorkdir) pickingWorkdir = false;
+                else if (next !== prev && draft.defaultWorkdir) draft.defaultWorkdir = '';
+            }
+        );
+        const setWorkdir = (ref: { readonly environmentId: string; readonly path: string } | null): void => {
+            batch(() => {
+                if (ref && ref.environmentId !== draft.defaultEnvironmentId) {
+                    pickingWorkdir = true;
+                    draft.defaultEnvironmentId = ref.environmentId;
+                }
+                draft.defaultWorkdir = ref?.path ?? '';
+            });
+        };
 
         const reset = () => {
             batch(() => {
@@ -270,6 +303,8 @@ export const AgentForm = component<AgentFormProps>(
                         <>
                             <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={props.runtimes ?? DEFAULT_RUNTIMES} required error={err.runtime} />
                             <SelectField model={() => draft.defaultEnvironmentId} name={F.environment} label="Default environment" options={props.environments ?? []} placeholder="Any available" />
+                            <input type="hidden" name={F.workdir} value={draft.defaultWorkdir} />
+                            {slots.workdir ? slots.workdir({ environmentId: draft.defaultEnvironmentId, path: draft.defaultWorkdir, set: setWorkdir }) : null}
                             <TextField model={() => draft.model} name={F.model} label="Model" description="Leave blank for the runtime's default." />
                             <SelectField model={() => draft.offlinePolicy} name={F.offlinePolicy} label="When the environment is offline" options={OFFLINE_OPTIONS} error={err.offlinePolicy} />
                             {LIMIT_KEYS.map((k) => (

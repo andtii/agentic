@@ -18,6 +18,7 @@ import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../..
 import { taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { useAgentDirectory, type AgentDirectory } from '../chat/directory';
 import { chainRoots, countTasks, filterTasks, isActiveRow, TASK_FILTERS, TASK_TABLE_COLS, TASK_TABLE_COLUMNS, taskListRow, type TaskFilter, type TaskListRow } from './live';
+import { LiveStartTask } from './LiveStartTask';
 
 export interface TaskRows {
     /** Every task the index holds, newest first, assignees resolved. */
@@ -174,6 +175,7 @@ export const LiveTasks = component(() => {
                             ? <p data-panel-note aria-busy="true">Loading tasks…</p>
                             : <EmptyState variant="generic" caption={st.filter === 'all' ? 'No tasks yet. Post in a chat to start one.' : `No ${st.filter} tasks.`} />}
                 {tasks.error ? <p data-chat-error role="alert">{tasks.error.message}</p> : null}
+                <LiveStartTask />
             </Page>
         );
     };

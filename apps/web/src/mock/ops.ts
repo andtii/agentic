@@ -43,34 +43,39 @@ export const opsMachines: readonly OpsMachine[] = [
 
 export const opsMachine = (id: string): OpsMachine | undefined => opsMachines.find(m => m.id === id);
 
-const env = (machineId: string, name: string, account: EnvironmentDescriptor['account'], active: number, max: number): EnvironmentDescriptor => ({
-    id: `${machineId}:${name}` as EnvironmentId,
+/** Ids as the workspace mock names them (`env_alien01_work`), so an agent's environment and the Machines page agree. */
+const envId = (machineId: string, name: string): EnvironmentId => `env_${machineId.replace(/-/g, '')}_${name.replace(/-/g, '_')}` as EnvironmentId;
+
+const env = (machineId: string, name: string, account: EnvironmentDescriptor['account'], active: number, max: number, cwdRoots: readonly string[]): EnvironmentDescriptor => ({
+    id: envId(machineId, name),
     machineId: machineId as MachineId,
     name,
     runtime: 'claude-code',
     account,
-    cwdRoots: [],
+    cwdRoots,
     concurrency: { active, max },
     isolation: 'config-dir'
 });
 
 export const opsEnvironments: readonly EnvironmentDescriptor[] = [
-    env('alien01', 'work', { label: 'work', authStatus: 'ok' }, 1, 3),
-    env('alien01', 'personal', { label: 'personal', authStatus: 'ok' }, 1, 3),
-    env('alien01', 'client-acme', { label: 'client-acme', authStatus: 'expired' }, 0, 2),
-    env('nuc-lab', 'work', { label: 'work', authStatus: 'unknown' }, 0, 2)
+    env('alien01', 'work', { label: 'work', authStatus: 'ok' }, 1, 3, ['C:\\Dev', 'D:\\scratch']),
+    env('alien01', 'personal', { label: 'personal', authStatus: 'ok' }, 1, 3, ['C:\\Users\\andy\\src']),
+    env('alien01', 'client-acme', { label: 'client-acme', authStatus: 'expired' }, 0, 2, ['C:\\clients\\acme']),
+    env('nuc-lab', 'work', { label: 'work', authStatus: 'unknown' }, 0, 2, ['C:\\work'])
 ];
 
 export const environmentsOf = (machineId: string): readonly EnvironmentDescriptor[] => opsEnvironments.filter(e => e.machineId === machineId);
 
+export const opsEnvironment = (id: string): EnvironmentDescriptor | undefined => opsEnvironments.find(e => e.id === id);
+
 /** Agents that default to an environment, by environment id. */
 export const defaultAgentsFor: Readonly<Record<string, readonly string[]>> = {
-    'alien01:work': ['forge'],
-    'alien01:personal': ['lint']
+    'env_alien01_work': ['forge'],
+    'env_alien01_personal': ['lint']
 };
 
 /** Tasks queued for an environment (held under the agent's offline policy, EXE-12). */
-export const queuedFor: Readonly<Record<string, number>> = { 'nuc-lab:work': 1 };
+export const queuedFor: Readonly<Record<string, number>> = { 'env_nuclab_work': 1 };
 
 export const queuedOn = (machineId: string): number => environmentsOf(machineId).reduce((n, e) => n + (queuedFor[e.id] ?? 0), 0);
 
@@ -149,7 +154,7 @@ export interface OpsSchedule {
 export const opsSchedules: readonly OpsSchedule[] = [
     { id: 'sch_1', kind: 'reminder', what: 'Call the venue about the field service event', when: 'once', nextRun: 'today 15:00', runsOn: {}, enabled: true },
     { id: 'sch_2', kind: 'recurring', what: 'Weekly summary to inbox', when: 'Thu 17:30', nextRun: 'today 17:30', runsOn: { agentId: 'atlas' }, enabled: true },
-    { id: 'sch_3', kind: 'agent-task', what: 'Nightly dependency audit', when: 'daily 02:00', nextRun: 'tomorrow 02:00', runsOn: { environmentId: 'nuc-lab:work', agentId: 'forge' }, enabled: true },
+    { id: 'sch_3', kind: 'agent-task', what: 'Nightly dependency audit', when: 'daily 02:00', nextRun: 'tomorrow 02:00', runsOn: { environmentId: 'env_nuclab_work', agentId: 'forge' }, enabled: true },
     { id: 'sch_4', kind: 'recurring', what: 'Stand up and stretch', when: 'weekdays 10:30', nextRun: 'paused', runsOn: {}, enabled: false }
 ];
 
@@ -161,7 +166,8 @@ export const dstRule = `Times are ${workspaceTimeZone}. Across daylight saving, 
 export function offlinePolicyLine(schedule: OpsSchedule): string | undefined {
     const id = schedule.runsOn.environmentId;
     if (!id) return undefined;
-    const machine = opsMachine(id.split(':')[0]!);
+    const env = opsEnvironment(id);
+    const machine = env ? opsMachine(env.machineId) : undefined;
     return machine && !machine.online ? `${machine.name} is offline · policy: queue until it returns` : undefined;
 }
 
@@ -222,8 +228,8 @@ export const opsSettings = {
     defaultEnvironment: 'platform',
     environmentOptions: [
         { value: 'platform', label: 'platform / anthropic-api / byo-key' },
-        { value: 'alien01:work', label: 'alien01 / claude-code / work' },
-        { value: 'alien01:personal', label: 'alien01 / claude-code / personal' }
+        { value: 'env_alien01_work', label: 'alien01 / claude-code / work' },
+        { value: 'env_alien01_personal', label: 'alien01 / claude-code / personal' }
     ],
     /** Web Push may slip (architecture §12); when it does the column is hidden, not disabled. */
     pushAvailable: true,
@@ -257,7 +263,7 @@ export const historyFilters = [
     { id: 'all', label: 'All', kinds: undefined },
     { id: 'approvals', label: 'Approvals', kinds: ['approval', 'approval-asked'] },
     { id: 'delegations', label: 'Delegations', kinds: ['delegation'] },
-    { id: 'environments', label: 'Environment choices', kinds: ['environment'] },
+    { id: 'environments', label: 'Environments and folders', kinds: ['environment'] },
     { id: 'transitions', label: 'Transitions', kinds: ['transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config'] }
 ] as const satisfies readonly { id: string; label: string; kinds?: readonly HistoryKind[] }[];

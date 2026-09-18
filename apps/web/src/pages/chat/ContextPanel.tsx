@@ -1,6 +1,8 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
+import type { EnvironmentId, WorkdirRef } from '@agentic/core';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
+import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
 
@@ -19,7 +21,13 @@ export type ContextPanelProps =
     /** The add-agent dialog confirmed: `{ agentId, access }`. */
     & Define.Event<'addAgent', { readonly agentId: string; readonly access: HistoryAccessChoice }>
     /** "Stop task chain" confirmed. */
-    & Define.Event<'stopChain'>;
+    & Define.Event<'stopChain'>
+    /** Where a member's folder can be picked (#193); absent, the members show no folder. */
+    & Define.Prop<'environments', readonly WorkdirEnvironment[]>
+    /** The machine an environment belongs to — where the picker's folder requests go (live). */
+    & Define.Prop<'machineOf', (environmentId: string) => string | undefined>
+    /** A member's folder for this chat was picked, or cleared with `null`. */
+    & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>;
 
 const historyLine = (member: MockChatSummary['members'][number], time: TimeText): string => {
     const base = member.history.access === 'all' ? 'sees all history' : `Added ${time(member.history.at)} · sees history from then`;
@@ -32,7 +40,7 @@ const historyLine = (member: MockChatSummary['members'][number], time: TimeText)
  * note (MEM-11). The add-agent dialog asks for history access (CHT-04).
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
-    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '' });
+    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '' });
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
         const lookup = props.lookup ?? agentNamed;
@@ -58,6 +66,18 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     <EnvironmentLine tone="muted" {...a.environment} />
                                     <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
+                                    {props.environments && a.environment.runtime !== 'anthropic-api' ? (
+                                        <span data-member-workdir>
+                                            <WorkdirField
+                                                compact
+                                                value={member.workdir ?? null}
+                                                environments={props.environments}
+                                                label={`Working folder for ${a.name}`}
+                                                onOpen={() => { st.pickFor = member.agentId; st.picking = true; }}
+                                                onClear={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}
+                                            />
+                                        </span>
+                                    ) : null}
                                 </li>
                             );
                         })}
@@ -91,6 +111,20 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     <span>Agents keep private memory here. Membership shares the chat, not their memories.</span>
                 </p>
 
+                {props.environments ? (
+                    // Mounted closed from the start: a zero Dialog that mounts already open throws (signalxjs/zero#102).
+                    <WorkdirPicker
+                        model={() => st.picking}
+                        title={st.pickFor ? `Working folder for ${lookup(st.pickFor).name}` : 'Working folder'}
+                        value={props.chat.members.find((m) => m.agentId === st.pickFor)?.workdir ?? null}
+                        environments={props.environments}
+                        {...(props.machineOf ? { machineOf: props.machineOf } : {})}
+                        // A daemon agent's identity names its default environment there (`identityOf`); anything else is ignored.
+                        preferred={(st.pickFor ? lookup(st.pickFor).environment.machine : null) as EnvironmentId | null}
+                        onSelect={(ref: WorkdirRef) => { st.picking = false; emit('setWorkdir', { agentId: st.pickFor, ref }); }}
+                        onCancel={() => { st.picking = false; }}
+                    />
+                ) : null}
                 <ConfirmDialog
                     model={() => st.addAgent}
                     title="Add an agent to this chat"

@@ -111,6 +111,8 @@ export interface NewScheduleInput {
     readonly cron: string;
     readonly agentId: string;
     readonly environmentId: string;
+    /** `agent-task`: the folder the task runs in, inside `environmentId` (#193); `''` = the environment's default. Optional for callers that predate it. */
+    readonly workdir?: string;
     readonly prompt: string;
 }
 
@@ -138,7 +140,13 @@ export function newScheduleSpec(input: NewScheduleInput, tz: string): ScheduleSp
         recurrence,
         ...(prompt ? { prompt } : {}),
         ...(input.kind === 'agent-task'
-            ? { agentId: input.agentId as AgentId, ...(input.environmentId ? { environmentId: input.environmentId as EnvironmentId } : {}), offlinePolicy: 'queue' as const }
+            ? {
+                  agentId: input.agentId as AgentId,
+                  ...(input.environmentId ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                  // A folder only means something in its environment.
+                  ...(input.environmentId && input.workdir?.trim() ? { workdir: input.workdir.trim() } : {}),
+                  offlinePolicy: 'queue' as const
+              }
             : {})
     };
 }

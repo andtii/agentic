@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { AgentTile, Button, DataTable, EnvironmentLine, Icon, Switch, Tag } from '@agentic/ui';
-import { dstRule, offlinePolicyLine, opsAgent, opsMachine, opsSchedules, type OpsSchedule } from '../mock/ops';
+import { dstRule, offlinePolicyLine, opsAgent, opsEnvironment, opsMachine, opsSchedules, type OpsSchedule } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
@@ -18,8 +18,9 @@ const RunsOn = component<Define.Prop<'schedule', OpsSchedule, true>>(({ props })
     const { environmentId, agentId } = props.schedule.runsOn;
     const agent = agentId ? opsAgent(agentId) : undefined;
     if (!agent) return <span data-runs-on data-platform>platform · no machine needed</span>;
-    const [machineId, envName] = environmentId ? environmentId.split(':') : [undefined, undefined];
-    const machine = machineId ? opsMachine(machineId) : undefined;
+    const env = environmentId ? opsEnvironment(environmentId) : undefined;
+    const machine = env ? opsMachine(env.machineId) : undefined;
+    const envName = env?.name;
     return (
         <span data-runs-on>
             <AgentTile name={agent.name} hue={agent.hue} size={20} labelled />

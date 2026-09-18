@@ -93,3 +93,36 @@ describe('/chats/:id (Chat)', () => {
         expect(dom.querySelectorAll('[data-chat-row]')).toHaveLength(CHATS.length);
     });
 });
+
+describe('/chats/:id — working folders (#193)', () => {
+    const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
+    const chipOf = (dom: ParentNode, i: number): HTMLElement => [...dom.querySelectorAll<HTMLElement>('[data-chat-context] [data-member-workdir] [data-scope="ag-workdir"][data-part="chip"]')][i]!;
+
+    it('shows a folder chip per member that runs on a machine, none for a platform agent', async () => {
+        const dom = await mountRoute('/chats/c1');
+        const panel = dom.querySelector('[data-chat-context]')!;
+        const rows = [...panel.querySelectorAll('[data-member]')];
+        // Atlas runs on the platform (no folder); Forge and Lint on alien01.
+        expect(rows.map((r) => r.querySelector('[data-member-workdir]') !== null)).toEqual([false, true, true]);
+        expect(chipOf(dom, 0).textContent).toContain('Environment default');
+    });
+
+    it('picks a folder from the mock machine and shows it on the chip', async () => {
+        const dom = await mountRoute('/chats/c1');
+        chipOf(dom, 0).click();
+        await settle();
+        const dialog = document.querySelector('[data-scope="ag-workdir-picker"][data-part="root"]') as HTMLElement;
+        expect(dialog).not.toBeNull();
+        // Opens on the first environment that can be browsed; its roots are the shortcuts.
+        const roots = [...dialog.querySelectorAll<HTMLButtonElement>('[data-part="shortcut"]')].map((b) => b.title);
+        expect(roots).toEqual(expect.arrayContaining(['C:\\Dev', 'D:\\scratch']));
+        [...dialog.querySelectorAll<HTMLButtonElement>('[data-part="shortcut"]')].find((b) => b.title === 'C:\\Dev')!.click();
+        await settle();
+        expect([...dialog.querySelectorAll('[data-part="item"] [data-part="name"]')].map((n) => n.textContent)).toEqual(['agentic', 'agentic-ui-handoff', 'sigx']);
+        // The footer sits beside the picker's root, in the dialog.
+        [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Use this folder' && !b.disabled)!.click();
+        await settle();
+        expect(chipOf(dom, 0).textContent).toContain('alien01 / work');
+        expect(chipOf(dom, 0).getAttribute('title') ?? chipOf(dom, 0).textContent).toContain('Dev');
+    });
+});

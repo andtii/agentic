@@ -1,7 +1,9 @@
 import { component, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
-import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AgentFormRailProps, type FieldOption } from '@agentic/ui';
-import type { AgentConfig, AgentConfigVersion } from '@agentic/core';
+import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
+import type { AgentConfig, AgentConfigVersion, EnvironmentId } from '@agentic/core';
+import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
+import { WorkdirInput } from '../workdir/WorkdirInput';
 import { agents } from '../../mock/data';
 import type { AgentProfile } from '../../mock/agents';
 import type { AgentCatalog } from './catalog';
@@ -29,14 +31,17 @@ export type ConfigTabProps =
     /** The environment picker's options (`execution.defaultEnvironmentId`, #144); default: the mock workspace's. */
     & Define.Prop<'environments', readonly FieldOption[]>
     /** The other pickers' options on the platform (`./catalog`); a list it leaves out keeps the design track's. */
-    & Define.Prop<'catalog', AgentCatalog>;
+    & Define.Prop<'catalog', AgentCatalog>
+    /** Where the default working folder can be picked (#193); default: the mock machines' environments. */
+    & Define.Prop<'workdirs', WorkdirEnvironments>;
 
 const SKILLS = [{ value: 'sigx-actors' }, { value: 'zero-anatomy' }, { value: 'git-worktree' }, { value: 'web-research' }];
 const TOOLS = [{ value: 'Read' }, { value: 'Edit' }, { value: 'Bash' }, { value: 'WebFetch' }, { value: 'memory.*' }, { value: 'memory.search' }, { value: 'task.report' }, { value: 'ask_user' }];
 const CONNECTORS = [{ value: 'github', label: 'github (mcp)' }];
 const ENVIRONMENTS = [
-    { value: 'env_work', label: 'andy-desktop / claude-code / work' },
-    { value: 'env_personal', label: 'andy-desktop / claude-code / personal' },
+    // The mock machines' ids (`mock/ops.ts`), so the default working folder's environment is one the select offers.
+    { value: 'env_alien01_work', label: 'alien01 / claude-code / work' },
+    { value: 'env_alien01_personal', label: 'alien01 / claude-code / personal' },
     { value: 'env_platform', label: 'platform / anthropic-api / byo-key' }
 ];
 const SCOPES = [{ value: 'agentic-repo' }, { value: 'team' }];
@@ -173,6 +178,22 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
         );
     };
 
+    /** "Default working folder" under "Default environment": picking one sets both (a folder belongs to its environment). */
+    const workdir = (w: AgentFormWorkdirProps) => {
+        const envs = props.workdirs ?? mockWorkdirEnvironments;
+        return (
+            <WorkdirInput
+                value={w.path && w.environmentId ? { environmentId: w.environmentId as EnvironmentId, path: w.path } : null}
+                environments={envs.list()}
+                machineOf={envs.machineOf}
+                preferred={(w.environmentId || null) as EnvironmentId | null}
+                label="Default working folder"
+                description="Where work in the default environment runs. Empty: the environment's first working root."
+                onChange={(ref) => w.set(ref)}
+            />
+        );
+    };
+
     return () => (
         <div data-agent-config="">
             <AgentForm
@@ -186,7 +207,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 memoryScopes={props.catalog?.memoryScopes ?? SCOPES}
                 agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
                 onSubmit={onSubmit}
-                slots={{ rail }}
+                slots={{ rail, workdir }}
             />
         </div>
     );

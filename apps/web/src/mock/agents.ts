@@ -162,7 +162,7 @@ const PROFILES: Record<string, Omit<AgentProfile, 'id'>> = {
             ],
             execution: {
                 runtime: 'claude-code',
-                defaultEnvironmentId: 'env_work' as EnvironmentId,
+                defaultEnvironmentId: 'env_alien01_work' as EnvironmentId,
                 limits: { maxTurns: 40, maxWallMs: 3_600_000, maxCostUsd: 5, maxDepth: 3 },
                 offlinePolicy: 'queue'
             }

@@ -83,6 +83,13 @@ describe('history model', () => {
         expect(actorOf('user', lookup)).toEqual({ name: 'You', hue: 1, person: true });
         expect(actorOf('task:p.c1', lookup).name).toBe('task p.c1');
         expect(refOf(event({ kind: 'plugin.enabled', data: { pluginId: 'p' } }))).toBeNull();
+
+        // A worktree created from the folder picker (#189, #193): filed with the environment choices, leads to its machine.
+        const worktree = event({ kind: 'workdir.worktree-created', data: { machineId: 'm1' as never, environmentId: 'env_work' as never, repo: 'C:\\src\\app', branch: 'feat/x', path: 'C:\\src\\app-worktrees\\feat-x' } });
+        expect(kindLabel(worktree)).toBe('worktree created');
+        expect(toneOf(worktree)).toBe('live');
+        expect(refOf(worktree)).toEqual({ label: 'feat/x', href: '/machines/m1' });
+        expect(auditQueryOf({ kind: 'environments', agentId: null, window: 'all' }, 0).kinds).toEqual(['environment.chosen', 'workdir.worktree-created']);
     });
 
     it('stamps the workspace-zone time and groups by day through it', () => {
