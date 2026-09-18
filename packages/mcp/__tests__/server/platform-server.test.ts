@@ -12,9 +12,9 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { describe, expect, it } from 'vitest';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { createOAuthServer, memoryOAuthStore, type OAuthUser } from '@agentic/platform';
-import { PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
+import { CHAT_FILE_BYTES_UNAVAILABLE, PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
 
 const ORIGIN = 'https://app.test';
 const MCP_URL = `${ORIGIN}/_agentic/mcp`;
@@ -33,9 +33,39 @@ const ENV: EnvironmentDescriptor = {
     isolation: 'config-dir'
 };
 
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+const chatFile = (id: string, name: string, mediaType: string, bytes: number): ChatFile => ({ id, chatId: 'chat_1' as ChatId, name, mediaType, bytes, at: 1 });
+/** Files of `chat_1`: `f_secret` exists but this client may not see it; `f_gone` is visible but its bytes are not in the store. */
+const FILES: Record<string, { file: ChatFile; visible: boolean; bytes?: Uint8Array }> = {
+    f_text: { file: chatFile('f_text', 'notes.md', 'text/markdown', 13), visible: true, bytes: new TextEncoder().encode('# hello 👋\n') },
+    f_img: { file: chatFile('f_img', 'shot.png', 'image/png', PNG.length), visible: true, bytes: PNG },
+    f_pdf: { file: chatFile('f_pdf', 'spec.pdf', 'application/pdf', 2048), visible: true, bytes: new Uint8Array(2048) },
+    f_secret: { file: chatFile('f_secret', 'secret.txt', 'text/plain', 6), visible: false, bytes: new TextEncoder().encode('secret') },
+    f_gone: { file: chatFile('f_gone', 'gone.txt', 'text/plain', 4), visible: true }
+};
+
+/** A `ChatFileStore` over `FILES` (plus `extra` bytes) that records its reads. */
+function fakeStore(extra: Record<string, Uint8Array> = {}) {
+    const reads: string[] = [];
+    const store: ChatFileStore = {
+        put: async () => {},
+        get: async (workspaceId, chatId, fileId) => {
+            reads.push(`${workspaceId}/${chatId}/${fileId}`);
+            const bytes = extra[fileId] ?? FILES[fileId]?.bytes;
+            const file = FILES[fileId]?.file ?? chatFile(fileId, `${fileId}.txt`, 'text/plain', bytes?.length ?? 0);
+            return bytes ? { file, bytes } : null;
+        },
+        markPosted: async () => {},
+        deleteChat: async () => {},
+        sweepOrphans: async () => 0
+    };
+    return { store, reads };
+}
+
 /** The fake platform: one online machine, sessions open on it only, a short event log per session. */
 function fakePlatform() {
     const opened: (OpenSessionInput & { principal: ExternalPrincipal })[] = [];
+    const fileAccess: { chatId: string; fileId: string; principal: ExternalPrincipal }[] = [];
     const prompts: { sessionId: string; text: string }[] = [];
     const delegated: DelegateTaskInput[] = [];
     const port = (principal: ExternalPrincipal): PlatformPort => ({
@@ -88,21 +118,44 @@ function fakePlatform() {
             tree: async (taskId) => ({ taskId, status: 'active', assignee: 'agent_ada' as AgentId, objective: 'x', depth: 0, children: [] }),
             cancel: async (taskId) => ({ taskId, stopped: true, notStopped: [] })
         },
-        chats: { post: async () => ({ messageId: 'msg_1' }), history: async () => ({ entries: [], next: null }) },
+        chats: {
+            post: async () => ({ messageId: 'msg_1' }),
+            history: async (chatId) => ({
+                entries: [
+                    {
+                        kind: 'message',
+                        seq: 1,
+                        author: { kind: 'user', userId: 'gh_1' },
+                        parts: [
+                            { type: 'text', text: 'see attached' },
+                            { type: 'image', mediaType: 'image/png', url: `agentic-file:${chatId}/f_img` },
+                            { type: 'file', mediaType: 'application/pdf', name: 'spec.pdf', url: `agentic-file:${chatId}/f_pdf` }
+                        ]
+                    }
+                ],
+                next: null
+            }),
+            fileAccess: async (chatId, fileId) => {
+                fileAccess.push({ chatId, fileId, principal });
+                const row = chatId === 'chat_1' ? FILES[fileId] : undefined;
+                return row?.visible ? row.file : null;
+            }
+        },
         memory: {
             search: async () => [],
             remember: async (_scope, entry) => ({ ...entry, id: 'mem_1', provenance: { ...entry.provenance, at: 1 } })
         },
         schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) }
     });
-    return { port, opened, prompts, delegated };
+    return { port, opened, prompts, delegated, fileAccess };
 }
 
 /** The Worker, in process: OAuth routes + the MCP mount, sessions by a `session=<userId>` cookie. */
-function server(platform = fakePlatform()) {
+/** `files`: the chat file store (`null` = a host without one). */
+function server(platform = fakePlatform(), files: ChatFileStore | null = fakeStore().store) {
     const store = memoryOAuthStore();
     const oauth = createOAuthServer({ secret: SECRET, issuer: ORIGIN, resource: MCP_URL, store });
-    const mcp = createPlatformMcpHandler({ authenticate: (request) => oauth.verify(request), port: platform.port, resourceMetadataUrl: oauth.resourceMetadataUrl, version: '1.0.0' });
+    const mcp = createPlatformMcpHandler({ authenticate: (request) => oauth.verify(request), port: platform.port, resourceMetadataUrl: oauth.resourceMetadataUrl, version: '1.0.0', ...(files ? { files } : {}) });
     const userOf = (request: Request): OAuthUser | null => (request.headers.get('cookie') === 'session=gh_1' ? owner : null);
     const requests: { method: string; path: string }[] = [];
     const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -233,6 +286,7 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
                 'tasks_cancel',
                 'chats_post',
                 'chats_history',
+                'chats_file_get',
                 'memory_search',
                 'memory_remember',
                 'schedules_create'
@@ -346,5 +400,122 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
         await expect(tools.find((t) => t.name === 'memory_remember')!.run({ scope: 'agent:agent_ada', kind: 'fact', text: 'x' }, ctx)).rejects.toThrow(/"memory" scope/);
         // Bad arguments are a validation error, not a port call.
         await expect(tools.find((t) => t.name === 'agents_get')!.run({}, ctx)).rejects.toThrow(/Invalid arguments/);
+    });
+});
+
+describe('platform MCP server: chats_file_get (#209)', () => {
+    type Content = { type: string; text?: string; data?: string; mimeType?: string }[];
+    const call = (client: Awaited<ReturnType<typeof connect>>['client'], fileId: string, chatId = 'chat_1') => client.callTool({ name: 'chats_file_get', arguments: { chatId, fileId } });
+
+    it('a text file comes back as its text, with the record as structured content and a JSON summary first', async () => {
+        const files = fakeStore();
+        const s = server(fakePlatform(), files.store);
+        const { client } = await connect(s, ['chats']);
+        const res = await call(client, 'f_text');
+        expect(res.isError).toBeFalsy();
+        const content = res.content as Content;
+        expect(content.map((c) => c.type)).toEqual(['text', 'text']);
+        expect(content[1]!.text).toBe('# hello 👋\n');
+        expect(JSON.parse(content[0]!.text!)).toEqual(res.structuredContent);
+        expect(res.structuredContent).toEqual({ file: FILES.f_text!.file, uri: 'agentic-file:chat_1/f_text', kind: 'text' });
+        // Access is asked of the chat as THIS client, then the bytes are read in its workspace.
+        expect(s.platform.fileAccess).toEqual([{ chatId: 'chat_1', fileId: 'f_text', principal: expect.objectContaining({ kind: 'external', workspaceId: 'gh_1', scopes: ['chats'] }) }]);
+        expect(files.reads).toEqual(['gh_1/chat_1/f_text']);
+        await client.close();
+    });
+
+    it('a model image type comes back as an MCP image block (base64); another binary type as metadata only', async () => {
+        const s = server();
+        const { client } = await connect(s, ['chats']);
+        const img = await call(client, 'f_img');
+        expect(img.isError).toBeFalsy();
+        const block = (img.content as Content)[1]!;
+        expect(block).toEqual({ type: 'image', mimeType: 'image/png', data: btoa(String.fromCharCode(...PNG)) });
+        expect(img.structuredContent).toEqual({ file: FILES.f_img!.file, uri: 'agentic-file:chat_1/f_img', kind: 'image' });
+
+        const pdf = await call(client, 'f_pdf');
+        expect(pdf.isError).toBeFalsy();
+        expect((pdf.content as Content).map((c) => c.type)).toEqual(['text']);
+        expect(pdf.structuredContent).toMatchObject({ file: FILES.f_pdf!.file, kind: 'metadata', note: expect.stringContaining('binary file') });
+        await client.close();
+    });
+
+    it('a file the client may not see and a file that does not exist get the same not-found error, and no bytes are read', async () => {
+        const files = fakeStore();
+        const s = server(fakePlatform(), files.store);
+        const { client } = await connect(s, ['chats']);
+        const denied = await call(client, 'f_secret');
+        const missing = await call(client, 'f_nope');
+        const otherChat = await call(client, 'f_text', 'chat_2');
+        for (const res of [denied, missing, otherChat]) {
+            expect(res.isError).toBe(true);
+            expect((res.content as Content)[0]!.text).toMatch(/^not found: file "f_\w+" does not exist in chat "chat_\d" or this client may not read it$/);
+        }
+        expect(files.reads).toEqual([]);
+        // Visible, but the bytes are gone from the store: the record, flagged.
+        const gone = await call(client, 'f_gone');
+        expect(gone.isError).toBeFalsy();
+        expect(gone.structuredContent).toMatchObject({ file: FILES.f_gone!.file, kind: 'metadata', note: 'file bytes are missing from the store' });
+        await client.close();
+    });
+
+    it('is gated by the "chats" scope like chats_post, before the chat is asked', async () => {
+        const s = server();
+        const { client } = await connect(s, ['machines']);
+        for (const res of [await call(client, 'f_text'), await client.callTool({ name: 'chats_post', arguments: { chatId: 'chat_1', text: 'hi' } })]) {
+            expect(res.isError).toBe(true);
+            expect((res.content as Content)[0]!.text).toContain('needs the "chats" scope');
+        }
+        expect(s.platform.fileAccess).toEqual([]);
+        await client.close();
+        // Ids that could not form an agentic-file: URI are refused as arguments.
+        const c2 = await connect(server(), ['chats']);
+        const bad = await c2.client.callTool({ name: 'chats_file_get', arguments: { chatId: 'chat_1', fileId: '../f_text' } });
+        expect(bad.isError).toBe(true);
+        await c2.client.close();
+    });
+
+    it('without a file store it returns the record and says the bytes are unavailable on this host', async () => {
+        const s = server(fakePlatform(), null);
+        const { client } = await connect(s, ['chats']);
+        for (const fileId of ['f_text', 'f_img']) {
+            const res = await call(client, fileId);
+            expect(res.isError).toBeFalsy();
+            expect(res.structuredContent).toMatchObject({ file: FILES[fileId]!.file, kind: 'metadata', note: CHAT_FILE_BYTES_UNAVAILABLE });
+        }
+        await client.close();
+    });
+
+    it('chats_history keeps chat-file parts as their agentic-file: URIs', async () => {
+        const s = server();
+        const { client } = await connect(s, ['chats']);
+        const res = await client.callTool({ name: 'chats_history', arguments: { chatId: 'chat_1' } });
+        expect(res.isError).toBeFalsy();
+        const parts = (res.structuredContent as { entries: { parts: Record<string, unknown>[] }[] }).entries[0]!.parts;
+        expect(parts.slice(1)).toEqual([
+            { type: 'image', mediaType: 'image/png', url: 'agentic-file:chat_1/f_img' },
+            { type: 'file', mediaType: 'application/pdf', name: 'spec.pdf', url: 'agentic-file:chat_1/f_pdf' }
+        ]);
+        expect(JSON.stringify(res.content)).not.toContain('"data"');
+        await client.close();
+    });
+
+    it('in process: long text is cut on a character boundary and flagged; a port without fileAccess says files are unavailable', async () => {
+        const principal: ExternalPrincipal = { kind: 'external', workspaceId: 'gh_1' as WorkspaceId, clientId: 'oac_x', scopes: ['chats'] };
+        const ctx = { signal: new AbortController().signal, toolCallId: 'c1' };
+        const long = new TextEncoder().encode('é'.repeat(200 * 1024));
+        const port = fakePlatform().port(principal);
+        const withLong: PlatformPort = { ...port, chats: { ...port.chats, fileAccess: async (_chatId, fileId) => chatFile(fileId, 'long.txt', 'text/plain', long.length) } };
+        const get = platformTools(withLong, principal, { files: fakeStore({ f_long: long }).store }).find((t) => t.name === 'chats_file_get')!;
+        const out = (await get.run({ chatId: 'chat_1', fileId: 'f_long' }, ctx)) as { truncated?: boolean; note?: string; mcpContent: Content };
+        expect(out.truncated).toBe(true);
+        expect(out.note).toContain('truncated');
+        const text = out.mcpContent[1]!.text!;
+        expect(text.length).toBe(128 * 1024);
+        expect(text).not.toContain('�');
+
+        const { fileAccess: _omit, ...chats } = port.chats;
+        const bare = platformTools({ ...port, chats }, principal).find((t) => t.name === 'chats_file_get')!;
+        await expect(bare.run({ chatId: 'chat_1', fileId: 'f_text' }, ctx)).rejects.toThrow(/not available on this host/);
     });
 });
