@@ -8,22 +8,18 @@
  * a task runs to its answer; the user corrects that answer through the
  * Session ("never do this"); the correction is a lesson in the agent's own
  * memory scope with the user's provenance; a similar task later opens a
- * session whose record carries the lesson in its retrieved memories and in
- * the platform-owned memory block of its system prompt. Deeper:
+ * session whose record carries the lesson in its retrieved memories, keyed
+ * on the task's objective, and every request the model saw carries it in
+ * the prompt's memory block (#135). Deeper:
  * `packages/platform/__tests__/session-learning.test.ts` (repeated
  * corrections → a reviewed instruction proposal; the retrieval text and
- * the lesson's conditions when the open spec names the objective) and
- * `packages/learning/__tests__/plugin.test.ts`.
- *
- * Known gap, pinned by the `fails` case below: on the routed local path
- * the retrieved memories stop at the session record — `createSessionFactory`
- * builds the model agent from the config alone and never hands it
- * `spec.memories`, and `Routing.placeLocal` opens the session without the
- * task's objective, so the retrieval text is empty. Follow-up: #135.
+ * the lesson's conditions when the open spec names the objective),
+ * `packages/platform/__tests__/routing/memories.test.ts` (the routed local
+ * path over the real factory) and `packages/learning/__tests__/plugin.test.ts`.
  */
 import type { MessageId, TaskId } from '@agentic/core';
-import { Memory, PLATFORM_MEMORY_HEADING, memoryActorKey } from '@agentic/platform';
-import { startHost, type AcceptanceHost, type Owner } from './host';
+import { Memory, memoryActorKey } from '@agentic/platform';
+import { lastUserText, startHost, type AcceptanceHost, type Owner } from './host';
 
 const OBJECTIVE_1 = 'Write the release notes for v2.0';
 const OBJECTIVE_2 = 'Draft the release notes for v2.1';
@@ -82,25 +78,24 @@ describe('AC-09: a correction, then a similar task', () => {
         });
         expect(lessons[0]!.entry.evidence?.[0]).toMatch(/^correction\(never\) by user at .* in session_/);
 
-        // The similar task later: the lesson is retrieved into the session and labelled as platform-owned context in its system block.
+        // The similar task later: the lesson is retrieved into the session, ranked on the task's objective, above task 1's record.
         const info2 = await me.session(second.sessionId!).get();
         expect(info2.spec?.memories?.map((m) => m.kind)).toEqual(['lesson', 'record']);
         expect(info2.spec?.memories?.[0]).toMatchObject({ text: CORRECTION, provenance: { source: 'user', sessionId: first.sessionId } });
-        expect(info2.spec?.retrieval).toMatchObject({ scopes: [`agent:${ada}`], skipped: [] });
-        const system = info2.spec?.system ?? '';
-        expect(system).toContain(PLATFORM_MEMORY_HEADING);
-        expect(system).toContain(`- lesson/stated: ${CORRECTION} [correction, correction:never]`);
-        // The record of task 1 is in scope too, ranked below the lesson, and never mistaken for the runtime's own memory.
-        expect(system).not.toMatch(/^## Memory$/m);
+        expect(info2.spec?.retrieval).toMatchObject({ text: OBJECTIVE_2, scopes: [`agent:${ada}`], skipped: [] });
+        // On the local path the API factory renders the memories itself; the record composes no second system prompt (#135).
+        expect(info2.spec?.system).toBeUndefined();
     });
 
-    it.fails('the retrieved lesson reaches the model on the routed local path (open gap, #135)', async () => {
-        const me = h.user('ac09_gap');
+    it('the retrieved lesson reaches the model on the routed local path (#135)', async () => {
+        const me = h.user('ac09_model');
         const { second } = await correctThenRepeat(me);
         const info2 = await me.session(second.sessionId!).get();
-        // The Routing opens the local session without the task's objective, so the retrieval text is empty…
         expect(info2.spec?.retrieval?.text).toBe(OBJECTIVE_2);
-        // …and the model agent is built from the config alone: no request the model saw carried the lesson.
-        expect(h.model!.requests.some((r) => r.system?.includes(CORRECTION))).toBe(true);
+        // Every request of task 2's session carries the lesson in the prompt's memory block; task 1's requests had nothing to carry.
+        const requests = h.model!.requests.filter((r) => lastUserText(r) === OBJECTIVE_2);
+        expect(requests.length).toBeGreaterThan(0);
+        for (const r of requests) expect(r.system).toContain(`- lesson/stated: ${CORRECTION} [correction, correction:never]`);
+        expect(h.model!.requests.filter((r) => lastUserText(r) === OBJECTIVE_1).some((r) => r.system?.includes(CORRECTION))).toBe(false);
     });
 });

@@ -207,8 +207,19 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 wakers.get(ctx.key)?.();
             }
 
+            /**
+             * The work the session opens on: the task's objective and context — fixed at
+             * the task's creation — so the Session's memory retrieval ranks on the task and
+             * a lesson learned from it names the task (architecture §8; MEM-07, LRN-05).
+             * `run` passes the view it already read; a retry reads the task once.
+             */
+            async function work(route: Route, t?: Pick<TaskView, 'objective' | 'context'>): Promise<Pick<SessionOpenSpec, 'objective' | 'context'>> {
+                const { objective, context } = t ?? (await task(route.taskId).get());
+                return { objective, context };
+            }
+
             /** Open a local (`anthropic-api`) Session for the route and prompt it. */
-            async function placeLocal(route: Route, why: string): Promise<void> {
+            async function placeLocal(route: Route, why: string, t?: TaskView): Promise<void> {
                 const sessionId = (route.sessionId ??= newSessionId());
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
@@ -216,6 +227,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     runtime: 'anthropic-api',
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
+                    ...(await work(route, t)),
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     tools: grantedToolNames(route)
@@ -271,7 +283,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             /** Open the route's Session on ITS machine (never another), or park it. A route no machine reported yet is located first — and bound to that machine from then on. */
-            async function placeRemote(route: Route, view?: MachineView): Promise<void> {
+            async function placeRemote(route: Route, view?: MachineView, t?: TaskView): Promise<void> {
                 const { environmentId } = route;
                 if (!environmentId) return;
                 if (!route.machineId) {
@@ -306,6 +318,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     taskId: route.taskId,
                     environmentId,
                     machineId,
+                    ...(await work(route, t)),
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     system: route.config.instructions,
@@ -313,7 +326,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 };
                 // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
                 // is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
-                await session(sessionId).open(spec);
+                // The record's `system` is the one the daemon runs: the instructions plus the memory block `open` retrieved (§8).
+                const opened = await session(sessionId).open(spec);
                 route.status = 'opening';
                 const limits = route.config.execution.limits;
                 let result: OpenSessionResult;
@@ -324,7 +338,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         {
                             agentId: route.agentId,
                             cwd: env.cwdRoots[0] ?? '',
-                            system: route.config.instructions,
+                            system: opened.spec?.system ?? route.config.instructions,
                             ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
@@ -408,7 +422,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (runtime === 'anthropic-api') {
                         s.routes[taskId] = { ...base, status: 'opening' };
                         await chosen(`runtime anthropic-api (the agent's runtime); no environment needed`);
-                        await placeLocal(s.routes[taskId]!, 'started');
+                        await placeLocal(s.routes[taskId]!, 'started', t);
                         await ctx.save();
                         return task(taskId).get();
                     }
@@ -422,7 +436,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
                     // reports yet is "offline" under the agent's policy — `queue` waits for the machine that will (AST-05).
                     s.routes[taskId] = { ...base, environmentId, status: 'opening' };
-                    await placeRemote(s.routes[taskId]!);
+                    await placeRemote(s.routes[taskId]!, undefined, t);
                     await ctx.save();
                     return task(taskId).get();
                 },

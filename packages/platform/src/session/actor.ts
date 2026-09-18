@@ -339,8 +339,11 @@ export function defineSessionActor(ports: SessionPorts) {
 
     /**
      * Session start (architecture §8): query the agent's own scope and its shared
-     * scopes as the agent, record what came back on the spec, and append the
-     * platform-owned block to the system prompt. A scope that refuses is listed
+     * scopes as the agent, record what came back on the spec, and — when the
+     * caller built a system prompt (the daemon path) — append the platform-owned
+     * block to it. Without one, `spec.memories` is the single rendering source:
+     * the API factory hands them to `createPlatformModelAgent({ memories })`,
+     * which composes the prompt itself (#135). A scope that refuses is listed
      * in `retrieval.skipped`; a retrieval that fails altogether leaves the spec
      * without memories and says so — the session still opens.
      */
@@ -351,7 +354,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const at = now();
         try {
             const r = await retrieveMemories(learning.memory, principal, spec.config, spec, learning.retrieval);
-            const system = withMemoryBlock(spec.system, renderMemoryBlock(r.entries));
+            const system = spec.system !== undefined ? withMemoryBlock(spec.system, renderMemoryBlock(r.entries)) : undefined;
             return {
                 ...spec,
                 memories: r.entries,
