@@ -129,8 +129,12 @@ const LiveWorkdirPicker = component<WorkdirPickerProps>(({ props, emit }) => {
         return null;
     };
 
+    // Only the newest request may install its id or its error: a quicker click must not be overwritten by a slower answer.
+    let listSeq = 0;
+    let worktreeSeq = 0;
     const backend: Backend = {
         list(environmentId, path) {
+            const mine = ++listSeq;
             const ws = viewer.workspaceId;
             const machine = machineFor(environmentId);
             if (!ws || !machine) return;
@@ -139,6 +143,7 @@ const LiveWorkdirPicker = component<WorkdirPickerProps>(({ props, emit }) => {
             void actor(defs.Machine, machineKeyOf(ws, machine))
                 .fsRequest(environmentId, { kind: 'list', path })
                 .then(({ requestId }) => {
+                    if (mine !== listSeq) return;
                     Object.assign(req, { machine, list: requestId, environmentId });
                     timer = setTimeout(() => {
                         if (!st.loading) return;
@@ -147,11 +152,13 @@ const LiveWorkdirPicker = component<WorkdirPickerProps>(({ props, emit }) => {
                     }, CLIENT_TIMEOUT_MS);
                 })
                 .catch((e: unknown) => {
+                    if (mine !== listSeq) return;
                     st.loading = false;
                     st.error = requestError(e);
                 });
         },
         worktree(request) {
+            const mine = ++worktreeSeq;
             const ws = viewer.workspaceId;
             const machine = machineFor(request.environmentId);
             if (!ws || !machine) {
@@ -161,8 +168,9 @@ const LiveWorkdirPicker = component<WorkdirPickerProps>(({ props, emit }) => {
             const { environmentId, repo, branch, base, path } = request;
             void actor(defs.Machine, machineKeyOf(ws, machine))
                 .fsRequest(environmentId, { kind: 'worktree', repo, branch, path, ...(base ? { base } : {}) })
-                .then(({ requestId }) => { Object.assign(req, { machine, worktree: requestId, environmentId }); })
+                .then(({ requestId }) => { if (mine === worktreeSeq) Object.assign(req, { machine, worktree: requestId, environmentId }); })
                 .catch((e: unknown) => {
+                    if (mine !== worktreeSeq) return;
                     st.creating = false;
                     st.worktreeError = requestError(e);
                 });

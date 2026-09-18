@@ -20,8 +20,8 @@ const FILTERS: readonly { readonly value: TaskStatus | 'all'; readonly label: st
 ];
 
 /** `/tasks` — every task, the Home table at full width with filter chips by status; the TaskIndex in live mode (#146). */
-/** "Start task" (#193): live only, like every create button — the mock workspace has no router to hand a task to. */
-defineTopbar('tasks', () => ({ actions: () => <Button intent="primary" icon="plus" onClick={dataMode() === 'live' ? () => openStartTask() : undefined}>Start task</Button> }));
+/** "Start task" (#193): live only — the mock workspace has no router to hand a task to, so there it is disabled. */
+defineTopbar('tasks', () => ({ actions: () => <Button intent="primary" icon="plus" disabled={dataMode() !== 'live'} onClick={() => openStartTask()}>Start task</Button> }));
 
 export const Tasks = component(() => {
     const all = loadTasks();
