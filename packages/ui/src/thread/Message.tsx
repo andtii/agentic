@@ -22,13 +22,14 @@ import { component, type Define } from '@sigx/runtime-core';
 import type { AgentMessage, AgentPart, AgentTranscript, ToolPartState } from '@sigx/ai-agent/app';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { EnvironmentLine, type EnvironmentParts } from '../kit/EnvironmentLine.js';
+import { Icon } from '../kit/icons.js';
 import { StatusPill } from '../kit/StatusPill.js';
 import { aiMessageAnatomy } from './anatomy.js';
 import type { RespondFn } from './ApprovalPrompt.js';
 import { Reasoning } from './Reasoning.js';
 import { StreamingMarkdown } from './StreamingMarkdown.js';
 import { ToolCall, type DescribeRequestFn, type ToolMetaFn } from './ToolCall.js';
-import { nonBlank } from './text.js';
+import { formatBytes, nonBlank } from './text.js';
 
 const SCOPE = aiMessageAnatomy.scope;
 
@@ -66,6 +67,32 @@ export function authorOf(message: AgentMessage): string {
     return nonBlank(message.author) ?? nonBlank(message.actor) ?? (message.role === 'user' ? 'You' : 'Assistant');
 }
 
+/** The image / file part shape — `@sigx/ai-agent`'s, plus the name and size a host may carry alongside. */
+interface MediaPart {
+    readonly mediaType: string;
+    readonly data?: string;
+    readonly url?: string;
+    readonly filename?: string;
+    readonly name?: string;
+    readonly size?: number;
+}
+
+/** Where a media part's bytes are: its URL, else its base64 payload as a `data:` URL. */
+export function mediaSrc(p: MediaPart): string | undefined {
+    if (p.url) return p.url;
+    return p.data ? `data:${p.mediaType};base64,${p.data}` : undefined;
+}
+
+/** The part's byte size: given, else decoded from the base64 payload's length. */
+export function mediaSize(p: MediaPart): number | undefined {
+    if (p.size !== undefined) return p.size;
+    if (!p.data) return undefined;
+    const pad = p.data.endsWith('==') ? 2 : p.data.endsWith('=') ? 1 : 0;
+    return Math.floor((p.data.length * 3) / 4) - pad;
+}
+
+const mediaName = (p: MediaPart, fallback: string): string => nonBlank(p.filename) ?? nonBlank(p.name) ?? fallback;
+
 type PartProps =
     & Define.Prop<'part', AgentPart, true>
     & Define.Prop<'transcript', AgentTranscript, false>
@@ -95,10 +122,28 @@ const Part = component<PartProps>(({ props }) => {
                         onCancelAgent={props.onCancelAgent}
                     />
                 );
-            case 'image':
-                return <code>{p.mediaType}</code>;
-            case 'file':
-                return <code>{p.filename ?? p.mediaType}</code>;
+            case 'image': {
+                const src = mediaSrc(p);
+                if (!src) return <code>{p.mediaType}</code>;
+                return (
+                    <a data-scope={SCOPE} data-part="image" href={src} target="_blank" rel="noopener noreferrer">
+                        <img src={src} alt={mediaName(p, 'image')} loading="lazy" decoding="async" />
+                    </a>
+                );
+            }
+            case 'file': {
+                const src = mediaSrc(p);
+                const name = mediaName(p, p.mediaType);
+                if (!src) return <code>{name}</code>;
+                const size = mediaSize(p);
+                return (
+                    <a data-scope={SCOPE} data-part="file" href={src} download={name}>
+                        <Icon name="file" size={15} />
+                        <span data-scope={SCOPE} data-part="file-name">{name}</span>
+                        {size !== undefined && <span data-scope={SCOPE} data-part="file-size">{formatBytes(size)}</span>}
+                    </a>
+                );
+            }
             default:
                 return <code>{p.type}</code>;
         }
