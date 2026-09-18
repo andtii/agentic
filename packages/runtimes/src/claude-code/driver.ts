@@ -13,7 +13,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import type { SpawnOptions, SpawnedProcess, PermissionMode } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
 import { isWithin } from '@sigx/ai-agent/coding';
 import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
@@ -54,6 +54,22 @@ export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
 }
 
 const RUNTIME = 'claude-code';
+
+/**
+ * Claude Code's own cross-session tools: they list and message OTHER Claude Code sessions on the
+ * machine — the operator's own work, not this platform's agents. A platform session reaches its
+ * collaborators through `delegate` / `chat_post`. Claude Code runs these without asking (no
+ * permission request reaches the policy), so they are taken out of the model's context instead:
+ * the SDK's `disallowedTools`.
+ */
+export const CROSS_SESSION_TOOLS: readonly string[] = ['ListAgents', 'SendMessage'];
+
+/** `query` with Claude Code's cross-session tools disallowed on every session it starts, beside any the caller disallows. */
+export function withoutCrossSessionTools(query: QueryFn): QueryFn {
+    const wrapped = (params: Parameters<QueryFn>[0]) =>
+        query({ ...params, options: { ...params.options, disallowedTools: [...new Set([...(params.options?.disallowedTools ?? []), ...CROSS_SESSION_TOOLS])] } });
+    return wrapped as QueryFn;
+}
 
 async function readText(path: string): Promise<string | undefined> {
     try {
@@ -100,7 +116,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 env: childEnvFor(env),
                 ...(options.models ? { models: options.models } : {}),
                 ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
-                ...(options.query ? { query: options.query } : {}),
+                query: withoutCrossSessionTools(options.query ?? sdkQuery),
                 ...(options.listen ? { listen: options.listen } : {}),
                 ...(options.listSessions ? { listSessions: options.listSessions } : {}),
                 ...(options.spawn ? { spawn: options.spawn } : {}),

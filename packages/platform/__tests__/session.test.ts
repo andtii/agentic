@@ -5,6 +5,7 @@ import { checkEventInvariants, checkReplayEquality, mockAgent, type MockAgent } 
 import { serveSession, type WireCommand, type WireFrame } from '@sigx/ai-agent/wire';
 
 import { defineSessionActor, isInterruptedTurnEnd, type CommandSink, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
+import { applySessionEntry, type SessionEntry, type SessionState } from '../src/session/state';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
@@ -47,6 +48,17 @@ const ChatStub = defineActor({
     }
 });
 
+/** A question form as Claude Code's `AskUserQuestion` raises it: one property per question, a multi-select as an array. */
+const FORM = {
+    type: 'object',
+    properties: {
+        q1: { type: 'string', title: 'Focus', description: 'Which area?', anyOf: [{ enum: ['bugs', 'docs'] }, { type: 'string' }] },
+        q2: { type: 'array', title: 'Scope', description: 'Which size?', items: { type: 'string' } }
+    },
+    required: ['q1', 'q2'],
+    additionalProperties: false
+};
+
 /** A scripted agent: `slow` runs a long tool call, anything else answers in words. */
 function scriptedAgent(): MockAgent {
     return mockAgent({
@@ -54,6 +66,7 @@ function scriptedAgent(): MockAgent {
             const text = input.map((p) => (p.type === 'text' ? p.text : '')).join('');
             if (text === 'slow') return [{ text: 'working ' }, { tool: { name: 'slow', input: { n: 1 }, output: 'done', delayMs: 2_000 } }, { text: 'after' }];
             if (text === 'ask') return [{ request: { kind: 'input', message: 'Which colour?' } }, { text: 'picked' }];
+            if (text === 'ask-form') return [{ request: { kind: 'input', message: 'Focus: Which area?\nScope: Which size?', schema: FORM } }, { text: 'picked' }];
             return [{ text: `echo: ${text}`, chunkSize: 4 }];
         }
     });
@@ -184,10 +197,15 @@ describe('Session turns (local path)', () => {
         await session().prompt('slow', 't1');
         await until(async () => (await session().events()).some((e) => e.type === 'tool-call'), 'the tool call');
 
-        // Kill the activation mid-turn: the record keeps what was appended and the running turn.
+        // Kill the activation mid-turn: the record keeps what was appended and the running turn —
+        // a snapshot plus the entries appended since (`ctx.append`), folded as a load folds them.
         await app.host.deactivate({ type: 'session', key: KEY });
-        const stored = (await app.storage.load('session', KEY))?.state as { running?: { turnId: string } } | undefined;
-        expect(stored?.running?.turnId).toBe('t1');
+        const record = await app.storage.load('session', KEY);
+        const stored = structuredClone(record!.state) as SessionState;
+        for (const entry of record!.log ?? []) applySessionEntry(stored, entry as SessionEntry);
+        expect(stored.running?.turnId).toBe('t1');
+        // Every event went through the O(entry) append, not a full save of the growing record.
+        expect(app.appends.filter((w) => w.type === 'session').length).toBeGreaterThan(app.saves.filter((w) => w.type === 'session').length);
         // Re-activation restarts the driver from the task ledger; it finds no live session and closes the turn.
         await settled();
 
@@ -237,6 +255,31 @@ describe('Session turns (local path)', () => {
         expect(events.filter((e) => e.type === 'request-resolved')).toHaveLength(1);
         expect(await session().get()).toMatchObject({ status: 'idle', openRequests: [] });
         expect((await session().transcript())?.messages.at(-1)).toMatchObject({ role: 'assistant', parts: [{ type: 'text', text: 'picked' }] });
+    });
+
+    it('shapes a free-text answer to a question form into the form — one answer per question, never dropped', async () => {
+        await session().open(spec);
+        await session().prompt('ask-form', 't1');
+        await until(async () => (await session().get()).status === 'awaiting', 'the request');
+        const requestId = (await session().get()).openRequests[0]!;
+
+        await session().respond(requestId, { type: 'input', answers: 'attachments please' });
+        await settled();
+
+        const resolved = (await session().events()).find((e) => e.type === 'request-resolved');
+        expect(resolved).toMatchObject({ outcome: 'input', answers: { q1: 'attachments please', q2: ['attachments please'] } });
+    });
+
+    it('passes an answer already shaped to the form through untouched', async () => {
+        await session().open(spec);
+        await session().prompt('ask-form', 't1');
+        await until(async () => (await session().get()).status === 'awaiting', 'the request');
+        const requestId = (await session().get()).openRequests[0]!;
+
+        await session().respond(requestId, { type: 'input', answers: { q1: 'bugs', q2: ['small'] } });
+        await settled();
+
+        expect((await session().events()).find((e) => e.type === 'request-resolved')).toMatchObject({ answers: { q1: 'bugs', q2: ['small'] } });
     });
 
     it('never switches a recorded session to another environment or machine on a second open', async () => {

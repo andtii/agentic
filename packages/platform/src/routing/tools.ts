@@ -26,7 +26,7 @@
  * and says so; the tool never silently succeeds.
  */
 
-import { actorKey, isTerminal, type ChatId, type MemoryEntry, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, isTerminal, type AgentId, type ChatId, type MemoryEntry, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import type { DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -184,6 +184,16 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 const { config } = await as(AgentActor, agentKey(workspaceId, agentId)).get();
                 if (config.collaborators !== 'all' && !config.collaborators.includes(spec.assignee)) {
                     throw new ToolCallError('forbidden', `delegate: agent ${agentId} may not delegate to ${spec.assignee} (not a collaborator)`);
+                }
+                // An id that names no configured agent is the caller's mistake, said before a child task exists — not a
+                // failed child with an `agent-unconfigured` the model cannot tell from a platform fault.
+                try {
+                    await as(AgentActor, agentKey(workspaceId, spec.assignee as AgentId)).snapshotForSession();
+                } catch {
+                    throw new ToolCallError(
+                        'invalid',
+                        `delegate: "${spec.assignee}" is not an agent of this workspace. The assignee is a platform agent id (agent_…): take it from "This chat" in your instructions — session or process names on your machine are not agents here.`
+                    );
                 }
                 let childId: TaskId;
                 try {

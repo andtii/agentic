@@ -10,7 +10,7 @@
 import type { AnyTool, LanguageModel, Usage } from '@sigx/ai';
 import { modelAgent, type Agent, type TranscriptStore } from '@sigx/ai-agent';
 import { anthropic, DEFAULT_ANTHROPIC_MODEL, type AnthropicProviderOptions } from '@sigx/ai-anthropic';
-import type { CapabilityReport, FrozenAgentConfig, MemoryEntry, UsageRow } from '@agentic/core';
+import type { CapabilityReport, ChatRoster, FrozenAgentConfig, MemoryEntry, UsageRow } from '@agentic/core';
 import { grantedPlatformTools, type PlatformPorts } from '../tools/index.js';
 import { anthropicCapabilityReport } from './capabilities.js';
 import { costOf, resolvePricing, type ResolvedPricing } from './pricing.js';
@@ -30,6 +30,8 @@ export interface PlatformAgentDeps {
     readonly skills?: readonly ResolvedSkill[];
     /** Memories retrieved for this session; they become the prompt's memory block. */
     readonly memories?: readonly MemoryEntry[];
+    /** The chat the session works in (CHT-07); it becomes the prompt's chat section. */
+    readonly roster?: ChatRoster;
     /** Extra tools beyond the platform's (connectors); they are on every session's roster as given. */
     readonly tools?: readonly AnyTool[];
 }
@@ -57,7 +59,8 @@ export function createPlatformModelAgent(config: FrozenAgentConfig, deps: Platfo
         config,
         tools: roster,
         ...(deps.skills ? { skills: deps.skills } : {}),
-        ...(deps.memories ? { memories: deps.memories } : {})
+        ...(deps.memories ? { memories: deps.memories } : {}),
+        ...(deps.roster ? { roster: deps.roster } : {})
     });
     const limits = config.execution.limits;
     const agent = modelAgent({

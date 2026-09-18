@@ -3,8 +3,9 @@
  * rows a person must answer, approvals first, then input, then interrupted,
  * oldest first inside each kind. An approval row carries the `ai-approval`
  * card wired to `Session.respond` with `once` | `session` scope; an input
- * row an answer box; an interrupted row a Resume that goes through the
- * router (`source.resume`, OPS-05); every row links to where it came from. The card's
+ * row the `ai-question` card (one block per question, the options as
+ * toggles, free text beside them — answered in the form's own shape); an
+ * interrupted row a Resume that goes through the router (`source.resume`, OPS-05); every row links to where it came from. The card's
  * data is the Session's record, so a decision from any client — this tab,
  * the chat, the phone — collapses the card here and the row leaves the
  * list once the Session marks the notification read.
@@ -12,7 +13,7 @@
 import { component } from 'sigx';
 import type { Decision } from '@sigx/ai-agent';
 import type { OpenRequest } from '@sigx/ai-agent/app';
-import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, NeedsItem, SectionHeading, type ApprovalDecision } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, NeedsItem, QuestionPrompt, SectionHeading, type ApprovalDecision } from '@agentic/ui';
 import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
 import { sortRows, type NeedsRow, type NeedsSource, type RequestState } from './source';
@@ -53,7 +54,7 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
     const row = props.row;
     const source = props.source;
     const request: (() => RequestState) | undefined = row.ref ? source.useRequest(row.ref) : undefined;
-    const st = signal({ answer: '', busy: false, error: '' });
+    const st = signal({ busy: false, error: '' });
 
     const respond = async (decision: Decision): Promise<void> => {
         if (!row.ref) return;
@@ -79,14 +80,6 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
         }).finally(() => {
             st.busy = false;
         });
-    };
-
-    const answer = (): void => {
-        const text = st.answer.trim();
-        if (!text) return;
-        void respond({ type: 'input', answers: text }).then(() => {
-            st.answer = '';
-        }, () => undefined);
     };
 
     return () => {
@@ -119,20 +112,18 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                     />
                 ) : null}
                 {row.kind === 'input' && view ? (
-                    resolved ? (
-                        <p data-needs-answered>{`Answered${resolved.outcome === 'cancel' ? ' (cancelled)' : ''}`}</p>
-                    ) : (
-                        <div data-needs-answer>
-                            {view.view.request.message ? <p data-needs-question>{view.view.request.message}</p> : null}
-                            <textarea aria-label="Your answer" rows={2} value={st.answer} disabled={st.busy} onInput={(e: Event) => { st.answer = (e.target as HTMLTextAreaElement).value; }} />
-                            <Button intent="wait" loading={st.busy} disabled={st.busy || !st.answer.trim()} onClick={answer}>Answer</Button>
-                        </div>
-                    )
+                    <QuestionPrompt
+                        request={openRequestOf(view.view)}
+                        requestedBy={view.requestedBy}
+                        answered={resolved && resolved.outcome !== 'cancel' ? (resolved.answers ?? '') : undefined}
+                        cancelled={resolved?.outcome === 'cancel'}
+                        onRespond={(_, decision) => respond(decision)}
+                    />
                 ) : null}
                 {row.kind === 'interrupted' && row.primary && source.resume ? <Button intent="wait" icon="play" loading={st.busy} disabled={st.busy} onClick={resume}>{row.primary.label}</Button> : null}
                 {r?.loading && !view ? <p data-panel-note>Loading the request…</p> : null}
                 {r?.error ? <p data-needs-error role="alert">{`Could not load the request: ${r.error.message}`}</p> : null}
-                {st.error && row.kind !== 'approval' ? <p data-needs-error role="alert">{`Could not ${row.kind === 'interrupted' ? 'resume' : 'answer'}: ${st.error}`}</p> : null}
+                {st.error && row.kind === 'interrupted' ? <p data-needs-error role="alert">{`Could not resume: ${st.error}`}</p> : null}
                 <LinkButton to={link.to} label={link.label}>{link.label}</LinkButton>
             </NeedsItem>
         );

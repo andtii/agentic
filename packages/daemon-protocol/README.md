@@ -10,8 +10,8 @@ The frame TYPES live in `@agentic/core` (`DaemonFrame<F, R>`, `PlatformFrame<C>`
 import type { DaemonFrame, PlatformFrame, HelloFrame, SessionFrameFrame } from '@agentic/daemon-protocol';
 ```
 
-`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong`.
-`PlatformFrame` (platform → daemon): `welcome` · `session.open` · `session.command` · `session.close` · `tool.result` · `ping`.
+`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong` · `fs.response`.
+`PlatformFrame` (platform → daemon): `welcome` · `session.open` · `session.command` · `session.close` · `tool.result` · `ping` · `fs.request`.
 
 ## Validators
 

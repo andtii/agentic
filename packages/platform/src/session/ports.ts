@@ -8,7 +8,7 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
@@ -63,6 +63,8 @@ export interface SessionOpenSpec {
     readonly retrieval?: MemoryRetrievalRecord;
     /** Tool names the runtime must serve. */
     readonly tools?: readonly string[];
+    /** The chat the session works in (CHT-07), filled by the router for a chat-originated task: the prompt's chat section. */
+    readonly roster?: ChatRoster;
     /** Resume an earlier runtime session. */
     readonly resume?: SessionRef;
 }

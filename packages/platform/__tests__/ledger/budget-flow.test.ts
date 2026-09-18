@@ -55,6 +55,8 @@ function scriptedAgent(): MockAgent {
             if (text === 'cheap') return [{ usage: USAGE, costUsd: 0.4 }, { text: 'ok' }];
             if (text === 'dear') return [{ usage: USAGE, costUsd: 0.7 }, { tool: { name: 'slow', input: {}, output: 'x', delayMs: 2_000 } }, { text: 'after' }];
             if (text === 'free') return [{ usage: { inputTokens: 5, outputTokens: 1 } }, { text: 'free' }];
+            // Claude Code's thinking-token ticks: an estimate per tick, nothing billed.
+            if (text === 'think') return [{ usage: { reasoningTokens: 3 } }, { usage: { reasoningTokens: 4, inputTokens: 0, outputTokens: 0 } }, { text: 'thought' }];
             return [{ text: `echo: ${text}` }];
         }
     });
@@ -134,6 +136,16 @@ describe('usage → Ledger (OPS-07)', () => {
         expect(rows[0]!.taskId).toBeUndefined();
         const summary = await ledger().summary({ by: 'agent', agentId: PLAIN });
         expect(summary.total).toMatchObject({ rows: 1, costUsd: null, unpricedRows: 1, quality: 'not-reported' });
+    });
+
+    it('records no row for a usage event with nothing billed — a thinking-token tick — and charges no task', async () => {
+        await task('task_4').create(contract(PRICED, { maxCostUsd: 1 }), { owner: PRICED });
+        await task('task_4').start('user:u1', 'session_4' as SessionId);
+        await session('session_4').open(spec(PLAIN, 'task_4' as TaskId));
+        await session('session_4').prompt('think', 'k1');
+        await settled('session_4');
+        expect(await ledger().rows()).toEqual([]);
+        expect((await task('task_4').get()).usage).toEqual({ inputTokens: 0, outputTokens: 0 });
     });
 });
 

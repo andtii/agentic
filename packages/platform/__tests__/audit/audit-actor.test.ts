@@ -70,7 +70,9 @@ describe('Audit records', () => {
         expect(await audit().record(transition('k1'))).toBe(true);
         expect(await audit().record(transition('k1', { summary: 'again' }))).toBe(false);
         expect(await audit().record(transition('k2', { at: AT + 1 }))).toBe(true);
-        expect(app.saves.filter((s) => s.type === 'audit')).toHaveLength(2);
+        // One durable write per recorded event: the first creates the record (a save), the next is an O(entry) append.
+        expect([...app.saves, ...app.appends].filter((s) => s.type === 'audit')).toHaveLength(2);
+        expect(app.appends.filter((s) => s.type === 'audit')).toHaveLength(1);
         const page = await audit().list();
         expect(keys(page.events)).toEqual(['k2', 'k1']);
         expect(page.events.map((e) => e.seq)).toEqual([1, 0]);

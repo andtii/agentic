@@ -25,10 +25,10 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs';
 
 export interface DaemonConformanceHarness {
-    /** `'env'`: `setEnvironments`; `'gap'`: `truncateLog`; `'raw'`: `PlatformSeat.sendRaw`. */
+    /** `'env'`: `setEnvironments`; `'gap'`: `truncateLog`; `'raw'`: `PlatformSeat.sendRaw`; `'fs'`: the daemon answers `fs.request` (#187). */
     readonly features?: readonly ConformanceFeature[];
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;

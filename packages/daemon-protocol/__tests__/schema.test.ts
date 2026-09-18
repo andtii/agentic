@@ -1,6 +1,6 @@
 /** Every frame kind: one valid frame parses, one invalid frame is refused with a field-level issue. */
 
-import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, PLATFORM_FRAME_TYPES } from '@agentic/core';
+import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, PLATFORM_FRAME_TYPES } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameType, PlatformFrame, PlatformFrameType } from '../src/index';
 import { LIMITS, daemonFrame, daemonFrameSchemas, platformFrame, platformFrameSchemas } from '../src/index';
@@ -42,7 +42,17 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
     },
     'session.closed': { valid: { v: V, t: 'session.closed', sessionId: 's1' as never, reason: 'done' }, invalid: { v: V, t: 'session.closed', sessionId: '', reason: 'done' }, path: 'sessionId' },
     'tool.call': { valid: { v: V, t: 'tool.call', callId: 'k1', sessionId: 's1' as never, tool: 'echo', input: { x: 1 } }, invalid: { v: V, t: 'tool.call', callId: 'k1', sessionId: 's1', input: {} }, path: 'tool' },
-    pong: { valid: { v: V, t: 'pong', at: 5 }, invalid: { v: V, t: 'pong', at: 'now' }, path: 'at' }
+    pong: { valid: { v: V, t: 'pong', at: 5 }, invalid: { v: V, t: 'pong', at: 'now' }, path: 'at' },
+    'fs.response': {
+        valid: {
+            v: V,
+            t: 'fs.response',
+            requestId: 'fs_1',
+            result: { kind: 'list', path: '/work', entries: [{ name: 'app', path: '/work/app', git: { kind: 'repo', branch: 'main' } }, { name: 'wt', path: '/work/wt', git: { kind: 'worktree', head: 'abc1234' } }], truncated: false }
+        },
+        invalid: { v: V, t: 'fs.response', requestId: 'fs_1', result: { kind: 'worktree', path: '/work/b', branch: 'b' }, error: { code: 'exists', message: 'taken' } },
+        path: 'error'
+    }
 };
 
 const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformFrame, { t: T }>> } = {
@@ -63,7 +73,12 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         invalid: { v: V, t: 'tool.result', callId: 'k1', output: 1, error: { code: 'boom', message: 'no' } },
         path: 'error'
     },
-    ping: { valid: { v: V, t: 'ping' }, invalid: { v: V, t: 'ping', extra: 1 }, path: '' }
+    ping: { valid: { v: V, t: 'ping' }, invalid: { v: V, t: 'ping', extra: 1 }, path: '' },
+    'fs.request': {
+        valid: { v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'worktree', repo: '/work/app', branch: 'feat/x', base: 'main', path: '/work/app-worktrees/feat-x' } },
+        invalid: { v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'list', path: '' } },
+        path: 'op.path'
+    }
 };
 
 describe('daemon frame schemas', () => {
@@ -149,6 +164,21 @@ describe('daemon frame schemas', () => {
         const neither = result({});
         expect(neither.success).toBe(false);
         expect(neither.error?.issues[0]?.path).toEqual(['output']);
+    });
+
+    it('require exactly one of result or error on fs.response, and bound a listing (#187)', () => {
+        const response = (f: Record<string, unknown>) => daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', requestId: 'fs_1', ...f });
+        const listing = (n: number) => ({ kind: 'list', path: '/work', parent: '/', entries: Array.from({ length: n }, (_, i) => ({ name: `d${i}`, path: `/work/d${i}` })), truncated: n === FS_LIST_MAX_ENTRIES });
+        expect(response({ result: listing(FS_LIST_MAX_ENTRIES) }).success).toBe(true);
+        expect(response({ result: listing(FS_LIST_MAX_ENTRIES + 1) }).success).toBe(false);
+        expect(response({ result: { kind: 'worktree', path: '/work/b', branch: 'feat/b' } }).success).toBe(true);
+        expect(response({ error: { code: 'outside-roots', message: 'no' } }).success).toBe(true);
+        expect(response({ error: { code: 'teapot', message: 'no' } }).success).toBe(false);
+        const neither = response({});
+        expect(neither.success).toBe(false);
+        expect(neither.error?.issues[0]?.path).toEqual(['result']);
+        expect(daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', error: { code: 'internal', message: 'x' } }).success).toBe(false);
+        expect(platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'delete', path: '/work' } }).success).toBe(false);
     });
 
     it('refuse the wrong protocol version at the schema level too', () => {

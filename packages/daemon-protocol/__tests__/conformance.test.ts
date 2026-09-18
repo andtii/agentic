@@ -7,7 +7,7 @@ describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness(), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, none skipped', () => {
-        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'tool-round-trip']);
+        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'tool-round-trip']);
         expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
@@ -17,7 +17,8 @@ describe('daemonConformance × inMemoryHarness', () => {
         const bare = daemonConformance({ start: () => inMemoryHarness().start({ events: 3, heartbeatMs: 10 }) });
         expect(bare.filter((c) => c.skip).map((c) => [c.name, c.skip])).toEqual([
             ['env', 'the harness does not declare the "env" feature'],
-            ['gap', 'the harness does not declare the "gap" feature']
+            ['gap', 'the harness does not declare the "gap" feature'],
+            ['fs-list', 'the harness does not declare the "fs" feature']
         ]);
     });
 });
@@ -41,6 +42,10 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that answers frames from another protocol version', async () => {
         await expect(only('malformed-input', { answerAnyVersion: true }).run()).rejects.toThrow(/expected a session\.opened frame, got pong/);
+    });
+
+    it('a daemon that lists folders outside its working roots (OPS-01)', async () => {
+        await expect(only('fs-list', { browseAnywhere: true }).run()).rejects.toThrow(/a folder outside the working roots is refused/);
     });
 
     it('a daemon that never announces environments', async () => {

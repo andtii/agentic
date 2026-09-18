@@ -96,7 +96,8 @@ describe('/chats/:id tasks, waiting and stop (live)', () => {
         expect(rowOf(dom, chatId)!.querySelector('[data-scope="ag-pill"][data-status="approval"]')).not.toBeNull();
         await until(() => [...panel(dom).querySelectorAll('[data-member]')].some((m) => m.querySelector('[data-member-name]')!.textContent === 'Forge' && m.querySelector('[data-status="waiting"]')), 'Forge waiting');
         await until(() => chatHead.value?.members.find((m) => m.agentId === forge)?.status === 'waiting', 'the head');
-        expect((await task.get()).status).toBe('waiting');
+        // The Task parks through the router's follow of the session (throttled), not the chat's status entry: it lands a beat later.
+        await until(async () => (await task.get()).status === 'waiting', 'the task to park');
 
         await until(() => dom.querySelector('[data-scope="ai-approval"][data-part="root"]') !== null, 'the approval card in the thread');
         buttonNamed(dom.querySelector('[data-scope="ai-approval"][data-part="root"]')!, 'Allow once').click();

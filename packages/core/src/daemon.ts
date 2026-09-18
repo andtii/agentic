@@ -8,7 +8,7 @@
  * `R` its reply, `C` a command. `@agentic/daemon-protocol` instantiates them.
  */
 
-import type { ApprovalRule, CapabilityReport, EnvironmentDescriptor, MachineId, SessionId, ToolGrant } from './index.js';
+import type { ApprovalRule, CapabilityReport, EnvironmentDescriptor, FsError, FsOp, FsResult, MachineId, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -67,7 +67,9 @@ export type DaemonFrame<F = unknown, R = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.reply'; readonly sessionId: SessionId; readonly reply: R }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.closed'; readonly sessionId: SessionId; readonly reason: string }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'tool.call'; readonly callId: string; readonly sessionId: SessionId; readonly tool: string; readonly input: unknown }
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'pong'; readonly at: number };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'pong'; readonly at: number }
+    /** The answer to `fs.request` (#185): exactly one of `result` / `error`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.response'; readonly requestId: string; readonly result?: FsResult; readonly error?: FsError };
 
 export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>> }
@@ -75,7 +77,9 @@ export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.command'; readonly sessionId: SessionId; readonly command: C }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.close'; readonly sessionId: SessionId }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'tool.result'; readonly callId: string; readonly output?: unknown; readonly error?: { readonly code: string; readonly message: string } }
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'ping' };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'ping' }
+    /** Browse a folder or create a git worktree inside an environment's `cwdRoots` (#185); answered by `fs.response`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.request'; readonly requestId: string; readonly environmentId: string; readonly op: FsOp };
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong'] as const;
-export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response'] as const;
+export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request'] as const;

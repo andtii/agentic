@@ -23,6 +23,7 @@ import { Icon, type IconName } from '../kit/icons.js';
 import { StatusPill } from '../kit/StatusPill.js';
 import { aiToolCallAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type ApprovalPromptProps, type RespondFn } from './ApprovalPrompt.js';
+import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message } from './Message.js';
 import { agentState, toolCallState, type ToolCallPhase } from './tool-state.js';
 import { inputText, nonBlank, oneLine, outputText, reportedOutput, signature } from './text.js';
@@ -189,6 +190,7 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
         const p = props.part;
         const request: OpenRequest | undefined = p.requestId !== undefined ? props.transcript?.requests[p.requestId] : undefined;
         const awaiting = request !== undefined && request.kind === 'permission';
+        const asking = request !== undefined && request.kind === 'input';
         const streaming = p.status === 'streaming';
         const sig = streaming ? `${oneLine(p.inputText ?? '')}…` : signature(p.input);
         const output = streaming ? undefined : outputText(p);
@@ -218,6 +220,7 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                 {output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
                 {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...props.describeRequest?.(request!)} toolName={p.name} input={p.input} />}
+                {asking && props.onRespond && <QuestionPrompt request={request!} onRespond={props.onRespond} requestedBy={props.describeRequest?.(request!)?.requestedBy} />}
                 {agent && <AgentCard agent={agent} transcript={props.transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={props.onCancelAgent} />}
             </div>
         );
