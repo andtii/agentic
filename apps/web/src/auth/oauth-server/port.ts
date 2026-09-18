@@ -9,7 +9,7 @@
  * actor admits its owner only) and driving the router (`Routing.run`, the
  * same principal the schedule trigger uses).
  */
-import { createId, type AgentId, type EnvironmentDescriptor, type MachineId, type Principal, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type MachineId, type Principal, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
 import {
     AgentActor,
@@ -147,17 +147,20 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 const m = await machine(input.machineId, driver).get();
                 const env = m.environments.find((e) => e.id === input.environmentId);
                 if (!env) throw new ServerFnError(404, `environment ${input.environmentId} is not reported by machine ${input.machineId}`);
-                if (input.cwd !== undefined && env.cwdRoots.length > 0 && !env.cwdRoots.some((root) => input.cwd!.startsWith(root))) {
-                    throw new ServerFnError(400, `cwd ${input.cwd} is outside the environment's roots (${env.cwdRoots.join(', ')})`);
+                // The folder must lie within the roots by the machine's path rules (decision 3, #190) — never a sibling that
+                // merely shares a root's prefix — and the router runs the session in it (`TaskContract.workdir` → `OpenSpec.cwd`).
+                if (input.cwd !== undefined && !pathWithin(input.cwd, env.cwdRoots, m.os ?? 'windows')) {
+                    throw new ServerFnError(400, `cwd ${input.cwd} is outside the environment's roots (${env.cwdRoots.join(', ') || 'none'})`);
                 }
                 const objective = input.objective ?? `Interactive session for ${input.agentId} on ${m.name} (${env.name})${input.cwd ? ` in ${input.cwd}` : ''}`;
                 const view = await createTask({
                     objective,
                     origin: { kind: 'external', clientId },
                     assignee: input.agentId,
-                    context: input.cwd !== undefined ? [{ type: 'text', text: `Working directory: ${input.cwd}` }] : [],
+                    context: [],
                     constraints: {},
-                    environmentId: input.environmentId
+                    environmentId: input.environmentId,
+                    ...(input.cwd !== undefined ? { workdir: input.cwd } : {})
                 });
                 return summary(view);
             },

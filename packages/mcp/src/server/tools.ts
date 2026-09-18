@@ -116,7 +116,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal):
                 agentId: id('The agent to run.'),
                 machineId: id('The machine that must host the session (from machines_list).'),
                 environmentId: id('An environment that machine reports (from environments_list).'),
-                cwd: z.string().min(1).optional().describe('Working directory inside one of the environment’s cwd roots.'),
+                cwd: z.string().min(1).optional().describe('The folder the session runs in: absolute, inside one of the environment’s cwd roots (checked by the machine’s path rules). Default: the first root.'),
                 objective: z.string().min(1).optional().describe('What the session is for; becomes the task objective and the first prompt.')
             }),
             annotations: WRITE,

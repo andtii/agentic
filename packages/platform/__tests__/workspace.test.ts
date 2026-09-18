@@ -1,9 +1,9 @@
-import { actorKey, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
+import { actorKey, type EnvironmentId, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
 import { workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 import { PairingDirectory } from '../src/pairing/index';
-import { DEFAULT_SETTINGS, PAIRING_CODE_LENGTH, PAIRING_CODE_TTL_MS, Workspace, type WorkspaceState } from '../src/workspace/index';
+import { DEFAULT_SETTINGS, PAIRING_CODE_LENGTH, PAIRING_CODE_TTL_MS, RECENT_WORKDIRS_MAX, Workspace, type WorkspaceState } from '../src/workspace/index';
 
 const owner = userPrincipal('u1');
 const KEY = workspaceKey('u1');
@@ -155,5 +155,41 @@ describe('Workspace machines', () => {
         expect(await ws().listMachines()).toEqual([]);
         const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
         expect(stored.machines).toEqual([]);
+    });
+});
+
+describe('Workspace recent folders (#190)', () => {
+    const ref = (n: number, environmentId = 'env_1') => ({ environmentId: environmentId as EnvironmentId, path: `/work/repo-${n}` });
+
+    it('keeps the newest RECENT_WORKDIRS_MAX, one per environment and path, most recent first', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(1_000);
+        expect(await ws().recentWorkdirs()).toEqual([]);
+        for (let n = 0; n < RECENT_WORKDIRS_MAX + 5; n++) {
+            vi.setSystemTime(1_000 + n);
+            await ws().noteWorkdir(ref(n));
+        }
+        let recents = await ws().recentWorkdirs();
+        expect(recents).toHaveLength(RECENT_WORKDIRS_MAX);
+        expect(recents[0]).toEqual({ ...ref(RECENT_WORKDIRS_MAX + 4), at: 1_000 + RECENT_WORKDIRS_MAX + 4 });
+        expect(recents.at(-1)!.path).toBe('/work/repo-5');
+
+        // Noting one again moves it to the front instead of adding a second row; the same path elsewhere is its own row.
+        vi.setSystemTime(5_000);
+        await ws().noteWorkdir(ref(10));
+        await ws().noteWorkdir(ref(10, 'env_2'));
+        await ws().noteWorkdir({ environmentId: 'env_2' as EnvironmentId, path: ' /work/repo-10 ' });
+        recents = await ws().recentWorkdirs();
+        expect(recents).toHaveLength(RECENT_WORKDIRS_MAX);
+        expect(recents.slice(0, 2)).toEqual([{ ...ref(10, 'env_2'), at: 5_000 }, { ...ref(10), at: 5_000 }]);
+        expect(recents.filter((r) => r.path === '/work/repo-10' && r.environmentId === 'env_1')).toHaveLength(1);
+        expect((await ws().get()).recentWorkdirs).toEqual(recents);
+    });
+
+    it('refuses a folder without an environment or a path, and is the owner’s alone', async () => {
+        expect(await statusOf(ws().noteWorkdir({ environmentId: 'env_1' as EnvironmentId, path: ' ' }))).toBe(400);
+        expect(await statusOf(ws().noteWorkdir({ path: '/work' } as never))).toBe(400);
+        expect(await statusOf(app.as(userPrincipal('u2')).actor(Workspace, KEY).noteWorkdir(ref(1)))).toBe(403);
+        expect(await ws().recentWorkdirs()).toEqual([]);
     });
 });

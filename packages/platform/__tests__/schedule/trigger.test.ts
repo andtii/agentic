@@ -130,6 +130,11 @@ describe('deliverScheduleFired', () => {
         expect(await inbox().list()).toEqual([]);
     });
 
+    it('an agent entry with a workdir carries it into the task contract with its environment (#190)', async () => {
+        await deliverScheduleFired(agentEntry({ environmentId: ENV, workdir: 'C:/src/app' }), hop);
+        expect(await task(scheduledTaskId(SCH, AT)).get()).toMatchObject({ environmentId: ENV, workdir: 'C:/src/app' });
+    });
+
     it('the objective falls back to the title when the entry has no prompt', async () => {
         await deliverScheduleFired(agentEntry({ prompt: undefined }), hop);
         expect((await task(scheduledTaskId(SCH, AT)).get()).objective).toBe('Nightly digest');

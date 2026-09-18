@@ -3,7 +3,7 @@
  * per member (CHT-04, MEM-11), bounded writes, the session-events fold
  * (CHT-11) and the authorization chain (architecture §9).
  */
-import type { AgentId, ChatEntry, MachineId, Principal, Scope, SessionId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatEntry, EnvironmentId, MachineId, Principal, Scope, SessionId, WorkspaceId } from '@agentic/core';
 import { Chat, ChatPage, MAX_TITLE_LENGTH, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
 import { statusOf, type TestActorApp } from '../../src/testing/index.js';
 import { A, B, C, WS, agent, chatKey, countingStorage, startChatApp, user } from './helpers.js';
@@ -321,5 +321,52 @@ describe('title (#124)', () => {
         const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'cli', scopes: ['chats'] };
         await chatAs(external).rename('from the CLI');
         expect((await chatAs(agent(A)).get()).title).toBe('from the CLI');
+    });
+});
+
+describe('working folder (#190)', () => {
+    const E1 = 'env_1' as EnvironmentId;
+    const folder = { environmentId: E1, path: 'C:/src/app' };
+
+    it('setWorkdir stores the folder on the member, appends a visible note that activates nobody, and survives a restart', async () => {
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        const member = await chat.setWorkdir(A, folder);
+        expect(member.workdir).toEqual(folder);
+        expect((await chat.get()).members[A]!.workdir).toEqual(folder);
+        const { entries } = await chat.history();
+        const note = entries.at(-1)!.entry;
+        expect(note).toMatchObject({ t: 'msg', author: { kind: 'user' }, mentions: [], workdir: { agentId: A, ref: folder } });
+        expect(text(note)).toBe(`Working folder for ${A} → C:/src/app on env_1`);
+        // Idempotent: the same folder again — padded or not — writes nothing.
+        await chat.setWorkdir(A, folder);
+        await chat.setWorkdir(A, { environmentId: E1, path: ' C:/src/app ' });
+        expect((await chat.history()).entries).toHaveLength(entries.length);
+
+        const before = await chat.get();
+        const { storage } = app;
+        await app.stop();
+        app = await startChatApp(storage);
+        expect(await chatAs(user).get()).toEqual(before);
+    });
+
+    it('null clears it with a note of its own', async () => {
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        await chat.setWorkdir(A, folder);
+        const member = await chat.setWorkdir(A, null);
+        expect(member.workdir).toBeUndefined();
+        expect('workdir' in (await chat.get()).members[A]!).toBe(false);
+        expect(text((await chat.history()).entries.at(-1)!.entry)).toBe(`Working folder for ${A} cleared`);
+    });
+
+    it('is for members only (404), refuses a folder without an environment or a path (400), and is the user’s call', async () => {
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        expect(await statusOf(chat.setWorkdir(B, folder))).toBe(404);
+        expect(await statusOf(chat.setWorkdir(A, { environmentId: E1, path: '  ' }))).toBe(400);
+        expect(await statusOf(chat.setWorkdir(A, { path: 'C:/src' } as never))).toBe(400);
+        expect(await statusOf(chatAs(agent(A)).setWorkdir(A, folder))).toBe(403);
+        expect((await chat.get()).members[A]!.workdir).toBeUndefined();
     });
 });

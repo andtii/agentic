@@ -84,6 +84,13 @@ describe('delegate', () => {
         await tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.' }, ctx());
         expect(ports.calls[0]!.args).toEqual({ assignee: 'agent_bob', objective: 'Go.', context: [], constraints: {} });
     });
+    it('passes an environment and a folder for the child (#190); a folder without its environment is refused before the port', async () => {
+        const { ports, tool } = byName();
+        await tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.', environmentId: 'env_1', workdir: 'C:/src/app' }, ctx());
+        expect(ports.calls[0]!.args).toEqual({ assignee: 'agent_bob', objective: 'Go.', context: [], constraints: {}, environmentId: 'env_1', workdir: 'C:/src/app' });
+        await expect(tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.', workdir: 'C:/src/app' }, ctx())).rejects.toBeInstanceOf(SchemaValidationError);
+        expect(ports.calls).toHaveLength(1);
+    });
 });
 
 describe('chat and task tools', () => {

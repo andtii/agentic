@@ -33,6 +33,11 @@ export type ChatEntry =
           readonly replyTo?: MessageId;
           readonly sessionId?: SessionId;
           readonly taskId?: TaskId;
+          /**
+           * Set on the note `Chat.setWorkdir` writes (#190): a member's working folder for this chat
+           * changed. Whoever folds the entries copies `ref` onto the member; `null` clears it.
+           */
+          readonly workdir?: { readonly agentId: AgentId; readonly ref: WorkdirRef | null };
       }
     | { readonly t: 'member'; readonly op: 'add' | 'remove'; readonly agentId: AgentId; readonly historyAccess: HistoryAccess; readonly at: number }
     | {

@@ -28,6 +28,13 @@ export interface Route {
     readonly environmentId?: EnvironmentId;
     /** The machine that reported `environmentId` — bound once a machine reports it, never rebound. */
     machineId?: MachineId;
+    /**
+     * The folder the session runs in (#190), resolved once (EXE-12): the task's `workdir`, a delegating parent's
+     * folder in the same environment, the agent's `defaultWorkdir` in its default environment, else the
+     * environment's first `cwdRoots` entry — the last filled in at placement when no machine reported the
+     * environment at `run`. Always within the roots (`pathWithin`) before a session opens.
+     */
+    cwd?: string;
     readonly policy: OfflinePolicy;
     /** The configuration the session runs with (AGT-06/07), taken once at `run`. */
     readonly config: FrozenAgentConfig;

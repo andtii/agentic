@@ -13,10 +13,10 @@
  * card that links to the child task; the result itself is the tool output.
  */
 
-import { defineTool } from '@sigx/ai';
+import { defineTool, SchemaValidationError } from '@sigx/ai';
 import type { AgentToolContext } from '@sigx/ai-agent';
 import { z } from 'zod';
-import type { AgentId, ArtifactRef, TaskError, TaskId } from '@agentic/core';
+import type { AgentId, ArtifactRef, EnvironmentId, TaskError, TaskId } from '@agentic/core';
 import type { DelegateOutcome, TaskPort } from './ports.js';
 
 export const delegateInput = z.object({
@@ -31,7 +31,9 @@ export const delegateInput = z.object({
             maxWallMs: z.number().min(0).optional()
         })
         .optional()
-        .describe('Limits for the child; never wider than your own.')
+        .describe('Limits for the child; never wider than your own.'),
+    environmentId: z.string().min(1).optional().describe('The environment the child runs in; default: the assignee’s own default.'),
+    workdir: z.string().min(1).optional().describe('The folder the child works in, absolute and inside the roots of `environmentId` (which it requires). Default: your folder when the child runs in your environment.')
 });
 
 /** What the model gets back: the child task's id and status, and its result flattened (COL-07). */
@@ -79,6 +81,10 @@ export function delegateTool(port: TaskPort) {
         input: delegateInput,
         annotations: { openWorld: true },
         execute: async (input, ctx) => {
+            // A folder is only meaningful on one machine: it travels with its environment (#190).
+            if (input.workdir !== undefined && input.environmentId === undefined) {
+                throw new SchemaValidationError([{ message: 'workdir needs environmentId', path: ['workdir'] }], 'delegate: workdir needs environmentId');
+            }
             const hostEmit = (ctx as Partial<AgentToolContext>).emit;
             const emit = typeof hostEmit === 'function' ? hostEmit : undefined;
             const outcome = await port.delegate(
@@ -87,7 +93,9 @@ export function delegateTool(port: TaskPort) {
                     objective: input.objective,
                     context: input.context !== undefined ? [{ type: 'text', text: input.context }] : [],
                     constraints: input.constraints ?? {},
-                    ...(input.expected !== undefined ? { expected: input.expected } : {})
+                    ...(input.expected !== undefined ? { expected: input.expected } : {}),
+                    ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                    ...(input.workdir !== undefined ? { workdir: input.workdir } : {})
                 },
                 {
                     callId: ctx.toolCallId,

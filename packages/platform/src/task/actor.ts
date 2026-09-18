@@ -19,6 +19,7 @@ import {
     type WaitReason
 } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorDefinition, type ActorOptions } from '@sigx/actors';
+import { ServerFnError } from '@sigx/server';
 import { recordAudit } from '../audit/port.js';
 import { sameWorkspace } from '../auth/index.js';
 import { budgetError, checkBudget, type BudgetVerdict } from '../ledger/budget.js';
@@ -99,6 +100,7 @@ function toView(s: TaskState): TaskView {
         constraints: s.constraints,
         ...(s.expected !== undefined ? { expected: s.expected } : {}),
         ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
+        ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
         depth: s.depth,
         ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),
         status: s.status,
@@ -279,12 +281,17 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
 
         return {
             async create(contract, init) {
+                // A folder is only meaningful on one machine: it travels with its environment (#190).
+                if (contract.workdir !== undefined && (typeof contract.workdir !== 'string' || !contract.workdir.trim() || contract.environmentId === undefined)) {
+                    throw new ServerFnError(400, `task ${s.id}: a workdir needs an environmentId (and a path)`);
+                }
                 if (s.created) return view();
                 const at = Date.now();
                 await commit(ctx, {
                     t: 'created',
                     at,
-                    contract,
+                    // The folder as `pathWithin` will check it: surrounding whitespace is never part of a path here.
+                    contract: contract.workdir !== undefined ? { ...contract, workdir: contract.workdir.trim() } : contract,
                     owner: init.owner,
                     depth: init.depth ?? 0,
                     ...(init.parentId !== undefined ? { parentId: init.parentId } : {}),
@@ -353,7 +360,8 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                     context: spec.context ?? [],
                     constraints,
                     ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
-                    ...((spec.environmentId ?? s.environmentId) !== undefined ? { environmentId: spec.environmentId ?? s.environmentId } : {})
+                    ...((spec.environmentId ?? s.environmentId) !== undefined ? { environmentId: spec.environmentId ?? s.environmentId } : {}),
+                    ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {})
                 };
                 const owner = spec.owner ?? s.assignee;
                 await childClient(id).create(contract, { owner, depth, parentId: s.id, configVersion: s.configVersion });

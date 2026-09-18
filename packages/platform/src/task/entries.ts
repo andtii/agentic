@@ -52,6 +52,7 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             state.constraints = { ...c.constraints };
             if (c.expected !== undefined) state.expected = c.expected;
             if (c.environmentId !== undefined) state.environmentId = c.environmentId;
+            if (c.workdir !== undefined) state.workdir = c.workdir;
             state.owner = e.owner;
             state.depth = e.depth;
             if (e.parentId !== undefined) state.parentId = e.parentId;

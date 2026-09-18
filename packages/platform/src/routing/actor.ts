@@ -3,9 +3,13 @@
  * EXE-11, EXE-12, AST-05). A task always runs where it was told to, or
  * waits / fails with a visible reason:
  *
- * - `run(taskId)` resolves the runtime and the environment ONCE — the task's
- *   `environmentId`, else the agent's default — and records them on the
- *   route; nothing later changes them (EXE-12).
+ * - `run(taskId)` resolves the runtime, the environment and the folder ONCE —
+ *   the task's `environmentId`, else the agent's default; the task's
+ *   `workdir`, else a delegating parent's folder in the same environment,
+ *   else the agent's `defaultWorkdir` in its default environment, else the
+ *   environment's first root (#190) — and records them on the route; nothing
+ *   later changes them (EXE-12). A folder outside the environment's
+ *   `cwdRoots` fails the task `workdir-outside-roots` before any session opens.
  * - `anthropic-api` opens a local Session (the `SessionFactory`) and prompts.
  * - a daemon runtime opens the Session on the environment's machine through
  *   `Machine.openSession`: `opened` → prompted when the daemon acknowledges
@@ -36,7 +40,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -45,12 +49,13 @@ import { isServerFnError, ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
-import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
+import { asPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
+import { Workspace } from '../workspace/index.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
-import { locateEnvironment } from './locate.js';
+import { locateEnvironment, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
 import { initialRoutingState, type Route, type RoutingState } from './state.js';
 
@@ -119,6 +124,9 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
     }
     return text;
 }
+
+/** The machine's path rules (`hello.os`); a daemon that never said is taken for Windows, the first platform (decision 2). */
+const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 
 const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
 
@@ -307,7 +315,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             summary: why,
                             agentId: route.agentId,
                             taskId: route.taskId,
-                            data: { runtime: 'anthropic-api', policy: route.policy, fallback: true, from, why }
+                            data: { runtime: 'anthropic-api', policy: route.policy, fallback: true, from, ...(route.cwd !== undefined ? { ignoredWorkdir: route.cwd } : {}), why }
                         });
                         await placeLocal(route, why);
                         return;
@@ -315,12 +323,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 }
             }
 
-            /** Open the route's Session on ITS machine (never another), or park it. A route no machine reported yet is located first — and bound to that machine from then on. */
-            async function placeRemote(route: Route, view?: MachineView, t?: TaskView): Promise<void> {
+            /**
+             * Open the route's Session on ITS machine (never another), or park it. A route no machine reported yet is
+             * located first — and bound to that machine from then on; `run` hands in what it already located.
+             */
+            async function placeRemote(route: Route, view?: MachineView, t?: TaskView, located?: LocatedEnvironment | null): Promise<void> {
                 const { environmentId } = route;
                 if (!environmentId) return;
                 if (!route.machineId) {
-                    const found = await locate(environmentId);
+                    const found = located !== undefined ? located : await locate(environmentId);
                     if (!found) {
                         await offline(route, null);
                         return;
@@ -339,6 +350,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await fail(route, { code: 'unknown-environment', message: `machine ${machineId} no longer reports environment ${environmentId}`, recoverable: true });
                     return;
                 }
+                // The folder (#190): the first root when nothing earlier chose one, and always inside the roots (decision 3) —
+                // checked against the roots the machine reports now, before a session exists, online or not.
+                route.cwd ??= env.cwdRoots[0];
+                if (route.cwd !== undefined && !pathWithin(route.cwd, env.cwdRoots, osOf(m))) {
+                    await fail(route, { code: 'workdir-outside-roots', message: `folder ${route.cwd} is outside the roots of environment ${environmentId} on machine ${machineId} (${env.cwdRoots.join(', ') || 'none'})`, recoverable: false });
+                    return;
+                }
                 if (!m.online) {
                     await offline(route, m);
                     return;
@@ -353,6 +371,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     taskId: route.taskId,
                     environmentId,
                     machineId,
+                    ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
                     ...opening,
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
@@ -374,7 +393,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         environmentId,
                         {
                             agentId: route.agentId,
-                            cwd: env.cwdRoots[0] ?? '',
+                            cwd: route.cwd ?? '',
                             system: opened.spec?.system ?? spec.system ?? route.config.instructions,
                             ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
@@ -405,6 +424,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             const locate = (environmentId: EnvironmentId) => locateEnvironment(workspaceId, environmentId, { machines: ports.machines, driver });
+
+            /** `Workspace.noteWorkdir` as a one-way hop under the driver (a user principal): the recents are a convenience, never a gate. */
+            async function noteWorkdir(ref: WorkdirRef): Promise<void> {
+                try {
+                    await actor(Workspace, workspaceKey(workspaceId)).with({ context, oneWay: true }).noteWorkdir(ref);
+                } catch {
+                    // A workspace that cannot be reached never fails the route.
+                }
+            }
 
             return {
                 /**
@@ -445,7 +473,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                     const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), createdAt: at, updatedAt: at };
                     /** The one resolution of where this task runs (EXE-12), recorded before placement so a placement that fails still shows the choice (OPS-03). */
-                    const chosen = (why: string, environmentId?: EnvironmentId): Promise<void> =>
+                    const chosen = (why: string, environmentId?: EnvironmentId, folder: { cwd?: string; ignoredWorkdir?: string } = {}): Promise<void> =>
                         audit.record(ctx, workspaceId, {
                             key: `${taskKey(workspaceId, taskId)}:environment`,
                             kind: 'environment.chosen',
@@ -454,11 +482,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             summary: why,
                             agentId: t.assignee,
                             taskId,
-                            data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, why }
+                            data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, ...folder, why }
                         });
                     if (runtime === 'anthropic-api') {
                         s.routes[taskId] = { ...base, status: 'opening' };
-                        await chosen(`runtime anthropic-api (the agent's runtime); no environment needed`);
+                        // The API runtime runs in no local folder: a workdir the task asked for is ignored, and the record says so (#190).
+                        const ignored = t.workdir !== undefined ? `; folder ${t.workdir} ignored (anthropic-api runs in no local folder)` : '';
+                        await chosen(`runtime anthropic-api (the agent's runtime); no environment needed${ignored}`, undefined, t.workdir !== undefined ? { ignoredWorkdir: t.workdir } : {});
                         await placeLocal(s.routes[taskId]!, 'started', t);
                         await ctx.save();
                         return task(taskId).get();
@@ -469,11 +499,27 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await task(taskId).fail({ code: 'no-environment', message: `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`, recoverable: false }, ROUTER);
                         return task(taskId).get();
                     }
-                    await chosen(`runtime ${runtime} in environment ${environmentId} (${t.environmentId ? "the task's own" : "the agent's default"}); offline policy ${config.execution.offlinePolicy}`, environmentId);
+                    // The folder, once (#190, EXE-12): the task's own, a delegating parent's in the same environment, the agent's
+                    // default in its default environment, else the environment's first root — which needs the machine's report.
+                    const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
+                    const asked: { cwd: string; from: string } | undefined =
+                        t.workdir !== undefined
+                            ? { cwd: t.workdir, from: "the task's own" }
+                            : parent?.cwd !== undefined && parent.environmentId === environmentId
+                              ? { cwd: parent.cwd, from: "the delegating task's" }
+                              : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId
+                                ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
+                                : undefined;
+                    const located = await locate(environmentId);
+                    const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
+                    const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
+                    await chosen(`runtime ${runtime} in environment ${environmentId} (${t.environmentId ? "the task's own" : "the agent's default"})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
+                    // A folder picked for this task joins the workspace's recent folders — one-way, never failing the run.
+                    if (t.workdir !== undefined) await noteWorkdir({ environmentId, path: t.workdir });
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
                     // reports yet is "offline" under the agent's policy — `queue` waits for the machine that will (AST-05).
-                    s.routes[taskId] = { ...base, environmentId, status: 'opening' };
-                    await placeRemote(s.routes[taskId]!, undefined, t);
+                    s.routes[taskId] = { ...base, environmentId, ...(cwd !== undefined ? { cwd } : {}), status: 'opening' };
+                    await placeRemote(s.routes[taskId]!, undefined, t, located);
                     await ctx.save();
                     return task(taskId).get();
                 },

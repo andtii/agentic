@@ -108,6 +108,10 @@ export interface EnvironmentChosenData {
     readonly policy: OfflinePolicy;
     readonly fallback: boolean;
     readonly from?: { readonly runtime: RuntimeId; readonly environmentId?: EnvironmentId; readonly machineId?: MachineId };
+    /** The folder the session runs in (#190) — absent on `anthropic-api`, or when no machine reported the environment yet (then the first root is taken at placement). */
+    readonly cwd?: string;
+    /** A folder the task asked for that this runtime does not use: `anthropic-api` runs no local folder (#190). */
+    readonly ignoredWorkdir?: string;
     readonly why: string;
 }
 

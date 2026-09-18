@@ -35,6 +35,7 @@ export interface OpenSessionInput {
     /** Explicit, always (EXE-12): the machine that must host the session. */
     readonly machineId: MachineId;
     readonly environmentId: EnvironmentId;
+    /** The folder the session runs in (#190): within the environment's `cwdRoots` by the machine's path rules; it becomes the task's `workdir`. */
     readonly cwd?: string;
     /** The task objective; the first prompt when given. Default: a generic "interactive session" objective. */
     readonly objective?: string;

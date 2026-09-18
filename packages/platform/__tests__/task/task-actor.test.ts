@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { childTaskId } from '@agentic/core';
-import type { AgentId, ChatId, MessageId, Principal, SessionId, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, MessageId, Principal, SessionId, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
 import { statusOf, testActorApp, type TestActorApp } from '../../src/testing/index';
 import { TaskActor, parseTaskKey, taskKey } from '../../src/task/index';
 import type { TaskOutcome } from '../../src/task/index';
@@ -152,6 +152,19 @@ describe('lifecycle', () => {
 });
 
 describe('delegation', () => {
+    it('hands the child the folder asked for (#190), in the environment asked for or the parent task’s', async () => {
+        const root = task(id('root_w'));
+        await root.create(contract({ environmentId: 'env_1' as EnvironmentId }), { owner: a });
+        await root.start('user:u1', 'sess_r' as SessionId);
+        const inherited = await root.delegate({ callId: 'call_1', objective: 'sub', assignee: b, workdir: '/work/app' });
+        expect(await task(inherited).get()).toMatchObject({ environmentId: 'env_1', workdir: '/work/app' });
+        const elsewhere = await root.delegate({ callId: 'call_2', objective: 'sub', assignee: b, environmentId: 'env_2' as EnvironmentId, workdir: '/other' });
+        expect(await task(elsewhere).get()).toMatchObject({ environmentId: 'env_2', workdir: '/other' });
+        const none = await task(await root.delegate({ callId: 'call_3', objective: 'sub', assignee: b })).get();
+        expect(none.environmentId).toBe('env_1');
+        expect(none).not.toHaveProperty('workdir');
+    });
+
     it('creates the child deterministically, links both sides and parks the parent on waiting {child}', async () => {
         const root = task(id('root'));
         await root.create(contract({ constraints: { maxDepth: 3 } }), { owner: a });
