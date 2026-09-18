@@ -127,7 +127,8 @@ describe('worker: schedule alarm → trigger → Inbox / Task, no machine regist
         });
 
         const task = overHttp(TaskActor, taskKey(workspaceId, scheduledTaskId(scheduleId, at)), cookie);
-        await advanceAlarm(key, () => task.get().then(() => true, () => false));
+        // The task exists (`queued`) a turn before the router parks it: wait for the park, not for the record (#174).
+        await advanceAlarm(key, () => task.get().then((v) => v.status === 'waiting', () => false));
 
         const view = await task.get();
         expect(view.status).toBe('waiting');
