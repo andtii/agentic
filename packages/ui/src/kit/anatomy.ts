@@ -121,6 +121,41 @@ export const agEmptyAnatomy = defineAnatomy('ag-empty', {
     actions: { element: 'div', parent: 'root' }
 });
 
+/** A working folder as a field shows it (#191): the chip (`machine / environment · …\last\two`) and its Change / Clear actions. */
+export const agWorkdirAnatomy = defineAnatomy('ag-workdir', {
+    root: { element: 'div' },
+    chip: { element: 'output', parent: 'root', tokens: ['color', 'radius-selector', 'text'] },
+    actions: { element: 'span', parent: 'root' }
+});
+
+/**
+ * The folder picker inside the working-folder dialog (#191): the environment
+ * strip, the top level (Recent, Roots), the breadcrumb bar with its path
+ * editor and git badge, the folder listbox, the state notices and the
+ * inline new-worktree form.
+ */
+export const agWorkdirPickerAnatomy = defineAnatomy('ag-workdir-picker', {
+    root: { element: 'div', tokens: ['color', 'text'] },
+    envs: { element: 'div', parent: 'root' },
+    env: { element: 'button', parent: 'envs', tokens: ['color', 'radius-field', 'text'] },
+    'env-name': { element: 'span', parent: 'env', tokens: ['text'] },
+    'env-note': { element: 'span', parent: 'env', tokens: ['color', 'text'] },
+    section: { element: 'section', parent: 'root' },
+    heading: { element: 'h3', parent: 'section', tokens: ['color', 'text'] },
+    shortcuts: { element: 'ul', parent: 'section' },
+    shortcut: { element: 'button', parent: 'shortcuts', tokens: ['color', 'radius-field', 'text'] },
+    bar: { element: 'div', parent: 'root' },
+    crumbs: { element: 'nav', parent: 'bar', tokens: ['text'] },
+    crumb: { element: 'button', parent: 'crumbs', tokens: ['color', 'radius-selector', 'text'] },
+    editor: { element: 'div', parent: 'bar' },
+    list: { element: 'ul', parent: 'root', tokens: ['color', 'radius-box'] },
+    item: { element: 'li', parent: 'list', tokens: ['color', 'text'] },
+    name: { element: 'span', parent: 'item', tokens: ['text'] },
+    notice: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
+    worktree: { element: 'div', parent: 'root', tokens: ['color', 'radius-box'] },
+    actions: { element: 'div', parent: 'worktree' }
+});
+
 export const kitAnatomies = [
     agPillAnatomy,
     agAgentTileAnatomy,
@@ -132,5 +167,7 @@ export const kitAnatomies = [
     agEnvCardAnatomy,
     agFailureAnatomy,
     agBannerAnatomy,
-    agEmptyAnatomy
+    agEmptyAnatomy,
+    agWorkdirAnatomy,
+    agWorkdirPickerAnatomy
 ] as const;

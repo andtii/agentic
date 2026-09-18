@@ -60,6 +60,28 @@ import { Row, Col, Spacer } from '@agentic/ui';
 - Persistence is the caller's: the forms emit, they never write to an actor.
 - `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls, and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
 
+### Working-folder picker (#191)
+
+`WorkdirField` and `WorkdirDialog` pick a `WorkdirRef` (`{ environmentId, path }`) on a remote machine. Both are data in and events out; the page owns browsing.
+
+```tsx
+<WorkdirField value={draft.workdir} environments={envs} name="workdir" onOpen={() => (ui.picking = true)} onClear={() => (draft.workdir = null)} />
+<WorkdirDialog
+    model={() => ui.picking}
+    environments={envs}              // WorkdirEnvironment[] — toWorkdirEnvironment(descriptor, machine)
+    recent={recent}
+    environmentId={b.environmentId}  // null: none chosen yet
+    path={b.path}                    // null: the environment's top level (Recent + Roots)
+    listing={b.listing} loading={b.loading} error={b.error}
+    creating={b.creating} worktreeError={b.worktreeError}
+    onNavigate={({ environmentId, path }) => browse(environmentId, path)}   // fs.request list
+    onCreateWorktree={(req) => createWorktree(req)}                         // fs.request worktree; then navigate / select the result
+    onSelect={(ref) => (draft.workdir = ref)}                               // the dialog closes itself
+/>
+```
+
+The dialog never fetches and never assumes that a move happened: it shows what `path` / `listing` say. It holds no `<form>` and no named control, so it can sit inside a page's form. `workdirLabel(ref, environments)` is the chip text for any other surface.
+
 ## Component kit (`src/kit`)
 
 The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. Eight `ag-*` scopes ship in the fragment with recipes (`StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.

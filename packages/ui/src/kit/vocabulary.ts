@@ -27,5 +27,8 @@ export const kitScopes: Record<string, ScopeVocabulary> = {
     // The six named failure states — the `kind` values `FAILURES[kind].axis` renders (`client-offline` → `offline`).
     'ag-failure': { axes: { kind: ['offline', 'machine', 'auth', 'runtime', 'task', 'interrupted'], tone: ['muted', 'needs-you', 'failed'] } },
     'ag-banner': { axes: { tone: ['muted', 'needs-you', 'failed'] } },
-    'ag-empty': { modifiers: ['compact', 'outline'] }
+    'ag-empty': { modifiers: ['compact', 'outline'] },
+    // The working-folder picker (#191): selection rides ARIA (`aria-pressed`, `aria-selected`, `aria-current`).
+    'ag-workdir': { modifiers: ['compact'] },
+    'ag-workdir-picker': { modifiers: ['loading'] }
 };

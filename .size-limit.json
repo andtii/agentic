@@ -7,11 +7,11 @@
   {
     "name": "@agentic/ui",
     "path": "packages/ui/dist/index.prod.js",
-    "limit": "68 KB"
+    "limit": "74 KB"
   },
   {
     "name": "@agentic/ui css (control-room design system)",
     "path": "packages/ui/dist/ds/css/index.css",
-    "limit": "22 KB"
+    "limit": "23 KB"
   }
 ]
