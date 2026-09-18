@@ -311,10 +311,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
              * over a one-way hop; the UI may note a pick too.
              */
             async noteWorkdir(ref: WorkdirRef): Promise<readonly RecentWorkdir[]> {
-                if (typeof ref?.environmentId !== 'string' || !ref.environmentId || typeof ref.path !== 'string' || !ref.path.trim()) {
+                if (typeof ref?.environmentId !== 'string' || !ref.environmentId.trim() || typeof ref.path !== 'string' || !ref.path.trim()) {
                     throw new ServerFnError(400, 'Workspace.noteWorkdir: a folder needs an environmentId and a path');
                 }
-                const entry: RecentWorkdir = { environmentId: ref.environmentId, path: ref.path, at: now() };
+                // Trimmed, so two notes of one folder are one row.
+                const entry: RecentWorkdir = { environmentId: ref.environmentId.trim() as WorkdirRef['environmentId'], path: ref.path.trim(), at: now() };
                 const rest = (ctx.state.recentWorkdirs ?? []).filter((r) => r.environmentId !== entry.environmentId || r.path !== entry.path);
                 ctx.state.recentWorkdirs = [entry, ...rest].slice(0, RECENT_WORKDIRS_MAX);
                 await ctx.save();

@@ -338,8 +338,9 @@ describe('working folder (#190)', () => {
         const note = entries.at(-1)!.entry;
         expect(note).toMatchObject({ t: 'msg', author: { kind: 'user' }, mentions: [], workdir: { agentId: A, ref: folder } });
         expect(text(note)).toBe(`Working folder for ${A} → C:/src/app on env_1`);
-        // Idempotent: the same folder again writes nothing.
+        // Idempotent: the same folder again — padded or not — writes nothing.
         await chat.setWorkdir(A, folder);
+        await chat.setWorkdir(A, { environmentId: E1, path: ' C:/src/app ' });
         expect((await chat.history()).entries).toHaveLength(entries.length);
 
         const before = await chat.get();

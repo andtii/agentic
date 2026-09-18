@@ -379,7 +379,7 @@ describe('Schedule working folder (#190)', () => {
         expect(r.trigger.events[0]).toMatchObject({ environmentId: ENV, workdir: 'C:/src/app' });
 
         await expect(client.update({ workdir: '  ' })).rejects.toMatchObject({ status: 400 });
-        expect((await client.update({ workdir: 'C:/src/other' })).workdir).toBe('C:/src/other');
+        expect((await client.update({ workdir: ' C:/src/other ' })).workdir).toBe('C:/src/other');
         const cleared = await client.update({ workdir: null });
         expect(cleared.workdir).toBeUndefined();
         expect('workdir' in cleared).toBe(false);

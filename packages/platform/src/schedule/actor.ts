@@ -213,7 +213,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 s.enabled = spec.enabled ?? true;
                 if (spec.agentId !== undefined) s.agentId = spec.agentId;
                 if (spec.environmentId !== undefined) s.environmentId = spec.environmentId;
-                if (spec.workdir !== undefined) s.workdir = spec.workdir;
+                if (spec.workdir !== undefined) s.workdir = spec.workdir.trim();
                 if (spec.prompt !== undefined) s.prompt = spec.prompt;
                 s.offlinePolicy = spec.offlinePolicy ?? 'queue';
                 s.createdAt = at;
@@ -232,7 +232,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 if (patch.agentId !== undefined) s.agentId = patch.agentId;
                 if (patch.environmentId !== undefined) s.environmentId = patch.environmentId;
                 if (workdir === undefined) delete s.workdir;
-                else s.workdir = workdir;
+                else s.workdir = workdir.trim();
                 if (patch.prompt !== undefined) s.prompt = patch.prompt;
                 if (patch.offlinePolicy !== undefined) s.offlinePolicy = patch.offlinePolicy;
                 if (patch.enabled !== undefined) s.enabled = patch.enabled;

@@ -271,6 +271,6 @@ describe('working folder resolution (#190)', () => {
         const a = await agent('agent_cc', { runtime: 'in-memory', defaultEnvironmentId: E1 });
         expect(await statusOf(createTask('t1', a, { workdir: '/work/app' }))).toBe(400);
         expect(await statusOf(createTask('t2', a, { environmentId: E1, workdir: '  ' }))).toBe(400);
-        expect((await createTask('t3', a, { environmentId: E1, workdir: '/work/app' })).workdir).toBe('/work/app');
+        expect((await createTask('t3', a, { environmentId: E1, workdir: ' /work/app ' })).workdir).toBe('/work/app');
     });
 });

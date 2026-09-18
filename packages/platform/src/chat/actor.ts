@@ -276,10 +276,10 @@ export const Chat = defineActor({
         async setWorkdir(agentId: AgentId, ref: WorkdirRef | null): Promise<ChatMember> {
             const member = ctx.state.members[agentId];
             if (!member) throw new ServerFnError(404, `Chat.setWorkdir: ${agentId} is not a member`);
-            if (ref !== null && (typeof ref?.environmentId !== 'string' || !ref.environmentId || typeof ref.path !== 'string' || !ref.path.trim())) {
+            if (ref !== null && (typeof ref?.environmentId !== 'string' || !ref.environmentId.trim() || typeof ref.path !== 'string' || !ref.path.trim())) {
                 throw new ServerFnError(400, 'Chat.setWorkdir: a folder needs an environmentId and a path');
             }
-            const next: WorkdirRef | null = ref === null ? null : { environmentId: ref.environmentId, path: ref.path };
+            const next: WorkdirRef | null = ref === null ? null : { environmentId: ref.environmentId.trim() as WorkdirRef['environmentId'], path: ref.path.trim() };
             const current = member.workdir;
             if (next === null ? current === undefined : current?.environmentId === next.environmentId && current.path === next.path) return ctx.snapshot(member);
             const text = next === null ? `Working folder for ${agentId} cleared` : `Working folder for ${agentId} → ${next.path} on ${next.environmentId}`;

@@ -178,6 +178,7 @@ describe('Workspace recent folders (#190)', () => {
         vi.setSystemTime(5_000);
         await ws().noteWorkdir(ref(10));
         await ws().noteWorkdir(ref(10, 'env_2'));
+        await ws().noteWorkdir({ environmentId: 'env_2' as EnvironmentId, path: ' /work/repo-10 ' });
         recents = await ws().recentWorkdirs();
         expect(recents).toHaveLength(RECENT_WORKDIRS_MAX);
         expect(recents.slice(0, 2)).toEqual([{ ...ref(10, 'env_2'), at: 5_000 }, { ...ref(10), at: 5_000 }]);

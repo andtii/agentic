@@ -290,7 +290,8 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 await commit(ctx, {
                     t: 'created',
                     at,
-                    contract,
+                    // The folder as `pathWithin` will check it: surrounding whitespace is never part of a path here.
+                    contract: contract.workdir !== undefined ? { ...contract, workdir: contract.workdir.trim() } : contract,
                     owner: init.owner,
                     depth: init.depth ?? 0,
                     ...(init.parentId !== undefined ? { parentId: init.parentId } : {}),
