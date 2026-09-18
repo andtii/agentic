@@ -102,6 +102,8 @@ export function entryLine(entry: ChatEntry, lookup: AgentLookup): string {
             return `${lookup(entry.agentId).name} ${entry.op === 'add' ? 'joined' : 'left'}`;
         case 'coordinator':
             return entry.agentId ? `${lookup(entry.agentId).name} coordinates` : 'No coordinator';
+        case 'rename':
+            return `Renamed to ${entry.title}`;
     }
 }
 

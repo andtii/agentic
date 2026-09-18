@@ -66,7 +66,9 @@ export type ChatEntry =
           readonly error: TaskError;
           readonly at: number;
       }
-    | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number };
+    | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number }
+    /** The chat's title was set (#124): `Workspace.createChat({ title })` writes the first one, `Chat.rename` the rest. */
+    | { readonly t: 'rename'; readonly title: string; readonly at: number };
 
 export interface ChatMember {
     readonly since: number;

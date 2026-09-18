@@ -6,6 +6,7 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- `ChatEntry` kind `rename` (#124): the chat's title as an entry, so `Chat.get().title` replays like every other piece of chat state.
 - `ChatEntry` status kind `task-failed` (#128): the task an agent was activated for could not run or ended in error — `ref` is the task id, `error` the `TaskError`; `SessionEvent` status carries the optional `error` so the router can publish it to the chat (OPS-04).
 - `ChatEntry` status kinds `request` / `request-resolved` (#40): a session's open request and its settlement as chat status entries; their `ref` is required and typed `RequestStatusRef` (`approval:{requestId}` | `input:{requestId}`, `isRequestStatusRef`) on both so they always pair up.
 - `EnvironmentVerdict` and the optional `EnvironmentDescriptor.doctor` (#43): the runtime's per-environment `doctor` verdict (`ok`, the findings naming the environment, `checkedAt`) travels in `hello` / `env` so the Machine can keep it; `environmentVerdict(report, environmentId, checkedAt)` derives it from a `DoctorReport`, `toEnvironmentDescriptor` takes it as a fifth argument. `DoctorFinding` moved to `environment.ts` (same export).
