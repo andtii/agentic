@@ -1,6 +1,6 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import type { CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, OpenSpec, SessionId } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -64,6 +64,27 @@ export const capabilityReport: z.ZodType<CapabilityReport> = z.object({
     tools: z.enum(['native', 'mcp', 'none'])
 });
 
+/** One `ApprovalRule` as the agent config keeps it (first-match over tools / categories / source). */
+export const approvalRule: z.ZodType<ApprovalRule> = z.object({
+    id: name,
+    match: z.object({
+        tools: z.array(name).max(LIMITS.list).optional(),
+        categories: z.array(z.enum(['read', 'write', 'execute', 'network', 'destructive'])).max(LIMITS.list).optional(),
+        source: z.enum(['client', 'native', 'mcp']).optional()
+    }),
+    outcome: z.enum(['allow', 'deny', 'ask']),
+    scope: z.enum(['once', 'session']).optional()
+});
+
+export const toolGrant: z.ZodType<ToolGrant> = z.object({ name, mode: z.enum(['allow', 'ask', 'deny']).optional() });
+
+/** The policy a session opens under (#121): the agent's rules and grants, the ancestors' constraints — every list bounded. */
+export const openSpecPolicy: z.ZodType<OpenSpecPolicy> = z.object({
+    rules: z.array(approvalRule).max(LIMITS.list),
+    grants: z.array(toolGrant).max(LIMITS.list),
+    constraints: z.array(approvalRule).max(LIMITS.list).optional()
+});
+
 export const openSpec: z.ZodType<OpenSpec> = z.object({
     agentId: name,
     cwd: text,
@@ -72,5 +93,6 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     maxTurns: z.number().int().min(1).optional(),
     maxBudgetUsd: z.number().min(0).optional(),
     tools: z.array(name).max(LIMITS.list),
+    policy: openSpecPolicy.optional(),
     resume: z.unknown().optional()
 });
