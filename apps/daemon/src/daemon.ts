@@ -19,6 +19,9 @@
  *   #121): the daemon compiles it with the same `sessionPolicy` a local
  *   session runs under and hands the `Policy` to the driver, so a harness
  *   asks the platform only what the agent's rules say to ask.
+ * - `fs.request` lists folders or adds a git worktree inside the named
+ *   environment's `cwdRoots` (`./fs.ts`, #188) and is answered by
+ *   `fs.response`; `session.open` passes the same symlink-aware root check.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -44,9 +47,9 @@ import { decodePlatformFrame, encodeFrame, type DaemonFrame, type PlatformFrame,
 import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, type ServedSession } from '@sigx/ai-agent/wire';
-import { isAbsolute, relative, resolve } from 'node:path';
 import { reconnectingConnection, type BackoffOptions, type Connection, type Socket } from './connection.js';
 import type { NdjsonEventLog } from './event-log.js';
+import { answerFsRequest, checkWithinRoots } from './fs.js';
 import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
 import { DAEMON_VERSION } from './version.js';
@@ -146,16 +149,6 @@ export function follows(at: Cursor, last: Cursor): boolean {
 /** A report for an environment whose driver could not be asked. */
 function unavailableReport(runtime: string, reason: string): CapabilityReport {
     return { runtime, supported: [], unsupported: [{ op: '*', reason }], resume: false, cancel: false, steer: false, permissions: 'none', tools: 'none' };
-}
-
-/** `cwd` lies inside one of `roots` (case-insensitive on Windows). */
-export function withinRoots(cwd: string, roots: readonly string[], platform: NodeJS.Platform = process.platform): boolean {
-    const norm = (p: string) => (platform === 'win32' ? resolve(p).toLowerCase() : resolve(p));
-    const target = norm(cwd);
-    return roots.some((root) => {
-        const rel = relative(norm(root), target);
-        return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-    });
 }
 
 export function createDaemon(options: DaemonOptions): Daemon {
@@ -299,6 +292,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
             case 'session.close':
                 void closeSession(frame.sessionId, 'closed');
                 return;
+            case 'fs.request':
+                void fsRequest(frame);
+                return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
                 if (!pending) return;
@@ -374,10 +370,12 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (!driver) return refuse(`no driver for runtime ${env.runtime} on this machine`);
         const busy = [...sessions.values()].filter((s) => s.environmentId === env.id).length + [...opening.values()].filter((id) => id === env.id).length;
         if (busy >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency})`);
-        if (!withinRoots(spec.cwd, env.cwdRoots, platform)) return refuse(`cwd is outside the environment's cwdRoots`);
 
         opening.set(sessionId, env.id);
         try {
+            // Lexically, then with symlinks resolved: neither `..` nor a link or junction leaves the roots.
+            const where = await checkWithinRoots(spec.cwd, env.cwdRoots, platform);
+            if (!where.ok) return refuse(where.code === 'not-found' ? `cwd ${spec.cwd} does not exist` : `cwd is outside the environment's cwdRoots`);
             // The agent's rules, grants and the ancestors' constraints, compiled here exactly as the platform compiles them (AC-12).
             const policy = spec.policy ? sessionPolicyOf(spec.policy) : undefined;
             const opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input), ...(policy ? { policy } : {}) });
@@ -397,6 +395,13 @@ export function createDaemon(options: DaemonOptions): Daemon {
         } finally {
             opening.delete(sessionId);
         }
+    }
+
+    // -------------------------------------------------------------- folders
+
+    async function fsRequest(frame: PlatformFrameOf<'fs.request'>): Promise<void> {
+        const outcome = await answerFsRequest(environments, frame.environmentId, frame.op, { platform, logger });
+        send({ v: V, t: 'fs.response', requestId: frame.requestId, ...outcome });
     }
 
     async function command(frame: PlatformFrameOf<'session.command'>): Promise<void> {
