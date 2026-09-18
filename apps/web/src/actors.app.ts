@@ -82,12 +82,14 @@ import {
 } from '@agentic/platform';
 import { learningPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
+import { defineActorApp, type ActorApp } from '@sigx/actors/host';
 import { createHostDurableObject, createWorkerHandler, type DurableObjectNamespaceLike, type DurableObjectStateLike, type DurableWebSocketLike } from '@sigx/actors-cloudflare';
 import { createServerApp, setPrincipal } from '@sigx/server/server';
 import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
+import { runWithHost } from './host-scope';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -307,6 +309,16 @@ const namespace = (env: PlatformEnv): DurableObjectNamespaceLike => env.ACTORS;
  * is verified against the actor's token hash and accepted under the
  * `agentic:daemon` tag; the hibernation handlers route those sockets to the
  * Machine actor and everything else back to the actor host's own session.
+ *
+ * Every entry point runs under the object's OWN host (`runWithHost`, #137):
+ * `@sigx/actors` resolves an ambient `actor()` through one global that the
+ * last-booted object owns, and the platform hops ambiently wherever a call
+ * carries its own principal (`actor(def, key).with({ context })` — the
+ * Routing driver's clients, `routing().machineOnline`, the tool and learning
+ * ports, the Session's command sink). Unscoped, a hop from this object to an
+ * actor the last-booted object hosts ran it HERE, on that object's storage.
+ * Booting (`this.host()`) happens before the scope is entered: it starts the
+ * host and hops nowhere.
  */
 export function createActorHost(actors: readonly AnyActorDefinition[] = defaultActors()) {
     const Base = createHostDurableObject<PlatformEnv>({ actors: [...actors], namespace, socket: {} });
@@ -322,17 +334,25 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
             this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
             this.#purge = createPurgeHandler({ state, host: () => this.host(), own, secret: () => secrets.sessionSecret });
         }
-        override fetch(request: Request): Promise<Response> {
-            return this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request);
+        override async fetch(request: Request): Promise<Response> {
+            const host = await this.host();
+            return runWithHost(host, () => this.#purge.fetch(request) ?? this.#daemon.fetch(request) ?? super.fetch(request));
         }
-        override webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
-            return this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message);
+        override async webSocketMessage(ws: DurableWebSocketLike, message: unknown): Promise<void> {
+            const host = await this.host();
+            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.message(ws, message) : super.webSocketMessage(ws, message)));
         }
-        override webSocketClose(ws: DurableWebSocketLike): Promise<void> {
-            return this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketClose(ws);
+        override async webSocketClose(ws: DurableWebSocketLike): Promise<void> {
+            const host = await this.host();
+            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketClose(ws)));
         }
-        override webSocketError(ws: DurableWebSocketLike): Promise<void> {
-            return this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketError(ws);
+        override async webSocketError(ws: DurableWebSocketLike): Promise<void> {
+            const host = await this.host();
+            return runWithHost(host, () => (this.#daemon.owns(ws) ? this.#daemon.close(ws) : super.webSocketError(ws)));
+        }
+        override async alarm(): Promise<void> {
+            const host = await this.host();
+            return runWithHost(host, () => super.alarm());
         }
     };
 }
@@ -343,20 +363,35 @@ export interface ActorWorkerOptions {
     readonly fallback?: (request: Request) => Response | Promise<Response> | undefined;
 }
 
-/** The Worker half: daemon socket forwarding, actor HTTP mount, object-terminated socket forwarding. */
+/**
+ * The Worker half: daemon socket forwarding, actor HTTP mount,
+ * object-terminated socket forwarding. Its requests run under the Worker's
+ * own host too (`runWithHost`, #137): the Worker hosts nothing, so a hop it
+ * makes ambiently (the machine token lookup in `serverAuth`, `pairingWiring`,
+ * the MCP mount) must go OUT to the object — never run locally because an
+ * object sharing the isolate stamped the global last. The host boots lazily
+ * on the first request, so the scope carries a thunk that resolves to it.
+ */
 export function createActorWorker(options: ActorWorkerOptions = {}) {
     const actors = options.actors ?? defaultActors();
+    let app: ActorApp | undefined;
     const handler = createWorkerHandler<PlatformEnv>({
         actors: [...actors],
         namespace,
         socket: { terminate: 'object' },
+        app: (base) => (app = defineActorApp(base)),
         ...(options.fallback ? { fetch: { fallback: options.fallback } } : {})
     });
     return {
         fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
             ensureServerApp(env, actors);
-            if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
-            return handler.fetch(request, env, ctx);
+            return runWithHost(
+                () => app?.host ?? undefined,
+                () => {
+                    if (new URL(request.url).pathname.startsWith(DAEMON_SOCKET_PREFIX)) return Promise.resolve(forwardDaemonSocket(request, env.ACTORS));
+                    return handler.fetch(request, env, ctx);
+                }
+            );
         }
     };
 }
