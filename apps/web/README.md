@@ -12,6 +12,7 @@ pnpm --filter @agentic/web dev         # Vite dev server on http://localhost:300
 pnpm --filter @agentic/web build       # zero:validate, then dist/server + dist/client
 pnpm --filter @agentic/web preview     # wrangler dev over the production build
 pnpm --filter @agentic/web test:workers    # the Worker + ActorHost Durable Object inside workerd (Node >= 22)
+pnpm --filter @agentic/web test:acceptance # requirements §17 as scripted scenarios, workerd + in-process (docs/acceptance.md)
 pnpm --filter @agentic/web deploy:preview  # build + wrangler deploy --env preview (docs/runbook.md)
 pnpm --filter @agentic/web zero:validate   # the design system against zero's anatomy manifest (also part of build)
 pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (see below)
@@ -29,6 +30,7 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 - `src/entry.cloudflare.ts` — the Worker: daemon socket stub → auth routes → actor mount + sockets → server functions → document render; exports `ActorHost`.
 - `src/actors.app.ts` — the platform actor registry, the `ActorHost` Durable Object class, the Worker half, and the ports later issues fill (`defaultPorts`).
 - `__tests__/workers/` — workerd tests over the HTTP actor mount (workspace + agent + chat, eviction, 401/403, `memoryConformance` on Durable Object storage); own `tsconfig.json`, excluded from the root typecheck and `pnpm test`.
+- `__tests__/acceptance/` — the acceptance suite (`docs/acceptance.md`): one file per §17 scenario; `*.workers.test.ts` run in workerd (`vitest.acceptance.config.ts`, own `tsconfig.json`), the rest in process on the app's own registry (`host.ts`) or the live page harness.
 
 ## Theme
 

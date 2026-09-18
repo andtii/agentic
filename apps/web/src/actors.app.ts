@@ -164,7 +164,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Inbox = defineInbox({ channels: ports.channels });
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, ...(anthropic ? { anthropic } : {}) }),
-        commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, command) },
+        commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.

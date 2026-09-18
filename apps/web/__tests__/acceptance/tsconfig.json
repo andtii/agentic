@@ -1,0 +1,11 @@
+{
+    "extends": "../workers/tsconfig.json",
+    "include": [
+        "./*.workers.test.ts",
+        "./workers.ts",
+        "./worker.ts",
+        "../workers/http.ts",
+        "../workers/secret.ts"
+    ],
+    "exclude": []
+}
