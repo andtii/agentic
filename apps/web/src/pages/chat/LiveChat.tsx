@@ -13,15 +13,20 @@
  * zone, the topbar's search and settings buttons open a panel over
  * `Chat.search` and a dialog over `rename` / `setCoordinator` /
  * `removeAgent`, and having the chat open moves this device's read marker.
+ *
+ * #207: files the composer takes (pick, paste, drop) are shrunk when they are
+ * photos (`prepareImage`), uploaded to `POST /files/chats/:chatId` and shown
+ * as chips; a send posts the text and the ready chips' `agentic-file:` parts
+ * (`runActivation`), then clears them.
  */
 import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
-import { createId, type AgentId, type ChatId, type TaskId, type WorkdirRef } from '@agentic/core';
+import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { Decision } from '@sigx/ai-agent';
-import { Composer, EmptyState, NOBODY_HINT, Thread, type Mention, type MessageAuthor } from '@agentic/ui';
+import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { FailureNotice } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -40,6 +45,7 @@ import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
+import { previewable, readyParts, uploadChatFile, uploaded, type Upload } from './uploads';
 
 /** Who the user reads as in their own thread. */
 export const YOU = 'You';
@@ -67,6 +73,9 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
+    // The composer's chips (#207): one per file taken, until it is sent or removed.
+    const uploads = signal<{ list: Upload[] }>({ list: [] });
+    let uploadSeq = 0;
 
     const session = (sessionId: string): SessionActorClient => actor(defs.Session, sessionKeyOf(viewer.workspaceId!, sessionId)) as unknown as SessionActorClient;
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
@@ -112,10 +121,43 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     });
     onUnmounted(stopHead);
 
-    const send = async (text: string): Promise<void> => {
+    const patchUpload = (id: string, change: (chip: Upload) => Upload): void => {
+        // A chip removed while its upload ran stays removed.
+        if (uploads.list.some((c) => c.id === id)) uploads.list = uploads.list.map((c) => (c.id === id ? change(c) : c));
+    };
+    const dropUploads = (ids: ReadonlySet<string>): void => {
+        for (const c of uploads.list) if (ids.has(c.id) && c.previewUrl) URL.revokeObjectURL(c.previewUrl);
+        uploads.list = uploads.list.filter((c) => !ids.has(c.id));
+    };
+    onUnmounted(() => dropUploads(new Set(uploads.list.map((c) => c.id))));
+
+    /** The composer's `files` (#207): a chip per file at once, then the photo shrunk and the bytes uploaded. */
+    const attach = (files: readonly File[]): void => {
+        const chatId = props.id;
+        for (const file of files) {
+            const id = `upload-${++uploadSeq}`;
+            const previewUrl = previewable(file.type) && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : undefined;
+            uploads.list = [...uploads.list, { id, name: file.name, size: file.size, status: 'uploading', ...(previewUrl ? { previewUrl } : {}) }];
+            void (async () => {
+                try {
+                    const result = await uploadChatFile(chatId, await prepareImage(file, { maxEdge: 1568, quality: 0.85 }));
+                    patchUpload(id, (c) => uploaded(c, result));
+                } catch (e) {
+                    patchUpload(id, (c) => ({ ...c, status: 'error', error: e instanceof Error ? e.message : String(e) }));
+                }
+            })();
+        }
+    };
+
+    /** Post and activate. `reshare`: files already in the chat to post again (a retry) instead of the composer's chips. */
+    const send = async (text: string, reshare?: readonly ChatFilePart[]): Promise<void> => {
         const ws = viewer.workspaceId;
         const s = summary.value;
         if (!ws || !s || st.sending) return;
+        // The chips that go with this message: every ready one (the composer holds Send while one uploads).
+        const sent = reshare ? [] : uploads.list.filter((c) => c.status === 'ready' && c.part);
+        const attachments = reshare ?? readyParts(sent);
+        if (!text && !attachments.length) return;
         const k = chatKeyOf(ws, props.id);
         const members = membersOf(s);
         st.sending = true;
@@ -123,14 +165,15 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         try {
             await runActivation(
                 {
-                    post: (input, mentions) => actor(defs.Chat, k).post(input, mentions),
+                    post: (parts, mentions) => actor(defs.Chat, k).post(parts, mentions),
                     createTask: (id, contract, owner) => actor(defs.TaskActor, taskKeyOf(ws, id)).create(contract, { owner }),
                     run: (taskId) => actor(defs.Routing, routingKeyOf(ws)).run(taskId),
                     newTaskId: () => createId('task') as TaskId
                 },
-                { chatId: props.id as ChatId, text, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: history.value?.entries ?? [], lookup: directory.lookup }
+                { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: history.value?.entries ?? [], lookup: directory.lookup }
             );
             st.draft = '';
+            dropUploads(new Set(sent.map((c) => c.id)));
         } catch (e) {
             fail(e);
         } finally {
@@ -157,7 +200,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const retry = (): void => {
         const last = [...(history.value?.entries ?? [])].reverse().find((e) => e.entry.t === 'msg' && e.entry.author.kind === 'user');
         if (!last || last.entry.t !== 'msg') return;
-        void send(last.entry.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''));
+        void send(last.entry.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''), last.entry.parts.filter(isChatFilePart));
     };
 
     const respond = (requestId: string, decision: Decision): void => {
@@ -300,6 +343,9 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             busy={st.sending}
                             disabled={!s}
                             placeholder="Message the chat. @ to address an agent, otherwise the coordinator answers."
+                            attachments={uploads.list}
+                            onFiles={(files: File[]) => attach(files)}
+                            onRemoveAttachment={(id: string) => dropUploads(new Set([id]))}
                             onSend={(text: string) => { void send(text); }}
                         />
                     </div>

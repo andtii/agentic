@@ -6,7 +6,7 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isTerminal, type AgentId, type ChatEntry, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
+import { isChatFilePart, isTerminal, parseChatFileUri, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
@@ -258,18 +258,49 @@ export function notStoppedLine(reports: readonly { readonly notStopped: readonly
 
 // ---- the transcript --------------------------------------------------------------
 
-const partText = (p: PromptPart): string => {
+/** `[image "<name>" <uri>]` / `[file "<name>" <uri>]` — an attachment as one line of text; the name or the uri is left out when the part has none. */
+function mediaText(kind: 'image' | 'file', name: string | undefined, url: string | undefined): string {
+    return `[${[kind, name ? `"${name}"` : '', url && !url.startsWith('data:') ? url : ''].filter(Boolean).join(' ')}]`;
+}
+
+/** A part as the text of a list row or a context line. */
+export const partText = (p: PromptPart): string => {
     switch (p.type) {
         case 'text':
             return p.text;
         case 'image':
-            return '[image]';
+            return mediaText('image', (p as { readonly name?: string }).name, p.url);
         case 'file':
-            return `[file${p.name ? ` ${p.name}` : ''}]`;
+            return mediaText('file', p.name, p.url);
         case 'resource':
             return `[${p.uri}]`;
     }
 };
+
+/** Where the browser reads a chat file (`apps/web/src/files/route.ts`, #207). */
+export const chatFileHref = (chatId: string, fileId: string): string => `/files/chats/${encodeURIComponent(chatId)}/${encodeURIComponent(fileId)}`;
+
+/**
+ * A message part as the thread renders it (#207): text as text; a chat
+ * attachment (`agentic-file:`) as an image or file part pointing at the
+ * download route, so the Message component shows a thumbnail or a download
+ * chip; an inline (`data`) image or file as it is. Any other url is never
+ * loaded — it reads as its placeholder text.
+ */
+function threadPart(p: PromptPart, id: string): AgentPart {
+    if (p.type === 'image' || p.type === 'file') {
+        const ref = p.url !== undefined ? parseChatFileUri(p.url) : null;
+        const name = p.type === 'file' ? p.name : undefined;
+        if (ref) {
+            const url = chatFileHref(ref.chatId, ref.fileId);
+            return p.type === 'image' ? { type: 'image', mediaType: p.mediaType, url } : { type: 'file', mediaType: p.mediaType, url, ...(name ? { filename: name } : {}) };
+        }
+        if (p.data !== undefined && p.url === undefined) {
+            return p.type === 'image' ? { type: 'image', mediaType: p.mediaType, data: p.data } : { type: 'file', mediaType: p.mediaType, data: p.data, ...(name ? { filename: name } : {}) };
+        }
+    }
+    return { type: 'text', id, text: partText(p) };
+}
 
 function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string {
     switch (entry.kind) {
@@ -316,7 +347,7 @@ export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentL
             messages.push({ id, role: 'user', author: userName, parts: [{ type: 'text', id: `${id}:0`, text: `*${workdirNote(entry.workdir, lookup)}*` }] });
             authors[id] = { name: userName, person: true, time: timeOf(entry.at) };
         } else if (entry.t === 'msg') {
-            const parts: AgentPart[] = entry.parts.map((p, i) => ({ type: 'text', id: `${entry.id}:${i}`, text: partText(p) }));
+            const parts: AgentPart[] = entry.parts.map((p, i) => threadPart(p, `${entry.id}:${i}`));
             if (entry.author.kind === 'user') {
                 messages.push({ id: entry.id, role: 'user', author: userName, parts });
                 authors[entry.id] = { name: userName, person: true, time: timeOf(entry.at) };
@@ -572,14 +603,26 @@ export const CONTEXT_WINDOW = 50;
  * member's working folder for this chat (`Chat.setWorkdir`, #193) rides along
  * as the task's `environmentId` + `workdir`, so the router opens the session
  * there instead of the agent's default.
+ *
+ * Attachments (#207): the chat-file parts of those messages, then of the
+ * triggering message (`attachments`), follow the text in `context` as
+ * reference parts (`agentic-file:` URIs, never bytes), each once — the
+ * router resolves them for the agent when the turn starts (#205: images
+ * inlined, other files noted for `chat_file_read`). The objective stays
+ * text; a message of attachments alone reads as their placeholders.
  */
-export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef): TaskContract {
-    const lines = visible
-        .filter((e): e is IndexedEntry & { entry: Extract<ChatEntry, { t: 'msg' }> } => e.entry.t === 'msg')
-        .slice(-CONTEXT_WINDOW)
-        .map((e) => entryLine(e.entry, lookup));
+export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef, attachments: readonly PromptPart[] = []): TaskContract {
+    const messages = visible.filter((e): e is IndexedEntry & { entry: Extract<ChatEntry, { t: 'msg' }> } => e.entry.t === 'msg').slice(-CONTEXT_WINDOW);
+    const lines = messages.map((e) => entryLine(e.entry, lookup));
     const context: PromptPart[] = lines.length ? [{ type: 'text', text: `Chat so far:\n${lines.join('\n')}` }] : [];
-    return { objective: text, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}) };
+    const seen = new Set<string>();
+    for (const part of [...messages.flatMap((e) => e.entry.parts), ...attachments]) {
+        if (!isChatFilePart(part) || seen.has(part.url)) continue;
+        seen.add(part.url);
+        context.push(part);
+    }
+    const objective = text || attachments.map(partText).join(' ');
+    return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}) };
 }
 
 /** The entries `agentId` may read: from its `historyFrom` on (CHT-04). */
@@ -590,7 +633,8 @@ export function visibleTo(entries: readonly IndexedEntry[], summary: ChatSummary
 
 /** What `runActivation` needs from the actors — thin so a workers test can hand it HTTP clients. */
 export interface ActivationPorts {
-    post(text: string, mentions: readonly AgentId[]): Promise<{ readonly messageId: MessageId; readonly activated: readonly AgentId[] }>;
+    /** `Chat.post`: the message's parts — its text, then its attachments. */
+    post(parts: readonly PromptPart[], mentions: readonly AgentId[]): Promise<{ readonly messageId: MessageId; readonly activated: readonly AgentId[] }>;
     createTask(id: TaskId, contract: TaskContract, owner: AgentId): Promise<unknown>;
     run(taskId: TaskId): Promise<unknown>;
     /** A fresh task id per activation. */
@@ -602,18 +646,29 @@ export interface Activation {
     readonly tasks: readonly { readonly agentId: AgentId; readonly taskId: TaskId }[];
 }
 
+/** The parts a message posts: its text (when there is any), then its attachments. */
+export function messageParts(text: string, attachments: readonly PromptPart[] = []): PromptPart[] {
+    return [...(text ? [{ type: 'text', text } as const] : []), ...attachments];
+}
+
+/** An uploaded chat file as the part a message carries (#207): an `image` part for an image type, a `file` part with its name otherwise. */
+export function attachmentPart(file: { readonly name: string; readonly mediaType: string }, uri: string): ChatFilePart {
+    return file.mediaType.startsWith('image/') ? { type: 'image', mediaType: file.mediaType, url: uri } : { type: 'file', mediaType: file.mediaType, name: file.name, url: uri };
+}
+
 /**
  * Post, then start one task per activated agent and hand each to the
  * router (`Routing.run`, PR #102) — the path from a message to a running
  * session. The post is durable before any task exists; a task that fails
  * to route reports through its own record, never by un-posting.
  */
-export async function runActivation(ports: ActivationPorts, input: { chatId: ChatId; text: string; mentions: readonly AgentId[]; summary: ChatSummary; entries: readonly IndexedEntry[]; lookup: AgentLookup }): Promise<Activation> {
-    const { messageId, activated } = await ports.post(input.text, input.mentions);
+export async function runActivation(ports: ActivationPorts, input: { chatId: ChatId; text: string; attachments?: readonly PromptPart[]; mentions: readonly AgentId[]; summary: ChatSummary; entries: readonly IndexedEntry[]; lookup: AgentLookup }): Promise<Activation> {
+    const attachments = input.attachments ?? [];
+    const { messageId, activated } = await ports.post(messageParts(input.text, attachments), input.mentions);
     const tasks: { agentId: AgentId; taskId: TaskId }[] = [];
     for (const agentId of activated) {
         const taskId = ports.newTaskId();
-        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir);
+        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir, attachments);
         await ports.createTask(taskId, contract, agentId);
         await ports.run(taskId);
         tasks.push({ agentId, taskId });

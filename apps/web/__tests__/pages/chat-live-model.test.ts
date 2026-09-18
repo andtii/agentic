@@ -7,6 +7,7 @@ import { WIRE_PROTOCOL_VERSION, type WireFrame, type WireReply } from '@sigx/ai-
 import {
     activationContract,
     actorSessionTransport,
+    attachmentPart,
     chatRow,
     chatTitle,
     chatTranscript,
@@ -18,6 +19,7 @@ import {
     lookupOver,
     membersOf,
     mentionsIn,
+    messageParts,
     runActivation,
     unknownAgent,
     visibleTo,
@@ -154,8 +156,8 @@ describe('addressing and activation', () => {
         let n = 0;
         const result = await runActivation(
             {
-                post: async (text, mentions) => {
-                    calls.push(`post ${text} [${mentions.join(',')}]`);
+                post: async (parts, mentions) => {
+                    calls.push(`post ${parts.map((p) => (p.type === 'text' ? p.text : p.type)).join('+')} [${mentions.join(',')}]`);
                     return { messageId: 'm9' as MessageId, activated: ['a1', 'a2'] as AgentId[] };
                 },
                 createTask: async (id, contract, owner) => calls.push(`create ${id} ${contract.assignee} by ${owner} origin ${contract.origin.kind}`),
@@ -166,6 +168,68 @@ describe('addressing and activation', () => {
         );
         expect(result).toEqual({ messageId: 'm9', tasks: [{ agentId: 'a1', taskId: 't1' }, { agentId: 'a2', taskId: 't2' }] });
         expect(calls).toEqual(['post go [a2]', 'create t1 a1 by a1 origin user', 'run t1', 'create t2 a2 by a2 origin user', 'run t2']);
+    });
+});
+
+describe('attachments (#207)', () => {
+    const shot = 'agentic-file:c1/file_shot';
+    const csv = 'agentic-file:c1/file_csv';
+    const withFiles: IndexedEntry[] = [
+        { seq: 0, entry: { t: 'member', op: 'add', agentId: 'a1' as AgentId, historyAccess: 'all', at: 1000 } },
+        { seq: 1, entry: { t: 'msg', id: 'm1' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'see' }, { type: 'image', mediaType: 'image/png', url: shot }, { type: 'file', mediaType: 'text/csv', name: 'data.csv', url: csv }], at: 2000, mentions: [] } },
+        { seq: 2, entry: { t: 'msg', id: 'm2' as MessageId, author: { kind: 'agent', agentId: 'a1' as AgentId, sessionId: 's9' as never }, parts: [{ type: 'text', text: 'again' }, { type: 'image', mediaType: 'image/png', url: shot }, { type: 'image', mediaType: 'image/png', data: 'iVBO' }], at: 3000, mentions: [] } }
+    ];
+    const allSummary: ChatSummary = { seq: 2, members: { a1: { since: 1000, historyFrom: 0 } }, coordinator: null, activeSessions: {} };
+
+    it('entryLine renders attachments as named placeholders with their uri', () => {
+        expect(entryLine(withFiles[1]!.entry, lookup)).toBe(`You: see [image ${shot}] [file "data.csv" ${csv}]`);
+        // An inline image has no uri to name.
+        expect(entryLine(withFiles[2]!.entry, lookup)).toBe(`Atlas: again [image ${shot}] [image]`);
+    });
+
+    it('entryTranscript keeps image and file parts and points chat files at the download route', () => {
+        const t = entryTranscript(withFiles, lookup);
+        expect(t.messages[0]!.parts).toEqual([
+            { type: 'text', id: 'm1:0', text: 'see' },
+            { type: 'image', mediaType: 'image/png', url: '/files/chats/c1/file_shot' },
+            { type: 'file', mediaType: 'text/csv', url: '/files/chats/c1/file_csv', filename: 'data.csv' }
+        ]);
+        expect(t.messages[1]!.parts[2]).toEqual({ type: 'image', mediaType: 'image/png', data: 'iVBO' });
+        // A url that is not a chat file is never loaded: it reads as its placeholder.
+        const external: IndexedEntry = { seq: 3, entry: { t: 'msg', id: 'm3' as MessageId, author: { kind: 'user' }, parts: [{ type: 'image', mediaType: 'image/png', url: 'https://tracker.example/p.png' }], at: 4000, mentions: [] } };
+        expect(entryTranscript([external], lookup).messages[0]!.parts).toEqual([{ type: 'text', id: 'm3:0', text: '[image https://tracker.example/p.png]' }]);
+    });
+
+    it('activationContract carries the chat-file parts of the context window and the trigger as reference parts, each once', () => {
+        const trigger = [attachmentPart({ name: 'new.png', mediaType: 'image/png' }, 'agentic-file:c1/file_new'), attachmentPart({ name: 'data.csv', mediaType: 'text/csv' }, csv)];
+        const c = activationContract('a1' as AgentId, 'c1' as ChatId, 'm4' as MessageId, 'what changed?', visibleTo(withFiles, allSummary, 'a1'), lookup, undefined, trigger);
+        expect(c.objective).toBe('what changed?');
+        expect(c.context).toEqual([
+            { type: 'text', text: `Chat so far:\nYou: see [image ${shot}] [file "data.csv" ${csv}]\nAtlas: again [image ${shot}] [image]` },
+            { type: 'image', mediaType: 'image/png', url: shot },
+            { type: 'file', mediaType: 'text/csv', name: 'data.csv', url: csv },
+            { type: 'image', mediaType: 'image/png', url: 'agentic-file:c1/file_new' }
+        ]);
+        // Attachments alone: the objective is their placeholders, never empty.
+        expect(activationContract('a1' as AgentId, 'c1' as ChatId, 'm4' as MessageId, '', [], lookup, undefined, trigger.slice(0, 1)).objective).toBe('[image agentic-file:c1/file_new]');
+    });
+
+    it('runActivation posts the text then the attachments, and hands them to every task', async () => {
+        const posted: unknown[] = [];
+        const contracts: unknown[] = [];
+        const part = attachmentPart({ name: 'data.csv', mediaType: 'text/csv' }, csv);
+        await runActivation(
+            {
+                post: async (parts) => (posted.push(parts), { messageId: 'm9' as MessageId, activated: ['a1'] as AgentId[] }),
+                createTask: async (_id, contract) => contracts.push(contract.context),
+                run: async () => undefined,
+                newTaskId: () => 't1' as never
+            },
+            { chatId: 'c1' as ChatId, text: '', attachments: [part], mentions: [], summary: allSummary, entries: [], lookup }
+        );
+        expect(posted).toEqual([[part]]);
+        expect(contracts).toEqual([[part]]);
+        expect(messageParts('hi', [part])).toEqual([{ type: 'text', text: 'hi' }, part]);
     });
 });
 

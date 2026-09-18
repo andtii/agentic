@@ -6,9 +6,10 @@
 // every other port is the production wiring.
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
-import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, type PlatformEnv } from '../../src/actors.app';
+import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, platformFiles, type PlatformEnv } from '../../src/actors.app';
 import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
+import { createFilesMount, type WaitUntilLike } from '../../src/files/route';
 import { runWithHost } from '../../src/host-scope';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
@@ -35,6 +36,9 @@ export const ActorHost = createActorHost(actors);
  */
 const authRoute = createAuthMount({ pairing: pairingWiring(actors), actors });
 
+/** The chat file routes (#207), as the production entry mounts them: after the auth routes, over the same R2 store the actors use. */
+const filesRoute = createFilesMount({ store: platformFiles });
+
 const worker = createActorWorker({ actors });
 
 // The same shape as `entry.cloudflare.ts`: the dev login (#35, #143: GET form + POST), the auth
@@ -42,7 +46,7 @@ const worker = createActorWorker({ actors });
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
         return runWithHost(worker.host, async () => {
-            const route = devLoginRouteFor(request, env) ?? authRoute(request, env);
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
             if (route) {
                 // The Worker host boots from `env` before an auth route hops (#182).
                 await worker.boot(env);
