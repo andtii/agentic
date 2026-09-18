@@ -3,15 +3,22 @@ import { Link } from '@sigx/router';
 import { Card } from '@sigx/zero-daisyui/components';
 import { EnvironmentLine, Label, SectionHeading, Stack, StatusPill } from '@agentic/ui';
 import type { MockAgent } from '../../mock/data';
-import { sessionRows, type AgentProfile } from '../../mock/agents';
+import { sessionRows, type AgentProfile, type SessionRow } from '../../mock/agents';
 import { age } from './format';
 
-export type OverviewTabProps = Define.Prop<'profile', AgentProfile, true> & Define.Prop<'agent', MockAgent, true>;
+export type OverviewTabProps =
+    & Define.Prop<'profile', AgentProfile, true>
+    & Define.Prop<'agent', MockAgent, true>
+    /** The agent's sessions on the platform (`sessionRowsOf`, #153); absent, the mock workspace's. */
+    & Define.Prop<'sessions', readonly SessionRow[]>
+    /** The workspace's IANA zone; absent, the mock workspace's. */
+    & Define.Prop<'zone', string>;
 
 /** Overview: description, environment, stats, the last sessions. Minimal by design (the handoff draws no board for it). */
 export const OverviewTab = component<OverviewTabProps>(({ props }) => () => {
     const p = props.profile;
-    const recent = sessionRows(p.id).slice(0, 5);
+    const sessions = props.sessions ?? sessionRows(p.id);
+    const recent = sessions.slice(0, 5);
     return (
         <div data-agent-overview="">
             <Stack gap="lg">
@@ -26,7 +33,7 @@ export const OverviewTab = component<OverviewTabProps>(({ props }) => () => {
                     <div><dd>v{props.agent.configVersion}</dd><dt>config</dt></div>
                     <div><dd>{p.memories.length}</dd><dt>memories</dt></div>
                     <div><dd>{p.correctionsThisWeek}</dd><dt>corrections / wk</dt></div>
-                    <div><dd>{recent.length}</dd><dt>sessions</dt></div>
+                    <div><dd>{sessions.length}</dd><dt>sessions</dt></div>
                 </dl>
             </Stack>
             <div data-agent-recent="">
@@ -39,7 +46,7 @@ export const OverviewTab = component<OverviewTabProps>(({ props }) => () => {
                                 <li>
                                     <Link to={`/sessions/${s.id}`}>{s.id}</Link>
                                     <StatusPill status={s.status} />
-                                    <span data-tone="dim">{age(s.startedAt)}</span>
+                                    <span data-tone="dim">{age(s.startedAt, undefined, props.zone)}</span>
                                 </li>
                             ))}
                         </ul>
