@@ -25,7 +25,8 @@ export const AUDIT_KINDS = [
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
-    'secret.opened'
+    'secret.opened',
+    'workdir.worktree-created'
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -166,6 +167,17 @@ export interface SecretOpenedData {
     readonly pluginId: string;
 }
 
+/** A daemon added a git worktree at an owner's `Machine.fsRequest` (#189, OPS-03). `by` is the owner who asked. */
+export interface WorktreeCreatedData {
+    readonly machineId: MachineId;
+    readonly environmentId: EnvironmentId;
+    readonly repo: string;
+    readonly branch: string;
+    /** Where the worktree was added: absolute, machine-native. */
+    readonly path: string;
+    readonly base?: string;
+}
+
 /** The per-kind payload. */
 export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
@@ -181,6 +193,7 @@ export interface AuditDataByKind {
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
     readonly 'secret.opened': SecretOpenedData;
+    readonly 'workdir.worktree-created': WorktreeCreatedData;
 }
 
 /** What an emitter hands `record` / `recordAudit`: one kind, its data, the common fields. */
