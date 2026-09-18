@@ -57,6 +57,12 @@ jobs:
         if: matrix.node-version == '22'
         run: pnpm --filter @agentic/web test:workers
 
+      # Requirements §17 as scripted scenarios (docs/acceptance.md): the
+      # workerd half needs the pool above, the in-process half runs here too.
+      - name: Acceptance suite
+        if: matrix.node-version == '22'
+        run: pnpm --filter @agentic/web test:acceptance
+
   # Playwright against the dev server at 400 / 1024 / 1280 px: the phone
   # regime, the tablet rails drop and the desktop flows (apps/web/e2e).
   e2e:

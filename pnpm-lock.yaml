@@ -205,6 +205,9 @@ importers:
       '@playwright/test':
         specifier: ^1.63.0
         version: 1.63.0
+      '@sigx/ai':
+        specifier: 'catalog:'
+        version: 0.1.0(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)
       '@sigx/cli':
         specifier: ^0.11.0
         version: 0.11.0
