@@ -1,13 +1,16 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, Button, DataTable, Tag, type Tone } from '@agentic/ui';
+import { dataMode } from '../data-mode';
 import { historyFilters, opsAgent, opsHistory, type HistoryEntry, type HistoryFilter, type HistoryKind } from '../mock/ops';
 import { clock, groupByDay } from './ops/format';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
+import { HISTORY_COLS } from './history/live';
+import { LiveHistory } from './history/LiveHistory';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
-export const HISTORY_COLS = '84px 150px 130px 1fr 110px';
+export { HISTORY_COLS };
 
 /** A kind's tag tone: what waits on a person is amber, what broke is red, what was learned is live, the rest is neutral. */
 export const KIND_TONE: Partial<Record<HistoryKind, Tone>> = { 'approval-asked': 'needs-you', interrupted: 'failed', correction: 'live' };
@@ -86,4 +89,5 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
     };
 });
 
-export const History = component(() => () => <HistoryView entries={opsHistory} />);
+/** `/history` — the mock entries, or the Audit actor in live mode (#146). */
+export const History = component(() => () => (dataMode() === 'live' ? <LiveHistory /> : <HistoryView entries={opsHistory} />));

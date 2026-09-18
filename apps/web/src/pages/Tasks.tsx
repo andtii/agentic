@@ -2,8 +2,10 @@ import { component, signal } from 'sigx';
 import type { TaskStatus } from '@agentic/core';
 import { DataTable, EmptyState, SectionHeading } from '@agentic/ui';
 import { Page } from '../components/Page';
+import { dataMode } from '../data-mode';
 import { loadTasks } from '../mock/workspace';
 import { HOME_TASK_COLS, TASK_COLUMNS, TaskRowCells } from './Home';
+import { LiveTasks } from './task/LiveTasks';
 
 const FILTERS: readonly { readonly value: TaskStatus | 'all'; readonly label: string }[] = [
     { value: 'all', label: 'All' },
@@ -15,11 +17,12 @@ const FILTERS: readonly { readonly value: TaskStatus | 'all'; readonly label: st
     { value: 'cancelled', label: 'Cancelled' }
 ];
 
-/** `/tasks` — every task, the Home table at full width with filter chips by status. */
+/** `/tasks` — every task, the Home table at full width with filter chips by status; the TaskIndex in live mode (#146). */
 export const Tasks = component(() => {
     const all = loadTasks();
     const st = signal({ filter: 'all' as TaskStatus | 'all' });
     return () => {
+        if (dataMode() === 'live') return <LiveTasks />;
         const rows = st.filter === 'all' ? all : all.filter((t) => t.status === st.filter);
         const count = (value: TaskStatus | 'all') => (value === 'all' ? all.length : all.filter((t) => t.status === value).length);
         return (

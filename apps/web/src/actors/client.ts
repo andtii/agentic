@@ -28,6 +28,9 @@ export function clientDefs(): ActorDefs {
         Inbox: ref('Inbox'),
         Machine: ref('machine'),
         Schedule: ref('Schedule'),
-        Registry: ref('Registry')
+        Registry: ref('Registry'),
+        TaskIndex: ref('task-index'),
+        Audit: ref('audit'),
+        Ledger: ref('ledger')
     };
 }

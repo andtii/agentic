@@ -1,10 +1,13 @@
 import { component, signal, type Define } from 'sigx';
 import { AgentTile, DataTable, Label, Segmented, StatusPill } from '@agentic/ui';
+import { dataMode } from '../data-mode';
 import { money, opsAgent, tokensText, usageDays, usageRows, usageStats, type UsageBy, type UsageRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
+import { USAGE_COLS } from './usage/live';
+import { LiveUsage } from './usage/LiveUsage';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
-export const USAGE_COLS = '1fr 120px 120px 130px 150px';
+export { USAGE_COLS };
 
 const BY_LABEL: Record<UsageBy, string> = { agent: 'Agent', task: 'Task', turn: 'Turn' };
 
@@ -90,4 +93,5 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
     );
 });
 
-export const Usage = component(() => () => <UsageView rows={usageRows} />);
+/** `/usage` — the mock rows, or the month's Ledger in live mode (#146). */
+export const Usage = component(() => () => (dataMode() === 'live' ? <LiveUsage /> : <UsageView rows={usageRows} />));
