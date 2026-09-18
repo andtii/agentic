@@ -207,6 +207,16 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 wakers.get(ctx.key)?.();
             }
 
+            /**
+             * The work the session opens on: the task's objective and context, so the
+             * Session's memory retrieval ranks on the task and a lesson learned from it
+             * names the task (architecture §8; MEM-07, LRN-05) — not only the prompt.
+             */
+            async function work(route: Route): Promise<Pick<SessionOpenSpec, 'objective' | 'context'>> {
+                const t = await task(route.taskId).get();
+                return { objective: t.objective, context: t.context };
+            }
+
             /** Open a local (`anthropic-api`) Session for the route and prompt it. */
             async function placeLocal(route: Route, why: string): Promise<void> {
                 const sessionId = (route.sessionId ??= newSessionId());
@@ -216,6 +226,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     runtime: 'anthropic-api',
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
+                    ...(await work(route)),
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     tools: grantedToolNames(route)
@@ -306,6 +317,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     taskId: route.taskId,
                     environmentId,
                     machineId,
+                    ...(await work(route)),
                     config: ctx.snapshot(route.config),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     system: route.config.instructions,
@@ -313,7 +325,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 };
                 // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
                 // is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
-                await session(sessionId).open(spec);
+                // The record's `system` is the one the daemon runs: the instructions plus the memory block `open` retrieved (§8).
+                const opened = await session(sessionId).open(spec);
                 route.status = 'opening';
                 const limits = route.config.execution.limits;
                 let result: OpenSessionResult;
@@ -324,7 +337,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         {
                             agentId: route.agentId,
                             cwd: env.cwdRoots[0] ?? '',
-                            system: route.config.instructions,
+                            system: opened.spec?.system ?? route.config.instructions,
                             ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),

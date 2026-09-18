@@ -12,6 +12,9 @@
  * through `Session.respond` (OPS-02); on the daemon path the same rules
  * travel as `OpenSpec.policy` and the daemon compiles them (#121). With a
  * Session definition, `ask_user` raises its input request there (#122).
+ * The memories the Session retrieved at `open` (`spec.memories`, ranked on
+ * the task's objective) go in as `memories`: `buildSystemPrompt` renders them
+ * as the prompt's memory block — the one rendering on the local path (§8, #135).
  */
 
 import type { WorkspaceId } from '@agentic/core';
@@ -52,7 +55,8 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
         const built = createPlatformModelAgent(c.spec.config, {
             ports,
             ...(options.model ? { model: options.model } : { anthropic: provider }),
-            store: c.transcripts
+            store: c.transcripts,
+            ...(c.spec.memories?.length ? { memories: c.spec.memories } : {})
         });
         const session = await built.agent.session({ policy: options.policy ?? sessionPolicy(c.spec), signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
         return {

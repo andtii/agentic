@@ -50,11 +50,12 @@ export interface SessionOpenSpec {
     /** Tags retrieval filters on and learning stamps on records. */
     readonly tags?: readonly string[];
     /**
-     * The assembled system prompt (instructions + skills), when the caller built one. When the actor
-     * has learning ports, `open` appends the retrieved memory block (`## Platform memory`) to it.
+     * The assembled system prompt (instructions + skills), when the caller built one (the daemon path).
+     * When the actor has learning ports, `open` appends the retrieved memory block (`## Platform memory`)
+     * to it. Without one nothing is composed here: `memories` is what the runtime renders (#135).
      */
     readonly system?: string;
-    /** Filled by `open`: the memories retrieved for this session, in rank order — a factory renders them natively (`createPlatformModelAgent({ memories })`). */
+    /** Filled by `open`: the memories retrieved for this session, in rank order — the API factory renders them natively (`createPlatformModelAgent({ memories })`), the one place on the local path. */
     readonly memories?: readonly MemoryEntry[];
     /** Filled by `open`: how `memories` were retrieved. */
     readonly retrieval?: MemoryRetrievalRecord;
