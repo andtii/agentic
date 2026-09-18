@@ -50,7 +50,7 @@ export const githubEnabled = (env: AuthMountEnv, request: Request): boolean => !
 
 /**
  * Build the resolver: `(request, env) → handler | undefined`. The route
- * tables are built once per distinct (secret, origin, GitHub) triple and
+ * tables are built once per distinct (secret, origin, GitHub app) tuple and
  * kept — a Worker's env does not change between requests, but a test's may.
  */
 export function createAuthMount(wiring: AuthMountWiring): (request: Request, env: AuthMountEnv) => RouteHandler | undefined {
@@ -60,7 +60,7 @@ export function createAuthMount(wiring: AuthMountWiring): (request: Request, env
         if (!secret) return undefined;
         const origin = originOf(env, request);
         const github = loginConfigured({ ...env, APP_ORIGIN: origin });
-        const key = `${secret}\n${origin ?? ''}\n${github}`;
+        const key = [secret, origin ?? '', github ? `${env.GITHUB_CLIENT_ID}\n${env.GITHUB_CLIENT_SECRET}` : ''].join('\n');
         if (built?.key !== key) {
             const web = createWebAuth(
                 { SESSION_SECRET: secret, ...(github ? { GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET } : {}), ...(origin ? { APP_ORIGIN: origin } : {}) },
