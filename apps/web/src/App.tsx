@@ -2,11 +2,13 @@ import { component, useHead } from 'sigx';
 import { Link, RouterView, useRoute } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Breadcrumbs } from '@sigx/zero-daisyui/components';
-import { AppShell } from '@agentic/ui';
+import { AppShell, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
 import { NAV_GROUPS } from './nav';
 import { backOf, titleOf, trailFor } from './crumbs';
 import { machines } from './mock/data';
 import { topbarFor } from './components/topbar';
+import { clientConnection, LiveConnection } from './components/status';
+import { dataMode } from './data-mode';
 
 /** Schibsted Grotesk (interface) + JetBrains Mono (anything a machine said), 400–700, swapped in. */
 const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
@@ -71,17 +73,11 @@ export const App = component(() => {
                             </Breadcrumbs>
                         ),
                         // The always-visible half of failure distinction (OPS-04): this
-                        // browser's socket, then each machine. Live signals land with #46.
-                        connection: () => (
-                            <ul data-connection>
-                                <li data-connection-row data-state="on"><span>This browser</span><span>live</span></li>
-                                {machines.map(m => (
-                                    <li data-connection-row data-state={m.online ? 'on' : 'off'}>
-                                        <span>{m.name}</span><span>{m.online ? 'online' : 'offline'}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        ),
+                        // browser's socket, then each machine — the live signals in live
+                        // mode (#46), the design track's workspace in mock mode.
+                        connection: () => (dataMode() === 'live'
+                            ? <LiveConnection />
+                            : <ConnectionStrip rows={connectionRows(clientConnection(), machines.map(m => ({ id: m.id, name: m.name, online: m.online })))} />),
                         user: () => (
                             <>
                                 <span data-user-avatar aria-hidden="true">WS</span>
@@ -90,6 +86,7 @@ export const App = component(() => {
                         )
                     }}
                 >
+                    {clientConnection() === 'reconnecting' ? <OfflineBanner /> : null}
                     <RouterView />
                 </AppShell>
             </ThemeProvider>

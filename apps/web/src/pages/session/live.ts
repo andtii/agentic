@@ -7,10 +7,11 @@
  * (AC-15: unsupported operations are listed, their controls never drawn).
  */
 import type { CapabilityReport, MachineId, RuntimeId, SessionId, TaskId } from '@agentic/core';
-import type { SessionInfo } from '@agentic/platform';
+import type { MachineView, SessionInfo } from '@agentic/platform';
 import { createTranscript, reduceAgentEvent, type AgentEvent } from '@sigx/ai-agent';
 import type { ToolPartState } from '@sigx/ai-agent/app';
 import type { ApprovalContext } from '@agentic/ui';
+import type { FailureSignals } from '../../components/status';
 import type { MockEvent, MockSessionView } from '../../mock/workspace';
 import type { AgentIdentity } from '../chat/live';
 
@@ -95,7 +96,28 @@ export function capabilityReport(runtime: RuntimeId, caps: SessionInfo['capabili
 /** The interrupted marker the Session actor writes for a turn an eviction cut short (OPS-05). */
 export const isInterruptedEnd = (ev: AgentEvent): boolean => ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === 'process_exited';
 
-export function liveSessionView(id: string, info: SessionInfo, events: readonly AgentEvent[], agent: AgentIdentity): MockSessionView {
+/** The pill's word for an environment account's `authStatus`; `unknown` shows as ok until the daemon says otherwise. */
+const authPillOf = (status: MachineView['environments'][number]['account']['authStatus']): MockSessionView['authStatus'] => (status === 'missing' ? 'auth-missing' : status === 'expired' ? 'auth-expired' : 'auth-ok');
+
+/**
+ * The failure signals a session view carries (OPS-04): the machine's
+ * presence, the account's auth status, the session's state, its last
+ * non-recoverable error and the interrupted marker. `failureOf` picks one.
+ */
+export function sessionSignals(v: MockSessionView): FailureSignals {
+    return {
+        machine: v.machine.id === 'platform' ? null : { id: v.machine.id, name: v.machine.name, online: v.machine.online },
+        auth: v.auth ?? null,
+        session: { status: v.state, ...(v.error ? { error: v.error } : {}), ...(v.interrupted ? { interrupted: true } : {}) },
+        ...(v.taskId ? { task: { id: v.taskId, status: 'active' } } : {})
+    };
+}
+
+/**
+ * `Session.get()`, its log and — for a daemon session — its machine's record
+ * (`Machine.online`, the environment's account) folded into the page view.
+ */
+export function liveSessionView(id: string, info: SessionInfo, events: readonly AgentEvent[], agent: AgentIdentity, machine?: MachineView): MockSessionView {
     const spec = info.spec;
     const runtime = spec?.runtime ?? ('anthropic-api' as RuntimeId);
     const transcript = createTranscript(id);
@@ -108,6 +130,8 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         : undefined;
     const last = events[events.length - 1];
     const model = spec?.config.execution.model;
+    const env = machine?.environments.find((e) => e.id === spec?.environmentId);
+    const error = transcript.error && !transcript.error.recoverable ? { code: transcript.error.code, message: transcript.error.message, recoverable: false } : undefined;
     return {
         id: id as SessionId,
         ref: info.ref?.id ?? id,
@@ -118,9 +142,13 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         ...(spec?.chatId ? { chatId: spec.chatId } : {}),
         ...(spec?.taskId ? { taskId: spec.taskId as TaskId } : {}),
         environment: agent.environment,
-        machine: spec?.machineId ? { id: spec.machineId, name: spec.machineId, os: '—', online: info.status !== 'disconnected' } : PLATFORM_MACHINE,
+        machine: spec?.machineId
+            ? { id: spec.machineId, name: machine?.name ?? spec.machineId, os: machine?.os ?? '—', online: machine ? machine.online : info.status !== 'disconnected' }
+            : PLATFORM_MACHINE,
         runtimeVersion: model ? `${runtime} · ${model}` : runtime,
-        authStatus: 'auth-ok',
+        authStatus: env ? authPillOf(env.account.authStatus) : 'auth-ok',
+        ...(env ? { auth: { status: env.account.authStatus, account: env.account.label } } : {}),
+        ...(error ? { error } : {}),
         cwd: '—',
         head: info.head,
         configVersion: spec?.config.configVersion ?? agent.configVersion,

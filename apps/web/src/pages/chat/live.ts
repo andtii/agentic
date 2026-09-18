@@ -12,6 +12,7 @@ import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
+import { failureOf, INTERRUPTED_CODE, type FailureState } from '../../components/status';
 import { formatTime, USER, type MockChatMember, type MockChatSummary } from '../../mock/workspace';
 
 // ---- identities --------------------------------------------------------------
@@ -213,6 +214,8 @@ export interface SessionFeed {
     readonly sessionId: string;
     readonly agentId: string;
     readonly transcript: AgentTranscript;
+    /** The task the session runs, once its record was read — what "Resume" needs. */
+    readonly taskId?: string;
 }
 
 /**
@@ -245,6 +248,66 @@ export function composeTranscript(target: AgentTranscript, entries: EntryTranscr
 
 /** A fresh transcript to compose into, keyed by the chat. */
 export const chatTranscript = (chatKey: string): AgentTranscript => createTranscript(chatKey);
+
+// ---- failure distinction (OPS-04) ------------------------------------------------
+
+/** The interrupted marker as the transcript folds it: the last turn ended `process_exited` and nothing runs. */
+export const feedInterrupted = (t: AgentTranscript): boolean => !sessionMidTurn(t) && t.turn?.stopReason === 'error' && t.turn.error?.code === INTERRUPTED_CODE;
+
+export interface ChatFailure {
+    readonly state: FailureState;
+    readonly agentId: string;
+    /** The feed the failure came from — where "Resume" goes. */
+    readonly sessionId?: string;
+}
+
+/**
+ * The chat's one failure to show under the thread, or `null`: a live feed's
+ * word first (its transcript says interrupted, errored or disconnected —
+ * `failureOf` over the session signal), else the newest failure status the
+ * chat recorded since the user last posted (`task-failed` from the router,
+ * the Session's `interrupted:` marker) — stale once an agent answered after
+ * it (for a failed task: with a message of other work, since the failed
+ * turn's own partial text can land after the router's word), and suppressed
+ * while a feed of that agent is mid-turn (a resume in flight). Interrupted
+ * work is uncertain (OPS-05).
+ */
+export function chatFailure(entries: readonly IndexedEntry[], feeds: readonly SessionFeed[]): ChatFailure | null {
+    for (const feed of feeds) {
+        const t = feed.transcript;
+        const session = {
+            status: t.state,
+            ...(t.error && !t.error.recoverable ? { error: { code: t.error.code, message: t.error.message, recoverable: false } } : {}),
+            ...(feedInterrupted(t) ? { interrupted: true } : {})
+        };
+        const state = failureOf({ session, ...(feed.taskId ? { task: { id: feed.taskId, status: 'active' } } : {}) });
+        if (state) return { state, agentId: feed.agentId, sessionId: feed.sessionId };
+    }
+    const busy = new Set(feeds.filter((f) => sessionMidTurn(f.transcript)).map((f) => f.agentId));
+    // Agent messages seen after the entry under consideration, by the task they came from (`''` for none).
+    const answered = new Set<string>();
+    for (let i = entries.length - 1; i >= 0; i--) {
+        const entry = entries[i]!.entry;
+        if (entry.t === 'msg') {
+            if (entry.author.kind === 'user') break;
+            answered.add(entry.taskId ?? '');
+            continue;
+        }
+        if (entry.t !== 'status' || busy.has(entry.agentId)) continue;
+        if (entry.kind === 'task-failed') {
+            if ([...answered].some((taskId) => taskId !== entry.ref)) continue;
+            const state = failureOf({ task: { id: entry.ref, status: 'failed', error: entry.error } });
+            if (state) return { state, agentId: entry.agentId };
+        }
+        if (entry.kind === 'task' && entry.ref?.startsWith('interrupted:')) {
+            if (answered.size) continue;
+            const feed = feeds.find((f) => f.agentId === entry.agentId);
+            const state = failureOf({ session: { status: 'idle', interrupted: true }, ...(feed?.taskId ? { task: { id: feed.taskId, status: 'active' } } : {}) });
+            if (state) return { state, agentId: entry.agentId, ...(feed ? { sessionId: feed.sessionId } : {}) };
+        }
+    }
+    return null;
+}
 
 // ---- the session wire ------------------------------------------------------------
 

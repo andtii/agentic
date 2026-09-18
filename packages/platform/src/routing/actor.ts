@@ -34,9 +34,9 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { createId, hasScope, isTerminal, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type PromptPart, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isTerminal, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkspaceId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
-import { actor, defineActor, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
+import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
@@ -44,7 +44,7 @@ import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
 import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
-import { isInterruptedTurnEnd, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
+import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment } from './locate.js';
@@ -54,10 +54,30 @@ import { initialRoutingState, type Route, type RoutingState } from './state.js';
 /** The `by` the router signs its transitions with. */
 export const ROUTER = 'system:routing';
 
+/**
+ * A chat-originated task that failed is told to its chat as a `task-failed`
+ * status (#128, OPS-04): the thread shows a named failure where the answer
+ * would have been, never silence. Best effort, one-way — a chat that cannot
+ * be reached never fails the route. A route that never got a session id
+ * (an offline environment under `fail`, a mismatch) is stamped with the id
+ * it would have used: the chat's contract wants one, and the address is
+ * all it is.
+ */
+async function tellChat(c: ActorContext<RoutingState>, workspaceId: WorkspaceId, route: Route, error: TaskError, now: () => number = Date.now, newSessionId: () => SessionId = () => createId('session') as SessionId): Promise<void> {
+    if (!route.chatId) return;
+    const payload: SessionEvent = { kind: 'status', agentId: route.agentId, sessionId: route.sessionId ?? newSessionId(), status: 'task-failed', ref: route.taskId, error, at: now() };
+    try {
+        await c.publish(topic<SessionEvent>(SESSION_EVENTS_TOPIC, actorKey(workspaceId, 'chat', route.chatId)), payload);
+    } catch {
+        // A chat that cannot be reached never fails the route.
+    }
+}
+
 /** The slice of the Session actor the router drives (`defineSessionActor`). */
 interface SessionClient {
     open(spec: SessionOpenSpec): Promise<SessionInfo>;
     prompt(input: readonly PromptPart[], turnId: string): Promise<SessionCommandResult>;
+    resume(): Promise<SessionCommandResult>;
     get(): Promise<SessionInfo>;
     transcript(): Promise<AgentTranscript | undefined>;
     tail(from?: { epoch: number; seq: number }): AsyncIterable<AgentEvent>;
@@ -132,10 +152,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 delete ctx.state.reports[taskId];
             };
 
-            /** Fail the task with a reason and forget the route. A task already settled is left alone. */
+            /** Fail the task with a reason, tell its chat, and forget the route. A task already settled is left alone. */
             async function fail(route: Route, error: TaskError): Promise<void> {
                 const t = await task(route.taskId).get();
-                if (!isTerminal(t.status)) await task(route.taskId).fail(error, ROUTER);
+                if (!isTerminal(t.status)) {
+                    await task(route.taskId).fail(error, ROUTER);
+                    await tellChat(ctx, workspaceId, route, error, now, newSessionId);
+                }
                 drop(route.taskId);
             }
 
@@ -398,6 +421,33 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     return task(taskId).get();
                 },
 
+                /**
+                 * "Resume" on an interrupted turn (OPS-05): the session is prompted anew
+                 * with the cut turn's input over its intact transcript (`Session.resume`),
+                 * the task's `waiting {input, resume:…}` resolves `active` with a `resumed`
+                 * transition, and `follow` picks the new turn up. Nothing is replayed.
+                 */
+                async resume(taskId: TaskId): Promise<TaskView> {
+                    const s = ctx.state;
+                    const route = s.routes[taskId];
+                    if (!route || route.status !== 'interrupted' || !route.sessionId || !route.turnId) throw new ServerFnError(409, `task ${taskId} has no interrupted turn to resume`);
+                    const reply = await session(route.sessionId).resume();
+                    if (reply.kind === 'error') {
+                        await fail(route, { code: `resume-${reply.code}`, message: reply.message, recoverable: false });
+                        await ctx.save();
+                        return task(taskId).get();
+                    }
+                    const t = await task(taskId).get();
+                    if (t.status === 'waiting') await task(taskId).resolveWaiting(ROUTER, `resumed: a new prompt over the intact transcript (turn ${route.turnId} was interrupted)`, route.sessionId);
+                    route.turnId = resumeTurnId(route.turnId);
+                    route.status = 'running';
+                    touch(route);
+                    await ctx.tasks.start('follow');
+                    wakers.get(ctx.key)?.();
+                    await ctx.save();
+                    return task(taskId).get();
+                },
+
                 /** Machine → router: the daemon said hello. Every route parked on it is retried — on that machine, no other; a route no machine reported yet looks again. */
                 async machineOnline(machineId: MachineId): Promise<void> {
                     const s = ctx.state;
@@ -534,17 +584,28 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 if (end.stopReason === 'error') {
                     if (isInterruptedTurnEnd(end)) {
                         // Cut short by an eviction: nothing was re-run (OPS-05/06); the user decides whether to resume.
+                        // The route parks as `interrupted` — not followed again until `resume` re-prompts it.
                         await ctx.turn(async (c) => {
                             await tryTask(() => taskClient.reportWaiting({ kind: 'input', requestId: `resume:${turnId}`, sessionId }, ROUTER));
+                            const parked = c.state.routes[route.taskId];
+                            if (parked && parked.turnId === turnId) parked.status = 'interrupted';
                             await c.save();
                         });
                         return;
                     }
-                    await settled(() => tryTask(() => taskClient.fail({ code: end!.error?.code ?? 'turn-error', message: end!.error?.message ?? 'the turn ended with an error', recoverable: false }, ROUTER)));
+                    const error: TaskError = { code: end.error?.code ?? 'turn-error', message: end.error?.message ?? 'the turn ended with an error', recoverable: false };
+                    await settled(async (c) => {
+                        await tryTask(() => taskClient.fail(error, ROUTER));
+                        await tellChat(c, ids.workspaceId, route, error, now, newSessionId);
+                    });
                     return;
                 }
                 if (end.stopReason === 'cancelled') {
-                    await settled(() => tryTask(() => taskClient.fail({ code: 'turn-cancelled', message: 'the session cancelled the turn', recoverable: true }, ROUTER)));
+                    const error: TaskError = { code: 'turn-cancelled', message: 'the session cancelled the turn', recoverable: true };
+                    await settled(async (c) => {
+                        await tryTask(() => taskClient.fail(error, ROUTER));
+                        await tellChat(c, ids.workspaceId, route, error, now, newSessionId);
+                    });
                     return;
                 }
                 const transcript = await sessionClient.transcript();

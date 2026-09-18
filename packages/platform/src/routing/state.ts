@@ -13,8 +13,10 @@ import type { TaskReport } from '@agentic/runtimes';
  * - `waiting-capacity`: the machine queued the session — prompted when the daemon acknowledges it.
  * - `opening`: `session.open` went to the daemon — prompted on `session.opened`.
  * - `running`: the prompt is out; `follow` settles the task at the turn's end.
+ * - `interrupted`: the turn was cut short by an eviction (OPS-05) — the task waits `{input, resume:{turnId}}`
+ *   for a person's `resume`, which re-prompts the session and puts the route back to `running`.
  */
-export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'running';
+export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'running' | 'interrupted';
 
 export interface Route {
     readonly taskId: TaskId;

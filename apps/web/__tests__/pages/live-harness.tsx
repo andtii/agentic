@@ -17,7 +17,7 @@ import { createFetchHandler } from '@sigx/actors/server';
 import { stubServerApp } from '@sigx/server/testing';
 import { mockAgent, type MockAgent, type MockAgentOptions } from '@sigx/ai-agent/testing';
 import type { AgentId, Principal, WorkspaceId } from '@agentic/core';
-import { AgentActor, AuditActor, Chat, ChatPage, LedgerActor, Memory, TaskActor, Workspace, agentKey, defineInbox, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type SessionFactory } from '@agentic/platform';
+import { AgentActor, AuditActor, Chat, ChatPage, LedgerActor, Memory, PairingDirectory, TaskActor, Workspace, agentKey, createToolCallPort, defineInbox, defineMachineActor, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type MachineSocketPort, type SessionFactory } from '@agentic/platform';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../../packages/platform/src/testing/index';
 import { clientDefs } from '../../src/actors/client';
 import { useActorDefs, useViewer } from '../../src/actors/defs';
@@ -40,6 +40,8 @@ export interface LiveHarness {
     readonly transport: ActorTransport;
     readonly Session: ReturnType<typeof defineSessionActor>;
     readonly Routing: ReturnType<typeof defineRoutingActor>;
+    /** Machines with no socket: paired records whose `online` a test flips through `socketMessage` / `socketClosed` (#46). */
+    readonly Machine: ReturnType<typeof defineMachineActor>;
     /** Serve one wire request in-process. */
     fetch(url: string, init?: RequestInit): Promise<Response>;
     /** An agent in the workspace index, configured for `anthropic-api` (the mock runtime) — returns its id. */
@@ -56,12 +58,21 @@ function localFactory(agent: MockAgent): SessionFactory {
     };
 }
 
+/** A socket layer with nobody on it: every send fails, so a machine here is only ever what `socketMessage` told it. */
+const noSockets: MachineSocketPort = { send: () => false, close: () => undefined };
+
+export interface LiveOptions {
+    /** Replace the session factory — a deployment that cannot open sessions (`no-api-key`, #128). */
+    readonly factory?: SessionFactory;
+}
+
 /** Start the host, the wire and the stubbed identity. `agentScript` is the mock runtime every session runs. */
-export async function startLive(agentScript: MockAgentOptions = { respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] }): Promise<LiveHarness> {
+export async function startLive(agentScript: MockAgentOptions = { respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] }, options: LiveOptions = {}): Promise<LiveHarness> {
     const Inbox = defineInbox({ channels: [] });
-    const Session = defineSessionActor({ factory: localFactory(mockAgent(agentScript)), inbox: () => Inbox });
-    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
-    const app = testActorApp([Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Routing, Inbox, Memory, LedgerActor, AuditActor]);
+    const Session = defineSessionActor({ factory: options.factory ?? localFactory(mockAgent(agentScript)), inbox: () => Inbox });
+    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    const Machine = defineMachineActor({ socket: noSockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
+    const app = testActorApp([Workspace, AgentActor, Chat, ChatPage, TaskActor, Session, Routing, Machine, PairingDirectory, Inbox, Memory, LedgerActor, AuditActor]);
     await app.start();
     // After `start()` (last-wins seam): the wire authenticates the `x-user` header; hops keep the JSON codec.
     const restore = stubServerApp({
@@ -84,6 +95,7 @@ export async function startLive(agentScript: MockAgentOptions = { respond: (inpu
         transport,
         Session,
         Routing,
+        Machine,
         fetch,
         async agent(name, role = '') {
             const { agentId } = await app.as(owner).actor(Workspace, workspaceKey(WS)).createAgent({ name });
@@ -128,10 +140,10 @@ export async function mountLive(path: string, harness: LiveHarness, tree: JSXEle
 
 export const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Poll until `check` holds. */
-export async function until(check: () => boolean, what: string, timeoutMs = 5_000): Promise<void> {
+/** Poll until `check` holds — a DOM condition, or an actor read (`async` checks are awaited). */
+export async function until(check: () => boolean | Promise<boolean>, what: string, timeoutMs = 5_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    while (!check()) {
+    while (!(await check())) {
         if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
         await tick(10);
     }

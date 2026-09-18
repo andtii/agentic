@@ -1,13 +1,15 @@
 import { component, type Define, type JSXElement } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
-import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, FailureCard, Icon, StatusPill, ToolCall, type RespondFn } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, Icon, StatusPill, ToolCall, type RespondFn } from '@agentic/ui';
 import { KeyValue } from '../components/KeyValue';
+import { FailureNotice, failureOf } from '../components/status';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar, routeId } from '../components/topbar';
 import { agentNamed, CAPABILITY_LABELS, formatTime, loadSession, taskRow, type MockSessionView } from '../mock/workspace';
 import { dataMode } from '../data-mode';
 import { LiveSession, sessionHead } from './session/LiveSession';
+import { sessionSignals } from './session/live';
 import type { AgentIdentity } from './chat/live';
 
 const sessionPill = (s: MockSessionView): string => {
@@ -62,7 +64,10 @@ export const Session = component(() => {
 export type SessionViewProps =
     & Define.Prop<'v', MockSessionView, true>
     & Define.Prop<'agent', AgentIdentity, true>
-    & Define.Prop<'onRespond', RespondFn>;
+    & Define.Prop<'onRespond', RespondFn>
+    /** "Resume" on an interrupted turn (OPS-05). */
+    & Define.Prop<'onResume', () => void>
+    & Define.Prop<'recovering', boolean>;
 
 /** The page body over a resolved view — the mock workspace's, or the live session's (#34). */
 export const SessionView = component<SessionViewProps>(({ props }) => {
@@ -71,6 +76,8 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
         const supported = new Set(v.capabilities.supported);
         const ops = [...v.capabilities.supported, ...v.capabilities.unsupported.map((u) => u.op)];
         const reason = (op: string) => v.capabilities.unsupported.find((u) => u.op === op)?.reason;
+        // One named failure from the session's signals (OPS-04), never a generic error; interrupted work is marked uncertain (OPS-05).
+        const failure = failureOf(sessionSignals(v));
         return (
             <Page title={`Session ${v.ref}`} page="session" hideTitle>
                 <header data-session-head>
@@ -84,7 +91,7 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
                 </header>
 
                 <section data-session-main aria-label="Session activity">
-                    {v.interrupted ? <FailureCard kind="interrupted" detail="The platform restarted mid-turn. Nothing was replayed. Resume sends a new prompt over the intact transcript." action={{ label: 'Resume' }} /> : null}
+                    {failure ? <FailureNotice state={failure} {...(props.onResume ? { onResume: props.onResume } : {})} busy={props.recovering ?? false} /> : null}
                     {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} meta="3.4s" /> : null}
                     {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={(id, d) => props.onRespond?.(id, d)} /> : null}
                     <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>

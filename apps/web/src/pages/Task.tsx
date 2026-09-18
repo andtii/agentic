@@ -6,13 +6,30 @@ import { KeyValue } from '../components/KeyValue';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar, routeId } from '../components/topbar';
+import { FailureNotice, failureOf } from '../components/status';
+import { dataMode } from '../data-mode';
 import { agentNamed, formatTime, loadTask, sessionsOf } from '../mock/workspace';
+import { LiveTask, taskHead } from './task/LiveTask';
 
 /** The stop-chain dialog is opened from the topbar, which lives outside the page. */
 const dialogs = signal({ stop: false });
 
 defineTopbar('task', (route) => {
-    const v = loadTask(routeId(route));
+    const id = routeId(route);
+    // Live: what the page published for THIS task (`task/LiveTask.tsx`); mock: the workspace's view.
+    if (dataMode() === 'live') {
+        const head = taskHead.value?.id === id ? taskHead.value : null;
+        return {
+            crumb: head?.task.objective,
+            actions: () => (head ? (
+                <>
+                    {head.task.sessionId ? <Link to={`/sessions/${head.task.sessionId}`} data-scope="button" data-part="root" data-color="neutral" data-variant="solid" data-intent="default"><span>Open session</span></Link> : null}
+                    <Button intent="danger" icon="stop" onClick={() => head.stop()}>Stop chain</Button>
+                </>
+            ) : null)
+        };
+    }
+    const v = loadTask(id);
     const session = v ? sessionsOf(v.task.id)[0] : undefined;
     return {
         crumb: v?.root.objective,
@@ -35,6 +52,7 @@ export const Task = component(() => {
     const view = () => loadTask(String(route.params.id));
     const st = signal({ selected: String(route.params.id) });
     return () => {
+        if (dataMode() === 'live') return <LiveTask id={String(route.params.id)} />;
         const v = view();
         if (!v) {
             return (
@@ -50,6 +68,8 @@ export const Task = component(() => {
         const approval = v.approvals[selected.id];
         const result = v.results[selected.id]!;
         const depth = Math.max(...v.tree.map((t) => t.depth)) + 1;
+        // The selected node's one named failure (OPS-04); interrupted work is marked uncertain (OPS-05).
+        const failure = failureOf({ task: { id: selected.id, status: selected.status, ...(selected.wait ? { wait: selected.wait } : {}) } });
         return (
             <Page title={v.root.objective} page="task" hideTitle>
                 <section data-task-tree aria-label="Delegation tree">
@@ -79,6 +99,7 @@ export const Task = component(() => {
                         </p>
                     ) : null}
                     {approval ? <ApprovalPrompt request={approval.request} {...approval.context} onRespond={() => undefined} /> : null}
+                    {failure ? <FailureNotice state={failure} /> : null}
                 </section>
 
                 <aside data-task-rail aria-label="Selected task">

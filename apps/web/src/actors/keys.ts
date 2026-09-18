@@ -14,3 +14,4 @@ export const taskKeyOf = (ws: string, id: string): string => actorKey(ws as Work
 export const sessionKeyOf = (ws: string, id: string): string => actorKey(ws as WorkspaceId, 'session', id);
 export const routingKeyOf = (ws: string): string => `${ws}:routing:main`;
 export const inboxKeyOf = (ws: string): string => `${ws}:inbox`;
+export const machineKeyOf = (ws: string, id: string): string => `${ws}:machine:${id}`;

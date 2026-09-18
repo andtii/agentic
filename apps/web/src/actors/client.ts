@@ -25,6 +25,7 @@ export function clientDefs(): ActorDefs {
         TaskActor: ref('task'),
         Session: ref('session', ['tail']),
         Routing: ref('routing'),
-        Inbox: ref('Inbox')
+        Inbox: ref('Inbox'),
+        Machine: ref('machine')
     };
 }

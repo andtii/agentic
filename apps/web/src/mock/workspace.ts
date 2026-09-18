@@ -8,7 +8,7 @@
  * replace the body of each loader with actor reads; the pages keep the
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
-import type { CapabilityReport, EnvironmentId, MachineId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AuthStatus, CapabilityReport, EnvironmentId, MachineId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
@@ -310,6 +310,10 @@ export interface MockSessionView {
     readonly grants: readonly { readonly key: string; readonly label: string }[];
     /** OPS-05: the last event is not `turn-end`. */
     readonly interrupted?: boolean;
+    /** OPS-04: the last non-recoverable adapter `error` event — the runtime failed. */
+    readonly error?: { readonly code: string; readonly message: string; readonly recoverable: boolean };
+    /** The machine's word on the environment's account (`authStatus`), when the machine record was read. */
+    readonly auth?: { readonly status: AuthStatus; readonly account?: string };
 }
 
 const FORGE_CAPABILITIES: CapabilityReport = {
@@ -367,7 +371,7 @@ function forgeSession(): MockSessionView {
     };
 }
 
-const API_CAPABILITIES: CapabilityReport = {
+export const API_CAPABILITIES: CapabilityReport = {
     runtime: 'anthropic-api', supported: ['resume', 'cancel', 'approvals', 'usage'], unsupported: [{ op: 'steer', reason: 'the model runs one turn at a time' }, { op: 'migrate', reason: 'not supported' }],
     resume: 'portable', cancel: true, steer: false, permissions: 'every-call', tools: 'native'
 };

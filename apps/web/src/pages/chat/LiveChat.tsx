@@ -15,6 +15,7 @@ import { createId, type AgentId, type ChatId, type TaskId } from '@agentic/core'
 import type { Decision } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, type Mention, type MessageAuthor } from '@agentic/ui';
 import { Page } from '../../components/Page';
+import { FailureNotice } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { chatKeyOf, routingKeyOf, sessionKeyOf, taskKeyOf } from '../../actors/keys';
 import { resolveAddressing, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
@@ -23,7 +24,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatTitle, chatTranscript, composeTranscript, entryTranscript, membersOf, mentionsIn, runActivation, type SessionActorClient } from './live';
+import { chatFailure, chatTitle, chatTranscript, composeTranscript, entryTranscript, membersOf, mentionsIn, runActivation, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 
@@ -40,7 +41,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const summary = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const history = useActorState(defs.Chat, () => { const k = key(); return k && ([k, 'history', null, HISTORY_LIMIT] as const); }, { live: true });
 
-    const st = signal({ draft: '', error: '', sending: false });
+    const st = signal({ draft: '', error: '', sending: false, recovering: false });
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
@@ -108,6 +109,28 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         }
     };
 
+    /** "Resume" on an interrupted turn (OPS-05): the router re-prompts the session over its intact transcript and follows the new turn. */
+    const resume = async (taskId: string): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws || st.recovering) return;
+        st.recovering = true;
+        st.error = '';
+        try {
+            await actor(defs.Routing, routingKeyOf(ws)).resume(taskId as TaskId);
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.recovering = false;
+        }
+    };
+
+    /** "Retry turn" after a runtime error: the last message posted again — a new task, never a replay. */
+    const retry = (): void => {
+        const last = [...(history.value?.entries ?? [])].reverse().find((e) => e.entry.t === 'msg' && e.entry.author.kind === 'user');
+        if (!last || last.entry.t !== 'msg') return;
+        void send(last.entry.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''));
+    };
+
     const respond = (requestId: string, decision: Decision): void => {
         const feed = feeds.list.find((f) => f.transcript.requests[requestId]);
         if (!feed) return;
@@ -157,6 +180,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const memberIds = new Set(members.map((m) => m.agentId));
         const candidates = directory.all().filter((a) => !memberIds.has(a.id));
         const tasks: readonly MockTaskRow[] = [];
+        const failure = chatFailure(history.value?.entries ?? [], feeds.list);
         const empty = transcript.messages.length === 0;
         const loading = summary.loading && !s;
         return (
@@ -172,6 +196,16 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 onRespond={respond}
                             />
                         )}
+                    {failure ? (
+                        <div data-chat-failure>
+                            <FailureNotice
+                                state={failure.state}
+                                busy={st.recovering}
+                                {...(failure.state.kind === 'interrupted' && failure.state.taskId ? { onResume: () => { void resume(failure.state.taskId!); } } : {})}
+                                {...(failure.state.kind === 'runtime' ? { onRetry: retry } : {})}
+                            />
+                        </div>
+                    ) : null}
                     {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
                     <div data-chat-composer onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>
                         <Composer
