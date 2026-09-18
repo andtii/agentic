@@ -34,6 +34,12 @@ export interface TaskContract {
     /** Free text or a JSON Schema the result must satisfy. */
     readonly expected?: string | JsonSchemaObject;
     readonly environmentId?: EnvironmentId;
+    /**
+     * The folder the task's session runs in (#185): absolute, machine-native, within
+     * the `cwdRoots` of `environmentId` — which it requires. Absent: the router picks
+     * (a delegating parent's folder, the agent's `defaultWorkdir`, else the first root).
+     */
+    readonly workdir?: string;
 }
 
 export type JsonSchemaObject = { readonly type: 'object'; readonly [key: string]: unknown };
