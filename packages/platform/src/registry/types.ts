@@ -41,7 +41,25 @@ export interface ConnectorStatus {
     readonly error?: string;
 }
 
-/** A configured MCP server (architecture §9). `pluginId` names the manifest it was registered under. */
+/**
+ * Where each of a connector's secrets goes — secret NAMES only (decisions
+ * 2026-09-19 (a)): the values are opened from the Registry when a session
+ * opens, under the connector plugin's `secret:<name>` grants.
+ */
+export interface ConnectorAuth {
+    /** Sent as `Authorization: Bearer <value>` (Streamable HTTP). */
+    readonly bearer?: string;
+    /** Header name → secret name (Streamable HTTP). */
+    readonly headers?: Readonly<Record<string, string>>;
+    /** Environment variable → secret name (stdio). */
+    readonly env?: Readonly<Record<string, string>>;
+}
+
+/**
+ * A configured MCP server (architecture §9). `pluginId` names the manifest it
+ * was registered under — by convention the same id (`mcpConnectorSetup`), which
+ * is also what an agent's `connectors[]` names.
+ */
 export interface ConnectorRecord {
     readonly id: string;
     readonly pluginId: string;
@@ -54,7 +72,12 @@ export interface ConnectorRecord {
     readonly machine?: string;
     /** Secret names the connector reads (each needs a `secret:<name>` grant on its plugin). */
     readonly secrets?: readonly string[];
-    /** Tool names discovered on the last successful `tools/list`. */
+    /**
+     * Where each secret goes. Absent on a record written before #240: an http
+     * connector then sends its first `secrets` entry as the bearer token.
+     */
+    readonly auth?: ConnectorAuth;
+    /** Tool names discovered on the last successful `tools/list`, as sessions see them (`<id>__<tool>`). */
     readonly tools: readonly string[];
     readonly status: ConnectorStatus;
     readonly updatedAt: number;
@@ -111,6 +134,30 @@ export interface RegistryGate {
     readonly learning: GateEntry | null;
     /** Enabled `notification` plugins, id order. */
     readonly channels: readonly { readonly id: string; readonly config: Record<string, unknown> }[];
+    /** One answer per connector asked for (`gate({ connectors })`), in the order asked; absent when none was. */
+    readonly connectors?: readonly GateConnector[];
+}
+
+/**
+ * A connector an agent names, as `gate()` found it (#240): `ready` — the
+ * record exists and its plugin is installed and on; `disabled` — the plugin
+ * is turned off; `missing` — no such connector, or its plugin is gone. A
+ * ready one carries what a session needs to open it, secret NAMES only.
+ */
+export interface GateConnector {
+    readonly id: string;
+    readonly state: 'ready' | 'disabled' | 'missing';
+    readonly pluginId?: string;
+    readonly transport?: ConnectorTransport;
+    /** Streamable HTTP endpoint: the plugin's `config.url` when set, else the record's. */
+    readonly url?: string;
+    readonly command?: string;
+    readonly args?: readonly string[];
+    readonly machine?: string;
+    readonly auth?: ConnectorAuth;
+    /** What the last open or probe found, so a session reports only a change. */
+    readonly tools?: readonly string[];
+    readonly status?: ConnectorStatus;
 }
 
 /** One read for a page: every plugin, the active slots, which secrets are set (names only). */

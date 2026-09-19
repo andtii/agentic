@@ -53,6 +53,14 @@ describe('buildSystemPrompt', () => {
         expect(prompt).not.toContain('## Memory');
         expect(prompt).toContain('You have no tools in this session.');
     });
+    it('names the connectors this session runs without, and why, after the tools and before memory (#240)', () => {
+        const prompt = buildSystemPrompt({ config: frozenConfig(), tools: ['memory_search'], memories: [memoryEntry], unavailableConnectors: [{ id: 'acme', reason: 'its plugin is turned off (/plugins/acme)' }] });
+        expect(prompt).toContain('## Connectors not available');
+        expect(prompt).toContain('- acme: its plugin is turned off (/plugins/acme)');
+        expect(prompt.indexOf('## Tools')).toBeLessThan(prompt.indexOf('## Connectors not available'));
+        expect(prompt.indexOf('## Connectors not available')).toBeLessThan(prompt.indexOf('## Memory'));
+        expect(buildSystemPrompt({ config: frozenConfig(), tools: ['memory_search'] })).not.toContain('Connectors not available');
+    });
     it('is stable across calls with the same input (a cacheable prefix)', () => {
         const input = { config: frozenConfig(), tools: ['memory_search'], memories: [memoryEntry] };
         expect(buildSystemPrompt(input)).toBe(buildSystemPrompt(input));

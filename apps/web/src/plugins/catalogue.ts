@@ -12,6 +12,7 @@
  * - `runtimeCatalogue(options)` → both `createSessionFactory({ runtimes })`
  *   and `defineRoutingActor({ runtimes })`: `anthropic-api` runs in-process
  *   with its key from the workspace's `anthropic-api-key` Registry secret,
+ *   and opens the agent's MCP connectors with `openMcpConnector` (#240);
  *   `claude-code` on a machine's daemon.
  *
  * Memory and learning are still wired statically (`platformLearningPorts`);
@@ -20,6 +21,7 @@
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, RuntimeCatalogue } from '@agentic/platform';
 import { anthropicApiRuntime } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
+import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 
@@ -29,7 +31,7 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, c
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
     return {
-        [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime(options),
+        [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
         [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
     };
 }
