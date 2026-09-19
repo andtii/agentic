@@ -145,7 +145,31 @@ function fakePlatform() {
             search: async () => [],
             remember: async (_scope, entry) => ({ ...entry, id: 'mem_1', provenance: { ...entry.provenance, at: 1 } })
         },
-        schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) }
+        schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) },
+        usage: {
+            limits: async (query) => ({
+                accounts: [
+                    {
+                        machineId: ENV.machineId,
+                        machineName: 'laptop',
+                        online: true,
+                        environmentId: ENV.id,
+                        runtime: 'claude-code',
+                        account: { label: ENV.account.label },
+                        snapshot: {
+                            sourceId: 'agentic.quota.claude-code',
+                            runtime: 'claude-code',
+                            environmentId: ENV.id,
+                            availability: 'reported',
+                            windows: [{ id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.76, unit: 'percent', resetsAt: '2026-09-22T18:00:00.000Z', status: 'ok' }],
+                            observedAt: 1,
+                            via: 'probe'
+                        },
+                        ageMs: 60_000
+                    }
+                ].filter((a) => (query.machineId === undefined || a.machineId === query.machineId) && (query.runtime === undefined || a.runtime === query.runtime)) as never
+            })
+        }
     });
     return { port, opened, prompts, delegated, fileAccess };
 }
@@ -289,7 +313,8 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
                 'chats_file_get',
                 'memory_search',
                 'memory_remember',
-                'schedules_create'
+                'schedules_create',
+                'usage_limits'
             ].sort()
         );
         const byName = new Map(tools.map((t) => [t.name, t]));
@@ -389,6 +414,23 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
         expect(unknown.isError).toBe(true);
         expect(PLATFORM_MCP_UNSUPPORTED.map((u) => u.op)).toEqual(['resources', 'prompts']);
         await client.close();
+    });
+
+    it('usage_limits lists every account with its windows and resetsAt, narrowed on request, under the usage scope (#272)', async () => {
+        const principal: ExternalPrincipal = { kind: 'external', workspaceId: 'gh_1' as WorkspaceId, clientId: 'oac_x', scopes: ['usage'] };
+        const tools = platformTools(fakePlatform().port(principal), principal);
+        const ctx = { signal: new AbortController().signal, toolCallId: 'c1' };
+        const limits = tools.find((t) => t.name === 'usage_limits')!;
+        expect(limits.annotations).toEqual({ readOnly: true, idempotent: true });
+        expect(limits.description).toMatch(/resetsAt/);
+        expect(limits.description).toMatch(/ageMs/);
+        const all = (await limits.run({}, ctx)) as { accounts: { environmentId: string; snapshot: { windows: { resetsAt: string }[] } }[] };
+        expect(all.accounts.map((a) => [a.environmentId, a.snapshot.windows[0]!.resetsAt])).toEqual([['env_laptop', '2026-09-22T18:00:00.000Z']]);
+        expect(((await limits.run({ machineId: 'm_other' }, ctx)) as { accounts: unknown[] }).accounts).toEqual([]);
+        expect(((await limits.run({ runtime: 'anthropic-api' }, ctx)) as { accounts: unknown[] }).accounts).toEqual([]);
+        const without: ExternalPrincipal = { ...principal, scopes: ['machines'] };
+        await expect(platformTools(fakePlatform().port(without), without).find((t) => t.name === 'usage_limits')!.run({}, ctx)).rejects.toThrow(/"usage" scope/);
+        expect(scopeOfTool('usage_limits')).toBe('usage');
     });
 
     it('platformTools gates every family by its scope, before touching the port', async () => {

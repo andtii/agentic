@@ -172,6 +172,17 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             run: (input) => port.environments.list(input.machineId as MachineId | undefined)
         }),
         tool({
+            name: 'usage_limits',
+            scope: 'usage',
+            description:
+                'How close each account (a machine’s environment) is to its provider’s usage limits, e.g. Claude Code’s current session and current week: per window `utilization` (0..1), `status` (ok | warning | exhausted | unknown) and `resetsAt` (ISO). ' +
+                'Use it to choose an environment with headroom before sessions_open. Weigh each window’s `resetsAt` (an exhausted window that resets soon may be fine for later work) and the snapshot’s `ageMs` (an old snapshot, or one from an offline machine, may no longer be true). ' +
+                '`snapshot: null` means nothing reported yet; `availability: "not-reported"` comes with a `reason`. Informational only: nothing is switched for you.',
+            input: z.object({ machineId: id('Limit to this machine.').optional(), runtime: z.string().min(1).optional().describe('Limit to one runtime, e.g. claude-code.') }),
+            annotations: READ,
+            run: (input) => port.usage.limits({ ...(input.machineId ? { machineId: input.machineId as MachineId } : {}), ...(input.runtime ? { runtime: input.runtime } : {}) })
+        }),
+        tool({
             name: 'environments_doctor',
             scope: 'environments',
             description: 'The daemon’s doctor verdicts (isolation, account auth — EXE-05/07) for one machine’s environments, as last reported; `unverified` lists environments the daemon sent no verdict for.',
@@ -447,5 +458,5 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
 /** The scope a tool name belongs to — `<family>_<op>`. */
 export function scopeOfTool(name: string): Scope | null {
     const family = name.split('_')[0];
-    return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' ? family : null;
+    return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' || family === 'usage' ? family : null;
 }

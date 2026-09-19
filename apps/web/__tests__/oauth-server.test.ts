@@ -170,6 +170,30 @@ describe('apps/web OAuth server + MCP mount', () => {
         expect((await rpc(token, 'tools/list')).status).toBe(401);
     });
 
+    it('usage_limits under the usage scope alone lists each account with the snapshot its machine reported (#272)', async () => {
+        const ws = app.as(userPrincipal('gh_1')).actor(Workspace, workspaceKey(WS));
+        const { machineId, pairingCode } = await ws.registerMachinePending({ name: 'laptop' });
+        const Machine = registry(files).find((d) => (d as { type?: string }).type === 'machine')!;
+        const daemon = app.as({ kind: 'machine', workspaceId: WS, machineId }).actor(Machine as never, `${WS}:machine:${machineId}`) as unknown as { pair(code: string, info: object): Promise<unknown>; socketMessage(raw: string): Promise<unknown> };
+        await daemon.pair(pairingCode, { name: 'laptop', os: 'windows', daemonVersion: '0.1.0' });
+        const env = { id: 'env_work', machineId, name: 'work', runtime: 'claude-code', account: { label: 'work', authStatus: 'ok', identity: 'me@example.com' }, cwdRoots: ['/work'], concurrency: { max: 1, active: 0 }, isolation: 'config-dir' };
+        await daemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId, daemonVersion: '0.1.0', os: 'windows', environments: [env], capabilities: [], resume: {} }));
+        const snapshot = { sourceId: 'agentic.quota.claude-code', runtime: 'claude-code', environmentId: 'env_work', plan: 'max', availability: 'reported', windows: [{ id: 'five_hour', label: 'Current session', period: 'session', utilization: 0.19, unit: 'percent', resetsAt: '2026-09-19T11:10:00.000Z', status: 'ok' }], observedAt: Date.now() - 1_000, via: 'probe' };
+        await daemon.socketMessage(JSON.stringify({ v: 1, t: 'quota', environmentId: 'env_work', snapshot }));
+
+        const token = await accessToken(['usage']);
+        const res = await rpc(token, 'tools/call', { name: 'usage_limits', arguments: {} });
+        expect(res.body.result).not.toMatchObject({ isError: true });
+        const { accounts } = JSON.parse((res.body.result as { content: { text: string }[] }).content[0]!.text) as { accounts: { machineName: string; environmentId: string; account: object; snapshot: { windows: { resetsAt: string }[] }; ageMs: number }[] };
+        expect(accounts).toHaveLength(1);
+        expect(accounts[0]).toMatchObject({ machineName: 'laptop', environmentId: 'env_work', account: { label: 'work', identity: 'me@example.com' } });
+        expect(accounts[0]!.snapshot.windows[0]!.resetsAt).toBe('2026-09-19T11:10:00.000Z');
+        expect(accounts[0]!.ageMs).toBeGreaterThanOrEqual(1_000);
+        // Without `usage` the family is refused.
+        const other = await rpc(await accessToken(['machines']), 'tools/call', { name: 'usage_limits', arguments: {} });
+        expect((other.body.result as { content: { text: string }[] }).content[0]!.text).toContain('"usage" scope');
+    });
+
     it('chats_file_get reads a posted attachment through Chat.fileAccess and the store the actors share (#209)', async () => {
         const chatId = 'c1' as ChatId;
         const file: ChatFile = { id: 'f_notes', chatId, name: 'notes.txt', mediaType: 'text/plain', bytes: 5, at: 1 };

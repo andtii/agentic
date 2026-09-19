@@ -81,3 +81,17 @@ Setting up a runtime meant editing files: a deployment-wide `ANTHROPIC_API_KEY` 
     - `profileDir` is never accepted over the wire — the frame's type has no such field. The daemon allocates it (`<configDir>/profiles/<environmentId>`), and it still never leaves the machine (decision 3).
     - The runtime must be one the daemon has a driver for; removal is refused while the environment has active sessions; every put and remove is audited with the requested roots.
   - **What stays local.** Signing in to the runtime (EXE-10): the page shows `authStatus` and the command to run (`agentic-daemon env login <id>`), never a path. The file and the CLI (`agentic-daemon env add | list | rm`) stay first-class: a machine with the policy off is set up entirely from its own terminal, without hand-editing JSON and without a restart.
+
+## 2026-09-19 — provider usage limits per account (#261)
+
+With several Claude Code accounts connected, neither a person nor an orchestrating AI could see how close each account is to its plan limits. `claude` → `/usage` shows it, and OPS-07 asks for it.
+
+- **Quota is not the Ledger.** The Ledger records what was consumed ($, tokens). A quota snapshot records what is left, as the provider reports it (`QuotaWindow`: utilization 0..1, reset time, status). They are separate types, and the words differ too: "usage" stays the Ledger's word, "quota" is the new concept. The MCP/OAuth scope is still named `usage`, so a later `usage_summary` over the Ledger can live beside `usage_limits`.
+- **One source per runtime; not single-slot.** `quota` is a plugin kind (`QuotaSource`: `probe?`, `fromSignal?`). Every runtime brings its own source, and all enabled sources run, so `quota` is not in `SINGLE_SLOT_KINDS`. Only normalized snapshots cross package boundaries and the wire; credentials and profile paths stay on the machine (EXE-10).
+- **v1 is Claude Code subscriptions.** `anthropic-api` reports `not-reported` with its reason (per-minute rate limits, not a plan allowance), never an empty bar (PLG-09).
+- **The probe uses an experimental SDK call, behind a flag.** Freshness comes from two places:
+  - the rate-limit events of running sessions, which are passive and always on
+  - an idle-account probe through the Agent SDK's `usage_EXPERIMENTAL_…` call on a query that is never prompted
+
+  The spike measured the probe on four local profiles: no model call, cost 0, no leftover process, 0.25–0.9 s. It ships **on**. `agentic-daemon run --quota-probe off` leaves the stream only, and the probe returns `null` on any failure, so an SDK change degrades to passive rather than breaking.
+- **No automatic account switching (EXE-12).** The limits are information for planning. `usage_limits` and the UI never move or re-place work; the caller chooses an environment explicitly, as `sessions_open` already requires.

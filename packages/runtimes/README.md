@@ -74,6 +74,7 @@ Both are normalized to 0..1. Only normalized snapshots leave the machine. Record
 | `chat_file_read` | `ChatFilesPort.read` (`PlatformPorts.files`, #203): `{ uri }` an `agentic-file:` URI; a text file returns `{ name, mediaType, bytes, text }` (`truncated` + a note past 256 KB), any other file a `note` naming it as binary (an image: attached to the turn when it fits); no `files` port fails the call | `readOnly`, `idempotent` |
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |
+| `usage_limits` | `UsagePort.limits` (`PlatformPorts.usage`, #272): `{ machineId?, runtime? }` → core `UsageLimits`, every account's latest quota snapshot and its age; no `usage` port fails the call | `readOnly`, `idempotent` |
 
 `platformTools(ports)` gives all seven; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
