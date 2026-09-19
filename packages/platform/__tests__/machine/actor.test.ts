@@ -822,3 +822,81 @@ describe('Machine environment management (#237, EXE-03/04, OPS-01/03)', () => {
         expect(await statusOf(machine(K1).envResult(ids[1]!))).toBe(404);
     });
 });
+
+describe('Machine quota (#268, OPS-07)', () => {
+    const win = (id: string, utilization: number, status = 'ok') => ({ id, label: id, period: 'week', utilization, unit: 'percent', status });
+    const snapshot = (environmentId: EnvironmentId, windows: object[], extra: object = {}) => ({ sourceId: 'agentic.quota.claude-code', runtime: 'claude-code', environmentId, availability: 'reported', windows, observedAt: Date.now(), via: 'probe', ...extra });
+    const hello = (environments = [inMemoryEnvironment(M1, E1), inMemoryEnvironment(M1, E2)]) => JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments, capabilities: [], resume: {} });
+
+    /** A daemon this test speaks for by hand. */
+    async function rawDaemon() {
+        sockets.connected.add(K1);
+        const asDaemon = machine(K1, asMachine(M1));
+        await asDaemon.socketMessage(hello());
+        const quota = (environmentId: EnvironmentId, windows: object[], extra: object = {}) => asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'quota', environmentId, snapshot: snapshot(environmentId, windows, extra) }));
+        return { asDaemon, quota };
+    }
+
+    it('stores a probe snapshot, merges a stream update into it, and saves in the turn', async () => {
+        const { quota } = await rawDaemon();
+        expect((await machine().get()).quota).toBeUndefined();
+        expect(await quota(E1, [win('five_hour', 0.19), win('seven_day', 0.76)], { plan: 'max' })).toMatchObject({ ok: true, t: 'quota' });
+        await quota(E1, [win('five_hour', 0.9, 'warning')], { availability: 'partial', via: 'stream' });
+        const stored = (await machine().get()).quota![E1]!;
+        expect(stored.windows.map((w) => [w.id, w.utilization, w.status])).toEqual([
+            ['five_hour', 0.9, 'warning'],
+            ['seven_day', 0.76, 'ok']
+        ]);
+        expect(stored).toMatchObject({ plan: 'max', availability: 'reported', via: 'stream' });
+        const saved = (await app.storage.load('machine', K1))!.state as { quota?: Record<string, unknown> };
+        expect(saved.quota?.[E1]).toEqual(stored);
+    });
+
+    it('quota() lists every environment, null until reported; one environment on request, 404 for an unknown one', async () => {
+        const { quota } = await rawDaemon();
+        await quota(E2, [], { availability: 'not-reported', reason: 'API-key login' });
+        const view = await machine().quota();
+        expect(view).toMatchObject({ machineId: M1, online: true });
+        expect(view.environments.map((e) => [e.environmentId, e.snapshot?.availability ?? null])).toEqual([
+            [E1, null],
+            [E2, 'not-reported']
+        ]);
+        expect((await machine().quota(E2)).environments).toHaveLength(1);
+        expect(await statusOf(machine().quota('env_nope' as EnvironmentId))).toBe(404);
+    });
+
+    it('ignores a snapshot for an environment the machine does not report, and prunes one whose environment is dropped', async () => {
+        const { asDaemon, quota } = await rawDaemon();
+        await quota('env_nope' as EnvironmentId, [win('five_hour', 0.5)]);
+        expect((await machine().get()).quota).toBeUndefined();
+        await quota(E1, [win('five_hour', 0.5)]);
+        await quota(E2, [win('five_hour', 0.6)]);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'env', environments: [inMemoryEnvironment(M1, E1)] }));
+        expect(Object.keys((await machine().get()).quota!)).toEqual([E1]);
+        await asDaemon.socketMessage(hello([inMemoryEnvironment(M1, E2)]));
+        expect((await machine().get()).quota).toBeUndefined();
+    });
+
+    it('keeps the last snapshot while the machine is offline', async () => {
+        const { asDaemon, quota } = await rawDaemon();
+        await quota(E1, [win('seven_day', 0.76)]);
+        await asDaemon.socketClosed();
+        const view = await machine().quota(E1);
+        expect(view.online).toBe(false);
+        expect(view.environments[0]!.snapshot?.windows[0]?.utilization).toBe(0.76);
+    });
+
+    it('is read under the machines reader rule: an external client needs the machines scope', async () => {
+        await rawDaemon();
+        const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['usage'] };
+        expect(await statusOf(app.as(external).actor(Machine, K1).quota())).toBe(403);
+        expect(await statusOf(app.as({ ...external, scopes: ['machines'] }).actor(Machine, K1).quota())).toBeUndefined();
+        expect(await statusOf(app.as(userPrincipal('u2')).actor(Machine, K1).quota())).toBe(403);
+    });
+
+    it('a real daemon reports its limits once welcomed', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine().get()).quota?.[E1] !== undefined, 'the in-memory daemon quota frame');
+        expect((await machine().get()).quota![E1]).toMatchObject({ availability: 'not-reported', via: 'probe' });
+    });
+});

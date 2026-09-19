@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -118,6 +118,12 @@ export interface MachineState {
     envRequests?: Record<string, EnvRequestRecord>;
     /** The machine-local policy the daemon last reported (`hello` / `env`); absent when it reports none (it predates web-managed environments). */
     policy?: MachinePolicy;
+    /**
+     * Each environment's provider limits as the daemon last reported them (`quota` frames, #261), merged with `mergeQuota`;
+     * kept while the machine is offline (readers judge staleness from `observedAt`), dropped with the environment.
+     * Absent on a record saved before #268.
+     */
+    quota?: Record<string, QuotaSnapshot>;
     /** The most recent closures, newest last (capped). */
     closures: SessionClosure[];
     /** Daemon messages refused by the protocol codec since pairing. */
@@ -190,6 +196,12 @@ export function advances(cursor: Cursor | undefined, at: Cursor): boolean {
  */
 export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = true): void {
     prune(fs, at, room, FS_RESULT_TTL_MS, MAX_FS_REQUESTS);
+}
+
+/** Drop the quota snapshots of environments the machine no longer reports. */
+export function pruneQuota(s: MachineState): void {
+    if (!s.quota) return;
+    for (const id of Object.keys(s.quota)) if (!s.environments.some((e) => e.id === id)) delete s.quota[id];
 }
 
 /** `pruneFs` for environment requests: the same TTL-then-oldest rule over `ENV_RESULT_TTL_MS` / `MAX_ENV_REQUESTS`. */
