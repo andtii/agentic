@@ -34,3 +34,4 @@ export { OUTCOME_TEXT_LIMIT, isVerified, recordFromOutcome, lessonFromOutcome } 
 
 export type { LearningPluginOptions } from './plugin/index.js';
 export { learningPlugin, DEFAULT_LEARNING_PLUGIN_ID, DEFAULT_LEARNING_PLUGIN_VERSION } from './plugin/index.js';
+export { learningDefaultPlugin } from './manifest.js';

@@ -1,6 +1,6 @@
-/** `WorkspaceSettings` ⇄ the draft a `SettingsForm` edits; the same pair of paths as `agent-model.ts`. */
+/** `SettingsFormValue` ⇄ the draft a `SettingsForm` edits; the same pair of paths as `agent-model.ts`. */
 
-import type { EnvironmentId, NotificationKind, WorkspaceSettings } from '@agentic/core';
+import type { EnvironmentId, NotificationKind } from '@agentic/core';
 import { NOTIFICATION_KINDS } from '@agentic/core';
 import { flag, text } from './form-data.js';
 
@@ -11,6 +11,17 @@ export const SETTINGS_FIELDS = {
     environment: 'default-environment'
 } as const;
 
+/**
+ * What a `SettingsForm` edits: per-kind notification switches and a default environment. Its own shape —
+ * core's `WorkspaceSettings` is the one the Workspace actor stores (#227), which the live Settings page edits directly.
+ */
+export interface SettingsFormValue {
+    /** IANA time zone name (`Europe/Stockholm`). */
+    readonly timeZone: string;
+    readonly notifications: { readonly kinds: Readonly<Record<NotificationKind, boolean>>; readonly push: boolean };
+    readonly defaultEnvironmentId?: EnvironmentId;
+}
+
 export interface SettingsDraft {
     timeZone: string;
     kinds: Record<NotificationKind, boolean>;
@@ -20,14 +31,14 @@ export interface SettingsDraft {
 
 export type SettingsErrors = Partial<Record<'timeZone', string>>;
 
-export function defaultWorkspaceSettings(timeZone = 'UTC'): WorkspaceSettings {
+export function defaultSettingsFormValue(timeZone = 'UTC'): SettingsFormValue {
     return {
         timeZone,
         notifications: { kinds: Object.fromEntries(NOTIFICATION_KINDS.map((k) => [k, true])) as SettingsDraft['kinds'], push: false }
     };
 }
 
-export function toSettingsDraft(settings: WorkspaceSettings): SettingsDraft {
+export function toSettingsDraft(settings: SettingsFormValue): SettingsDraft {
     return {
         timeZone: settings.timeZone,
         kinds: { ...settings.notifications.kinds },
@@ -36,7 +47,7 @@ export function toSettingsDraft(settings: WorkspaceSettings): SettingsDraft {
     };
 }
 
-export function fromSettingsDraft(draft: SettingsDraft): WorkspaceSettings {
+export function fromSettingsDraft(draft: SettingsDraft): SettingsFormValue {
     return {
         timeZone: draft.timeZone.trim(),
         notifications: { kinds: { ...draft.kinds }, push: draft.push },
@@ -55,7 +66,7 @@ export function settingsDraftFromFormData(fd: FormData): SettingsDraft {
 }
 
 /** Parse a posted settings form straight to its settings (the server-side path). */
-export function parseSettingsFormData(fd: FormData, zones?: readonly string[]): { settings: WorkspaceSettings; errors: SettingsErrors } {
+export function parseSettingsFormData(fd: FormData, zones?: readonly string[]): { settings: SettingsFormValue; errors: SettingsErrors } {
     const draft = settingsDraftFromFormData(fd);
     return { settings: fromSettingsDraft(draft), errors: validateSettingsDraft(draft, zones) };
 }
