@@ -7,14 +7,14 @@
  * Real Session, Memory and Agent actors; `mockAgent` as the runtime.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, type AgentId, type FrozenAgentConfig, type MemoryPlugin, type MemoryScope, type MessageId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type FrozenAgentConfig, type MemoryScope, type MessageId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { learningPlugin, memoryCorrectionLedger } from '@agentic/learning';
-import { flatMemoryPlugin, memoryDefaultPlugin } from '@agentic/memory';
+import { memoryDefaultPlugin } from '@agentic/memory';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 
 import { AgentActor } from '../src/agent/index';
-import { isolateMemoryImpl, MAX_RETRIEVAL_LIMIT, Memory, memoryActorImpl, memoryActorKey, retrievalFromConfig } from '../src/memory/index';
+import { FlatMemory, flatMemoryActorImpl, MAX_RETRIEVAL_LIMIT, Memory, memoryActorImpl, memoryActorKey, retrievalFromConfig } from '../src/memory/index';
 import type { RegistryGate } from '../src/registry/index';
 import { createActorToolPorts, createToolCallPort, type AgentPrincipal } from '../src/routing/index';
 import { defineSessionActor, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
@@ -69,7 +69,6 @@ const spec = (taskId: string, plugins?: RegistryGate): SessionOpenSpec => ({
 
 let app: TestActorApp;
 let Session: ReturnType<typeof defineSessionActor>;
-let flat: MemoryPlugin;
 let ports: LearningPorts;
 
 const factory: SessionFactory = async (runtime, c) => {
@@ -80,25 +79,24 @@ const factory: SessionFactory = async (runtime, c) => {
 };
 
 beforeEach(() => {
-    flat = flatMemoryPlugin();
     const ledger = memoryCorrectionLedger();
     ports = platformLearningPorts({
         // The static wiring a spec without a gate still gets.
         plugin: () => learningPlugin({ now: () => T, ledger }),
-        memoryPlugins: { [MEM]: memoryActorImpl(), [FLAT]: isolateMemoryImpl(() => flat) },
+        memoryPlugins: { [MEM]: memoryActorImpl(), [FLAT]: flatMemoryActorImpl() },
         learningPlugins: {
             [LRN]: (c) => () => learningPlugin({ now: () => T, ledger, repeatThreshold: c['repeatThreshold'] as number, contextFor: () => ({ objective: OBJECTIVE }) })
         }
     });
     Session = defineSessionActor({ factory, now: () => T, learning: ports });
-    app = testActorApp([Session, Memory, AgentActor]);
+    app = testActorApp([Session, Memory, FlatMemory, AgentActor]);
     return app.start();
 });
 afterEach(() => app.stop());
 
 const session = (id: string) => app.as(owner).actor(Session, actorKey(WS, 'session', id));
 const memory = (scope: MemoryScope = `agent:${AGENT}`) => app.as(owner).actor(Memory, memoryActorKey(WS, scope));
-const flatStore = () => flat.open(`agent:${AGENT}`, { now: () => T, log: () => {} });
+const flatStore = (scope: MemoryScope = `agent:${AGENT}`) => app.as(owner).actor(FlatMemory, memoryActorKey(WS, scope));
 
 async function remember(n: number): Promise<void> {
     for (let i = 1; i <= n; i++) {
@@ -201,10 +199,24 @@ describe('the active memory and learning plugins (#242)', () => {
         expect(await memory().query({ kinds: ['record'], limit: 10 })).toEqual([]);
     });
 
-    it('flat active: a shared scope is refused (it has no access control) and listed as skipped', async () => {
-        const shared = { ...spec('task_1', gate({ memory: { id: FLAT, enabled: true, config: {} } })), config: { ...config, memoryPolicy: { shared: ['team'], autoLearn: 'lessons' as const } } };
-        const opened = await session('s1').open(shared);
-        expect(opened.spec?.retrieval?.skipped).toEqual([{ scope: 'shared:team', reason: expect.stringContaining('needs the default memory plugin') as string }]);
+    it('flat active: a shared scope obeys its ACL — the Memory actor’s — like the default (#281)', async () => {
+        await flatStore('shared:team').put({ kind: 'fact', text: 'team release rule', tags: ['release'], confidence: 'verified', provenance: { source: 'user' } });
+        const shared = (taskId: string) => ({ ...spec(taskId, gate({ memory: { id: FLAT, enabled: true, config: { retrievalLimit: 8 } } })), config: { ...config, memoryPolicy: { shared: ['team'], autoLearn: 'lessons' as const } } });
+
+        // No grant on the scope: the agent may not read it, so it is skipped.
+        const refused = await session('s1').open(shared('task_1'));
+        expect(refused.spec?.retrieval?.skipped.map((s) => s.scope)).toEqual(['shared:team']);
+        expect(refused.spec?.memories).toEqual([]);
+
+        // Granted on the scope's Memory actor, the flat store lets the agent read — and still not write.
+        await memory('shared:team').setAcl({ read: [AGENT], write: [] });
+        const granted = await session('s2').open(shared('task_2'));
+        expect(granted.spec?.retrieval?.skipped).toEqual([]);
+        expect(granted.spec?.memories?.map((m) => m.text)).toEqual(['team release rule']);
+        const asAgent = app.as({ kind: 'agent', workspaceId: WS, agentId: AGENT, sessionId: 's2' as SessionId });
+        await expect(
+            asAgent.actor(FlatMemory, memoryActorKey(WS, 'shared:team')).put({ kind: 'fact', text: 'x', tags: [], confidence: 'stated', provenance: { source: 'agent' } })
+        ).rejects.toMatchObject({ status: 403 });
     });
 
     it('an active plugin this build does not implement is off, and says so', async () => {

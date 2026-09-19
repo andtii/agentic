@@ -27,7 +27,8 @@ pnpm --filter @agentic/web test:e2e    # Playwright smoke at 400px and 1280px (s
 - `src/styles.css` (document surface) and `src/styles/pages.css` (per-screen grids, one section per page).
 - `src/entry-client.tsx` / `src/entry-server.tsx` — import `@agentic/ui/css` (after `@sigx/zero/css`), call `installThemes()` from `@agentic/ui/design-system`, build the app.
 - `src/api/*.server.ts` — server functions (only ever run on the server).
-- `src/entry.cloudflare.ts` — the Worker: daemon socket stub → auth routes → actor mount + sockets → server functions → document render; exports `ActorHost`.
+- `src/entry.cloudflare.ts` — the Worker: daemon socket stub → auth routes → the A2A mount → actor mount + sockets → server functions → document render; exports `ActorHost`.
+- `src/a2a/` — the A2A server as a plugin (#245): `mount.ts` answers `/.well-known/agent-card.json` and `/_agentic/a2a/*` for a workspace whose `agentic.a2a.server` plugin is on (404 otherwise; bearer = an OAuth access token with `tasks` + `sessions`); `session.ts` turns each A2A task into a platform task.
 - `src/actors.app.ts` — the platform actor registry, the `ActorHost` Durable Object class, the Worker half, and the ports later issues fill (`defaultPorts`).
 - `__tests__/workers/` — workerd tests over the HTTP actor mount (workspace + agent + chat, eviction, 401/403, `memoryConformance` on Durable Object storage); own `tsconfig.json`, excluded from the root typecheck and `pnpm test`.
 - `__tests__/acceptance/` — the acceptance suite (`docs/acceptance.md`): one file per §17 scenario; `*.workers.test.ts` run in workerd (`vitest.acceptance.config.ts`, own `tsconfig.json`), the rest in process on the app's own registry (`host.ts`) or the live page harness.

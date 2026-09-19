@@ -10,13 +10,44 @@ import { useActorState } from '@sigx/actors/app';
 import type { AgentId, MemoryEntry } from '@agentic/core';
 import type { AgentView, PendingProposal, TaskIndexRow } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { agentKeyOf, ledgerKeyOf, memoryKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { agentKeyOf, ledgerKeyOf, memoryKeyOf, registryKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { activeTasks, isoWeekOf, weekMonths, type AgentActivity } from './live';
 
 /** Entries read per `Memory.exportPage` call. */
 export const MEMORY_PAGE = 200;
 /** Most entries the Memory tab lists; a scope past it shows its first `MEMORY_LIMIT` by id. */
 export const MEMORY_LIMIT = 2000;
+
+/** The flat memory plugin's id (`FLAT_MEMORY_PLUGIN_ID`; a literal, so `@agentic/memory` stays out of the client bundle). */
+export const FLAT_MEMORY_PLUGIN = 'agentic.memory.flat';
+
+export interface ActiveMemory {
+    /** The flat plugin is the workspace's active memory: its FlatMemory actors hold what the agents remember. */
+    flat(): boolean;
+    /** The active memory plugin's name; `undefined` until the Registry answers. */
+    name(): string | undefined;
+}
+
+/**
+ * Which store the agent pages read (#281): the workspace's ACTIVE memory plugin's — the FlatMemory actor of the scope
+ * while the flat plugin is active, the Memory actor otherwise (and until the Registry answers). The two share the key
+ * and the method table, so only the definition differs.
+ */
+export function useActiveMemory(defs: Pick<ActorDefs, 'Registry'>, viewer: Pick<ViewerState, 'workspaceId'>): ActiveMemory {
+    const overview = useActorState(defs.Registry, () => { const ws = viewer.workspaceId; return ws && ([registryKeyOf(ws), 'overview'] as const); }, { live: true });
+    const active = (): string | undefined => overview.value?.active.memory;
+    return {
+        flat: () => active() === FLAT_MEMORY_PLUGIN,
+        name: () => { const id = active(); return id ? overview.value?.plugins.find((p) => p.manifest.id === id)?.manifest.name : undefined; }
+    };
+}
+
+/** A scope's live `stats` from whichever store is active: one read per store, the idle one never asked. */
+function useMemoryStats(defs: Pick<ActorDefs, 'Memory' | 'FlatMemory'>, active: ActiveMemory, key: () => string | null | undefined) {
+    const main = useActorState(defs.Memory, () => { const k = key(); return !!k && !active.flat() && ([k, 'stats'] as const); }, { live: true });
+    const flat = useActorState(defs.FlatMemory, () => { const k = key(); return !!k && active.flat() && ([k, 'stats'] as const); }, { live: true });
+    return () => (active.flat() ? flat.value : main.value);
+}
 
 export interface AgentCorrections {
     /** Corrections in the current ISO week. */
@@ -50,10 +81,11 @@ export function useAgentCorrections(defs: ActorDefs, viewer: ViewerState, agentI
     return { week: () => sum(all), wrong: () => sum(wrong) };
 }
 
-/** How many entries of the agent's private scope are live — the roster's count. */
+/** How many entries of the agent's private scope are live, in the active memory plugin's store — the roster's count. */
 export function useMemoryCount(defs: ActorDefs, viewer: ViewerState, agentId: () => string): () => number {
-    const stats = useActorState(defs.Memory, () => viewer.workspaceId && ([memoryKeyOf(viewer.workspaceId, `agent:${agentId()}`), 'stats'] as const), { live: true });
-    return () => stats.value?.live ?? 0;
+    const active = useActiveMemory(defs, viewer);
+    const stats = useMemoryStats(defs, active, () => viewer.workspaceId && memoryKeyOf(viewer.workspaceId, `agent:${agentId()}`));
+    return () => stats()?.live ?? 0;
 }
 
 /**
@@ -70,6 +102,8 @@ export function useWorkspaceTasks(defs: ActorDefs, viewer: ViewerState): () => T
 export interface AgentActivityRead {
     /** The folded reads; absent parts read as idle / empty / zero. */
     activity(): AgentActivity;
+    /** The workspace's active memory plugin — the store the Memory tab lists and acts on (#281). */
+    memory: ActiveMemory;
     /** A read the tabs copy at mount (the pending proposal) has not answered yet. */
     pending(): boolean;
 }
@@ -80,13 +114,16 @@ export function useAgentActivity(defs: ActorDefs, viewer: ViewerState, agentId: 
     const tasks = (): TaskIndexRow[] => index().filter((r) => r.assignee === agentId());
     const corrections = useAgentCorrections(defs, viewer, agentId);
 
-    // The list follows the scope's revision: any write (ours, the agent's, another tab's) bumps it.
+    // The list follows the scope's revision in the active memory plugin's store (#281): any write (ours, the agent's,
+    // another tab's) bumps it, and so does switching the active plugin.
+    const memory = useActiveMemory(defs, viewer);
     const memoryKey = (): string | null => (viewer.workspaceId ? memoryKeyOf(viewer.workspaceId, `agent:${agentId()}`) : null);
-    const stats = useActorState(defs.Memory, () => { const k = memoryKey(); return k && ([k, 'stats'] as const); }, { live: true });
+    const stats = useMemoryStats(defs, memory, memoryKey);
     const memories = useData(
-        () => { const k = memoryKey(); return k && stats.value ? (['agent-memories', k, stats.value.rev] as const) : false; },
+        () => { const k = memoryKey(); const s = stats(); return k && s ? (['agent-memories', memory.flat() ? 'flat' : 'default', k, s.rev] as const) : false; },
         async (key): Promise<MemoryEntry[]> => {
-            const client = actor(defs.Memory, (key as readonly [string, string, number])[1]);
+            const [, store, k] = key as readonly [string, 'flat' | 'default', string, number];
+            const client = store === 'flat' ? actor(defs.FlatMemory, k) : actor(defs.Memory, k);
             const out: MemoryEntry[] = [];
             let after: string | null = null;
             do {
@@ -129,6 +166,7 @@ export function useAgentActivity(defs: ActorDefs, viewer: ViewerState, agentId: 
     let lastProposal: PendingProposal | undefined;
 
     return {
+        memory,
         activity() {
             if (memories.value) lastMemories = memories.value;
             const waiting = (view()?.pendingProposals ?? 0) > 0;

@@ -19,6 +19,7 @@ in a shared table.
 | Workspace `ws:{ws}` | owner, ids of agents / chats / machines / schedules, settings (time zone, notification prefs, defaults, **retention**), pending pairing codes, the `ops` log of the last export / delete | — (root) |
 | Agent `{ws}:agent:{id}` | identity, every config version | `Workspace.agents` |
 | Memory `{ws}:memory:{scope}` | entries of one scope (`agent:{id}` private, `shared:{name}`) and the shared-scope ACL | implied: every agent's own scope + every `memoryPolicy.shared` scope any agent names |
+| FlatMemory `{ws}:memory:{scope}` (#281) | the flat memory plugin's entries of one scope (its ACL is the Memory actor's) | implied: the same scopes as Memory |
 | Chat `{ws}:chat:{id}` + ChatPage `…:p{n}` | members, the last 200 entries, archived pages of 100 | `Workspace.chats` (pages `0..seq/100`) |
 | Schedule `{ws}:schedule:{id}` | recurrence, target agent, firing log | `Workspace.schedules` (`createSchedule` allocates the id) |
 | Inbox `{ws}:inbox` | notifications (capped at 500), push subscriptions | implied (one per workspace) |
@@ -66,7 +67,7 @@ app-level `ArtifactSink` (R2 on Cloudflare), under `{ws}/{ISO stamp}/`:
 |---|---|---|
 | `workspace.ndjson` | workspace | `Workspace.get` — machines without their pairing codes, no `ops` |
 | `agents.ndjson` | agent | `Agent.get` + `listVersions` |
-| `memory.ndjson` | memory entry | `Memory.exportPage` over every implied scope |
+| `memory.ndjson` | memory entry | `Memory.exportPage` over every implied scope, then `FlatMemory.exportPage` (rows marked `plugin: 'agentic.memory.flat'`) |
 | `chats.ndjson` | chat, then every entry | `Chat.get` + `history` (oldest first) |
 | `schedules.ndjson` | schedule | `Schedule.get` |
 | `inbox.ndjson` | notification, push subscription | `Inbox.list` + `subscriptions` |
@@ -112,7 +113,7 @@ Deletion is not reversible; there is no grace period. Export first.
   `Registry.openSecret(name, pluginId)` to a plugin that is enabled and holds
   the matching `secret:` grant, and are purged with the Registry. Rotating
   `WORKSPACE_KEK` makes every stored secret unreadable; re-enter them.
-- Memory written by the default Memory plugin is in Memory actors (above). A
+- Memory written by the default Memory plugin is in Memory actors, by the flat plugin in FlatMemory actors (above). A
   third-party memory or learning plugin that stores elsewhere must say so in
   its manifest description; the platform cannot reach it.
 
