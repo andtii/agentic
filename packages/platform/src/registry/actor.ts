@@ -41,7 +41,9 @@ import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
 import type { AuditEventInput } from '../audit/events.js';
 import { decryptSecret, encryptSecret, sameWorkspace, workspaceKey } from '../auth/index.js';
+import { workspaceMemoryScopes, switchMemory, type MemorySwitchReport } from '../memory/switch.js';
 import { defineScheduleActor } from '../schedule/index.js';
+import type { MemoryPluginImpl } from '../task/driver.js';
 import { Workspace } from '../workspace/index.js';
 import { computeDependents, type AgentRef, type ScheduleRef } from './dependents.js';
 import { BadConfigError, PluginDisabledError, RegistryError } from './errors.js';
@@ -78,6 +80,12 @@ export interface RegistryOptions {
      * manifest fails the build's start and never a request.
      */
     readonly catalogue?: readonly CatalogueEntry[];
+    /**
+     * The memory plugins this build implements, by id (`memoryCatalogue`): what `previewActivation` and
+     * `activate('memory', id, { migrate: true })` move the memories between (#243). Without both ends, a
+     * migrating switch refuses with `no-migration`.
+     */
+    readonly memoryPlugins?: Readonly<Record<string, MemoryPluginImpl>>;
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
     readonly authorize?: ActorPolicy | readonly ActorPolicy[];
@@ -284,6 +292,40 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return dependentsOf(ctx, plugin(ctx, id), refs);
     };
 
+    const exportOf = (p: PluginRecord): 'full' | 'partial' => (p.manifest.capabilities.includes('export:partial') ? 'partial' : 'full');
+
+    /**
+     * Move the memories of every scope the workspace implies from the ACTIVE memory plugin into `id` (#243) — or, as
+     * a dry run, report what that would keep and drop. Reads and writes as the caller, the owner. A failure is
+     * `migration-failed`; the caller switches nothing then.
+     */
+    const moveMemories = async (ctx: Ctx, id: string, dryRun: boolean): Promise<MemorySwitchReport> => {
+        const target = plugin(ctx, id);
+        if (target.manifest.kind !== 'memory') throw new RegistryError('wrong-kind', `[registry] "${id}" is a ${target.manifest.kind} plugin, not memory`);
+        const fromId = activeOf(ctx, 'memory');
+        if (fromId === undefined || fromId === id) return { from: fromId ?? id, to: id, dryRun, targetExport: exportOf(target), entries: 0, imported: 0, skipped: 0, droppedFields: [], scopes: [] };
+        const fromImpl = options.memoryPlugins?.[fromId];
+        const toImpl = options.memoryPlugins?.[id];
+        if (!fromImpl || !toImpl) throw new RegistryError('no-migration', `[registry] this build cannot move memories from "${fromId}" to "${id}"`);
+        const source = plugin(ctx, fromId);
+        const principal = (ctx.principal as Principal | null | undefined) ?? null;
+        if (!principal) throw new RegistryError('no-migration', '[registry] moving memories needs the owner as the caller');
+        const refs = await collectRefs(ctx);
+        const scopes = workspaceMemoryScopes(refs.agents.map((a) => ({ id: a.id, shared: a.config.memoryPolicy.shared })));
+        try {
+            return await switchMemory({
+                from: { id: fromId, memory: fromImpl(mergedConfig(source)) },
+                to: { id, memory: toImpl(mergedConfig(target)), export: exportOf(target) },
+                scopes,
+                principal,
+                dryRun
+            });
+        } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            throw new RegistryError('migration-failed', `[registry] ${dryRun ? 'checking the move of' : 'moving'} the memories to "${id}" failed, so "${fromId}" stays active: ${why}`);
+        }
+    };
+
     return defineActor({
         type: 'Registry',
         authorize,
@@ -294,6 +336,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             remove: [ownerOnly],
             configure: [ownerOnly],
             activate: [ownerOnly],
+            previewActivation: [ownerOnly],
             grant: [ownerOnly],
             revoke: [ownerOnly],
             putConnector: [ownerOnly],
@@ -446,14 +489,25 @@ export function defineRegistry(options: RegistryOptions = {}) {
              * Make `id` the plugin its single-slot kind runs on — for NEW sessions,
              * like every other switch here. Refuses another kind, and a plugin that
              * is missing or disabled. Recorded when it changes something.
+             *
+             * `{ migrate: true }` (memory only, #243) first moves every scope's
+             * memories from the active plugin into `id` and verifies the counts;
+             * `active` flips last, so a failure (`migration-failed`) leaves the old
+             * plugin active. What was already copied stays in the new store, and the
+             * old store is never touched. `previewActivation` is the same move as a
+             * dry run.
              */
-            async activate(kind: SlotKind, id: string): Promise<PluginView> {
+            async activate(kind: SlotKind, id: string, options: { readonly migrate?: boolean } = {}): Promise<PluginView & { readonly migration?: MemorySwitchReport }> {
                 if (!isSingleSlot(kind)) throw new RegistryError('wrong-kind', `[registry] "${String(kind)}" is not a single-slot kind`);
                 const p = plugin(ctx, id);
                 if (p.manifest.kind !== kind) throw new RegistryError('wrong-kind', `[registry] "${id}" is a ${p.manifest.kind} plugin, not ${kind}`);
                 if (!p.enabled) throw new PluginDisabledError(id, 'disabled');
                 const previous = activeOf(ctx, kind);
                 if (previous === id) return view(ctx, p);
+                if (options.migrate && kind !== 'memory') throw new RegistryError('wrong-kind', `[registry] only memory plugins hold data to move; activate "${id}" without migrate`);
+                const migration = options.migrate ? await moveMemories(ctx, id, false) : undefined;
+                // The move awaited: the plugin may have been turned off meanwhile.
+                if (migration && !plugin(ctx, id).enabled) throw new PluginDisabledError(id, 'disabled');
                 ctx.state.active = { ...ctx.state.active, [kind]: id };
                 await ctx.save();
                 const at = now();
@@ -462,10 +516,22 @@ export function defineRegistry(options: RegistryOptions = {}) {
                     kind: 'plugin.activated',
                     at,
                     by: principalLabel(ctx.principal),
-                    summary: `plugin ${id} made the active ${kind} plugin`,
+                    summary: migration
+                        ? `plugin ${id} made the active ${kind} plugin; ${migration.imported} of ${migration.entries} memories moved from ${migration.from}${migration.droppedFields.length ? ` (dropped: ${migration.droppedFields.join(', ')})` : ''}`
+                        : `plugin ${id} made the active ${kind} plugin`,
                     data: { pluginId: id, kind, ...(previous !== undefined ? { previous } : {}) }
                 });
-                return view(ctx, plugin(ctx, id));
+                return { ...view(ctx, plugin(ctx, id)), ...(migration ? { migration } : {}) };
+            },
+
+            /**
+             * What `activate('memory', id, { migrate: true })` would move (#243, MEM-09): every scope's entries,
+             * what the target would skip, and the fields it cannot hold — nothing is written. The page shows this
+             * before it asks for confirmation.
+             */
+            async previewActivation(kind: SlotKind, id: string): Promise<MemorySwitchReport> {
+                if (kind !== 'memory') throw new RegistryError('wrong-kind', `[registry] only memory plugins hold data to move`);
+                return moveMemories(ctx, id, true);
             },
 
             /** Grant declared scopes only — a scope the manifest never asked for is refused (PLG-04). */

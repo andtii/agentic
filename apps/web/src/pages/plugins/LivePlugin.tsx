@@ -2,8 +2,10 @@
  * `/plugins/:id` on the platform (#233): one plugin out of the Registry's
  * live `overview()`, its dependents out of one `dependentsAll()`, and every
  * change as a direct owner-only Registry call — `configure`, `setSecret` /
- * `deleteSecret`, `grant` / `revoke`, `activate`, `remove`. A refusal is
- * shown where it belongs (the form, the one secret, the page) and nothing
+ * `deleteSecret`, `grant` / `revoke`, `activate`, `remove`. Making a memory
+ * plugin active asks `previewActivation` first and moves the memories with
+ * `activate(…, { migrate: true })` only once the owner confirms (#243). A
+ * refusal is shown where it belongs (the form, the one secret, the page) and nothing
  * is written. A secret's value goes to `setSecret` and nowhere else: it is
  * never put in page state, the URL, a log or an error string.
  */
@@ -11,13 +13,13 @@ import { component, signal, useData, useHead, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import type { PermissionScope } from '@agentic/core';
-import type { Dependents, SlotKind } from '@agentic/platform';
-import { EmptyState } from '@agentic/ui';
+import type { Dependents, MemorySwitchReport, SlotKind } from '@agentic/platform';
+import { ConfirmDialog, EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
-import { isInUse, registryErrorText } from './model';
+import { isInUse, memorySwitchText, registryErrorText } from './model';
 import { PluginDetail, type SecretWrite } from './PluginDetail';
 import { useWorkspaceReadiness } from './readiness';
 import { usePluginSwitches } from './switches';
@@ -106,10 +108,46 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
     };
     const grant = (scope: PermissionScope): Promise<void> => act((k) => actor(defs.Registry, k).grant(props.id, [scope]));
     const revoke = (scope: PermissionScope): Promise<void> => act((k) => actor(defs.Registry, k).revoke(props.id, [scope]));
+    /** A memory plugin's dry run, while its confirmation is open (#243). */
+    const move = signal<{ preview: MemorySwitchReport | null }>({ preview: null });
     const activate = (): Promise<void> => act(async (k) => {
-        await actor(defs.Registry, k).activate(plugin()!.manifest.kind as SlotKind, props.id);
+        const kind = plugin()!.manifest.kind as SlotKind;
+        // A memory plugin holds data: show what moving it keeps and drops, and move only on confirm.
+        if (kind === 'memory') {
+            move.preview = await actor(defs.Registry, k).previewActivation(kind, props.id);
+            return;
+        }
+        await actor(defs.Registry, k).activate(kind, props.id);
         if (usedBy.hasValue) await usedBy.refresh();
     });
+    const confirmMove = (): Promise<void> => act(async (k) => {
+        try {
+            await actor(defs.Registry, k).activate('memory', props.id, { migrate: true });
+        } finally {
+            move.preview = null;
+        }
+        if (usedBy.hasValue) await usedBy.refresh();
+    });
+    const nameOf = (id: string): string => ready.overview()?.plugins.find((p) => p.manifest.id === id)?.manifest.name ?? id;
+    const moveDialog = () => {
+        const report = move.preview;
+        if (!report) return null;
+        const text = memorySwitchText(report, nameOf, (id) => agents.lookup(id).name);
+        return (
+            <ConfirmDialog
+                model={() => move.preview !== null}
+                title={text.title}
+                description={text.description}
+                {...(text.scopes.length ? { dependents: text.scopes, dependentsLabel: `Memories by scope · ${text.scopes.length}` } : {})}
+                confirmLabel={text.confirmLabel}
+                cancelLabel={`Keep ${nameOf(report.from)}`}
+                danger={false}
+                busy={st.busy}
+                onConfirm={() => { void confirmMove(); }}
+                onCancel={() => { move.preview = null; }}
+            />
+        );
+    };
 
     const remove = async (): Promise<void> => {
         const k = key();
@@ -163,6 +201,7 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                 {switches.left()[props.id] ? <p data-plugin-left role="status">Disabled. New work cannot use it; running work finishes.</p> : null}
                 {st.error || switches.error() ? <p data-chat-error role="alert">{st.error || switches.error()}</p> : null}
                 {switches.dialog()}
+                {moveDialog()}
             </OpsPage>
         );
     };
