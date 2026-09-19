@@ -95,9 +95,13 @@ export interface UsageLimits {
  * A `not-reported` snapshot carries no windows and clears them.
  */
 export function mergeQuota(prev: QuotaSnapshot | undefined, next: QuotaSnapshot): QuotaSnapshot {
-    if (!prev || next.availability === 'not-reported' || prev.availability === 'not-reported') return next;
-    const ids = new Set(next.windows.map((w) => w.id));
-    const windows = [...prev.windows.map((w) => (ids.has(w.id) ? next.windows.find((n) => n.id === w.id)! : w)), ...next.windows.filter((w) => !prev.windows.some((p) => p.id === w.id))];
+    if (next.availability === 'not-reported') return { ...next, windows: [] };
+    if (!prev || prev.availability === 'not-reported') return next;
+    // Keyed by id: prev's order first, next's values win, windows only next has are appended.
+    const byId = new Map<string, QuotaWindow>();
+    for (const w of prev.windows) byId.set(w.id, w);
+    for (const w of next.windows) byId.set(w.id, w);
+    const windows = [...byId.values()];
     const availability = next.availability === 'partial' && prev.availability === 'reported' ? 'reported' : next.availability;
     return { ...prev, ...next, availability, windows };
 }

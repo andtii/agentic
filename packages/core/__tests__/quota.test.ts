@@ -42,7 +42,9 @@ describe('mergeQuota', () => {
 
     it('not-reported replaces everything, and a later report replaces not-reported', () => {
         const none = snap([], { availability: 'not-reported', reason: 'API-key login' });
-        expect(mergeQuota(snap([win('five_hour', 0.5)]), none)).toBe(none);
+        expect(mergeQuota(snap([win('five_hour', 0.5)]), none)).toEqual(none);
+        // Contradictory input: not-reported never keeps windows.
+        expect(mergeQuota(undefined, snap([win('five_hour', 0.5)], { availability: 'not-reported', reason: 'x' })).windows).toEqual([]);
         const later = snap([win('five_hour', 0.5)], { availability: 'partial' });
         expect(mergeQuota(none, later)).toBe(later);
     });

@@ -167,6 +167,8 @@ describe('daemon frame schemas', () => {
         expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
         const none = { v: V, t: 'quota', environmentId: env.id, snapshot: { ...(quotaOf([]) as object), availability: 'not-reported', reason: 'API-key login: no subscription limits' } };
         expect(daemonFrame.safeParse(none).success).toBe(true);
+        expect(daemonFrame.safeParse({ ...none, snapshot: { ...none.snapshot, reason: undefined } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...none, snapshot: { ...none.snapshot, windows: [week] } }).success).toBe(false);
         expect(daemonFrame.safeParse({ ...ok, snapshot: { ...(quotaOf([]) as object), environmentId: 'env_other' } }).success).toBe(false);
         expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, resetsAt: 'next tuesday' }]) }).success).toBe(false);
         expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, status: 'fine' }]) }).success).toBe(false);

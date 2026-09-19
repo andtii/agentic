@@ -158,14 +158,17 @@ export const quotaWindow: z.ZodType<QuotaWindow> = z.object({
 });
 
 /** A normalized quota snapshot — never credentials, never a profile directory (EXE-10). */
-export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z.object({
-    sourceId: name,
-    runtime: name,
-    environmentId,
-    plan: name.optional(),
-    availability: z.enum(['reported', 'partial', 'not-reported']),
-    reason: text.optional(),
-    windows: z.array(quotaWindow).max(LIMITS.list),
-    observedAt: nonNegativeInt,
-    via: z.enum(['probe', 'stream', 'headers'])
-});
+export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z
+    .object({
+        sourceId: name,
+        runtime: name,
+        environmentId,
+        plan: name.optional(),
+        availability: z.enum(['reported', 'partial', 'not-reported']),
+        reason: text.optional(),
+        windows: z.array(quotaWindow).max(LIMITS.list),
+        observedAt: nonNegativeInt,
+        via: z.enum(['probe', 'stream', 'headers'])
+    })
+    // PLG-09: "not reported" is said, with its reason, and carries no numbers.
+    .refine((s) => s.availability !== 'not-reported' || (s.windows.length === 0 && !!s.reason), { message: 'a not-reported snapshot has a reason and no windows', path: ['reason'] });
