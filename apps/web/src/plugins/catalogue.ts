@@ -12,6 +12,7 @@
  * - `runtimeCatalogue(options)` → both `createSessionFactory({ runtimes })`
  *   and `defineRoutingActor({ runtimes })`: `anthropic-api` runs in-process
  *   with its key from the workspace's `anthropic-api-key` Registry secret,
+ *   and opens the agent's MCP connectors with `openMcpConnector` (#240);
  *   `claude-code` on a machine's daemon.
  * - `memoryCatalogue` / `learningCatalogue` → `platformLearningPorts({
  *   memoryPlugins, learningPlugins })`: the workspace's ACTIVE memory and
@@ -35,6 +36,7 @@ import { a2aServerPlugin } from '@agentic/a2a';
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
 import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, isolateMemoryImpl, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
+import { openMcpConnector } from '@agentic/mcp';
 import { flatMemoryPlugin, memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, claudeCodeQuotaPlugin } from '@agentic/runtimes';
 
@@ -55,7 +57,7 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
     return {
-        [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime(options),
+        [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
         [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
     };
 }
