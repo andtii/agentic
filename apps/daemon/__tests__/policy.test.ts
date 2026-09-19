@@ -113,6 +113,20 @@ describe('checkWorkingRoot — what a web-supplied working root must pass', () =
         expect(await check(join(allowed, 'repo', 'sub', '..'))).toEqual({ ok: true, real: join(allowed, 'repo') });
     });
 
+    it('another spelling of a folder inside (a link to it, an 8.3 short name, macOS /var) is judged by where it leads, and stored resolved', async () => {
+        // A link outside the allowed root that leads into it: using it reaches nothing the owner did not allow.
+        await symlink(join(allowed, 'repo'), join(dir, 'alias'), win ? 'junction' : 'dir');
+        expect(await check(join(dir, 'alias', 'sub'))).toEqual({ ok: true, real: join(allowed, 'repo', 'sub') });
+    });
+
+    it('outside is outside whether it exists or not: the web learns nothing about folders it may not use', async () => {
+        const missing = await check(join(dir, 'outside', 'nope'));
+        const existing = await check(join(dir, 'outside'));
+        expect(missing).toMatchObject({ ok: false, code: 'outside-allowed-roots' });
+        expect(existing).toMatchObject({ ok: false, code: 'outside-allowed-roots' });
+        expect(!missing.ok && missing.message.replace(join(dir, 'outside', 'nope'), '<path>')).toBe(!existing.ok && existing.message.replace(join(dir, 'outside'), '<path>'));
+    });
+
     it('a sibling that only shares a prefix is outside', async () => {
         expect(await check(join(dir, 'allowed-evil'))).toMatchObject({ ok: false, code: 'outside-allowed-roots' });
     });

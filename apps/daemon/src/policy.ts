@@ -123,15 +123,27 @@ export type WorkingRootCheck =
  * May the web use `root` as a working root under `allowedRoots`? In order:
  * absolute; not a share or a device; inside an allowed root lexically (so
  * `..` is judged by where it leads) and again after `realpath` of both sides
- * (so a symlink or junction cannot lead out — `checkWithinRoots`); an
+ * (so a symlink or junction cannot lead out — `checkWithinRoots`) — a path
+ * that is outside only lexically but whose `realpath` is inside (a short
+ * name, a link to an allowed folder) counts as that real folder; an
  * existing directory; and not overlapping any of the daemon's own folders in
- * either direction. Messages name only the path that was asked for.
+ * either direction. Outside answers the same whether the folder exists or
+ * not. Messages name only the path that was asked for.
  */
 export async function checkWorkingRoot(root: unknown, allowedRoots: readonly string[], protectedDirs: ProtectedDirs, platform: NodeJS.Platform = process.platform): Promise<WorkingRootCheck> {
     if (typeof root !== 'string' || root.length === 0 || !isAbsolute(root)) return { ok: false, code: 'invalid', message: `working root ${JSON.stringify(root)} must be an absolute path` };
     const outside = { ok: false, code: 'outside-allowed-roots', message: `${root} is not inside a folder this machine allows` } as const;
     if (isRemoteOrDevicePath(root)) return { ...outside, message: `${root} is a network or device path; working roots are local folders` };
-    const within = await checkWithinRoots(root, allowedRoots, platform);
+    let within = await checkWithinRoots(root, allowedRoots, platform);
+    if (!within.ok && within.code === 'outside-roots') {
+        // Another spelling of a folder inside — an 8.3 short name, or a link to it such as macOS's /var → /private/var — is
+        // judged by where it leads. Everything else answers the same whether it exists or not, so the web learns nothing
+        // about folders it may not use.
+        const real = await realpath(resolve(root)).catch(() => undefined);
+        if (real === undefined || isRemoteOrDevicePath(real)) return outside;
+        within = await checkWithinRoots(real, allowedRoots, platform);
+        if (!within.ok) return outside;
+    }
     if (!within.ok) return within.code === 'not-found' ? { ok: false, code: 'invalid', message: `${root} does not exist on this machine` } : outside;
     const { real } = within;
     // A mapped drive resolves to its share.
