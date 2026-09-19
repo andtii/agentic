@@ -9,7 +9,7 @@ import type { Dependents, PluginView } from '@agentic/platform';
 import { dependentCount } from '../ops/live';
 
 /** The catalogue's sections, in the order a person sets a workspace up: what runs agents, what they reach, what they keep. */
-export const KIND_ORDER: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
+export const KIND_ORDER: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'quota'];
 
 export const KIND_TITLE: Record<PluginKind, string> = {
     runtime: 'Runtimes',
@@ -18,7 +18,8 @@ export const KIND_TITLE: Record<PluginKind, string> = {
     learning: 'Learning',
     notification: 'Notifications',
     trigger: 'Triggers',
-    a2a: 'A2A'
+    a2a: 'A2A',
+    quota: 'Usage limits'
 };
 
 export interface PluginGroup {

@@ -4,6 +4,7 @@ All notable changes to `@agentic/learning` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Config (#242): `learningDefaultPlugin` declares `repeatThreshold` (integer 1–20, default 3 — repetitions of one correction before an instruction change is proposed), honoured by the platform's implementation.
 - Plugin manifest (#228, PLG-02): `learningDefaultPlugin` (`agentic.learning.default`) — kind `learning`, `memory:read` + `memory:write`, no config yet. A declaration only.
 - Package skeleton.
 - `learningPlugin()` — the default `LearningPlugin`: corrections become lessons with evidence, conditions and user provenance; repeated corrections supersede the earlier lesson; task outcomes become records with claimed and verified success kept distinct; refuted claims become lessons; agent-detected corrections off by default (#27).

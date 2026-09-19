@@ -598,17 +598,27 @@ export function actorSessionTransport(client: SessionActorClient, sessionId: str
 
 // ---- activation ------------------------------------------------------------------
 
-/** The agents a draft addresses: `@Name` tokens resolved against the members, by name (case-insensitive) or id. */
+/**
+ * The agents a draft addresses: `@Name` tokens resolved against the members, by name (case-insensitive) or id.
+ * A name is matched whole, longest first (#279): the picker inserts it as is — spaces, parentheses, an e-mail's
+ * own "@" — so "@Claude Code 2 (…" is never read as a member called "Claude". The result is ids; a later rename
+ * never changes whom a sent message addressed.
+ */
 export function mentionsIn(draft: string, members: readonly MockChatMember[], lookup: AgentLookup): AgentId[] {
-    const byName = new Map<string, string>();
-    for (const m of members) {
-        byName.set(lookup(m.agentId).name.toLowerCase(), m.agentId);
-        byName.set(m.agentId.toLowerCase(), m.agentId);
-    }
+    const names: { key: string; id: string }[] = [];
+    for (const m of members) names.push({ key: lookup(m.agentId).name.toLowerCase(), id: m.agentId }, { key: m.agentId.toLowerCase(), id: m.agentId });
+    names.sort((x, y) => y.key.length - x.key.length);
+    const text = draft.toLowerCase();
+    const word = /[\p{L}\p{N}_-]/u;
     const out: AgentId[] = [];
-    for (const match of draft.matchAll(/@([\p{L}\p{N}_-]+)/gu)) {
-        const id = byName.get(match[1]!.toLowerCase());
-        if (id && !out.includes(id as AgentId)) out.push(id as AgentId);
+    let at = text.indexOf('@');
+    while (at !== -1) {
+        // A mention starts a word: "andy@ekdahls.net" in running text is an address, not a mention.
+        const starts = at === 0 || !word.test(text[at - 1]!);
+        const hit = starts ? names.find((n) => n.key !== '' && text.startsWith(n.key, at + 1) && !word.test(text[at + 1 + n.key.length] ?? ' ')) : undefined;
+        if (hit && !out.includes(hit.id as AgentId)) out.push(hit.id as AgentId);
+        // Resume after a matched name: an "@" inside it belongs to the name.
+        at = text.indexOf('@', hit ? at + 1 + hit.key.length : at + 1);
     }
     return out;
 }

@@ -4,6 +4,7 @@ All notable changes to `@agentic/daemon-protocol` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `quota { environmentId, snapshot: QuotaSnapshot }` (daemon → platform, #267, part of #261): an environment's provider limits, pushed unsolicited. Schemas `quotaWindow`, `quotaSnapshot` (`utilization` 0..1 or `null`, `resetsAt` an ISO date-time) and `quotaFrame` — the snapshot must name the frame's environment; alias `QuotaFrame`. The conformance suite passes over `quota` frames wherever it passes over heartbeats, and the in-memory daemon sends one (`not-reported`) after `welcome`.
 - Web-managed environment frames (#236, part of #224; decisions 2026-09-19 (c)):
   - `env.request { requestId, op: 'put', environment } | { requestId, op: 'remove', environmentId }` (platform → daemon) and `env.response { requestId, exactly one of result: { environmentId } | error }` (daemon → platform); aliases `EnvRequestFrame` / `EnvResponseFrame`.
   - Schemas `environmentInput`, `envResult`, `envError`, `machinePolicy`, `envRequestFrame`, `envResponseFrame`. `environmentInput` is **strict**: an input carrying `profileDir` (or any key the contract does not name) fails the frame instead of being stripped. It needs at least one working root and a `concurrency` of 1 or more.
