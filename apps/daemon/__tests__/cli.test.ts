@@ -170,6 +170,25 @@ describe('cli', () => {
         ]);
     });
 
+    it('env login: Codex signs in with `codex login` under its own CODEX_HOME, without the parent\'s OpenAI variables', async () => {
+        const calls: { command: string; args: readonly string[]; env: Readonly<Record<string, string | undefined>> }[] = [];
+        const ctx = () => ({
+            paths: paths(),
+            drivers: [{ ...scripted(), runtime: 'codex-cli' }],
+            ...secure,
+            ...io(),
+            env: { PATH: '/bin', OPENAI_API_KEY: 'sk-leak', CODEX_HOME: '/elsewhere' },
+            login: async (command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>>) => (calls.push({ command, args, env }), 0)
+        });
+        expect(await main(['env', 'add', '--name', 'Codex', '--runtime', 'codex-cli', '--root', dir], ctx())).toBe(0);
+        expect(await main(['env', 'login', 'env_codex'], ctx())).toBe(0);
+        expect(await main(['env', 'login', 'env_codex', '--cli', '/opt/codex'], ctx())).toBe(0);
+        const home = { PATH: '/bin', CODEX_HOME: join(dir, 'profiles', 'env_codex') };
+        // The daemon ships `@openai/codex`: its launcher, run with this Node.
+        expect(calls[0]).toEqual({ command: process.execPath, args: [expect.stringMatching(/[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.js$/), 'login'], env: home });
+        expect(calls[1]).toEqual({ command: '/opt/codex', args: ['login'], env: home });
+    });
+
     it('run: env add reaches the platform without a restart; an invalid edit keeps the running set', async () => {
         const relay = await startRelay();
         let stop!: () => void;

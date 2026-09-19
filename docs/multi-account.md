@@ -1,4 +1,4 @@
-# Multi-account environments (Claude Code, Copilot CLI)
+# Multi-account environments (Claude Code, Copilot CLI, Codex)
 
 How three accounts on one machine are kept apart, what proves it, and what is
 verified on which OS. Requirements EXE-04 (multiple accounts), EXE-05 (starting
@@ -153,6 +153,16 @@ Each Copilot CLI environment gets its own `COPILOT_HOME`, which is its profile d
 2. `agentic-daemon env login env_octo`
 3. `agentic-daemon doctor` should report `auth-ok (<login>)`, not `shared-login`.
 4. `/usage` Limits should show "Premium requests" with the same used and limit numbers as `copilot` → `/usage`.
+
+## Codex (#320, #321)
+
+Each Codex environment gets its own `CODEX_HOME`, which is its profile dir, where `auth.json` and `config.toml` live. The driver starts `codex app-server` with that home and without the parent's `OPENAI_*` variables or `CODEX_HOME`, with or without a profile. `agentic-daemon env login <id>` runs `codex login` under the profile, using the Codex CLI the daemon ships. Codex also loads MCP servers from the profile's own `config.toml`, so keep that file to what the account needs.
+
+**Checklist (real CLI).**
+1. `agentic-daemon env add --name codex --runtime codex-cli --root <dir>`
+2. `agentic-daemon env login env_codex`
+3. `agentic-daemon doctor` should report `auth-ok (<email>)`.
+4. `/usage` Limits should show "Current session" and "Current week" matching `codex` → `/status`. An API-key login shows "not reported", with the reason.
 
 ## Out of scope here
 

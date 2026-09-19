@@ -373,8 +373,8 @@ describe('builtin drivers', () => {
     it('ship a disposable driver and a quota source per harness runtime', async () => {
         const { builtinRuntimes, isDisposable } = await import('../src/drivers');
         const { drivers, quotaSources } = builtinRuntimes();
-        expect(drivers.map((d) => d.runtime)).toEqual(['claude-code', 'copilot-cli']);
+        expect(drivers.map((d) => d.runtime)).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
         expect(drivers.every(isDisposable)).toBe(true);
-        expect(quotaSources.map((s) => s.runtime)).toEqual(['claude-code', 'copilot-cli']);
+        expect(quotaSources.map((s) => s.runtime)).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
     });
 });

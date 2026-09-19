@@ -8,6 +8,7 @@ import type { QuotaSource } from '@agentic/core';
 import { openMcpConnector } from '@agentic/mcp';
 import { openStdioMcpConnector } from '@agentic/mcp/node';
 import { claudeCodeDriver, claudeCodeQuota, type DaemonConnectorOpener } from '@agentic/runtimes/claude-code';
+import { codexCliDriver, codexCliQuota } from '@agentic/runtimes/codex-cli';
 import { copilotCliDriver, copilotCliQuota } from '@agentic/runtimes/copilot-cli';
 import type { DaemonDriver } from './daemon.js';
 
@@ -34,14 +35,15 @@ export interface BuiltinRuntimes {
 }
 
 /**
- * Claude Code, Copilot CLI (#321). A source that asks the runtime itself shares its driver, so a usage probe
- * reuses the Copilot runtime a session would start, not a second one per environment.
+ * Claude Code, Copilot CLI, Codex (#321). A source that asks the runtime itself goes through its driver: the
+ * Copilot probe reuses the runtime a session would start, the Codex probe opens the app-server the driver would.
  */
 export function builtinRuntimes(): BuiltinRuntimes {
     const copilot = copilotCliDriver({ connectors: openConnector });
+    const codex = codexCliDriver({ connectors: openConnector });
     return {
-        drivers: [claudeCodeDriver({ connectors: openConnector }), copilot],
-        quotaSources: [claudeCodeQuota(), copilotCliQuota({ client: (env) => copilot.clientFor(env) })]
+        drivers: [claudeCodeDriver({ connectors: openConnector }), copilot, codex],
+        quotaSources: [claudeCodeQuota(), copilotCliQuota({ client: (env) => copilot.clientFor(env) }), codexCliQuota({ connect: codex.connect })]
     };
 }
 
