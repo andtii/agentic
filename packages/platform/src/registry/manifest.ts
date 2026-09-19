@@ -3,7 +3,7 @@
 import type { PermissionScope, PluginKind, PluginManifest } from '@agentic/core';
 import { RegistryError } from './errors.js';
 
-export const PLUGIN_KINDS: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
+export const PLUGIN_KINDS: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'quota'];
 
 /** Plugin ids, connector ids and secret names share one alphabet: letters, digits, `.`, `_`, `-`. */
 export const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;

@@ -25,7 +25,8 @@ const SCOPE_TEXT: Readonly<Record<Scope, string>> = {
     tasks: 'Create, inspect and cancel tasks',
     chats: 'Post into and read your chats',
     memory: 'Search and add to agent memory',
-    schedules: 'Create schedules'
+    schedules: 'Create schedules',
+    usage: "See how close each account is to its provider's usage limits"
 };
 
 export function escapeHtml(text: string): string {
