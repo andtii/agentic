@@ -216,14 +216,14 @@ export function validateDraft(draft: SettingsDraft, zones: readonly string[]): S
  * `runtimeOf` names the runtime a machine environment runs (Claude Code, Copilot CLI, Codex, …); an
  * environment it does not know yet keeps `claude-code`, the first daemon runtime.
  */
-export function settingsPatch(draft: SettingsDraft, zones: readonly string[], runtimeOf: (environmentId: string) => RuntimeId | undefined = () => undefined): SettingsPatch | null {
+export function settingsPatch(draft: SettingsDraft, zones: readonly string[], runtimeOf: (environmentId: EnvironmentId) => RuntimeId | undefined = () => undefined): SettingsPatch | null {
     if (Object.keys(validateDraft(draft, zones)).length) return null;
     const environmentId = draft.environmentId.trim();
     return {
         timeZone: draft.timeZone.trim(),
         notifications: { inbox: draft.inbox, push: draft.push },
         // The platform runtime for no environment; a machine environment runs its own.
-        defaults: environmentId ? { runtime: runtimeOf(environmentId) ?? 'claude-code', environmentId: environmentId as EnvironmentId } : { runtime: 'anthropic-api', environmentId: undefined },
+        defaults: environmentId ? { runtime: runtimeOf(environmentId as EnvironmentId) ?? 'claude-code', environmentId: environmentId as EnvironmentId } : { runtime: 'anthropic-api', environmentId: undefined },
         retention: { sessionLogDays: days(draft.sessionLogDays)!, artifactDays: days(draft.artifactDays)! }
     };
 }
