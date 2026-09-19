@@ -64,6 +64,25 @@ export function resolveRuntime(runtimes: RuntimeCatalogue, runtime: RuntimeId): 
     return Object.prototype.hasOwnProperty.call(runtimes, runtime) ? runtimes[runtime] : undefined;
 }
 
+/** Runtimes a workspace adds at run time, by id prefix (#246): `a2a.` → an A2A peer. Each makes the implementation for one full id. */
+export type InstanceRuntimes = Readonly<Record<string, (runtime: RuntimeId) => RuntimeImpl>>;
+
+/**
+ * The build's own runtimes first, then an instance runtime whose prefix the id starts with (and goes past). Whether
+ * such an id may run at all is the Registry's to say: the router's `gate()` refuses one no plugin provides, or one
+ * turned off, before this is asked.
+ */
+export function withInstanceRuntimes(fixed: RuntimeCatalogue, instances: InstanceRuntimes): RuntimeCatalogue {
+    return (runtime) => {
+        const own = resolveRuntime(fixed, runtime);
+        if (own) return own;
+        for (const [prefix, make] of Object.entries(instances)) {
+            if (runtime.length > prefix.length && runtime.startsWith(prefix)) return make(runtime);
+        }
+        return undefined;
+    };
+}
+
 export interface AnthropicApiRuntimeOptions {
     /** The Routing actor definition (`task_report`). */
     readonly routing: () => AnyActorDefinition;

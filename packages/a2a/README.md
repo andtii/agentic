@@ -64,6 +64,10 @@ A card without `capabilities.streaming` runs `SendMessage` (blocking) and polls 
 
 Declared unsupported (PLG-09, `A2A_UNSUPPORTED`): push notifications, `SubscribeToTask`, the extended card, the gRPC and HTTP+JSON bindings, resume, fork, structured output, client tools, sub-agents, steering, configure.
 
+### A2A peers as runtimes
+
+`a2aPeer({ id, cardUrl, name? })` is the `kind: runtime` plugin manifest for one remote agent: id `a2a.<id>`, config `{ cardUrl }`, an optional bearer secret `a2a-<id>-token`, and `network:<host>` / `secret:` permissions. `a2aPeerRuntime('a2a.<id>', { fetch? })` is its local runtime: each `open(context, plugin)` reads `plugin.config.cardUrl`, asks `plugin.secret('a2a-<id>-token')`, and returns `{ session, agentId, capabilities, dispose }` over `a2aAgent` — structurally the platform's `RuntimeImpl`, without this package depending on the platform. The web app registers peers from /plugins ("Add A2A peer") and resolves the `a2a.` prefix with the platform's `withInstanceRuntimes`.
+
 ## Conformance
 
 `__tests__/conformance.test.ts` runs `agentConformance` against `a2aAgent` over an in-process server built from `createA2aHandler` over `mockAgent` sessions: `text`, `slow-tool` (cancel), `input-request`, `tool-error`, `model-error`, `usage`, `busy-session`, `late-join`, `prompt-after-close` and `respond-unknown` pass; the rest are asserted skips (`resume: false`, no structured output, no client tools, no sub-agents, no steering).

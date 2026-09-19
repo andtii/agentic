@@ -2,7 +2,7 @@
 export { defineRoutingActor, ROUTER, type RoutingActor, type RoutingView } from './actor.js';
 export { CHAT_FILE_READ, FILE_UNAVAILABLE, fileNote, hydrateChatFiles, readChatFile, withChatFileRead, type FileAccess, type HydrateOptions } from './files.js';
 export { connectorCategory, connectorPolicy, openSessionConnectors, type ConnectorOpenInput, type ConnectorOpener, type ConnectorTool, type OpenSessionConnectorsInput, type OpenedConnector, type SessionConnectors, type UnavailableConnector } from './connectors.js';
-export { anthropicApiRuntime, createSessionFactory, resolveRuntime, NO_API_KEY_CODE, PLUGIN_DISABLED_CODE, UNKNOWN_RUNTIME_CODE, type AnthropicApiRuntimeOptions, type RuntimeCatalogue, type RuntimeImpl, type RuntimePluginAccess, type SessionFactoryOptions } from './factory.js';
+export { anthropicApiRuntime, createSessionFactory, resolveRuntime, withInstanceRuntimes, NO_API_KEY_CODE, PLUGIN_DISABLED_CODE, UNKNOWN_RUNTIME_CODE, type AnthropicApiRuntimeOptions, type InstanceRuntimes, type RuntimeCatalogue, type RuntimeImpl, type RuntimePluginAccess, type SessionFactoryOptions } from './factory.js';
 export { ROUTING_TYPE, parseRoutingKey, routingKey } from './key.js';
 export { createEnvironmentProbe, locateEnvironment, type EnvironmentProbeOptions, type LocatedEnvironment } from './locate.js';
 export type { RoutingPorts } from './ports.js';
