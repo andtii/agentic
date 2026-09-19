@@ -37,7 +37,7 @@ export interface OpenSpecPolicy {
  * it opens the session (`CONNECTOR_CREDENTIALS_TOOL`).
  */
 export interface OpenSpecConnectorAuth {
-    /** Sent as `Authorization: Bearer <value>` (Streamable HTTP). */
+    /** The name of the secret whose value is sent as the bearer token of the `Authorization` header (Streamable HTTP). */
     readonly bearer?: string;
     /** Header name → secret name (Streamable HTTP). */
     readonly headers?: Readonly<Record<string, string>>;
@@ -48,8 +48,9 @@ export interface OpenSpecConnectorAuth {
 /**
  * An MCP connector the daemon opens for one session (#280, architecture §9):
  * a ready connector of the agent's, as the platform's gate found it. Its tools
- * reach the runtime namespaced `<id>__<tool>`. Plain JSON with no credential
- * in it: the platform keeps the spec and re-sends it after a reconnect.
+ * reach the runtime as `<namespace>__<tool>`, the namespace being the id made
+ * tool-safe (`.` → `_`). Plain JSON with no credential VALUE in it: the
+ * platform keeps the spec and re-sends it after a reconnect.
  */
 export interface OpenSpecConnector {
     readonly id: string;
