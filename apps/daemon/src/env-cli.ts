@@ -83,6 +83,15 @@ export async function envCommand(argv: readonly string[], sub: string | undefine
                     c.err(`this daemon has no driver for runtime "${runtime}" (it has: ${c.drivers.map((d) => d.runtime).join(', ') || 'none'})`);
                     return 1;
                 }
+                // A flag given without its value parses as `true`: say so, rather than let `Number(true)` make it 1.
+                for (const flag of ['id', 'runtime', 'concurrency', 'account', 'profile-dir']) {
+                    if (flags[flag] === true) {
+                        c.err(`--${flag} needs a value
+
+${ENV_USAGE}`);
+                        return 2;
+                    }
+                }
                 const concurrency = flags.concurrency === undefined ? undefined : Number(flags.concurrency);
                 const id = text(flags.id);
                 const account = text(flags.account);

@@ -43,7 +43,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         return { ok: false, findings };
     }
     // Not an error (#235): the daemon runs and reports none; it just cannot host a session yet.
-    if (loaded.environments.length === 0) findings.push({ level: 'warn', code: 'no-environments', message: `no environments in ${options.paths.environmentsFile} — add one with \`agentic-daemon env add --name <name> --root <dir>\`` });
+    if (loaded.environments.length === 0) findings.push({ level: 'warn', code: 'no-environments', message: `${loaded.missing ? `no environments yet (${options.paths.environmentsFile} does not exist)` : `no environments in ${options.paths.environmentsFile}`} — add one with \`agentic-daemon env add --name <name> --root <dir>\`` });
 
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const byRuntime = new Map<string, LocalEnvironment[]>();

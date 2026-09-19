@@ -103,6 +103,9 @@ describe('cli', () => {
         expect(await main(['env', 'add', '--name', 'Other', '--runtime', 'nope', '--root', dir], ctx())).toBe(1);
         expect(out.join('\n')).toMatch(/no driver for runtime "nope" \(it has: scripted\)/);
         expect(await main(['env', 'add', '--name', 'NoRoot', '--runtime', 'scripted'], ctx())).toBe(2);
+        // A flag without its value is a usage error, not `Number(true)` = 1.
+        expect(await main(['env', 'add', '--name', 'NoValue', '--runtime', 'scripted', '--root', dir, '--concurrency'], ctx())).toBe(2);
+        expect(out.join('\n')).toMatch(/--concurrency needs a value/);
         expect(await main(['env'], ctx())).toBe(2);
         out = [];
         expect(await main(['env', 'list'], ctx())).toBe(0);
@@ -174,7 +177,12 @@ describe('cli', () => {
     it('doctor: no environments is a warning with the command to add one', async () => {
         await writeFile(paths().credentialsFile, JSON.stringify({ url: 'https://agentic.example', workspaceId: 'ws_1', machineId: 'machine_1', token: `amt.ws_1.machine_1.${'t'.repeat(43)}` }));
         expect(await main(['doctor'], { paths: paths(), drivers: [scripted()], ...io() })).toBe(0);
-        expect(out.join('\n')).toMatch(/! no environments in .* — add one with `agentic-daemon env add/);
+        expect(out.join('\n')).toMatch(/! no environments yet \(.*environments\.json does not exist\) — add one with `agentic-daemon env add/);
+        // The file is there but empty: say that instead.
+        out = [];
+        await writeFile(paths().environmentsFile, '[]');
+        expect(await main(['doctor'], { paths: paths(), drivers: [scripted()], ...io() })).toBe(0);
+        expect(out.join('\n')).toMatch(/! no environments in .*environments\.json — add one/);
     });
 
     it('doctor: not paired, invalid environments', async () => {
