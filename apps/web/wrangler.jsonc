@@ -31,6 +31,7 @@
     //   GITHUB_CLIENT_ID      GitHub OAuth app
     //   GITHUB_CLIENT_SECRET  GitHub OAuth app
     //   WORKSPACE_KEK         base64, 32 bytes — AES-GCM key for stored API keys
+    // No Anthropic key: each workspace sets its own at /plugins/anthropic-api (#231).
     // See docs/runbook.md.
     "env": {
         // `pnpm --filter @agentic/web deploy:preview` → worker `agentic-web-preview`.

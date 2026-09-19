@@ -76,10 +76,11 @@ describe('worker: the ops pages over the browser stubs', () => {
         expect((await schedule.enable()).next).toBe(wanted);
 
         const registry = actor(defs.Registry, registryKeyOf(workspaceId));
-        expect(await registry.list()).toEqual([]);
-        await registry.setSecret('anthropic-key', 'sk-ant-never-shown');
+        // The build's plugins (#231): listed for a workspace that never touched the Registry.
+        expect((await registry.list()).map((p) => p.manifest.id)).toEqual(['agentic.learning.default', 'agentic.memory.default', 'agentic.memory.flat', 'anthropic-api', 'claude-code']);
+        await registry.setSecret('anthropic-api-key', 'sk-ant-never-shown');
         const secrets = await registry.secrets();
-        expect(secrets.map((s) => s.name)).toEqual(['anthropic-key']);
+        expect(secrets.map((s) => s.name)).toEqual(['anthropic-api-key']);
         expect(JSON.stringify(secrets)).not.toContain('sk-ant');
         expect(await registry.connectors()).toEqual([]);
     });

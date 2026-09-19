@@ -21,7 +21,7 @@
  * as the prompt's memory block — the one rendering on the local path (§8, #135).
  */
 
-import type { ChatFileStore, RuntimeId, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, RuntimeId } from '@agentic/core';
 import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, createPlatformModelAgent, type PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy } from '@sigx/ai-agent';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
@@ -61,12 +61,7 @@ export interface AnthropicApiRuntimeOptions {
     readonly routing: () => AnyActorDefinition;
     /** The Session actor definition (`ask_user`, #122); without it the tool answers `unsupported`. */
     readonly sessions?: () => AnyActorDefinition;
-    /**
-     * The workspace's Anthropic provider options.
-     * @deprecated The key is the `anthropic-api-key` Registry secret (`createSessionFactory({ registry })`); only consulted when the factory has no `registry`.
-     */
-    readonly anthropic?: (workspaceId: WorkspaceId) => PlatformAgentDeps['anthropic'] | Promise<PlatformAgentDeps['anthropic']>;
-    /** A model to run every session on instead of the provider's — tests pass `mockModel`. With a `registry` the key is still required. */
+    /** A model to run every session on instead of the provider's — tests pass `mockModel`. With a `registry` the key is still required; without one, it is the only way to open. */
     readonly model?: PlatformAgentDeps['model'];
     /** The approval policy every session opens with, replacing the compiled one (`sessionPolicy(spec)`). Tests pass `allowAll`. */
     readonly policy?: Policy;
@@ -123,8 +118,8 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 if (!apiKey) throw new Error(`${NO_API_KEY_CODE}: workspace ${c.workspaceId} has no Anthropic API key — add one at ${ANTHROPIC_PLUGIN_PAGE}`);
                 provider = { apiKey };
             } else if (!options.model) {
-                provider = await options.anthropic?.(c.workspaceId);
-                if (!provider?.apiKey && !provider?.client) throw new Error(`${NO_API_KEY_CODE}: workspace ${c.workspaceId} has no Anthropic API key configured`);
+                // No Registry behind the factory, so no key can be found: the key is only ever the workspace's secret (#231).
+                throw new Error(`${NO_API_KEY_CODE}: workspace ${c.workspaceId} has no Anthropic API key — add one at ${ANTHROPIC_PLUGIN_PAGE}`);
             }
             const built = createPlatformModelAgent(c.spec.config, {
                 ports,
