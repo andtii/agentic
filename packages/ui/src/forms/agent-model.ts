@@ -45,12 +45,43 @@ export const AGENT_FIELDS = {
     environment: 'environment',
     workdir: 'workdir',
     model: 'model',
+    /** The typed model when the model select says `CUSTOM_MODEL`. */
+    modelCustom: 'model-custom',
     offlinePolicy: 'offline-policy',
     limit: (key: LimitKey) => `limit:${key}`,
     collaborateAll: 'collaborate-all',
     collaborators: 'collaborators',
     reason: 'reason'
 } as const;
+
+/**
+ * A runtime the form offers (#234): the option, plus what the app knows about
+ * it — why it cannot run work yet (`hint`, with where to fix that) and the
+ * models its plugin names (`models`, the runtime's own `defaultModel` first
+ * among equals). Without `models` the model is typed.
+ */
+export interface RuntimeOption {
+    readonly value: string;
+    readonly label?: string;
+    readonly disabled?: boolean;
+    /** What is in the way, in a sentence; absent when the runtime is ready. */
+    readonly hint?: string;
+    /** Where to fix it — the plugin's page, or where a machine is paired. */
+    readonly href?: string;
+    readonly hrefLabel?: string;
+    readonly models?: readonly string[];
+    /** The model a blank choice runs on, named in "Runtime default (…)". */
+    readonly defaultModel?: string;
+}
+
+/** The model select's value for "type one": never a model id (ids carry no underscores at the start). */
+export const CUSTOM_MODEL = '__custom';
+
+/** What the model select shows for a model: blank → the runtime default, a known id → itself, anything else → custom. */
+export function modelChoice(model: string, models: readonly string[]): string {
+    if (!model) return '';
+    return models.includes(model) ? model : CUSTOM_MODEL;
+}
 
 export interface AgentDraft {
     name: string;
@@ -205,6 +236,7 @@ export function agentDraftFromFormData(fd: FormData): AgentDraft {
         })
     ) as AgentDraft['approvals'];
     const offline = text(fd, F.offlinePolicy);
+    const model = text(fd, F.model);
     return {
         name: text(fd, F.name),
         description: text(fd, F.description),
@@ -226,7 +258,7 @@ export function agentDraftFromFormData(fd: FormData): AgentDraft {
         runtime: text(fd, F.runtime),
         defaultEnvironmentId: text(fd, F.environment),
         defaultWorkdir: text(fd, F.workdir),
-        model: text(fd, F.model),
+        model: model === CUSTOM_MODEL ? text(fd, F.modelCustom).trim() : model,
         offlinePolicy: isOffline(offline) ? offline : 'queue',
         limits: Object.fromEntries(LIMIT_KEYS.map((k) => [k, number(fd, F.limit(k))])) as AgentDraft['limits'],
         collaborateAll: flag(fd, F.collaborateAll),

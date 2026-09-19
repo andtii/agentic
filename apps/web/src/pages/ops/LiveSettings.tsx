@@ -3,20 +3,26 @@
  * settings and the OPS-10 task records, the same sections the mock page
  * draws over a draft; Save is `Workspace.updateSettings(patch)` (time zone
  * for every schedule, AST-07; inbox / push preferences, AST-06; the default
- * environment; retention windows in days, `docs/retention.md`). Keys are
- * the Registry's secret NAMES. "Export workspace" is `Workspace.exportAll`
+ * environment; retention windows in days, `docs/retention.md`). "API keys"
+ * lists every secret a plugin declares — set or not, never a value — each
+ * linking to the plugin's page, where it is set (#234); a stored name no
+ * plugin declares is listed too. "Export workspace" is `Workspace.exportAll`
  * (its record says what landed and where); "Delete workspace" is
  * `Workspace.deleteAll` behind a dialog that needs the workspace's name
  * typed back.
  */
 import { component, effect, onUnmounted, signal, useHead, type Define, type JSXElement } from 'sigx';
+import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
+import type { RegistryOverview } from '@agentic/platform';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { formatAge } from '../../mock/workspace';
 import { useEnvironmentDirectory } from './environments';
+import { pluginHref } from '../plugins/model';
+import { useWorkspaceReadiness } from '../plugins/readiness';
 import { opStatus, settingsPatch, timeZoneOptions, toDraft, validateDraft, type SettingsDraft } from './live';
 import { OpsPage } from './OpsPage';
 
@@ -42,6 +48,7 @@ export const LiveSettings = component(() => {
     const wsKey = (): string | null => (viewer.workspaceId ? workspaceKeyOf(viewer.workspaceId) : null);
     const workspace = useActorState(defs.Workspace, () => { const k = wsKey(); return k && ([k, 'get'] as const); }, { live: true });
     const secrets = useActorState(defs.Registry, () => (viewer.workspaceId ? ([registryKeyOf(viewer.workspaceId), 'secrets'] as const) : null), { live: true });
+    const plugins = useWorkspaceReadiness(defs, viewer);
 
     const draft = signal<SettingsDraft & { loaded: boolean }>({ loaded: false, timeZone: 'UTC', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
     const st = signal({ saving: false, saved: false, error: '', deleting: false, typed: '', exporting: false, deleteAsked: false });
@@ -167,22 +174,8 @@ export const LiveSettings = component(() => {
                         </table>
                     </Section>
 
-                    <Section title="API keys" hint="Secrets are sealed under the workspace key; only their names are ever shown. Runtime logins never leave their machine.">
-                        {secrets.value?.length
-                            ? (
-                                <ul data-api-keys>
-                                    {secrets.value.map((s) => (
-                                        <li data-api-key data-secret={s.name}>
-                                            <Icon name="key" size={15} />
-                                            <span data-api-provider>{s.name}</span>
-                                            <span data-api-masked>••••••••</span>
-                                            <StatusPill status="auth-ok" label="STORED" />
-                                            <span data-api-updated>{formatAge(s.updatedAt, Date.now())}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )
-                            : <p data-panel-note>{secrets.value ? 'No keys stored. The deployment’s Anthropic key serves this workspace until a per-workspace key lands.' : 'Loading…'}</p>}
+                    <Section title="API keys" hint="Keys are set on the page of the plugin that uses them, sealed under the workspace key; only their names are ever shown. Runtime logins never leave their machine.">
+                        {apiKeys(plugins.overview(), secrets.value)}
                     </Section>
 
                     <Section title="Retention" hint="Days each record is kept (docs/retention.md). Copies already handed to a runtime are outside platform control.">
@@ -222,3 +215,55 @@ export const LiveSettings = component(() => {
         );
     };
 });
+
+interface KeyRow {
+    readonly name: string;
+    readonly title: string;
+    readonly set: boolean;
+    readonly updatedAt?: number;
+    /** The plugin that declares it; absent for a stored name nobody declares. */
+    readonly plugin?: { readonly id: string; readonly name: string };
+    readonly required: boolean;
+}
+
+/** Every declared secret, set or not, then any stored name no plugin declares (a connector's, an old key). */
+export function keyRows(overview: RegistryOverview | undefined, stored: readonly { readonly name: string; readonly updatedAt: number }[] | null | undefined): KeyRow[] {
+    const at = new Map((stored ?? []).map((s) => [s.name, s.updatedAt]));
+    const set = new Set([...(overview?.secretNames ?? []), ...at.keys()]);
+    const rows: KeyRow[] = [];
+    const declared = new Set<string>();
+    for (const p of overview?.plugins ?? []) {
+        for (const s of p.manifest.secrets ?? []) {
+            declared.add(s.name);
+            const updatedAt = at.get(s.name);
+            rows.push({ name: s.name, title: s.title, set: set.has(s.name), plugin: { id: p.manifest.id, name: p.manifest.name }, required: s.required, ...(updatedAt !== undefined ? { updatedAt } : {}) });
+        }
+    }
+    for (const name of [...set].filter((n) => !declared.has(n)).sort()) {
+        const updatedAt = at.get(name);
+        rows.push({ name, title: name, set: true, required: false, ...(updatedAt !== undefined ? { updatedAt } : {}) });
+    }
+    return rows;
+}
+
+function apiKeys(overview: RegistryOverview | undefined, stored: readonly { readonly name: string; readonly updatedAt: number }[] | null | undefined): JSXElement {
+    if (!overview && !stored) return <p data-panel-note>Loading…</p>;
+    const rows = keyRows(overview, stored);
+    if (!rows.length) return <p data-panel-note>No plugin in this workspace needs a key.</p>;
+    return (
+        <ul data-api-keys>
+            {rows.map((r) => (
+                <li data-api-key data-secret={r.name} data-set={r.set ? '' : undefined}>
+                    <Icon name="key" size={15} />
+                    <span data-api-provider>{r.title}</span>
+                    <span data-api-masked>{r.set ? '••••••••' : 'not set'}</span>
+                    <StatusPill status={r.set ? 'auth-ok' : r.required ? 'needs-review' : 'not-reported'} label={r.set ? 'STORED' : r.required ? 'NEEDED' : 'NOT SET'} hollow={!r.set && !r.required} />
+                    {r.plugin
+                        ? <Link to={pluginHref(r.plugin.id)} data-api-plugin>{r.set ? `Manage in ${r.plugin.name}` : `Add in ${r.plugin.name}`}</Link>
+                        : <span data-api-updated>{r.updatedAt !== undefined ? formatAge(r.updatedAt, Date.now()) : ''}</span>}
+                </li>
+            ))}
+        </ul>
+    );
+}
+

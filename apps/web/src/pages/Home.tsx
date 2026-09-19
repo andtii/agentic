@@ -10,6 +10,7 @@ import { Panel } from '../components/Panel';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
 import { agentNamed, loadHome, rootOf, type MockTaskRow } from '../mock/workspace';
+import { SetupChecklist } from './home/SetupChecklist';
 import { NeedsYou, useNeedsSource } from './inbox';
 import { TASK_TABLE_COLS, TASK_TABLE_COLUMNS } from './task/live';
 import { LiveActiveTasks } from './task/LiveTasks';
@@ -57,7 +58,8 @@ defineTopbar('home', () => ({ actions: () => <Button intent="primary" icon="plus
  * month's spend from the Ledger — the reported and estimated parts kept
  * apart, `n/a` when nothing was priced — and the active tasks from the
  * TaskIndex (`LiveActiveTasks`). Today's schedule is not read here yet: the
- * Schedules page lists it.
+ * Schedules page lists it. Above everything, while no runtime is ready, the
+ * setup checklist says what to do first (#234).
  */
 export const LiveHome = component(() => {
     const defs = useActorDefs();
@@ -70,6 +72,7 @@ export const LiveHome = component(() => {
         if (w && w.agents.length === 0) {
             return (
                 <Page title="Home" page="home" hideTitle>
+                    <SetupChecklist />
                     <EmptyState variant="workspace" />
                 </Page>
             );
@@ -78,6 +81,7 @@ export const LiveHome = component(() => {
         const parts = total ? costPartsOf(total) : null;
         return (
             <Page title="Home" page="home" hideTitle>
+                <SetupChecklist />
                 <NeedsYou source={needs} />
 
                 <aside data-home-rail aria-label="Today and spend">

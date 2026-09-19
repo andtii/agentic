@@ -4,14 +4,17 @@
  * workspace's connectors discovered; connectors are the Registry's; skills
  * and shared memory scopes have no catalogue yet (runbook §10), so the
  * pickers offer what the agent already has and take new names as typed.
- * `environments` is left to the machines wiring (#144).
+ * `environments` is left to the machines wiring (#144). The runtimes are the
+ * workspace's enabled runtime plugins with what each still needs (#234).
  */
 import { useActorState } from '@sigx/actors/app';
 import type { AgentConfig } from '@agentic/core';
 import type { ConnectorRecord } from '@agentic/platform';
-import type { FieldOption } from '@agentic/ui';
+import type { FieldOption, RuntimeOption } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
+import { useWorkspaceReadiness } from '../plugins/readiness';
+import { runtimeOptions } from './runtimes';
 
 /** One list per picker; an absent list keeps the form's design-track options. */
 export interface AgentCatalog {
@@ -21,6 +24,8 @@ export interface AgentCatalog {
     /** Filled by the machines wiring (#144). */
     readonly environments?: readonly FieldOption[];
     readonly memoryScopes?: readonly FieldOption[];
+    /** The enabled runtime plugins (#234); absent while the Registry lists none, so the form keeps its own. */
+    readonly runtimes?: readonly RuntimeOption[];
 }
 
 /**
@@ -45,8 +50,13 @@ export function agentCatalog(config: AgentConfig, connectors: readonly Connector
     };
 }
 
-/** The catalogue, with the Registry's connectors read live. Call in a component's setup. */
+/** The catalogue, with the Registry's connectors and runtime plugins read live. Call in a component's setup. */
 export function useAgentCatalog(defs: ActorDefs, viewer: ViewerState): (config: AgentConfig) => AgentCatalog {
     const connectors = useActorState(defs.Registry, () => viewer.workspaceId && ([registryKeyOf(viewer.workspaceId), 'connectors'] as const), { live: true });
-    return (config) => agentCatalog(config, connectors.value ?? []);
+    const readiness = useWorkspaceReadiness(defs, viewer);
+    return (config) => {
+        const plugins = readiness.overview()?.plugins;
+        const runtimes = plugins ? runtimeOptions(plugins, readiness.byId(), config.execution.runtime) : undefined;
+        return { ...agentCatalog(config, connectors.value ?? []), ...(runtimes ? { runtimes } : {}) };
+    };
 }

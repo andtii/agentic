@@ -24,9 +24,11 @@ export {
     fromAgentDraft,
     agentDraftFromFormData,
     parseAgentFormData,
-    validateAgentDraft
+    validateAgentDraft,
+    CUSTOM_MODEL,
+    modelChoice
 } from './agent-model.js';
-export type { AgentDraft, AgentErrors, AgentErrorKey, ApprovalCategory, ApprovalOutcome, ToolMode, LimitKey } from './agent-model.js';
+export type { AgentDraft, AgentErrors, AgentErrorKey, ApprovalCategory, ApprovalOutcome, ToolMode, LimitKey, RuntimeOption } from './agent-model.js';
 
 export {
     SETTINGS_FIELDS,

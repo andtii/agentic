@@ -1,4 +1,4 @@
-import { AGENT_FIELDS as F, agentDraftFromFormData, decodeSkill, defaultAgentConfig, encodeSkill, fromAgentDraft, parseAgentFormData, toAgentDraft, validateAgentDraft } from '@agentic/ui';
+import { AGENT_FIELDS as F, CUSTOM_MODEL, agentDraftFromFormData, decodeSkill, modelChoice, defaultAgentConfig, encodeSkill, fromAgentDraft, parseAgentFormData, toAgentDraft, validateAgentDraft } from '@agentic/ui';
 import { fullAgentConfig } from './helpers';
 
 describe('AgentConfig ⇄ draft', () => {
@@ -104,5 +104,29 @@ describe('agentDraftFromFormData', () => {
         const fd = post();
         fd.set(F.name, '');
         expect(parseAgentFormData(fd).errors.name).toBeTruthy();
+    });
+});
+
+describe('the model select (#234)', () => {
+    const models = ['claude-opus-5', 'claude-sonnet-5'];
+
+    it('modelChoice: blank is the runtime default, a listed id itself, anything else custom', () => {
+        expect(modelChoice('', models)).toBe('');
+        expect(modelChoice('claude-sonnet-5', models)).toBe('claude-sonnet-5');
+        expect(modelChoice('claude-opus-4', models)).toBe(CUSTOM_MODEL);
+        expect(modelChoice('claude-opus-5', [])).toBe(CUSTOM_MODEL);
+    });
+
+    it('a post that chose Custom… carries the typed id; any other choice is the model itself', () => {
+        const fd = new FormData();
+        fd.set(F.name, 'A');
+        fd.set(F.runtime, 'anthropic-api');
+        fd.set(F.model, CUSTOM_MODEL);
+        fd.set(F.modelCustom, '  claude-opus-4  ');
+        expect(agentDraftFromFormData(fd).model).toBe('claude-opus-4');
+        fd.set(F.model, 'claude-sonnet-5');
+        expect(agentDraftFromFormData(fd).model).toBe('claude-sonnet-5');
+        fd.set(F.model, '');
+        expect(fromAgentDraft(agentDraftFromFormData(fd)).execution).not.toHaveProperty('model');
     });
 });

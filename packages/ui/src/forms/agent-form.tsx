@@ -26,15 +26,18 @@ import {
     AGENT_FIELDS as F,
     AGENT_NAME_MAX,
     APPROVAL_CATEGORIES,
+    CUSTOM_MODEL,
     LIMIT_KEYS,
     defaultAgentConfig,
     fromAgentDraft,
+    modelChoice,
     toAgentDraft,
     validateAgentDraft,
     type AgentDraft,
     type AgentErrors,
     type ApprovalCategory,
-    type LimitKey
+    type LimitKey,
+    type RuntimeOption
 } from './agent-model.js';
 import { MultiSelectField, NumberField, SelectField, SwitchField, TextField, TextareaField, type FieldOption } from './fields.js';
 import { Segmented } from '../kit/Segmented.js';
@@ -76,7 +79,8 @@ export type AgentFormProps = Define.Model<AgentConfig> &
     Define.Prop<'connectors', readonly FieldOption[]> &
     Define.Prop<'agents', readonly FieldOption[]> &
     Define.Prop<'environments', readonly FieldOption[]> &
-    Define.Prop<'runtimes', readonly FieldOption[]> &
+    /** The runtimes to offer (#234): each may carry why it is not ready yet and the models it names. */
+    Define.Prop<'runtimes', readonly RuntimeOption[]> &
     Define.Prop<'memoryScopes', readonly FieldOption[]> &
     /** Where the pre-hydration post goes. */
     Define.Prop<'action', string> &
@@ -95,7 +99,7 @@ export type AgentFormProps = Define.Model<AgentConfig> &
     Define.Slot<'workdir', AgentFormWorkdirProps> &
     Define.Expose<AgentFormApi>;
 
-const DEFAULT_RUNTIMES: readonly FieldOption[] = [
+const DEFAULT_RUNTIMES: readonly RuntimeOption[] = [
     { value: 'anthropic-api', label: 'Anthropic API' },
     { value: 'claude-code', label: 'Claude Code' }
 ];
@@ -148,11 +152,39 @@ const LIMIT_LABELS: Record<LimitKey, string> = {
     maxConcurrentChildren: 'Max concurrent children'
 };
 
+/** The select's options: a runtime that is not ready says so in its label, beside the hint the form draws under it. */
+function runtimeFieldOptions(runtimes: readonly RuntimeOption[]): FieldOption[] {
+    return runtimes.map((r) => ({ value: r.value, label: r.label ?? r.value, ...(r.disabled ? { disabled: true } : {}) }));
+}
+
+function modelOptions(models: readonly string[], defaultModel: string | undefined): FieldOption[] {
+    return [
+        { value: '', label: defaultModel ? `Runtime default (${defaultModel})` : 'Runtime default' },
+        ...models.map((m) => ({ value: m, label: m })),
+        { value: CUSTOM_MODEL, label: 'Custom…' }
+    ];
+}
+
+/** Why the chosen runtime cannot run work yet, and where to fix it (#234). */
+function runtimeHint(runtime: RuntimeOption | undefined): JSXElement | null {
+    if (!runtime?.hint) return null;
+    return (
+        <p data-scope="ai-form" data-part="hint" data-runtime-hint={runtime.value} role="note">
+            {runtime.hint}
+            {runtime.href ? <> <a href={runtime.href}>{runtime.hrefLabel ?? 'Set it up'}</a></> : null}
+        </p>
+    );
+}
+
 export const AgentForm = component<AgentFormProps>(
     ({ props, emit, expose, slots }) => {
         const source = (): AgentConfig => props.model?.value ?? defaultAgentConfig();
         const draft = signal<AgentDraft>(toAgentDraft(source()));
-        const ui = signal({ attempted: false });
+        const runtimes = (): readonly RuntimeOption[] => props.runtimes ?? DEFAULT_RUNTIMES;
+        const chosenRuntime = (): RuntimeOption | undefined => runtimes().find((r) => r.value === draft.runtime);
+        const models = (): readonly string[] => chosenRuntime()?.models ?? [];
+        // `modelChoice` is what the model select shows; `customPicked` keeps "Custom…" open once a person chose it.
+        const ui = signal({ attempted: false, modelChoice: modelChoice(draft.model, models()), customPicked: false });
         const errors = computed(() => validateAgentDraft(draft));
         const shown = (): AgentErrors => (ui.attempted ? errors.value : {});
         // Dirty against the canonical form of the bound config, so an untouched draft is clean.
@@ -185,11 +217,40 @@ export const AgentForm = component<AgentFormProps>(
             });
         };
 
+        // The model select: a person's pick writes the draft (Custom… keeps what is typed); the form's
+        // own sync — a reset, another runtime, the runtimes' models arriving — only moves the select.
+        let syncingChoice = false;
+        const syncChoice = (): void => {
+            const next = modelChoice(draft.model, models());
+            if (next === ui.modelChoice) return;
+            syncingChoice = true;
+            ui.modelChoice = next;
+        };
+        watch(
+            () => ui.modelChoice,
+            (choice) => {
+                if (syncingChoice) {
+                    syncingChoice = false;
+                    return;
+                }
+                ui.customPicked = choice === CUSTOM_MODEL;
+                if (choice !== CUSTOM_MODEL) draft.model = choice;
+            }
+        );
+        watch(
+            () => `${draft.runtime}\n${models().join('\n')}`,
+            () => {
+                if (!ui.customPicked) syncChoice();
+            }
+        );
+
         const reset = () => {
             batch(() => {
                 Object.assign(draft, toAgentDraft(source()));
                 ui.attempted = false;
+                ui.customPicked = false;
             });
+            syncChoice();
         };
         const submit = (): boolean => {
             ui.attempted = true;
@@ -301,11 +362,21 @@ export const AgentForm = component<AgentFormProps>(
 
                     {section('execution', 'Execution', (
                         <>
-                            <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={props.runtimes ?? DEFAULT_RUNTIMES} required error={err.runtime} />
+                            <div data-runtime-field="">
+                                <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={runtimeFieldOptions(runtimes())} required error={err.runtime} />
+                                {runtimeHint(chosenRuntime())}
+                            </div>
                             <SelectField model={() => draft.defaultEnvironmentId} name={F.environment} label="Default environment" options={props.environments ?? []} placeholder="Any available" />
                             <input type="hidden" name={F.workdir} value={draft.defaultWorkdir} />
                             {slots.workdir ? slots.workdir({ environmentId: draft.defaultEnvironmentId, path: draft.defaultWorkdir, set: setWorkdir }) : null}
-                            <TextField model={() => draft.model} name={F.model} label="Model" description="Leave blank for the runtime's default." />
+                            {models().length ? (
+                                <>
+                                    <SelectField model={() => ui.modelChoice} name={F.model} label="Model" options={modelOptions(models(), chosenRuntime()?.defaultModel)} description="The runtime's default unless you pick one." />
+                                    {ui.modelChoice === CUSTOM_MODEL ? <TextField model={() => draft.model} name={F.modelCustom} label="Model id" description="Any id the runtime accepts; blank runs on its default." /> : null}
+                                </>
+                            ) : (
+                                <TextField model={() => draft.model} name={F.model} label="Model" description="Leave blank for the runtime's default." />
+                            )}
                             <SelectField model={() => draft.offlinePolicy} name={F.offlinePolicy} label="When the environment is offline" options={OFFLINE_OPTIONS} error={err.offlinePolicy} />
                             {LIMIT_KEYS.map((k) => (
                                 <NumberField key={k} model={() => draft.limits[k]} name={F.limit(k)} label={LIMIT_LABELS[k]} min={k === 'maxCostUsd' ? 0 : 1} step={k === 'maxCostUsd' ? 0.01 : 1} placeholder="No limit" error={err[`limit:${k}`]} />

@@ -58,6 +58,7 @@ import { Row, Col, Spacer } from '@agentic/ui';
 - The form edits a draft; a valid submit writes the config back through the model and emits `submit`. An invalid submit is blocked, errors render beside their fields (`Field.Error`, `role="alert"`, wired to the control by `aria-describedby`) and `invalid` fires; `reset()` restores the draft.
 - Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
 - Persistence is the caller's: the forms emit, they never write to an actor.
+- `AgentForm runtimes={…}` takes `RuntimeOption[]`: each runtime may carry a `hint` (drawn under the select, with an `href` to the fix) and the `models` its plugin lists — the model field is then a select (runtime default, each model, "Custom…" → a typed id posted as `AGENT_FIELDS.modelCustom`). Without `runtimes` the form offers the built-in pair and a typed model.
 - `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls, and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
 
 ### Working-folder picker (#191)
