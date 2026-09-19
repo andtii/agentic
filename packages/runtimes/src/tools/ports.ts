@@ -75,9 +75,18 @@ export interface UserQuestion {
     readonly choices?: readonly string[];
 }
 
+/** What a post did (#222): the message, the members its mentions started a task for, and those it could not. */
+export interface ChatPostResult {
+    readonly messageId: MessageId;
+    /** One task per mentioned member that was activated; its reply comes back into the chat when its turn ends. */
+    readonly activated?: readonly { readonly agentId: AgentId; readonly taskId: TaskId; readonly status: string }[];
+    /** Mentioned members that were not activated, and why (not a collaborator, depth limit, failed to start). */
+    readonly notActivated?: readonly { readonly agentId: AgentId; readonly reason: string }[];
+}
+
 export interface ChatPort {
-    /** Post a final message into the task's chat, attributed to the agent (CHT-08, COL-06). */
-    post(post: ChatPost, call: ToolCall): Promise<{ readonly messageId: MessageId }>;
+    /** Post a message into the task's chat, attributed to the agent; a mentioned collaborator is activated (CHT-06, COL-06, #222). */
+    post(post: ChatPost, call: ToolCall): Promise<ChatPostResult>;
     /** Ask the user and wait; the platform parks the Task `waiting {input}` meanwhile (COL-06). */
     ask(question: UserQuestion, call: ToolCall): Promise<{ readonly answer: string }>;
 }

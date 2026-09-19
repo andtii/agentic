@@ -34,8 +34,8 @@
  * `files` port.
  */
 
-import { actorKey, chatFileUri, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type MemoryEntry, type Principal, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
-import type { DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type MemoryEntry, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
 
@@ -46,8 +46,9 @@ import { ToolCallError } from '../machine/ports.js';
 import { Memory, memoryActorKey } from '../memory/index.js';
 import type { RequestResolvedEvent } from '../policy/requests.js';
 import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
-import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
+import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { readChatFile } from './files.js';
+import { MENTION_CONTEXT_WINDOW, mentionContract } from './mentions.js';
 import { routingKey } from './key.js';
 
 export type AgentPrincipal = Extract<Principal, { kind: 'agent' }>;
@@ -56,6 +57,7 @@ export type AgentPrincipal = Extract<Principal, { kind: 'agent' }>;
 interface RoutingClient {
     report(taskId: TaskId, report: TaskReport): Promise<void>;
     run(taskId: TaskId): Promise<TaskView>;
+    get(): Promise<{ readonly routes: readonly { readonly taskId: TaskId; readonly environmentId?: string }[] }>;
 }
 
 /** The slice of the Session actor `ask_user` uses (`defineSessionActor`). */
@@ -171,6 +173,71 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         return file;
     }
 
+    /**
+     * Start a task for every member the post MENTIONS (#222, CHT-06, COL-06) — never the coordinator fallback, so an
+     * agent's post without mentions wakes nobody. The poster's collaborators gate it as they gate `delegate` (COL-10);
+     * each task is one level deeper than the poster's, so agents mentioning each other stop at `maxDepth`. An assignee
+     * with neither a folder in this chat nor a default environment runs in the poster's (#220). Never throws: the post
+     * is stored, and what could not be started is said in `notActivated`.
+     */
+    async function activateMentions(chatId: ChatId, messageId: MessageId, post: ChatPost, addressed: readonly AgentId[]): Promise<Pick<ChatPostResult, 'activated' | 'notActivated'>> {
+        const targets = addressed.filter((id) => post.mentions.includes(id));
+        if (targets.length === 0) return {};
+        const activated: { agentId: AgentId; taskId: TaskId; status: string }[] = [];
+        const notActivated: { agentId: AgentId; reason: string }[] = [];
+        const skip = (reason: string, ids: readonly AgentId[] = targets) => ({ notActivated: ids.map((agentId) => ({ agentId, reason })) });
+        const def = options.routing?.();
+        if (!def) return skip('the router is not wired on this deployment');
+        const router = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principal) }) as unknown as RoutingClient;
+        const poster = await as(AgentActor, agentKey(workspaceId, agentId)).get();
+        const postingTask = taskId ? await task(taskId).get() : undefined;
+        let depth: number;
+        try {
+            depth = checkDepth(postingTask?.depth ?? 0, postingTask?.constraints ?? {});
+        } catch (e) {
+            return skip(`depth limit: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        const chat = as(Chat, agentChatKey(workspaceId, chatId));
+        const summary = await chat.get();
+        const { entries } = await chat.history(null, MENTION_CONTEXT_WINDOW + 1);
+        const names = new Map<AgentId, string>([[agentId, poster.config.name]]);
+        const nameOf = (id: AgentId): string => names.get(id) ?? id;
+        for (const e of entries) {
+            if (e.entry.t !== 'msg' || e.entry.author.kind !== 'agent' || names.has(e.entry.author.agentId)) continue;
+            const id = e.entry.author.agentId;
+            names.set(id, await as(AgentActor, agentKey(workspaceId, id)).get().then((a) => a.config.name, () => id));
+        }
+        let posterEnvironment: string | null | undefined;
+        const posterEnv = async (): Promise<string | undefined> => {
+            if (posterEnvironment === undefined) posterEnvironment = (await router.get().then((r) => r.routes.find((x) => x.taskId === taskId)?.environmentId, () => undefined)) ?? null;
+            return posterEnvironment ?? undefined;
+        };
+        for (const target of targets) {
+            if (poster.config.collaborators !== 'all' && !poster.config.collaborators.includes(target)) {
+                notActivated.push({ agentId: target, reason: `not a collaborator of ${agentId}` });
+                continue;
+            }
+            const member = summary.members[target];
+            if (!member) {
+                notActivated.push({ agentId: target, reason: 'not a member of this chat' });
+                continue;
+            }
+            try {
+                const assignee = await as(AgentActor, agentKey(workspaceId, target)).get();
+                const fallback = member.workdir || assignee.config.execution.defaultEnvironmentId ? undefined : await posterEnv();
+                const contract = mentionContract({ assignee: target, chatId, messageId, text: post.text, posterName: poster.config.name, member, entries, nameOf, ...(fallback ? { fallbackEnvironmentId: fallback } : {}) });
+                const id = createId('task') as TaskId;
+                await task(id).create(contract, { owner: target, depth });
+                const view = await router.run(id);
+                activated.push({ agentId: target, taskId: id, status: view.status });
+                if (view.status === 'failed') notActivated.push({ agentId: target, reason: `its task failed to start: ${view.error?.code ?? 'failed'}: ${view.error?.message ?? ''}` });
+            } catch (e) {
+                notActivated.push({ agentId: target, reason: `could not start: ${e instanceof Error ? e.message : String(e)}` });
+            }
+        }
+        return { ...(activated.length ? { activated } : {}), ...(notActivated.length ? { notActivated } : {}) };
+    }
+
     const store = options.files;
     const files: PlatformPorts['files'] = store
         ? {
@@ -205,7 +272,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 }
                 const input: string | PromptPart[] = attached.length === 0 ? post.text : [...(post.text ? [{ type: 'text' as const, text: post.text }] : []), ...attached];
                 const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(input, post.mentions, taskId ? { taskId } : {});
-                return { messageId: result.messageId };
+                return { messageId: result.messageId, ...(await activateMentions(chatId, result.messageId, post, result.activated)) };
             },
             async ask(question, call) {
                 const def = options.sessions?.();

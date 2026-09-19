@@ -8,7 +8,7 @@ import type { ChatPort } from './ports.js';
 
 export const chatPostInput = z.object({
     text: z.string().min(1).describe('The message, in markdown.'),
-    mentions: z.array(z.string()).optional().describe('Agent ids to address; a mentioned collaborator is activated.'),
+    mentions: z.array(z.string()).optional().describe('Agent ids (agent_…) to address; each mentioned collaborator is started on this message.'),
     attachments: z.array(chatFileUriInput).optional().describe('agentic-file: URIs of files from this chat to attach to the message.')
 });
 
@@ -20,7 +20,7 @@ export const askUserInput = z.object({
 export function chatPostTool(port: ChatPort) {
     return defineTool({
         name: 'chat_post',
-        description: 'Post a message into the chat this task came from, in your name. Use it to share a result or to address another agent; it does not wait for a reply. Attach files from the chat by their agentic-file: URIs.',
+        description: 'Post a message into the chat this task came from, in your name. Each agent id in `mentions` gets a task of its own and answers in the chat when its turn ends; the result lists who was started (`activated`) and who was not, and why (`notActivated`). It does not wait for the reply: use `delegate` when you need the answer back as a tool result. Attach files from the chat by their agentic-file: URIs.',
         input: chatPostInput,
         annotations: { idempotent: false },
         execute: (input, ctx) =>
