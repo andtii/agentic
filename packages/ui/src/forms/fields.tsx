@@ -9,6 +9,9 @@
 import { component, type Define } from '@sigx/runtime-core';
 import { Field, Input, NativeSelect, NumberInput, Switch, Textarea, type InputType } from '@sigx/zero';
 import { MultiSelect, type MultiSelectOption } from '../_zero-gaps/multi-select.js';
+import { agMapFieldAnatomy } from '../kit/anatomy.js';
+import { Button } from '../kit/Button.js';
+import type { MapRow } from './schema-model.js';
 
 export type FieldOption = MultiSelectOption;
 
@@ -129,4 +132,72 @@ export const MultiSelectField = component<MultiSelectFieldProps>(
             </Field.Root>
         ),
     { name: 'MultiSelectField' }
+);
+
+export type MapFieldProps = Define.Model<MapRow[]> &
+    Common &
+    Define.Prop<'keyPlaceholder', string> &
+    Define.Prop<'valuePlaceholder', string> &
+    Define.Prop<'addLabel', string>;
+
+const MAP = agMapFieldAnatomy.scope;
+
+/**
+ * A string → string map (headers, process environment) as name / value rows.
+ * The model is the ROWS, not the record: a half-typed or repeated name keeps
+ * its row until the form reads the map back (`fromSchemaDraft`). Each input is
+ * zero's `input` anatomy drawn directly, because a row's inputs are named by
+ * `aria-label` and `Input.Input` takes none; they post as `<name>.key` /
+ * `<name>.value` pairs.
+ */
+export const MapField = component<MapFieldProps>(
+    ({ props }) => {
+        const rows = (): MapRow[] => props.model?.value ?? [];
+        const set = (next: MapRow[]) => {
+            if (props.model) props.model.value = next;
+        };
+        const cell = (row: MapRow, index: number, part: 'key' | 'value') => (
+            <div data-scope="input" data-part="root" data-invalid={props.error ? '' : undefined}>
+                <div data-scope="input" data-part="control" data-invalid={props.error ? '' : undefined}>
+                    <input
+                        data-scope="input"
+                        data-part="input"
+                        type="text"
+                        name={`${props.name}.${part}`}
+                        aria-label={`${props.label} ${part === 'key' ? 'name' : 'value'} ${index + 1}`}
+                        aria-invalid={props.error ? 'true' : undefined}
+                        autoComplete="off"
+                        value={row[part]}
+                        placeholder={part === 'key' ? (props.keyPlaceholder ?? 'Name') : (props.valuePlaceholder ?? 'Value')}
+                        disabled={props.disabled}
+                        onInput={(e: Event) => {
+                            row[part] = (e.target as HTMLInputElement).value;
+                        }}
+                    />
+                </div>
+            </div>
+        );
+        return () => (
+            <Field.Root invalid={!!props.error} required={props.required} disabled={props.disabled}>
+                <Field.Label>{props.label}</Field.Label>
+                <div data-scope={MAP} data-part="root" role="group" aria-label={props.label}>
+                    {rows().map((row, i) => (
+                        <div data-scope={MAP} data-part="row" key={i}>
+                            {cell(row, i, 'key')}
+                            {cell(row, i, 'value')}
+                            <Button intent="icon" icon="close" label={`Remove ${props.label} row ${i + 1}`} disabled={props.disabled} onClick={() => set(rows().filter((_, j) => j !== i))} />
+                        </div>
+                    ))}
+                    <div data-scope={MAP} data-part="actions">
+                        <Button icon="plus" disabled={props.disabled} onClick={() => set([...rows(), { key: '', value: '' }])}>
+                            {props.addLabel ?? 'Add row'}
+                        </Button>
+                    </div>
+                </div>
+                {props.description ? <Field.Description>{props.description}</Field.Description> : null}
+                {props.error ? <Field.Error>{props.error}</Field.Error> : null}
+            </Field.Root>
+        );
+    },
+    { name: 'MapField' }
 );
