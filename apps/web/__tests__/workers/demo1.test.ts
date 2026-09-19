@@ -14,7 +14,7 @@ import { agentKeyOf, chatKeyOf, routingKeyOf, taskKeyOf, workspaceKeyOf } from '
 import { DEV_LOGIN_PATH } from '../../src/auth/dev-login';
 import { runActivation, unknownAgent } from '../../src/pages/chat/live';
 import { configPatch, CREATED_REASON, newAgentPatch } from '../../src/pages/agent/live';
-import { overHttp } from './http';
+import { overHttp, setAnthropicKey } from './http';
 import { TEST_DEV_LOGIN } from './secret';
 
 const ORIGIN = 'https://agentic.test';
@@ -64,6 +64,9 @@ describe('worker: demo 1 — dev login, new agent, config save, direct chat, ans
         expect(principal).toEqual({ kind: 'user', userId: 'dev_demo1', workspaceId: 'dev_demo1' });
         const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
         const WS = principal.workspaceId as WorkspaceId;
+
+        // `/plugins/anthropic-api`: the workspace's own key (#231) — the deployment holds none.
+        await setAnthropicKey(WS, cookie);
 
         // The roster's "New agent": the index record, then v1 on the platform runtime.
         const ws = overHttp(Workspace, workspaceKeyOf(WS), cookie);
