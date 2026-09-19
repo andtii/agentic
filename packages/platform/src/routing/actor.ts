@@ -537,15 +537,22 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await ctx.save();
                         return task(taskId).get();
                     }
-                    // A daemon runtime: the environment is the task's, else the agent's — and from here on, this one only (EXE-12).
-                    const environmentId = t.environmentId ?? config.execution.defaultEnvironmentId;
+                    // A daemon runtime: the environment is the task's, else the agent's, else — for a delegated task — the
+                    // delegating task's route (#220: a chat-started parent's environment lives on its route, not its record).
+                    // From here on, this one only (EXE-12).
+                    const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
+                    const environmentId = t.environmentId ?? config.execution.defaultEnvironmentId ?? parent?.environmentId;
                     if (!environmentId) {
-                        await task(taskId).fail({ code: 'no-environment', message: `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`, recoverable: false }, ROUTER);
+                        const message =
+                            t.origin.kind === 'agent'
+                                ? `agent ${t.assignee} runs on ${runtime} but no environment is named by the task, the agent or the delegating task`
+                                : `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`;
+                        await task(taskId).fail({ code: 'no-environment', message, recoverable: false }, ROUTER);
                         return task(taskId).get();
                     }
+                    const envFrom = t.environmentId ? "the task's own" : config.execution.defaultEnvironmentId ? "the agent's default" : "the delegating task's";
                     // The folder, once (#190, EXE-12): the task's own, a delegating parent's in the same environment, the agent's
                     // default in its default environment, else the environment's first root — which needs the machine's report.
-                    const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
                     const asked: { cwd: string; from: string } | undefined =
                         t.workdir !== undefined
                             ? { cwd: t.workdir, from: "the task's own" }
@@ -557,7 +564,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const located = await locate(environmentId);
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
                     const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
-                    await chosen(`runtime ${runtime} in environment ${environmentId} (${t.environmentId ? "the task's own" : "the agent's default"})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
+                    await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
                     // A folder picked for this task joins the workspace's recent folders — one-way, never failing the run.
                     if (t.workdir !== undefined) await noteWorkdir({ environmentId, path: t.workdir });
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody

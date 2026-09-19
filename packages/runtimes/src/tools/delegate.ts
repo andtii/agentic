@@ -32,7 +32,7 @@ export const delegateInput = z.object({
         })
         .optional()
         .describe('Limits for the child; never wider than your own.'),
-    environmentId: z.string().min(1).optional().describe('The environment the child runs in; default: the assignee’s own default.'),
+    environmentId: z.string().min(1).optional().describe('The environment the child runs in; default: the assignee’s own default, else yours. Usually leave it out.'),
     workdir: z.string().min(1).optional().describe('The folder the child works in, absolute and inside the roots of `environmentId` (which it requires). Default: your folder when the child runs in your environment.')
 });
 
