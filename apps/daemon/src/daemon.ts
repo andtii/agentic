@@ -180,6 +180,15 @@ function unavailableReport(runtime: string, reason: string): CapabilityReport {
     return { runtime, supported: [], unsupported: [{ op: '*', reason }], resume: false, cancel: false, steer: false, permissions: 'none', tools: 'none' };
 }
 
+/**
+ * A driver error travels to the platform in the verdict, and a local path never does (#274): a
+ * profile or config dir is the machine's business. Absolute paths — drive, UNC, POSIX — become
+ * `<path>`; the local log and `agentic-daemon doctor` keep the original.
+ */
+export function withoutLocalPaths(text: string): string {
+    return text.replace(/(^|[\s'"`(=])((?:[A-Za-z]:[\\/]|\\\\|\/)[^\s'"`,;)]*)/g, '$1<path>');
+}
+
 export function createDaemon(options: DaemonOptions): Daemon {
     const logger = options.logger ?? silentLogger;
     const platform = options.platform ?? process.platform;
@@ -261,8 +270,11 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 report = await drivers.get(runtime)!.doctor(envs);
             } catch (e) {
                 logger.warn('driver doctor failed', { runtime, error: e });
-                const reason = e instanceof Error && e.message ? e.message : String(e);
-                report = { ok: false, findings: [{ level: 'error', code: 'driver-doctor-failed', message: `the ${runtime} driver's checks failed: ${reason}`, environmentIds: envs.map((env) => env.id) }] };
+                const reason = withoutLocalPaths(e instanceof Error && e.message ? e.message : String(e));
+                report = {
+                    ok: false,
+                    findings: [{ level: 'error', code: 'driver-doctor-failed', message: `the ${runtime} driver's checks failed: ${reason} — run \`agentic-daemon doctor\` on the machine for details`, environmentIds: envs.map((env) => env.id) }]
+                };
             }
             for (const env of envs) nextVerdicts.set(env.id, environmentVerdict(report, env.id, checkedAt));
         }

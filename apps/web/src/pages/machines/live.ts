@@ -12,6 +12,7 @@ import type { MachineDoctorView, MachineIndexEntry, MachineOs, MachineView, Rout
 import type { DoctorCheck, OpsMachine, OpsSession } from '../../mock/ops';
 import type { AgentIdentity } from '../chat/live';
 import { dateTime, shortDate } from '../agent/format';
+import { shellArg } from './manage';
 
 /** An agent tile on an environment card's "Default for" line (`EnvironmentCard`'s own shape, not exported by the kit). */
 export interface DefaultForAgent {
@@ -171,11 +172,19 @@ export interface PairCommands {
     readonly pair: string;
 }
 
-export function pairCommands(origin: string, code: string, name: string): PairCommands {
-    const url = origin || '<platform url>';
+/**
+ * `allowRoot` is the folder the machine lets this page manage environments in
+ * (#239): `pair --allow-root` turns web management on at pairing (#238). Left
+ * empty, the machine keeps it off and its environments are edited there.
+ */
+export function pairCommands(origin: string, code: string, name: string, allowRoot = ''): PairCommands {
+    // Every value quoted when it needs it: a machine name may hold a space, and so does the placeholder URL.
+    const url = shellArg(origin || '<platform url>');
+    const machine = shellArg(name);
+    const root = allowRoot.trim();
     return {
-        install: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${url} -Code ${code} -Name ${name}`,
-        pair: `agentic-daemon pair ${code} --url ${url} --name ${name}`
+        install: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${url} -Code ${code} -Name ${machine}`,
+        pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${root ? ` --allow-root ${shellArg(root)}` : ''}`
     };
 }
 

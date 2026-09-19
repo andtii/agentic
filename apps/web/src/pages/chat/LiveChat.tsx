@@ -40,7 +40,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, type SessionActorClient } from './live';
+import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
@@ -115,7 +115,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The topbar reads the title and members from here.
     const stopHead = effect(() => {
         const s = summary.value;
-        const members = s ? membersOf(s, waitingAgents(history.value?.entries ?? [])) : [];
+        const members = s ? membersOf(s, waitingAgents(history.value?.entries ?? []), workingAgents(index.value ?? [], props.id)) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
         chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities };
     });
@@ -295,7 +295,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         }
         const entries = history.value?.entries ?? [];
         const waiting = waitingAgents(entries);
-        const members = s ? membersOf(s, waiting) : [];
+        const members = s ? membersOf(s, waiting, workingAgents(index.value ?? [], props.id)) : [];
         const last = lastOf(entries, directory.lookup);
         // The open chat as a summary: nothing in it is unread — it is on screen.
         const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at };
