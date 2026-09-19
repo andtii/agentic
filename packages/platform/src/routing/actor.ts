@@ -839,11 +839,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await outcomes.return?.().catch(() => undefined);
                 }
                 if (!end) return;
-                if (settledOutside || isTerminal((await taskClient.get()).status)) {
-                    // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
-                    await settled(() => tryTask(() => taskClient.sessionStopped()));
-                    return;
-                }
+                // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
+                const stopped = async (): Promise<void> => settled(() => tryTask(() => taskClient.sessionStopped()));
+                if (settledOutside) return stopped();
+                const t = await taskClient.get();
+                if (isTerminal(t.status)) return stopped();
                 if (end.stopReason === 'error') {
                     if (isInterruptedTurnEnd(end)) {
                         // Cut short by an eviction: nothing was re-run (OPS-05/06); the user decides whether to resume.
