@@ -38,7 +38,7 @@ export {
     supportedTimeZones,
     validateSettingsDraft
 } from './settings-model.js';
-export type { SettingsDraft, SettingsErrors } from './settings-model.js';
+export type { SettingsDraft, SettingsErrors, SettingsFormValue } from './settings-model.js';
 
 export { TextField, TextareaField, SelectField, NumberField, SwitchField, MultiSelectField } from './fields.js';
 export type { FieldOption, TextFieldProps, TextareaFieldProps, SelectFieldProps, NumberFieldProps, SwitchFieldProps, MultiSelectFieldProps } from './fields.js';

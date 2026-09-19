@@ -4,6 +4,10 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+### Changed
+
+- `WorkspaceSettings` is the shape the Workspace actor stores (#227, part of #224): `{ timeZone, notifications: { inbox, push }, defaults: { runtime, environmentId? }, retention: { sessionLogDays, artifactDays } }`, with `WorkspaceDefaults`, `RetentionSettings` and `DEFAULT_WORKSPACE_SETTINGS`. It replaces the shape from #25 (`notifications.kinds`, a flat `defaultEnvironmentId`), which no actor ever stored; `NotificationPrefs` is now `{ inbox, push }`. There is no `defaults.model`: a model is a runtime's to default. `NotificationKind` / `NOTIFICATION_KINDS` are unchanged.
+
 ### Added
 
 - Chat attachments contract (#204, part of #203), in `files.ts`:

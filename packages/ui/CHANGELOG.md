@@ -4,6 +4,7 @@ All notable changes to `@agentic/ui` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `SettingsForm` binds to its own `SettingsFormValue` (exported; the shape it always edited: per-kind notification switches, `defaultEnvironmentId`) now that core's `WorkspaceSettings` is the Workspace actor's shape (#227). No behaviour change.
 - `AgentForm` gains a `workdir` slot (`AgentFormWorkdirProps { environmentId, path, set }`) under "Default environment", and `AgentDraft.defaultWorkdir` posts as `AGENT_FIELDS.workdir` (#193).
   - A folder picked through `set` also sets the default environment; choosing another environment in the select clears the folder.
   - `fromAgentDraft` keeps `execution.defaultWorkdir` only with a default environment.
