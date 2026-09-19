@@ -15,7 +15,7 @@
  */
 import type { EnvironmentDescriptor, EnvironmentId, MachineId, TaskId } from '@agentic/core';
 import { inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
-import { connectDaemon, daemonFor, opens, signInAs, until, type DaemonLink } from './workers';
+import { SCENARIO_MS, connectDaemon, daemonFor, opens, signInAs, until, type DaemonLink } from './workers';
 
 const E = ['env_work', 'env_personal', 'env_client'] as EnvironmentId[];
 
@@ -33,7 +33,8 @@ afterEach(() => {
     for (const l of links.splice(0)) l.close();
 });
 
-describe('AC-02: three accounts of one runtime on one machine', () => {
+// A pairing, a daemon link and three routed runs: several waits in a row (#179).
+describe('AC-02: three accounts of one runtime on one machine', { timeout: SCENARIO_MS }, () => {
     it('each is selectable, a session opens on the environment its task chose, and no run touches another account', async () => {
         const me = await signInAs('ac02_user');
         const { machineId, token } = await me.pairMachine('laptop');
