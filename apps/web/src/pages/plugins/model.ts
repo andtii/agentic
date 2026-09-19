@@ -5,7 +5,7 @@
  * same functions from `mock/ops.ts`.
  */
 import { isSingleSlot, type PermissionScope, type PluginKind, type PluginReadiness } from '@agentic/core';
-import type { Dependents, PluginView } from '@agentic/platform';
+import type { Dependents, MemorySwitchReport, PluginView } from '@agentic/platform';
 import { dependentCount } from '../ops/live';
 
 /** The catalogue's sections, in the order a person sets a workspace up: what runs agents, what they reach, what they keep. */
@@ -99,4 +99,32 @@ export function registryErrorText(e: unknown): string {
     const message = messageOf(e);
     if (/no-kek|WORKSPACE_KEK/.test(message)) return 'This deployment cannot store keys: WORKSPACE_KEK is not set. Whoever runs the platform sets it (wrangler secret put WORKSPACE_KEK); nothing was saved.';
     return message.replace(/^\[registry\]\s*/, '');
+}
+
+/** What the "Make active" confirmation of a memory plugin says (#243): the dry run's numbers, before anything moves. */
+export interface MemorySwitchText {
+    readonly title: string;
+    readonly description: string;
+    /** One line per scope that holds memories, the agent's name for its own scope. */
+    readonly scopes: readonly string[];
+    readonly confirmLabel: string;
+}
+
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+export function memorySwitchText(report: MemorySwitchReport, nameOf: (pluginId: string) => string, agentName: (agentId: string) => string): MemorySwitchText {
+    const from = nameOf(report.from);
+    const to = nameOf(report.to);
+    const title = `Make ${to} active?`;
+    if (report.entries === 0) return { title, description: `${from} holds no memories yet, so nothing moves. New sessions remember in ${to}.`, scopes: [], confirmLabel: 'Make active' };
+    const parts = [
+        report.imported === 0
+            ? `Nothing new to move: all ${plural(report.entries, 'memory', 'memories')} in ${from} ${report.entries === 1 ? 'is' : 'are'} already in ${to} or cannot be held there.`
+            : `${plural(report.imported, 'memory', 'memories')} of ${report.entries} move from ${from} to ${to}.`
+    ];
+    if (report.skipped && report.imported > 0) parts.push(`${report.skipped} ${report.skipped === 1 ? 'is' : 'are'} already there or cannot be held, so ${report.skipped === 1 ? 'it stays' : 'they stay'} out.`);
+    parts.push(report.droppedFields.length ? `${to} keeps less than ${from}: ${report.droppedFields.join(', ')} ${report.droppedFields.length === 1 ? 'is' : 'are'} dropped.` : 'Nothing is lost.');
+    parts.push(`${from} keeps its own copy, so switching back finds it again.`);
+    const scopes = report.scopes.map((s) => `${s.scope.startsWith('agent:') ? agentName(s.scope.slice('agent:'.length)) : `Shared: ${s.scope.slice('shared:'.length)}`} · ${plural(s.report.entries, 'memory', 'memories')}`);
+    return { title, description: parts.join(' '), scopes, confirmLabel: report.imported === 0 ? 'Make active' : `Move ${plural(report.imported, 'memory', 'memories')} and make active` };
 }

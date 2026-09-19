@@ -15,7 +15,9 @@ export type RegistryErrorCode =
     | 'secret-missing'
     | 'secret-denied'
     | 'bad-name'
-    | 'connector-missing';
+    | 'connector-missing'
+    | 'no-migration'
+    | 'migration-failed';
 
 export class RegistryError extends Error {
     override readonly name: string = 'RegistryError';

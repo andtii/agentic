@@ -7,8 +7,8 @@
  * table under the same key, so it is reached the same way.
  */
 
-import { actorKey, type ImportReport, type MemoryEntry, type MemoryPlugin, type MemoryQuery, type MemoryScope, type MemoryStore, type NewMemoryEntry, type PluginContext, type RankedMemory, type WorkspaceId } from '@agentic/core';
-import { FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, memoryPlugin } from '@agentic/memory';
+import { actorKey, type ImportReport, type MemoryEntry, type MemoryPlugin, type MemoryQuery, type MemoryScope, type NewMemoryEntry, type PluginContext, type RankedMemory, type WorkspaceId } from '@agentic/core';
+import { createFlatMemoryStore, createMemoryStore, FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, memoryPlugin, type MemoryFidelity, type MigrationTarget } from '@agentic/memory';
 import { actor, type ActorClientWith } from '@sigx/actors';
 import { asPrincipal } from '../auth/agent-token.js';
 import type { MemoryPluginImpl, RetrievalBudget } from '../task/driver.js';
@@ -20,7 +20,10 @@ export type MemoryActorClient = ActorClientWith<typeof Memory>;
 export type FlatMemoryActorClient = ActorClientWith<typeof FlatMemory>;
 
 /** The methods `actorMemoryStore` calls — what the Memory and the FlatMemory actor both answer. */
-export type MemoryStoreClient = Pick<MemoryActorClient, 'put' | 'update' | 'retire' | 'delete' | 'get' | 'query' | 'exportPage' | 'importBatch'>;
+export type MemoryStoreClient = Pick<MemoryActorClient, 'put' | 'update' | 'retire' | 'delete' | 'get' | 'query' | 'exportPage' | 'importBatch'> & Partial<Pick<MemoryActorClient, 'stats'>>;
+
+/** A store over an actor: a `MigrationTarget`, and — when the client answers `stats` — `count()` in one call instead of an export scan. */
+export type ActorMemoryStore = MigrationTarget & { readonly count?: () => Promise<number> };
 
 /** Rows per `importBatch` call and entries per `exportPage`. */
 export const MEMORY_WIRE_BATCH = 100;
@@ -29,9 +32,20 @@ export function memoryActorKey(workspace: WorkspaceId, scope: MemoryScope): stri
     return actorKey(workspace, 'memory', scope);
 }
 
-/** A `MemoryStore` over one Memory (or FlatMemory) actor client. */
-export function actorMemoryStore(client: MemoryStoreClient, batch = MEMORY_WIRE_BATCH): MemoryStore {
-    const store: MemoryStore = {
+/**
+ * What each plugin's `import` would drop from an entry, without writing (`MemoryFidelity`). It depends on the entry
+ * alone, never on what a store holds, so a local store of the same kind answers for the actor: a migration's dry
+ * run (#243) needs no round trip per entry.
+ */
+const DEFAULT_FIDELITY: MemoryFidelity['fidelity'] = createMemoryStore().fidelity;
+const FLAT_FIDELITY: MemoryFidelity['fidelity'] = createFlatMemoryStore().fidelity;
+
+/** A `MemoryStore` over one Memory (or FlatMemory) actor client; with `fidelity`, a `MigrationTarget` a dry run can ask. */
+export function actorMemoryStore(client: MemoryStoreClient, batch = MEMORY_WIRE_BATCH, fidelity?: MemoryFidelity['fidelity']): ActorMemoryStore {
+    const stats = client.stats;
+    const store: ActorMemoryStore = {
+        ...(fidelity ? { fidelity } : {}),
+        ...(typeof stats === 'function' ? { count: async () => (await stats.call(client)).entries } : {}),
         put: (entry: NewMemoryEntry): Promise<MemoryEntry> => client.put(entry),
         update: (id: string, patch: Partial<Omit<MemoryEntry, 'id'>>): Promise<MemoryEntry> => client.update(id, patch),
         retire: (id: string, why: string): Promise<void> => client.retire(id, why),
@@ -84,7 +98,7 @@ export function memoryActorPlugin(options: MemoryActorPluginOptions): MemoryPlug
     return memoryPlugin({
         id: options.id,
         version: options.version,
-        open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)))
+        open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)), MEMORY_WIRE_BATCH, DEFAULT_FIDELITY)
     });
 }
 
@@ -131,7 +145,7 @@ export function flatMemoryActorPlugin(options: FlatMemoryActorPluginOptions): Me
         id: FLAT_MEMORY_PLUGIN_ID,
         version: FLAT_MEMORY_PLUGIN_VERSION,
         capabilities: { semantic: false, export: 'partial' },
-        open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)))
+        open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)), MEMORY_WIRE_BATCH, FLAT_FIDELITY)
     };
 }
 

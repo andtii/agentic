@@ -199,7 +199,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const withFiles = files ? { files } : {};
     // The build's plugins (#231): the Registry lists them, the router gates on them, a local runtime's key is their secret.
     const kek = ports.kek ?? defaultPorts.kek;
-    const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue });
+    // Switching the active memory plugin moves the memories between these implementations (#243).
+    const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue, memoryPlugins: memoryCatalogue });
     const registry = () => Registry;
     // Notification channels (#244): the static ones, then every enabled notification plugin this build implements — one Registry hop per notification.
     const Inbox = defineInbox({ channels: ports.channels, channelPlugins: ports.channelPlugins ?? channelCatalogue, registry });

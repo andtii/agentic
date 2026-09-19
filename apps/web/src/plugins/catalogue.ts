@@ -27,7 +27,8 @@
  * scope, the flat one the FlatMemory actor of each scope (#281), and a shared
  * scope's ACL (the Memory actor's) governs both. The flat plugin is enabled but
  * not active — the default stays the workspace's memory until the owner makes
- * another one active (#243 moves the memories with it).
+ * another one active, and making it active moves the memories with it
+ * (#243: the Registry moves them between the `memoryCatalogue` implementations).
  *
  * The A2A server (#245) ships off until the owner turns it on: its
  * implementation is the Worker's A2A mount (`src/a2a/mount.ts`), which asks

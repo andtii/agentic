@@ -9,5 +9,8 @@ export { MEMORY_ACTOR_TYPE, Memory, applyMemoryActorEntry, createMemoryActorStat
 export type { FlatMemoryActorState } from './flat-actor.js';
 export { FLAT_MEMORY_ACTOR_TYPE, FlatMemory, createFlatMemoryActorState } from './flat-actor.js';
 
-export type { MemoryActorClient, FlatMemoryActorClient, MemoryStoreClient, MemoryActorPluginOptions, FlatMemoryActorPluginOptions } from './plugin.js';
+export type { MemoryActorClient, FlatMemoryActorClient, MemoryStoreClient, ActorMemoryStore, MemoryActorPluginOptions, FlatMemoryActorPluginOptions } from './plugin.js';
 export { MEMORY_WIRE_BATCH, MAX_RETRIEVAL_LIMIT, RETRIEVAL_LIMIT_KEY, memoryActorKey, actorMemoryStore, memoryActorPlugin, memoryActorImpl, flatMemoryActorPlugin, flatMemoryActorImpl, isolateMemoryImpl, retrievalFromConfig } from './plugin.js';
+
+export type { MemoryScopeMigration, MemorySwitchReport, MemorySwitchInput } from './switch.js';
+export { MemorySwitchError, workspaceMemoryScopes, switchMemory } from './switch.js';
