@@ -94,13 +94,13 @@ export function createA2aMount(wiring: A2aMountWiring): (request: Request, env: 
         if (!p?.enabled) return [];
         const wanted = exposedOf(p);
         if (wanted.length === 0) return [];
-        const ids = new Set(wanted);
-        const names = new Set(wanted.map((w) => w.toLowerCase()));
+        // Ids and names alike, without regard to case: one set serves both.
+        const wantedLower = new Set(wanted.map((w) => w.toLowerCase()));
         const { agents } = await actor(Workspace, workspaceKey(ws)).with({ context: owner(ws) }).get();
         const out: ExposedAgent[] = [];
         for (const id of agents) {
             const view = await actor(AgentActor, agentKey(ws, id)).with({ context: owner(ws) }).get();
-            if (ids.has(view.id) || names.has(view.config.name.toLowerCase())) out.push(exposedAgent(view));
+            if (wantedLower.has(view.id.toLowerCase()) || wantedLower.has(view.config.name.toLowerCase())) out.push(exposedAgent(view));
         }
         return out;
     }
@@ -115,7 +115,8 @@ export function createA2aMount(wiring: A2aMountWiring): (request: Request, env: 
                 const principal = principals.get(request);
                 if (!principal) throw new Error('[a2a/mount] a session was asked for outside an authenticated request');
                 // A context belongs to the client that opened it: another client's id opens a context of its own.
-                const key = `${principal.clientId}\n${agentId}\n${contextId}`;
+                // The contextId is the client's to choose — encode the tuple so no value can collide with another client's.
+                const key = JSON.stringify([principal.clientId, agentId, contextId]);
                 let s = sessions.get(key);
                 if (!s) {
                     s = platformA2aSession({ platform: createActorPlatformPort(principal, { actors: wiring.actors }), agentId: agentId as AgentId, contextId, pollMs });
@@ -131,7 +132,7 @@ export function createA2aMount(wiring: A2aMountWiring): (request: Request, env: 
     }
 
     function oauthFor(secret: string, origin: string): OAuthServer {
-        const key = `${secret}\n${origin}`;
+        const key = JSON.stringify([secret, origin]);
         if (oauth?.key !== key) {
             const issuer = origin.replace(/\/+$/, '');
             oauth = { key, server: createOAuthServer({ secret, issuer, resource: `${issuer}${MCP_PATH}`, store: wiring.store ?? actorOAuthStore(), ...(wiring.now ? { now: wiring.now } : {}) }) };
@@ -147,7 +148,7 @@ export function createA2aMount(wiring: A2aMountWiring): (request: Request, env: 
         const server = oauthFor(secret, origin);
         return async (req) => {
             const principal = await server.verify(req);
-            if (!principal) return server.challenge();
+            if (!principal) return server.challenge({ description: `A2A needs an access token with the ${A2A_SCOPES.join(' and ')} scopes`, scope: A2A_SCOPES });
             // Off → nothing is here: no hint that the workspace has an A2A server it has not turned on.
             if (!(await plugin(principal.workspaceId))?.enabled) return notFound();
             const missing = A2A_SCOPES.filter((s) => !principal.scopes.includes(s));

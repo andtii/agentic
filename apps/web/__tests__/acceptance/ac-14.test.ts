@@ -179,6 +179,8 @@ describe('AC-14: the platform’s agents over the mounted A2A server (#245)', ()
         const anonymous = await get('/.well-known/agent-card.json');
         expect(anonymous.status).toBe(401);
         expect(anonymous.headers.get('www-authenticate')).toMatch(/resource_metadata=/);
+        // The challenge names the scopes to ask for, so a client need not guess them.
+        expect(anonymous.headers.get('www-authenticate')).toMatch(/scope="tasks sessions"/);
 
         // Off by default: nothing is there, for any path — not even a hint of the agents.
         expect((await get('/.well-known/agent-card.json', token)).status).toBe(404);
@@ -198,6 +200,11 @@ describe('AC-14: the platform’s agents over the mounted A2A server (#245)', ()
         expect(((await (await get('/.well-known/agent-card.json', token)).json()) as AgentCard).name).toBe('Helper');
         expect((await get(`/_agentic/a2a/${hidden}/.well-known/agent-card.json`, token)).status).toBe(404);
         expect((await send(`/_agentic/a2a/${hidden}`, token, 'hi')).status).toBe(404);
+        // By id too, matched without regard to case like a name.
+        await registry.configure(A2A_SERVER_PLUGIN_ID, { exposedAgents: [hidden.toUpperCase()] });
+        expect((await get(`/_agentic/a2a/${hidden}/.well-known/agent-card.json`, token)).status).toBe(200);
+        expect((await get(`/_agentic/a2a/${helper}/.well-known/agent-card.json`, token)).status).toBe(404);
+        await registry.configure(A2A_SERVER_PLUGIN_ID, { exposedAgents: ['helper'] });
 
         // A grant without the task scopes is refused once the server is on.
         const narrow = await accessToken(['agents']);
