@@ -82,7 +82,7 @@ describe('buildSystemPrompt: the chat section (CHT-07)', () => {
         expect(prompt).toContain('- Eve (agent_eve)\n');
         expect(prompt).toContain('You are the coordinator');
         expect(prompt).toContain("`delegate` with the agent's id as `assignee`");
-        expect(prompt).toContain('`chat_post` mentioning @Name');
+        expect(prompt).toContain("`chat_post` with the agent's id in `mentions`");
         expect(prompt).toContain("never use a runtime's own agent or session messaging");
         // Stable before the tools, so the cacheable prefix keeps it.
         expect(prompt.indexOf('## This chat')).toBeLessThan(prompt.indexOf('## Tools'));

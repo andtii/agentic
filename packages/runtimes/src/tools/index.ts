@@ -16,7 +16,7 @@ import { memoryRememberTool, memorySearchTool } from './memory.js';
 import type { PlatformPorts } from './ports.js';
 import { taskReportTool } from './task.js';
 
-export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, UserQuestion, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, ChatFilesPort, PlatformPorts } from './ports.js';
+export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, ChatPostResult, UserQuestion, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, ChatFilesPort, PlatformPorts } from './ports.js';
 export { memorySearchTool, memoryRememberTool, memorySearchInput, memoryRememberInput } from './memory.js';
 export { delegateTool, delegateInput, delegateResult, type DelegateResult } from './delegate.js';
 export { chatPostTool, askUserTool, chatPostInput, askUserInput } from './chat.js';
