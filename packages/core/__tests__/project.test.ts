@@ -54,6 +54,12 @@ describe('project feature manifests', () => {
         expect(isProjectFeatureManifest(base)).toBe(false);
         expect(isProjectFeatureManifest({ ...base, kind: 'memory' })).toBe(false);
     });
+    it('rejects a project settings schema that is not an object', () => {
+        expect(isProjectFeatureManifest({ ...base, projectSettings: undefined } as PluginManifest)).toBe(false);
+        expect(isProjectFeatureManifest({ ...base, projectSettings: null } as unknown as PluginManifest)).toBe(false);
+        expect(isProjectFeatureManifest({ ...base, projectSettings: [] } as unknown as PluginManifest)).toBe(false);
+        expect(isProjectFeatureManifest(Object.create({ ...base, projectSettings: {} }) as PluginManifest)).toBe(false);
+    });
     it('caps a workspace at fifty projects', () => {
         expect(PROJECTS_MAX).toBe(50);
     });

@@ -72,7 +72,9 @@ export interface ProjectFeatureManifest extends PluginManifest {
 }
 
 export function isProjectFeatureManifest(manifest: PluginManifest): manifest is ProjectFeatureManifest {
-    return manifest.kind === PROJECT_FEATURE_KIND && 'projectSettings' in manifest;
+    if (manifest.kind !== PROJECT_FEATURE_KIND || !Object.hasOwn(manifest, 'projectSettings')) return false;
+    const schema = (manifest as { projectSettings?: unknown }).projectSettings;
+    return typeof schema === 'object' && schema !== null && !Array.isArray(schema);
 }
 
 /** A folder as the daemon lists it: the path and, for a repo or worktree, its git badge. */
