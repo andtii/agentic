@@ -236,7 +236,8 @@ function settleOf(item: ThreadItem): { status: 'completed' | 'failed' | 'denied'
     if (item.type === 'mcpToolCall') {
         const i = item as Extract<ThreadItem, { type: 'mcpToolCall' }>;
         if (status === 'completed') return { status: 'completed', output: i.result?.structuredContent ?? textOf(i.result?.content) };
-        return { status: 'failed', error: i.error?.message ?? textOf(i.result?.content) ?? 'the tool failed' };
+        // An empty message is no message: a failure always says something.
+        return { status: 'failed', error: i.error?.message || textOf(i.result?.content) || 'the tool failed' };
     }
     return undefined;
 }

@@ -118,6 +118,20 @@ describe('codexCliDriver', () => {
         await driver.dispose();
     });
 
+    it('a failed MCP call with no message still says it failed', async () => {
+        const { driver } = driverWith(async (s) => {
+            const item = { type: 'mcpToolCall', id: 'mcp_x', server: 'other', tool: 'lookup', status: 'inProgress', arguments: {}, result: null, error: null };
+            s.server.emit('item/started', { threadId: s.turn.threadId, turnId: s.turn.turnId, item });
+            s.server.emit('item/completed', { threadId: s.turn.threadId, turnId: s.turn.turnId, item: { ...item, status: 'failed', result: { content: [], structuredContent: null } } });
+        });
+        const { session } = await driver.open(ENV, spec(), ctx());
+        const events = await drain(session.prompt('Look it up'));
+        expect(events.find((e) => e.type === 'tool-call')).toMatchObject({ name: 'other__lookup' });
+        expect(events).toContainEqual(expect.objectContaining({ type: 'tool-update', callId: 'mcp_x', status: 'failed', error: 'the tool failed' }));
+        await session.close();
+        await driver.dispose();
+    });
+
     it('routes a command approval through the policy: allow → accept, deny → decline (the call is denied)', async () => {
         const decisions: (string | undefined)[] = [];
         const script: TurnScript = async (s) => {
