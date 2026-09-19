@@ -1,7 +1,7 @@
 /** The connector manifest and the static capability declaration. */
 // @vitest-environment node
-import type { PluginManifest } from '@agentic/core';
-import { MCP_CONNECTOR_CAPABILITIES, MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS, capabilityReportFor, mcpConnector } from '@agentic/mcp';
+import { configDefaults, validateConfig, type PluginManifest } from '@agentic/core';
+import { MCP_CONNECTOR_CAPABILITIES, MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS, capabilityReportFor, mcpConnector, mcpConnectorSetup } from '@agentic/mcp';
 
 describe('mcpConnector', () => {
     it('declares an HTTP server with its host, secret and tool namespace as permissions', () => {
@@ -18,6 +18,31 @@ describe('mcpConnector', () => {
         expect(m.permissions.map((p) => p.scope)).toEqual(['machine:m-1', 'secret:fs.key', 'tools:fs', 'memory:read']);
         expect(mcpConnector({ id: 'fs', name: 'Files', transport: 'stdio', command: 'x' }).permissions[0]?.scope).toBe('machine:*');
         expect(m.config).toMatchObject({ required: ['command'] });
+    });
+
+    it('declares every credential as a manifest secret with its scope, and keeps credentials out of the config schema (#240)', () => {
+        const m = mcpConnector({ id: 'acme.tools', name: 'Acme', transport: 'streamable-http', url: 'https://mcp.acme.test/mcp', secret: 'acme.token', headerSecrets: { 'X-Team': 'acme.team' } });
+        expect(m.secrets).toEqual([
+            { name: 'acme.token', title: 'Bearer token', description: 'Bearer token sent on every request', required: true },
+            { name: 'acme.team', title: 'X-Team', description: 'Sent as the X-Team header on every request', required: true }
+        ]);
+        expect(m.permissions.map((p) => p.scope)).toEqual(['network:mcp.acme.test', 'secret:acme.token', 'secret:acme.team', 'tools:acme_tools']);
+        expect(Object.keys((m.config as { properties: object }).properties)).toEqual(['url']);
+        expect(validateConfig(m.config, configDefaults(m.config)).ok).toBe(true);
+        const stdio = mcpConnector({ id: 'gh', name: 'GitHub', transport: 'stdio', command: 'gh-mcp', envSecrets: { GITHUB_TOKEN: 'github.token' } });
+        expect(Object.keys((stdio.config as { properties: object }).properties)).toEqual(['command', 'args', 'cwd']);
+        expect(stdio.secrets?.map((s) => s.name)).toEqual(['github.token']);
+        expect(validateConfig(stdio.config, configDefaults(stdio.config)).ok).toBe(true);
+    });
+
+    it('mcpConnectorSetup gives the manifest and the record that binds each secret to where it goes', () => {
+        const http = mcpConnectorSetup({ id: 'acme', name: 'Acme', transport: 'streamable-http', url: 'https://mcp.acme.test/mcp', secret: 'acme.token', headerSecrets: { 'X-Team': 'acme.team' } });
+        expect(http.manifest.id).toBe('acme');
+        expect(http.connector).toEqual({ id: 'acme', pluginId: 'acme', transport: 'streamable-http', url: 'https://mcp.acme.test/mcp', secrets: ['acme.token', 'acme.team'], auth: { bearer: 'acme.token', headers: { 'X-Team': 'acme.team' } } });
+        const open = mcpConnectorSetup({ id: 'pub', name: 'Public', transport: 'streamable-http', url: 'https://pub.test/mcp' });
+        expect(open.connector).toEqual({ id: 'pub', pluginId: 'pub', transport: 'streamable-http', url: 'https://pub.test/mcp', secrets: [] });
+        const stdio = mcpConnectorSetup({ id: 'gh', name: 'GitHub', transport: 'stdio', command: 'gh-mcp', args: ['serve'], machine: 'm-1', secrets: ['GH_HOST'], envSecrets: { GITHUB_TOKEN: 'github.token' } });
+        expect(stdio.connector).toEqual({ id: 'gh', pluginId: 'gh', transport: 'stdio', command: 'gh-mcp', args: ['serve'], machine: 'm-1', secrets: ['GH_HOST', 'github.token'], auth: { env: { GH_HOST: 'GH_HOST', GITHUB_TOKEN: 'github.token' } } });
     });
 
     it('rejects an id that cannot be a tool namespace', () => {
