@@ -4,6 +4,7 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- claude-code doctor (#238): a signed-out environment's finding says to sign in on the machine with `agentic-daemon env login <id>` instead of spelling out `CLAUDE_CONFIG_DIR=<dir> claude /login`.
 - Plugin manifests (#228, PLG-02): `anthropicApiPlugin` (id `anthropic-api`; config `defaultModel` over `ANTHROPIC_MODEL_IDS`, default `DEFAULT_ANTHROPIC_MODEL`; required secret `ANTHROPIC_API_KEY_SECRET` = `anthropic-api-key` with its `secret:` scope) and `claudeCodePlugin` (id `claude-code`, `DAEMON_HOSTED_CAPABILITY`, `machine:*`), plus `RUNTIME_PLUGINS`, `ANTHROPIC_API_PLUGIN_ID`, `CLAUDE_CODE_PLUGIN_ID`, `RUNTIME_PLUGIN_VERSION`. Ids equal the `RuntimeId`. Declarations only — nothing is registered here.
 - `ChatPort.post` answers `ChatPostResult` (#222): `messageId` plus optional `activated` (the task each mentioned member was started on) and `notActivated` (who was not, and why). The `chat_post` description and the system prompt's "This chat" say a mention starts the agent, which answers in the chat, and that `delegate` is how to get the answer back as a result.
 - `delegate`: the `environmentId` description says the child falls back to the caller's environment when the assignee has no default (#220).

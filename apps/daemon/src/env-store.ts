@@ -79,19 +79,21 @@ export function addEnvironment(current: readonly LocalEnvironment[], input: Envi
     if (existing && !options.replace) throw new EnvironmentStoreError('exists', `environment "${input.id}" already exists`);
     const id = input.id ?? newEnvironmentId(input.name ?? '', new Set(current.map((e) => e.id)));
     for (const root of input.cwdRoots ?? []) if (typeof root === 'string' && !isAbsolute(root)) throw new EnvironmentStoreError('invalid', `working root "${root}" must be an absolute path`);
-    const profileDir = input.profileDir ?? existing?.profileDir ?? profileDirFor(paths, id);
-    if (!isAbsolute(profileDir)) throw new EnvironmentStoreError('invalid', `profile dir "${profileDir}" must be an absolute path`);
+    // A replaced environment keeps its profile — also when that is the runtime's default one (a hand-written row without `profileDir`):
+    // allocating a directory there would sign the environment out.
+    const profileDir = input.profileDir ?? (existing ? existing.profileDir : profileDirFor(paths, id));
+    if (profileDir !== undefined && !isAbsolute(profileDir)) throw new EnvironmentStoreError('invalid', `profile dir "${profileDir}" must be an absolute path`);
     const row = {
         id,
         name: input.name,
         runtime: input.runtime,
-        profileDir,
+        ...(profileDir === undefined ? {} : { profileDir }),
         cwdRoots: [...(input.cwdRoots ?? [])],
         ...(input.concurrency === undefined ? {} : { concurrency: input.concurrency }),
         ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel })
     };
     const others = current.filter((e) => e.id !== id);
-    const sharing = others.find((e) => e.profileDir !== undefined && samePath(e.profileDir, profileDir, platform));
+    const sharing = profileDir === undefined ? undefined : others.find((e) => e.profileDir !== undefined && samePath(e.profileDir, profileDir, platform));
     if (sharing) throw new EnvironmentStoreError('shared-profile-dir', `profile dir ${profileDir} is already used by environment "${sharing.id}" — two environments never share an account profile`);
     // The file's own validator has the last word, so what is written always loads.
     const checked = parseEnvironments([row]);
@@ -136,10 +138,12 @@ export async function deleteEnvironment(paths: Pick<DaemonPaths, 'environmentsFi
     return removed;
 }
 
-export interface WatchEnvironmentsOptions {
+export interface WatchConfigFileOptions<T> {
     readonly file: string;
-    /** Every settled change, valid or not; the caller keeps its running set on `ok: false`. */
-    onChange(result: EnvironmentsResult): void | Promise<void>;
+    /** Reads the file once its events have settled. */
+    load(file: string): Promise<T>;
+    /** Every settled change, valid or not; the caller keeps what it runs with when the result says the file is bad. */
+    onChange(result: T): void | Promise<void>;
     onError?(error: unknown): void;
     /** Default 250 ms. */
     readonly debounceMs?: number;
@@ -147,12 +151,19 @@ export interface WatchEnvironmentsOptions {
     readonly watch?: (dir: string, listener: (event: string, filename: string | Buffer | null) => void) => Pick<FSWatcher, 'close' | 'on'>;
 }
 
+export type WatchEnvironmentsOptions = Omit<WatchConfigFileOptions<EnvironmentsResult>, 'load'>;
+
+/** `environments.json`, re-read whenever it changes. */
+export function watchEnvironments(options: WatchEnvironmentsOptions): Promise<{ close(): void }> {
+    return watchConfigFile({ ...options, load: loadEnvironments });
+}
+
 /**
  * Watch the DIRECTORY, not the file: an atomic write replaces the file, and a
  * watch on the old inode goes quiet. Events are debounced and the file is
- * re-read once they settle.
+ * re-read once they settle. `policy.json` is watched the same way (#238).
  */
-export async function watchEnvironments(options: WatchEnvironmentsOptions): Promise<{ close(): void }> {
+export async function watchConfigFile<T>(options: WatchConfigFileOptions<T>): Promise<{ close(): void }> {
     const dir = dirname(options.file);
     const name = basename(options.file);
     await mkdir(dir, { recursive: true });
@@ -161,7 +172,8 @@ export async function watchEnvironments(options: WatchEnvironmentsOptions): Prom
     const settle = (): void => {
         timer = undefined;
         if (closed) return;
-        void loadEnvironments(options.file)
+        void options
+            .load(options.file)
             .then((result) => (closed ? undefined : options.onChange(result)))
             .catch((e: unknown) => options.onError?.(e));
     };

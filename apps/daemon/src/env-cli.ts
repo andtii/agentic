@@ -116,7 +116,7 @@ ${ENV_USAGE}`);
                     );
                     if (!ok) c.err(`warning: working root ${root} is not a directory (yet)`);
                 }
-                c.out(`${flags.replace === true ? 'saved' : 'added'} environment ${environment.id} (${environment.name}, ${environment.runtime}); profile ${environment.profileDir}`);
+                c.out(`${flags.replace === true ? 'saved' : 'added'} environment ${environment.id} (${environment.name}, ${environment.runtime}); profile ${environment.profileDir ?? "(the runtime default)"}`);
                 if (environment.runtime === 'claude-code') c.out(`sign it in with: agentic-daemon env login ${environment.id}`);
                 return 0;
             }
