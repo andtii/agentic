@@ -71,9 +71,9 @@ describe('AC-13: a plugin is disabled', () => {
         expect(await registry.dependents('github')).toEqual(dependents);
         // Beside the build's own plugins (#231), which stay as they were.
         expect((await registry.list()).filter((p) => !p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
-        // The flat memory plugin (#242) and Web Push (#244) ship turned off; every other built-in is on — and all stay as they were.
+        // The flat memory plugin (#242), Web Push (#244) and the A2A server (#245) ship turned off; every other built-in is on — and all stay as they were.
         expect(await builtins()).toEqual(builtinsBefore);
-        expect(builtinsBefore.filter(([, on]) => !on).map(([id]) => id)).toEqual(['agentic.memory.flat', 'agentic.notify.web-push']);
+        expect(builtinsBefore.filter(([, on]) => !on).map(([id]) => id)).toEqual(['agentic.a2a.server', 'agentic.memory.flat', 'agentic.notify.web-push']);
 
         // New use is refused from now on, with a typed error a caller can show — the gate and the secret alike.
         const refused = await registry.requireEnabled('github').catch((e: unknown) => e);

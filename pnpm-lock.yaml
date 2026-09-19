@@ -153,6 +153,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@agentic/a2a':
+        specifier: workspace:*
+        version: link:../../packages/a2a
       '@agentic/core':
         specifier: workspace:*
         version: link:../../packages/core

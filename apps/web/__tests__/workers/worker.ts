@@ -12,6 +12,7 @@ import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_I
 import { NO_API_KEY_CODE, type RuntimeCatalogue } from '@agentic/platform';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
+import { createA2aMount } from '../../src/a2a/mount';
 import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, platformFiles, type PlatformEnv } from '../../src/actors.app';
 import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
@@ -51,6 +52,12 @@ const authRoute = createAuthMount({ pairing: pairingWiring(actors), actors });
 /** The chat file routes (#207), as the production entry mounts them: after the auth routes, over the same R2 store the actors use. */
 const filesRoute = createFilesMount({ store: platformFiles });
 
+/**
+ * The A2A server (#245), as the production entry mounts it: after the auth routes. Like the OAuth server it
+ * verifies tokens with, it needs an origin — the pool sets no `APP_ORIGIN`, so it answers on `http://localhost`.
+ */
+const a2aRoute = createA2aMount({ actors, pollMs: 20 });
+
 const worker = createActorWorker({ actors });
 
 // The same shape as `entry.cloudflare.ts`: the dev login (#35, #143: GET form + POST), the auth
@@ -58,7 +65,7 @@ const worker = createActorWorker({ actors });
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
         return runWithHost(worker.host, async () => {
-            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
             if (route) {
                 // The Worker host boots from `env` before an auth route hops (#182).
                 await worker.boot(env);
