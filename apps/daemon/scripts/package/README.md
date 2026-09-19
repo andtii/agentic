@@ -52,6 +52,18 @@ node bin\agentic-daemon.mjs run         # foreground, logs on stderr (--verbose 
 node bin\agentic-daemon.mjs --version
 ```
 
+## Letting the web add environments (optional)
+
+By default the platform cannot add, change or remove this machine's environments. To let the Machine page do it inside chosen folders only, allow them here, on the machine (never from the web):
+
+```bat
+node bin\agentic-daemon.mjs policy allow-root C:\src
+node bin\agentic-daemon.mjs policy show
+node bin\agentic-daemon.mjs policy off
+```
+
+(or `pair … --allow-root C:\src`). A running daemon picks the change up without a restart. The web can then only use folders inside the allowed ones: never a network share, never the daemon's own folder (`%APPDATA%\agentic`, which holds the token and the sign-ins), and a link or junction that leads out does not count as inside. New environments still need a sign-in on the machine: `node bin\agentic-daemon.mjs env login <id>`.
+
 ## `environments.json`
 
 `env add | rm` write it for you (atomically, owner-only); editing it by hand works too — a running daemon picks either up without a restart, and an edit that does not validate is logged and ignored (the running environments stay). `env add` gives each environment its own profile folder, `%APPDATA%\agentic\profiles\<id>`, unless you pass `--profile-dir`, and refuses a folder another environment already uses.

@@ -1,6 +1,6 @@
 /**
- * Where the daemon keeps things (architecture §5b). The token and
- * `environments.json` are configuration and roam with the user profile
+ * Where the daemon keeps things (architecture §5b). The token,
+ * `environments.json` and `policy.json` are configuration and roam with the user profile
  * (`%APPDATA%/agentic`); session logs are machine-local state
  * (`%LOCALAPPDATA%/agentic/sessions`). `AGENTIC_DAEMON_HOME` puts both under
  * one directory — for tests and portable installs.
@@ -13,6 +13,8 @@ export interface DaemonPaths {
     readonly configDir: string;
     readonly credentialsFile: string;
     readonly environmentsFile: string;
+    /** The machine-local policy for web-managed environments (#238); only ever edited on this machine. */
+    readonly policyFile: string;
     readonly stateDir: string;
     readonly sessionsDir: string;
 }
@@ -48,6 +50,7 @@ export function daemonPaths(context: PathContext = {}): DaemonPaths {
         configDir,
         credentialsFile: join(configDir, 'credentials.json'),
         environmentsFile: join(configDir, 'environments.json'),
+        policyFile: join(configDir, 'policy.json'),
         stateDir,
         sessionsDir: join(stateDir, 'sessions')
     };
