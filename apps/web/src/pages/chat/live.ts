@@ -74,12 +74,15 @@ const NOBODY: ReadonlySet<string> = new Set();
 /**
  * `Chat.get()` → the members as the panel and the composer read them. A
  * member in `waiting` has a request open in this chat (`openRequests`) —
- * it reads WAITING, ahead of its session being active.
+ * it reads WAITING, ahead of its session being active. A member reads
+ * ACTIVE while the chat runs a session for it, or while it works a task of
+ * this chat's tree (`working`, #258) — a delegated child runs outside the
+ * chat, so it never shows in `activeSessions`.
  */
-export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY): MockChatMember[] {
+export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] || working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {})
@@ -235,6 +238,11 @@ export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: nu
     };
     for (const r of roots) visit(r, 0);
     return out;
+}
+
+/** The agents working a task of this chat's tree right now (#258): every `active` row of `chatTasks`, uncapped. */
+export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
+    return new Set(chatTasks(rows, chatId, Number.POSITIVE_INFINITY).flatMap((t) => (t.status === 'active' ? [t.agentId as string] : [])));
 }
 
 /** The tasks "Stop task chain" would stop: everything in the panel that has not settled. */
