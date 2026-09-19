@@ -24,7 +24,9 @@ export type MemoryTabProps =
     /** Live mode: act through the actors; absent, the actions mutate a local copy (the mock page). */
     & Define.Prop<'store', MemoryTabStore>
     /** The workspace's IANA zone; absent, the mock workspace's. */
-    & Define.Prop<'zone', string>;
+    & Define.Prop<'zone', string>
+    /** The memory plugin the entries come from — the workspace's active one (#281); absent, the tab does not say. */
+    & Define.Prop<'source', string>;
 
 type Filter = MemoryKind | 'all';
 
@@ -176,6 +178,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                             <span>Export NDJSON</span>
                         </a>
                     </div>
+                    {props.source ? <p data-memory-source="">Stored by {props.source}, the workspace's active memory.</p> : null}
                     {state.error ? <p data-memory-error="" role="alert">{state.error}</p> : null}
                     {rows.length ? (
                         <ul data-memory-list="" aria-label="Memories">
