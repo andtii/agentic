@@ -33,7 +33,7 @@ import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, isolateMemoryImpl, memoryActor
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { flatMemoryPlugin, memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
-import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
+import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, claudeCodeQuotaPlugin } from '@agentic/runtimes';
 
 /** The manifests the Registry lists for every workspace — enabled (the flat memory plugin and Web Push excepted), with their declared scopes granted, until the owner changes them. */
 export const pluginCatalogue: readonly CatalogueEntry[] = [
@@ -43,7 +43,9 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     { manifest: memoryFlatPlugin, enabledByDefault: false },
     learningDefaultPlugin,
     // Off until the owner sets a contact and generates keys on its page (#244).
-    { manifest: webPushPlugin, enabledByDefault: false }
+    { manifest: webPushPlugin, enabledByDefault: false },
+    // What the daemon reads each Claude Code account's plan limits with (#261); the daemon runs it, the Registry lists it.
+    claudeCodeQuotaPlugin
 ];
 
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */

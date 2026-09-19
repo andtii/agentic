@@ -85,6 +85,8 @@ export interface AnthropicApiRuntimeOptions {
      * Absent: an agent's connectors are left out of its sessions, and the agent is told why.
      */
     readonly connectors?: ConnectorOpener;
+    /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
+    readonly machines?: () => AnyActorDefinition;
 }
 
 export interface SessionFactoryOptions extends AnthropicApiRuntimeOptions {
@@ -136,7 +138,8 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 routing: options.routing,
                 ...(options.sessions ? { sessions: options.sessions } : {}),
                 ...(options.files ? { files: options.files } : {}),
-                ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {})
+                ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {}),
+                ...(options.machines ? { machines: options.machines } : {})
             });
             let provider: PlatformAgentDeps['anthropic'];
             if (plugin.registry) {

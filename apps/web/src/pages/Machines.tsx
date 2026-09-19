@@ -1,6 +1,6 @@
 import { component, type Define } from 'sigx';
 import { EmptyState } from '@agentic/ui';
-import { environmentsOf, opsAgent, opsMachines, platformRow, queuedFor, type OpsMachine } from '../mock/ops';
+import { environmentsOf, opsAgent, opsMachines, opsQuota, platformRow, queuedFor, type OpsMachine } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { MachineGroup, PlatformRow, mockDefaultFor } from './machines/MachineGroup';
 import { LiveMachines } from './machines/LiveMachines';
@@ -18,7 +18,7 @@ export type MachinesViewProps = Define.Prop<'machines', readonly OpsMachine[], t
  */
 export const MachinesView = component<MachinesViewProps>(({ props }) => () => (
     <OpsPage page="machines" title="Machines">
-        {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} queued={queuedFor} defaultFor={mockDefaultFor} />)}
+        {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} queued={queuedFor} defaultFor={mockDefaultFor} quota={opsQuota} />)}
         <PlatformRow defaultFor={platformRow.defaultFor.map(id => ({ name: opsAgent(id).name, hue: opsAgent(id).hue }))} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
         {props.machines.length === 0 ? <EmptyState variant="machines" /> : null}
     </OpsPage>

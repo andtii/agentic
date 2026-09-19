@@ -65,5 +65,24 @@ export const claudeCodePlugin: PluginManifest = {
     compat: { platform: '*', core: '*' }
 };
 
+/** The `quota` source for Claude Code subscriptions (#269): what `claude` → `/usage` shows, per environment. */
+export const CLAUDE_CODE_QUOTA_ID = 'agentic.quota.claude-code';
+export const QUOTA_PLUGIN_VERSION = '0.1.0';
+
+export const claudeCodeQuotaPlugin: PluginManifest = {
+    id: CLAUDE_CODE_QUOTA_ID,
+    version: QUOTA_PLUGIN_VERSION,
+    kind: 'quota',
+    name: 'Claude Code usage limits',
+    description: 'Shows how close each Claude Code account is to its plan limits (session, week, per model), read on the machine from the account itself. Only the percentages and reset times leave the machine.',
+    capabilities: [DAEMON_HOSTED_CAPABILITY],
+    config: { type: 'object', properties: {}, additionalProperties: false },
+    permissions: [{ scope: 'machine:*', reason: 'Reads each Claude Code environment’s plan usage on your paired machines.' }],
+    compat: { platform: '*', core: '*' }
+};
+
+/** Every quota manifest this package ships. */
+export const QUOTA_PLUGINS: readonly PluginManifest[] = [claudeCodeQuotaPlugin];
+
 /** Every runtime manifest this package ships. */
 export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin];

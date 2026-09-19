@@ -5,7 +5,7 @@
  * Memory, Task and Chat under the agent's principal.
  */
 
-import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult, TaskStatus } from '@agentic/core';
+import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult, TaskStatus, UsageLimits, UsageLimitsQuery } from '@agentic/core';
 
 /** What every port call learns about the tool call behind it. */
 export interface ToolCall {
@@ -97,10 +97,17 @@ export interface ChatFilesPort {
     read(uri: string, call: ToolCall): Promise<ChatFileRead>;
 }
 
+/** Provider limits per account (#272): the machines' latest quota snapshots, read under the agent's principal. */
+export interface UsagePort {
+    limits(query: UsageLimitsQuery, call: ToolCall): Promise<UsageLimits>;
+}
+
 export interface PlatformPorts {
     readonly memory: MemoryPort;
     readonly task: TaskPort;
     readonly chat: ChatPort;
     /** Absent on hosts without a file store — `chat_file_read` then reports it unavailable. */
     readonly files?: ChatFilesPort;
+    /** Absent on hosts without machines — `usage_limits` then reports it unavailable. */
+    readonly usage?: UsagePort;
 }

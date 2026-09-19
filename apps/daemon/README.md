@@ -10,7 +10,7 @@ agentic-daemon env add --name Work --root C:\src\work [--root …] [--concurrenc
 agentic-daemon env login env_work
 agentic-daemon policy show | allow-root <dir> | deny-root <dir> | off
 agentic-daemon doctor
-agentic-daemon run [--verbose]
+agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
 ```
 
 - **env add | list | rm | login** edit `environments.json` so nobody writes it by hand (`src/env-store.ts`, `src/env-cli.ts`). `add` takes `--name` and one or more `--root`, plus `--runtime` (default `claude-code`; it must be one this daemon has a driver for), `--id` (default `env_<name>`), `--concurrency`, `--account`, `--profile-dir`; with `--id <id> --replace` it changes an environment in place, keeping its profile. Each environment gets its own profile directory, `<config dir>/profiles/<id>`, and a directory another environment already uses is refused — two environments never share an account. The file is written atomically (temp + rename) and owner-only, like the credentials. `rm <id>` leaves the profile directory, which holds the sign-in. `login <id>` runs `claude /login` (or `--claude <path>`) with that profile as `CLAUDE_CONFIG_DIR` and the parent's `CLAUDE_CONFIG_DIR` / `ANTHROPIC_*` removed — the same rule sessions are opened under.
@@ -18,6 +18,11 @@ agentic-daemon run [--verbose]
 - **policy show | allow-root | deny-root | off** edit `policy.json`, the machine-local policy for web-managed environments (#238, below). Only on the machine: nothing the platform sends can change it.
 - **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error; having no environments yet is a warning. The token is never printed.
 - **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines. A missing `environments.json` is zero environments — the machine connects and reports none. While running, the daemon watches the config directory: an `env add` / `env rm` or a hand edit is re-read once it settles (250 ms) and announced with an `env` frame, no restart; an edit that does not validate is logged and ignored, the running environments stay. Environments that are not signed in are inspected again every 30 s (`DaemonOptions.reinspectMs`), so a sign-in shows up on the platform by itself.
+- **Usage limits** (#271): the daemon reports each environment's provider limits (what `claude` → `/usage` shows) as `quota` frames. Two sources feed them:
+  - **Passive:** every rate-limit event in a live session updates the window it names at once.
+  - **Probe:** unless `--quota-probe off`, it reads every account right after connecting, idle environments every 5 min (`--quota-poll-ms`, 0 turns the poll off), and each environment 30 s after a turn ends. One probe runs at a time. A probe starts Claude Code without a prompt and asks it for its usage, so no model call is made.
+
+  A snapshot equal to the last one sent is not sent again, except every 15 min, so the platform can tell fresh from stale. Only percentages, reset times and the plan name leave the machine; credentials and profile paths never do.
 - **--version** (or `version`) prints `agentic-daemon <version>` (`DAEMON_VERSION`, what `hello.daemonVersion` reports) and exits 0 — the installer test and `install.ps1` use it.
 
 ### Files

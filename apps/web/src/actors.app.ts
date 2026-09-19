@@ -205,9 +205,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // tools reach the same store the session retrieves from, on both paths.
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
     const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, memory, ...withFiles });
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles });
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, registry, runtimes, ...withFiles }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning,
@@ -219,7 +219,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         socket: daemonSockets.port,
         sessions: () => Session,
         routing: () => Routing,
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, memory, ...withFiles })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.

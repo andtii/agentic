@@ -24,6 +24,7 @@ import {
     memoryActorKey,
     routingKey,
     taskKey,
+    usageLimitsOf,
     userPrincipal,
     workspaceKey,
     type MachineActor,
@@ -257,6 +258,14 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     ...(input.offlinePolicy !== undefined ? { offlinePolicy: input.offlinePolicy } : {})
                 });
                 return { scheduleId: view.id, title: view.title, kind: view.kind, enabled: view.enabled, next: view.next };
+            }
+        },
+        usage: {
+            // The tool gate already checked the `usage` scope; the machines are read as the workspace driver, so a client granted
+            // `usage` alone sees the accounts' limits without `machines` (the answer carries no more than `usage_limits` names).
+            limits: async (query) => {
+                const views = query.machineId !== undefined ? [await machine(query.machineId, driver).get()] : await machines(driver);
+                return usageLimitsOf(views, query, Date.now());
             }
         }
     };

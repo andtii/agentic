@@ -1,4 +1,4 @@
-import type { EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, QuotaSnapshot } from '@agentic/core';
 import { EnvironmentCard, authFixLine, authPill, environmentStatus } from '@agentic/ui';
 import { mount } from './helpers';
 
@@ -98,5 +98,24 @@ describe('EnvironmentCard', () => {
         const selected = mount(<EnvironmentCard environment={env()} selected selectLabel="Use here" />);
         expect(card(selected).hasAttribute('data-mod-selected')).toBe(true);
         expect(selected.querySelector('button')!.disabled).toBe(true);
+    });
+});
+
+describe('EnvironmentCard quota (#270)', () => {
+    const quota: QuotaSnapshot = {
+        sourceId: 'agentic.quota.claude-code',
+        runtime: 'claude-code',
+        environmentId: 'env_1' as EnvironmentId,
+        availability: 'reported',
+        windows: [{ id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.76, unit: 'percent', status: 'ok' }],
+        observedAt: Date.now(),
+        via: 'probe'
+    };
+
+    it('shows the account limits when given, "No usage reported yet" for null, nothing when absent', () => {
+        const withQuota = mount(<EnvironmentCard environment={env()} quota={quota} />);
+        expect(part(withQuota, 'quota')!.querySelector('[data-scope="ag-quota"][data-part="used"]')!.textContent).toBe('76% used');
+        expect(part(mount(<EnvironmentCard environment={env()} quota={null} />), 'quota')!.textContent).toContain('No usage reported yet');
+        expect(part(mount(<EnvironmentCard environment={env()} />), 'quota')).toBeNull();
     });
 });
