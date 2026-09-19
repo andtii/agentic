@@ -127,12 +127,15 @@ export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
  * its `prompt` (the question itself), the `options` as toggles (`on` when
  * chosen, with a `hint` line each) and a free-text `other` — the `actions`
  * with the answer button, an `error` line when the answer did not get
- * through, and the one-line `record` an answered question collapses to.
+ * through, and the one-line `record` an answered question collapses to. A
+ * question whose asker stopped waiting (#285) carries a `note` saying what
+ * answering does.
  */
 export const aiQuestionAnatomy = defineAnatomy('ai-question', {
     root: { element: 'div', tokens: ['color', 'radius-box'] },
     header: { element: 'div', parent: 'root', tokens: ['text'] },
     title: { element: 'span', parent: 'header', tokens: ['text'] },
+    note: { element: 'p', parent: 'root', tokens: ['text'] },
     question: { element: 'fieldset', parent: 'root', tokens: ['text'] },
     label: { element: 'legend', parent: 'question', tokens: ['text'] },
     prompt: { element: 'p', parent: 'question', tokens: ['text'] },

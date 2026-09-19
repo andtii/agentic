@@ -29,7 +29,7 @@ import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message, type MessageAuthor } from './Message.js';
-import type { DescribeRequestFn, ToolMetaFn } from './ToolCall.js';
+import { approvalContext, type DescribeRequestFn, type ToolMetaFn } from './ToolCall.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
 
 const SCOPE = aiThreadAnatomy.scope;
@@ -174,8 +174,8 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                         loose.map((r) => (
                             <li key={`request:${r.requestId}`} data-scope={SCOPE} data-part="row">
                                 {r.kind === 'input'
-                                    ? <QuestionPrompt request={r} onRespond={props.onRespond!} requestedBy={props.describeRequest?.(r)?.requestedBy} />
-                                    : <ApprovalPrompt request={r} onRespond={props.onRespond!} {...props.describeRequest?.(r)} />}
+                                    ? <QuestionPrompt request={r} onRespond={props.onRespond!} requestedBy={props.describeRequest?.(r)?.requestedBy} stale={props.describeRequest?.(r)?.stale} />
+                                    : <ApprovalPrompt request={r} onRespond={props.onRespond!} {...approvalContext(props.describeRequest?.(r))} />}
                             </li>
                         ))}
                 </ol>

@@ -59,6 +59,7 @@ import {
     TaskActor,
     TaskIndex,
     asPrincipal,
+    createAnswerFollowUp,
     createEnvironmentProbe,
     createSessionFactory,
     createToolCallPort,
@@ -214,7 +215,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         usage: ledgerRecorder(),
         learning,
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
-        inbox: () => Inbox
+        inbox: () => Inbox,
+        // A late answer to a detached `ask_user` (#285): posted in the chat, and the asker started again with it.
+        answered: createAnswerFollowUp({ routing: () => Routing })
     });
     const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles });
     const Machine: MachineActor = defineMachineActor({

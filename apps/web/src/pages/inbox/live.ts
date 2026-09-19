@@ -97,7 +97,7 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
                 const view = state.value ?? null;
                 return {
                     loading: state.loading,
-                    value: view ? { view, requestedBy: { name: view.agentId, hue: hueOf(view.agentId) } } : null,
+                    value: view ? { view, requestedBy: { name: view.agentName || view.agentId, hue: hueOf(view.agentId) } } : null,
                     error: state.error
                 };
             };

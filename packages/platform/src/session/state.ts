@@ -16,7 +16,7 @@
  * the window.
  */
 
-import type { Correction, SessionId, TaskOutcome, WorkspaceId } from '@agentic/core';
+import type { Correction, Principal, SessionId, TaskOutcome, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, PromptPart, SessionRef } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
@@ -118,12 +118,26 @@ export interface SessionState {
      * these itself, since the live `AgentSession` does not know them.
      */
     platformRequests?: string[];
+    /**
+     * Platform requests whose tool call stopped waiting (#285): `ask_user` answered `pending`. With the session
+     * closed, every open platform request counts as detached too. An answer to one re-activates the asker.
+     */
+    detachedRequests?: string[];
+    /** Answers to detached requests that came while the session was still open: handed to `answered` when it closes (#285). */
+    answeredDetached?: DetachedAnswer[];
+}
+
+/** A detached request's answer, parked until the session closes (#285). */
+export interface DetachedAnswer {
+    readonly requestId: string;
+    /** Who answered — the principal the follow-up posts the answer as. */
+    readonly answeredBy: Principal;
 }
 
 /** Replies remembered for idempotent retries (OPS-06); the same default as `serveSession`. */
 export const MAX_COMMANDS = 256;
 
-export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests'>>;
+export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests' | 'detachedRequests' | 'answeredDetached'>>;
 
 export type SessionEntry =
     | { readonly t: 'ev'; readonly ev: AgentEvent }

@@ -27,7 +27,7 @@ export const memoryEntry: MemoryEntry = {
 };
 
 /** Ports that record every call and answer with canned data. */
-export function fakePorts(options: { readonly answer?: string; readonly hits?: readonly RankedMemory[] } = {}): FakePorts {
+export function fakePorts(options: { readonly answer?: string; readonly pending?: boolean; readonly hits?: readonly RankedMemory[] } = {}): FakePorts {
     const calls: PortCall[] = [];
     const hits = options.hits ?? [{ entry: memoryEntry, score: 0.9 }];
     const memory: MemoryPort = {
@@ -56,6 +56,7 @@ export function fakePorts(options: { readonly answer?: string; readonly hits?: r
         },
         async ask(question, call) {
             calls.push({ port: 'chat', op: 'ask', args: question, call });
+            if (options.pending) return { status: 'pending', questionId: `ask:${call.callId}`, note: 'waiting for the user' };
             return { answer: options.answer ?? 'yes' };
         }
     };

@@ -42,7 +42,7 @@ const TOOL_GUIDE: Readonly<Record<string, string>> = {
     chat_post: 'speak in the chat; an agent id in `mentions` starts that agent, which answers in the chat; attach chat files by their agentic-file: URI',
     chat_file_read: 'read a file attached to the chat by its agentic-file: URI',
     task_report: 'report progress, a blocker, or the final result of your task',
-    ask_user: 'ask the user only for a decision that is theirs to make'
+    ask_user: 'ask the user only for a decision that is theirs to make; on `pending`, end your turn — the answer starts you again'
 };
 
 function skillKey(ref: SkillRef): string {
