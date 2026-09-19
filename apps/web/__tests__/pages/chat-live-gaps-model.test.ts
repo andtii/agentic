@@ -1,10 +1,11 @@
 /** The live chat's pure rules added by #152: tasks in a chat, what a stop reaches, open requests, unread, the settings change, the list filter, the read marks. */
 import { describe, it, expect, afterEach } from 'vitest';
 import type { AgentId, MessageId, TaskId } from '@agentic/core';
-import type { ChatSummary, IndexedEntry, TaskIndexRow } from '@agentic/platform';
+import type { ChatSummary, InboxNotification, IndexedEntry, TaskIndexRow } from '@agentic/platform';
+import { createTranscript } from '@sigx/ai-agent';
 import { matchingChats } from '../../src/pages/chat/ChatList';
 import { settingsChange } from '../../src/pages/chat/ChatSettingsDialog';
-import { chatRow, chatTasks, entryTranscript, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
+import { chatRow, chatTasks, detachedQuestions, entryTranscript, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
 import { baselineReadMarks, loadReadMarks, markSeen, readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
 import { zoneFormat } from '../../src/time';
 
@@ -75,6 +76,20 @@ describe('chatTasks', () => {
     it('what could not be stopped is named by objective, once (COL-12)', () => {
         expect(notStoppedLine([{ notStopped: [] }], rows)).toBeNull();
         expect(notStoppedLine([{ notStopped: ['kid-b', 'gone'] }, { notStopped: ['kid-b'] }], rows)).toBe('Could not be stopped: do kid-b; gone');
+    });
+});
+
+describe('detachedQuestions (#285)', () => {
+    const note = (requestId: string, sessionId: string, read = false): InboxNotification => ({ id: `n_${requestId}`, kind: 'input', title: 'Ada needs input', ref: { kind: 'session', sessionId: sessionId as never, requestId }, at: 1, read, deliveries: [] });
+
+    it('lists the open questions no live feed carries, with the session the Inbox names; never an approval, an answered one, or one a feed shows', () => {
+        const entries = [request(1, 'a1', 'request', 'input:ask:c1'), request(2, 'a2', 'request', 'input:ask:c2'), request(3, 'a2', 'request', 'approval:r9'), request(4, 'a1', 'request', 'input:ask:c3'), request(5, 'a1', 'request-resolved', 'input:ask:c3')];
+        const inbox = [note('ask:c1', 's1'), note('ask:c2', 's2'), note('r9', 's2'), note('ask:c3', 's1', true)];
+        const live = createTranscript('s2');
+        live.requests['ask:c2'] = { requestId: 'ask:c2', kind: 'input', seq: 2 };
+        expect(detachedQuestions(entries, inbox, [{ transcript: live }])).toEqual([{ sessionId: 's1', requestId: 'ask:c1', agentId: 'a1' }]);
+        // Without the Inbox row there is no session to answer through: nothing to show.
+        expect(detachedQuestions(entries, [], [])).toEqual([]);
     });
 });
 

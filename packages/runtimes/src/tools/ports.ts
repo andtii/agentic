@@ -75,6 +75,12 @@ export interface UserQuestion {
     readonly choices?: readonly string[];
 }
 
+/**
+ * What `ask_user` answers (#285): the user's answer, or `pending` when none came within the quick window —
+ * the question outlives the call, and the answer re-activates the asking agent in its chat.
+ */
+export type AskOutcome = { readonly answer: string } | { readonly status: 'pending'; readonly questionId: string; readonly note: string };
+
 /** What a post did (#222): the message, the members its mentions started a task for, and those it could not. */
 export interface ChatPostResult {
     readonly messageId: MessageId;
@@ -87,8 +93,11 @@ export interface ChatPostResult {
 export interface ChatPort {
     /** Post a message into the task's chat, attributed to the agent; a mentioned collaborator is activated (CHT-06, COL-06, #222). */
     post(post: ChatPost, call: ToolCall): Promise<ChatPostResult>;
-    /** Ask the user and wait; the platform parks the Task `waiting {input}` meanwhile (COL-06). */
-    ask(question: UserQuestion, call: ToolCall): Promise<{ readonly answer: string }>;
+    /**
+     * Ask the user (COL-06, #285): the answer when it comes within a short window, else `pending` — the question
+     * stays open, the agent ends its turn, and the answer starts it again in the chat.
+     */
+    ask(question: UserQuestion, call: ToolCall): Promise<AskOutcome>;
 }
 
 /** Chat attachments (#203): read a file of the task's chat under the agent's principal. */

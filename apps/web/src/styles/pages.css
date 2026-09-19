@@ -171,6 +171,8 @@
 [data-chat-error] { margin: 0; padding: var(--space-sm) var(--space-2xl); font-size: var(--text-sm); color: var(--color-error); }
 /* Failure distinction (#46): the one named card under the thread, above the composer; the uncertainty line of OPS-05 under an interrupted card. */
 [data-chat-failure] { flex: none; padding: 0 var(--space-2xl); }
+/* An open question whose asker stopped waiting (#285), under the thread. */
+[data-chat-question] { flex: none; padding: 0 var(--space-2xl) var(--space-md); }
 [data-failure-notice] { display: flex; flex-direction: column; gap: var(--space-xs); }
 [data-failure-uncertain] { margin: 0; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }
 [data-uncertain-note] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }

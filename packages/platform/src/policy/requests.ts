@@ -181,3 +181,10 @@ export function shapeAnswers(schema: unknown, answers: unknown): unknown {
     }
     return shaped;
 }
+
+/** An input decision's `answers` as the text the model reads: a string as is, a choice list joined, anything else as JSON. */
+export function answerText(answers: unknown): string {
+    if (typeof answers === 'string') return answers;
+    if (Array.isArray(answers) && answers.every((a) => typeof a === 'string')) return answers.join(', ');
+    return JSON.stringify(answers) ?? '';
+}

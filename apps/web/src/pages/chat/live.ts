@@ -7,7 +7,7 @@
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
 import { isChatFilePart, isTerminal, parseChatFileUri, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
-import type { AgentView, ChatSummary, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
+import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -165,6 +165,31 @@ export function openRequests(entries: readonly IndexedEntry[]): OpenChatRequest[
         else if (entry.kind === 'request-resolved') open.delete(entry.ref);
     }
     return [...open.values()];
+}
+
+/** An open question of this chat whose session has left it (#285): answered from its own card, it starts the asker again. */
+export interface DetachedQuestion {
+    readonly sessionId: string;
+    readonly requestId: string;
+    readonly agentId: string;
+}
+
+/**
+ * The chat's open questions no live feed carries (#285): an `ask_user` that answered `pending` outlives its turn
+ * and its session, so it leaves `activeSessions` while still open. The chat's `input` statuses say which are open;
+ * the unread Inbox row of each says which session asked (a chat status carries no session).
+ */
+export function detachedQuestions(entries: readonly IndexedEntry[], inbox: readonly InboxNotification[], feeds: readonly { readonly transcript: AgentTranscript }[]): DetachedQuestion[] {
+    const live = new Set(feeds.flatMap((f) => Object.keys(f.transcript.requests)));
+    const sessionOf = new Map<string, string>();
+    for (const n of inbox) if (!n.read && n.ref?.kind === 'session' && n.ref.requestId) sessionOf.set(n.ref.requestId, n.ref.sessionId);
+    return openRequests(entries).flatMap((r) => {
+        const cut = r.ref.indexOf(':');
+        const need = r.ref.slice(0, cut);
+        const requestId = r.ref.slice(cut + 1);
+        const sessionId = sessionOf.get(requestId);
+        return cut > 0 && need === 'input' && !live.has(requestId) && sessionId ? [{ sessionId, requestId, agentId: r.agentId }] : [];
+    });
 }
 
 /** The agents with a request open in these entries — who reads WAITING in the members panel. */
