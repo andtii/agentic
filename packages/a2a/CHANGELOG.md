@@ -4,7 +4,6 @@ All notable changes to `@agentic/a2a` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
-- The server as a plugin (#245): `a2aServerPlugin` (id `agentic.a2a.server`, kind `a2a`, config `{ exposedAgents: string[] }`, default `[]`, no secrets and no permissions — a remote client's task runs under the exposed agent's own runtime and approvals), with `A2A_SERVER_PLUGIN_ID`, `A2A_PLUGIN_VERSION` and the `A2aServerConfig` type. The web app lists it off by default and mounts the handler behind it.
 - Package skeleton.
 - A2A 1.0 wire (`protocol`): JSON-RPC types, method names (0.3 names as aliases), error codes with `google.rpc.ErrorInfo` details, zod request validation answering `-32602` with the violating field, prompt part ↔ A2A part mapping, and the `agentic` extension (tool calls, requests, usage and the turn result as data parts, declared on the card with `required: false`).
 - Server: `createA2aHandler({ port, basePath?, defaultAgentId?, tasks?, cancelWaitMs? })` fetch handler over a `SessionPort` — Agent Cards per exposed agent (well-known path, `ETag`, `Cache-Control`), `SendMessage` (blocking or `returnImmediately`), `SendStreamingMessage` (SSE), `GetTask`, `ListTasks` (filters, paging), `CancelTask`; `INPUT_REQUIRED` continued by a message on the task; `SubscribeToTask` / extended card answer `-32004`, push-notification methods `-32003`, never a 500. `memoryTaskStore()` default `TaskStore`.

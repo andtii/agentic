@@ -74,6 +74,8 @@ export interface AnthropicApiRuntimeOptions {
      * the spec — `(gate) => memoryAccess(learningPorts, gate)`. Absent → the Memory actor of the agent's own scope.
      */
     readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
+    /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
+    readonly machines?: () => AnyActorDefinition;
 }
 
 export interface SessionFactoryOptions extends AnthropicApiRuntimeOptions {
@@ -124,7 +126,8 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 routing: options.routing,
                 ...(options.sessions ? { sessions: options.sessions } : {}),
                 ...(options.files ? { files: options.files } : {}),
-                ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {})
+                ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {}),
+                ...(options.machines ? { machines: options.machines } : {})
             });
             let provider: PlatformAgentDeps['anthropic'];
             if (plugin.registry) {

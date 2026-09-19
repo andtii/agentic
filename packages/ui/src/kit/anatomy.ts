@@ -89,6 +89,7 @@ export const agEnvCardAnatomy = defineAnatomy('ag-env-card', {
     facts: { element: 'dl', parent: 'root', tokens: ['text'] },
     'default-for': { element: 'dd', parent: 'facts' },
     fix: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
+    quota: { element: 'div', parent: 'root' },
     actions: { element: 'div', parent: 'root' }
 });
 
@@ -185,6 +186,25 @@ export const agMapFieldAnatomy = defineAnatomy('ag-map-field', {
     actions: { element: 'div', parent: 'root' }
 });
 
+/** One provider limit window (#270): bold label, a bar filled to the utilization and coloured by status, "76% used", the reset time; dims when `stale`. */
+export const agQuotaAnatomy = defineAnatomy('ag-quota', {
+    root: { element: 'div', tokens: ['color', 'text'] },
+    label: { element: 'span', parent: 'root', tokens: ['text'] },
+    bar: { element: 'span', parent: 'root', tokens: ['color', 'radius-selector'] },
+    fill: { element: 'span', parent: 'bar', tokens: ['color'] },
+    used: { element: 'span', parent: 'root', tokens: ['text'] },
+    resets: { element: 'span', parent: 'root', tokens: ['text'] }
+});
+
+/** One account's limits: title, plan, how old, then its windows — or why the provider reports none (OPS-07). */
+export const agQuotaPanelAnatomy = defineAnatomy('ag-quota-panel', {
+    root: { element: 'section', tokens: ['color'] },
+    header: { element: 'div', parent: 'root' },
+    title: { element: 'span', parent: 'header', tokens: ['text'] },
+    age: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    reason: { element: 'p', parent: 'root', tokens: ['text'] }
+});
+
 export const kitAnatomies = [
     agPillAnatomy,
     agAgentTileAnatomy,
@@ -201,5 +221,7 @@ export const kitAnatomies = [
     agWorkdirPickerAnatomy,
     agPluginCardAnatomy,
     agSecretAnatomy,
-    agMapFieldAnatomy
+    agMapFieldAnatomy,
+    agQuotaAnatomy,
+    agQuotaPanelAnatomy
 ] as const;

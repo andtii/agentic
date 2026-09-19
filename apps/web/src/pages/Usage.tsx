@@ -1,10 +1,11 @@
 import { component, signal, type Define } from 'sigx';
 import { AgentTile, DataTable, Label, Segmented, StatusPill } from '@agentic/ui';
 import { dataMode } from '../data-mode';
-import { money, opsAgent, tokensText, usageDays, usageRows, usageStats, type UsageBy, type UsageRow } from '../mock/ops';
+import { money, opsAgent, opsLimitAccounts, tokensText, usageDays, usageRows, usageStats, type UsageBy, type UsageRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { USAGE_COLS } from './usage/live';
 import { LiveUsage } from './usage/LiveUsage';
+import { LimitsSection } from './usage/Limits';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
 export { USAGE_COLS };
@@ -19,8 +20,8 @@ export type UsageViewProps =
  * `/usage` — segmented by agent, task or turn; four stat cards; cost per
  * day; the table with its mandatory data-quality column. An unreported
  * figure prints `n/a` in text-dim, never 0 or blank; an estimate is
- * prefixed `~` and carries `PARTLY ESTIMATED` (OPS-07). `Ledger.summary`
- * replaces the mock with #45.
+ * prefixed `~` and carries `PARTLY ESTIMATED` (OPS-07). Above them, each
+ * account's provider limits (#270). `Ledger.summary` replaces the mock with #45.
  */
 export const UsageView = component<UsageViewProps>(({ props }) => {
     const ui = signal<{ by: UsageBy }>({ by: props.by ?? 'agent' });
@@ -40,6 +41,8 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
                 )
             }}
         >
+            <LimitsSection accounts={opsLimitAccounts()} />
+
             <div data-usage-stats>
                 {usageStats.map(stat => (
                     <section data-card data-stat data-tone={stat.tone} aria-label={stat.label}>

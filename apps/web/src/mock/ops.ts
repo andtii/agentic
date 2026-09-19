@@ -8,8 +8,9 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, ScheduleId } from '@agentic/core';
+import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
+import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
 
 export interface OpsAgent {
     readonly id: string;
@@ -350,6 +351,76 @@ export const opsHistory: readonly HistoryEntry[] = [
     { id: 'h9', at: '2026-09-17T02:00:00', kind: 'transition', actor: 'forge', what: 'Nightly dependency audit queued · nuc-lab offline · policy queue', ref: { label: 't_7e01', href: '/tasks/t_7e01' } },
     { id: 'h10', at: '2026-09-16T17:30:02', kind: 'transition', actor: 'atlas', what: 'Weekly summary completed · verified', ref: { label: 't_7c10', href: '/tasks/t_7c10' } },
     { id: 'h11', at: '2026-09-16T09:04:10', kind: 'config', actor: 'you', what: 'Lint v2 → v3 · Reviewer role, read-only tools', ref: { label: 'v3', href: '/agents/lint' } }
+];
+
+/* ------------------------------------------------------------------- quota */
+
+/**
+ * Provider limits per account (#270): `alien01 / work` mirrors a real
+ * `claude` → `/usage` (19 % session, 76 % week, 80 % Fable week); `nuc-lab`
+ * is offline, so its snapshot is hours old and shows stale; the platform's
+ * `anthropic-api` reports none, and says why. Times are relative to load.
+ */
+const QUOTA_AT = Date.now();
+const inHours = (h: number) => new Date(QUOTA_AT + h * 3_600_000).toISOString();
+const quotaWin = (id: string, label: string, period: QuotaWindow['period'], utilization: number, resetsInHours: number, model?: string): QuotaWindow => ({
+    id,
+    label,
+    period,
+    ...(model ? { scope: { model } } : {}),
+    utilization,
+    unit: 'percent',
+    resetsAt: inHours(resetsInHours),
+    status: utilization >= 1 ? 'exhausted' : utilization >= 0.8 ? 'warning' : 'ok'
+});
+const claudeQuota = (environmentId: EnvironmentId, windows: readonly QuotaWindow[], minutesAgo: number): QuotaSnapshot => ({
+    sourceId: 'agentic.quota.claude-code',
+    runtime: 'claude-code',
+    environmentId,
+    plan: 'max',
+    availability: 'reported',
+    windows,
+    observedAt: QUOTA_AT - minutesAgo * 60_000,
+    via: 'probe'
+});
+
+/** Snapshots by environment id; an environment without one has reported nothing yet (`client-acme`: signed out). */
+export const opsQuota: Readonly<Record<string, QuotaSnapshot>> = {
+    [envId('alien01', 'work')]: claudeQuota(envId('alien01', 'work'), [
+        quotaWin('five_hour', 'Current session', 'session', 0.19, 3.2),
+        quotaWin('seven_day', 'Current week (all models)', 'week', 0.76, 78),
+        quotaWin('seven_day:fable', 'Current week (Fable)', 'week', 0.8, 78, 'Fable')
+    ], 2),
+    [envId('alien01', 'personal')]: claudeQuota(envId('alien01', 'personal'), [
+        quotaWin('five_hour', 'Current session', 'session', 0.42, 1.5),
+        quotaWin('seven_day', 'Current week (all models)', 'week', 0.31, 120),
+        quotaWin('seven_day:fable', 'Current week (Fable)', 'week', 0.12, 120, 'Fable')
+    ], 4),
+    [envId('nuc-lab', 'work')]: claudeQuota(envId('nuc-lab', 'work'), [
+        quotaWin('five_hour', 'Current session', 'session', 0.05, 0.5),
+        quotaWin('seven_day', 'Current week (all models)', 'week', 0.58, 60)
+    ], 180)
+};
+
+/** The platform's own runtime: no environment, no plan allowance to report. */
+export const platformQuota: QuotaSnapshot = {
+    sourceId: 'agentic.quota.anthropic-api',
+    runtime: 'anthropic-api',
+    environmentId: 'env_platform_anthropic_api' as EnvironmentId,
+    availability: 'not-reported',
+    reason: 'The Anthropic API has per-minute rate limits, not a plan allowance to report',
+    windows: [],
+    observedAt: QUOTA_AT - 60_000,
+    via: 'probe'
+};
+
+/** `/usage` Limits and Home's rail: every environment of every machine, then the platform runtime. */
+export const opsLimitAccounts = (): readonly LimitAccount[] => [
+    ...opsEnvironments.map((env) => {
+        const machine = opsMachine(env.machineId);
+        return limitAccountOf(env, machine?.name ?? env.machineId, machine?.online ?? false, opsQuota[env.id] ?? null);
+    }),
+    { key: 'platform', title: 'anthropic-api · your key', caption: 'platform · anthropic-api', snapshot: platformQuota }
 ];
 
 /* -------------------------------------------------------------------- usage */

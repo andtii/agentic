@@ -21,6 +21,7 @@ import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRunti
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
+import { accountEnv } from './env.js';
 import { claudeCodeSystemPrompt } from './system.js';
 import { bridgedPlatformTools } from './tools.js';
 
@@ -98,13 +99,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
     const configDirOf = (env: LocalEnvironment) => env.profileDir ?? joinPath(home(), '.claude');
 
     /** Removes what could select another account; sets this environment's config dir (or none: the default). */
-    const childEnvFor = (env: LocalEnvironment): Record<string, string | undefined> => {
-        const parent = options.parentEnv ?? process.env;
-        const extra: Record<string, string | undefined> = {};
-        for (const key of Object.keys(parent)) if (/^ANTHROPIC_/i.test(key) || /^CLAUDE_CONFIG_DIR$/i.test(key)) extra[key] = undefined;
-        extra.CLAUDE_CONFIG_DIR = env.profileDir;
-        return extra;
-    };
+    const childEnvFor = (env: LocalEnvironment) => accountEnv(env, options.parentEnv ?? process.env);
 
     const agentFor = (env: LocalEnvironment) => {
         assertRuntime(env);

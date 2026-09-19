@@ -2,7 +2,7 @@ import { component, signal, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, StatusPill, TextField } from '@agentic/ui';
-import { doctorChecks, doctorFootnote, environmentsOf, machinePolicyOf, opsMachine, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
+import { doctorChecks, doctorFootnote, environmentsOf, machinePolicyOf, opsMachine, opsQuota, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { CommandWell } from './machines/CommandWell';
 import { EnvironmentDialog } from './machines/EnvironmentDialog';
@@ -153,7 +153,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit }) => {
                         </div>
                     ) : null}
                     {props.environments.length
-                        ? <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} actions={actions} />
+                        ? <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} actions={actions} />
                         : <EmptyState caption={m.online ? (manageable ? 'No environment yet. Add one to run agents on this machine.' : 'The daemon reported no environment.') : 'The daemon has not connected yet: its environments arrive with its first hello.'} />}
                 </section>
 
@@ -338,6 +338,7 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
             doctor={doctorChecks}
             queued={queuedFor}
             defaultFor={mockDefaultFor}
+            quota={opsQuota}
             {...(policy ? { policy } : {})}
             runtimes={runtimesOf([], st.environments)}
             envRequest={st.request}

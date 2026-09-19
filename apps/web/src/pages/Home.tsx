@@ -10,11 +10,13 @@ import { Panel } from '../components/Panel';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
 import { agentNamed, loadHome, rootOf, type MockTaskRow } from '../mock/workspace';
+import { opsLimitAccounts } from '../mock/ops';
 import { NeedsYou, useNeedsSource } from './inbox';
 import { TASK_TABLE_COLS, TASK_TABLE_COLUMNS } from './task/live';
 import { LiveActiveTasks } from './task/LiveTasks';
 import { costPartsOf, costText, monthLabel } from './usage/live';
 import { useMonthSpend } from './usage/LiveUsage';
+import { LimitsSection, LiveLimits } from './usage/Limits';
 
 /** The Home tasks table template (docs/design/HANDOFF.md → tables). */
 export const HOME_TASK_COLS = TASK_TABLE_COLS;
@@ -80,7 +82,7 @@ export const LiveHome = component(() => {
             <Page title="Home" page="home" hideTitle>
                 <NeedsYou source={needs} />
 
-                <aside data-home-rail aria-label="Today and spend">
+                <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${w?.settings.timeZone ?? 'UTC'}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
                         <ul data-today>
                             <li data-today-empty><span data-today-title>Today's schedule is listed on the Schedules page.</span></li>
@@ -99,6 +101,9 @@ export const LiveHome = component(() => {
                                     ? (parts.estimated > 0 ? `~ marks the ${costText({ reported: 0, estimated: parts.estimated })} priced at a guessed rate; ${total.unpricedRows} ${total.unpricedRows === 1 ? 'turn' : 'turns'} reported no cost.` : `Every priced turn was reported by its provider; ${total.unpricedRows} ${total.unpricedRows === 1 ? 'turn' : 'turns'} reported no cost.`)
                                     : `${total.rows} ${total.rows === 1 ? 'turn' : 'turns'} recorded, none with a cost — the runtime gives no cost data.`}
                         </p>
+                    </Panel>
+                    <Panel label="Usage limits" slots={{ aside: () => <Link to="/usage">All limits</Link> }}>
+                        <LiveLimits compact />
                     </Panel>
                 </aside>
 
@@ -128,7 +133,7 @@ export const Home = component(() => {
             <Page title="Home" page="home" hideTitle>
                 <NeedsYou source={needs} />
 
-                <aside data-home-rail aria-label="Today and spend">
+                <aside data-home-rail aria-label="Today, spend and limits">
                     <Panel label={`Today · ${view.timeZone}`} slots={{ aside: () => <Link to="/schedules">All schedules</Link> }}>
                         <ul data-today>
                             {view.today.map((entry) => {
@@ -153,6 +158,9 @@ export const Home = component(() => {
                             <span style={`inline-size: ${spendPct}%`} />
                         </div>
                         <p data-panel-note>{view.spend.note}</p>
+                    </Panel>
+                    <Panel label="Usage limits" slots={{ aside: () => <Link to="/usage">All limits</Link> }}>
+                        <LimitsSection accounts={opsLimitAccounts()} compact />
                     </Panel>
                 </aside>
 

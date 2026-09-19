@@ -168,7 +168,7 @@ export const TONES = ['muted', 'dim', 'live', 'working', 'needs-you', 'failed'] 
 /** The `data-kind` axis: inbox item kinds and the six named failure states. */
 export const KINDS = ['approval', 'input', 'interrupted', 'offline', 'machine', 'auth', 'runtime', 'task'] as const;
 /** Presence-only modifiers the kit wires (`data-mod-*`), on top of daisy's. */
-export const AG_MODIFIERS = ['hollow', 'outline', 'compact', 'selected', 'current'] as const;
+export const AG_MODIFIERS = ['hollow', 'outline', 'compact', 'selected', 'current', 'stale'] as const;
 
 export const tokens: TokensInput<Roles, typeof system> = {
     roles: daisy.roles,

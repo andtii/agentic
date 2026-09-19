@@ -34,20 +34,24 @@
  * `files` port.
  */
 
-import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
 import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey, agentMemoryScope } from '../agent/index.js';
-import { asPrincipal } from '../auth/index.js';
+import { asPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
+import type { MachineView } from '../machine/actor.js';
 import { ToolCallError } from '../machine/ports.js';
+import { machineKey } from '../machine/state.js';
+import { usageLimitsOf } from '../machine/usage.js';
 import { Memory, memoryActorKey } from '../memory/index.js';
 import type { RequestResolvedEvent } from '../policy/requests.js';
 import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import type { SessionMemory } from '../task/driver.js';
+import { Workspace } from '../workspace/index.js';
 import { readChatFile } from './files.js';
 import { MENTION_CONTEXT_WINDOW, mentionContract } from './mentions.js';
 import { routingKey } from './key.js';
@@ -84,6 +88,8 @@ export interface ActorToolPortsOptions {
      * Memory actor of the agent's own scope, as before the catalogue.
      */
     readonly memory?: SessionMemory;
+    /** The Machine actor definition, for `usage_limits` (#272); without it there is no `usage` port and the tool reports it unavailable. */
+    readonly machines?: () => AnyActorDefinition;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -265,8 +271,28 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
           }
         : undefined;
 
+    // Provider limits (#272): the machine index is the workspace user's to read (as the router scans it, `locate.ts`); each
+    // machine is then read under the agent's own principal, which the Machine's reader rule admits.
+    const machineDef = options.machines;
+    const usage: PlatformPorts['usage'] = machineDef
+        ? {
+              async limits(query) {
+                  const listed = await actor(Workspace, workspaceKey(workspaceId))
+                      .with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) })
+                      .listMachines();
+                  const views: MachineView[] = [];
+                  for (const entry of listed) {
+                      if (entry.status !== 'paired' || (query.machineId !== undefined && entry.id !== query.machineId)) continue;
+                      views.push((await as(machineDef(), machineKey(workspaceId, entry.id as MachineId)).get()) as MachineView);
+                  }
+                  return usageLimitsOf(views, query, Date.now());
+              }
+          }
+        : undefined;
+
     return {
         ...(files ? { files } : {}),
+        ...(usage ? { usage } : {}),
         memory: {
             search: async (query) => memory().query(query),
             remember: async (entry): Promise<MemoryEntry> =>

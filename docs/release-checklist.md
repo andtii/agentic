@@ -8,7 +8,7 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 - [ ] CI green on `main` for the release commit: `lint`, `verify:catalog`, `typecheck`, `build`, `test`, `test:workers` (Node 22, Windows + Linux), `test:acceptance`, Playwright e2e, bundle size (`pnpm size`), coverage upload.
 - [ ] `pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm size` green locally on Windows and Linux (contributors run both).
-- [ ] Every package has its CHANGELOG `[Unreleased]` section rolled into a version heading, and `version` bumped consistently (`@agentic/daemon` and `DAEMON_VERSION` in `apps/daemon/src/version.ts` — the installer zip and `hello.daemonVersion` carry it).
+- [ ] Release notes reviewed in the release-drafter draft (from PR titles; `CHANGELOG.md` files are frozen history, not updated per PR), and `version` bumped consistently (`@agentic/daemon` and `DAEMON_VERSION` in `apps/daemon/src/version.ts` — the installer zip and `hello.daemonVersion` carry it).
 - [ ] `pnpm verify:catalog` passes: every `@sigx/*` package on one core minor; no local checkout linked.
 
 ### Acceptance
