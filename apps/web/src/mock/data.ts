@@ -12,7 +12,8 @@ export interface MockAgent {
     id: string;
     name: string;
     description: string;
-    runtime: 'claude-code' | 'anthropic-api';
+    /** The runtime id (`anthropic-api`, `claude-code`, `copilot-cli`, `codex-cli`, …). */
+    runtime: string;
     status: AgentStatus;
     configVersion: number;
 }

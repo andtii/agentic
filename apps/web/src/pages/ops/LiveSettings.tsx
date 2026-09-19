@@ -79,7 +79,7 @@ export const LiveSettings = component(() => {
     const save = async (): Promise<void> => {
         const k = wsKey();
         if (!k || st.saving) return;
-        const patch = settingsPatch(draft, zones());
+        const patch = settingsPatch(draft, zones(), (id) => environments.lookup(id)?.descriptor.runtime);
         if (!patch) return;
         st.saving = true;
         st.error = '';

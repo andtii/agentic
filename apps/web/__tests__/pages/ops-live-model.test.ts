@@ -150,6 +150,12 @@ describe('settings draft', () => {
         expect(settingsPatch({ ...draft, environmentId: 'env_1', sessionLogDays: '7' }, [])).toMatchObject({ defaults: { runtime: 'claude-code', environmentId: 'env_1' }, retention: { sessionLogDays: 7, artifactDays: 30 } });
     });
 
+    it('defaults to the runtime the chosen environment runs, not always Claude Code', () => {
+        const draft = { ...toDraft(settings), environmentId: 'env_copilot' };
+        expect(settingsPatch(draft, [], (id) => (id === 'env_copilot' ? 'copilot-cli' : undefined))?.defaults).toEqual({ runtime: 'copilot-cli', environmentId: 'env_copilot' });
+        expect(settingsPatch({ ...draft, environmentId: 'env_codex' }, [], (id) => (id === 'env_codex' ? 'codex-cli' : undefined))?.defaults).toEqual({ runtime: 'codex-cli', environmentId: 'env_codex' });
+    });
+
     it('refuses an unknown zone or a retention that is not whole days', () => {
         expect(validateDraft({ ...toDraft(settings), timeZone: 'Mars/Olympus' }, ['Europe/Stockholm'])).toEqual({ timeZone: 'Unknown time zone "Mars/Olympus".' });
         expect(validateDraft({ ...toDraft(settings), artifactDays: '30 days' }, [])).toEqual({ artifactDays: 'Whole days.' });

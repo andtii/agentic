@@ -63,6 +63,8 @@ describe('workdir environments', () => {
             ['env_alien01_work', null],
             ['env_alien01_personal', null],
             ['env_alien01_client_acme', 'Sign-in expired'],
+            ['env_alien01_copilot', null],
+            ['env_alien01_codex', null],
             ['env_nuclab_work', 'Machine offline']
         ]);
         expect(mockWorkdirEnvironments.machineOf('env_nuclab_work')).toBe('nuc-lab');

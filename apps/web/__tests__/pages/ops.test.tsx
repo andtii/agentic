@@ -31,8 +31,8 @@ describe('/machines', () => {
         const groups = [...root.querySelectorAll('[data-machine-group]:not([data-platform])')];
         expect(groups.map(g => g.getAttribute('aria-label'))).toEqual(opsMachines.map(m => m.name));
         expect(root.querySelector('[data-machine-group][data-platform] [data-machine-name]')!.textContent).toBe('platform');
-        // Three environment cards for alien01, in a three-column grid.
-        expect(groups[0]!.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]').length).toBe(3);
+        // Five environment cards for alien01 — three Claude Code accounts, one Copilot CLI, one Codex.
+        expect(groups[0]!.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]').length).toBe(5);
         // The offline machine with queued work says the work stays put.
         const offline = root.querySelector(`[data-machine-group][aria-label="${offlineMachine.name}"]`)!;
         expect(offline.querySelector('[data-machine-queued]')!.textContent).toContain('will not move to another account or machine by itself');
@@ -60,7 +60,7 @@ describe('/machines/:id', () => {
         const root = await mountAt('/machines/alien01', <Machine />);
         expect(root.querySelector('[data-page="machine"]')).not.toBeNull();
         expect(root.querySelector('[data-machine-name]')!.textContent).toBe('alien01');
-        expect(root.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]').length).toBe(3);
+        expect(root.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]').length).toBe(5);
         const table = root.querySelector('.ag-sessions')!;
         expect(colWidths(table)).toEqual(SESSIONS_COLS.split(' ').map(t => (t.endsWith('fr') ? 'auto' : t)));
         expect(table.querySelectorAll('tbody tr').length).toBe(2);
@@ -163,7 +163,8 @@ describe('/plugins', () => {
     });
 
     it('turning off a plugin with dependents opens the dialog listing them; the switch holds until confirmed', async () => {
-        const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
+        // Without the other harnesses, so Claude Code is the last ready runtime.
+        const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins.filter((p) => p.manifest.id !== 'copilot-cli' && p.manifest.id !== 'codex-cli')} />);
         const claude = card(root, 'claude-code');
         const control = () => claude.querySelector<HTMLInputElement>('input[role="switch"]')!;
         expect(control().checked).toBe(true);

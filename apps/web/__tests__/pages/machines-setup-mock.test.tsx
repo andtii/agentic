@@ -41,7 +41,7 @@ describe('/machines/:id on mock data (#239)', () => {
         await tick();
         await tick();
         expect(open()).toBeNull();
-        expect(cardNames(root)).toEqual(['work', 'personal', 'client-acme', 'lab']);
+        expect(cardNames(root)).toEqual(['work', 'personal', 'client-acme', 'copilot', 'codex', 'lab']);
         expect(text(root.querySelector('[data-env-cell][data-environment="env_alien01_lab"] [data-env-login] code'))).toBe('agentic-daemon env login env_alien01_lab');
     });
 
