@@ -11,6 +11,10 @@ Design context: `docs/architecture.md` §5b.
 One **environment** = one account = one Claude Code config dir.
 
 - `environments.json` on the machine gives each environment a `profileDir`.
+  `agentic-daemon env add` writes the row and allocates the directory
+  (`<config dir>/profiles/<id>`), refusing one another environment already
+  uses; `agentic-daemon env login <id>` signs it in (`claude /login` with that
+  `CLAUDE_CONFIG_DIR` and the same stripped environment a session gets).
   The daemon's Claude Code driver (`@agentic/runtimes/claude-code`) runs one
   `claudeCode()` agent per environment with `CLAUDE_CONFIG_DIR = profileDir`,
   `settingSources: []`, and a child environment from which the daemon's own
@@ -122,8 +126,10 @@ above, all three signed in as different accounts.
    fourth equals the first.
 5. While a session runs on `env_work`, sign out of `env_personal` by hand
    (`CLAUDE_CONFIG_DIR=… claude /logout`). The running `env_work` session keeps
-   working; after the daemon's next `env` (or restart) `env_personal` shows
-   `auth-missing` and `env_work` still `auth-ok`.
+   working; after the daemon's next `env` (any change to `environments.json`,
+   or a restart) `env_personal` shows `auth-missing` and `env_work` still
+   `auth-ok`. Signing back in (`agentic-daemon env login env_personal`) needs
+   neither: environments that are not signed in are inspected again every 30 s.
 6. Set `CLAUDE_CONFIG_DIR` and `ANTHROPIC_API_KEY` in the daemon's own shell
    before `run`. Every session still answers with its own environment's account —
    the daemon's variables never reach a child.
