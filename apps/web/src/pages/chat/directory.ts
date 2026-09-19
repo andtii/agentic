@@ -64,21 +64,25 @@ export function useAgentDirectory(defs: ActorDefs, viewer: ViewerState): AgentDi
         stop = effect(() => {
             const ws = viewer.workspaceId;
             const ids = ws ? (index.value?.agents ?? []) : [];
-            for (const [id, off] of subs) {
-                if (ids.includes(id as AgentId)) continue;
+            // Keyed by actor key, not id: a workspace switch drops every old subscription and its identity.
+            const wanted = new Map(ids.map((id, i) => [agentKeyOf(ws!, id as AgentId), { id, i }] as const));
+            for (const [key, off] of subs) {
+                if (wanted.has(key)) continue;
                 off();
-                subs.delete(id);
+                subs.delete(key);
             }
-            ids.forEach((id, i) => {
-                if (subs.has(id) || !ws) return;
+            const keep = new Set<string>(ids);
+            if (Object.keys(live.byId).some((id) => !keep.has(id))) live.byId = Object.fromEntries(Object.entries(live.byId).filter(([id]) => keep.has(id)));
+            for (const [key, { id, i }] of wanted) {
+                if (subs.has(key)) continue;
                 subs.set(
-                    id,
-                    channel.subscribe({ type: 'Agent', key: agentKeyOf(ws, id as AgentId), method: 'get' }, (value: unknown) => {
+                    key,
+                    channel.subscribe({ type: 'Agent', key, method: 'get' }, (value: unknown) => {
                         const view = value as AgentView | null;
-                        if (view?.config) live.byId = { ...live.byId, [id]: identityOf(view, i) };
+                        if (view?.config && subs.has(key)) live.byId = { ...live.byId, [id]: identityOf(view, i) };
                     })
                 );
-            });
+            }
         });
     });
     onUnmounted(() => {

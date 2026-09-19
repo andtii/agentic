@@ -240,9 +240,22 @@ export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: nu
     return out;
 }
 
-/** The agents working a task of this chat's tree right now (#258): every `active` row of `chatTasks`, uncapped. */
+/** The agents working a task of this chat's tree right now (#258): each `active` row whose chain of parents ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. */
 export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
-    return new Set(chatTasks(rows, chatId, Number.POSITIVE_INFINITY).flatMap((t) => (t.status === 'active' ? [t.agentId as string] : [])));
+    const byId = new Map<string, TaskIndexRow>(rows.map((r) => [r.id, r]));
+    const inChat = new Map<string, boolean>();
+    const belongs = (r: TaskIndexRow): boolean => {
+        const known = inChat.get(r.id);
+        if (known !== undefined) return known;
+        inChat.set(r.id, false); // a cycle, however unlikely, ends here
+        const parent = r.parentId === undefined ? undefined : byId.get(r.parentId);
+        const yes = r.parentId === undefined ? r.chatId === chatId : parent !== undefined && belongs(parent);
+        inChat.set(r.id, yes);
+        return yes;
+    };
+    const out = new Set<string>();
+    for (const r of rows) if (r.status === 'active' && belongs(r)) out.add(r.assignee);
+    return out;
 }
 
 /** The tasks "Stop task chain" would stop: everything in the panel that has not settled. */
