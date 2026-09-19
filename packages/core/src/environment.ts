@@ -67,8 +67,9 @@ export interface MachineInfo {
  * What the platform may ask a daemon to create or change with `env.request`
  * (#236; decisions 2026-09-19 (c)). There is no `profileDir`: the daemon
  * allocates one per environment and it never crosses the wire, in either
- * direction. `id` absent → the daemon mints one; present → that environment is
- * updated in place and keeps its profile directory.
+ * direction. `put` is an upsert: `id` absent → the daemon mints one; present →
+ * that environment is changed in place and keeps its profile directory, or is
+ * created under that id.
  */
 export interface EnvironmentInput {
     readonly id?: EnvironmentId;
@@ -88,7 +89,7 @@ export type EnvOp =
     /** Forget the environment; its profile directory stays on the machine (it holds a login). */
     | { readonly op: 'remove'; readonly environmentId: EnvironmentId };
 
-/** What `env.response` answers: the environment that was written or removed. The new descriptors follow in an `env` frame. */
+/** What `env.response` answers: the environment that was written or removed. The descriptors themselves travel in an `env` frame, before or after it. */
 export interface EnvResult {
     readonly environmentId: EnvironmentId;
 }
@@ -102,7 +103,7 @@ export type EnvErrorCode =
     | 'unknown-runtime'
     /** `remove`: the environment has running sessions. */
     | 'in-use'
-    /** `remove`, or a `put` with an `id`: the daemon has no such environment. */
+    /** `remove`: the daemon has no such environment. */
     | 'unknown-environment'
     /** The daemon's own check of the input failed: a relative root, a name or id it cannot keep. */
     | 'invalid'

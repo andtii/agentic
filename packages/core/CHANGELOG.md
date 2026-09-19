@@ -10,6 +10,7 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- `env.request` / `env.response` on `PlatformFrame` / `DaemonFrame` (#236), carrying the `EnvOp` / `EnvResult` / `EnvError` vocabulary; both frame-type lists include them. `hello` and `env` carry the optional `policy: MachinePolicy`. `put` is an upsert, so `unknown-environment` answers a `remove` only.
 - Web-managed environments vocabulary (#236, part of #224; decisions 2026-09-19 (c)), in `environment.ts`:
   - `EnvironmentInput` (`id?`, `name`, `runtime`, `cwdRoots`, `concurrency?`, `accountLabel?`): what the platform may ask a daemon to create or change. It has no `profileDir` — the daemon allocates it and it never crosses the wire.
   - `EnvOp` (`put` | `remove`), `EnvResult`, `EnvError` / `EnvErrorCode` (`policy-disabled`, `outside-allowed-roots`, `unknown-runtime`, `in-use`, `unknown-environment`, `invalid`, `io`, and the platform-side `timeout`).

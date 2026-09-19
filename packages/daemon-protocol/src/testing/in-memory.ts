@@ -8,10 +8,23 @@
  * test can check that the suite notices.
  */
 
-import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type CapabilityReport, type Cursor, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type SessionId } from '@agentic/core';
+import {
+    DAEMON_PROTOCOL_VERSION,
+    normalizePath,
+    pathWithin,
+    type CapabilityReport,
+    type Cursor,
+    type EnvError,
+    type EnvironmentDescriptor,
+    type EnvironmentId,
+    type EnvResult,
+    type MachineId,
+    type MachinePolicy,
+    type SessionId
+} from '@agentic/core';
 import type { AgentEvent, SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, cursorBefore, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, PlatformFrame } from '../frames.js';
+import type { DaemonFrame, EnvRequestFrame, PlatformFrame } from '../frames.js';
 import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
 import type { ConformanceDaemon, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
 
@@ -24,11 +37,19 @@ export interface InMemoryFaults {
     readonly silentEnv?: boolean;
     /** List any folder asked for, inside the working roots or not. */
     readonly browseAnywhere?: boolean;
+    /** Accept an environment whose working roots are outside the allowed roots. */
+    readonly acceptAnyRoot?: boolean;
+    /** Remove an environment that still has running sessions. */
+    readonly removeInUse?: boolean;
+    /** Manage environments whatever the policy says. */
+    readonly ignorePolicy?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
     readonly machineId?: MachineId;
     readonly environments?: readonly EnvironmentDescriptor[];
+    /** The machine-local policy it starts with. Default: web-managed, inside `/work`. */
+    readonly policy?: MachinePolicy;
     readonly faults?: InMemoryFaults;
 }
 
@@ -37,6 +58,7 @@ const W = WIRE_PROTOCOL_VERSION;
 
 export const IN_MEMORY_MACHINE = 'machine_inmemory' as MachineId;
 export const IN_MEMORY_ENVIRONMENT = 'env_inmemory' as EnvironmentId;
+export const IN_MEMORY_POLICY: MachinePolicy = { webManaged: true, allowedRoots: ['/work'] };
 
 export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     runtime: 'in-memory',
@@ -98,6 +120,7 @@ class Link {
 
 interface FakeSession {
     readonly id: SessionId;
+    readonly environmentId: string;
     readonly epoch: number;
     seq: number;
     /** Every event frame emitted, in order — the daemon's durable log. */
@@ -112,6 +135,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
     readonly machineId: MachineId;
     readonly environmentId: EnvironmentId;
     private environments: readonly EnvironmentDescriptor[];
+    private policy: MachinePolicy;
+    private minted = 0;
     private readonly sessions = new Map<string, FakeSession>();
     private readonly pendingTools = new Map<string, (result: { output?: unknown; error?: unknown }) => void>();
     private link: Link | undefined;
@@ -127,6 +152,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
         this.machineId = options.machineId ?? IN_MEMORY_MACHINE;
         this.environments = options.environments ?? [inMemoryEnvironment(this.machineId)];
         this.environmentId = this.environments[0]!.id;
+        this.policy = options.policy ?? IN_MEMORY_POLICY;
     }
 
     dial(): PlatformSeat {
@@ -135,7 +161,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
         this.link = link;
         const resume: Record<string, Cursor> = {};
         for (const s of this.sessions.values()) if (!s.closed) resume[s.id] = { epoch: s.epoch, seq: s.seq };
-        this.emit({ v: V, t: 'hello', machineId: this.machineId, daemonVersion: '0.0.0-fake', os: 'linux', environments: this.environments, capabilities: [IN_MEMORY_CAPABILITIES], resume });
+        this.emit({ v: V, t: 'hello', machineId: this.machineId, daemonVersion: '0.0.0-fake', os: 'linux', environments: this.environments, capabilities: [IN_MEMORY_CAPABILITIES], resume, policy: this.policy });
         return {
             send: (frame) => this.receive(encodeFrame(frame)),
             sendRaw: (text) => this.receive(text),
@@ -149,7 +175,12 @@ export class InMemoryDaemon implements ConformanceDaemon {
 
     setEnvironments(environments: readonly EnvironmentDescriptor[]): void {
         this.environments = environments;
-        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments });
+        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments, policy: this.policy });
+    }
+
+    setPolicy(policy: MachinePolicy): void {
+        this.policy = policy;
+        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments: this.environments, policy });
     }
 
     truncateLog(sessionId: SessionId, keepFrom: Cursor): void {
@@ -200,7 +231,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 this.emit({ v: V, t: 'pong', at: Date.now() });
                 return;
             case 'session.open': {
-                const session: FakeSession = { id: frame.sessionId, epoch: 0, seq: 0, log: [], closed: false, busy: false };
+                const session: FakeSession = { id: frame.sessionId, environmentId: frame.environmentId, epoch: 0, seq: 0, log: [], closed: false, busy: false };
                 this.sessions.set(frame.sessionId, session);
                 const ref: SessionRef = { agent: 'in-memory', v: 1, id: frame.sessionId };
                 this.emit({ v: V, t: 'session.opened', sessionId: frame.sessionId, ref, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: session.epoch, seq: session.seq } });
@@ -244,7 +275,46 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 const parent = isRoot ? undefined : normalizePath(`${path}/..`, 'linux')!;
                 return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), entries: [], truncated: false } });
             }
+            case 'env.request': {
+                const outcome = this.manage(frame);
+                // The descriptors first, then the answer: whoever reads the answer already has the list it is about.
+                if ('result' in outcome) this.setEnvironments(this.environments);
+                this.emit({ v: V, t: 'env.response', requestId: frame.requestId, ...outcome });
+                return;
+            }
         }
+    }
+
+    /** `env.request` under the policy: an upsert inside the allowed roots, a removal of an idle environment. No profile directory anywhere. */
+    private manage(frame: EnvRequestFrame): { result: EnvResult } | { error: EnvError } {
+        const faults = this.options.faults;
+        const refuse = (code: EnvError['code'], message: string) => ({ error: { code, message } });
+        if (!this.policy.webManaged && !faults?.ignorePolicy) return refuse('policy-disabled', 'this machine does not let the web manage its environments');
+        if (frame.op === 'remove') {
+            if (!this.environments.some((e) => e.id === frame.environmentId)) return refuse('unknown-environment', `no environment ${frame.environmentId}`);
+            const busy = [...this.sessions.values()].some((x) => !x.closed && x.environmentId === frame.environmentId);
+            if (busy && !faults?.removeInUse) return refuse('in-use', `environment ${frame.environmentId} has running sessions`);
+            this.environments = this.environments.filter((e) => e.id !== frame.environmentId);
+            return { result: { environmentId: frame.environmentId } };
+        }
+        const input = frame.environment;
+        if (input.runtime !== IN_MEMORY_CAPABILITIES.runtime) return refuse('unknown-runtime', `no driver for ${input.runtime}`);
+        const roots = input.cwdRoots.map((r) => normalizePath(r, 'linux'));
+        if (roots.some((r) => r === null)) return refuse('invalid', 'a working root must be an absolute path');
+        if (!faults?.acceptAnyRoot && !roots.every((r) => pathWithin(r!, this.policy.allowedRoots, 'linux'))) return refuse('outside-allowed-roots', 'a working root is outside the allowed roots');
+        const existing = input.id === undefined ? undefined : this.environments.find((e) => e.id === input.id);
+        const next: EnvironmentDescriptor = {
+            id: input.id ?? (`env_put_${++this.minted}` as EnvironmentId),
+            machineId: this.machineId,
+            name: input.name,
+            runtime: input.runtime,
+            account: { label: input.accountLabel ?? existing?.account.label ?? input.name, authStatus: existing?.account.authStatus ?? 'missing' },
+            cwdRoots: roots as string[],
+            concurrency: { max: input.concurrency ?? existing?.concurrency.max ?? 1, active: existing?.concurrency.active ?? 0 },
+            isolation: 'none'
+        };
+        this.environments = existing ? this.environments.map((e) => (e.id === next.id ? next : e)) : [...this.environments, next];
+        return { result: { environmentId: next.id } };
     }
 
     private active(): SessionId[] {
@@ -299,7 +369,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
 /** A conformance harness over the fake daemon; also usable directly to exercise a platform implementation. */
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     return {
-        features: ['env', 'gap', 'raw', 'fs'],
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
         start: (script) => new InMemoryDaemon(script, options)
     };
 }
