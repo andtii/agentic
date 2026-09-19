@@ -15,6 +15,7 @@
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@agentic/daemon-protocol": "workspace:*",
+    "@agentic/mcp": "workspace:*",
     "@agentic/runtimes": "workspace:*",
     "@sigx/ai": "catalog:",
     "@sigx/ai-agent": "catalog:",
