@@ -102,7 +102,8 @@ function registryCode(error: unknown): string | undefined {
     if (typeof code === 'string') return code;
     const message = error instanceof Error ? error.message : '';
     if (/\[registry\] no secret "/.test(message)) return 'secret-missing';
-    if (/\[registry\] plugin ".*" is (disabled|not installed)/.test(message)) return PLUGIN_DISABLED_CODE;
+    if (/\[registry\] plugin ".*" is not installed/.test(message)) return 'plugin-missing';
+    if (/\[registry\] plugin ".*" is disabled/.test(message)) return PLUGIN_DISABLED_CODE;
     return undefined;
 }
 
@@ -167,7 +168,9 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
                 } catch (e) {
                     const code = registryCode(e);
                     if (code === 'secret-missing') return undefined;
-                    if (code === PLUGIN_DISABLED_CODE || code === 'plugin-missing') throw new Error(`${PLUGIN_DISABLED_CODE}: the "${runtime}" runtime plugin is turned off for workspace ${c.workspaceId}`);
+                    // Both fail the task `plugin-disabled` (the router reads the prefix); the message says which it was.
+                    if (code === 'plugin-missing') throw new Error(`${PLUGIN_DISABLED_CODE}: no "${runtime}" runtime plugin is installed in workspace ${c.workspaceId}`);
+                    if (code === PLUGIN_DISABLED_CODE) throw new Error(`${PLUGIN_DISABLED_CODE}: the "${runtime}" runtime plugin is turned off for workspace ${c.workspaceId}`);
                     throw e;
                 }
             }

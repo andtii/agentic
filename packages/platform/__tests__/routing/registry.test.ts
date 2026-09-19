@@ -15,7 +15,7 @@ import { AgentActor, agentKey } from '../../src/agent/index';
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { generateWorkspaceKek, importWorkspaceKek, workspaceKey } from '../../src/auth/index';
 import { defineRegistry, registryKey } from '../../src/registry/index';
-import { anthropicApiRuntime, createSessionFactory, defineRoutingActor, routingKey, type RuntimeCatalogue } from '../../src/routing/index';
+import { anthropicApiRuntime, createSessionFactory, defineRoutingActor, routingKey, type RuntimeCatalogue, type RuntimeImpl } from '../../src/routing/index';
 import { defineSessionActor } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
@@ -226,5 +226,35 @@ describe('the runtime catalogue', () => {
         const t = await run('t1', a);
         expect(t.status).toBe('failed');
         expect(t.error).toMatchObject({ code: 'unknown-runtime', recoverable: false });
+    });
+});
+
+describe('a secret asked for after the gate', () => {
+    /** A local runtime that only asks for a secret — what any runtime with a key does first. */
+    const asking: RuntimeImpl = {
+        host: 'local',
+        async open(_context, plugin) {
+            await plugin.secret('token');
+            throw new Error('the secret was handed out');
+        }
+    };
+
+    it('fails the task plugin-disabled either way, and the message tells a plugin that is not installed from one that is turned off', async () => {
+        await app.stop();
+        const runtimes: RuntimeCatalogue = { ghost: asking, [ANTHROPIC_API_PLUGIN_ID]: asking };
+        Session = defineSessionActor({ factory: createSessionFactory({ routing: () => Routing, registry: () => Registry, runtimes }) });
+        // A router without the Registry: nothing is gated, so the open is where the plugin answers — as when it is turned off between the two.
+        Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session, runtimes });
+        app = testActorApp([Routing, Session, TaskActor, AgentActor, Workspace, Registry, AuditActor]);
+        await app.start();
+
+        const missing = await run('t1', await agent('ghost', { runtime: 'ghost' }));
+        expect(missing.error).toMatchObject({ code: 'plugin-disabled', recoverable: true });
+        expect(missing.error!.message).toContain('no "ghost" runtime plugin is installed');
+
+        await registry().disable(ANTHROPIC_API_PLUGIN_ID);
+        const off = await run('t2', await agent('atlas', { runtime: 'anthropic-api' }));
+        expect(off.error).toMatchObject({ code: 'plugin-disabled', recoverable: true });
+        expect(off.error!.message).toContain('the "anthropic-api" runtime plugin is turned off');
     });
 });
