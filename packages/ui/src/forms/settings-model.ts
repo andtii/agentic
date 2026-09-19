@@ -31,7 +31,7 @@ export interface SettingsDraft {
 
 export type SettingsErrors = Partial<Record<'timeZone', string>>;
 
-export function defaultWorkspaceSettings(timeZone = 'UTC'): SettingsFormValue {
+export function defaultSettingsFormValue(timeZone = 'UTC'): SettingsFormValue {
     return {
         timeZone,
         notifications: { kinds: Object.fromEntries(NOTIFICATION_KINDS.map((k) => [k, true])) as SettingsDraft['kinds'], push: false }

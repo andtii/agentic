@@ -30,7 +30,7 @@ export type { AgentDraft, AgentErrors, AgentErrorKey, ApprovalCategory, Approval
 
 export {
     SETTINGS_FIELDS,
-    defaultWorkspaceSettings,
+    defaultSettingsFormValue,
     toSettingsDraft,
     fromSettingsDraft,
     settingsDraftFromFormData,
