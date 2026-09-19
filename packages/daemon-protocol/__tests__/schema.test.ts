@@ -52,6 +52,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         },
         invalid: { v: V, t: 'fs.response', requestId: 'fs_1', result: { kind: 'worktree', path: '/work/b', branch: 'b' }, error: { code: 'exists', message: 'taken' } },
         path: 'error'
+    },
+    'env.response': {
+        valid: { v: V, t: 'env.response', requestId: 'env_1', error: { code: 'outside-allowed-roots', message: '/etc is not inside an allowed root' } },
+        invalid: { v: V, t: 'env.response', requestId: 'env_1' },
+        path: 'result'
     }
 };
 
@@ -78,6 +83,12 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         valid: { v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'worktree', repo: '/work/app', branch: 'feat/x', base: 'main', path: '/work/app-worktrees/feat-x' } },
         invalid: { v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'list', path: '' } },
         path: 'op.path'
+    },
+    'env.request': {
+        valid: { v: V, t: 'env.request', requestId: 'env_1', op: 'put', environment: { id: env.id, name: 'Work', runtime: 'in-memory', cwdRoots: ['/work/app'], concurrency: 2, accountLabel: 'work' } },
+        // A profile directory never crosses the wire: the input is strict, so the key fails the frame instead of being stripped.
+        invalid: { v: V, t: 'env.request', requestId: 'env_1', op: 'put', environment: { name: 'Work', runtime: 'in-memory', cwdRoots: ['/work/app'], profileDir: '/home/me/.claude' } },
+        path: 'environment'
     }
 };
 
@@ -115,6 +126,31 @@ describe('daemon frame schemas', () => {
             expect(platformFrame.safeParse(c.invalid).success).toBe(false);
         });
     }
+
+    it('env.request: each op carries its own field, and only a bounded, non-empty input', () => {
+        const put = { v: V, t: 'env.request', requestId: 'env_1', op: 'put', environment: { name: 'Work', runtime: 'in-memory', cwdRoots: ['/work'] } };
+        expect(platformFrame.safeParse(put)).toEqual({ success: true, data: put });
+        const remove = { v: V, t: 'env.request', requestId: 'env_2', op: 'remove', environmentId: env.id };
+        expect(platformFrame.safeParse(remove)).toEqual({ success: true, data: remove });
+        expect(platformFrame.safeParse({ v: V, t: 'env.request', requestId: 'env_3', op: 'put', environmentId: env.id }).success).toBe(false);
+        expect(platformFrame.safeParse({ v: V, t: 'env.request', requestId: 'env_4', op: 'remove' }).success).toBe(false);
+        expect(platformFrame.safeParse({ v: V, t: 'env.request', requestId: 'env_5', op: 'rename', environmentId: env.id }).success).toBe(false);
+        expect(platformFrame.safeParse({ ...put, environment: { ...put.environment, cwdRoots: [] } }).success).toBe(false);
+        expect(platformFrame.safeParse({ ...put, environment: { ...put.environment, concurrency: 0 } }).success).toBe(false);
+    });
+
+    it('hello and env may carry the machine policy; an env.response carries result or error, never both', () => {
+        const policy = { webManaged: true, allowedRoots: ['/work'] };
+        const hello = { ...daemonCases.hello.valid, policy };
+        expect(daemonFrame.safeParse(hello)).toEqual({ success: true, data: hello });
+        const changed = { v: V, t: 'env', environments: [env], policy: { webManaged: false, allowedRoots: [] } };
+        expect(daemonFrame.safeParse(changed)).toEqual({ success: true, data: changed });
+        expect(daemonFrame.safeParse({ ...hello, policy: { webManaged: 'yes', allowedRoots: [] } }).success).toBe(false);
+        const ok = { v: V, t: 'env.response', requestId: 'env_1', result: { environmentId: env.id } };
+        expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
+        expect(daemonFrame.safeParse({ ...ok, error: { code: 'io', message: 'disk' } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ v: V, t: 'env.response', requestId: 'env_1', error: { code: 'nope', message: 'x' } }).success).toBe(false);
+    });
 
     it('are Standard Schemas', async () => {
         const std = daemonFrameSchemas.pong['~standard'];

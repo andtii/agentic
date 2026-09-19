@@ -3,7 +3,7 @@
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
-import { capabilityReport, cursor, cursors, environments, fsError, fsResult, machineId, name, nonNegativeInt, os, sessionId, text } from './common.js';
+import { capabilityReport, cursor, cursors, envError, environments, envResult, fsError, fsResult, machineId, machinePolicy, name, nonNegativeInt, os, sessionId, text } from './common.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireFrame, wireReply } from './wire.js';
 
@@ -17,9 +17,10 @@ const hello = z.object({
     os,
     environments,
     capabilities: z.array(capabilityReport).max(LIMITS.list),
-    resume: cursors
+    resume: cursors,
+    policy: machinePolicy.optional()
 });
-const env = z.object({ v, t: z.literal('env'), environments });
+const env = z.object({ v, t: z.literal('env'), environments, policy: machinePolicy.optional() });
 const heartbeat = z.object({ v, t: z.literal('heartbeat'), at: nonNegativeInt, active: z.array(sessionId).max(LIMITS.list) });
 const sessionOpened = z.object({ v, t: z.literal('session.opened'), sessionId, ref: sessionRef, capabilities: capabilityReport, head: cursor });
 const sessionFrame = z.object({ v, t: z.literal('session.frame'), sessionId, frame: wireFrame });
@@ -31,6 +32,10 @@ const fsResponse = z
     .object({ v, t: z.literal('fs.response'), requestId: name, result: fsResult.optional(), error: fsError.optional() })
     .refine((f) => f.result === undefined || f.error === undefined, { message: 'fs.response carries result or error, not both', path: ['error'] })
     .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'fs.response carries result or error', path: ['result'] });
+const envResponse = z
+    .object({ v, t: z.literal('env.response'), requestId: name, result: envResult.optional(), error: envError.optional() })
+    .refine((f) => f.result === undefined || f.error === undefined, { message: 'env.response carries result or error, not both', path: ['error'] })
+    .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'env.response carries result or error', path: ['result'] });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
 export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
@@ -42,6 +47,7 @@ export const sessionClosedFrame: z.ZodType<DaemonFrameOf<'session.closed'>> = se
 export const toolCallFrame: z.ZodType<DaemonFrameOf<'tool.call'>> = toolCall;
 export const pongFrame: z.ZodType<DaemonFrameOf<'pong'>> = pong;
 export const fsResponseFrame: z.ZodType<DaemonFrameOf<'fs.response'>> = fsResponse;
+export const envResponseFrame: z.ZodType<DaemonFrameOf<'env.response'>> = envResponse;
 
 /** Every daemon frame kind by its `t`. */
 export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
@@ -54,7 +60,8 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     'session.closed': sessionClosedFrame,
     'tool.call': toolCallFrame,
     pong: pongFrame,
-    'fs.response': fsResponseFrame
+    'fs.response': fsResponseFrame,
+    'env.response': envResponseFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse]);

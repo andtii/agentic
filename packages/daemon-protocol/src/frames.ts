@@ -29,6 +29,7 @@ export type SessionClosedFrame = DaemonFrameOf<'session.closed'>;
 export type ToolCallFrame = DaemonFrameOf<'tool.call'>;
 export type PongFrame = DaemonFrameOf<'pong'>;
 export type FsResponseFrame = DaemonFrameOf<'fs.response'>;
+export type EnvResponseFrame = DaemonFrameOf<'env.response'>;
 
 export type WelcomeFrame = PlatformFrameOf<'welcome'>;
 export type SessionOpenFrame = PlatformFrameOf<'session.open'>;
@@ -37,6 +38,7 @@ export type SessionCloseFrame = PlatformFrameOf<'session.close'>;
 export type ToolResultFrame = PlatformFrameOf<'tool.result'>;
 export type PingFrame = PlatformFrameOf<'ping'>;
 export type FsRequestFrame = PlatformFrameOf<'fs.request'>;
+export type EnvRequestFrame = PlatformFrameOf<'env.request'>;
 
 /** Either direction. */
 export type AnyFrame = DaemonFrame | PlatformFrame;
