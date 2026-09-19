@@ -113,7 +113,7 @@ interface RegistrySecrets {
 }
 
 /** A Registry refusal by its stable `code` — the class does not survive a hop between objects, the code and the message do. */
-function registryCode(error: unknown): string | undefined {
+export function registryCode(error: unknown): string | undefined {
     const code = (error as { code?: unknown } | null)?.code;
     if (typeof code === 'string') return code;
     const message = error instanceof Error ? error.message : '';

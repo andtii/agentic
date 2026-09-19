@@ -202,6 +202,20 @@ describe('daemon frame schemas', () => {
         expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: Array.from({ length: LIMITS.list + 1 }, (_, i) => ({ id: `r${i}`, match: {}, outcome: 'allow' })), grants: [] } } }).success).toBe(false);
     });
 
+    it('session.open carries the agent’s MCP connectors (#280) with secret names; a bad transport or a value-shaped auth is refused', () => {
+        const connectors = [
+            { id: 'acme', transport: 'streamable-http', url: 'https://mcp.acme.test/mcp', auth: { bearer: 'acme.token', headers: { 'X-Team': 'acme.team' } } },
+            { id: 'files', transport: 'stdio', command: 'files-mcp', args: ['--ro'], cwd: '/work/repo', auth: { env: { FILES_KEY: 'files.key' } } }
+        ];
+        const open = (c: unknown) => platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...platformCases['session.open'].valid.spec, connectors: c } });
+        const parsed = open(connectors);
+        expect(parsed.success).toBe(true);
+        expect((parsed.data as { spec: { connectors: unknown } }).spec.connectors).toEqual(connectors);
+        expect(open([{ id: 'x', transport: 'websocket' }]).success).toBe(false);
+        expect(open([{ id: 'x', transport: 'stdio', auth: { env: { KEY: { value: 'v' } } } }]).success).toBe(false);
+        expect(open([{ id: '', transport: 'stdio' }]).success).toBe(false);
+    });
+
     it('bound the wire command payloads: output spec name and configure patch', () => {
         const command = (c: Record<string, unknown>) => platformFrameSchemas['session.command'].safeParse({ v: V, t: 'session.command', sessionId: 's1', command: { v: W, commandId: 'c1', ...c } }).success;
         const prompt = { type: 'prompt', turnId: 't1', input: [{ type: 'text', text: 'hi' }] };

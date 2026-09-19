@@ -8,7 +8,8 @@
  * from the child environment unless the environment sets them (EXE-04/05).
  * Sessions append the platform's system prompt to Claude Code's preset, run
  * the platform tools the spec names as client tools bridged back through
- * `callTool`, and report their capabilities (AGT-09).
+ * `callTool`, open the agent's MCP connectors the spec carries beside them
+ * (#280, `connectors.ts`), and report their capabilities (AGT-09).
  */
 
 import { readFile } from 'node:fs/promises';
@@ -20,9 +21,10 @@ import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSess
 import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
+import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener } from './connectors.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
-import { claudeCodeSystemPrompt } from './system.js';
+import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
 import { bridgedPlatformTools } from './tools.js';
 
 export interface ClaudeCodeDriverOptions {
@@ -43,6 +45,11 @@ export interface ClaudeCodeDriverOptions {
     readonly home?: string;
     /** Profile file reads and the clock, for `inspect`; the real file system by default. */
     readonly auth?: Partial<ProfileAuthDeps>;
+    /**
+     * Opens an MCP connector as tools (#280) — `@agentic/mcp`'s openers, wired by the daemon. Absent: the spec's
+     * connectors are left out of every session, and the agent is told why.
+     */
+    readonly connectors?: DaemonConnectorOpener;
 }
 
 export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
@@ -79,6 +86,21 @@ async function readText(path: string): Promise<string | undefined> {
         if ((e as { code?: string }).code === 'ENOENT') return undefined;
         throw e;
     }
+}
+
+/** `session`, whose `close` also closes its connectors — every other member read through to the adapter's session. */
+function closingConnectors(session: AgentSession, closeConnectors: () => Promise<void>): AgentSession {
+    return Object.create(session, {
+        close: {
+            value: async () => {
+                try {
+                    await session.close();
+                } finally {
+                    await closeConnectors();
+                }
+            }
+        }
+    }) as AgentSession;
 }
 
 const joinPath = (dir: string, file: string) => `${dir.replace(/[\\/]+$/, '')}/${file}`;
@@ -145,21 +167,43 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
             if (!env.cwdRoots.some((root) => isWithin(spec.cwd, root))) {
                 throw new Error(`[claude-code] cwd ${spec.cwd} is outside the cwdRoots of environment "${env.name}"`);
             }
-            const { tools, unknown } = bridgedPlatformTools(spec.tools, ctx.callTool);
-            const session = await agent.session({
+            const { tools: platform, unknown } = bridgedPlatformTools(spec.tools, ctx.callTool);
+            const connectors = await openDaemonConnectors({
+                connectors: spec.connectors ?? [],
+                env,
                 cwd: spec.cwd,
-                system: claudeCodeSystemPrompt(spec.system),
-                systemPromptPreset: true,
-                settingSources: [],
-                interactive: true,
-                tools,
-                ...(spec.model !== undefined ? { model: spec.model } : {}),
-                ...(spec.maxTurns !== undefined ? { maxTurns: spec.maxTurns } : {}),
-                ...(spec.maxBudgetUsd !== undefined ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
-                ...(ctx.policy !== undefined ? { policy: ctx.policy } : {}),
-                ...(spec.resume !== undefined ? { resume: spec.resume as SessionRef } : {})
+                callTool: ctx.callTool,
+                ...(options.connectors ? { opener: options.connectors } : {}),
+                taken: platform.map((t) => t.name)
             });
-            return { session, capabilities: claudeCodeCapabilityReport(agent.capabilities, { tools: tools.map((t) => t.name), unknownTools: unknown }) };
+            const tools = [...platform, ...connectors.tools];
+            const policy = withConnectorPolicy(ctx.policy, connectors.annotations);
+            let session: AgentSession;
+            try {
+                session = await agent.session({
+                    cwd: spec.cwd,
+                    system: withUnavailableConnectors(claudeCodeSystemPrompt(spec.system), connectors.unavailable),
+                    systemPromptPreset: true,
+                    settingSources: [],
+                    interactive: true,
+                    tools,
+                    ...(spec.model !== undefined ? { model: spec.model } : {}),
+                    ...(spec.maxTurns !== undefined ? { maxTurns: spec.maxTurns } : {}),
+                    ...(spec.maxBudgetUsd !== undefined ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
+                    ...(policy !== undefined ? { policy } : {}),
+                    ...(spec.resume !== undefined ? { resume: spec.resume as SessionRef } : {})
+                });
+            } catch (e) {
+                await connectors.close();
+                throw e;
+            }
+            // A connector tool the agent is granted is not a platform tool the daemon failed to serve: `__` names are connectors'.
+            const capabilities = claudeCodeCapabilityReport(agent.capabilities, {
+                tools: tools.map((t) => t.name),
+                unknownTools: unknown.filter((name) => !name.includes('__')),
+                unavailableConnectors: connectors.unavailable
+            });
+            return { session: closingConnectors(session, connectors.close), capabilities };
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

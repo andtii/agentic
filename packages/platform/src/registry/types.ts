@@ -153,6 +153,8 @@ export interface GateConnector {
     readonly url?: string;
     readonly command?: string;
     readonly args?: readonly string[];
+    /** Stdio: the plugin's `config.cwd`, where the daemon runs the server (#280). */
+    readonly cwd?: string;
     readonly machine?: string;
     readonly auth?: ConnectorAuth;
     /** What the last open or probe found, so a session reports only a change. */

@@ -22,6 +22,8 @@ export interface ClaudeCodeReportInput {
     readonly tools?: readonly string[];
     /** Tools asked for that the daemon cannot serve. */
     readonly unknownTools?: readonly string[];
+    /** The agent's MCP connectors this session runs without (#280), `connector:<id>` in the report. */
+    readonly unavailableConnectors?: readonly { readonly id: string; readonly reason: string }[];
 }
 
 export function claudeCodeCapabilityReport(c: AgentCapabilities, input: ClaudeCodeReportInput = {}): CapabilityReport {
@@ -47,6 +49,7 @@ export function claudeCodeCapabilityReport(c: AgentCapabilities, input: ClaudeCo
 
     for (const name of input.tools ?? []) supported.push(`tool:${name}`);
     for (const name of input.unknownTools ?? []) unsupported.push({ op: `tool:${name}`, reason: 'not a platform tool the daemon can serve' });
+    for (const c of input.unavailableConnectors ?? []) unsupported.push({ op: `connector:${c.id}`, reason: c.reason });
 
     return {
         runtime: 'claude-code',

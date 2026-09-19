@@ -225,6 +225,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
         const url = typeof config['url'] === 'string' ? config['url'] : record.url;
         const command = typeof config['command'] === 'string' ? config['command'] : record.command;
         const args = Array.isArray(config['args']) ? (config['args'] as string[]) : record.args;
+        const cwd = typeof config['cwd'] === 'string' && config['cwd'] !== '' ? config['cwd'] : undefined;
         // A record written before #240 names its secrets without saying where they go: an http one sent the first as its bearer.
         const auth = record.auth ?? (record.transport === 'streamable-http' && record.secrets?.[0] !== undefined ? { bearer: record.secrets[0] } : undefined);
         return {
@@ -235,6 +236,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             ...(url !== undefined ? { url } : {}),
             ...(command !== undefined ? { command } : {}),
             ...(args !== undefined ? { args } : {}),
+            ...(cwd !== undefined ? { cwd } : {}),
             ...(record.machine !== undefined ? { machine: record.machine } : {}),
             ...(auth ? { auth } : {}),
             tools: record.tools,

@@ -82,6 +82,15 @@ Setting up a runtime meant editing files: a deployment-wide `ANTHROPIC_API_KEY` 
     - The runtime must be one the daemon has a driver for; removal is refused while the environment has active sessions; every put and remove is audited with the requested roots.
   - **What stays local.** Signing in to the runtime (EXE-10): the page shows `authStatus` and the command to run (`agentic-daemon env login <id>`), never a path. The file and the CLI (`agentic-daemon env add | list | rm`) stay first-class: a machine with the policy off is set up entirely from its own terminal, without hand-editing JSON and without a restart.
 
+## 2026-09-19 — connector credentials reach a daemon by `tool.call`, not on the spec (#280)
+
+An agent's MCP connectors now open on daemon-hosted sessions, so their credentials have to reach the machine.
+
+- **Not on `OpenSpec`.** The Machine actor keeps every hosted or queued session's spec in durable state and re-sends it after a reconnect (EXE-09). A value on the spec would be persisted by the platform, against EXE-10 and decisions 2026-09-19 (a).
+- **The daemon asks, per open.** The spec carries secret NAMES (`OpenSpecConnector.auth`). While opening, the daemon makes its own `tool.call` `connector_credentials {connectorId}`, which is never offered to the model. The platform answers only for a ready connector named by the calling session's recorded gate. It opens each secret under the connector plugin's own `secret:` grants, as the workspace owner, and the Registry audits each one. The value travels once in the `tool.result` and is recorded nowhere.
+- **On the machine.** Values stay in memory for that session: request headers for HTTP, the child's environment for stdio (on top of the allowlist, never the daemon's whole environment). They are scrubbed from any error the agent sees and are never logged or written to the event log or any file.
+- **Why not a new frame pair.** `tool.call` already carries the agent principal the Machine minted for the session, and the answer runs where the session's gate is. A dedicated frame would repeat that plumbing without adding a check.
+
 ## 2026-09-19 — provider usage limits per account (#261)
 
 With several Claude Code accounts connected, neither a person nor an orchestrating AI could see how close each account is to its plan limits. `claude` → `/usage` shows it, and OPS-07 asks for it.
