@@ -174,6 +174,14 @@ describe('QuotaMonitor', () => {
         expect(sent.map((s) => s.snapshot.via)).toEqual(['stream']);
     });
 
+    it('without a source that can probe it schedules nothing', async () => {
+        const m = createQuotaMonitor({ sources: [], send: () => true, environments: () => environments, busy: () => false, logger: silentLogger, pollMs: 1_000, turnEndDebounceMs: 10 });
+        m.start();
+        m.observe(E1, { type: 'turn-end' });
+        expect(vi.getTimerCount()).toBe(0);
+        m.stop();
+    });
+
     it('a probe that answers null keeps what the stream said; one that throws is logged, not fatal', async () => {
         let answer: () => QuotaSnapshot | null = () => null;
         const source = testSource(() => answer());

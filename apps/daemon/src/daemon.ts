@@ -30,7 +30,7 @@
  * - `quota` reports each environment's provider limits (`./quota.ts`, #271):
  *   from rate-limit events in the live session streams and, unless
  *   `quota.probe` is off, by probing accounts once welcomed, when idle and
- *   after a turn. Unchanged snapshots are not sent again.
+ *   after a turn. An unchanged snapshot is only re-sent after a refresh interval.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.

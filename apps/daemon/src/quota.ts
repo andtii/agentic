@@ -70,7 +70,8 @@ export function quotaSignalOf(event: { readonly type: string }): QuotaSignal | u
 
 export function createQuotaMonitor(options: QuotaMonitorOptions): QuotaMonitor {
     const { logger } = options;
-    const probing = options.probe ?? true;
+    // No source can probe: nothing to schedule.
+    const probing = (options.probe ?? true) && options.sources.some((s) => s.probe);
     const pollMs = options.pollMs ?? DEFAULT_QUOTA_POLL_MS;
     const debounceMs = options.turnEndDebounceMs ?? DEFAULT_QUOTA_TURN_END_DEBOUNCE_MS;
     const refreshMs = options.refreshMs ?? DEFAULT_QUOTA_REFRESH_MS;
