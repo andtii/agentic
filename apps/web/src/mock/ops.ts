@@ -8,7 +8,7 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, NotificationKind, PluginManifest, ScheduleId } from '@agentic/core';
+import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, ScheduleId } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
 
 export interface OpsAgent {
@@ -66,6 +66,18 @@ export const opsEnvironments: readonly EnvironmentDescriptor[] = [
 ];
 
 export const environmentsOf = (machineId: string): readonly EnvironmentDescriptor[] => opsEnvironments.filter(e => e.machineId === machineId);
+
+/**
+ * What each sample daemon reports about web management (#239): alien01 lets
+ * the page manage environments inside its allowed folders, nuc-lab does not —
+ * so both states of the machine page show on mock data.
+ */
+export const opsMachinePolicies: Readonly<Record<string, MachinePolicy>> = {
+    alien01: { webManaged: true, allowedRoots: ['C:\\Dev', 'D:\\scratch', 'C:\\Users\\andy\\src', 'C:\\clients'] },
+    'nuc-lab': { webManaged: false, allowedRoots: [] }
+};
+
+export const machinePolicyOf = (machineId: string): MachinePolicy | undefined => opsMachinePolicies[machineId];
 
 export const opsEnvironment = (id: string): EnvironmentDescriptor | undefined => opsEnvironments.find(e => e.id === id);
 

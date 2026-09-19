@@ -4,6 +4,14 @@ All notable changes to `@agentic/web` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Set a machine up from its page (#239, part of #224; EXE-03, EXE-04, EXE-06):
+  - **Environments from the web:** with the machine's web management on (its own `policy.json`, #238), `/machines/:id` has "Add environment" and, per environment, Edit and Remove. The dialog takes a name, the runtime (what the daemon's drivers report), the working folders (one per line, with the machine's allowed folders a click away), sessions at once and an account label. It sends `Machine.putEnvironment` / `removeEnvironment` (#237) and follows `envResult(requestId)` live. It stays open while the daemon answers, closes when the daemon accepts, and shows a refusal under the field it concerns (`outside-allowed-roots` under Working folders). A remove refused while work runs (`in-use`) says so. There is never a profile directory: the daemon allocates it.
+  - **Web management off, or a daemon that reports no policy:** the page shows the exact command to run on the machine (`agentic-daemon policy allow-root <folder>`, prefilled with a folder the environments already use) instead of any form, and picks the change up when the daemon reports it.
+  - **Sign-in:** a signed-out or expired account shows `agentic-daemon env login <id>` with Copy; the row flips live when the daemon re-inspects.
+  - **This machine:** Rename (`Machine.rename`) and "Remove from workspace", which revokes the token FIRST and then drops the index entry (`Workspace.removeMachine` alone leaves the token valid, #259).
+  - **`/pair`:** an optional "Folder agents may work in" adds `--allow-root <folder>` to the pair command (no new code is minted).
+  - History's "Machines" filter includes `environment.put` / `environment.removed`, linking to the machine and toned by outcome.
+  - Mock mode: alien01 manages its environments from the page, nuc-lab keeps web management off.
 - Plugins you configure from the UI (#233, part of #224; PLG-02, PLG-03, PLG-04, AC-13):
   - **`/plugins`** lists every plugin of the build by kind on the kit's `PluginCard`, each with its readiness (core `pluginReadiness` over one live `Registry.overview()` and the workspace's environments), granted scopes, dependents and a Configure link. Dependents come from ONE `dependentsAll()` instead of a `dependents(id)` per plugin. The active memory/learning plugin says "Used by every agent".
   - **`/plugins/:id`** (new route): settings on `SchemaForm` → `Registry.configure` (a refusal shows on the form, nothing is written), one write-only `SecretField` per declared secret → `setSecret` / `deleteSecret` (`no-kek` says who can fix it), every declared permission with its reason and Grant / Revoke, who depends on it, enable/disable through the same confirm, "Make active" for memory/learning, Remove (then "Remove anyway" on `plugin-in-use`) for plugins that are not built in.

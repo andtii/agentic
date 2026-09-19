@@ -780,6 +780,17 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-doctor-check][data-ok] svg { color: var(--color-primary); }
 [data-doctor-note] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); text-align: end; }
 [data-doctor-foot] { font-size: var(--text-sm); color: var(--ag-text-dim); }
+/* setting a machine up (#239): each card with its sign-in command and actions; the policy card; the dialog's fields */
+[data-env-cell] { display: flex; flex-direction: column; gap: var(--space-sm); min-inline-size: 0; }
+[data-env-cell] > [data-scope="ag-env-card"] { flex: 1 1 auto; }
+[data-env-login] { display: flex; flex-direction: column; gap: var(--space-xs); font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-env-login] [data-command-well] { font-size: var(--text-sm); }
+[data-env-actions], [data-card-actions] { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+[data-env-note] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-env-fields] { display: flex; flex-direction: column; gap: var(--space-md); margin-block-end: var(--space-lg); }
+[data-env-allowed] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); font-family: var(--font-mono); font-size: var(--text-xs); }
+[data-env-allowed-label] { color: var(--ag-text-dim); text-transform: uppercase; letter-spacing: var(--tracking-wider); margin-inline-end: var(--space-xs); }
+[data-env-failure] { margin: 0; font-size: var(--text-md); color: var(--color-error); }
 
 /* ---- pair (#90): 620 + 360 ---- */
 /* 620 + 360 as drawn at 1440; the steps column gives way first so 1280 still fits without a sideways scroll */
