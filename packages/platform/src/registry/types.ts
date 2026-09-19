@@ -8,14 +8,29 @@
  * to, and nothing else reaches it.
  */
 
-import type { AgentId, PermissionScope, PluginManifest, PluginState, ScheduleId } from '@agentic/core';
+import type { AgentId, PermissionScope, PluginKind, PluginManifest, PluginState, ScheduleId } from '@agentic/core';
 
 export const REGISTRY_STATE_VERSION = 1;
 
-/** One installed plugin, as stored. */
+/**
+ * One plugin the build ships (architecture §9): its manifest, and whether a
+ * workspace that never touched it has it on. Default `true` (PLG-05).
+ */
+export type CatalogueEntry = PluginManifest | { readonly manifest: PluginManifest; readonly enabledByDefault?: boolean };
+
+/** The kinds a workspace runs exactly one of (`SINGLE_SLOT_KINDS`). */
+export type SlotKind = Extract<PluginKind, 'memory' | 'learning'>;
+
+/** One installed plugin, as stored. A built-in nobody touched has no record: its `registeredAt` and `updatedAt` read `0`. */
 export interface PluginRecord extends PluginState {
     readonly registeredAt: number;
     readonly updatedAt: number;
+    /**
+     * Built-ins only: every scope a build has declared so far. A declared scope
+     * missing here is new and granted once (decisions 2026-09-19 (a)); one that
+     * is here and not granted was taken away by the owner and stays away.
+     */
+    readonly seenScopes?: readonly PermissionScope[];
 }
 
 export type ConnectorTransport = 'streamable-http' | 'stdio';
@@ -66,9 +81,46 @@ export interface RegistryState {
     plugins: Record<string, PluginRecord>;
     connectors: Record<string, ConnectorRecord>;
     secrets: Record<string, SecretRecord>;
+    /** The owner's choice per single-slot kind; absent → the first catalogue plugin of the kind. Optional, so state written before #229 reads as it is. */
+    active?: Partial<Record<SlotKind, string>>;
 }
 
-export type PluginView = Readonly<PluginRecord>;
+/**
+ * What reads return: the record with `config` merged over the schema's
+ * defaults, whether the build ships it, and — for a single-slot kind —
+ * whether it is the one the workspace runs.
+ */
+export type PluginView = Readonly<PluginRecord> & {
+    readonly builtin: boolean;
+    readonly active?: boolean;
+};
+
+/** One plugin as `gate()` reports it: `config` is ready to use (defaults filled in). */
+export interface GateEntry {
+    readonly id: string;
+    readonly enabled: boolean;
+    readonly config: Record<string, unknown>;
+}
+
+/** Everything `Routing.run` asks before NEW work, in one hop. */
+export interface RegistryGate {
+    /** The runtime plugin asked for; `null` when no `runtime` plugin has that id. */
+    readonly runtime: GateEntry | null;
+    /** The active plugin of each single-slot kind; `null` when the workspace has none. */
+    readonly memory: GateEntry | null;
+    readonly learning: GateEntry | null;
+    /** Enabled `notification` plugins, id order. */
+    readonly channels: readonly { readonly id: string; readonly config: Record<string, unknown> }[];
+}
+
+/** One read for a page: every plugin, the active slots, which secrets are set (names only). */
+export interface RegistryOverview {
+    readonly plugins: readonly PluginView[];
+    readonly active: Partial<Record<SlotKind, string>>;
+    readonly secretNames: readonly string[];
+    /** Whether the deployment can seal secrets at all (a `pluginReadiness` fact). */
+    readonly hasKek: boolean;
+}
 
 export interface RegisterOptions {
     /** Start enabled. Default `false`. */
@@ -79,7 +131,7 @@ export interface RegisterOptions {
 }
 
 /** How an agent depends on a plugin. */
-export type DependencyVia = 'connector' | 'tool' | 'runtime';
+export type DependencyVia = 'connector' | 'tool' | 'runtime' | 'fallback';
 
 export interface AgentDependent {
     readonly id: AgentId;
@@ -98,6 +150,8 @@ export interface Dependents {
     readonly pluginId: string;
     readonly agents: readonly AgentDependent[];
     readonly schedules: readonly ScheduleDependent[];
+    /** The active memory / learning plugin: every agent's new sessions run on it, so no agent is singled out. */
+    readonly workspaceWide?: true;
 }
 
 /** One NDJSON row of `exportRows()` — secrets appear by NAME only. */

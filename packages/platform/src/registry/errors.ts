@@ -1,10 +1,15 @@
 /** Errors the Registry raises; each carries a stable `code` for callers and the UI. */
 
+import type { ConfigError } from '@agentic/core';
+
 export type RegistryErrorCode =
     | 'plugin-disabled'
     | 'plugin-missing'
     | 'plugin-in-use'
     | 'bad-manifest'
+    | 'bad-config'
+    | 'builtin'
+    | 'wrong-kind'
     | 'not-declared'
     | 'no-kek'
     | 'secret-missing'
@@ -33,6 +38,17 @@ export class PluginDisabledError extends RegistryError {
             state === 'missing' ? 'plugin-missing' : 'plugin-disabled',
             `[registry] plugin "${pluginId}" is ${state === 'missing' ? 'not installed' : 'disabled'}`
         );
+    }
+}
+
+/** `configure` / `register` refused: the config does not fit the manifest's schema. `errors` names every path. */
+export class BadConfigError extends RegistryError {
+    override readonly name = 'BadConfigError';
+    constructor(
+        readonly pluginId: string,
+        readonly errors: readonly ConfigError[]
+    ) {
+        super('bad-config', `[registry] bad config for "${pluginId}": ${errors.map((e) => `${e.path || '(config)'}: ${e.message}`).join('; ')}`);
     }
 }
 

@@ -4,8 +4,12 @@
  * An agent depends on a plugin when its config names it: a `connectors[]`
  * ref with the plugin's id, a `tools[]` grant inside the plugin's tool
  * namespace (`tools:<id>` — `<id>.x`, `<id>:x`, `<id>/x`, `<id>__x` or the
- * bare id), or `execution.runtime` equal to the plugin id (a runtime
- * plugin). A schedule depends on a plugin through the agent it drives.
+ * bare id), `execution.runtime` equal to the plugin id (a runtime plugin),
+ * or — for `anthropic-api` — `offlinePolicy: 'fallback-api'`, which sends
+ * the agent's work there while its environment is offline. A schedule
+ * depends on a plugin through the agent it drives. The ACTIVE memory /
+ * learning plugin serves every agent, so it reports `workspaceWide` rather
+ * than a list of all of them.
  */
 
 import type { AgentConfig, AgentId, PluginManifest, ScheduleId } from '@agentic/core';
@@ -21,6 +25,9 @@ export interface ScheduleRef {
     readonly title: string;
     readonly agentId?: AgentId;
 }
+
+/** Where `offlinePolicy: 'fallback-api'` lands (architecture §5a). */
+export const FALLBACK_RUNTIME = 'anthropic-api';
 
 const SEPARATORS = ['.', ':', '/', '__'] as const;
 
@@ -46,10 +53,12 @@ export function dependencyOf(agent: AgentRef, manifest: PluginManifest): readonl
     const namespaces = toolNamespaces(manifest);
     if (config.tools.some((t) => namespaces.some((ns) => toolInNamespace(t.name, ns)))) via.push('tool');
     if (config.execution.runtime === manifest.id) via.push('runtime');
+    else if (manifest.id === FALLBACK_RUNTIME && config.execution.offlinePolicy === 'fallback-api') via.push('fallback');
     return via;
 }
 
-export function computeDependents(manifest: PluginManifest, agents: readonly AgentRef[], schedules: readonly ScheduleRef[]): Dependents {
+export function computeDependents(manifest: PluginManifest, agents: readonly AgentRef[], schedules: readonly ScheduleRef[], options: { readonly workspaceWide?: boolean } = {}): Dependents {
+    if (options.workspaceWide) return { pluginId: manifest.id, agents: [], schedules: [], workspaceWide: true };
     const dependentAgents: AgentDependent[] = [];
     for (const agent of agents) {
         const via = dependencyOf(agent, manifest);
