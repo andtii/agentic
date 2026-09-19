@@ -72,7 +72,7 @@ describe('fromSignal — the streamed rate_limit_event', () => {
         expect(s.windows).toEqual([{ id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.76, unit: 'percent', resetsAt: new Date(1790589600 * 1000).toISOString(), status: 'warning' }]);
     });
 
-    it('a rejection is exhausted — as an ext, and as the adapter`s error rate_limited event', () => {
+    it('a rejection is exhausted — as an ext, and as the adapter’s error rate_limited event', () => {
         const info: SDKRateLimitInfo = { status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1790589600 };
         expect(source.fromSignal!(rateLimitExt(info), env)!.windows[0]).toMatchObject({ id: 'five_hour', utilization: null, status: 'exhausted' });
         expect(source.fromSignal!({ ns: 'error', name: 'rate_limited', data: info }, env)!.windows[0]).toMatchObject({ id: 'five_hour', status: 'exhausted' });
@@ -121,7 +121,7 @@ describe('probe', () => {
         logs.length = 0;
     });
 
-    it('reads /usage on an unprompted query under the environment`s own account, then closes it', async () => {
+    it('reads /usage on an unprompted query under the environment’s own account, then closes it', async () => {
         const { query, calls } = fakeQuery();
         const parentEnv = { PATH: '/bin', HOME: '/home/me', ANTHROPIC_API_KEY: 'sk-parent', CLAUDE_CONFIG_DIR: '/home/me/.claude-other' };
         const s = await claudeCodeQuota({ query, parentEnv }).probe!(env, ctx);
@@ -173,7 +173,7 @@ describe('probe', () => {
 });
 
 describe('the quota manifest', () => {
-    it('is a quota plugin for the claude-code runtime`s source id', () => {
+    it('is a quota plugin for the claude-code runtime’s source id', () => {
         expect(QUOTA_PLUGINS.map((m) => [m.id, m.kind])).toEqual([[CLAUDE_CODE_QUOTA_ID, 'quota']]);
         expect(claudeCodeQuota().id).toBe(CLAUDE_CODE_QUOTA_ID);
     });

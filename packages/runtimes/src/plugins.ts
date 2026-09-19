@@ -77,7 +77,7 @@ export const claudeCodeQuotaPlugin: PluginManifest = {
     description: 'Shows how close each Claude Code account is to its plan limits (session, week, per model), read on the machine from the account itself. Only the percentages and reset times leave the machine.',
     capabilities: [DAEMON_HOSTED_CAPABILITY],
     config: { type: 'object', properties: {}, additionalProperties: false },
-    permissions: [{ scope: 'machine:*', reason: "Reads each Claude Code environment's plan usage on your paired machines." }],
+    permissions: [{ scope: 'machine:*', reason: 'Reads each Claude Code environment’s plan usage on your paired machines.' }],
     compat: { platform: '*', core: '*' }
 };
 
