@@ -6,6 +6,13 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- Plugin configuration contract (#226, part of #224; PLG-02, PLG-04), in `plugin-config.ts`:
+  - `ConfigSchema`: the typed JSON-Schema SUBSET a manifest's `config` is written in. Properties are a string (with `enum`, `format: 'uri'`), a number / integer (with `minimum` / `maximum`), a boolean, a string list or a string map, each with `title`, `description`, `default`; plus `required` and `additionalProperties`. A bare `{ type: 'object' }` or `{}` still means "anything". `JsonSchema` stays as a deprecated alias of it, so existing manifests compile unchanged.
+  - `PluginManifest.secrets` (`PluginSecretDeclaration`: `name`, `title`, `description`, `required`). A secret is never a config property.
+  - `validateConfig(schema, value)` → `{ ok: true, value } | { ok: false, errors: { path, message }[] }`. Unknown keys are rejected once the schema declares `properties`, unless `additionalProperties: true`. Defaults are not filled in.
+  - `configDefaults(schema)`.
+  - `PluginReadiness` and the pure `pluginReadiness(state, facts)`: `disabled`, then `needs-config`, `no-kek` / `needs-secret`, `needs-grant`, `needs-machine` (a `runtime` plugin listing the `daemon-hosted` capability, `DAEMON_HOSTED_CAPABILITY`, with no environment of its id), else `ready`. The caller supplies `PluginReadinessFacts` (`secretNames`, `environments`, `hasKek`).
+  - `SINGLE_SLOT_KINDS` (`memory`, `learning`) and `isSingleSlot(kind)`.
 - Chat attachments contract (#204, part of #203), in `files.ts`:
   - `ChatFile`: a file attached to a chat. Messages reference it as `agentic-file:<chatId>/<fileId>` in the `url` of an `image` or `file` part, never inline.
   - URI helpers: `chatFileUri`, `parseChatFileUri` (strict, url-safe segments) and `isChatFilePart` / `ChatFilePart`.
