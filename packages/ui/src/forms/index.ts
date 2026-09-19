@@ -30,7 +30,7 @@ export type { AgentDraft, AgentErrors, AgentErrorKey, ApprovalCategory, Approval
 
 export {
     SETTINGS_FIELDS,
-    defaultWorkspaceSettings,
+    defaultSettingsFormValue,
     toSettingsDraft,
     fromSettingsDraft,
     settingsDraftFromFormData,
@@ -38,7 +38,7 @@ export {
     supportedTimeZones,
     validateSettingsDraft
 } from './settings-model.js';
-export type { SettingsDraft, SettingsErrors } from './settings-model.js';
+export type { SettingsDraft, SettingsErrors, SettingsFormValue } from './settings-model.js';
 
 export { TextField, TextareaField, SelectField, NumberField, SwitchField, MultiSelectField, MapField } from './fields.js';
 export type { FieldOption, TextFieldProps, TextareaFieldProps, SelectFieldProps, NumberFieldProps, SwitchFieldProps, MultiSelectFieldProps, MapFieldProps } from './fields.js';
