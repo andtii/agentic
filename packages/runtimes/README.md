@@ -67,6 +67,17 @@ const report = await driver.doctor(environments);         // ok: false when two 
 
 `platformTools(ports)` gives all seven; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
+## Plugin manifests (`src/plugins.ts`, #228)
+
+Each runtime ships a `PluginManifest` (PLG-02) for the composition root's catalogue; nothing here registers one. A runtime plugin's id IS its `RuntimeId` — the Registry finds an agent's dependency by `execution.runtime === manifest.id`.
+
+| Manifest | id | Config | Secrets | Permissions |
+|---|---|---|---|---|
+| `anthropicApiPlugin` | `anthropic-api` | `defaultModel`: one of `ANTHROPIC_MODEL_IDS` (the priced ids plus the provider default), default `DEFAULT_ANTHROPIC_MODEL` | `anthropic-api-key` (`ANTHROPIC_API_KEY_SECRET`, required) | `secret:anthropic-api-key` |
+| `claudeCodePlugin` | `claude-code` | none | none — the login stays on the machine (EXE-10) | `machine:*` |
+
+`claudeCodePlugin` lists core's `DAEMON_HOSTED_CAPABILITY`, so `pluginReadiness` answers `needs-machine` until a machine offers a `claude-code` environment. `RUNTIME_PLUGINS` is both. The key is a secret, never a config value: the schema refuses unknown keys.
+
 ## Policy (`src/policy`, #121)
 
 The approval policy compile — `compilePolicy(rules)`, `grantPolicy(grants)`, `agentPolicy(config)`, `constrainPolicy(policy, constraints)`, `sessionPolicy(spec)` and `sessionPolicyOf(OpenSpec.policy)` — lives here, below `@agentic/platform`, so the machine daemon compiles the SAME session policy from the rules an `OpenSpec` carries that a local session runs under; the platform re-exports it. Rules are first match over `tools` / `categories` / `source`; a grant decides per tool (`ask` / `deny` / allow); constraints (a delegated task's ancestors) only ever tighten (deny > ask > allow).
