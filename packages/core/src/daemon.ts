@@ -8,7 +8,7 @@
  * `R` its reply, `C` a command. `@agentic/daemon-protocol` instantiates them.
  */
 
-import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, SessionId, ToolGrant } from './index.js';
+import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, QuotaSnapshot, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -74,7 +74,12 @@ export type DaemonFrame<F = unknown, R = unknown> =
     /** The answer to `fs.request` (#185): exactly one of `result` / `error`. */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.response'; readonly requestId: string; readonly result?: FsResult; readonly error?: FsError }
     /** The answer to `env.request` (#236): exactly one of `result` / `error`. A `result` comes with an `env` frame carrying the new descriptors, before or after it. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.response'; readonly requestId: string; readonly result?: EnvResult; readonly error?: EnvError };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.response'; readonly requestId: string; readonly result?: EnvResult; readonly error?: EnvError }
+    /**
+     * An environment's provider limits changed (#261): pushed unsolicited, from a probe or a streamed rate-limit
+     * signal. A stream snapshot carries only the windows it saw; the platform merges it (`mergeQuota`).
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'quota'; readonly environmentId: EnvironmentId; readonly snapshot: QuotaSnapshot };
 
 export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>> }
@@ -91,5 +96,5 @@ export type PlatformFrame<C = unknown> =
      */
     | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.request'; readonly requestId: string } & EnvOp);
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota'] as const;
 export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request'] as const;

@@ -10,6 +10,7 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- Provider quota contract (#267, part of #261; OPS-07, PLG-09), in `quota.ts`: `QuotaWindow` / `QuotaSnapshot` (normalized limits: `utilization` 0..1 or `null`, `resetsAt` ISO, `status` `ok` | `warning` | `exhausted` | `unknown`; `availability` `reported` | `partial` | `not-reported` with a `reason`), `QuotaUnit`, `QuotaStatus`, `QuotaSignal` and the `QuotaSource` seam (`probe?(env, ctx)`, `fromSignal?(signal, env)`). `QuotaAccount` / `UsageLimitsQuery` / `UsageLimits` are the `usage_limits` tool's shape. Helpers `mergeQuota(prev, next)` (next's windows replace same-id windows, the rest are kept; `not-reported` replaces everything) and `tightestWindow(snapshot)`. New plugin kind `'quota'` (not single-slot), new scope `'usage'`, new daemon frame `quota { environmentId, snapshot }` in `DAEMON_FRAME_TYPES`.
 - `env.request` / `env.response` on `PlatformFrame` / `DaemonFrame` (#236), carrying the `EnvOp` / `EnvResult` / `EnvError` vocabulary; both frame-type lists include them. `hello` and `env` carry the optional `policy: MachinePolicy`. `put` is an upsert, so `unknown-environment` answers a `remove` only.
 - Web-managed environments vocabulary (#236, part of #224; decisions 2026-09-19 (c)), in `environment.ts`:
   - `EnvironmentInput` (`id?`, `name`, `runtime`, `cwdRoots`, `concurrency?`, `accountLabel?`): what the platform may ask a daemon to create or change. It has no `profileDir` — the daemon allocates it and it never crosses the wire.

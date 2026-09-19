@@ -156,6 +156,7 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    tool.call {callId, sessionId, tool, input} · pong
                    fs.response {requestId, exactly one of result: FsResult | error: {code, message}}
                    env.response {requestId, exactly one of result: {environmentId} | error: {code, message}}
+                   quota {environmentId, snapshot: QuotaSnapshot}   (unsolicited, #261: provider limits; stream snapshots are partial → mergeQuota)
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · session.open {sessionId, environmentId, spec}
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
                    tool.result {callId, exactly one of output | error} · ping
