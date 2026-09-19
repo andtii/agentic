@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
@@ -28,7 +28,7 @@ import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
-import { activeIn, advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import { activeIn, advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneQuota, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -154,6 +154,8 @@ export interface MachineView {
     readonly environments: readonly EnvironmentDescriptor[];
     /** The machine-local policy as last reported: whether the web may manage environments, and inside which roots. Absent → the daemon reports none. */
     readonly policy?: MachinePolicy;
+    /** Provider limits by environment id, as last reported (#261); absent until the daemon reports any, and an environment without an entry has reported none yet. */
+    readonly quota?: Readonly<Record<string, QuotaSnapshot>>;
     readonly activeSessions: readonly HostedSession[];
     readonly queued: readonly QueuedSession[];
     readonly pending: readonly PendingCommand[];
@@ -186,6 +188,24 @@ export interface MachineDoctorView {
     /** Environments the daemon sent no verdict for. */
     readonly unverified: readonly EnvironmentId[];
     readonly environments: readonly EnvironmentDoctorView[];
+}
+
+/** One environment's provider limits as `Machine.quota()` reports them; `snapshot: null` until the daemon reports one. */
+export interface EnvironmentQuotaView {
+    readonly environmentId: EnvironmentId;
+    readonly name: string;
+    readonly runtime: RuntimeId;
+    readonly account: EnvironmentDescriptor['account'];
+    readonly snapshot: QuotaSnapshot | null;
+}
+
+/** `Machine.quota()` — each environment's provider limits (#261). Kept while offline: staleness is the reader's, from `snapshot.observedAt`. */
+export interface MachineQuotaView {
+    readonly machineId: MachineId;
+    readonly name: string;
+    readonly online: boolean;
+    readonly lastSeen?: number;
+    readonly environments: readonly EnvironmentQuotaView[];
 }
 
 /** Only the machine the key names — the daemon's own socket. */
@@ -258,6 +278,7 @@ export function defineMachineActor(ports: MachinePorts) {
             capabilities: rest.capabilities,
             environments: rest.environments,
             ...(rest.policy ? { policy: rest.policy } : {}),
+            ...(rest.quota && Object.keys(rest.quota).length > 0 ? { quota: rest.quota } : {}),
             activeSessions: Object.values(rest.activeSessions),
             queued: rest.queued,
             pending: Object.values(rest.pending),
@@ -397,6 +418,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 // A daemon that reports no policy predates web-managed environments: nothing stale is kept from an older one.
                 if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
                 else delete s.policy;
+                pruneQuota(s);
                 // Sessions the daemon still runs, or once ran, replay from the last cursor this machine holds;
                 // ones it never heard of (a restart before `session.opened`) are opened again.
                 const wanted: Record<string, { epoch: number; seq: number }> = {};
@@ -561,6 +583,15 @@ export function defineMachineActor(ports: MachinePorts) {
                 return { requestId };
             }
 
+            /** Fold an environment's provider limits in (#261): a stream snapshot replaces only the windows it carries. An environment the machine does not report is ignored. */
+            function onQuota(frame: DaemonFrameOf<'quota'>): void {
+                const s = ctx.state;
+                s.lastSeen = now();
+                if (!s.environments.some((e) => e.id === frame.environmentId)) return;
+                const quota = (s.quota ??= {});
+                quota[frame.environmentId] = mergeQuota(quota[frame.environmentId], ctx.snapshot(frame.snapshot) as QuotaSnapshot);
+            }
+
             async function handle(frame: DaemonFrame): Promise<void> {
                 const s = ctx.state;
                 switch (frame.t) {
@@ -570,6 +601,7 @@ export function defineMachineActor(ports: MachinePorts) {
                         s.environments = ctx.snapshot(frame.environments) as EnvironmentDescriptor[];
                         // The policy is edited on the machine while the daemon runs; an `env` without one says nothing about it.
                         if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
+                        pruneQuota(s);
                         s.lastSeen = now();
                         dequeue();
                         return;
@@ -594,6 +626,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onFsResponse(frame);
                     case 'env.response':
                         return onEnvResponse(frame);
+                    case 'quota':
+                        return onQuota(frame);
                 }
             }
 
@@ -697,6 +731,23 @@ export function defineMachineActor(ports: MachinePorts) {
                         ok: unverified.length === 0 && environments.every((e) => e.verdict?.ok === true),
                         unverified,
                         environments
+                    };
+                },
+
+                /**
+                 * Each environment's provider limits as last reported (#261), under the `machines` reader rule. With
+                 * `environmentId`, that environment only (404 when the machine does not report it).
+                 */
+                quota(environmentId?: EnvironmentId): MachineQuotaView {
+                    const s = ctx.state;
+                    const envs = environmentId === undefined ? s.environments : s.environments.filter((e) => e.id === environmentId);
+                    if (environmentId !== undefined && envs.length === 0) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    return {
+                        machineId,
+                        name: s.name,
+                        online: s.online,
+                        ...(s.lastSeen !== undefined ? { lastSeen: s.lastSeen } : {}),
+                        environments: envs.map((e) => ({ environmentId: e.id, name: e.name, runtime: e.runtime, account: e.account, snapshot: s.quota?.[e.id] ?? null }))
                     };
                 },
 
