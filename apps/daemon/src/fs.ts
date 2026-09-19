@@ -255,7 +255,7 @@ export interface FsOptions {
 export async function answerFsRequest(environments: readonly LocalEnvironment[], environmentId: string, op: FsOp, options: FsOptions = {}): Promise<FsOutcome> {
     const logger = options.logger ?? silentLogger;
     const platform = options.platform ?? process.platform;
-    logger.debug('fs: request', { environment: environmentId, op: op.kind, path: op.path, ...(op.kind === 'worktree' ? { repo: op.repo } : {}) });
+    logger.debug('fs: request', { environment: environmentId, op: op.kind, ...('path' in op ? { path: op.path } : {}), ...(op.kind === 'worktree' ? { repo: op.repo } : {}) });
     const env = environments.find((e) => e.id === environmentId);
     if (!env) return fail('unknown-environment', `no environment ${environmentId} on this machine`);
     try {
@@ -268,7 +268,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         return fail('unsupported', `unknown fs op ${(op as { kind: string }).kind}`);
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });
-        if (isMissing(e)) return fail('not-found', `${op.path} does not exist`);
+        if (isMissing(e)) return fail('not-found', `${'path' in op ? op.path : op.kind} does not exist`);
         return fail('internal', e instanceof Error ? e.message : String(e));
     }
 }

@@ -2,7 +2,7 @@
 
 import type { ConfigSchema, PluginSecretDeclaration } from './plugin-config.js';
 
-export type PluginKind = 'runtime' | 'connector' | 'memory' | 'learning' | 'notification' | 'trigger' | 'a2a';
+export type PluginKind = 'runtime' | 'connector' | 'memory' | 'learning' | 'notification' | 'trigger' | 'a2a' | 'project-feature';
 
 /** What a plugin may be granted; nothing is implicit (PLG-04). */
 export type PermissionScope =

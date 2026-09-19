@@ -16,8 +16,9 @@ export type MachineId = Brand<'machine'>;
 export type EnvironmentId = Brand<'environment'>;
 export type ScheduleId = Brand<'schedule'>;
 export type MessageId = Brand<'message'>;
+export type ProjectId = Brand<'project'>;
 
-export type IdPrefix = 'ws' | 'agent' | 'chat' | 'task' | 'session' | 'machine' | 'env' | 'schedule' | 'msg';
+export type IdPrefix = 'ws' | 'agent' | 'chat' | 'task' | 'session' | 'machine' | 'env' | 'schedule' | 'msg' | 'project';
 
 /**
  * A new id: `<prefix>_<22 url-safe chars>`. Uses `crypto.getRandomValues`,

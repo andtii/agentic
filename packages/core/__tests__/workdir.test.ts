@@ -1,4 +1,29 @@
-import { normalizePath, pathWithin, suggestWorktreePath } from '../src/index';
+import { normalizePath, originKey, pathWithin, sameOrigin, suggestWorktreePath } from '../src/index';
+
+describe('originKey / sameOrigin (#330)', () => {
+    it.each([
+        ['https://github.com/andtii/agentic.git', 'github.com/andtii/agentic'],
+        ['https://GitHub.com/andtii/agentic/', 'github.com/andtii/agentic'],
+        ['git@github.com:andtii/agentic.git', 'github.com/andtii/agentic'],
+        ['ssh://git@github.com/andtii/agentic', 'github.com/andtii/agentic'],
+        ['https://user:token@github.com/andtii/agentic', 'github.com/andtii/agentic'],
+        ['git@github.com:andtii/Agentic', 'github.com/andtii/Agentic'],
+        ['https://dev.azure.com/org/project/_git/repo', 'dev.azure.com/org/project/_git/repo'],
+        ['  https://github.com/a/b.git  ', 'github.com/a/b'],
+        ['', '']
+    ])('%s -> %s', (url, key) => {
+        expect(originKey(url)).toBe(key);
+    });
+    it('matches the same repo across URL forms and keeps the path case', () => {
+        expect(sameOrigin('https://github.com/andtii/agentic.git', 'git@github.com:andtii/agentic')).toBe(true);
+        expect(sameOrigin('https://github.com/andtii/agentic', 'https://github.com/andtii/agentic-fork')).toBe(false);
+        expect(sameOrigin('git@github.com:andtii/agentic', 'git@github.com:andtii/Agentic')).toBe(false);
+    });
+    it('never matches a blank', () => {
+        expect(sameOrigin('', '')).toBe(false);
+        expect(sameOrigin('  ', 'https://github.com/a/b')).toBe(false);
+    });
+});
 
 describe('pathWithin', () => {
     describe('windows', () => {
