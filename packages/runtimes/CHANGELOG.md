@@ -4,6 +4,7 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `delegate`: the `environmentId` description says the child falls back to the caller's environment when the assignee has no default (#220).
 - `chat_file_read` (#206, part of #203): reads a chat attachment by its `agentic-file:` URI through `PlatformPorts.files` — the text of a text file (flagged `truncated` with a note past 256 KB), a "binary file <name> (<type>, N KB)" note otherwise (an image: attached to the turn when it fits), a clear error on a host without a `files` port. Added to `PLATFORM_TOOL_NAMES` after `chat_post`, to the system prompt's tool guide, and bridged to Claude Code (`DEFINITION_PORTS.files`). `chat_post` takes optional `attachments` (`agentic-file:` URIs, validated before the port) passed as `ChatPost.attachments`.
 - Chat attachments ports (#204, part of #203):
   - `PlatformPorts.files?: ChatFilesPort` (`read(uri, call)` → `ChatFileRead`). It is optional, so hosts without a file store and existing fakes keep compiling.
