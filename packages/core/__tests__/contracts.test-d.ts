@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, Principal, Proposal, RuntimeDriver, RuntimeOpenContext, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, RuntimeDriver, RuntimeOpenContext, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -12,6 +12,9 @@ describe('contract type tests', () => {
     });
     it('chat entries and principals are discriminated', () => {
         expectTypeOf<Discriminant<ChatEntry, 't'>>().toEqualTypeOf<'msg' | 'member' | 'status' | 'coordinator' | 'rename'>();
+        expectTypeOf<Extract<ChatEntry, { t: 'msg' }>['project']>().toEqualTypeOf<{ readonly id: ProjectId | null } | undefined>();
+        expectTypeOf<TaskContract['projectId']>().toEqualTypeOf<ProjectId | undefined>();
+        expectTypeOf<'project-feature'>().toMatchTypeOf<PluginKind>();
         expectTypeOf<Discriminant<Principal, 'kind'>>().toEqualTypeOf<'user' | 'machine' | 'agent' | 'external'>();
     });
     it('daemon frames are versioned and generic over the wire types', () => {
@@ -22,8 +25,9 @@ describe('contract type tests', () => {
         expectTypeOf<Discriminant<Extract<PlatformFrame, { t: 'env.request' }>, 'op'>>().toEqualTypeOf<'put' | 'remove'>();
     });
     it('fs operations and results are closed unions', () => {
-        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree'>();
-        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree'>();
+        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
+        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
+        expectTypeOf<Extract<FsOp, { kind: 'locate' }>['origin']>().toEqualTypeOf<string>();
         expectTypeOf<'outside-roots'>().toMatchTypeOf<FsErrorCode>();
     });
     it('env operations are a closed union and an environment input never names a profile directory', () => {

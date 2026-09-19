@@ -2,7 +2,7 @@
 
 import type { Limits } from './agent.js';
 import type { PromptPart } from './chat.js';
-import type { AgentId, ChatId, EnvironmentId, MessageId, SessionId, TaskId } from './ids.js';
+import type { AgentId, ChatId, EnvironmentId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { Usage } from './usage.js';
 
 export type TaskStatus = 'queued' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled';
@@ -40,6 +40,14 @@ export interface TaskContract {
      * (a delegating parent's folder, the agent's `defaultWorkdir`, else the first root).
      */
     readonly workdir?: string;
+    /**
+     * The project the task belongs to (#330): copied from the chat by the activation
+     * contract, inherited by delegated children and carried by a schedule's fired task.
+     * Without `workdir`, the router runs the session in the project's folder for the
+     * resolved environment (before a parent's folder and the agent's default), merges the
+     * project's connectors and runs its enabled feature plugins' `beforeSession`.
+     */
+    readonly projectId?: ProjectId;
     /**
      * An earlier session this task continues (#285): when the placement allows (same
      * runtime and environment), the router opens the task's session resuming that

@@ -1,6 +1,6 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
-import type { AgentId, ChatId, MessageId, SessionId, TaskId } from './ids.js';
+import type { AgentId, ChatId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { TaskError } from './task.js';
 import type { WorkdirRef } from './workdir.js';
 
@@ -38,6 +38,12 @@ export type ChatEntry =
            * changed. Whoever folds the entries copies `ref` onto the member; `null` clears it.
            */
           readonly workdir?: { readonly agentId: AgentId; readonly ref: WorkdirRef | null };
+          /**
+           * Set on the note `Chat.setProject` writes (#330): the chat now belongs to this project,
+           * or to none with `null`. Whoever folds the entries keeps the last one; the router reads
+           * the project's folder for each member's environment unless the member has its own.
+           */
+          readonly project?: { readonly id: ProjectId | null };
       }
     | { readonly t: 'member'; readonly op: 'add' | 'remove'; readonly agentId: AgentId; readonly historyAccess: HistoryAccess; readonly at: number }
     | {
@@ -156,4 +162,6 @@ export interface ChatRoster {
     readonly self: AgentId;
     readonly coordinator?: AgentId;
     readonly members: readonly ChatRosterMember[];
+    /** The project the chat belongs to (#330), named so the prompt can say where the work lives. */
+    readonly project?: { readonly id: ProjectId; readonly name: string };
 }

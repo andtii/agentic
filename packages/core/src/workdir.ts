@@ -22,7 +22,13 @@ export type FsOp =
     /** The immediate subfolders of `path`. */
     | { readonly kind: 'list'; readonly path: string }
     /** `git worktree add -b branch path [base]` in `repo`; `path` must not exist yet. */
-    | { readonly kind: 'worktree'; readonly repo: string; readonly branch: string; readonly base?: string; readonly path: string };
+    | { readonly kind: 'worktree'; readonly repo: string; readonly branch: string; readonly base?: string; readonly path: string }
+    /**
+     * Every checkout of `origin` under the environment's `cwdRoots` (#330): the roots walked
+     * `depth` levels down (default and cap `FS_LOCATE_MAX_DEPTH`), compared with `sameOrigin`.
+     * How a project finds its repo on a machine where it has no folder yet.
+     */
+    | { readonly kind: 'locate'; readonly origin: string; readonly depth?: number };
 
 export interface FsGitInfo {
     /** `repo`: `.git` is a directory; `worktree`: `.git` is a file pointing into another repo's `worktrees/`. */
@@ -31,6 +37,8 @@ export interface FsGitInfo {
     readonly branch?: string;
     /** Short commit id when HEAD is detached. */
     readonly head?: string;
+    /** The `origin` remote's URL as written in the git config (#330); absent without one. The repo's identity across machines. */
+    readonly origin?: string;
 }
 
 /** One folder in a listing. */
@@ -60,7 +68,16 @@ export interface FsWorktreeResult {
     readonly branch: string;
 }
 
-export type FsResult = FsListResult | FsWorktreeResult;
+export interface FsLocateResult {
+    readonly kind: 'locate';
+    readonly origin: string;
+    /** Repos and worktrees of `origin` under the roots, roots first, shallowest first. */
+    readonly matches: readonly { readonly path: string; readonly git: FsGitInfo }[];
+    /** More than `FS_LOCATE_MAX_MATCHES` checkouts: only the first ones are listed. */
+    readonly truncated: boolean;
+}
+
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -81,6 +98,40 @@ export interface FsError {
 
 /** A listing carries at most this many folders. */
 export const FS_LIST_MAX_ENTRIES = 500;
+/** A `locate` walks at most this many levels below each root (and `depth` is capped to it). */
+export const FS_LOCATE_MAX_DEPTH = 3;
+/** A `locate` reports at most this many checkouts. */
+export const FS_LOCATE_MAX_MATCHES = 20;
+
+/**
+ * The comparable form of a remote URL: scheme, user and a trailing `.git` or `/`
+ * dropped, the host case-folded, `git@host:path` read as `host/path`. So
+ * `https://github.com/andtii/agentic.git`, `git@github.com:andtii/agentic` and
+ * `ssh://git@GitHub.com/andtii/agentic/` are one repo. `''` for a blank.
+ */
+export function originKey(url: string): string {
+    let s = url.trim();
+    if (!s) return '';
+    const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(s);
+    if (scheme) s = s.slice(scheme[0].length);
+    else {
+        // scp-like `user@host:path`
+        const scp = /^([^@/]+@)?([^:/]+):(.+)$/.exec(s);
+        if (scp) s = `${scp[2]}/${scp[3]}`;
+    }
+    s = s.replace(/^[^@/]+@/, '');
+    const slash = s.indexOf('/');
+    const host = (slash < 0 ? s : s.slice(0, slash)).toLowerCase();
+    let path = slash < 0 ? '' : s.slice(slash);
+    path = path.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+    return `${host}${path}`;
+}
+
+/** Whether two remote URLs name the same repo (`originKey` equal and non-empty). */
+export function sameOrigin(a: string, b: string): boolean {
+    const ka = originKey(a);
+    return ka !== '' && ka === originKey(b);
+}
 
 interface ParsedPath {
     /** `C:` / `//server/share` on Windows, `` on POSIX. */
