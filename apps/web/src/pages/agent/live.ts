@@ -21,15 +21,19 @@ export const EDITED_REASON = 'Edited in the web UI';
 export interface NewAgentInput {
     readonly name: string;
     readonly role: string;
+    /** The runtime it starts on (#234, the workspace default unless picked); absent → `anthropic-api`. */
+    readonly runtime?: string;
 }
 
 /**
- * The first version of a new agent: its name and role, on the platform
- * runtime (`anthropic-api`, the demo's target) — an API session fails
- * rather than queues when no key is set, so the failure is visible.
+ * The first version of a new agent: its name and role, on the runtime the
+ * dialog chose (the workspace default, `anthropic-api` without one). On the
+ * API runtime a session fails rather than queues when no key is set, so the
+ * failure is visible; a machine runtime queues while its machine is away.
  */
 export function newAgentPatch(input: NewAgentInput): AgentConfigPatch {
-    const patch: { -readonly [K in keyof AgentConfigPatch]: AgentConfigPatch[K] } = { name: input.name.trim(), execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } };
+    const runtime = input.runtime || 'anthropic-api';
+    const patch: { -readonly [K in keyof AgentConfigPatch]: AgentConfigPatch[K] } = { name: input.name.trim(), execution: { runtime, offlinePolicy: runtime === 'anthropic-api' ? 'fail' : 'queue' } };
     if (input.role.trim()) patch.role = input.role.trim();
     return patch;
 }

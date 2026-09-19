@@ -22,16 +22,17 @@
  */
 
 import type { ChatFileStore, RuntimeId } from '@agentic/core';
-import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, createPlatformModelAgent, type PlatformAgentDeps } from '@agentic/runtimes';
+import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, PLATFORM_TOOL_NAMES, createPlatformModelAgent, type PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy } from '@sigx/ai-agent';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 
 import { asPrincipal, mintAgentPrincipal, userPrincipal } from '../auth/index.js';
 import { sessionPolicy } from '../policy/index.js';
 import { registryKey } from '../registry/key.js';
+import type { ConnectorStatus, GateConnector, RegistryGate } from '../registry/types.js';
 import type { OpenedSession, SessionFactory, SessionFactoryContext } from '../session/ports.js';
 import type { SessionMemory } from '../task/driver.js';
-import type { RegistryGate } from '../registry/types.js';
+import { connectorPolicy, openSessionConnectors, type ConnectorOpener } from './connectors.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
 /** What a local runtime is handed besides the factory context: its plugin's config and the way to its secrets. */
@@ -41,10 +42,15 @@ export interface RuntimePluginAccess {
     /** Whether a Registry backs `secret` — without one (a test, an app before the catalogue) a runtime falls back to its own options. */
     readonly registry: boolean;
     /**
-     * A secret the runtime's manifest declares, through `Registry.openSecret` (enabled + granted, audited).
-     * `undefined` when it is not set — or when the factory has no `registry`. Ask once per open; never keep it.
+     * A secret the runtime's manifest declares — or, with `pluginId`, one a connector plugin declares — through
+     * `Registry.openSecret` (enabled + granted, audited). `undefined` when it is not set — or when the factory has
+     * no `registry`. Ask once per open; never keep it.
      */
-    secret(name: string): Promise<string | undefined>;
+    secret(name: string, pluginId?: string): Promise<string | undefined>;
+    /** The agent's connectors as the router's gate found them (`spec.plugins.connectors`, #240); empty when it names none. */
+    readonly connectors: readonly GateConnector[];
+    /** Record what opening a connector found (`Registry.setConnectorStatus`); absent without a `registry`. */
+    reportConnector?(id: string, status: ConnectorStatus, tools?: readonly string[]): Promise<void>;
 }
 
 /** Where a runtime's sessions live: in this process, or on a machine's daemon. */
@@ -76,6 +82,11 @@ export interface AnthropicApiRuntimeOptions {
      * the spec — `(gate) => memoryAccess(learningPorts, gate)`. Absent → the Memory actor of the agent's own scope.
      */
     readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
+    /**
+     * Opens an MCP connector as tools (#240) — `openMcpConnector` of `@agentic/mcp`, passed where the app is composed.
+     * Absent: an agent's connectors are left out of its sessions, and the agent is told why.
+     */
+    readonly connectors?: ConnectorOpener;
     /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
     readonly machines?: () => AnyActorDefinition;
 }
@@ -100,6 +111,7 @@ const ANTHROPIC_PLUGIN_PAGE = `/plugins/${ANTHROPIC_API_PLUGIN_ID}`;
 /** The slice of the Registry actor a factory calls. */
 interface RegistrySecrets {
     openSecret(name: string, pluginId: string): Promise<string>;
+    setConnectorStatus(id: string, status: ConnectorStatus, tools?: readonly string[]): Promise<unknown>;
 }
 
 /** A Registry refusal by its stable `code` — the class does not survive a hop between objects, the code and the message do. */
@@ -141,21 +153,43 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 // No Registry behind the factory, so no key can be found: the key is only ever the workspace's secret (#231).
                 throw new Error(`${NO_API_KEY_CODE}: workspace ${c.workspaceId} has no Anthropic API key — add one at ${ANTHROPIC_PLUGIN_PAGE}`);
             }
-            const built = createPlatformModelAgent(c.spec.config, {
-                ports,
-                ...(options.model ? { model: options.model } : { anthropic: provider }),
-                store: c.transcripts,
-                ...(c.spec.memories?.length ? { memories: c.spec.memories } : {}),
-                ...(c.spec.roster ? { roster: c.spec.roster } : {})
+            // The agent's MCP connectors (#240): the ready ones join the roster, the rest are named in the prompt with why.
+            const connectors = await openSessionConnectors({
+                connectors: plugin.connectors,
+                ...(options.connectors ? { opener: options.connectors } : {}),
+                secret: (name, pluginId) => plugin.secret(name, pluginId),
+                ...(plugin.reportConnector ? { report: (id, status, tools) => plugin.reportConnector!(id, status, tools) } : {}),
+                taken: PLATFORM_TOOL_NAMES
             });
-            const session = await built.agent.session({ policy: options.policy ?? sessionPolicy(c.spec), signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
-            return {
-                session,
-                agentId: built.agent.id,
-                capabilities: built.agent.capabilities,
-                usageRow: built.usageRow,
-                dispose: () => built.agent.dispose()
-            };
+            try {
+                const built = createPlatformModelAgent(c.spec.config, {
+                    ports,
+                    ...(options.model ? { model: options.model } : { anthropic: provider }),
+                    store: c.transcripts,
+                    ...(c.spec.memories?.length ? { memories: c.spec.memories } : {}),
+                    ...(c.spec.roster ? { roster: c.spec.roster } : {}),
+                    ...(connectors.tools.length ? { tools: connectors.tools } : {}),
+                    ...(connectors.unavailable.length ? { unavailableConnectors: connectors.unavailable } : {})
+                });
+                const policy = connectorPolicy(options.policy ?? sessionPolicy(c.spec), connectors.annotations);
+                const session = await built.agent.session({ policy, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
+                return {
+                    session,
+                    agentId: built.agent.id,
+                    capabilities: built.agent.capabilities,
+                    usageRow: built.usageRow,
+                    dispose: async () => {
+                        try {
+                            await built.agent.dispose();
+                        } finally {
+                            await connectors.close();
+                        }
+                    }
+                };
+            } catch (e) {
+                await connectors.close();
+                throw e;
+            }
         }
     };
 }
@@ -171,15 +205,32 @@ export function createSessionFactory(options: SessionFactoryOptions): SessionFac
         if (!impl) throw new Error(`${UNKNOWN_RUNTIME_CODE}: this build has no runtime "${runtime}"`);
         if (impl.host === 'daemon') return null;
         const registry = options.registry;
+        // As the workspace's owner (v1: `workspaceId === userId`): the session's agent principal does not exist yet, and the Registry audits who asked.
+        const client = (): RegistrySecrets => actor(registry!(), registryKey(c.workspaceId)).with({ context: asPrincipal(userPrincipal(c.workspaceId, c.workspaceId)) }) as unknown as RegistrySecrets;
         return impl.open(c, {
             config: c.spec.plugins?.runtime?.id === runtime ? c.spec.plugins.runtime.config : {},
             registry: registry !== undefined,
-            async secret(name) {
+            connectors: c.spec.plugins?.connectors ?? [],
+            ...(registry
+                ? {
+                      async reportConnector(id: string, status: ConnectorStatus, tools?: readonly string[]) {
+                          await client().setConnectorStatus(id, status, tools);
+                      }
+                  }
+                : {}),
+            async secret(name, pluginId) {
                 if (!registry) return undefined;
-                // As the workspace's owner (v1: `workspaceId === userId`): the session's agent principal does not exist yet, and the Registry audits who asked.
-                const client = actor(registry(), registryKey(c.workspaceId)).with({ context: asPrincipal(userPrincipal(c.workspaceId, c.workspaceId)) }) as unknown as RegistrySecrets;
+                if (pluginId !== undefined && pluginId !== runtime) {
+                    // A connector's secret: its plugin answers for itself — missing, off or not granted is the connector's problem, never the session's.
+                    try {
+                        return await client().openSecret(name, pluginId);
+                    } catch (e) {
+                        if (registryCode(e) === 'secret-missing') return undefined;
+                        throw e;
+                    }
+                }
                 try {
-                    return await client.openSecret(name, runtime);
+                    return await client().openSecret(name, runtime);
                 } catch (e) {
                     const code = registryCode(e);
                     if (code === 'secret-missing') return undefined;

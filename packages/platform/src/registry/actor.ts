@@ -54,6 +54,7 @@ import {
     type ConnectorRecord,
     type ConnectorStatus,
     type Dependents,
+    type GateConnector,
     type GateEntry,
     type PluginRecord,
     type PluginView,
@@ -211,6 +212,36 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return p ? { id: p.manifest.id, enabled: p.enabled, config: mergedConfig(p) } : null;
     };
 
+    /**
+     * A connector an agent names, as a session would open it (#240): its record and its plugin, looked up by the
+     * connector id — or, for a ref naming the plugin, the first connector registered under it.
+     */
+    const gateConnector = (ctx: Ctx, id: string): GateConnector => {
+        const record = ctx.state.connectors[id] ?? Object.values(ctx.state.connectors).find((c) => c.pluginId === id);
+        const p = record ? current(ctx, record.pluginId) : undefined;
+        if (!record || !p || p.manifest.kind !== 'connector') return { id, state: 'missing' };
+        if (!p.enabled) return { id, state: 'disabled', pluginId: p.manifest.id };
+        const config = mergedConfig(p);
+        const url = typeof config['url'] === 'string' ? config['url'] : record.url;
+        const command = typeof config['command'] === 'string' ? config['command'] : record.command;
+        const args = Array.isArray(config['args']) ? (config['args'] as string[]) : record.args;
+        // A record written before #240 names its secrets without saying where they go: an http one sent the first as its bearer.
+        const auth = record.auth ?? (record.transport === 'streamable-http' && record.secrets?.[0] !== undefined ? { bearer: record.secrets[0] } : undefined);
+        return {
+            id: record.id,
+            state: 'ready',
+            pluginId: p.manifest.id,
+            transport: record.transport,
+            ...(url !== undefined ? { url } : {}),
+            ...(command !== undefined ? { command } : {}),
+            ...(args !== undefined ? { args } : {}),
+            ...(record.machine !== undefined ? { machine: record.machine } : {}),
+            ...(auth ? { auth } : {}),
+            tools: record.tools,
+            status: record.status
+        };
+    };
+
     /** The audit record of a permission change or a secret leaving (OPS-03), one-way. */
     const audit = (ctx: Ctx, event: AuditEventInput): Promise<void> => recordAudit(ctx, workspaceOf(ctx), event);
     /** Distinguishes `openSecret` calls that share a millisecond within one activation. */
@@ -315,13 +346,14 @@ export function defineRegistry(options: RegistryOptions = {}) {
              * `config` ready to use. It reports and never throws: what a disabled
              * plugin means is the caller's call.
              */
-            async gate(input: { readonly runtime?: string } = {}): Promise<RegistryGate> {
+            async gate(input: { readonly runtime?: string; readonly connectors?: readonly string[] } = {}): Promise<RegistryGate> {
                 const runtime = input.runtime !== undefined && current(ctx, input.runtime)?.manifest.kind === 'runtime' ? gateEntry(ctx, input.runtime) : null;
                 const channels = pluginIds(ctx)
                     .map((id) => current(ctx, id)!)
                     .filter((p) => p.manifest.kind === 'notification' && p.enabled)
                     .map((p) => ({ id: p.manifest.id, config: mergedConfig(p) }));
-                return ctx.snapshot({ runtime, memory: gateEntry(ctx, activeOf(ctx, 'memory')), learning: gateEntry(ctx, activeOf(ctx, 'learning')), channels });
+                const connectors = input.connectors ? [...new Set(input.connectors)].map((id) => gateConnector(ctx, id)) : undefined;
+                return ctx.snapshot({ runtime, memory: gateEntry(ctx, activeOf(ctx, 'memory')), learning: gateEntry(ctx, activeOf(ctx, 'learning')), channels, ...(connectors ? { connectors } : {}) });
             },
 
             /**
@@ -499,6 +531,10 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 if (input.transport === 'streamable-http' && typeof input.url !== 'string') throw new TypeError('[registry] an http connector needs a url');
                 if (input.transport === 'stdio' && typeof input.command !== 'string') throw new TypeError('[registry] a stdio connector needs a command');
                 for (const s of input.secrets ?? []) assertName(s, 'secret name');
+                const bound = [input.auth?.bearer, ...Object.values(input.auth?.headers ?? {}), ...Object.values(input.auth?.env ?? {})].filter((s): s is string => s !== undefined);
+                for (const s of bound) {
+                    if (!(input.secrets ?? []).includes(s)) throw new TypeError(`[registry] connector "${input.id}" binds secret "${s}" without listing it in secrets`);
+                }
                 const existing = ctx.state.connectors[input.id];
                 const record: ConnectorRecord = {
                     ...ctx.snapshot(input),

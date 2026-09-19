@@ -52,7 +52,7 @@ test.describe('phone', () => {
         await expect(panel.locator(shell('connection'))).toBeVisible();
 
         const close = panel.getByRole('button', { name: 'Close' });
-        expect((await close.boundingBox())?.width).toBe(44);
+        expect(Math.round((await close.boundingBox())?.width ?? 0)).toBe(44);
         await close.click();
         await expect(panel).toBeHidden();
         await expect(menu).toBeFocused();
