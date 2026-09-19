@@ -1,4 +1,4 @@
-import { component, type Define } from 'sigx';
+import { component, type Define, type JSXElement } from 'sigx';
 import type { EnvironmentDescriptor } from '@agentic/core';
 import { AgentTile, EnvironmentCard, Icon, StatusPill } from '@agentic/ui';
 import { defaultAgentsFor, opsAgent, type OpsMachine } from '../../mock/ops';
@@ -13,17 +13,28 @@ export type EnvironmentFacts =
     & Define.Prop<'queued', Readonly<Record<string, number>>, true>
     & Define.Prop<'defaultFor', Readonly<Record<string, readonly DefaultForAgent[]>>, true>;
 
+export type EnvironmentGridProps =
+    & Define.Prop<'environments', readonly EnvironmentDescriptor[], true>
+    & Define.Prop<'machine', OpsMachine, true>
+    & EnvironmentFacts
+    /** Under each card on the machine page (#239): its sign-in command, Edit and Remove. Without it the cards are the grid's own cells. */
+    & Define.Prop<'actions', (env: EnvironmentDescriptor) => JSXElement | null>;
+
 /** The three-column grid of a machine's environment cards (`repeat(3, minmax(0, 1fr))`, gap 12). */
-export const EnvironmentGrid = component<Define.Prop<'environments', readonly EnvironmentDescriptor[], true> & Define.Prop<'machine', OpsMachine, true> & EnvironmentFacts>(({ props }) => () => (
+export const EnvironmentGrid = component<EnvironmentGridProps>(({ props }) => () => (
     <div data-env-grid>
-        {props.environments.map(env => (
-            <EnvironmentCard
-                environment={env}
-                machine={props.machine}
-                queued={props.queued[env.id]}
-                defaultFor={props.defaultFor[env.id] ?? []}
-            />
-        ))}
+        {props.environments.map(env => {
+            const card = (
+                <EnvironmentCard
+                    environment={env}
+                    machine={props.machine}
+                    queued={props.queued[env.id]}
+                    defaultFor={props.defaultFor[env.id] ?? []}
+                />
+            );
+            const actions = props.actions?.(env);
+            return actions ? <div data-env-cell data-environment={env.id}>{card}{actions}</div> : card;
+        })}
     </div>
 ));
 

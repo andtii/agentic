@@ -27,7 +27,8 @@ afterEach(async () => {
 });
 
 const button = (root: ParentNode, label: string): HTMLButtonElement => {
-    const b = [...root.querySelectorAll<HTMLButtonElement>('button')].find((x) => x.textContent?.trim() === label);
+    // Closed dialogs stay in the DOM: outside a dialog, never pick a button inside one.
+    const b = [...root.querySelectorAll<HTMLButtonElement>('button')].find((x) => x.textContent?.trim() === label && (root instanceof HTMLElement && root.matches('[data-part="popup"]') ? true : !x.closest('[data-part="popup"]')));
     if (!b) throw new Error(`no button "${label}"`);
     return b;
 };
@@ -134,14 +135,15 @@ describe('/machines/:id on the live pages', () => {
         // Revoke: the confirm dialog, then `Machine.revoke` — the record says so, and so does the page.
         button(dom, 'Revoke alien01').click();
         await tick();
-        const popup = document.querySelector('[data-scope="dialog"][data-part="popup"]')!;
+        const popup = document.querySelector('[data-scope="dialog"][data-part="popup"][data-state="open"]')!;
         expect(popup.textContent).toContain('No session is running on it.');
         button(popup, 'Revoke alien01').click();
         await until(async () => (await m.user.get()).revoked, 'the record revoked');
         await until(() => dom.querySelector('[data-revoked-line]') !== null, 'the revoked line');
         expect(dom.querySelector('[data-machine-hero]')!.hasAttribute('data-revoked')).toBe(true);
         expect(dom.querySelector('[data-machine-hero] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('REVOKED');
-        expect(dom.querySelector('button[data-intent="danger"]')).toBeNull();
+        // The revoke card no longer offers it (the page's other danger button removes the machine from the workspace).
+        expect([...dom.querySelectorAll('[aria-label="Revoke"] button')].filter((b) => !b.closest('[data-part="popup"]'))).toHaveLength(0);
         // The daemon's next message is refused: revoke stops the token at once.
         expect(await m.daemon.socketMessage(hello(m.machineId, []))).toEqual({ ok: false, code: 'revoked', message: 'the machine is revoked' });
         expect(await m.user.get()).toMatchObject({ revoked: true, online: false });
@@ -301,7 +303,7 @@ describe('the machine view model', () => {
             install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic.example -Code K7Q2MX -Name laptop',
             pair: 'agentic-daemon pair K7Q2MX --url https://agentic.example --name laptop'
         });
-        expect(pairCommands('', 'K7Q2MX', 'laptop').pair).toContain('--url <platform url>');
+        expect(pairCommands('', 'K7Q2MX', 'laptop').pair).toContain('--url "<platform url>"');
         expect(secondsLeft(now + 90_500, now)).toBe(91);
         expect(secondsLeft(now - 1, now)).toBe(0);
     });
