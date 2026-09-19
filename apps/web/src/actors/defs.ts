@@ -14,7 +14,7 @@
  * Tests provide either, plus their own transport.
  */
 import { defineInjectable } from 'sigx';
-import type { AgentActor, AuditActor, Chat, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
+import type { AgentActor, AuditActor, Chat, FlatMemory, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -39,6 +39,8 @@ export interface ActorDefs {
     readonly Ledger: typeof LedgerActor;
     /** One per memory scope — the agent Memory tab and the roster's counts (#150). */
     readonly Memory: typeof Memory;
+    /** The flat memory plugin's store of a scope, same key (#281) — read instead of `Memory` while that plugin is active. */
+    readonly FlatMemory: typeof FlatMemory;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });

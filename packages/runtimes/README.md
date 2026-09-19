@@ -73,7 +73,7 @@ Both are normalized to 0..1. Only normalized snapshots leave the machine. Record
 | `chat_post` | `ChatPort.post`; optional `attachments` (`agentic-file:` URIs, #203) passed as `ChatPost.attachments` | |
 | `chat_file_read` | `ChatFilesPort.read` (`PlatformPorts.files`, #203): `{ uri }` an `agentic-file:` URI; a text file returns `{ name, mediaType, bytes, text }` (`truncated` + a note past 256 KB), any other file a `note` naming it as binary (an image: attached to the turn when it fits); no `files` port fails the call | `readOnly`, `idempotent` |
 | `task_report` | `TaskPort.report` | `idempotent` |
-| `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |
+| `ask_user` | `ChatPort.ask` → `AskOutcome`: `{ answer }` within a short window, else `{ status: 'pending', questionId, note }` — the agent ends its turn and the answer starts it again in the chat (#285) | |
 | `usage_limits` | `UsagePort.limits` (`PlatformPorts.usage`, #272): `{ machineId?, runtime? }` → core `UsageLimits`, every account's latest quota snapshot and its age; no `usage` port fails the call | `readOnly`, `idempotent` |
 
 `platformTools(ports)` gives all eight; `grantedPlatformTools(ports, grants)` the ones a config grants.

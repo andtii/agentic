@@ -115,7 +115,9 @@ export type QuestionPromptProps =
     /** The answer that settled the request (from this or another client): the card collapses to it. */
     & Define.Prop<'answered', unknown, false>
     /** Settled as cancelled rather than answered. */
-    & Define.Prop<'cancelled', boolean, false>;
+    & Define.Prop<'cancelled', boolean, false>
+    /** The asker stopped waiting (#285): the card says answering starts it again with the answer. */
+    & Define.Prop<'stale', boolean, false>;
 
 export const QuestionPrompt = component<QuestionPromptProps>(({ props, signal }) => {
     const st = signal({ chosen: [] as string[][], other: [] as string[], pending: false, error: '' });
@@ -167,6 +169,11 @@ export const QuestionPrompt = component<QuestionPromptProps>(({ props, signal })
                     <Icon name="chats" size={15} />
                     <span data-scope={SCOPE} data-part="title">{settled ? 'Question' : `${who ? `${who.name} asks` : 'Question'}`}</span>
                 </div>
+                {!settled && props.stale ? (
+                    <p data-scope={SCOPE} data-part="note">
+                        {who ? `${who.name} has stopped waiting. Answering starts ${who.name} again with your answer.` : 'The agent has stopped waiting. Answering starts it again with your answer.'}
+                    </p>
+                ) : null}
                 {settled ? (
                     <p data-scope={SCOPE} data-part="record">{props.cancelled ? 'Not answered (cancelled)' : `Answered: ${answerText(props.answered)}`}</p>
                 ) : (

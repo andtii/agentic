@@ -40,8 +40,17 @@ export type ToolMetaFn = (part: ToolPartState) => string | undefined;
 
 /** What the page knows about a request that the transcript does not: the rule it matched, who asked, where it runs, the delegation path, a settled decision. */
 export type ApprovalContext = Pick<ApprovalPromptProps, 'toolName' | 'input' | 'rule' | 'requestedBy' | 'environment' | 'via' | 'decision' | 'compact'>;
+/** A request's context as the page describes it: the approval rows, and for a question whether its asker stopped waiting (#285). */
+export type RequestContext = ApprovalContext & { readonly stale?: boolean };
 /** Resolves the approval card's context rows for a request (`docs/design/HANDOFF.md` → `ai-approval`); absent = the bare card. */
-export type DescribeRequestFn = (request: OpenRequest) => ApprovalContext | undefined;
+export type DescribeRequestFn = (request: OpenRequest) => RequestContext | undefined;
+
+/** The approval card's rows of a request's context — without what only a question reads. */
+export function approvalContext(context: RequestContext | undefined): ApprovalContext | undefined {
+    if (!context) return undefined;
+    const { stale: _stale, ...rows } = context;
+    return rows;
+}
 
 /** What every card in a thread shares: the transcript (for sub-agents), the way to answer a request, the way to stop an agent. */
 export interface ThreadContextProps {
@@ -219,8 +228,8 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
                 {output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
-                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...props.describeRequest?.(request!)} toolName={p.name} input={p.input} />}
-                {asking && props.onRespond && <QuestionPrompt request={request!} onRespond={props.onRespond} requestedBy={props.describeRequest?.(request!)?.requestedBy} />}
+                {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...approvalContext(props.describeRequest?.(request!))} toolName={p.name} input={p.input} />}
+                {asking && props.onRespond && <QuestionPrompt request={request!} onRespond={props.onRespond} requestedBy={props.describeRequest?.(request!)?.requestedBy} stale={props.describeRequest?.(request!)?.stale} />}
                 {agent && <AgentCard agent={agent} transcript={props.transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={props.onCancelAgent} />}
             </div>
         );

@@ -25,7 +25,8 @@ import { actor, type ActorTaskContext, type AnyActorDefinition } from '@sigx/act
 import { AgentActor, agentKey } from '../agent/index.js';
 import { asPrincipal } from '../auth/index.js';
 import { Chat, PAGE, pageKey } from '../chat/index.js';
-import { Memory, memoryActorKey } from '../memory/index.js';
+import { FLAT_MEMORY_PLUGIN_ID } from '@agentic/memory';
+import { FlatMemory, Memory, memoryActorKey } from '../memory/index.js';
 import { Inbox, inboxKey } from '../notify/index.js';
 import { Registry, registryKey } from '../registry/index.js';
 import { defineScheduleActor } from '../schedule/index.js';
@@ -121,7 +122,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
     }
     await write('agents', agentRows);
 
-    // memory — every entry of every scope the agents imply
+    // memory — every entry of every scope the agents imply; then the flat plugin's store of each scope, its rows marked (#281)
     const memoryRows: unknown[] = [];
     for (const scope of memoryScopes(agentRefs)) {
         const m = as(Memory, memoryActorKey(ws, scope));
@@ -131,6 +132,20 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
             for (const entry of page.entries) memoryRows.push({ kind: 'memory', scope, entry });
             after = page.next;
         } while (after !== null);
+    }
+    for (const scope of memoryScopes(agentRefs)) {
+        const key = memoryActorKey(ws, scope);
+        try {
+            const f = as(FlatMemory, key);
+            let after: string | null = null;
+            do {
+                const page = await f.exportPage(after);
+                for (const entry of page.entries) memoryRows.push({ kind: 'memory', plugin: FLAT_MEMORY_PLUGIN_ID, scope, entry });
+                after = page.next;
+            } while (after !== null);
+        } catch {
+            notExported.push({ type: FlatMemory.type, key });
+        }
     }
     await write('memory', memoryRows);
 
@@ -201,7 +216,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
 }
 
 /** Types the export reads through the index; anything else the store lists is "present, not exported". Literals: this module and the Registry import each other. */
-const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'Chat', 'ChatPage', 'session-page', 'Schedule', 'Inbox', 'Registry']);
+const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'FlatMemory', 'Chat', 'ChatPage', 'session-page', 'Schedule', 'Inbox', 'Registry']);
 
 /** Every child record the index implies, children first; the root is NOT included. */
 export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef[]> {
@@ -221,7 +236,11 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
         }
         add(AgentActor.type, key);
     }
-    for (const scope of memoryScopes(agentRefs)) add(Memory.type, memoryActorKey(ws, scope));
+    // Both memory plugins' stores of each scope (#281): a scope the flat plugin never held purges as a no-op.
+    for (const scope of memoryScopes(agentRefs)) {
+        add(Memory.type, memoryActorKey(ws, scope));
+        add(FlatMemory.type, memoryActorKey(ws, scope));
+    }
     for (const id of snap.chats) {
         const key = `${ws}:chat:${id as ChatId}`;
         let seq = 0;

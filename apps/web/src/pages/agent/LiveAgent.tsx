@@ -95,7 +95,11 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
         }
     };
 
-    const memory = () => actor(defs.Memory, memoryKeyOf(viewer.workspaceId!, `agent:${props.id}`));
+    // The active memory plugin's store of the agent's scope (#281): the tab lists it, so it acts on it.
+    const memory = () => {
+        const key = memoryKeyOf(viewer.workspaceId!, `agent:${props.id}`);
+        return activity.memory.flat() ? actor(defs.FlatMemory, key) : actor(defs.Memory, key);
+    };
     const memoryStore: MemoryTabStore = {
         correct: (entry: MemoryEntry, text: string) => memory().update(entry.id, { text, confidence: 'stated', provenance: { ...entry.provenance, source: 'user', at: Date.now() } }),
         retire: (entry: MemoryEntry) => memory().retire(entry.id, 'retired by you'),
@@ -172,7 +176,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                     </Tabs.List>
                     <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} sessions={sessions} zone={zone()} /></Tabs.Panel>
                     <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} catalog={catalog(v.config)} workdirs={workdirs} /></Tabs.Panel>
-                    <Tabs.Panel value="memory"><MemoryTab profile={profile} store={memoryStore} zone={zone()} /></Tabs.Panel>
+                    <Tabs.Panel value="memory"><MemoryTab profile={profile} store={memoryStore} zone={zone()} source={activity.memory.name()} /></Tabs.Panel>
                     <Tabs.Panel value="sessions"><SessionsTab agentId={id} rows={sessions} agent={{ name: agent.name, hue: profile.hue }} zone={zone()} /></Tabs.Panel>
                 </Tabs>
                 <LiveStartTask />

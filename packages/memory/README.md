@@ -13,7 +13,7 @@ Design: `docs/architecture.md` §8. What may move into the sigx estate later: `d
 | `src/state` | `MemoryState` + `MemoryLogEntry` + `applyMemoryLog` — the reducer every write goes through; `completeEntry` (id, `provenance.at`, tag normalization); `coerceEntry` (validation of foreign rows with a dropped-fields report) |
 | `src/store` | `createMemoryStore({ state, now, commit })` — the `MemoryStore` contract over a state and a commit hook; `memoryPlugin()` — the default plugin with an in-memory backend |
 | `src/export` | versioned NDJSON: `toNdjson` / `exportToString` / `fromNdjson` / `parseExportHeader` |
-| `src/plugins/flat` | `flatMemoryPlugin()` / `createFlatMemoryStore()` — the deliberately narrower second plugin (MEM-09): tags only, substring retrieval, `capabilities.export: 'partial'` |
+| `src/plugins/flat` | `flatMemoryPlugin()` / `createFlatMemoryStore({ state? })` — the deliberately narrower second plugin (MEM-09): tags only, substring retrieval, `capabilities.export: 'partial'`; its state (`createFlatMemoryState()`, plain JSON-safe records) can be the host's, as the platform's FlatMemory actor persists it (#281), and `exportPage(after, size)` pages it by id |
 | `src/migrate` | `migrate(from, to, { dryRun })` → `MigrationReport` — the defined path between two stores, with the dropped fields per entry kind |
 | `src/testing` | `memoryConformance(make, { without })` — the suite every backend runs (`@agentic/memory/testing`) |
 

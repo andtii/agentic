@@ -55,12 +55,12 @@ async function seed(objective: string) {
 
 describe('/ Needs you (live)', () => {
     it('an approval raised by the agent reaches both tabs; answering from one settles the other and the task goes on', async () => {
-        const { task, chatId, forge } = await seed('push it');
+        const { task, chatId } = await seed('push it');
         const a = await mountLive('/', h);
         const b = await mountLive('/', h);
         await until(() => card(a) !== null && card(b) !== null, 'the approval card in both tabs');
         expect(rows(a).map((r) => r.getAttribute('data-kind'))).toEqual(['approval']);
-        expect(rows(a)[0]!.getAttribute('aria-label')).toBe(`${forge} asks for approval: push`);
+        expect(rows(a)[0]!.getAttribute('aria-label')).toBe('Forge asks for approval: push');
         expect(card(a)!.textContent).toContain('ask on destructive');
         expect(card(a)!.textContent).toContain('cmd: git push');
         expect(a.querySelector('[data-home-needs] a[data-scope="button"]')!.getAttribute('href')).toBe(`/chats/${chatId}`);

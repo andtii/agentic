@@ -47,8 +47,8 @@ import { ToolCallError } from '../machine/ports.js';
 import { machineKey } from '../machine/state.js';
 import { usageLimitsOf } from '../machine/usage.js';
 import { Memory, memoryActorKey } from '../memory/index.js';
-import type { RequestResolvedEvent } from '../policy/requests.js';
-import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
+import { answerText, type RequestResolvedEvent } from '../policy/requests.js';
+import type { DetachedInput, PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import type { SessionMemory } from '../task/driver.js';
 import { Workspace } from '../workspace/index.js';
@@ -69,7 +69,14 @@ interface RoutingClient {
 interface SessionAskClient {
     raiseInput(input: PlatformInputRequest): Promise<PlatformRequestRef>;
     resolution(requestId: string): AsyncIterable<RequestResolvedEvent>;
+    detachInput(requestId: string): Promise<DetachedInput>;
 }
+
+/**
+ * How long `ask_user` in a chat waits for a quick answer before it answers `pending` (#285) — safely under an
+ * engine's MCP tool-call timeout, so a fast answer still comes back inside the call.
+ */
+export const ASK_QUICK_WAIT_MS = 25_000;
 
 export interface ActorToolPortsOptions {
     /** Whose tools these are — the session's agent principal (workspace, agent, session, task?). */
@@ -90,6 +97,8 @@ export interface ActorToolPortsOptions {
     readonly memory?: SessionMemory;
     /** The Machine actor definition, for `usage_limits` (#272); without it there is no `usage` port and the tool reports it unavailable. */
     readonly machines?: () => AnyActorDefinition;
+    /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
+    readonly askQuickWaitMs?: number;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -118,12 +127,7 @@ function outcomeOf(child: TaskView | TaskOutcome, notStopped: readonly TaskId[] 
     }
 }
 
-/** An input decision's `answers` as the text the model reads: a string as is, a choice list joined, anything else as JSON. */
-export function answerText(answers: unknown): string {
-    if (typeof answers === 'string') return answers;
-    if (Array.isArray(answers) && answers.every((a) => typeof a === 'string')) return answers.join(', ');
-    return JSON.stringify(answers) ?? '';
-}
+export { answerText };
 
 /** The tool ports of one agent session, bound to the actors. */
 export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPorts {
@@ -322,7 +326,32 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 const s = as(def, actorKey(workspaceId, 'session', sessionId as SessionId)) as unknown as SessionAskClient;
                 const choices = question.choices?.map((c) => ({ id: c, label: c }));
                 const { requestId, resolved } = await s.raiseInput({ callId: call.callId, message: question.question, toolName: 'ask_user', ...(choices ? { options: choices } : {}) });
-                const decision = resolved ?? (await awaitResolution(s, requestId, call.signal));
+                let decision = resolved;
+                if (!decision && !chatId) {
+                    // No chat to start the asker again in: the call itself waits (#285 keeps chatless asks blocking).
+                    decision = await awaitResolution(s, requestId, call.signal);
+                } else if (!decision) {
+                    // In a chat the question outlives the call (#285): a quick answer comes back here, else `pending`.
+                    const window = new AbortController();
+                    const timer = setTimeout(() => window.abort(), options.askQuickWaitMs ?? ASK_QUICK_WAIT_MS);
+                    const stop = () => window.abort();
+                    call.signal.addEventListener('abort', stop, { once: true });
+                    try {
+                        decision = await awaitResolution(s, requestId, window.signal);
+                    } finally {
+                        clearTimeout(timer);
+                        call.signal.removeEventListener('abort', stop);
+                    }
+                    // Detaching is atomic with `respond`: an answer that beat it is handed back here, never lost.
+                    decision ??= (await s.detachInput(requestId)).resolved;
+                    if (!decision) {
+                        return {
+                            status: 'pending',
+                            questionId: requestId,
+                            note: 'The user has not answered yet. End your turn now, saying you are waiting on this question; the answer will start you again in this chat.'
+                        };
+                    }
+                }
                 if (!decision) throw new ToolCallError('cancelled', 'ask_user: the turn ended before the user answered');
                 if (decision.outcome !== 'input') throw new ToolCallError('cancelled', `ask_user: the question was ${decision.outcome === 'cancel' ? 'cancelled' : decision.outcome}${decision.reason ? ` (${decision.reason})` : ''}`);
                 return { answer: answerText(decision.answers) };
