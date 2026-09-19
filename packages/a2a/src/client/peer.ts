@@ -62,16 +62,21 @@ export function a2aPeerIdFrom(name: string): string {
         .slice(0, 64);
 }
 
-function checkOptions(options: A2aPeerOptions): URL {
-    if (!ID_RE.test(options.id)) throw new Error(`[agentic a2a] peer id "${options.id}" must be 1–64 letters, digits, "_" or "-"`);
+/** The card URL as an http(s) `URL`; throws naming what is wrong. */
+function httpUrl(cardUrl: string, what: string): URL {
     let url: URL;
     try {
-        url = new URL(options.cardUrl);
+        url = new URL(cardUrl);
     } catch {
-        throw new Error(`[agentic a2a] peer card URL "${options.cardUrl}" is not a URL`);
+        throw new Error(`${what} "${cardUrl}" is not a URL`);
     }
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(`[agentic a2a] peer card URL "${options.cardUrl}" must be http(s)`);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(`${what} "${cardUrl}" must be http(s)`);
     return url;
+}
+
+function checkOptions(options: A2aPeerOptions): URL {
+    if (!ID_RE.test(options.id)) throw new Error(`[agentic a2a] peer id "${options.id}" must be 1–64 letters, digits, "_" or "-"`);
+    return httpUrl(options.cardUrl, '[agentic a2a] peer card URL');
 }
 
 /** The runtime plugin manifest for one remote A2A agent; register it with `Registry.register(manifest, { enabled: true, grant: 'declared' })`. */
@@ -128,6 +133,8 @@ export function a2aPeerRuntime(runtime: string, options: A2aPeerRuntimeOptions =
         async open(c: A2aPeerOpenContext, plugin: A2aPeerPluginAccess): Promise<{ session: AgentSession; agentId: string; capabilities: AgentCapabilities; dispose(): Promise<void> }> {
             const cardUrl = plugin.config['cardUrl'];
             if (typeof cardUrl !== 'string' || !cardUrl) throw new Error(`a2a-peer: the "${runtime}" runtime plugin has no agent card URL — set one at /plugins/${runtime}`);
+            // The config schema's `uri` takes any scheme; only http(s) reaches an A2A agent.
+            httpUrl(cardUrl, `a2a-peer: the "${runtime}" agent card URL (set at /plugins/${runtime})`);
             const token = await plugin.secret(a2aPeerTokenSecret(id));
             const agent = a2aAgent(cardUrl, { id: runtime, ...(options.fetch ? { fetch: options.fetch } : {}), ...(token ? { auth: token } : {}) });
             // The peer's context continues across activations: the ref keeps it.

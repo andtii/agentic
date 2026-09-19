@@ -2,7 +2,8 @@
  * The "Add A2A peer" button and dialog on `/plugins` (#246), over the
  * workspace Registry: the token first (`setSecret`, when one is given), then
  * the peer's runtime plugin (`register`, on, granted what it declares) — so a
- * refused token leaves no half-added peer behind. The live overview then lists
+ * refused token leaves no half-added peer behind, and a refused register takes
+ * the token it just stored back out. The live overview then lists
  * it with the runtimes, and the agent form offers it.
  */
 import { component, signal, type Define } from 'sigx';
@@ -31,7 +32,13 @@ export const AddA2aPeer = component<AddA2aPeerProps>(({ props }) => {
             const { manifest, secret } = peerSetup(draft);
             const registry = actor(props.defs.Registry, k);
             if (secret) await registry.setSecret(secret.name, secret.value);
-            await registry.register(manifest, { enabled: true, grant: 'declared' });
+            try {
+                await registry.register(manifest, { enabled: true, grant: 'declared' });
+            } catch (e) {
+                // All or nothing: no token is left behind for a peer that was never added.
+                if (secret) await registry.deleteSecret(secret.name).catch(() => undefined);
+                throw e;
+            }
             st.added = manifest.name;
             st.open = false;
         } catch (e) {

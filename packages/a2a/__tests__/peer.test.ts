@@ -48,5 +48,7 @@ describe('a2aPeerRuntime (#246)', () => {
 
     it('fails the open, naming the plugin page, when the config has no card URL', async () => {
         await expect(a2aPeerRuntime('a2a.helper').open({ signal: new AbortController().signal }, plugin({}))).rejects.toThrow('/plugins/a2a.helper');
+        // The schema's `uri` takes any scheme; the open refuses one that is not http(s) before any request.
+        await expect(a2aPeerRuntime('a2a.helper').open({ signal: new AbortController().signal }, plugin({ cardUrl: 'ftp://peer.example.com/card' }))).rejects.toThrow(/must be http(s)/);
     });
 });
