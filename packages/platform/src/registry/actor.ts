@@ -5,6 +5,20 @@
  * Holds the workspace's plugins (manifest, enabled, config,
  * grantedPermissions), its MCP connectors and its encrypted secrets.
  *
+ * - The CATALOGUE is what the build ships (`defineRegistry({ catalogue })`).
+ *   A built-in is virtual until touched: a workspace that never mutated it
+ *   stores nothing and reads the catalogue default — enabled, every declared
+ *   scope granted, config at the schema's defaults (PLG-05; decisions
+ *   2026-09-19 (a)). No read ever saves; the first mutation materialises the
+ *   record and saves it in that turn. A stored built-in always reads with the
+ *   build's manifest: grants it no longer declares lapse, a scope no build
+ *   had declared before is granted once (`seenScopes`), and one the owner
+ *   revoked stays revoked.
+ * - `configure` holds a config to the manifest's `ConfigSchema` (`bad-config`).
+ * - Single-slot kinds (memory, learning) have one ACTIVE plugin: the owner's
+ *   `activate` choice, else the first of the kind in the catalogue.
+ * - `gate` answers Routing in one hop; `overview` and `dependentsAll` answer
+ *   a page in one read each.
  * - `enable` / `disable` / `remove`: `disable` always succeeds and returns
  *   the dependents it leaves behind; `requireEnabled` then refuses every
  *   NEW use — a session about to start, a schedule about to fire — while
@@ -21,7 +35,7 @@
  * Every mutation ends in `ctx.save()` inside the turn (Workers eviction rule).
  */
 
-import type { AgentId, PermissionScope, PluginManifest, Principal, ScheduleId, WorkspaceId } from '@agentic/core';
+import { configDefaults, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
@@ -30,21 +44,26 @@ import { decryptSecret, encryptSecret, sameWorkspace, workspaceKey } from '../au
 import { defineScheduleActor } from '../schedule/index.js';
 import { Workspace } from '../workspace/index.js';
 import { computeDependents, type AgentRef, type ScheduleRef } from './dependents.js';
-import { PluginDisabledError, RegistryError } from './errors.js';
+import { BadConfigError, PluginDisabledError, RegistryError } from './errors.js';
 import { parseRegistryKey } from './key.js';
 import { assertName, assertPluginManifest, declaredScopes, isPermissionScope, scopeCovered } from './manifest.js';
 import {
     REGISTRY_STATE_VERSION,
+    type CatalogueEntry,
     type ConnectorInput,
     type ConnectorRecord,
     type ConnectorStatus,
     type Dependents,
+    type GateEntry,
     type PluginRecord,
     type PluginView,
     type RegisterOptions,
     type RegistryExportRow,
+    type RegistryGate,
+    type RegistryOverview,
     type RegistryState,
-    type SecretInfo
+    type SecretInfo,
+    type SlotKind
 } from './types.js';
 
 export type KekSource = CryptoKey | Promise<CryptoKey> | (() => CryptoKey | Promise<CryptoKey>);
@@ -52,6 +71,12 @@ export type KekSource = CryptoKey | Promise<CryptoKey> | (() => CryptoKey | Prom
 export interface RegistryOptions {
     /** `importWorkspaceKek(env.WORKSPACE_KEK)`. Without it `setSecret` / `openSecret` refuse with `no-kek`. */
     readonly kek?: KekSource;
+    /**
+     * The plugins this build ships, in the order the app lists them — the first
+     * of a single-slot kind is that slot's default. Checked here, so a bad
+     * manifest fails the build's start and never a request.
+     */
+    readonly catalogue?: readonly CatalogueEntry[];
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
     readonly authorize?: ActorPolicy | readonly ActorPolicy[];
@@ -81,8 +106,17 @@ export function initialRegistryState(): RegistryState {
     return { v: REGISTRY_STATE_VERSION, plugins: {}, connectors: {}, secrets: {} };
 }
 
+const union = <T>(a: readonly T[], b: readonly T[]): T[] => [...new Set([...a, ...b])];
+
 export function defineRegistry(options: RegistryOptions = {}) {
     const now = options.now ?? (() => Date.now());
+    const catalogue = new Map<string, { readonly manifest: PluginManifest; readonly enabledByDefault: boolean }>();
+    for (const entry of options.catalogue ?? []) {
+        const manifest = 'manifest' in entry ? entry.manifest : entry;
+        assertPluginManifest(manifest);
+        if (catalogue.has(manifest.id)) throw new RegistryError('bad-manifest', `[registry] the catalogue lists "${manifest.id}" twice`);
+        catalogue.set(manifest.id, { manifest, enabledByDefault: ('manifest' in entry ? entry.enabledByDefault : undefined) ?? true });
+    }
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? sameWorkspace;
     let kekPromise: Promise<CryptoKey> | null = null;
     const kek = (): Promise<CryptoKey> => {
@@ -99,50 +133,118 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return ws;
     };
 
+    /**
+     * The record as it stands in THIS build, `config` as stored (the owner's
+     * values only). A built-in reads through the catalogue: no record → the
+     * default; a record → the build's manifest over it. Pure — never writes.
+     */
+    const current = (ctx: Ctx, id: string): PluginRecord | undefined => {
+        const stored = ctx.state.plugins[id];
+        const entry = catalogue.get(id);
+        if (!entry) return stored;
+        const declared = declaredScopes(entry.manifest);
+        if (!stored) return { manifest: entry.manifest, enabled: entry.enabledByDefault, config: {}, grantedPermissions: declared, seenScopes: declared, registeredAt: 0, updatedAt: 0 };
+        // A record from before `seenScopes` has seen what its own manifest declared.
+        const seen = stored.seenScopes ?? declaredScopes(stored.manifest);
+        const kept = stored.grantedPermissions.filter((s) => declared.includes(s));
+        return { ...stored, manifest: entry.manifest, grantedPermissions: union(kept, declared.filter((s) => !seen.includes(s))), seenScopes: union(seen, declared) };
+    };
+
+    /** Every plugin the workspace has: stored ones and the build's, id order. */
+    const pluginIds = (ctx: Ctx): string[] => union(Object.keys(ctx.state.plugins), [...catalogue.keys()]).sort();
+
     const plugin = (ctx: Ctx, id: string): PluginRecord => {
-        const p = ctx.state.plugins[id];
+        const p = current(ctx, id);
         if (!p) throw new PluginDisabledError(id, 'missing');
         return p;
     };
 
+    /** The one write path for a plugin record — what materialises a built-in. The caller saves. */
     const patchPlugin = (ctx: Ctx, id: string, patch: Partial<PluginRecord>): PluginRecord => {
-        const next: PluginRecord = { ...plugin(ctx, id), ...patch, updatedAt: now() };
-        ctx.state.plugins[id] = next;
+        const at = now();
+        const base = plugin(ctx, id);
+        const next: PluginRecord = { ...base, ...patch, registeredAt: base.registeredAt || at, updatedAt: at };
+        // The catalogue's manifest is shared by every workspace of the isolate: state gets its own copy.
+        ctx.state.plugins[id] = catalogue.has(id) ? { ...next, manifest: ctx.snapshot(next.manifest) } : next;
         return next;
     };
 
-    const view = (ctx: Ctx, p: PluginRecord): PluginView => ctx.snapshot(p);
+    const mergedConfig = (p: PluginRecord): Record<string, unknown> => ({ ...configDefaults(p.manifest.config), ...p.config });
+
+    const checkConfig = (manifest: PluginManifest, config: Record<string, unknown>): void => {
+        const checked = validateConfig(manifest.config, { ...configDefaults(manifest.config), ...config });
+        if (!checked.ok) throw new BadConfigError(manifest.id, checked.errors);
+    };
+
+    /** The plugin a single-slot kind runs on: the owner's choice while it exists, else the catalogue's first, else the first installed. */
+    const activeOf = (ctx: Ctx, kind: PluginKind): string | undefined => {
+        const chosen = ctx.state.active?.[kind as SlotKind];
+        if (chosen !== undefined && current(ctx, chosen)?.manifest.kind === kind) return chosen;
+        for (const [id, entry] of catalogue) if (entry.manifest.kind === kind) return id;
+        return pluginIds(ctx).find((id) => current(ctx, id)!.manifest.kind === kind);
+    };
+
+    const activeSlots = (ctx: Ctx): Partial<Record<SlotKind, string>> => {
+        const memory = activeOf(ctx, 'memory');
+        const learning = activeOf(ctx, 'learning');
+        return { ...(memory !== undefined ? { memory } : {}), ...(learning !== undefined ? { learning } : {}) };
+    };
+
+    const isActive = (ctx: Ctx, p: PluginRecord): boolean => isSingleSlot(p.manifest.kind) && activeOf(ctx, p.manifest.kind) === p.manifest.id;
+
+    const view = (ctx: Ctx, p: PluginRecord): PluginView =>
+        ctx.snapshot({
+            ...p,
+            config: mergedConfig(p),
+            builtin: catalogue.has(p.manifest.id),
+            ...(isSingleSlot(p.manifest.kind) ? { active: isActive(ctx, p) } : {})
+        });
+
+    const gateEntry = (ctx: Ctx, id: string | undefined): GateEntry | null => {
+        const p = id === undefined ? undefined : current(ctx, id);
+        return p ? { id: p.manifest.id, enabled: p.enabled, config: mergedConfig(p) } : null;
+    };
 
     /** The audit record of a permission change or a secret leaving (OPS-03), one-way. */
     const audit = (ctx: Ctx, event: AuditEventInput): Promise<void> => recordAudit(ctx, workspaceOf(ctx), event);
     /** Distinguishes `openSecret` calls that share a millisecond within one activation. */
     let opened = 0;
 
-    /** Read the Workspace index, then every agent and schedule it lists. */
-    const collectRefs = async (ctx: Ctx): Promise<{ agents: AgentRef[]; schedules: ScheduleRef[] }> => {
+    type Refs = { readonly agents: readonly AgentRef[]; readonly schedules: readonly ScheduleRef[] };
+
+    /** Read the Workspace index, then every agent and schedule it lists — side by side, index order kept. */
+    const collectRefs = async (ctx: Ctx): Promise<Refs> => {
         const ws = workspaceOf(ctx);
         const index = await ctx.actor(Workspace, workspaceKey(ws)).get();
-        const agents: AgentRef[] = [];
-        for (const id of index.agents) {
-            const agent = await ctx.actor(AgentActor, agentKey(ws, id as AgentId)).get();
-            agents.push({ id: agent.id, config: agent.config });
-        }
-        const schedules: ScheduleRef[] = [];
-        for (const id of index.schedules) {
-            try {
-                const s = await ctx.actor(ScheduleRefDef, `${ws}:schedule:${id}`).get();
-                schedules.push({ id: s.id as ScheduleId, title: s.title, ...(s.agentId !== undefined ? { agentId: s.agentId } : {}) });
-            } catch {
-                // Indexed but never created (or already gone): nothing depends through it.
-            }
-        }
-        return { agents, schedules };
+        const [agents, schedules] = await Promise.all([
+            Promise.all(
+                index.agents.map(async (id): Promise<AgentRef> => {
+                    const agent = await ctx.actor(AgentActor, agentKey(ws, id as AgentId)).get();
+                    return { id: agent.id, config: agent.config };
+                })
+            ),
+            Promise.all(
+                index.schedules.map(async (id): Promise<ScheduleRef | null> => {
+                    try {
+                        const s = await ctx.actor(ScheduleRefDef, `${ws}:schedule:${id}`).get();
+                        return { id: s.id as ScheduleId, title: s.title, ...(s.agentId !== undefined ? { agentId: s.agentId } : {}) };
+                    } catch {
+                        // Indexed but never created (or already gone): nothing depends through it.
+                        return null;
+                    }
+                })
+            )
+        ]);
+        return { agents, schedules: schedules.filter((s): s is ScheduleRef => s !== null) };
     };
 
+    const dependentsOf = (ctx: Ctx, p: PluginRecord, refs: Refs): Dependents => computeDependents(p.manifest, refs.agents, refs.schedules, { workspaceWide: isActive(ctx, p) });
+
     const dependents = async (ctx: Ctx, id: string): Promise<Dependents> => {
-        const manifest = plugin(ctx, id).manifest;
-        const { agents, schedules } = await collectRefs(ctx);
-        return computeDependents(manifest, agents, schedules);
+        plugin(ctx, id);
+        const refs = await collectRefs(ctx);
+        // Read the record after the walk: it awaited, and the plugin may have moved meanwhile.
+        return dependentsOf(ctx, plugin(ctx, id), refs);
     };
 
     return defineActor({
@@ -154,6 +256,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             disable: [ownerOnly],
             remove: [ownerOnly],
             configure: [ownerOnly],
+            activate: [ownerOnly],
             grant: [ownerOnly],
             revoke: [ownerOnly],
             putConnector: [ownerOnly],
@@ -164,33 +267,55 @@ export function defineRegistry(options: RegistryOptions = {}) {
             openSecret: [ownerOrAgent]
         },
         persistence: 'explicit',
-        reads: { list: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 } },
-        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', getConnector: 'always', exportRows: 'always' },
+        reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 } },
+        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always' },
         state: (): RegistryState => initialRegistryState(),
         methods: (ctx) => ({
             // -- plugins ------------------------------------------------------
 
-            /** Every installed plugin, id order. A live read for the Plugins page. */
+            /** Every plugin — the build's and the installed ones — id order. A live read for the Plugins page. */
             list(): PluginView[] {
-                return Object.keys(ctx.state.plugins)
-                    .sort()
-                    .map((id) => view(ctx, ctx.state.plugins[id]!));
+                return pluginIds(ctx).map((id) => view(ctx, current(ctx, id)!));
+            },
+
+            /** What a page needs in one live read: the plugins, the active slots, which secrets are set (the facts `pluginReadiness` takes). */
+            overview(): RegistryOverview {
+                return {
+                    plugins: pluginIds(ctx).map((id) => view(ctx, current(ctx, id)!)),
+                    active: activeSlots(ctx),
+                    secretNames: Object.keys(ctx.state.secrets).sort(),
+                    hasKek: options.kek !== undefined
+                };
             },
 
             async get(id: string): Promise<PluginView | null> {
-                const p = ctx.state.plugins[id];
+                const p = current(ctx, id);
                 return p ? view(ctx, p) : null;
             },
 
             async isEnabled(id: string): Promise<boolean> {
-                return ctx.state.plugins[id]?.enabled === true;
+                return current(ctx, id)?.enabled === true;
             },
 
             /** The gate other actors call before NEW use of a plugin; throws `PluginDisabledError` (AC-13). */
             async requireEnabled(id: string): Promise<void> {
-                const p = ctx.state.plugins[id];
-                if (!p) throw new PluginDisabledError(id, 'missing');
-                if (!p.enabled) throw new PluginDisabledError(id, 'disabled');
+                if (!plugin(ctx, id).enabled) throw new PluginDisabledError(id, 'disabled');
+            },
+
+            /**
+             * Everything `Routing.run` asks before NEW work, in one hop: the runtime
+             * plugin (`null` when no runtime plugin has that id), the active memory
+             * and learning plugins, the enabled notification channels — each
+             * `config` ready to use. It reports and never throws: what a disabled
+             * plugin means is the caller's call.
+             */
+            async gate(input: { readonly runtime?: string } = {}): Promise<RegistryGate> {
+                const runtime = input.runtime !== undefined && current(ctx, input.runtime)?.manifest.kind === 'runtime' ? gateEntry(ctx, input.runtime) : null;
+                const channels = pluginIds(ctx)
+                    .map((id) => current(ctx, id)!)
+                    .filter((p) => p.manifest.kind === 'notification' && p.enabled)
+                    .map((p) => ({ id: p.manifest.id, config: mergedConfig(p) }));
+                return ctx.snapshot({ runtime, memory: gateEntry(ctx, activeOf(ctx, 'memory')), learning: gateEntry(ctx, activeOf(ctx, 'learning')), channels });
             },
 
             /**
@@ -200,6 +325,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
              */
             async register(manifest: PluginManifest, options: RegisterOptions = {}): Promise<PluginView> {
                 assertPluginManifest(manifest);
+                if (catalogue.has(manifest.id)) throw new RegistryError('builtin', `[registry] "${manifest.id}" ships with the build: it cannot be registered over`);
+                if (options.config !== undefined) checkConfig(manifest, options.config);
                 const at = now();
                 const declared = declaredScopes(manifest);
                 const existing = ctx.state.plugins[manifest.id];
@@ -251,12 +378,15 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
             /** Refuses with `plugin-in-use` while agents or schedules depend on it, unless `force`. Drops its connectors too. */
             async remove(id: string, options: { readonly force?: boolean } = {}): Promise<{ removed: true; dependents: Dependents }> {
-                plugin(ctx, id);
+                const kind = plugin(ctx, id).manifest.kind;
+                if (catalogue.has(id)) throw new RegistryError('builtin', `[registry] "${id}" ships with the build: disable it instead`);
                 const deps = await dependents(ctx, id);
-                if (!options.force && (deps.agents.length > 0 || deps.schedules.length > 0)) {
+                if (!options.force && (deps.agents.length > 0 || deps.schedules.length > 0 || deps.workspaceWide)) {
                     throw new RegistryError(
                         'plugin-in-use',
-                        `[registry] "${id}" is used by ${deps.agents.length} agent(s) and ${deps.schedules.length} schedule(s); disable it, or remove with force`
+                        deps.workspaceWide
+                            ? `[registry] "${id}" is the workspace's active ${kind} plugin; activate another, or remove with force`
+                            : `[registry] "${id}" is used by ${deps.agents.length} agent(s) and ${deps.schedules.length} schedule(s); disable it, or remove with force`
                     );
                 }
                 delete ctx.state.plugins[id];
@@ -265,11 +395,39 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 return { removed: true, dependents: deps };
             },
 
+            /** Replace the plugin's config. Held to the manifest's schema with its defaults filled in: `bad-config` names every path, and nothing is stored. */
             async configure(id: string, config: Record<string, unknown>): Promise<PluginView> {
                 if (config === null || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('[registry] config must be an object');
+                checkConfig(plugin(ctx, id).manifest, config);
                 const p = patchPlugin(ctx, id, { config: ctx.snapshot(config) });
                 await ctx.save();
                 return view(ctx, p);
+            },
+
+            /**
+             * Make `id` the plugin its single-slot kind runs on — for NEW sessions,
+             * like every other switch here. Refuses another kind, and a plugin that
+             * is missing or disabled. Recorded when it changes something.
+             */
+            async activate(kind: SlotKind, id: string): Promise<PluginView> {
+                if (!isSingleSlot(kind)) throw new RegistryError('wrong-kind', `[registry] "${String(kind)}" is not a single-slot kind`);
+                const p = plugin(ctx, id);
+                if (p.manifest.kind !== kind) throw new RegistryError('wrong-kind', `[registry] "${id}" is a ${p.manifest.kind} plugin, not ${kind}`);
+                if (!p.enabled) throw new PluginDisabledError(id, 'disabled');
+                const previous = activeOf(ctx, kind);
+                if (previous === id) return view(ctx, p);
+                ctx.state.active = { ...ctx.state.active, [kind]: id };
+                await ctx.save();
+                const at = now();
+                await audit(ctx, {
+                    key: `${ctx.key}:${id}:activated:${at}`,
+                    kind: 'plugin.activated',
+                    at,
+                    by: principalLabel(ctx.principal),
+                    summary: `plugin ${id} made the active ${kind} plugin`,
+                    data: { pluginId: id, kind, ...(previous !== undefined ? { previous } : {}) }
+                });
+                return view(ctx, plugin(ctx, id));
             },
 
             /** Grant declared scopes only — a scope the manifest never asked for is refused (PLG-04). */
@@ -307,6 +465,12 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
             async dependents(id: string): Promise<Dependents> {
                 return dependents(ctx, id);
+            },
+
+            /** `dependents` for every plugin, id order, over ONE walk of the workspace — what the Plugins page reads. */
+            async dependentsAll(): Promise<Dependents[]> {
+                const refs = await collectRefs(ctx);
+                return pluginIds(ctx).map((id) => dependentsOf(ctx, current(ctx, id)!, refs));
             },
 
             // -- connectors ---------------------------------------------------
@@ -409,7 +573,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
             /** NDJSON rows for `Workspace.exportAll`: plugins, connectors, secret NAMES. */
             async exportRows(): Promise<RegistryExportRow[]> {
                 const rows: RegistryExportRow[] = [];
-                for (const id of Object.keys(ctx.state.plugins).sort()) rows.push({ kind: 'plugin', plugin: ctx.snapshot(ctx.state.plugins[id]!) });
+                // Effective rows: a built-in nobody touched is still part of what the workspace runs on.
+                for (const id of pluginIds(ctx)) rows.push({ kind: 'plugin', plugin: ctx.snapshot(current(ctx, id)!) });
                 for (const id of Object.keys(ctx.state.connectors).sort()) rows.push({ kind: 'connector', connector: ctx.snapshot(ctx.state.connectors[id]!) });
                 for (const name of Object.keys(ctx.state.secrets).sort()) rows.push({ kind: 'secret', secret: { name, updatedAt: ctx.state.secrets[name]!.updatedAt } });
                 return rows;
@@ -418,7 +583,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
     });
 }
 
-/** The Registry with no KEK: everything but secrets. The app registers `defineRegistry({ kek })`. */
+/** The Registry with no KEK and no catalogue: a hop target, and everything but secrets and built-ins. The app registers `defineRegistry({ kek, catalogue })`. */
 export const Registry = defineRegistry();
 
 export type RegistryActor = ReturnType<typeof defineRegistry>;
