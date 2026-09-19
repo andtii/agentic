@@ -205,4 +205,30 @@ describe('the question card in the thread', () => {
         const dom = mount(<Thread transcript={transcript} onRespond={() => {}} />);
         expect(one(dom, 'ai-question', 'prompt')!.textContent).toBe('Which colour?');
     });
+
+    it('a question whose asker stopped waiting says what answering does, naming the asker (#285)', () => {
+        const dom = mount(<QuestionPrompt request={plain} onRespond={() => {}} requestedBy={{ name: 'Ada' }} stale />);
+        expectAnatomy(dom, aiQuestionAnatomy);
+        expect(one(dom, 'ai-question', 'title')!.textContent).toBe('Ada asks');
+        expect(one(dom, 'ai-question', 'note')!.textContent).toBe('Ada has stopped waiting. Answering starts Ada again with your answer.');
+        // Without an asker the card still says it; a live question, or a settled one, carries no note.
+        const anonymous = mount(<QuestionPrompt request={plain} onRespond={() => {}} stale />);
+        expect(one(anonymous, 'ai-question', 'title')!.textContent).toBe('Question');
+        expect(one(anonymous, 'ai-question', 'note')!.textContent).toBe('The agent has stopped waiting. Answering starts it again with your answer.');
+        expect(one(mount(<QuestionPrompt request={plain} onRespond={() => {}} requestedBy={{ name: 'Ada' }} />), 'ai-question', 'note')).toBeNull();
+        expect(one(mount(<QuestionPrompt request={plain} onRespond={() => {}} requestedBy={{ name: 'Ada' }} stale answered="tea" />), 'ai-question', 'note')).toBeNull();
+    });
+
+    it('the thread asks the page who asked and whether it still waits, and each loose card says so (#285)', () => {
+        const transcript = createTranscript('s1');
+        const asks: OpenRequest[] = [
+            { requestId: 'ask:c1', kind: 'input', toolName: 'ask_user', message: 'Which fruit?', seq: 2 },
+            { requestId: 'ask:c2', kind: 'input', toolName: 'ask_user', message: 'Which colour?', seq: 3 }
+        ];
+        for (const r of asks) transcript.requests[r.requestId] = r;
+        const who: Record<string, string> = { 'ask:c1': 'Ada', 'ask:c2': 'Bob' };
+        const dom = mount(<Thread transcript={transcript} onRespond={() => {}} describeRequest={(r) => ({ requestedBy: { name: who[r.requestId]! }, stale: r.requestId === 'ask:c2' })} />);
+        expect(all(dom, 'ai-question', 'title').map((el) => el.textContent)).toEqual(['Ada asks', 'Bob asks']);
+        expect(all(dom, 'ai-question', 'note').map((el) => el.textContent)).toEqual(['Bob has stopped waiting. Answering starts Bob again with your answer.']);
+    });
 });

@@ -28,7 +28,9 @@ const MEMORY_TOOLS: readonly string[] = ['memory_search', 'memory_remember'];
 export interface ToolCallPortOptions {
     /** The Routing actor definition (`task_report`). */
     readonly routing: () => AnyActorDefinition;
-    /** The Session actor definition — where a session's chat is looked up for `chat_post`, and where `ask_user` raises its request (#122). */
+    /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
+    readonly askQuickWaitMs?: number;
+    /** The Session actor definition — where a session's chat is looked up for `chat_post` and `ask_user` (#285), and where `ask_user` raises its request (#122). */
     readonly sessions: () => AnyActorDefinition;
     /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
     readonly files?: ChatFileStore;
@@ -51,7 +53,7 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
             let chatId: ChatId | undefined;
             let memory: SessionMemory | undefined;
             const memoryTool = MEMORY_TOOLS.includes(input.tool) && options.memory !== undefined;
-            if (input.tool === 'chat_post' || memoryTool) {
+            if (input.tool === 'chat_post' || input.tool === 'ask_user' || memoryTool) {
                 const session = actor(options.sessions(), `${agent.workspaceId}:session:${agent.sessionId}`).with({ context: asPrincipal(agent) }) as unknown as SessionSpecClient;
                 const spec = (await session.get()).spec;
                 chatId = spec?.chatId;
@@ -64,7 +66,8 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 sessions: options.sessions,
                 ...(options.files ? { files: options.files } : {}),
                 ...(memory ? { memory } : {}),
-                ...(options.machines ? { machines: options.machines } : {})
+                ...(options.machines ? { machines: options.machines } : {}),
+                ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {})
             });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);

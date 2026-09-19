@@ -452,6 +452,8 @@ const question: RecipeInput = {
         },
         header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-info)' } },
         title: { base: { fontWeight: 'var(--weight-semibold, 600)', fontSize: 'var(--text-lg)' } },
+        // The asker stopped waiting (#285): what answering does now.
+        note: { base: { margin: '0', fontSize: 'var(--text-sm)', color: textMuted, overflowWrap: 'anywhere' } },
         question: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', margin: '0', padding: '0', border: '0', minInlineSize: '0' } },
         label: { base: { padding: '0', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, textTransform: 'uppercase', letterSpacing: '0.04em' } },
         prompt: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--color-base-content)', overflowWrap: 'anywhere' } },
