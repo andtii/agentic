@@ -867,13 +867,17 @@ export function defineMachineActor(ports: MachinePorts) {
 
                 /**
                  * Ask the daemon to forget an environment; its profile
-                 * directory stays on the machine. 404 when the machine does
-                 * not report it, 409 `in-use` while this machine hosts or
-                 * queues a session in it (the daemon checks its own side too).
+                 * directory stays on the machine. In `fsRequest`'s order: 403
+                 * revoked, 404 when the machine does not report it, 503
+                 * `machine-offline`, then 409 `in-use` while this machine hosts
+                 * or queues a session in it (the daemon checks its own side too).
                  */
                 async removeEnvironment(environmentId: EnvironmentId): Promise<EnvRequested> {
                     const s = ctx.state;
+                    // The order of `fsRequest`: revoked before anything the machine last reported.
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
                     if (activeIn(s, environmentId) > 0 || s.queued.some((q) => q.environmentId === environmentId)) throw new ServerFnError(409, `in-use: environment "${environmentId}" has sessions on machine "${machineId}"`);
                     return envRequest({ op: 'remove', environmentId });
                 },

@@ -763,6 +763,19 @@ describe('Machine environment management (#237, EXE-03/04, OPS-01/03)', () => {
 
         await machine(K1).revoke();
         expect(await statusOf(machine(K1).putEnvironment(work()))).toBe(403);
+        // Revoked wins over what the machine last reported: not 409 for the busy one, not 404 for an unknown one.
+        expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(403);
+        expect(await statusOf(machine(K1).removeEnvironment(E2))).toBe(403);
+    });
+
+    it('checks removeEnvironment like fsRequest: revoked, then unknown environment, then offline', async () => {
+        const { seat } = connect(K1, daemon(M1));
+        await online();
+        seat.drop();
+        await until(async () => !(await machine(K1).get()).online, 'offline');
+        expect(await statusOf(machine(K1).removeEnvironment(E2))).toBe(404);
+        expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(503);
+        expect(envRequests()).toEqual([]);
     });
 
     it('times out an unanswered request through the liveness reminder; a late answer still lands and is recorded once', async () => {
