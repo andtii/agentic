@@ -121,6 +121,26 @@ describe('addressing and activation', () => {
         expect(mentionsIn('nothing', members, lookup)).toEqual([]);
     });
 
+    it('resolves names with spaces, punctuation and @ as the picker inserts them, longest name first (#279)', () => {
+        const people: Record<string, AgentIdentity> = {
+            lead: { ...atlas, id: 'lead', name: 'Claude Code (andy@ekdahls.net)' },
+            one: { ...atlas, id: 'one', name: 'Claude Code (claude@ekdahls.net)' },
+            two: { ...atlas, id: 'two', name: 'Claude Code 2 (claude2@ekdahls.net' },
+            short: { ...atlas, id: 'short', name: 'Claude' }
+        };
+        const find = lookupOver(people);
+        const all = Object.keys(people).map((agentId) => ({ agentId, status: 'idle' as const, history: { access: 'all' as const } }));
+        // Exactly what the picker inserts ("@" + label + space), then the question.
+        expect(mentionsIn('@Claude Code 2 (claude2@ekdahls.net what did you respond?', all, find)).toEqual(['two']);
+        expect(mentionsIn('@Claude Code (claude@ekdahls.net) and @claude code 2 (claude2@ekdahls.net, go', all, find)).toEqual(['one', 'two']);
+        // A shorter name that is a prefix still resolves on its own, and only at a word end.
+        expect(mentionsIn('@Claude please', all, find)).toEqual(['short']);
+        expect(mentionsIn('@Claudette hi', all, find)).toEqual([]);
+        // The @ inside a matched name is never read as a second mention; an email elsewhere is not a mention.
+        expect(mentionsIn('mail andy@ekdahls.net', all, find)).toEqual([]);
+        expect(mentionsIn('@two, @LEAD', all, find)).toEqual(['two', 'lead']);
+    });
+
     it('builds the activation contract from what the agent may read (CHT-04)', () => {
         expect(visibleTo(entries, summary, 'a2').map((e) => e.seq)).toEqual([2, 3, 4]);
         expect(visibleTo(entries, summary, 'nobody')).toEqual([]);
