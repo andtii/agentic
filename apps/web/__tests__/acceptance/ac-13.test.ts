@@ -59,6 +59,8 @@ describe('AC-13: a plugin is disabled', () => {
         await h.as(me.principal).actor(h.Schedule as ScheduleActor, `${me.ws}:schedule:${scheduleId}`).create({ kind: 'agent-task', title: 'nightly triage', prompt: 'Triage the issues', recurrence: { kind: 'at', at: Date.now() + 86_400_000 }, agentId: byTool });
         await expect(registry.requireEnabled('github')).resolves.toBeUndefined();
 
+        const builtins = async () => (await registry.list()).filter((p) => p.builtin).map((p) => [p.manifest.id, p.enabled]);
+        const builtinsBefore = await builtins();
         const { plugin, dependents } = await registry.disable('github');
         expect(plugin.enabled).toBe(false);
         expect(dependents.agents.map((a) => [a.id, a.name, a.via])).toEqual([
@@ -69,7 +71,9 @@ describe('AC-13: a plugin is disabled', () => {
         expect(await registry.dependents('github')).toEqual(dependents);
         // Beside the build's own plugins (#231), which stay as they were.
         expect((await registry.list()).filter((p) => !p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
-        expect((await registry.list()).filter((p) => p.builtin).every((p) => p.enabled)).toBe(true);
+        // (Web Push ships off, #244; the rest on.)
+        expect(await builtins()).toEqual(builtinsBefore);
+        expect(builtinsBefore.filter(([, on]) => !on).map(([id]) => id)).toEqual(['agentic.notify.web-push']);
 
         // New use is refused from now on, with a typed error a caller can show — the gate and the secret alike.
         const refused = await registry.requireEnabled('github').catch((e: unknown) => e);

@@ -13,18 +13,29 @@
  *   and `defineRoutingActor({ runtimes })`: `anthropic-api` runs in-process
  *   with its key from the workspace's `anthropic-api-key` Registry secret,
  *   `claude-code` on a machine's daemon.
+ * - `channelCatalogue` → `defineInbox({ channelPlugins })`: the notification
+ *   plugins this build implements, opened per notification while the
+ *   workspace has them on (#244). Web Push ships off: it needs keys first.
  *
  * Memory and learning are still wired statically (`platformLearningPorts`);
  * #242 resolves them through the active plugin.
  */
-import type { AnthropicApiRuntimeOptions, CatalogueEntry, RuntimeCatalogue } from '@agentic/platform';
-import { anthropicApiRuntime } from '@agentic/platform';
+import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, RuntimeCatalogue } from '@agentic/platform';
+import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 
-/** The manifests the Registry lists for every workspace — enabled, with their declared scopes granted, until the owner changes them. */
-export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, claudeCodePlugin, memoryDefaultPlugin, memoryFlatPlugin, learningDefaultPlugin];
+/** The manifests the Registry lists for every workspace — enabled (unless marked off), with their declared scopes granted, until the owner changes them. */
+export const pluginCatalogue: readonly CatalogueEntry[] = [
+    anthropicApiPlugin,
+    claudeCodePlugin,
+    memoryDefaultPlugin,
+    memoryFlatPlugin,
+    learningDefaultPlugin,
+    // Off until the owner sets a contact and generates keys on its page.
+    { manifest: webPushPlugin, enabledByDefault: false }
+];
 
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
@@ -33,3 +44,8 @@ export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCa
         [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
     };
 }
+
+/** Notification plugin id → its channel. The ids are the notification plugins' ids. */
+export const channelCatalogue: ChannelCatalogue = {
+    [WEB_PUSH_PLUGIN_ID]: webPushChannelPlugin()
+};

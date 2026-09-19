@@ -83,12 +83,16 @@ const { dependents } = await registry.disable('github'); // → the agents and s
 
 ## Notifications (`src/notify`)
 
-- `Inbox` — the `{ws}:inbox` actor (`inboxKey(workspaceId)`): `append`, `push`, `list({ unreadOnly, limit })` newest first, `unread`, `ack(ids | 'all')`, `ackRef(ref)` (every unread notification about a ref — `sameRef`, a ref without a `requestId` covers the session), `subscribe` / `unsubscribe` / `subscriptions`. `authorize: [sameWorkspace]`. Capped at `INBOX_CAP` (500); every mutation is a `reduceInbox` entry followed by `ctx.save()`. `list` and `unread` are declared `reads`, so `useActorState(Inbox, key).list(...)` is a live subscription.
+- `Inbox` — the `{ws}:inbox` actor (`inboxKey(workspaceId)`): `append`, `push`, `list({ unreadOnly, limit })` newest first, `unread`, `ack(ids | 'all')`, `ackRef(ref)` (every unread notification about a ref — `sameRef`, a ref without a `requestId` covers the session), `subscribe` / `unsubscribe` / `subscriptions`. `authorize: [sameWorkspace]`. Capped at `INBOX_CAP` (500); every mutation is a `reduceInbox` entry followed by `ctx.save()`. `list`, `unread` and `subscriptions` are declared `reads`, so `useActorState(Inbox, key).list(...)` is a live subscription.
 - `NotificationChannel` — the outbound seam: `{ id, deliver(notification, { workspaceId, subscriptions }) → { ok, error?, expired? } }`. `defineInbox({ channels })` builds the Inbox the app registers; `push` records first, then fans out through `deliverAll`, and every channel's outcome — a rejection included — lands on the record as a `DeliveryAttempt`, never as a throw.
-- `webPushChannel({ fetch, vapid, ttlSeconds })` — RFC 8030 push with VAPID (ES256 over WebCrypto, edge-safe). Contentless in v1: the service worker re-reads `Inbox.list` on a push event. `vapidSigner(keys)` is exported on its own.
+- Channels as plugins (#244): `defineInbox({ channelPlugins, registry })` asks `Registry.gate()` once per notification which `notification` plugins are on and opens each one it has a `ChannelPlugin` for — `open({ config, secret(name) })`, the secret through `openSecret` as the workspace owner. A Registry that cannot be asked is a failed attempt on `PLUGIN_CHANNELS`. `channels` (static) still work beside it.
+- `webPushChannel({ fetch, vapid, ttlSeconds })` — RFC 8030 push with VAPID (ES256 over WebCrypto, edge-safe). Contentless in v1: the notification the service worker shows is generic. `vapidSigner(keys)` is exported on its own.
+- `webPushPlugin` (`WEB_PUSH_PLUGIN_ID` = `agentic.notify.web-push`, kind `notification`, config `{ subject, publicKey }`, secret `VAPID_PRIVATE_KEY_SECRET`) and `webPushChannelPlugin(options)`, which opens the private key only for a notification that has a subscription and reports what is missing instead of sending an unsigned push.
 
 ```ts
 const Inbox = defineInbox({ channels: [webPushChannel({ vapid: { publicKey, privateKey, subject } })] });
+// Or, per workspace from the Registry (#244): each enabled notification plugin opens with its config and secrets.
+const PluginInbox = defineInbox({ channelPlugins: { [WEB_PUSH_PLUGIN_ID]: webPushChannelPlugin() }, registry: () => Registry });
 await actor(Inbox, inboxKey(ws)).push({ kind: 'task-done', title: 'Report ready', ref: { kind: 'task', taskId } });
 ```
 
