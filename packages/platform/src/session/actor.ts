@@ -31,15 +31,15 @@ import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, typ
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
 import { auditPort } from '../audit/port.js';
-import { mintAgentPrincipal, sameWorkspace } from '../auth/index.js';
+import { mintAgentPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
 import type { UsageVerdict } from '../ledger/recorder.js';
 import { agentMemoryScope } from '../agent/agent.actor.js';
 import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
 import { inboxKey, type NotificationInput, type NotificationRef } from '../notify/index.js';
-import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
+import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
-import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
+import { applySessionEntry, bytesOf, type DetachedAnswer, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -88,6 +88,13 @@ export interface SessionRequestView extends RequestRecord {
     readonly taskId?: TaskId;
     /** `ask on destructive` — `describeRule(ruleFor(approvalPolicy, …))`. */
     readonly rule?: string;
+    /** The asking agent's name, from the session's config — what a card says instead of the id (#285). */
+    readonly agentName?: string;
+    /**
+     * An open question whose tool call has stopped waiting (#285): `ask_user` answered `pending`, or the session
+     * closed. Answering it starts the asker again in its chat with the answer.
+     */
+    readonly detached?: boolean;
 }
 
 /** The slice of the Inbox actor a session notifies (`defineInbox`). */
@@ -109,6 +116,11 @@ export interface PlatformInputRequest {
 /** What `raiseInput` returns: the request's id and, when the log already has one, its decision. */
 export interface PlatformRequestRef {
     readonly requestId: string;
+    readonly resolved?: RequestResolvedEvent;
+}
+
+/** What `detachInput` returns: the decision when the answer beat the detach, so the call can still return it (#285). */
+export interface DetachedInput {
     readonly resolved?: RequestResolvedEvent;
 }
 
@@ -172,6 +184,16 @@ const internalPolicy: ActorPolicy = (principal: Principal | null) => principal?.
 const correctorPolicy: ActorPolicy = (principal: Principal | null) => principal !== null && principal.kind !== 'machine';
 /** `raiseInput`: only the agent working THIS session (the tool port runs under its principal, on both paths). */
 const ownAgentPolicy: ActorPolicy = (principal: Principal | null, _rq, op) => principal?.kind === 'agent' && !!op.resource && parseSessionKey(op.resource.key)?.sessionId === principal.sessionId;
+
+/** A platform request nobody's tool call waits on (#285): detached by its call, or its session closed. */
+function isDetached(s: SessionState, requestId: string): boolean {
+    return !!s.platformRequests?.includes(requestId) && (s.status === 'closed' || !!s.detachedRequests?.includes(requestId));
+}
+
+/** Who answered a detached question — the principal its answer is posted as; the workspace's own user when unknown. */
+function answererOf(p: Principal | null, workspaceId: WorkspaceId): Principal {
+    return p ?? userPrincipal(workspaceId, workspaceId);
+}
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type SessionEventInit = DistributiveOmit<SessionEvent, 'agentId' | 'sessionId' | 'at'>;
@@ -275,7 +297,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const common = { at: now(), agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) };
         if (ev.type === 'request') {
             await publishChat(c, { kind: 'status', status: 'request', ref: requestRef(ev) });
-            await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.push(requestNotification(spec.agentId, parsed.sessionId, ev)));
+            await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.push(requestNotification(spec.config.name || spec.agentId, parsed.sessionId, ev)));
             if (ev.kind !== 'permission') return;
             await audit.record(c, parsed.workspaceId, {
                 ...common,
@@ -327,12 +349,12 @@ export function defineSessionActor(ports: SessionPorts) {
         }
     }
 
-    /** The Inbox row for a request: what is asked, by which agent, deep-linked to the session and the request. */
-    function requestNotification(agentId: string, sessionId: SessionId, ev: RequestEvent): NotificationInput {
+    /** The Inbox row for a request: what is asked, by which agent (its name), deep-linked to the session and the request. */
+    function requestNotification(asker: string, sessionId: SessionId, ev: RequestEvent): NotificationInput {
         const kind = needOf(ev.kind);
         return {
             kind,
-            title: kind === 'approval' ? `${agentId} asks for approval${ev.toolName ? `: ${ev.toolName}` : ''}` : `${agentId} needs input`,
+            title: kind === 'approval' ? `${asker} asks for approval${ev.toolName ? `: ${ev.toolName}` : ''}` : `${asker} needs input`,
             ...(ev.message ? { body: ev.message } : {}),
             ref: { kind: 'session', sessionId, requestId: ev.requestId }
         };
@@ -350,7 +372,35 @@ export function defineSessionActor(ports: SessionPorts) {
             agentId: spec?.agentId ?? ('' as AgentId),
             ...(spec?.chatId ? { chatId: spec.chatId } : {}),
             ...(spec?.taskId ? { taskId: spec.taskId } : {}),
-            ...(rule ? { rule: describeRule(rule) } : {})
+            ...(rule ? { rule: describeRule(rule) } : {}),
+            ...(spec?.config.name ? { agentName: spec.config.name } : {}),
+            detached: !record.resolved && isDetached(c.state, record.request.requestId)
+        };
+    }
+
+    /**
+     * What the follow-up port hears for a parked answer (#285), from a state snapshot: `null` when there is nothing
+     * to follow up — no port, a chatless session (its ask blocked; the late answer stays on the record), or no answer.
+     */
+    function followUpOf(s: SessionState, key: string, answer: DetachedAnswer): AnswerFollowUp | null {
+        const spec = s.spec;
+        const parsed = parseSessionKey(key);
+        if (!ports.answered || !spec?.chatId || !parsed) return null;
+        const record = requestRecordOf(knownEvents(s), answer.requestId);
+        if (!record?.resolved || record.resolved.outcome !== 'input') return null;
+        const choices = record.request.options?.map((o) => o.label);
+        return {
+            workspaceId: parsed.workspaceId,
+            sessionId: parsed.sessionId,
+            agentId: spec.agentId,
+            chatId: spec.chatId,
+            ...(spec.taskId ? { taskId: spec.taskId } : {}),
+            ...(spec.environmentId ? { environmentId: spec.environmentId } : {}),
+            requestId: answer.requestId,
+            question: record.request.message ?? '',
+            ...(choices?.length ? { choices } : {}),
+            answer: answerText(record.resolved.answers),
+            answeredBy: answer.answeredBy
         };
     }
 
@@ -641,7 +691,8 @@ export function defineSessionActor(ports: SessionPorts) {
             }
         }
         for (const r of Object.values(before.requests)) {
-            if (r.turnId !== turnId) continue;
+            // A detached question outlives its turn (#285): its answer starts the asker again.
+            if (r.turnId !== turnId || s.detachedRequests?.includes(r.requestId)) continue;
             await emit({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: INTERRUPTED_MESSAGE, at: now() });
         }
         await emit({ type: 'error', turnId, code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE, recoverable: true, data: { interrupted: true } });
@@ -655,7 +706,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
@@ -737,6 +788,8 @@ export function defineSessionActor(ports: SessionPorts) {
                         await ctx.save();
                     }
                     await publishChat(ctx, { kind: 'status', status: 'session-ended' });
+                    // Answers that came while the asker's turn still ran: the turn is over now, so start it again (#285).
+                    if (s.answeredDetached?.length) await ctx.tasks.start('deliverAnswers', {});
                     return;
                 }
                 if (command.type === 'configure' && replied.kind === 'ack') {
@@ -754,6 +807,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 const d = command.decision;
                 if (d.type === 'permission') return errorReply(command.commandId, 'invalid', `request "${command.requestId}" asks for input, not a permission`);
                 if (s.openRequests.includes(command.requestId)) {
+                    const detached = isDetached(s, command.requestId);
                     await emitPlatform(ctx, {
                         type: 'request-resolved',
                         requestId: command.requestId,
@@ -763,6 +817,13 @@ export function defineSessionActor(ports: SessionPorts) {
                         ...(d.ruleId ? { ruleId: d.ruleId } : {}),
                         at: now()
                     });
+                    if (detached && d.type === 'input') {
+                        // Nobody waits on the call any more (#285): park the answer; the asker is started again once the
+                        // session is closed — now, or when its turn is over — outside this turn (`deliverAnswers`).
+                        const answer: DetachedAnswer = { requestId: command.requestId, answeredBy: answererOf(ctx.principal as Principal | null, parsed!.workspaceId) };
+                        await appendEntry(ctx, set({ answeredDetached: [...(s.answeredDetached ?? []), answer] }));
+                        if (s.status === 'closed') await ctx.tasks.start('deliverAnswers', {});
+                    }
                 }
                 const ack: WireReply = { v: V, kind: 'ack', commandId: command.commandId };
                 await recordReply(command, ack);
@@ -774,9 +835,10 @@ export function defineSessionActor(ports: SessionPorts) {
                 const s = ctx.state;
                 const known = s.commands[command.commandId];
                 if (known) return known.reply ? ctx.snapshot(known.reply) : pending(command.commandId);
+                // A platform question outlives its turn and its session (#285): its answer is taken even when closed.
+                if (s.opened && command.type === 'respond' && s.platformRequests?.includes(command.requestId)) return respondPlatform(command);
                 if (s.status === 'closed') return errorReply(command.commandId, 'closed', `session "${ctx.key}" is closed`);
                 if (!s.opened) return errorReply(command.commandId, 'invalid', `session "${ctx.key}" is not open`);
-                if (command.type === 'respond' && s.platformRequests?.includes(command.requestId)) return respondPlatform(command);
                 const live = await ensureLive();
                 // A local turn no live session knows was cut short by an eviction: settle it before anything else runs.
                 if (s.running && s.mode === 'local' && !live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
@@ -922,6 +984,20 @@ export function defineSessionActor(ports: SessionPorts) {
                     return { requestId, ...(resolved ? { resolved: ctx.snapshot(resolved as RequestResolvedEvent) } : {}) };
                 },
 
+                /**
+                 * The `ask_user` call stops waiting on `requestId` (#285): the question stays open, and its answer
+                 * starts the asker again instead of returning from the call. Atomic with `respond`: when the answer
+                 * already came, it is returned here and the call answers with it — never lost between the two.
+                 */
+                async detachInput(requestId: string): Promise<DetachedInput> {
+                    const s = ctx.state;
+                    if (!s.platformRequests?.includes(requestId)) throw new ServerFnError(404, `session "${ctx.key}" raised no request "${requestId}"`);
+                    const resolved = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    if (resolved) return { resolved: ctx.snapshot(resolved as RequestResolvedEvent) };
+                    if (!s.detachedRequests?.includes(requestId)) await appendEntry(ctx, set({ detachedRequests: [...(s.detachedRequests ?? []), requestId] }));
+                    return {};
+                },
+
                 /** One request with its call input and, once decided, the decision — what an approval card renders (CHT-09). A live read. */
                 request(requestId: string): SessionRequestView | null {
                     const s = ctx.state;
@@ -1033,6 +1109,32 @@ export function defineSessionActor(ports: SessionPorts) {
             }
         }),
         tasks: (ctx) => ({
+            /**
+             * Start the askers of parked answers again (#285), one at a time, outside any turn — the follow-up places a
+             * task that reads this session back (its `ref`), so it can never run inside a turn of this actor. Restarted by
+             * the task ledger after an eviction; an answer leaves the queue only once handed over (or said as failed).
+             */
+            async deliverAnswers(): Promise<void> {
+                for (;;) {
+                    const snap = ctx.snapshot();
+                    const next = snap.status === 'closed' ? snap.answeredDetached?.[0] : undefined;
+                    if (!next) return;
+                    const followUp = followUpOf(snap, ctx.key, next);
+                    let failed: string | undefined;
+                    if (followUp) {
+                        try {
+                            await ports.answered!(followUp);
+                        } catch (e) {
+                            failed = e instanceof Error ? e.message : String(e);
+                        }
+                    }
+                    await ctx.turn(async (c) => {
+                        await appendEntry(c, set({ answeredDetached: (c.state.answeredDetached ?? []).filter((a) => a.requestId !== next.requestId) }));
+                        if (failed !== undefined) await publishChat(c, { kind: 'status', status: 'task', ref: `answer-not-delivered:${failed}` });
+                    });
+                }
+            },
+
             /**
              * Pump one turn's events into the log. Restarted by the runtime's
              * task ledger after an eviction: with no live session to follow,

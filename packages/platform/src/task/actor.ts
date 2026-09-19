@@ -117,6 +117,7 @@ function toView(s: TaskState): TaskView {
         ...(s.expected !== undefined ? { expected: s.expected } : {}),
         ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
         ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
+        ...(s.resumeFrom !== undefined ? { resumeFrom: s.resumeFrom } : {}),
         depth: s.depth,
         ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),
         status: s.status,

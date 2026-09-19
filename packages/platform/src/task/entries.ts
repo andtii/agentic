@@ -53,6 +53,7 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             if (c.expected !== undefined) state.expected = c.expected;
             if (c.environmentId !== undefined) state.environmentId = c.environmentId;
             if (c.workdir !== undefined) state.workdir = c.workdir;
+            if (c.resumeFrom !== undefined) state.resumeFrom = c.resumeFrom;
             state.owner = e.owner;
             state.depth = e.depth;
             if (e.parentId !== undefined) state.parentId = e.parentId;
