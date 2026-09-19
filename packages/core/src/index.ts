@@ -18,6 +18,7 @@ export * from './principal.js';
 export * from './daemon.js';
 export * from './runtime.js';
 export * from './usage.js';
+export * from './quota.js';
 export * from './workspace.js';
 export * from './workdir.js';
 export * from './files.js';

@@ -43,6 +43,9 @@ export interface DaemonConformanceOptions {
 }
 
 const V = DAEMON_PROTOCOL_VERSION;
+
+/** Frames a daemon may push at any time after `hello`: liveness, and an environment's provider limits (#261). */
+const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota'];
 /** Cases that need an optional harness feature. */
 const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage' };
 
@@ -79,7 +82,7 @@ class Peer {
      * passed over (without extending the deadline — a heartbeat is not
      * progress), anything else fails the case.
      */
-    async expect<T extends DaemonFrameType>(t: T, ignore: readonly DaemonFrameType[] = ['heartbeat']): Promise<DaemonFrameOf<T>> {
+    async expect<T extends DaemonFrameType>(t: T, ignore: readonly DaemonFrameType[] = UNSOLICITED): Promise<DaemonFrameOf<T>> {
         const deadline = Date.now() + this.timeoutMs;
         for (;;) {
             const frame = await this.next(t, Math.max(1, deadline - Date.now()));
@@ -89,7 +92,7 @@ class Peer {
     }
 
     /** `count` event frames for `sessionId` continuing gaplessly from `after` (exclusive); a `gap`, a foreign session, a duplicate or a hole fails the case as soon as it shows. */
-    async events(sessionId: SessionId, count: number, after: Cursor, what: string, ignore: readonly DaemonFrameType[] = ['heartbeat']): Promise<EventFrame[]> {
+    async events(sessionId: SessionId, count: number, after: Cursor, what: string, ignore: readonly DaemonFrameType[] = UNSOLICITED): Promise<EventFrame[]> {
         const out: EventFrame[] = [];
         let last = after;
         while (out.length < count) {
@@ -187,7 +190,7 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
             const frame = await peer.next(response ? 'env' : 'env.response', Math.max(1, deadline - Date.now()));
             if (frame.t === 'env.response') response = frame;
             else if (frame.t === 'env') announced = frame;
-            else if (frame.t !== 'heartbeat') fail(`expected an env.response or env frame, got ${frame.t}`);
+            else if (!UNSOLICITED.includes(frame.t)) fail(`expected an env.response or env frame, got ${frame.t}`);
         }
         assertEqual(response.requestId, requestId, 'env.response answers the request it was sent');
         return { response, announced };
@@ -261,11 +264,11 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
             run: () =>
                 withDaemon(script, async (daemon) => {
                     const { peer, hello } = await handshake(daemon);
-                    const idle = await peer.expect('heartbeat', []);
+                    const idle = await peer.expect('heartbeat', ['quota']);
                     assertEqual(idle.active, [], 'an idle daemon heartbeats with no active sessions');
                     assert(idle.at <= Date.now() + 1, 'heartbeat.at is a time');
                     await open(peer, hello, daemon, S1);
-                    const busy = await peer.expect('heartbeat', []);
+                    const busy = await peer.expect('heartbeat', ['quota']);
                     assert(busy.active.includes(S1), 'a heartbeat lists the open session as active (EXE-08)');
                 })
         },
