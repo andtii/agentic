@@ -91,7 +91,7 @@ export const LiveConnectors = component<LiveConnectorsProps>(({ props }) => {
                     ? (
                         <ul data-connector-list>
                             {list.map((c) => (
-                                <li data-connector={c.id}>
+                                <li key={c.id} data-connector={c.id}>
                                     <span data-connector-name>{c.id}</span>
                                     <Tag>{c.transport}</Tag>
                                     <code data-mono data-dim>{connectorWhere(c)}</code>
@@ -100,7 +100,7 @@ export const LiveConnectors = component<LiveConnectorsProps>(({ props }) => {
                                     {c.transport === 'stdio' ? <span data-connector-needs>needs a machine — coming</span> : null}
                                     {c.secrets?.length ? <span data-connector-secrets>secrets: {c.secrets.join(', ')}</span> : null}
                                     {c.status.error ? <span data-connector-error>{c.status.error}</span> : null}
-                                    {c.tools.length ? <ul data-connector-tools>{c.tools.map((t) => <li><code data-mono>{t}</code></li>)}</ul> : null}
+                                    {c.tools.length ? <ul data-connector-tools>{c.tools.map((t) => <li key={t}><code data-mono>{t}</code></li>)}</ul> : null}
                                     <Button icon="trash" disabled={st.busy} onClick={() => { void remove(c); }} label={`Remove ${c.id}`}>Remove</Button>
                                 </li>
                             ))}

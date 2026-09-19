@@ -21,6 +21,7 @@ describe('validateConnectorDraft', () => {
         expect(validateConnectorDraft(draft({ name: 'x', url: 'ftp://x' }), new Set()).url).toMatch(/http\(s\) URL/);
         expect(validateConnectorDraft(draft({ name: 'Claude Code', url: 'https://x.test/mcp' }), new Set(['claude-code'])).name).toBe('A plugin called "claude-code" already exists.');
         expect(validateConnectorDraft(draft({ name: 'x', url: 'https://x.test/mcp', auth: 'header', header: 'bad header' }), new Set())).toEqual({ header: 'A header name, like X-Api-Key.', secret: 'The key the header carries.' });
+        expect(validateConnectorDraft(draft({ name: 'x', url: 'https://x.test/mcp', auth: 'bearer', secret: '  \n' }), new Set())).toEqual({ secret: 'The token the server expects.' });
         expect(validateConnectorDraft(draft({ name: 'x', url: 'https://x.test/mcp', auth: 'bearer', secret: 't' }), new Set())).toEqual({});
     });
 });

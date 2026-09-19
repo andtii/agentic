@@ -98,7 +98,7 @@ export const AddConnectorDialog = component<AddConnectorDialogProps>(({ props, e
                             p.ok ? (
                                 <div data-connector-probe="ok" role="status">
                                     <StatusPill status="online" label={`${p.tools.length} ${p.tools.length === 1 ? 'tool' : 'tools'}`} />
-                                    {p.tools.length ? <ul data-connector-tools>{p.tools.map((t) => <li><code data-mono>{t}</code></li>)}</ul> : null}
+                                    {p.tools.length ? <ul data-connector-tools>{p.tools.map((t) => <li key={t}><code data-mono>{t}</code></li>)}</ul> : null}
                                 </div>
                             ) : (
                                 <div data-connector-probe="error" role="status">

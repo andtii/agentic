@@ -22,7 +22,7 @@ export interface ConnectorDraft {
     auth: ConnectorAuthKind;
     /** The header that carries the credential when `auth` is `header` (`X-Api-Key`). */
     header: string;
-    /** The credential's value — kept in the dialog until `Registry.setSecret` seals it, never shown again. */
+    /** The credential's value — kept in the dialog until `Registry.setSecret` seals it, never shown again. Used trimmed: a pasted newline is not part of a token. */
     secret: string;
 }
 
@@ -70,7 +70,7 @@ export function validateConnectorDraft(draft: ConnectorDraft, taken: ReadonlySet
         if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) errors.url = 'An http(s) URL, like https://mcp.example.com/mcp.';
     }
     if (draft.auth === 'header' && !HEADER_RE.test(draft.header.trim())) errors.header = 'A header name, like X-Api-Key.';
-    if (draft.auth !== 'none' && !draft.secret) errors.secret = draft.auth === 'bearer' ? 'The token the server expects.' : 'The key the header carries.';
+    if (draft.auth !== 'none' && !draft.secret.trim()) errors.secret = draft.auth === 'bearer' ? 'The token the server expects.' : 'The key the header carries.';
     return errors;
 }
 
@@ -105,12 +105,13 @@ function probeError(e: unknown, secret: string): string {
 export async function probeConnector(draft: ConnectorDraft, options: { readonly fetch?: FetchLike; readonly timeoutMs?: number } = {}): Promise<ConnectorProbe> {
     const id = connectorIdOf(draft.name) || 'connector';
     const header = draft.header.trim();
+    const secret = draft.secret.trim();
     try {
         const opened = await openMcpConnector({
             id,
             url: draft.url.trim(),
-            ...(draft.auth === 'bearer' ? { bearer: draft.secret } : {}),
-            ...(draft.auth === 'header' ? { headers: { [header]: draft.secret } } : {}),
+            ...(draft.auth === 'bearer' ? { bearer: secret } : {}),
+            ...(draft.auth === 'header' ? { headers: { [header]: secret } } : {}),
             ...(options.fetch ? { fetch: options.fetch } : {}),
             ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {})
         });
@@ -118,7 +119,7 @@ export async function probeConnector(draft: ConnectorDraft, options: { readonly 
         await opened.close().catch(() => undefined);
         return { ok: true, tools };
     } catch (e) {
-        return { ok: false, error: probeError(e, draft.secret) };
+        return { ok: false, error: probeError(e, secret) };
     }
 }
 
@@ -140,7 +141,7 @@ export async function addConnector(registry: ConnectorRegistry, draft: Connector
     const { manifest, connector } = mcpConnectorSetup(connectorOptions(draft));
     await registry.register(manifest, { enabled: true, grant: 'declared' });
     await registry.putConnector(connector);
-    for (const s of manifest.secrets ?? []) await registry.setSecret(s.name, draft.secret);
+    for (const s of manifest.secrets ?? []) await registry.setSecret(s.name, draft.secret.trim());
     if (probe) await registry.setConnectorStatus(connector.id, probe.ok ? { state: 'ok' } : { state: 'error', error: probe.error }, probe.ok ? probe.tools : undefined);
     return connector.id;
 }
