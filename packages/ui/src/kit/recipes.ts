@@ -601,4 +601,72 @@ const workdirPicker: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker];
+/** Plugin card (#232): the env card's box at the handoff's card padding; name mono 15 / 600 with a dim version, tags in a row, the footer pinned to the bottom of a grid row. */
+const pluginCard: RecipeInput = {
+    component: 'ag-plugin-card',
+    parts: {
+        root: {
+            base: {
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 'var(--space-md)',
+                minInlineSize: '0',
+                padding: 'var(--space-xl)',
+                border: 'var(--border) solid var(--ag-line)',
+                borderRadius: 'var(--radius-box)',
+                background: 'var(--color-base-200)',
+                color: 'var(--color-base-content)',
+                transition: `border-color ${motion}, opacity ${motion}`
+            }
+        },
+        header: { base: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', alignSelf: 'stretch', minInlineSize: '0' } },
+        name: { base: { margin: '0', display: 'inline-flex', alignItems: 'baseline', gap: 'var(--space-sm)', minInlineSize: '0', fontFamily: mono, fontSize: '15px', fontWeight: 'var(--weight-semibold)' }, selectors: { '& > span:first-child': ellipsis } },
+        version: { base: { flex: 'none', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-dim)' } },
+        tags: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' } },
+        readiness: { base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', fontSize: 'var(--text-sm)' } },
+        'readiness-detail': { base: { color: 'var(--ag-text-muted)' } },
+        description: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)' } },
+        footer: { base: { marginBlockStart: 'auto', paddingBlockStart: 'var(--space-sm)', alignSelf: 'stretch', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', flexWrap: 'wrap', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
+        meta: { base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', flexWrap: 'wrap', minInlineSize: '0' } }
+    },
+    variants: {
+        tone: {
+            dim: { root: { base: { color: 'var(--ag-text-muted)' } } },
+            'needs-you': { root: { base: { borderColor: 'color-mix(in oklab, var(--color-warning) 53%, transparent)' } } },
+            failed: { root: { base: { borderColor: 'var(--color-error)' } } }
+        }
+    },
+    modifiers: {
+        selected: { root: { base: { borderColor: 'color-mix(in oklab, var(--color-primary) 53%, transparent)' } } }
+    }
+};
+
+/** Secret field (#232): the state row (pill, then Replace / Remove), and the editor — the input takes the row, the buttons keep their width. */
+const secret: RecipeInput = {
+    component: 'ag-secret',
+    parts: {
+        root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', minInlineSize: '0' } },
+        state: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flexWrap: 'wrap' } },
+        actions: { base: { display: 'inline-flex', gap: 'var(--space-sm)', flexWrap: 'wrap' } },
+        editor: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', margin: '0', minInlineSize: '0' },
+            selectors: { '& > [data-scope="input"]': { flex: '1 1 14rem', minInlineSize: '0' }, '& > [data-scope="button"]': { flex: 'none' } }
+        }
+    }
+};
+
+/** Map field (#232): name and value share the row evenly, the remove button keeps its square; a narrow row wraps. */
+const mapField: RecipeInput = {
+    component: 'ag-map-field',
+    parts: {
+        root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', minInlineSize: '0' } },
+        row: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', minInlineSize: '0' },
+            selectors: { '& > [data-scope="input"]': { flex: '1 1 9rem', minInlineSize: '0' }, '& > [data-scope="button"]': { flex: 'none' } }
+        },
+        actions: { base: { display: 'flex' } }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField];

@@ -3,6 +3,7 @@ export const PACKAGE = '@agentic/ui';
 export * from './layout';
 export * from './shell';
 export * from './forms';
+export * from './plugins/index.js';
 export * from './kit/index.js';
 export * from './thread/index.js';
 export * from './composer/index.js';
