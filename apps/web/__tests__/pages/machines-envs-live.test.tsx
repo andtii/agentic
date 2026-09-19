@@ -264,6 +264,11 @@ describe('the machine setup model', () => {
         expect(shellArg('C:\\My Code')).toBe('"C:\\My Code"');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop', ' /home/me/src ').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop --allow-root /home/me/src');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop');
+        // A name with a space, and the placeholder URL before the page knows its origin, stay one argument each.
+        expect(pairCommands('', 'K7Q2MX', 'my laptop')).toEqual({
+            install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url "<platform url>" -Code K7Q2MX -Name "my laptop"',
+            pair: 'agentic-daemon pair K7Q2MX --url "<platform url>" --name "my laptop"'
+        });
     });
 
     it('reads the policy and the runtimes a machine can host', () => {

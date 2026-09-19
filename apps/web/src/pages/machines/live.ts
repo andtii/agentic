@@ -178,11 +178,13 @@ export interface PairCommands {
  * empty, the machine keeps it off and its environments are edited there.
  */
 export function pairCommands(origin: string, code: string, name: string, allowRoot = ''): PairCommands {
-    const url = origin || '<platform url>';
+    // Every value quoted when it needs it: a machine name may hold a space, and so does the placeholder URL.
+    const url = shellArg(origin || '<platform url>');
+    const machine = shellArg(name);
     const root = allowRoot.trim();
     return {
-        install: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${url} -Code ${code} -Name ${name}`,
-        pair: `agentic-daemon pair ${code} --url ${url} --name ${name}${root ? ` --allow-root ${shellArg(root)}` : ''}`
+        install: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${url} -Code ${code} -Name ${machine}`,
+        pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${root ? ` --allow-root ${shellArg(root)}` : ''}`
     };
 }
 

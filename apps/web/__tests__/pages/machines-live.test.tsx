@@ -303,7 +303,7 @@ describe('the machine view model', () => {
             install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic.example -Code K7Q2MX -Name laptop',
             pair: 'agentic-daemon pair K7Q2MX --url https://agentic.example --name laptop'
         });
-        expect(pairCommands('', 'K7Q2MX', 'laptop').pair).toContain('--url <platform url>');
+        expect(pairCommands('', 'K7Q2MX', 'laptop').pair).toContain('--url "<platform url>"');
         expect(secondsLeft(now + 90_500, now)).toBe(91);
         expect(secondsLeft(now - 1, now)).toBe(0);
     });
