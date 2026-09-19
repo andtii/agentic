@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actorKey, type EnvironmentId, type FrozenAgentConfig, type MachineId, type OpenSpec, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type EnvironmentId, type FrozenAgentConfig, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { defineMachineActor, FS_RESULT_TTL_MS, machineKey, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
@@ -624,5 +624,188 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         await advance(TICK);
         expect(await statusOf(machine(K1).fsResult(ids[1]!))).toBe(404);
         expect((await machine(K1).fsResult(ids[2]!)).status).toBe('error'); // finished a tick later: not yet
+    });
+});
+
+describe('Machine environment management (#237, EXE-03/04, OPS-01/03)', () => {
+    const agentP: Principal = { kind: 'agent', workspaceId: WS, agentId: 'agent_1', sessionId: 'session_1' } as Principal;
+    const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['machines', 'sessions', 'tasks'] };
+    /** The in-memory daemon's default policy: web-managed, inside `/work`. */
+    const WORK_POLICY: MachinePolicy = { webManaged: true, allowedRoots: ['/work'] };
+    const work = (name = 'Work', cwdRoots = ['/work/app'], extra: object = {}) => ({ name, runtime: 'in-memory', cwdRoots, ...extra });
+    const settled = (requestId: string) => until(async () => (await machine(K1).envResult(requestId)).status !== 'pending', `env.response for ${requestId}`);
+    const envAudit = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['environment.put', 'environment.removed'] })).events;
+    const online = () => until(async () => (await machine(K1).get()).online, 'online');
+    const envRequests = () => sockets.frames(K1).filter((f) => f.t === 'env.request');
+
+    /** A daemon this test speaks for by hand: its hello goes in, nothing answers unless the test sends `env.response`. */
+    async function rawDaemon(policy?: MachinePolicy) {
+        sockets.connected.add(K1);
+        const asDaemon = machine(K1, asMachine(M1));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {}, ...(policy ? { policy } : {}) }));
+        const respond = (requestId: string, body: object) => asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'env.response', requestId, ...body }));
+        return { asDaemon, respond };
+    }
+
+    it('puts and removes an environment over env.request, stores the answer for envResult and records both (OPS-03)', async () => {
+        connect(K1, daemon(M1));
+        await online();
+        expect((await machine(K1).get()).policy).toEqual(WORK_POLICY);
+
+        const { requestId } = await machine(K1).putEnvironment(work());
+        expect(requestId).toMatch(/^env_/);
+        // Flat on the wire, like the frame schema: `op` beside `environment`.
+        expect(envRequests()[0]).toEqual({ v: 1, t: 'env.request', requestId, op: 'put', environment: work() });
+        await settled(requestId);
+        const done = await machine(K1).envResult(requestId);
+        expect(done).toEqual({ requestId, op: { op: 'put', environment: work() }, status: 'done', requestedAt: expect.any(Number), finishedAt: expect.any(Number), result: { environmentId: expect.any(String) } });
+        const created = done.result!.environmentId;
+        // The daemon's `env` frame went first: the list already has it.
+        expect((await machine(K1).get()).environments.find((e) => e.id === created)).toMatchObject({ name: 'Work', cwdRoots: ['/work/app'] });
+
+        // The same id again changes it in place.
+        const changed = await machine(K1).putEnvironment(work('Work 2', ['/work/app', '/work/lib'], { id: created, concurrency: 2 }));
+        await settled(changed.requestId);
+        expect((await machine(K1).get()).environments.find((e) => e.id === created)).toMatchObject({ name: 'Work 2', cwdRoots: ['/work/app', '/work/lib'], concurrency: { max: 2 } });
+
+        const removed = await machine(K1).removeEnvironment(created);
+        await settled(removed.requestId);
+        expect(await machine(K1).envResult(removed.requestId)).toMatchObject({ status: 'done', op: { op: 'remove', environmentId: created }, result: { environmentId: created } });
+        expect((await machine(K1).get()).environments.map((e) => e.id)).toEqual([E1]);
+
+        await until(async () => (await envAudit()).length === 3, 'three audit records');
+        const events = await envAudit();
+        expect(events.find((e) => e.key === `${K1}:env:${requestId}`)).toMatchObject({
+            kind: 'environment.put',
+            by: 'user:u1',
+            data: { machineId: M1, environmentId: created, name: 'Work', runtime: 'in-memory', cwdRoots: ['/work/app'], outcome: 'ok' }
+        });
+        expect(events.find((e) => e.key === `${K1}:env:${removed.requestId}`)).toMatchObject({ kind: 'environment.removed', by: 'user:u1', data: { machineId: M1, environmentId: created, outcome: 'ok' } });
+    });
+
+    it("passes the daemon's refusal through unchanged, and records it with the roots that were asked for", async () => {
+        connect(K1, daemon(M1));
+        await online();
+        const outside = await machine(K1).putEnvironment(work('Etc', ['/etc']));
+        await settled(outside.requestId);
+        expect(await machine(K1).envResult(outside.requestId)).toMatchObject({ status: 'error', error: { code: 'outside-allowed-roots' } });
+        const runtime = await machine(K1).putEnvironment({ ...work(), runtime: 'claude-code' });
+        await settled(runtime.requestId);
+        expect(await machine(K1).envResult(runtime.requestId)).toMatchObject({ status: 'error', error: { code: 'unknown-runtime' } });
+        expect((await machine(K1).get()).environments.map((e) => e.id)).toEqual([E1]);
+
+        await until(async () => (await envAudit()).length === 2, 'the refusals on the audit log');
+        expect((await envAudit()).find((e) => e.key === `${K1}:env:${outside.requestId}`)).toMatchObject({ kind: 'environment.put', data: { cwdRoots: ['/etc'], outcome: 'outside-allowed-roots' } });
+    });
+
+    it('follows the policy the machine reports: off at hello, turned on on the machine (env)', async () => {
+        const d = inMemoryHarness({ machineId: M1, environments: [inMemoryEnvironment(M1, E1)], policy: { webManaged: false, allowedRoots: [] } }).start({ events: 3, heartbeatMs: 600_000 }) as InMemoryDaemon;
+        daemons.push(d);
+        connect(K1, d);
+        await online();
+        expect((await machine(K1).get()).policy).toEqual({ webManaged: false, allowedRoots: [] });
+        const refused = await machine(K1).putEnvironment(work());
+        await settled(refused.requestId);
+        expect(await machine(K1).envResult(refused.requestId)).toMatchObject({ status: 'error', error: { code: 'policy-disabled' } });
+
+        d.setPolicy(WORK_POLICY);
+        await until(async () => (await machine(K1).get()).policy?.webManaged === true, 'the policy from env');
+        const ok = await machine(K1).putEnvironment(work());
+        await settled(ok.requestId);
+        expect((await machine(K1).envResult(ok.requestId)).status).toBe('done');
+    });
+
+    it('keeps no policy for a daemon that reports none (it predates web-managed environments)', async () => {
+        await rawDaemon(WORK_POLICY);
+        expect((await machine(K1).get()).policy).toEqual(WORK_POLICY);
+        // A reconnect by an older daemon: nothing stale is kept.
+        await rawDaemon();
+        expect((await machine(K1).get()).policy).toBeUndefined();
+    });
+
+    it('lets only the owner ask or read: agents, machines, external clients and other workspaces are refused (decisions 2026-09-19 (c))', async () => {
+        connect(K1, daemon(M1));
+        await online();
+        const { requestId } = await machine(K1).putEnvironment(work());
+        for (const p of [agentP, asMachine(M1), external, userPrincipal('u2')]) {
+            expect(await statusOf(machine(K1, p).putEnvironment(work('Sneaky', ['/work'])))).toBe(403);
+            expect(await statusOf(machine(K1, p).removeEnvironment(E1))).toBe(403);
+            expect(await statusOf(machine(K1, p).envResult(requestId))).toBe(403);
+        }
+        expect(await statusOf(machine(K1, null).putEnvironment(work()))).toBe(401);
+        expect(envRequests()).toHaveLength(1);
+    });
+
+    it('refuses a malformed input before anything is sent: a profile directory is never accepted over the wire', async () => {
+        await rawDaemon(WORK_POLICY);
+        expect(await statusOf(machine(K1).putEnvironment(work('Work', ['/work'], { profileDir: '/home/me/.claude' }) as never))).toBe(400);
+        expect(await statusOf(machine(K1).putEnvironment(work('Work', [])))).toBe(400);
+        expect(await statusOf(machine(K1).putEnvironment({ runtime: 'in-memory', cwdRoots: ['/work'] } as never))).toBe(400);
+        expect(envRequests()).toEqual([]);
+        expect(await statusOf(machine(K1).envResult('env_nope'))).toBe(404);
+    });
+
+    it('refuses offline (503 machine-offline), revoked (403), an unknown environment (404) and one in use (409)', async () => {
+        const offline = await machine(K1)
+            .putEnvironment(work())
+            .then(() => null)
+            .catch((e: unknown) => e as { status?: number; message?: string });
+        expect(offline?.status).toBe(503);
+        expect(offline?.message).toContain(MACHINE_OFFLINE_CODE);
+
+        connect(K1, daemon(M1));
+        await online();
+        expect(await statusOf(machine(K1).removeEnvironment(E2))).toBe(404);
+        await app.as(owner).actor(Session, actorKey(WS, 'session', 'session_1')).open({ agentId: config.agentId, runtime: 'in-memory', environmentId: E1, machineId: M1, config });
+        await machine(K1).openSession('session_1' as SessionId, E1, openSpec);
+        expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(409);
+        expect(envRequests()).toEqual([]);
+
+        await machine(K1).revoke();
+        expect(await statusOf(machine(K1).putEnvironment(work()))).toBe(403);
+    });
+
+    it('times out an unanswered request through the liveness reminder; a late answer still lands and is recorded once', async () => {
+        const { respond } = await rawDaemon(WORK_POLICY);
+        const { requestId } = await machine(K1).putEnvironment(work());
+        expect((await machine(K1).envResult(requestId)).status).toBe('pending');
+        await advance(TICK);
+        expect(await machine(K1).envResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: `no answer from machine ${M1} within ${DEFAULT_ENV_TIMEOUT_MS} ms` } });
+
+        await respond(requestId, { result: { environmentId: 'env_late' } });
+        expect(await machine(K1).envResult(requestId)).toMatchObject({ status: 'done', result: { environmentId: 'env_late' } });
+        expect((await machine(K1).envResult(requestId)).error).toBeUndefined();
+        await until(async () => (await envAudit()).length === 1, 'the late answer on the audit log');
+        // A second answer, and an answer for an unknown id, change nothing and record nothing.
+        await respond(requestId, { error: { code: 'io', message: 'late' } });
+        expect(await respond('env_unknown', { result: { environmentId: 'env_x' } })).toEqual({ ok: true, t: 'env.response' });
+        expect((await machine(K1).envResult(requestId)).status).toBe('done');
+        for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+        expect(await envAudit()).toHaveLength(1);
+    });
+
+    it('fails pending requests when the daemon disconnects', async () => {
+        await rawDaemon(WORK_POLICY);
+        const a = await machine(K1).putEnvironment(work());
+        const b = await machine(K1).removeEnvironment(E1);
+        await machine(K1, asMachine(M1)).socketClosed();
+        for (const { requestId } of [a, b]) expect(await machine(K1).envResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: 'machine went offline' }, finishedAt: expect.any(Number) });
+    });
+
+    it(`keeps at most ${MAX_ENV_REQUESTS} requests, evicting the oldest, and prunes finished ones after ${ENV_RESULT_TTL_MS / 1000} s`, async () => {
+        const { respond } = await rawDaemon(WORK_POLICY);
+        const ids: string[] = [];
+        for (let i = 0; i <= MAX_ENV_REQUESTS; i++) {
+            vi.setSystemTime(Date.now() + 1);
+            ids.push((await machine(K1).putEnvironment(work(`W${i}`))).requestId);
+        }
+        expect(await statusOf(machine(K1).envResult(ids[0]!))).toBe(404);
+        for (const id of ids.slice(1)) expect((await machine(K1).envResult(id)).status).toBe('pending');
+        await respond(ids[1]!, { result: { environmentId: 'env_w1' } });
+        await advance(TICK);
+        expect(await machine(K1).envResult(ids[2]!)).toMatchObject({ status: 'error', error: { code: 'timeout' } });
+        expect((await machine(K1).envResult(ids[1]!)).status).toBe('done');
+        await advance(TICK);
+        expect(await statusOf(machine(K1).envResult(ids[1]!))).toBe(404);
     });
 });

@@ -4,7 +4,8 @@
  * One paired daemon, one record: its token hash, what it reported
  * (`hello` / `env` / `heartbeat`), the sessions it hosts and those waiting
  * for capacity, the commands whose replies are still out, and the folder
- * requests (`fsRequest`) waiting on, or answered by, the daemon. The host
+ * requests (`fsRequest`) and environment requests (`putEnvironment` /
+ * `removeEnvironment`) waiting on, or answered by, the daemon. The host
  * accepts the daemon's hibernatable WebSocket and hands every message to
  * `socketMessage`; the actor answers through the `MachineSocketPort`.
  *
@@ -13,8 +14,8 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
-import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
+import { actorKey, hasScope, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -27,7 +28,7 @@ import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
-import { advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneFs, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import { activeIn, advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -37,17 +38,31 @@ export const LIVENESS = 'liveness';
 export const DEFAULT_HEARTBEAT_WINDOW_MS = 90_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 export const DEFAULT_FS_TIMEOUT_MS = 30_000;
+export const DEFAULT_ENV_TIMEOUT_MS = 30_000;
+/** The code a `putEnvironment` / `removeEnvironment` 503 starts with when the daemon is not connected. */
+export const MACHINE_OFFLINE_CODE = 'machine-offline';
 /** The reminder floor (architecture §2): nothing is checked more often. */
 const REMINDER_FLOOR_MS = 60_000;
 
-/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command or folder request. */
+/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder request or environment request. */
 function needsLiveness(s: MachineState): boolean {
-    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some((r) => r.status === 'pending');
+    const pending = (r: { status: string }) => r.status === 'pending';
+    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending);
 }
 
 /** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
 function failPendingFs(s: MachineState, at: number, message: string): void {
     for (const r of Object.values(s.fs ?? {})) {
+        if (r.status !== 'pending') continue;
+        r.status = 'error';
+        r.error = { code: 'timeout', message };
+        r.finishedAt = at;
+    }
+}
+
+/** The same for environment requests: whether the daemon applied one it never answered is unknown, and `timeout` says so. */
+function failPendingEnv(s: MachineState, at: number, message: string): void {
+    for (const r of Object.values(s.envRequests ?? {})) {
         if (r.status !== 'pending') continue;
         r.status = 'error';
         r.error = { code: 'timeout', message };
@@ -95,6 +110,28 @@ export interface FsResultView {
     readonly error?: FsError;
 }
 
+/** `putEnvironment` / `removeEnvironment` — the id `envResult` reads the answer by. */
+export interface EnvRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `envResult(requestId)` — one environment request as stored: `pending` until
+ * the daemon's `env.response` lands (or the deadline / a disconnect fails it
+ * with `timeout`), then `done` with `result` or `error` with the daemon's own
+ * `error` — its code unchanged (`policy-disabled`, `outside-allowed-roots`, …).
+ * The environment itself shows up in `get().environments` with the daemon's `env` frame.
+ */
+export interface EnvResultView {
+    readonly requestId: string;
+    readonly op: EnvOp;
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    readonly finishedAt?: number;
+    readonly result?: EnvResult;
+    readonly error?: EnvError;
+}
+
 /** What `socketMessage` reports back to the host, for its logs. */
 export type SocketMessageResult = { readonly ok: true; readonly t: DaemonFrame['t'] } | { readonly ok: false; readonly code: string; readonly message: string };
 
@@ -115,6 +152,8 @@ export interface MachineView {
     readonly daemonVersion?: string;
     readonly capabilities: readonly CapabilityReport[];
     readonly environments: readonly EnvironmentDescriptor[];
+    /** The machine-local policy as last reported: whether the web may manage environments, and inside which roots. Absent → the daemon reports none. */
+    readonly policy?: MachinePolicy;
     readonly activeSessions: readonly HostedSession[];
     readonly queued: readonly QueuedSession[];
     readonly pending: readonly PendingCommand[];
@@ -195,7 +234,8 @@ export function defineMachineActor(ports: MachinePorts) {
     const heartbeatWindowMs = ports.heartbeatWindowMs ?? DEFAULT_HEARTBEAT_WINDOW_MS;
     const commandTimeoutMs = ports.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const fsTimeoutMs = ports.fsTimeoutMs ?? DEFAULT_FS_TIMEOUT_MS;
-    const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs));
+    const envTimeoutMs = ports.envTimeoutMs ?? DEFAULT_ENV_TIMEOUT_MS;
+    const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs, envTimeoutMs));
 
     function view(c: ActorContext<MachineState>): MachineView {
         const s = c.snapshot();
@@ -217,6 +257,7 @@ export function defineMachineActor(ports: MachinePorts) {
             ...(rest.daemonVersion !== undefined ? { daemonVersion: rest.daemonVersion } : {}),
             capabilities: rest.capabilities,
             environments: rest.environments,
+            ...(rest.policy ? { policy: rest.policy } : {}),
             activeSessions: Object.values(rest.activeSessions),
             queued: rest.queued,
             pending: Object.values(rest.pending),
@@ -241,7 +282,11 @@ export function defineMachineActor(ports: MachinePorts) {
             sendCommand: sessionDriver,
             // `worktree` is narrowed to the owner inside the method: a policy sees the method, not the op.
             fsRequest: sessionDriver,
-            fsResult: sessionDriver
+            fsResult: sessionDriver,
+            // Owner only, and never a tool (decisions 2026-09-19 (c)): an agent must not widen where agents may work.
+            putEnvironment: owner,
+            removeEnvironment: owner,
+            envResult: owner
         },
         state: (): MachineState => initialMachineState(),
         methods: (ctx) => {
@@ -349,6 +394,9 @@ export function defineMachineActor(ports: MachinePorts) {
                 s.daemonVersion = frame.daemonVersion;
                 s.environments = ctx.snapshot(frame.environments) as EnvironmentDescriptor[];
                 s.capabilities = ctx.snapshot(frame.capabilities) as CapabilityReport[];
+                // A daemon that reports no policy predates web-managed environments: nothing stale is kept from an older one.
+                if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
+                else delete s.policy;
                 // Sessions the daemon still runs, or once ran, replay from the last cursor this machine holds;
                 // ones it never heard of (a restart before `session.opened`) are opened again.
                 const wanted: Record<string, { epoch: number; seq: number }> = {};
@@ -452,6 +500,67 @@ export function defineMachineActor(ports: MachinePorts) {
                 });
             }
 
+            /**
+             * The daemon's answer to `putEnvironment` / `removeEnvironment`. Ignored like a stray `fs.response`
+             * (unknown id, second answer — except over a `timeout`). Its error code is stored unchanged, and what
+             * was asked and what the machine said goes on the audit log once per request (OPS-03).
+             */
+            async function onEnvResponse(frame: DaemonFrameOf<'env.response'>): Promise<void> {
+                const r = ctx.state.envRequests?.[frame.requestId];
+                if (!r || r.status === 'done' || (r.status === 'error' && r.error?.code !== 'timeout')) return;
+                const at = now();
+                r.finishedAt = at;
+                if (frame.result) {
+                    r.status = 'done';
+                    r.result = structuredClone(frame.result);
+                    delete r.error;
+                } else {
+                    r.status = 'error';
+                    r.error = structuredClone(frame.error ?? { code: 'invalid', message: 'env.response carried neither result nor error' });
+                    delete r.result;
+                }
+                const outcome = r.error?.code ?? 'ok';
+                const refused = outcome === 'ok' ? '' : ` refused (${outcome})`;
+                if (r.op.op === 'put') {
+                    const input = r.op.environment;
+                    const environmentId = r.result?.environmentId ?? input.id;
+                    await recordAudit(ctx, workspaceId, {
+                        key: `${ctx.key}:env:${r.requestId}`,
+                        kind: 'environment.put',
+                        at,
+                        by: r.by,
+                        summary: `environment ${input.name} on machine ${machineId}${refused || ` set to ${input.cwdRoots.join(', ')}`}`,
+                        data: { machineId, ...(environmentId ? { environmentId } : {}), name: input.name, runtime: input.runtime, cwdRoots: [...input.cwdRoots], outcome }
+                    });
+                    return;
+                }
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:env:${r.requestId}`,
+                    kind: 'environment.removed',
+                    at,
+                    by: r.by,
+                    summary: `environment ${r.op.environmentId} on machine ${machineId}${refused || ' removed'}`,
+                    data: { machineId, environmentId: r.op.environmentId, outcome }
+                });
+            }
+
+            /** Send one `env.request` and keep it as pending — the shared half of `putEnvironment` / `removeEnvironment`. */
+            async function envRequest(op: EnvOp): Promise<EnvRequested> {
+                const s = ctx.state;
+                if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                const at = now();
+                const requestId = `env_${crypto.randomUUID()}`;
+                if (!send({ v: V, t: 'env.request', requestId, ...op })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                const requests = (s.envRequests ??= {});
+                pruneEnvRequests(requests, at);
+                const record: EnvRequestRecord = { requestId, op: structuredClone(op), status: 'pending', requestedAt: at, deadline: at + envTimeoutMs, by: principalLabel(ctx.principal) };
+                requests[requestId] = record;
+                await armLiveness();
+                await ctx.save();
+                return { requestId };
+            }
+
             async function handle(frame: DaemonFrame): Promise<void> {
                 const s = ctx.state;
                 switch (frame.t) {
@@ -459,6 +568,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onHello(frame);
                     case 'env':
                         s.environments = ctx.snapshot(frame.environments) as EnvironmentDescriptor[];
+                        // The policy is edited on the machine while the daemon runs; an `env` without one says nothing about it.
+                        if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
                         s.lastSeen = now();
                         dequeue();
                         return;
@@ -481,6 +592,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onToolCall(frame);
                     case 'fs.response':
                         return onFsResponse(frame);
+                    case 'env.response':
+                        return onEnvResponse(frame);
                 }
             }
 
@@ -530,6 +643,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (first) s.revokedAt = now();
                     s.online = false;
                     failPendingFs(s, now(), 'machine revoked');
+                    failPendingEnv(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
                     await ctx.save();
@@ -624,6 +738,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     s.online = false;
                     // No socket, no answer: a folder request never outlives the connection it was sent on.
                     failPendingFs(s, now(), 'machine went offline');
+                    failPendingEnv(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
                 },
@@ -730,10 +845,56 @@ export function defineMachineActor(ports: MachinePorts) {
                         ...(r.result ? { result: r.result } : {}),
                         ...(r.error ? { error: r.error } : {})
                     }) as FsResultView;
+                },
+
+                /**
+                 * Ask the daemon to create an environment, or change the one
+                 * `input.id` names (#237): `env.request` goes out and the
+                 * answer lands in state with its `env.response` — read it with
+                 * `envResult(requestId)` (live), as `fsRequest` / `fsResult`
+                 * do. OWNER ONLY, and on no tool surface: the daemon's
+                 * machine-local policy decides, and its refusal
+                 * (`policy-disabled`, `outside-allowed-roots`, …) comes back
+                 * unchanged. No profile directory is accepted — the schema is
+                 * strict. 400 for a malformed input, 403 revoked, 503
+                 * `machine-offline`.
+                 */
+                async putEnvironment(input: EnvironmentInput): Promise<EnvRequested> {
+                    const parsed = environmentInputSchema.safeParse(input);
+                    if (!parsed.success) throw new ServerFnError(400, `machine: invalid environment: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+                    return envRequest({ op: 'put', environment: parsed.data });
+                },
+
+                /**
+                 * Ask the daemon to forget an environment; its profile
+                 * directory stays on the machine. 404 when the machine does
+                 * not report it, 409 `in-use` while this machine hosts or
+                 * queues a session in it (the daemon checks its own side too).
+                 */
+                async removeEnvironment(environmentId: EnvironmentId): Promise<EnvRequested> {
+                    const s = ctx.state;
+                    if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    if (activeIn(s, environmentId) > 0 || s.queued.some((q) => q.environmentId === environmentId)) throw new ServerFnError(409, `in-use: environment "${environmentId}" has sessions on machine "${machineId}"`);
+                    return envRequest({ op: 'remove', environmentId });
+                },
+
+                /** One environment request as stored — a primitive argument, so a live read can key on it. 404 for an unknown, evicted or pruned id. */
+                envResult(requestId: string): EnvResultView {
+                    const r = ctx.state.envRequests?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no environment request "${requestId}"`);
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        op: r.op,
+                        status: r.status,
+                        requestedAt: r.requestedAt,
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+                        ...(r.result ? { result: r.result } : {}),
+                        ...(r.error ? { error: r.error } : {})
+                    }) as EnvResultView;
                 }
             };
         },
-        /** The liveness reminder: a silent daemon goes offline, an unanswered command answers `internal`, an unanswered folder request fails `timeout`, and finished folder requests past their TTL are pruned. */
+        /** The liveness reminder: a silent daemon goes offline, an unanswered command answers `internal`, an unanswered folder or environment request fails `timeout`, and finished ones past their TTL are pruned. */
         onReminder: async (ctx, name) => {
             if (name !== LIVENESS) return;
             const s = ctx.state;
@@ -757,6 +918,15 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.finishedAt = at;
                 }
                 pruneFs(s.fs, at, false);
+            }
+            if (s.envRequests) {
+                for (const r of Object.values(s.envRequests)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    r.status = 'error';
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${envTimeoutMs} ms` };
+                    r.finishedAt = at;
+                }
+                pruneEnvRequests(s.envRequests, at, false);
             }
             if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
             await ctx.save();

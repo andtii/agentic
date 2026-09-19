@@ -15,6 +15,8 @@ export {
     type ConfigVersionedData,
     type DelegationCreatedData,
     type EnvironmentChosenData,
+    type EnvironmentPutData,
+    type EnvironmentRemovedData,
     type MachinePairedData,
     type MachineRevokedData,
     type PluginActivatedData,
