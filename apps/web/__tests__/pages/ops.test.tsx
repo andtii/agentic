@@ -40,6 +40,12 @@ describe('/machines', () => {
         expect(root.querySelector('[data-scope="ag-empty"]')).toBeNull();
     });
 
+    it('each environment card carries its account\'s limits (#270)', async () => {
+        const root = await mountAt('/machines', <MachinesList machines={opsMachines} />);
+        const work = root.querySelector('[data-scope="ag-env-card"][data-part="root"][aria-label="work"]')!;
+        expect(work.querySelector('[data-scope="ag-env-card"][data-part="quota"] [data-window="seven_day"] [data-part="used"]')!.textContent).toBe('76% used');
+    });
+
     it('with no machine shows the platform row plus the dashed "Pair a machine" card', async () => {
         const root = await mountAt('/machines', <MachinesList machines={[]} />);
         expect(root.querySelector('[data-machine-group][data-platform]')).not.toBeNull();
@@ -341,6 +347,19 @@ describe('/usage', () => {
         for (const cost of table.querySelectorAll('[data-cost]')) expect(cost.textContent).not.toMatch(/^\$?0(\.00)?$/);
         expect(root.querySelectorAll('[data-stat]').length).toBe(4);
         expect(root.querySelectorAll('[data-bar]').length).toBe(17);
+    });
+
+    it('lists every account\'s provider limits above the stats: the /usage windows, stale offline data, and why anthropic-api reports none (#270, OPS-07)', async () => {
+        const root = await mountAt('/usage', <UsageView rows={usageRows} />);
+        const limits = root.querySelector('[data-usage-limits]')!;
+        expect(limits.compareDocumentPosition(root.querySelector('[data-usage-stats]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        const work = limits.querySelector('[data-limit-account="env_alien01_work"]')!;
+        expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="label"]')].map(l => l.textContent)).toEqual(['Current session', 'Current week (all models)', 'Current week (Fable)']);
+        expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="used"]')].map(l => l.textContent)).toEqual(['19% used', '76% used', '80% used']);
+        expect(work.querySelector('[data-window="seven_day:fable"]')!.getAttribute('data-tone')).toBe('needs-you');
+        expect(limits.querySelector('[data-limit-account="env_nuclab_work"] [data-scope="ag-quota-panel"]')!.hasAttribute('data-mod-stale')).toBe(true);
+        expect(limits.querySelector('[data-limit-account="env_alien01_client_acme"]')!.textContent).toContain('No usage reported yet');
+        expect(limits.querySelector('[data-limit-account="platform"]')!.textContent).toContain('Not reported by provider — The Anthropic API has per-minute rate limits');
     });
 
     it('switches the table by task and by turn', async () => {

@@ -344,6 +344,7 @@ const envCard: RecipeInput = {
             }
         },
         'default-for': { base: { display: 'flex', gap: 'var(--space-xs)', flexWrap: 'wrap' } },
+        quota: { base: { paddingBlockStart: 'var(--space-sm)', borderBlockStart: 'var(--border) solid var(--ag-line)' } },
         fix: {
             base: { margin: '0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', fontSize: 'var(--text-sm)', color: 'var(--color-base-content)', paddingBlockStart: 'var(--space-sm)', borderBlockStart: 'var(--border) solid var(--ag-line)' },
             // The line wraps; the button keeps its intrinsic width ("Re-check" never breaks).
@@ -669,4 +670,45 @@ const mapField: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField];
+/** A limit window, like Claude Code's `/usage`: label over a full-width 8 px bar with the percent beside it, the reset line under; the bar is the status ink. */
+const quota: RecipeInput = {
+    component: 'ag-quota',
+    tokens: { '--ag-ink': 'var(--color-primary)' },
+    parts: {
+        root: { base: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 'var(--space-md)', rowGap: 'var(--space-2xs)', transition: `opacity ${motion}` } },
+        label: { base: { gridColumn: '1 / -1', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-base-content)' } },
+        bar: { base: { display: 'block', blockSize: '8px', borderRadius: 'var(--radius-selector)', background: 'var(--ag-line-strong)', overflow: 'hidden' } },
+        fill: { base: { display: 'block', blockSize: '100%', background: 'var(--ag-ink)', borderRadius: 'inherit', transition: `inline-size ${motion}` } },
+        used: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-muted)', whiteSpace: 'nowrap' } },
+        resets: { base: { gridColumn: '1 / -1', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } }
+    },
+    variants: {
+        tone: {
+            muted: { root: { base: { '--ag-ink': 'var(--ag-text-dim)' } } },
+            live: { root: { base: { '--ag-ink': 'var(--color-primary)' } } },
+            'needs-you': { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
+            failed: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
+        }
+    },
+    modifiers: {
+        stale: { root: { base: { opacity: '0.6' } } }
+    }
+};
+
+/** An account's limits: a header (title, plan tag, age) over the windows, 12 px apart; the age turns warning when stale. */
+const quotaPanel: RecipeInput = {
+    component: 'ag-quota-panel',
+    parts: {
+        root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minInlineSize: '0' } },
+        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' } },
+        title: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', flex: '1 1 auto', minInlineSize: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        age: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
+        reason: { base: { margin: '0', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } }
+    },
+    modifiers: {
+        stale: { age: { base: { color: 'var(--color-warning)' } } },
+        compact: { root: { base: { gap: 'var(--space-xs)' } } }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel];

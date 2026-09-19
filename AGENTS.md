@@ -65,8 +65,9 @@ All work is tracked as sub-issues of the tracking issue
    and gets one line in `docs/promotion.md`.
 8. **Definition of done:** `pnpm typecheck && pnpm lint && pnpm test && pnpm size`
    green; new tests for new behaviour; the issue's acceptance checklist ticked in
-   the PR body; `docs/architecture.md` updated if a seam changed; a CHANGELOG
-   `[Unreleased]` entry in each touched package.
+   the PR body; `docs/architecture.md` updated if a seam changed. No
+   `CHANGELOG.md` entries: the PR title and body are the record, and release
+   notes are drafted from PR titles (the files are frozen history).
 9. **PR and merge:**
    ```sh
    gh pr create --base main --title "<area>: <what>" --body "Closes #N. <summary>"
@@ -161,7 +162,7 @@ In-repo docs ship in the same PR:
 | change a seam or actor contract | the matching section of `docs/architecture.md` |
 | take a product decision the PRD leaves open | `docs/decisions.md` |
 | write something generic | one line in `docs/promotion.md` |
-| change public behaviour of a package | its `README.md` and `CHANGELOG.md` `[Unreleased]` |
+| change public behaviour of a package | its `README.md` (and say so in the PR body — no `CHANGELOG.md` entry) |
 
 There is no docs site for this repo.
 

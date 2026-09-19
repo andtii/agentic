@@ -5,7 +5,7 @@
  */
 import './globals.js';
 
-export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy } from './anatomy.js';
+export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy, agQuotaAnatomy, agQuotaPanelAnatomy } from './anatomy.js';
 export { recipes as kitRecipes } from './recipes.js';
 export { kitScopes, TONES, NEEDS_KINDS } from './vocabulary.js';
 export type { Tone, NeedsKind } from './vocabulary.js';
@@ -15,6 +15,9 @@ export type { PillSpec, PillStatus } from './tone.js';
 export { Icon, ICON_NAMES } from './icons.js';
 export type { IconName, IconProps } from './icons.js';
 export { StatusPill, Tag, WaitReasonLine } from './StatusPill.js';
+export { QuotaMeter, QuotaPanel, QuotaMeter as AgQuota, QuotaPanel as AgQuotaPanel } from './QuotaMeter.js';
+export type { QuotaMeterProps, QuotaPanelProps } from './QuotaMeter.js';
+export { QUOTA_STALE_MS, quotaTone, quotaPercent, quotaUsedText, resetsText, ageText, isQuotaStale } from './quota.js';
 export type { StatusPillProps, TagProps, WaitReasonLineProps } from './StatusPill.js';
 export { AgentTile, AGENT_HUE_SLOTS, hueFor, monogramOf } from './AgentTile.js';
 export type { AgentTileProps, AgentHue, TileSize } from './AgentTile.js';

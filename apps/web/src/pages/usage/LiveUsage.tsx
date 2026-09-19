@@ -10,7 +10,8 @@
  * `summary` takes an options object, which the live read's canonical key
  * cannot carry, so the page reads through `useData` and re-reads on the
  * grouping, the month and the Refresh action; Home's spend panel reads the
- * same total through `useMonthSpend`.
+ * same total through `useMonthSpend`. Above the stats, every account's
+ * provider limits from the machines (`LiveLimits`, #270).
  */
 import { component, onMounted, signal, useData, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
@@ -20,6 +21,7 @@ import { AgentTile, Button, DataTable, Label, Segmented, StatusPill } from '@age
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { ledgerKeyOf, ledgerMonthOf, workspaceKeyOf } from '../../actors/keys';
 import { OpsPage } from '../ops/OpsPage';
+import { LiveLimits } from './Limits';
 import { useAgentDirectory } from '../chat/directory';
 import { costText, dayOf, daysOf, statsOf, tokensText, USAGE_BY, USAGE_COLS, usageRowsOf, type LiveUsageBy } from './live';
 
@@ -104,6 +106,8 @@ export const LiveUsage = component(() => {
                     actions: () => <Button intent="default" onClick={refresh} disabled={grouped.loading}>Refresh</Button>
                 }}
             >
+                <LiveLimits />
+
                 <div data-usage-stats aria-busy={grouped.loading ? 'true' : undefined}>
                     {stats.map((stat) => (
                         <section data-card data-stat data-tone={stat.tone} aria-label={stat.label}>

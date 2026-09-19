@@ -37,6 +37,8 @@ export interface ToolCallPortOptions {
      * Session only for a memory tool. Absent → the Memory actor of the agent's own scope.
      */
     readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
+    /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
+    readonly machines?: () => AnyActorDefinition;
 }
 
 /** A `tool.call` port over the actors: the Machine binds it as `MachinePorts.tools`. */
@@ -61,7 +63,8 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 routing: options.routing,
                 sessions: options.sessions,
                 ...(options.files ? { files: options.files } : {}),
-                ...(memory ? { memory } : {})
+                ...(memory ? { memory } : {}),
+                ...(options.machines ? { machines: options.machines } : {})
             });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
