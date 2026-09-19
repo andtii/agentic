@@ -6,8 +6,11 @@ import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/en
 import { WorkdirInput } from '../workdir/WorkdirInput';
 import { agents } from '../../mock/data';
 import type { AgentProfile } from '../../mock/agents';
+import { opsEnvironments, opsPluginFacts, opsPlugins } from '../../mock/ops';
+import { readinessById, readinessFacts } from '../plugins/readiness';
 import type { AgentCatalog } from './catalog';
 import { dateTime } from './format';
+import { runtimeOptions } from './runtimes';
 
 /** Where a save and a rollback go on the platform (#35): each resolves to the version the Agent actor recorded. */
 export interface ConfigStore {
@@ -45,6 +48,8 @@ const ENVIRONMENTS = [
     { value: 'env_platform', label: 'platform / anthropic-api / byo-key' }
 ];
 const SCOPES = [{ value: 'agentic-repo' }, { value: 'team' }];
+/** The mock workspace's runtime plugins (`mock/ops.ts`), read the way the live page reads the Registry's (#234). */
+const mockRuntimes = (current: string) => runtimeOptions(opsPlugins, readinessById(opsPlugins, readinessFacts(opsPluginFacts, opsEnvironments)), current);
 
 /** "Changes apply to new sessions. 1 active session keeps v7." (AGT-07) */
 export function applyLine(activeOnOlder: number, current: number): string {
@@ -205,6 +210,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 connectors={props.catalog?.connectors ?? CONNECTORS}
                 environments={props.environments ?? props.catalog?.environments ?? ENVIRONMENTS}
                 memoryScopes={props.catalog?.memoryScopes ?? SCOPES}
+                runtimes={props.store ? props.catalog?.runtimes : mockRuntimes(state.config.execution.runtime)}
                 agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}
                 onSubmit={onSubmit}
                 slots={{ rail, workdir }}
