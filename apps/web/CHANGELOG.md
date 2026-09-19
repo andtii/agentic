@@ -4,6 +4,7 @@ All notable changes to `@agentic/web` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `usage_limits` on the MCP surface and for agents (#272, part of #261). The OAuth port binds `usage.limits`: after the tool's `usage` gate, the machines are read as the workspace's user, so `usage` alone suffices. `platformActors` passes `machines` to the session factory, the runtime catalogue and the tool-call port. The agent Config tab offers `usage_limits` (`PLATFORM_TOOLS`).
 - Provider limits on Machines, `/usage` and Home (#270, part of #261; OPS-07, COL-02):
   - Every environment card shows its account's limits (`MachineView.quota`, live through `Machine.get`).
   - `/usage` opens with a "Limits" card: one panel per account, captioned `machine · runtime`, plus `offline`.

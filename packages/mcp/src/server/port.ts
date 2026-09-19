@@ -8,7 +8,7 @@
  * The shapes are deliberately plain (JSON-serializable, no branded ids on
  * the wire beyond strings) — they are what an external client sees.
  */
-import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, UsageLimits, UsageLimitsQuery, WaitReason } from '@agentic/core';
 
 export type ExternalPrincipal = Extract<Principal, { kind: 'external' }>;
 
@@ -205,6 +205,10 @@ export interface PlatformPort {
     };
     readonly schedules: {
         create(input: CreateScheduleInput): Promise<ScheduleSummary>;
+    };
+    readonly usage: {
+        /** Every account's provider limits as its machine last reported them (#272, OPS-07): machines → environments → `Machine.quota`. */
+        limits(query: UsageLimitsQuery): Promise<UsageLimits>;
     };
 }
 

@@ -4,6 +4,7 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Platform tool `usage_limits` (#272, part of #261): `usageLimitsTool(port)` / `usageLimitsInput`, over the new optional `PlatformPorts.usage: UsagePort` (`limits(query, call)` → core `UsageLimits`). Without the port it reports "not available on this host". It is in `PLATFORM_TOOL_NAMES` and granted through `ToolGrant` like the others.
 - Claude Code quota source (#269, part of #261; OPS-07, PLG-09) on `@agentic/runtimes/claude-code`: `claudeCodeQuota(options?)` → core `QuotaSource` (id `agentic.quota.claude-code`).
   - `fromSignal` maps the streamed `rate_limit_event` (`ext claude-code/rate-limit`, or `{ ns: 'error', name: 'rate_limited' }` carrying `SDKRateLimitInfo`) to one window. Utilization is 0..1, `resetsAt` goes from epoch seconds to ISO, and the status maps `allowed_warning` → warning and `rejected` → exhausted.
   - `probe` reads `claude` → `/usage` via the SDK's experimental `usage_…({ skipBehaviors: true })` and `accountInfo()` on a query that is never prompted. It runs under the environment's own account env (the same `childEnv` allowlist and account scrubbing as sessions), then closes. Any failure or timeout (default 20 s) returns `null` and is logged.
