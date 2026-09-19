@@ -233,7 +233,7 @@ export const opsPlugins: readonly PluginView[] = [
     })),
     builtin(manifest({
         id: 'codex-cli', version: '0.1.0', kind: 'runtime', name: 'Codex', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
-        description: 'Agents run in OpenAI Codex on a paired machine, signed in with the ChatGPT account of the chosen environment, and each account reports its plan usage limits. Credentials stay on the machine.',
+        description: 'Agents run in OpenAI Codex on a paired machine, signed in with the account of the chosen environment, and each ChatGPT account reports its plan usage limits. Credentials stay on the machine.',
         config: NOTHING_TO_SET,
         permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
     })),
