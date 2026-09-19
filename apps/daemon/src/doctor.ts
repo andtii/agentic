@@ -42,7 +42,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         for (const message of loaded.errors) error('environments-invalid', message);
         return { ok: false, findings };
     }
-    if (loaded.environments.length === 0) error('no-environments', `no environments in ${options.paths.environmentsFile}`);
+    // Not an error (#235): the daemon runs and reports none; it just cannot host a session yet.
+    if (loaded.environments.length === 0) findings.push({ level: 'warn', code: 'no-environments', message: `no environments in ${options.paths.environmentsFile} — add one with \`agentic-daemon env add --name <name> --root <dir>\`` });
 
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const byRuntime = new Map<string, LocalEnvironment[]>();

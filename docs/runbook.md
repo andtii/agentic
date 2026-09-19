@@ -231,7 +231,7 @@ console.log(await r.json());   // { machineId, pairingCode, expiresAt }
 On the machine, as the user who owns the Claude Code accounts:
 
 1. Unpack the zip to a folder that stays put, e.g. `C:\agentic\daemon`.
-2. Write `%APPDATA%\agentic\environments.json` — one entry per Claude Code account (`docs/multi-account.md`; the zip's README has the shape). Each `profileDir` must be signed in once: `$env:CLAUDE_CONFIG_DIR = "<profileDir>"; claude /login` (the `claude` CLI, or the copy in the zip at `node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`).
+2. Add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `node bin\agentic-daemon.mjs env add --name Work --root C:\src\work [--concurrency 2] [--account me@work.example]` writes `%APPDATA%\agentic\environments.json` (atomically, owner-only) and gives the environment its own profile folder `%APPDATA%\agentic\profiles\<id>`; `env list` and `env rm <id>` do the rest. Sign each one in once: `node bin\agentic-daemon.mjs env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`). This step can also come after step 3: a daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored.
 3. In PowerShell, from the folder:
 
    ```powershell
@@ -356,7 +356,7 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 |---|---|---|
 | Home's "Today" panel on the platform | every page reads the actors in live mode (`dataMode() === 'live'`; #144 the machine pages, #145 Schedules / Plugins / Settings, #146 Home, Tasks, History and Usage over the TaskIndex, the Audit log and the month's Ledger) except Home's "Today" panel, which does not read the schedules yet — the Schedules page lists them. Machine state is also `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | follow-up of #146 |
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
-| Adding a working root from the web | the folder picker (#193) browses and creates worktrees only inside an environment's `cwdRoots`; a new root is added in the machine's `environments.json` and takes a daemon restart (it reads the file once) | decisions §3 |
+| Adding a working root from the web | the folder picker (#193) browses and creates worktrees only inside an environment's `cwdRoots`; a new root is added on the machine — `agentic-daemon env add --id <id> --replace --name … --root …`, or an edit of `environments.json`; the running daemon picks it up without a restart (#235) | decisions §3 |
 | Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | — |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |

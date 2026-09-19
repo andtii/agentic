@@ -103,6 +103,38 @@ describe('daemon', () => {
         expect(hello.capabilities.find((c) => c.runtime === 'flaky')!.unsupported).toEqual([{ op: '*', reason: 'no claude binary' }]);
     });
 
+    it('a sign-in shows up without a restart: environments that are not signed in are inspected again (#235)', async () => {
+        const driver = scriptedDriver({ events: 1, heartbeatMs: 1_000 });
+        driver.auth.set('env_b', 'missing');
+        let inspected = 0;
+        const counting: DaemonDriver = { ...driver, inspect: (e) => (inspected++, driver.inspect(e)) };
+        const daemon = createDaemon({
+            credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
+            environments: [env('env_a'), env('env_b')],
+            drivers: [counting],
+            eventLog: ndjsonEventLog(join(dir, 'sessions')),
+            backoff: { initialMs: 5, maxMs: 20 },
+            heartbeatMs: 1_000,
+            reinspectMs: 15
+        });
+        daemons.push(daemon);
+        await daemon.start();
+        const seat = await relay.nextSeat();
+        const hello = await expectFrame(seat, 'hello');
+        expect(hello.environments.map((e) => e.account.authStatus)).toEqual(['ok', 'missing']);
+        seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: {} });
+
+        driver.auth.set('env_b', 'ok');
+        const announced = await expectFrame(seat, 'env');
+        expect(announced.environments.map((e) => e.account.authStatus)).toEqual(['ok', 'ok']);
+
+        // Everything signed in: the timer leaves the machine alone, and nothing changed means no frame.
+        const settled = inspected;
+        await new Promise((r) => setTimeout(r, 80));
+        expect(inspected).toBe(settled);
+        expect(await daemon.reinspect()).toBe(false);
+    });
+
     it('refuses unknown environments, a cwd outside cwdRoots and work beyond concurrency — with a reason', async () => {
         const { seat } = await start([env('env_a')]);
         open(seat, 'session_1', 'env_nope');
