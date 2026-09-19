@@ -68,11 +68,27 @@ export type TaskMethods = {
 };
 
 export type TaskStreams = {
-    /** Yields once, when the task reaches a terminal state, then ends. */
-    result(): AsyncIterable<TaskOutcome>;
+    /**
+     * Yields once, when the task reaches a terminal state, then ends. `eager` also yields as soon as a
+     * cancel is committed, before its turn ends: that turn waits for the session driver's word, so the
+     * driver (the router) must hear of the cancel while it is parked (#168). The early outcome carries
+     * no settled `cancel` report yet.
+     */
+    result(options?: { eager?: boolean }): AsyncIterable<TaskOutcome>;
 };
 
 type Ctx = ActorContext<TaskState>;
+
+/**
+ * Per activation (by actor key): the eager `result()` readers to wake when a cancel is committed. A
+ * change feed only yields after a turn ends, and the `cancel` turn stays open until the session
+ * driver acknowledges — which it can only do once it has heard of the cancel (#168).
+ */
+const cancelWakers = new Map<string, Set<() => void>>();
+
+function wakeOnCancel(key: string): void {
+    for (const wake of cancelWakers.get(key) ?? []) wake();
+}
 
 /**
  * Make one entry durable. `ctx.append` (O(entry), @sigx/actors #312) where the
@@ -237,6 +253,7 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
             if (!s.cancel) {
                 await transition('cancelled', by, 'cancel requested');
                 await commit(ctx, { t: 'cancel', at: Date.now(), by, deadline });
+                wakeOnCancel(ctx.key);
             }
             const now = Date.now();
             const pending = liveChildren();
@@ -459,12 +476,28 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
         };
     },
     streams: (ctx): TaskStreams => ({
-        async *result() {
-            for await (const snap of ctx.changes({ initial: true })) {
-                if (isTerminal(snap.status)) {
-                    yield outcomeOf(snap);
-                    return;
+        async *result(options) {
+            const changes = ctx.changes({ initial: true })[Symbol.asyncIterator]();
+            let wake: (() => void) | undefined;
+            const cancelled = new Promise<'cancelled'>((resolve) => (wake = () => resolve('cancelled')));
+            const wakers = options?.eager ? (cancelWakers.get(ctx.key) ?? new Set<() => void>()) : undefined;
+            if (wakers) cancelWakers.set(ctx.key, wakers.add(wake!));
+            try {
+                for (;;) {
+                    const next = await (wakers ? Promise.race([changes.next(), cancelled]) : changes.next());
+                    const snap = next === 'cancelled' ? ctx.snapshot() : next.done ? undefined : next.value;
+                    if (!snap) return;
+                    if (isTerminal(snap.status)) {
+                        yield outcomeOf(snap);
+                        return;
+                    }
                 }
+            } finally {
+                if (wakers) {
+                    wakers.delete(wake!);
+                    if (wakers.size === 0) cancelWakers.delete(ctx.key);
+                }
+                await changes.return?.();
             }
         }
     })

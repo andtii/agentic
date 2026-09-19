@@ -106,6 +106,29 @@ describe('/chats/:id tasks, waiting and stop (live)', () => {
         await until(() => panel(dom).querySelector('[data-member] [data-status="waiting"]') === null, 'nobody waiting');
     });
 
+    it('Stop task chain stops a task parked on an approval, confirmed and not listed as could not be stopped (#168)', async () => {
+        const { chatId, forge } = await seedChat();
+        const { task } = await runTask(chatId, forge, 'push it');
+        const dom = await mountLive(`/chats/${chatId}`, h);
+        await until(async () => (await task.get()).status === 'waiting', 'the task to park on the approval');
+        await until(() => panel(dom).querySelectorAll('[data-mini-node]').length === 1, 'the task in the panel');
+
+        buttonNamed(panel(dom), 'Stop task chain').click();
+        await until(() => [...document.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Stop 1 task'), 'the confirm dialog');
+        const started = performance.now();
+        buttonNamed(document, 'Stop 1 task').click();
+        // Well inside `Task.cancel`'s 10 s deadline: the stop is confirmed, not timed out.
+        await until(async () => (await task.get()).cancel?.stopped === true, 'the stop to be confirmed', 3_000);
+        expect(performance.now() - started).toBeLessThan(3_000);
+        const view = await task.get();
+        expect(view.status).toBe('cancelled');
+        expect(view.cancel).toMatchObject({ stopped: true });
+        const session = asOwner().actor(h.Session, `${USER}:session:${view.sessionId!}`);
+        await until(async () => (await session.get()).openRequests.length === 0, 'the open request to settle');
+        await until(() => ![...panel(dom).querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Stop task chain'), 'the stop button to leave');
+        expect(dom.querySelector('[data-chat-error]')?.textContent ?? '').toBe('');
+    });
+
     it('a chat with no tasks says so and offers no stop', async () => {
         const { chatId } = await seedChat();
         const dom = await mountLive(`/chats/${chatId}`, h);
