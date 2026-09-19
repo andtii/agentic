@@ -304,6 +304,9 @@ describe('cli', () => {
         expect(text).toMatch(/! environment B: working root .* is not a directory/);
         expect(text).toMatch(/✗ A and B share a profile dir/);
         expect(text).not.toContain(token);
+        // The verdict the platform gets names no path (#274); the operator at the machine still sees each profile.
+        expect(text).toContain(`✓ environment A (env_a): profile ${join(dir, 'p')}`);
+        expect(text).toContain('✓ environment C (env_c): no profile of its own — the runtime’s default');
     });
 
     it('doctor: ok when everything checks out', async () => {
