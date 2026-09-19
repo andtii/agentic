@@ -3,7 +3,13 @@
 //
 // The `anthropic-api` runtime is a mock agent (#34): the chat test drives a
 // post through activation, routing and a session inside workerd, offline —
-// every other port is the production wiring.
+// every other port is the production wiring. Since #231 it sits behind the
+// production session factory and Registry: the router gates the run on the
+// plugin, and the runtime opens only with the workspace's `anthropic-api-key`
+// secret (sealed under the pool's `WORKSPACE_KEK`), as `anthropicApiRuntime`
+// does — so a test that expects an answer sets the key first (`setAnthropicKey`).
+import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID } from '@agentic/runtimes';
+import { NO_API_KEY_CODE, type RuntimeCatalogue } from '@agentic/platform';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createActorHost, createActorWorker, defaultPorts, pairingWiring, platformActors, platformFiles, type PlatformEnv } from '../../src/actors.app';
@@ -14,14 +20,20 @@ import { runWithHost } from '../../src/host-scope';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
-const actors = platformActors({
-    ...defaultPorts,
-    factory: async (runtime, c) => {
-        if (runtime !== 'anthropic-api') return null;
-        const session = await agent.session({ policy: allowAll, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
-        return { session, agentId: agent.id, capabilities: agent.capabilities };
-    }
-});
+const runtimes: RuntimeCatalogue = {
+    [ANTHROPIC_API_PLUGIN_ID]: {
+        host: 'local',
+        async open(c, plugin) {
+            // The key check `anthropicApiRuntime` makes, against the real Registry; only the model is the mock.
+            if (!(await plugin.secret(ANTHROPIC_API_KEY_SECRET))) throw new Error(`${NO_API_KEY_CODE}: workspace ${c.workspaceId} has no Anthropic API key — add one at /plugins/${ANTHROPIC_API_PLUGIN_ID}`);
+            const session = await agent.session({ policy: allowAll, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
+            return { session, agentId: agent.id, capabilities: agent.capabilities };
+        }
+    },
+    [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
+};
+
+const actors = platformActors({ ...defaultPorts, runtimes });
 
 export const ActorHost = createActorHost(actors);
 

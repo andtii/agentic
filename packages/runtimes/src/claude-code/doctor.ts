@@ -81,7 +81,7 @@ export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
         const code = AUTH_CODES[inspection.authStatus];
         if (inspection.authStatus === 'ok') findings.push({ level: 'info', code, message: auth, environmentIds: [env.id] });
         else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code, message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
-        else findings.push({ level: 'warn', code, message: `${auth} Sign in with CLAUDE_CONFIG_DIR=${configDir} claude /login.`, environmentIds: [env.id] });
+        else findings.push({ level: 'warn', code, message: `${auth} Sign in on the machine with \`agentic-daemon env login ${env.id}\`.`, environmentIds: [env.id] });
     }
 
     return { ok: !findings.some((f) => f.level === 'error'), findings };

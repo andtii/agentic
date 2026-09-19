@@ -9,7 +9,7 @@ The web app and every platform actor run as one Cloudflare Worker (`apps/web`) p
 - Node ≥ 22.12 and pnpm 10 (`corepack enable`), Git.
 - A Cloudflare account on **Workers Paid** (Durable Objects on SQLite storage and R2 need it). Note the account's `workers.dev` subdomain (dashboard → Workers & Pages → overview).
 - A GitHub account that can create an OAuth app (personal or in an org).
-- An Anthropic API key for the platform-managed `anthropic-api` runtime (console.anthropic.com → API keys).
+- An Anthropic API key for the platform-managed `anthropic-api` runtime (console.anthropic.com → API keys). It is not a deployment secret: each workspace enters its own at `/plugins/anthropic-api` after signing in (#231).
 - For the daemon: a Windows 10/11 machine with Node ≥ 22.12 and at least one Claude Code account signed in per profile directory (`docs/multi-account.md`).
 
 Clone and install once:
@@ -72,7 +72,6 @@ Secrets go in with `wrangler secret put <NAME>` (production: no `--env`), which 
 | `WORKSPACE_KEK` | `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"` (exactly 32 bytes, base64) | AES-GCM key sealing Registry secrets (BYO API keys); absent → `Registry.setSecret` refuses `no-kek` |
 | `GITHUB_CLIENT_ID` | from §2.2 | the OAuth app |
 | `GITHUB_CLIENT_SECRET` | from §2.2 | the OAuth app |
-| `ANTHROPIC_API_KEY` | console.anthropic.com → API keys (`sk-ant-…`) | every `anthropic-api` session of the deployment (`createSessionFactory`, architecture §5a); absent → an API-runtime task fails `no-api-key` |
 | `AGENTIC_DEV_LOGIN` | **do not set on production** | preview / local-only login (§3, §4) — while set, `/auth/dev-login` (a form on `GET`, JSON or the form on `POST`) mints a session for anyone holding the value |
 
 ```sh
@@ -81,9 +80,10 @@ pnpm exec wrangler secret put SESSION_SECRET
 pnpm exec wrangler secret put WORKSPACE_KEK
 pnpm exec wrangler secret put GITHUB_CLIENT_ID
 pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
-pnpm exec wrangler secret put ANTHROPIC_API_KEY
 pnpm exec wrangler secret list                      # names only, never values
 ```
+
+There is no Anthropic key among them (decisions 2026-09-19 (b), #231): the `anthropic-api` runtime only ever uses the workspace's own `anthropic-api-key`, a Registry secret sealed under `WORKSPACE_KEK` and set at `/plugins/anthropic-api`. A deployment upgraded from before #231 ignores an `ANTHROPIC_API_KEY` secret it still has — `wrangler secret delete ANTHROPIC_API_KEY` tidies it away; each workspace enters its key once instead.
 
 Without `SESSION_SECRET` the Worker serves pages but treats every actor call as anonymous (it logs a warning). The auth routes (`/auth/*`) mount only when `SESSION_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `APP_ORIGIN` are all set.
 
@@ -110,7 +110,7 @@ The first deploy prints the `workers.dev` URL and creates the Durable Object nam
 2. `curl -s ${APP_ORIGIN}/auth/me` → `401 {"error":"unauthorized"}`.
 3. `curl -s -X POST ${APP_ORIGIN}/auth/dev-login` → `404`, and `GET` the same (the route must not exist on production).
 4. Open `${APP_ORIGIN}/auth/login` in a browser → GitHub consent → back on `/` signed in. `GET /auth/me` now returns `{ principal: { kind: "user", userId: "gh_<id>", workspaceId: "…" } }`.
-5. Agents → **New agent** → a name and role → the config tab shows v1 on the `anthropic-api` runtime → **Start chat** → post a message → the answer streams in. That is demo 1 by hand; §6 scripts it.
+5. `/plugins/anthropic-api` → paste your Anthropic key → Ready. Then Agents → **New agent** → a name and role → the config tab shows v1 on the `anthropic-api` runtime → **Start chat** → post a message → the answer streams in. That is demo 1 by hand; §6 scripts it. Without the key the post's task fails `no-api-key` and names that page.
 
 ## 3. Preview environment
 
@@ -126,7 +126,6 @@ pnpm exec wrangler secret put SESSION_SECRET --env preview
 pnpm exec wrangler secret put WORKSPACE_KEK --env preview
 pnpm exec wrangler secret put GITHUB_CLIENT_ID --env preview        # a second OAuth app, callback on the preview origin
 pnpm exec wrangler secret put GITHUB_CLIENT_SECRET --env preview
-pnpm exec wrangler secret put ANTHROPIC_API_KEY --env preview
 pnpm exec wrangler secret put AGENTIC_DEV_LOGIN --env preview       # ≥ 16 random chars; preview only
 ```
 
@@ -150,7 +149,7 @@ pnpm dev
 
 `scripts/dev.mjs` (Node only, Windows and Linux) does, in order:
 
-1. **Secrets.** If `apps/web/.dev.vars` is missing it is generated: a random `SESSION_SECRET` (48 chars), `WORKSPACE_KEK` (base64 of 32 bytes) and `AGENTIC_DEV_LOGIN` (32 chars), plus `ANTHROPIC_API_KEY` copied from your environment when it is set there — otherwise a commented placeholder and a warning (agents on the `anthropic-api` runtime fail `no-api-key` until you add the key and restart). An existing file is never touched; delete it to regenerate. `apps/web/.dev.vars.example` documents every line; `.dev.vars` stays ignored.
+1. **Secrets.** If `apps/web/.dev.vars` is missing it is generated: a random `SESSION_SECRET` (48 chars), `WORKSPACE_KEK` (base64 of 32 bytes) and `AGENTIC_DEV_LOGIN` (32 chars). No Anthropic key (#231): once signed in, add yours at `http://localhost:8787/plugins/anthropic-api` — it is sealed in the workspace's Registry under this `WORKSPACE_KEK` and survives restarts; the log prints the link. An existing file is never touched — deleting it to regenerate draws a new `WORKSPACE_KEK`, and every key stored under the old one can no longer be opened (enter it again). A file from before #231 may still carry `ANTHROPIC_API_KEY`: it is ignored (the log says so) and the line can be deleted by hand. `apps/web/.dev.vars.example` documents every line; `.dev.vars` stays ignored.
 2. **Build.** `pnpm build` runs only when `apps/web/dist` is missing or older than any file under `apps/web/src` or `packages/*/src` (mtime check); `pnpm dev --rebuild` forces it. There is no hot reload of the Worker: after a source change, Ctrl+C and `pnpm dev` again.
 3. **Serve.** `wrangler dev` over `dist/` on http://localhost:8787 (Durable Objects and R2 simulated) in the foreground, after printing the one-click sign-in link:
 
@@ -178,7 +177,7 @@ pnpm --filter @agentic/web test:workers      # the Worker + ActorHost inside wor
 pnpm --filter @agentic/web preview           # wrangler dev alone, when dist/ and .dev.vars are already there
 ```
 
-With `ANTHROPIC_API_KEY` in `.dev.vars`, "New agent" → Config → "Start chat" → a message streams an answer from the platform-managed session (the manual check). The scripted version is the demo 1 smoke against the local Worker started by `pnpm dev` (§6): `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<the value in .dev.vars> pnpm --filter @agentic/web smoke:demo1`.
+With your key set at `/plugins/anthropic-api`, "New agent" → Config → "Start chat" → a message streams an answer from the platform-managed session (the manual check). The scripted version is the demo 1 smoke against the local Worker started by `pnpm dev` (§6): `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<the value in .dev.vars> ANTHROPIC_API_KEY=<your key> pnpm --filter @agentic/web smoke:demo1` — the key comes from the shell running the smoke, which stores it in the fresh workspace.
 
 Every line of `apps/web/.dev.vars` (never committed):
 
@@ -186,7 +185,6 @@ Every line of `apps/web/.dev.vars` (never committed):
 SESSION_SECRET=<at least 32 random characters>
 WORKSPACE_KEK=<base64 of 32 random bytes>
 AGENTIC_DEV_LOGIN=<at least 16 random characters: mounts /auth/dev-login; never on production>
-ANTHROPIC_API_KEY=<the key the anthropic-api runtime uses>
 GITHUB_CLIENT_ID=<optional: an OAuth app whose callback is http://localhost:8787/auth/callback>
 GITHUB_CLIENT_SECRET=<its secret>
 ```
@@ -231,7 +229,7 @@ console.log(await r.json());   // { machineId, pairingCode, expiresAt }
 On the machine, as the user who owns the Claude Code accounts:
 
 1. Unpack the zip to a folder that stays put, e.g. `C:\agentic\daemon`.
-2. Add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `node bin\agentic-daemon.mjs env add --name Work --root C:\src\work [--concurrency 2] [--account me@work.example]` writes `%APPDATA%\agentic\environments.json` (atomically, owner-only) and gives the environment its own profile folder `%APPDATA%\agentic\profiles\<id>`; `env list` and `env rm <id>` do the rest. Sign each one in once: `node bin\agentic-daemon.mjs env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`). This step can also come after step 3: a daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored.
+2. Add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `node bin\agentic-daemon.mjs env add --name Work --root C:\src\work [--concurrency 2] [--account me@work.example]` writes `%APPDATA%\agentic\environments.json` (atomically, owner-only) and gives the environment its own profile folder `%APPDATA%\agentic\profiles\<id>`; `env list` and `env rm <id>` do the rest. Sign each one in once: `node bin\agentic-daemon.mjs env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`). This step can also come after step 3: a daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored. To let the Machine page add environments instead, allow the folders on the machine: `node bin\agentic-daemon.mjs policy allow-root C:\src` (off by default; the web never sees past those folders or into `%APPDATA%\agentic`; #238, `apps/daemon/README.md`).
 3. In PowerShell, from the folder:
 
    ```powershell
@@ -269,7 +267,7 @@ Stop-ScheduledTask -TaskName agentic-daemon; Start-ScheduledTask -TaskName agent
 
 ## 6. Demo 1 smoke (`smoke:demo1`, #35)
 
-Sign in, create an agent on the `anthropic-api` runtime, open a direct chat, post, watch the answer stream — as a Playwright spec (`apps/web/e2e/demo1.spec.ts`, config `playwright.demo1.config.ts`) against a deployed Worker. It signs in through the preview-only dev login, so the Worker needs `AGENTIC_DEV_LOGIN` and `ANTHROPIC_API_KEY` set (§3).
+Sign in, create an agent on the `anthropic-api` runtime, open a direct chat, post, watch the answer stream — as a Playwright spec (`apps/web/e2e/demo1.spec.ts`, config `playwright.demo1.config.ts`) against a deployed Worker. It signs in through the preview-only dev login, so the Worker needs `AGENTIC_DEV_LOGIN` set (§3); the Anthropic key comes from `ANTHROPIC_API_KEY` in the shell running the smoke, which stores it as the fresh workspace's `anthropic-api-key` (the Worker holds none, #231).
 
 ```sh
 pnpm --filter @agentic/web exec playwright install chromium      # once
@@ -278,7 +276,7 @@ BASE_URL=https://agentic-web-preview.<subdomain>.workers.dev AGENTIC_DEV_LOGIN=<
 
 On Windows PowerShell: `$env:BASE_URL='https://…'; $env:AGENTIC_DEV_LOGIN='…'; pnpm --filter @agentic/web smoke:demo1`.
 
-The same smoke runs against the local Worker `pnpm dev` starts (§4; `ANTHROPIC_API_KEY` in `apps/web/.dev.vars`, `AGENTIC_DEV_LOGIN` the value the file holds) as `BASE_URL=http://localhost:8787`. Without the key every step up to the post passes and the last assertion names the missing key — the task fails `session-open` (`no-api-key`) on the platform.
+The same smoke runs against the local Worker `pnpm dev` starts (§4; `AGENTIC_DEV_LOGIN` the value `apps/web/.dev.vars` holds, `ANTHROPIC_API_KEY` in your shell) as `BASE_URL=http://localhost:8787`. Without `ANTHROPIC_API_KEY` in the shell the smoke is skipped; with a bad key every step up to the post passes and the last assertion fails on the missing answer.
 
 Each run signs in as a fresh `dev_demo1-<stamp>` identity (set `DEMO1_USER` to reuse one), so the roster starts empty and the recording shows the whole flow: the empty roster → "New agent" → Ada on the platform runtime → her Config tab, a saved version (v2 in the rail) → "Start chat" → the message → Ada's answer streaming in. Video is always recorded to `apps/web/test-results/demo1/**/video.webm` (the artefact the issue asks for); the HTML report lands in `apps/web/playwright-report/demo1`. The same walk-through runs offline in CI with the mock model: `apps/web/__tests__/pages/demo1-live.test.tsx` (the pages on the live harness) and `apps/web/__tests__/workers/demo1.test.ts` (dev login + the actors inside workerd).
 
@@ -335,7 +333,6 @@ A rollback restores code, not Durable Object data. If the older version cannot r
 | `SESSION_SECRET` | signs everyone out; agent tokens and OAuth transients in flight become invalid. **Machine tokens keep working** — the Machine actor stores a SHA-256 of the token and verifies against that, not the secret |
 | `WORKSPACE_KEK` | every stored Registry secret becomes unreadable — users must re-enter their BYO keys (`Registry.setSecret`); rotate only with a re-entry plan |
 | `GITHUB_CLIENT_SECRET` | new logins use the new secret at once; existing sessions are unaffected |
-| `ANTHROPIC_API_KEY` | the next `anthropic-api` session uses the new key; a running session keeps its client until it ends |
 | `AGENTIC_DEV_LOGIN` | the scripted smokes need the new value; unset it (`wrangler secret delete`) to remove the route |
 
 Revoke a machine with `Machine.revoke()` (the daemon is refused on its next dial and every later one); a lost `credentials.json` on a machine is the same case — revoke, then re-pair.
@@ -356,9 +353,8 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 |---|---|---|
 | Home's "Today" panel on the platform | every page reads the actors in live mode (`dataMode() === 'live'`; #144 the machine pages, #145 Schedules / Plugins / Settings, #146 Home, Tasks, History and Usage over the TaskIndex, the Audit log and the month's Ledger) except Home's "Today" panel, which does not read the schedules yet — the Schedules page lists them. Machine state is also `Machine.get()` / `Machine.doctor()`, or the MCP surface's `machines_list`, `environments_list`, `environments_doctor` | follow-up of #146 |
 | Agent form on the platform: runtime, environment, approval rules, budgets | the New-agent dialog creates v1 on `anthropic-api`; other fields via `Agent.update(patch, reason)` | follow-up of #25 / #35 |
-| Plugins: the Registry is not load-bearing | `PluginManifest` and the Registry actor (enable / disable / configure / grant / dependents / sealed secrets) are complete, but nothing in production registers a plugin, so the live Plugins page always reads "No plugins installed"; `requireEnabled` has no caller, so disabling a plugin gates nothing; `configure` never validates against the manifest; the runtime is a hard-coded branch in `routing/factory.ts`, memory and learning are static imports, a stored MCP connector is never read by a session, and `@agentic/a2a` is not mounted | #224 (decisions 2026-09-19) |
-| Adding a working root from the web | the folder picker (#193) browses and creates worktrees only inside an environment's `cwdRoots`; a new root is added on the machine, not from the web yet — `agentic-daemon env add --id <id> --replace --name … --root …`, or an edit of `environments.json`; the running daemon picks it up without a restart (#235) | #236 – #239 (decisions 2026-09-19 (c)) |
-| Per-workspace BYO Anthropic key (Registry secret) | the deployment's `ANTHROPIC_API_KEY` serves every workspace (#35) | #229 – #231, #233 (decisions 2026-09-19 (b): the deployment key is removed) |
+| Plugins beyond the runtimes | the build's plugins are listed and configured at `/plugins` and the runtimes are load-bearing (#229 – #231, #233: `Routing.run` gates on them, the `anthropic-api` key is the workspace's Registry secret); memory, learning and notification channels are still wired statically, a stored MCP connector is never read by a session, and `@agentic/a2a` is not mounted | #240 – #246 (decisions 2026-09-19) |
+| Adding a working root from the web | the daemon answers `env.request` under its machine-local `policy.json` (#238: off until `agentic-daemon policy allow-root <dir>` or `pair --allow-root <dir>`, then roots only inside the allowed folders), but the Machine actor's request and the Machine page are not wired yet; until then a root is added on the machine — `agentic-daemon env add --id <id> --replace --name … --root …`, picked up without a restart (#235) | #237, #239 (decisions 2026-09-19 (c)) |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |
 | Web Push channel (VAPID keys) | no channels; the Inbox holds notifications (`Inbox.list`) | — (architecture §3) |

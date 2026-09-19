@@ -12,7 +12,7 @@ import { fetchTransport } from '@sigx/actors/client';
 import { SELF } from 'cloudflare:test';
 import { chatKeyOf, routingKeyOf } from '../../src/actors/keys';
 import { runActivation, unknownAgent } from '../../src/pages/chat/live';
-import { overHttp, signIn } from './http';
+import { overHttp, setAnthropicKey, signIn } from './http';
 
 const userId = 'gh_chat';
 const WS = userId as WorkspaceId;
@@ -50,6 +50,7 @@ async function until(check: () => boolean, what: string, timeoutMs = 10_000): Pr
 describe('worker: a post activates an agent — task, route, session, and the chat’s live view', () => {
     it('shows the status entry and the answer on the live subscription', async () => {
         const cookie = await signIn(userId);
+        await setAnthropicKey(WS, cookie);
         const ws = overHttp(Workspace, workspaceKey(WS), cookie);
         const { agentId } = await ws.createAgent({ name: 'Ada' });
         await overHttp(AgentActor, agentKey(WS, agentId as AgentId), cookie).update({ name: 'Ada', instructions: 'Be brief.', execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } }, 'create');
