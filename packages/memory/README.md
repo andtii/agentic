@@ -56,7 +56,7 @@ Known limitations of the round trip default → flat → default: exactly the fo
 
 ## Plugin manifests (`src/manifest.ts`, #228)
 
-`memoryDefaultPlugin` (`agentic.memory.default`) and `memoryFlatPlugin` (`agentic.memory.flat`) are the `PluginManifest`s (PLG-02) of the two plugins above, with the ids and versions the plugins report; `MEMORY_PLUGINS` lists both, the default first. `memory` is a single-slot kind: a workspace runs one at a time. Both declare `memory:read` and `memory:write`, no secrets and no config yet; `capabilities` names the retrieval and the export fidelity (`export:full` / `export:partial`).
+`memoryDefaultPlugin` (`agentic.memory.default`) and `memoryFlatPlugin` (`agentic.memory.flat`) are the `PluginManifest`s (PLG-02) of the two plugins above, with the ids and versions the plugins report; `MEMORY_PLUGINS` lists both, the default first. `memory` is a single-slot kind: a workspace runs one at a time. Both declare `memory:read` and `memory:write`, no secrets, and one config key, `retrievalLimit` (integer 0–50, default 8: the memories a session starts with — the platform applies it to whichever plugin is active, #242); `capabilities` names the retrieval and the export fidelity (`export:full` / `export:partial`).
 
 ## Conformance
 

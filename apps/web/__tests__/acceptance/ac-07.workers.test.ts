@@ -15,7 +15,7 @@
  */
 import type { EnvironmentId, MachineId, TaskId } from '@agentic/core';
 import { inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
-import { connectDaemon, daemonFor, edges, opens, signInAs, until, type Actor, type DaemonLink } from './workers';
+import { SCENARIO_MS, connectDaemon, daemonFor, edges, opens, signInAs, until, type Actor, type DaemonLink } from './workers';
 
 const E1 = 'env_laptop' as EnvironmentId;
 
@@ -36,7 +36,8 @@ async function offlineMachine(me: Actor, name: string): Promise<{ machineId: Mac
     return { machineId, token, daemon };
 }
 
-describe('AC-07: the selected machine is offline', () => {
+// Each policy first takes a machine online and offline again, then routes: several waits in a row (#179).
+describe('AC-07: the selected machine is offline', { timeout: SCENARIO_MS }, () => {
     it('policy queue: the task waits for ITS machine — another machine with the same environment id is not used — and runs there when it returns', async () => {
         const me = await signInAs('ac07_queue');
         const laptop = await offlineMachine(me, 'laptop');

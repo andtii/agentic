@@ -34,7 +34,7 @@
  * `files` port.
  */
 
-import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MemoryEntry, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
 import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -47,6 +47,7 @@ import { Memory, memoryActorKey } from '../memory/index.js';
 import type { RequestResolvedEvent } from '../policy/requests.js';
 import type { PlatformInputRequest, PlatformRequestRef } from '../session/actor.js';
 import { checkDepth, TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
+import type { SessionMemory } from '../task/driver.js';
 import { readChatFile } from './files.js';
 import { MENTION_CONTEXT_WINDOW, mentionContract } from './mentions.js';
 import { routingKey } from './key.js';
@@ -77,6 +78,12 @@ export interface ActorToolPortsOptions {
     readonly sessions?: () => AnyActorDefinition;
     /** Where chat attachment bytes live (#203); without it there is no `files` port and `chat_file_read` reports it unavailable. */
     readonly files?: ChatFileStore;
+    /**
+     * The session's memory (#242): the workspace's active memory plugin (`memoryAccess` over the spec's gate). `{ off }`
+     * → `memory_search` / `memory_remember` stay listed and answer why, so the agent learns memory is off. Absent → the
+     * Memory actor of the agent's own scope, as before the catalogue.
+     */
+    readonly memory?: SessionMemory;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -117,7 +124,12 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
     const { principal, chatId } = options;
     const { workspaceId, agentId, sessionId, taskId } = principal;
     const as = <D extends AnyActorDefinition>(def: D, key: string): ActorClientWith<D> => actor(def, key).with({ context: asPrincipal(principal) }) as ActorClientWith<D>;
-    const memory = () => as(Memory, memoryActorKey(workspaceId, agentMemoryScope(agentId)));
+    const memory = (): Pick<MemoryStore, 'query' | 'put'> => {
+        const access = options.memory;
+        if (!access) return as(Memory, memoryActorKey(workspaceId, agentMemoryScope(agentId)));
+        if ('off' in access) throw new ToolCallError('unsupported', access.off);
+        return access.open(agentMemoryScope(agentId), principal);
+    };
     const task = (id: TaskId) => as(TaskActor, taskKey(workspaceId, id));
     const routing = (what: string): RoutingClient => {
         const def = options.routing?.();
@@ -256,8 +268,8 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
     return {
         ...(files ? { files } : {}),
         memory: {
-            search: (query) => memory().query(query),
-            remember: (entry): Promise<MemoryEntry> =>
+            search: async (query) => memory().query(query),
+            remember: async (entry): Promise<MemoryEntry> =>
                 memory().put({
                     ...entry,
                     provenance: { ...entry.provenance, ...(sessionId ? { sessionId } : {}), ...(taskId ? { taskId } : {}) }

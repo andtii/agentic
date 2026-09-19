@@ -37,12 +37,12 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
         const cookie = await signIn(userId);
         const registry = registryOverHttp(WS, cookie);
 
-        // A fresh workspace: every plugin of the build, enabled, and no key yet.
+        // A fresh workspace: every plugin of the build, enabled but the flat memory plugin (#242), and no key yet.
         const fresh = await registry.overview();
         expect(fresh.plugins.map((p) => [p.manifest.id, p.enabled, p.builtin])).toEqual([
             ['agentic.learning.default', true, true],
             ['agentic.memory.default', true, true],
-            ['agentic.memory.flat', true, true],
+            ['agentic.memory.flat', false, true],
             // Off until the owner sets it up (#244).
             ['agentic.notify.web-push', false, true],
             [ANTHROPIC_API_PLUGIN_ID, true, true],

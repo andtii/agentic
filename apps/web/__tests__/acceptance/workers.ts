@@ -26,12 +26,21 @@ export const Session = { type: 'session' } as unknown as SessionActor;
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Poll until `check()` holds. */
-export async function until(check: () => Promise<boolean> | boolean, what: string, timeoutMs = 10_000): Promise<void> {
+/**
+ * Budgets for the slow Windows runner (#179): there the pool runs ~10× slower than a dev box and a single Durable
+ * Object turn can hold for 7–10 s, so a wait that takes 2 s locally needs tens of seconds. `WAIT_MS` bounds one
+ * wait; `SCENARIO_MS` is the test timeout of a scenario chaining several — larger than any single wait, so a stuck
+ * step fails with its own message (and the task record, for `settled`) instead of a bare "Test timed out".
+ */
+export const WAIT_MS = 30_000;
+export const SCENARIO_MS = 150_000;
+
+/** Poll until `check()` holds. Every poll is a request into the pool: poll gently, the runner is starved already. */
+export async function until(check: () => Promise<boolean> | boolean, what: string, timeoutMs = WAIT_MS): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!(await check())) {
         if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-        await sleep(25);
+        await sleep(50);
     }
 }
 
