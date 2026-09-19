@@ -1,4 +1,4 @@
-# Multi-account environments (Claude Code)
+# Multi-account environments (Claude Code, Copilot CLI, Codex)
 
 How three accounts on one machine are kept apart, what proves it, and what is
 verified on which OS. Requirements EXE-04 (multiple accounts), EXE-05 (starting
@@ -141,6 +141,28 @@ above, all three signed in as different accounts.
    the daemon's variables never reach a child.
 7. macOS only, when someone can: repeat 1–4 and note whether the CLI's Keychain
    entry is per config dir. Until then leave `authStatus` `unknown` on `darwin`.
+
+## Copilot CLI (#319, #321)
+
+Each Copilot CLI environment gets its own `COPILOT_HOME`, which is its profile dir. The driver starts one Copilot runtime per environment with that home. Neither the runtime nor `env login` gets the parent's `GH_TOKEN`, `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN` or the enterprise variants, with or without a profile. `agentic-daemon env login <id>` runs `copilot login` under the profile, and the token goes to the OS credential store under that account.
+
+**What is not isolated.** When a profile has no Copilot login of its own, Copilot falls back to `gh auth token`. The GitHub CLI reads its token from the OS keyring, which is the same for every environment on the machine whatever its config dir. So an unsigned profile runs on the machine's `gh` account. Verified against Copilot CLI 1.0.85: an empty profile reported `authType: gh-cli`. The doctor reports this as `shared-login` (a warning) and names `env login` as the fix. Copilot prefers the profile's own login once it has one.
+
+**Checklist (real CLI).**
+1. `agentic-daemon env add --name octo --runtime copilot-cli --root <dir>`
+2. `agentic-daemon env login env_octo`
+3. `agentic-daemon doctor` should report `auth-ok (<login>)`, not `shared-login`.
+4. `/usage` Limits should show "Premium requests" with the same used and limit numbers as `copilot` → `/usage`.
+
+## Codex (#320, #321)
+
+Each Codex environment gets its own `CODEX_HOME`, which is its profile dir, where `auth.json` and `config.toml` live. The driver starts `codex app-server` with that home and without the parent's `OPENAI_*` variables or `CODEX_HOME`, with or without a profile. `agentic-daemon env login <id>` runs `codex login` under the profile, using the Codex CLI the daemon ships. Codex also loads MCP servers from the profile's own `config.toml`, so keep that file to what the account needs.
+
+**Checklist (real CLI).**
+1. `agentic-daemon env add --name codex --runtime codex-cli --root <dir>`
+2. `agentic-daemon env login env_codex`
+3. `agentic-daemon doctor` should report `auth-ok (<email>)`.
+4. `/usage` Limits should show "Current session" and "Current week" matching `codex` → `/status`. An API-key login shows "not reported", with the reason.
 
 ## Out of scope here
 
