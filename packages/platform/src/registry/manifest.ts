@@ -40,6 +40,18 @@ export function assertPluginManifest(value: unknown): asserts value is PluginMan
     for (const p of m.permissions as unknown[]) {
         if (!isRecord(p) || !isPermissionScope(p.scope) || typeof p.reason !== 'string') bad(`permission ${JSON.stringify(p)}`);
     }
+    // Optional, never null: `secrets` is either absent or a list.
+    const secrets = m.secrets === undefined ? [] : m.secrets;
+    if (!Array.isArray(secrets)) bad('secrets');
+    const scopes = (m.permissions as { scope: PermissionScope }[]).map((p) => p.scope);
+    for (const s of secrets as unknown[]) {
+        if (!isRecord(s) || typeof s.name !== 'string' || !NAME_RE.test(s.name) || typeof s.title !== 'string' || typeof s.description !== 'string' || typeof s.required !== 'boolean') {
+            bad(`secret ${JSON.stringify(s)}`);
+        }
+        // PLG-04: a secret the manifest names is one it must ask for.
+        const name = (s as { name: string }).name;
+        if (!scopeCovered(scopes, `secret:${name}`)) bad(`secret "${name}" needs a secret:${name} permission`);
+    }
     if (!isRecord(m.compat) || typeof m.compat.platform !== 'string' || typeof m.compat.core !== 'string') bad('compat');
 }
 
