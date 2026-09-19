@@ -4,7 +4,7 @@
  * actor. Live reads (AC-06), the composer → `Chat.post` → Task → Routing
  * path, membership dialogs, and the topbar contribution.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ChatId, TaskId } from '@agentic/core';
 import { Chat, TaskActor, Workspace, taskKey, workspaceKey } from '@agentic/platform';
 import { agentKey, routingKey } from '@agentic/platform';
@@ -162,6 +162,24 @@ describe('/chats (live)', () => {
         expect(dom.querySelector('[data-chat-list][data-wide]')).not.toBeNull();
         expect(texts(dom.querySelectorAll('[data-chat-title]'))).toEqual(['Atlas, Forge', 'Atlas']);
         expect(texts(dom.querySelectorAll('[data-chat-last]'))).toEqual(['You: newer', 'You: older']);
+        setDataMode('mock');
+    });
+
+    it('orders chats whose last activity shares a millisecond by creation, newest first (#175)', async () => {
+        const fixed = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+        try {
+            const { chat, atlas } = await seedChat();
+            await chat.post('first');
+            const second = await h.app.as(owner).actor(Workspace, workspaceKey(WS)).createChat({ title: 'Second' });
+            const other = h.app.as(owner).actor(Chat, chatKeyOf(USER, second.chatId));
+            await other.addAgent(atlas, 'all');
+            await other.post('second');
+            const dom = await mountLive('/chats', h);
+            await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
+            expect(texts(dom.querySelectorAll('[data-chat-last]'))).toEqual(['You: second', 'You: first']);
+        } finally {
+            fixed.mockRestore();
+        }
         setDataMode('mock');
     });
 

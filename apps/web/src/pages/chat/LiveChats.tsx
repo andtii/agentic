@@ -83,9 +83,11 @@ export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: Age
     return {
         rows: (currentId) => {
             const marks = readMarks(viewer.workspaceId);
+            // `current()` is in the Workspace index's order (creation), so a tie in the same millisecond goes to the later chat (#175).
             return current()
-                .map((r) => chatRow(r.id, r.summary, r.newest, directory.lookup, r.id === currentId ? Number.POSITIVE_INFINITY : marks[r.id]))
-                .sort((a, b) => b.updatedAt - a.updatedAt);
+                .map((r, order) => ({ order, row: chatRow(r.id, r.summary, r.newest, directory.lookup, r.id === currentId ? Number.POSITIVE_INFINITY : marks[r.id]) }))
+                .sort((a, b) => b.row.updatedAt - a.row.updatedAt || b.order - a.order)
+                .map((r) => r.row);
         },
         ids: () => (marksLoaded.value ? (reads.value ?? []).map((r) => r.id) : []),
         report(read) {
