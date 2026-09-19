@@ -34,7 +34,7 @@ const TOOL_GUIDE: Readonly<Record<string, string>> = {
     memory_search: 'look up what you already know before asking or guessing',
     memory_remember: 'keep facts, preferences and lessons that outlive this session',
     delegate: 'hand work to a collaborator and wait for its result',
-    chat_post: 'speak in the chat; mention an agent to address it, attach chat files by their agentic-file: URI',
+    chat_post: 'speak in the chat; an agent id in `mentions` starts that agent, which answers in the chat; attach chat files by their agentic-file: URI',
     chat_file_read: 'read a file attached to the chat by its agentic-file: URI',
     task_report: 'report progress, a blocker, or the final result of your task',
     ask_user: 'ask the user only for a decision that is theirs to make'
@@ -78,7 +78,7 @@ export function chatSection(roster: ChatRoster, tools: readonly string[]): strin
     if (roster.members.some((m) => m.agentId !== roster.self)) {
         const ways = [
             tools.includes('delegate') ? "`delegate` with the agent's id as `assignee`, for work you need back as a result" : '',
-            tools.includes('chat_post') ? '`chat_post` mentioning @Name, to speak to it in the chat' : ''
+            tools.includes('chat_post') ? "`chat_post` with the agent's id in `mentions`, to start it on your message — it answers in the chat, not to you" : ''
         ].filter(Boolean);
         paragraphs.push(
             ways.length
