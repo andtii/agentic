@@ -4,7 +4,7 @@ import type { AgentId, MessageId, TaskId } from '@agentic/core';
 import type { ChatSummary, IndexedEntry, TaskIndexRow } from '@agentic/platform';
 import { matchingChats } from '../../src/pages/chat/ChatList';
 import { settingsChange } from '../../src/pages/chat/ChatSettingsDialog';
-import { chatRow, chatTasks, entryTranscript, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, type AgentIdentity } from '../../src/pages/chat/live';
+import { chatRow, chatTasks, entryTranscript, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
 import { baselineReadMarks, loadReadMarks, markSeen, readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
 import { zoneFormat } from '../../src/time';
 
@@ -53,6 +53,23 @@ describe('chatTasks', () => {
         const mixed = chatTasks([row('old', { chatId: 'c1' as never, status: 'completed' }), row('old-kid', { parentId: 'old' as TaskId })], 'c1');
         expect(stopTargets(mixed).map((t) => t.id)).toEqual(['old-kid']);
         expect(stopTargets(chatTasks([row('done', { chatId: 'c1' as never, status: 'cancelled' })], 'c1'))).toEqual([]);
+    });
+
+    it("a member working a delegated task of this chat reads active; settled, queued or other chats' work does not (#258)", () => {
+        const summary = { seq: 1, members: { a1: { since: 0, historyFrom: 0 }, a2: { since: 0, historyFrom: 0 }, a3: { since: 0, historyFrom: 0 } }, coordinator: 'a1', activeSessions: { a1: 's1' } } as unknown as ChatSummary;
+        const tree = [
+            row('root', { chatId: 'c1' as never, status: 'waiting', createdAt: 1 }),
+            row('kid', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a2' as AgentId, createdAt: 2 }),
+            row('queued', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a3' as AgentId, status: 'queued', createdAt: 3 }),
+            row('elsewhere', { chatId: 'c2' as never, assignee: 'a3' as AgentId })
+        ];
+        expect(workingAgents(tree, 'c1')).toEqual(new Set(['a2']));
+        expect(membersOf(summary, new Set(), workingAgents(tree, 'c1')).map((m) => [m.agentId, m.status])).toEqual([['a1', 'active'], ['a2', 'active'], ['a3', 'idle']]);
+        // An open request still reads WAITING first.
+        expect(membersOf(summary, new Set(['a2']), workingAgents(tree, 'c1'))[1]!.status).toBe('waiting');
+        // Beyond the panel's cap: status still counts every row.
+        const many = [row('r', { chatId: 'c1' as never, createdAt: 1 }), ...Array.from({ length: 12 }, (_, i) => row(`k${i}`, { parentId: 'r' as TaskId, origin: 'agent', depth: 1, assignee: (i === 11 ? 'a3' : 'a2') as AgentId, status: i === 11 ? 'active' : 'completed', createdAt: 2 + i }))];
+        expect(workingAgents(many, 'c1').has('a3')).toBe(true);
     });
 
     it('what could not be stopped is named by objective, once (COL-12)', () => {

@@ -74,12 +74,15 @@ const NOBODY: ReadonlySet<string> = new Set();
 /**
  * `Chat.get()` → the members as the panel and the composer read them. A
  * member in `waiting` has a request open in this chat (`openRequests`) —
- * it reads WAITING, ahead of its session being active.
+ * it reads WAITING, ahead of its session being active. A member reads
+ * ACTIVE while the chat runs a session for it, or while it works a task of
+ * this chat's tree (`working`, #258) — a delegated child runs outside the
+ * chat, so it never shows in `activeSessions`.
  */
-export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY): MockChatMember[] {
+export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] || working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {})
@@ -234,6 +237,24 @@ export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: nu
         for (const c of [...(children.get(r.id) ?? [])].sort((a, b) => a.createdAt - b.createdAt)) visit(c, depth + 1);
     };
     for (const r of roots) visit(r, 0);
+    return out;
+}
+
+/** The agents working a task of this chat's tree right now (#258): each `active` row whose chain of parents ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. */
+export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
+    const byId = new Map<string, TaskIndexRow>(rows.map((r) => [r.id, r]));
+    const inChat = new Map<string, boolean>();
+    const belongs = (r: TaskIndexRow): boolean => {
+        const known = inChat.get(r.id);
+        if (known !== undefined) return known;
+        inChat.set(r.id, false); // a cycle, however unlikely, ends here
+        const parent = r.parentId === undefined ? undefined : byId.get(r.parentId);
+        const yes = r.parentId === undefined ? r.chatId === chatId : parent !== undefined && belongs(parent);
+        inChat.set(r.id, yes);
+        return yes;
+    };
+    const out = new Set<string>();
+    for (const r of rows) if (r.status === 'active' && belongs(r)) out.add(r.assignee);
     return out;
 }
 
