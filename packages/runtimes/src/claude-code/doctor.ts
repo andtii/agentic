@@ -3,6 +3,11 @@
  * `CLAUDE_CONFIG_DIR` per account, so two environments on one config dir
  * share credentials and settings — reported as an error, never tolerated.
  * Pure: the auth status of every profile comes in from `inspect`.
+ *
+ * The report travels to the platform as each environment's verdict, and a
+ * profile path never leaves the machine (#274): findings name environments
+ * and the local command that fixes them, never a config dir. The local
+ * `agentic-daemon doctor` adds the paths itself.
  */
 
 import { normalizePath } from '@sigx/ai-agent/coding';
@@ -28,7 +33,9 @@ export const CLAUDE_CODE_DOCTOR_CODES = {
     authOk: 'auth-ok',
     authUnknown: 'auth-unknown',
     authMissing: 'auth-missing',
-    authExpired: 'auth-expired'
+    authExpired: 'auth-expired',
+    /** warn: the profile's files could not be read (a permission, say); only this environment is affected. */
+    profileUnreadable: 'profile-unreadable'
 } as const;
 
 /** The auth finding per `AuthStatus` — one spelling, from the table above. */
@@ -44,15 +51,17 @@ export interface DoctorInput {
     /** The config dir the CLI will actually use: `profileDir`, or the default when there is none. */
     readonly configDir: string;
     readonly inspection: EnvironmentInspection;
+    /** Reading the profile failed: the error's code (`EACCES`, …), never its message, which names the path. */
+    readonly unreadable?: string;
 }
 
 export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
     const findings: DoctorFinding[] = [];
 
-    const byDir = new Map<string, { dir: string; ids: EnvironmentId[]; names: string[] }>();
+    const byDir = new Map<string, { isDefault: boolean; ids: EnvironmentId[]; names: string[] }>();
     for (const { env, configDir } of inputs) {
         const key = configDirKey(configDir);
-        const group = byDir.get(key) ?? { dir: configDir, ids: [], names: [] };
+        const group = byDir.get(key) ?? { isDefault: env.profileDir === undefined, ids: [], names: [] };
         group.ids.push(env.id);
         group.names.push(env.name);
         byDir.set(key, group);
@@ -62,26 +71,36 @@ export function claudeCodeDoctor(inputs: readonly DoctorInput[]): DoctorReport {
         findings.push({
             level: 'error',
             code: CLAUDE_CODE_DOCTOR_CODES.sharedConfigDir,
-            message: `Environments ${group.names.map((n) => `"${n}"`).join(', ')} share the Claude Code config dir ${group.dir}: they would use one account and one set of settings. Give each its own profileDir.`,
+            message: `Environments ${group.names.map((n) => `"${n}"`).join(', ')} share ${group.isDefault ? 'the default Claude Code config dir' : 'one Claude Code profile directory'}: they would use one account and one set of settings. Give each its own profile (\`agentic-daemon env add\` allocates one).`,
             environmentIds: group.ids
         });
     }
 
-    for (const { env, configDir, inspection } of inputs) {
+    for (const { env, inspection, unreadable } of inputs) {
         if (env.profileDir === undefined) {
             findings.push({
                 level: 'warn',
                 code: CLAUDE_CODE_DOCTOR_CODES.defaultConfigDir,
-                message: `Environment "${env.name}" has no profileDir and uses the default Claude Code config dir ${configDir}; it is not isolated from Claude Code run by hand on this machine.`,
+                message: `Environment "${env.name}" has no profile of its own and uses the default Claude Code config dir; it is not isolated from Claude Code run by hand on this machine.`,
                 environmentIds: [env.id]
             });
         }
+        const login = `\`agentic-daemon env login ${env.id}\``;
+        if (unreadable !== undefined) {
+            findings.push({
+                level: 'warn',
+                code: CLAUDE_CODE_DOCTOR_CODES.profileUnreadable,
+                message: `Environment "${env.name}": its profile could not be read (${unreadable}). Run \`agentic-daemon doctor\` on the machine for the path.`,
+                environmentIds: [env.id]
+            });
+            continue;
+        }
         const who = inspection.identity === undefined ? '' : ` (${inspection.identity})`;
-        const auth = `Environment "${env.name}" at ${configDir}: auth ${inspection.authStatus}${who}.`;
+        const auth = `Environment "${env.name}": auth ${inspection.authStatus}${who}.`;
         const code = AUTH_CODES[inspection.authStatus];
         if (inspection.authStatus === 'ok') findings.push({ level: 'info', code, message: auth, environmentIds: [env.id] });
-        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code, message: `${auth} Run \`claude\` with CLAUDE_CONFIG_DIR=${configDir} to check.`, environmentIds: [env.id] });
-        else findings.push({ level: 'warn', code, message: `${auth} Sign in on the machine with \`agentic-daemon env login ${env.id}\`.`, environmentIds: [env.id] });
+        else if (inspection.authStatus === 'unknown') findings.push({ level: 'warn', code, message: `${auth} Check it on the machine with ${login}.`, environmentIds: [env.id] });
+        else findings.push({ level: 'warn', code, message: `${auth} Sign in on the machine with ${login}.`, environmentIds: [env.id] });
     }
 
     return { ok: !findings.some((f) => f.level === 'error'), findings };

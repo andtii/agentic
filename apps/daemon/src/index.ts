@@ -5,7 +5,7 @@
  */
 export { DAEMON_VERSION } from './version.js';
 export { main, parseArgs, type CliContext, type ParsedArgs } from './cli.js';
-export { createDaemon, agentCapabilitiesOf, follows, PlatformToolError, type Daemon, type DaemonDriver, type DaemonOptions } from './daemon.js';
+export { createDaemon, withoutLocalPaths, agentCapabilitiesOf, follows, PlatformToolError, type Daemon, type DaemonDriver, type DaemonOptions } from './daemon.js';
 export { answerFsRequest, checkWithinRoots, gitInfo, withinRoots, type FsOptions, type FsOutcome, type RootCheck } from './fs.js';
 export { builtinDrivers, isDisposable, type DisposableDriver } from './drivers.js';
 export { runDoctor, formatDoctorReport, type DoctorOptions } from './doctor.js';

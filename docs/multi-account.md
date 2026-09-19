@@ -57,6 +57,9 @@ The driver's `doctor(envs)` (`claudeCodeDoctor`) reports, with the codes in
 | `shared-config-dir` | error | two environments resolve to one config dir (paths compared normalised: separators, `..`, trailing slash, case-folded on Windows) — one account, one set of settings. Never tolerated: `doctor.ok` is false. |
 | `default-config-dir` | warn | no `profileDir`; the environment shares the default `~/.claude` with Claude Code run by hand. Two such environments are a `shared-config-dir` error. |
 | `auth-ok` / `auth-missing` / `auth-expired` / `auth-unknown` | info / warn | the profile's sign-in state from `.credentials.json`, with the account e-mail from `.claude.json` when present. |
+| `profile-unreadable` | warn | the profile's files could not be read (a permission, say): that environment only, with the error code. |
+
+These findings travel to the platform as each environment's verdict, so none of them names a path (#274); `agentic-daemon doctor` on the machine adds a `profile-dir` line per environment with its profile directory.
 
 The verdict reaches the platform without anyone running a command:
 
