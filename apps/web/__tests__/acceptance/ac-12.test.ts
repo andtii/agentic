@@ -46,7 +46,7 @@ describe('AC-12: a delegated action that requires approval', () => {
         expect(await me.session(child.sessionId!).request(requestId)).toMatchObject({ request: { requestId, toolName: 'memory_search' }, sessionId: child.sessionId, agentId: bob, taskId: childId, rule: expect.stringContaining('ask') });
         const inbox = h.as(me.principal).actor(h.defs.Inbox, inboxKey(me.ws));
         const rows = await inbox.list();
-        expect(rows).toMatchObject([{ kind: 'approval', title: `${bob} asks for approval: memory_search`, ref: { kind: 'session', sessionId: child.sessionId, requestId }, read: false }]);
+        expect(rows).toMatchObject([{ kind: 'approval', title: `Bob asks for approval: memory_search`, ref: { kind: 'session', sessionId: child.sessionId, requestId }, read: false }]);
         expect(await inbox.unread()).toBe(1);
 
         // The decision goes to the CHILD session — from the inbox card, the chat, or the session page alike.

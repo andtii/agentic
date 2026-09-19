@@ -24,7 +24,7 @@ import { Chat, ChatPage } from '../../src/chat/index';
 import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort } from '../../src/machine/index';
 import { defineInbox, inboxKey } from '../../src/notify/index';
 import { PairingDirectory } from '../../src/pairing/index';
-import { createSessionFactory, createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
+import { answerTaskId, createAnswerFollowUp, createSessionFactory, createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
 import { defineSessionActor, platformCursor, platformRequestId, type CommandSink } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
@@ -51,11 +51,18 @@ const lastToolResultText = (req: ModelRequest): string => {
     return m ? JSON.stringify(m.content) : '';
 };
 
-/** The scripted model: asks once, then answers with what it was told. */
+/**
+ * The scripted model: asks once, then answers with what it was told. Started again with a late answer (#285) it
+ * carries on with the answer instead of asking again.
+ */
 function askingModel() {
     return mockModel({
         modelId: 'claude-test',
-        respond: (req) => (hasToolResult(req) ? { text: `you said: ${lastToolResultText(req)}` } : { toolCalls: [{ name: 'ask_user', input: { question: 'Tea or coffee?', choices: ['tea', 'coffee'] }, id: 'ask_1' }] })
+        respond: (req) => {
+            const said = /Answer: (\w+)/.exec(JSON.stringify(req.messages));
+            if (said) return { text: `carrying on with ${said[1]}` };
+            return hasToolResult(req) ? { text: `you said: ${lastToolResultText(req)}` } : { toolCalls: [{ name: 'ask_user', input: { question: 'Tea or coffee?', choices: ['tea', 'coffee'] }, id: 'ask_1' }] };
+        }
     });
 }
 
@@ -89,17 +96,27 @@ let Inbox: ReturnType<typeof defineInbox>;
 let audit: ReturnType<typeof capturingAuditPort>;
 const daemons: InMemoryDaemon[] = [];
 
-beforeEach(async () => {
+/** The app under test; `quickMs` shortens `ask_user`'s quick window so a question detaches (#285). */
+async function start(quickMs?: number): Promise<void> {
+    const quick = quickMs !== undefined ? { askQuickWaitMs: quickMs } : {};
     audit = capturingAuditPort();
     sockets = new FakeSockets();
     Inbox = defineInbox({});
     const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
-    Session = defineSessionActor({ factory: createSessionFactory({ routing: () => Routing, sessions: () => Session, model: askingModel() }), commands: sink, inbox: () => Inbox, audit });
+    Session = defineSessionActor({
+        factory: createSessionFactory({ routing: () => Routing, sessions: () => Session, model: askingModel(), ...quick }),
+        commands: sink,
+        inbox: () => Inbox,
+        audit,
+        answered: createAnswerFollowUp({ routing: () => Routing })
+    });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, audit });
-    Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
+    Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session, ...quick }) });
     app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Inbox, Chat, ChatPage, Workspace, PairingDirectory]);
     await app.start();
-});
+}
+
+beforeEach(() => start());
 
 afterEach(async () => {
     for (const d of daemons.splice(0)) d.stop();
@@ -162,7 +179,7 @@ describe('ask_user on the local path (mockModel through createPlatformModelAgent
         expect(info.openRequests).toEqual([requestId]);
         expect((await task('t_1').get()).wait).toEqual({ kind: 'input', requestId, sessionId: sid });
         // The Inbox: one unread `input` row deep-linked to the request; the chat: the paired status.
-        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `${ADA} needs input`, body: 'Tea or coffee?', read: false, ref: { kind: 'session', sessionId: sid, requestId } }]);
+        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `Ada needs input`, body: 'Tea or coffee?', read: false, ref: { kind: 'session', sessionId: sid, requestId } }]);
         expect(await statuses()).toEqual(['session-started', `request:input:${requestId}`]);
         // The record a card renders: the question, the choices, the tool call's input from the transcript, the running turn.
         const record = (await session(sid).request(requestId))!;
@@ -208,7 +225,7 @@ describe('ask_user on the daemon path (tool.call through the Machine and createT
         const call = sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'session.open');
         expect(call).toBeDefined();
         expect((await task('t_2').get()).wait).toEqual({ kind: 'input', requestId, sessionId: sid });
-        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `${ADA} needs input`, body: 'Tea or coffee?', ref: { kind: 'session', sessionId: sid, requestId } }]);
+        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `Ada needs input`, body: 'Tea or coffee?', ref: { kind: 'session', sessionId: sid, requestId } }]);
         expect(await statuses()).toContain(`request:input:${requestId}`);
         expect(sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'tool.result')).toEqual([]);
 
@@ -225,6 +242,126 @@ describe('ask_user on the daemon path (tool.call through the Machine and createT
         expect(evs.filter((e) => e.type === 'request-resolved' && (e as { by: string }).by === 'client')).toHaveLength(1);
         expect(evs.some((e) => e.type === 'turn-end')).toBe(true);
         expect(audit.events.filter((e) => e.kind.startsWith('approval.'))).toEqual([]);
+    });
+});
+
+/** The chat's messages as `author: text`. */
+const messages = async () =>
+    (await chat().history()).entries
+        .map((e) => e.entry)
+        .filter((e) => e.t === 'msg')
+        .map((e) => `${e.author.kind === 'user' ? 'user' : e.author.agentId}: ${e.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')}`);
+const exists = (id: TaskId) =>
+    task(id)
+        .get()
+        .then(
+            () => true,
+            () => false
+        );
+
+describe('a late answer starts the asker again (#285)', () => {
+    beforeEach(async () => {
+        await app.stop();
+        await start(30);
+    });
+
+    it('local path: `pending` ends the turn, the question outlives the session, and the answer is posted and resumes the asker', async () => {
+        await agent();
+        await chat().addAgent(ADA, 'all');
+        const t = await run('t_1', 'decide');
+        await settled('t_1');
+        // The call answered `pending`; the model ended its turn and the task completed — not stuck `waiting`.
+        const done = await task('t_1').get();
+        expect(done.status).toBe('completed');
+        expect(done.result?.text).toContain('pending');
+        const sid = t.sessionId!;
+        const requestId = platformRequestId('ask_1');
+        const closed = await session(sid).get();
+        expect(closed.status).toBe('closed');
+        expect(closed.openRequests).toEqual([requestId]);
+        expect(await session(sid).request(requestId)).toMatchObject({ agentName: 'Ada', detached: true });
+        expect(await inbox().unread()).toBe(1);
+
+        // Answered long after: taken on the closed session, not refused as `closed`.
+        expect((await session(sid).respond(requestId, { type: 'input', answers: 'tea' })).kind).toBe('ack');
+        expect(await session(sid).request(requestId)).toMatchObject({ detached: false, resolved: { outcome: 'input', answers: 'tea' } });
+        expect(await inbox().unread()).toBe(0);
+        // The asker carries on with it, and the answer is in the chat as the person who gave it.
+        const follow = answerTaskId(sid, requestId);
+        await until(() => exists(follow), 'the follow-up task');
+        await settled(follow);
+        const next = await task(follow).get();
+        expect(next).toMatchObject({ status: 'completed', owner: ADA, assignee: ADA, resumeFrom: sid, origin: { kind: 'user', chatId: CHAT } });
+        expect(next.result?.text).toBe('carrying on with tea');
+        expect(await messages()).toContain('user: @Ada — re: “Tea or coffee?” → tea');
+        // An API session's transcript lives in its own record: the follow-up opens fresh, its context carrying the answer.
+        expect((await session(next.sessionId!).get()).spec?.resume).toBeUndefined();
+
+        // A replayed answer starts nobody twice and posts nothing twice.
+        expect((await session(sid).respond(requestId, { type: 'input', answers: 'coffee' }, 'respond:again')).kind).toBe('ack');
+        expect((await messages()).filter((m) => m.includes('Tea or coffee?'))).toHaveLength(1);
+    });
+
+    it('a cancelled question starts nobody', async () => {
+        await agent();
+        await chat().addAgent(ADA, 'all');
+        const t = await run('t_3', 'decide');
+        await settled('t_3');
+        const requestId = platformRequestId('ask_1');
+        expect((await session(t.sessionId!).respond(requestId, { type: 'cancel' })).kind).toBe('ack');
+        expect(await session(t.sessionId!).request(requestId)).toMatchObject({ resolved: { outcome: 'cancel' } });
+        expect(await exists(answerTaskId(t.sessionId!, requestId))).toBe(false);
+        expect((await messages()).filter((m) => m.includes('Tea or coffee?'))).toEqual([]);
+    });
+
+    it('three agents asking at once each get their own answer', async () => {
+        const agents = ['agent_ada', 'agent_bob', 'agent_cy'] as AgentId[];
+        for (const [i, id] of agents.entries()) {
+            await app.as(owner).actor(AgentActor, agentKey(WS, id)).update({ name: ['Ada', 'Bob', 'Cy'][i]!, instructions: 'Be brief.', tools: [{ name: 'ask_user' }], execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } }, 'create');
+            await chat().addAgent(id, 'all');
+        }
+        const started = await Promise.all(
+            agents.map(async (id, i) => {
+                await task(`t_${id}`).create({ objective: 'decide', origin: { kind: 'user', chatId: CHAT, messageId: 'msg_1' as MessageId }, assignee: id, context: [], constraints: {} }, { owner: id });
+                return { id, answer: ['tea', 'coffee', 'water'][i]!, view: await routing().run(`t_${id}` as TaskId) };
+            })
+        );
+        for (const s of started) await settled(`t_${s.id}`);
+        const requestId = platformRequestId('ask_1');
+        await Promise.all(started.map((s) => session(s.view.sessionId!).respond(requestId, { type: 'input', answers: s.answer })));
+        for (const s of started) {
+            const follow = answerTaskId(s.view.sessionId!, requestId);
+            await until(() => exists(follow), `${s.id}'s follow-up`);
+            await settled(follow);
+            expect(await task(follow).get()).toMatchObject({ owner: s.id, result: { text: `carrying on with ${s.answer}` } });
+        }
+        const posted = (await messages()).filter((m) => m.includes('Tea or coffee?')).sort();
+        expect(posted).toEqual(['user: @Ada — re: “Tea or coffee?” → tea', 'user: @Bob — re: “Tea or coffee?” → coffee', 'user: @Cy — re: “Tea or coffee?” → water']);
+    });
+
+    it('daemon path: the tool.call answers `pending`, and a late answer starts the asker again', async () => {
+        const m1 = await machineWithDaemon();
+        await agent({ execution: { runtime: 'in-memory', defaultEnvironmentId: E1, offlinePolicy: 'fail' } });
+        await chat().addAgent(ADA, 'all');
+        const t = await run('t_4', 'decide');
+        await until(() => sockets.frames(machineKey(WS, m1)).some((f) => f.t === 'tool.result'), 'the tool result');
+        expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'tool.result')).toMatchObject({ output: { status: 'pending', questionId: expect.stringMatching(/^ask:/) } });
+        await settled('t_4');
+        expect((await task('t_4').get()).status).toBe('completed');
+        const sid = t.sessionId!;
+        const requestId = (await session(sid).get()).openRequests[0]!;
+        expect(await session(sid).request(requestId)).toMatchObject({ detached: true });
+        const ref = (await session(sid).get()).ref;
+        expect((await session(sid).respond(requestId, { type: 'input', answers: 'coffee' })).kind).toBe('ack');
+        const follow = answerTaskId(sid, requestId);
+        await until(async () => (await exists(follow)) && (await task(follow).get()).sessionId !== undefined, 'the follow-up task to open its session');
+        expect(await messages()).toContain('user: @Ada — re: “Tea or coffee?” → coffee');
+        const next = await task(follow).get();
+        expect(next).toMatchObject({ owner: ADA, resumeFrom: sid, environmentId: E1 });
+        // The daemon's engine keeps its conversation: the follow-up session resumes the asking one's ref, on the same machine.
+        expect((await session(next.sessionId!).get()).spec).toMatchObject({ resume: ref, machineId: m1 });
+        await until(() => sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open').length === 2, 'the second session.open');
+        expect(sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open')[1]).toMatchObject({ spec: { resume: ref } });
     });
 });
 

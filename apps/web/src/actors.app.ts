@@ -49,6 +49,7 @@ import {
     ChatPage,
     LedgerActor,
     Memory,
+    FlatMemory,
     OAuthClients,
     OAuthGrants,
     PAIRING_DIRECTORY_KEY,
@@ -58,6 +59,7 @@ import {
     TaskActor,
     TaskIndex,
     asPrincipal,
+    createAnswerFollowUp,
     createEnvironmentProbe,
     createSessionFactory,
     createToolCallPort,
@@ -212,7 +214,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         usage: ledgerRecorder(),
         learning,
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
-        inbox: () => Inbox
+        inbox: () => Inbox,
+        // A late answer to a detached `ask_user` (#285): posted in the chat, and the asker started again with it.
+        answered: createAnswerFollowUp({ routing: () => Routing })
     });
     const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles });
     const Machine: MachineActor = defineMachineActor({
@@ -241,7 +245,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     const Chat = defineChatActor(withFiles);
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
@@ -296,7 +300,8 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         TaskIndex: byType('task-index') as ActorDefs['TaskIndex'],
         Audit: byType('audit') as ActorDefs['Audit'],
         Ledger: byType('ledger') as ActorDefs['Ledger'],
-        Memory: byType('Memory') as ActorDefs['Memory']
+        Memory: byType('Memory') as ActorDefs['Memory'],
+        FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory']
     };
 }
 

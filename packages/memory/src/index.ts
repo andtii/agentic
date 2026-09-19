@@ -35,8 +35,8 @@ export { MEMORY_STATE_VERSION, MEMORY_KINDS, createMemoryState, memoryId, isExpi
 export type { MemoryStoreOptions, OpenMemoryStore, MemoryPluginOptions, MemoryFidelity } from './store/index.js';
 export { createMemoryStore, liveCount, memoryPlugin, MemoryNotFoundError, DEFAULT_MEMORY_PLUGIN_ID, DEFAULT_MEMORY_PLUGIN_VERSION } from './store/index.js';
 
-export type { FlatUnsupportedField, FlatMemoryEntry, FlatEntryReport, FlatMemoryStoreOptions, FlatMemoryStore, FlatMemoryPluginOptions } from './plugins/flat/index.js';
-export { FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, FLAT_UNSUPPORTED_FIELDS, toFlatEntry, createFlatMemoryStore, flatMemoryPlugin } from './plugins/flat/index.js';
+export type { FlatUnsupportedField, FlatMemoryEntry, FlatEntryReport, FlatRetirement, FlatMemoryState, FlatMemoryStoreOptions, FlatMemoryStore, FlatMemoryPluginOptions } from './plugins/flat/index.js';
+export { FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, FLAT_UNSUPPORTED_FIELDS, FLAT_EXPORT_PAGE, toFlatEntry, createFlatMemoryState, createFlatMemoryStore, flatMemoryPlugin } from './plugins/flat/index.js';
 export { memoryDefaultPlugin, memoryFlatPlugin, MEMORY_PLUGINS } from './manifest.js';
 
 export type { MigrationKindReport, MigrationReport, MigrateOptions, MigrationTarget } from './migrate/index.js';

@@ -296,10 +296,30 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * a lesson learned from it names the task (architecture §8; MEM-07, LRN-05).
              * `run` passes the view it already read; a retry reads the task once.
              */
-            async function work(route: Route, t?: Pick<TaskView, 'objective' | 'context'>): Promise<Pick<SessionOpenSpec, 'objective' | 'context' | 'roster'>> {
-                const { objective, context } = t ?? (await task(route.taskId).get());
+            async function work(route: Route, t?: Pick<TaskView, 'objective' | 'context' | 'resumeFrom'>): Promise<Pick<SessionOpenSpec, 'objective' | 'context' | 'roster' | 'resume'>> {
+                const { objective, context, resumeFrom } = t ?? (await task(route.taskId).get());
                 const roster = await rosterOf(route);
-                return { objective, context, ...(roster ? { roster } : {}) };
+                const resume = resumeFrom ? await resumable(route, resumeFrom) : undefined;
+                return { objective, context, ...(roster ? { roster } : {}), ...(resume !== undefined ? { resume } : {}) };
+            }
+
+            /**
+             * The engine conversation a task continues (#285, `TaskContract.resumeFrom`): the earlier session's `ref`,
+             * when a daemon ran it for the same agent on the same runtime, environment and machine as this placement —
+             * the engine keeps its conversation where it ran. A local (API) session's transcript lives in its own
+             * Session record, so it is never resumed from another. Otherwise nothing: the session opens fresh and the
+             * contract's context (the question, the answer, the chat) carries on.
+             */
+            async function resumable(route: Route, from: SessionId): Promise<SessionOpenSpec['resume']> {
+                try {
+                    const earlier = await session(from).get();
+                    const spec = earlier.spec;
+                    if (!earlier.ref || !spec?.machineId || spec.machineId !== route.machineId) return undefined;
+                    if (spec.agentId !== route.agentId || spec.runtime !== route.runtime || spec.environmentId !== route.environmentId) return undefined;
+                    return ctx.snapshot(earlier.ref);
+                } catch {
+                    return undefined;
+                }
             }
 
             /**
@@ -488,7 +508,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
                             tools: grantedToolNames(route),
                             policy: ctx.snapshot(openSpecPolicy(route)),
-                            ...(placed.connectors.length ? { connectors: placed.connectors } : {})
+                            ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
+                            ...(opening.resume !== undefined ? { resume: opening.resume } : {})
                         },
                         { taskId: route.taskId }
                     );
@@ -850,6 +871,12 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await tellChat(c, ids.workspaceId, route, error, now, newSessionId);
                     });
                     return;
+                }
+                const wait = t.status === 'waiting' ? t.wait : undefined;
+                if (wait && (wait.kind === 'input' || wait.kind === 'approval') && wait.sessionId === sessionId) {
+                    // The turn ended with its question still open (#285: `ask_user` answered `pending`): nothing waits on it in
+                    // this task any more — the answer starts a new one — so the task leaves `waiting` and completes.
+                    await tryTask(() => taskClient.resolveWaiting(ROUTER, `turn ${turnId} ended; request ${wait.requestId} stays open`));
                 }
                 const transcript = await sessionClient.transcript();
                 const text = finalText(transcript, turnId);

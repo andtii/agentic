@@ -7,5 +7,6 @@ export { ROUTING_TYPE, parseRoutingKey, routingKey } from './key.js';
 export { createEnvironmentProbe, locateEnvironment, type EnvironmentProbeOptions, type LocatedEnvironment } from './locate.js';
 export type { RoutingPorts } from './ports.js';
 export { initialRoutingState, type Route, type RouteStatus, type RoutingState } from './state.js';
+export { answerContract, answerPostText, answerTaskId, createAnswerFollowUp, type AnswerFollowUpOptions } from './answers.js';
 export { createToolCallPort, type ToolCallPortOptions } from './tool-call.js';
-export { agentChatKey, answerText, createActorToolPorts, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';
+export { agentChatKey, answerText, ASK_QUICK_WAIT_MS, createActorToolPorts, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';
