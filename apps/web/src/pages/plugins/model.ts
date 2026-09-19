@@ -117,10 +117,14 @@ export function memorySwitchText(report: MemorySwitchReport, nameOf: (pluginId: 
     const to = nameOf(report.to);
     const title = `Make ${to} active?`;
     if (report.entries === 0) return { title, description: `${from} holds no memories yet, so nothing moves. New sessions remember in ${to}.`, scopes: [], confirmLabel: 'Make active' };
-    const parts = [`${plural(report.imported, 'memory', 'memories')} of ${report.entries} move from ${from} to ${to}.`];
-    if (report.skipped) parts.push(`${report.skipped} ${report.skipped === 1 ? 'is' : 'are'} already there or cannot be held, so ${report.skipped === 1 ? 'it stays' : 'they stay'} out.`);
+    const parts = [
+        report.imported === 0
+            ? `Nothing new to move: all ${plural(report.entries, 'memory', 'memories')} in ${from} ${report.entries === 1 ? 'is' : 'are'} already in ${to} or cannot be held there.`
+            : `${plural(report.imported, 'memory', 'memories')} of ${report.entries} move from ${from} to ${to}.`
+    ];
+    if (report.skipped && report.imported > 0) parts.push(`${report.skipped} ${report.skipped === 1 ? 'is' : 'are'} already there or cannot be held, so ${report.skipped === 1 ? 'it stays' : 'they stay'} out.`);
     parts.push(report.droppedFields.length ? `${to} keeps less than ${from}: ${report.droppedFields.join(', ')} ${report.droppedFields.length === 1 ? 'is' : 'are'} dropped.` : 'Nothing is lost.');
     parts.push(`${from} keeps its own copy, so switching back finds it again.`);
     const scopes = report.scopes.map((s) => `${s.scope.startsWith('agent:') ? agentName(s.scope.slice('agent:'.length)) : `Shared: ${s.scope.slice('shared:'.length)}`} · ${plural(s.report.entries, 'memory', 'memories')}`);
-    return { title, description: parts.join(' '), scopes, confirmLabel: `Move ${plural(report.imported, 'memory', 'memories')} and make active` };
+    return { title, description: parts.join(' '), scopes, confirmLabel: report.imported === 0 ? 'Make active' : `Move ${plural(report.imported, 'memory', 'memories')} and make active` };
 }

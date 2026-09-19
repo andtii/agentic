@@ -20,7 +20,10 @@ export type MemoryActorClient = ActorClientWith<typeof Memory>;
 export type FlatMemoryActorClient = ActorClientWith<typeof FlatMemory>;
 
 /** The methods `actorMemoryStore` calls — what the Memory and the FlatMemory actor both answer. */
-export type MemoryStoreClient = Pick<MemoryActorClient, 'put' | 'update' | 'retire' | 'delete' | 'get' | 'query' | 'exportPage' | 'importBatch'>;
+export type MemoryStoreClient = Pick<MemoryActorClient, 'put' | 'update' | 'retire' | 'delete' | 'get' | 'query' | 'exportPage' | 'importBatch'> & Partial<Pick<MemoryActorClient, 'stats'>>;
+
+/** A store over an actor: a `MigrationTarget`, and — when the client answers `stats` — `count()` in one call instead of an export scan. */
+export type ActorMemoryStore = MigrationTarget & { readonly count?: () => Promise<number> };
 
 /** Rows per `importBatch` call and entries per `exportPage`. */
 export const MEMORY_WIRE_BATCH = 100;
@@ -38,9 +41,11 @@ const DEFAULT_FIDELITY: MemoryFidelity['fidelity'] = createMemoryStore().fidelit
 const FLAT_FIDELITY: MemoryFidelity['fidelity'] = createFlatMemoryStore().fidelity;
 
 /** A `MemoryStore` over one Memory (or FlatMemory) actor client; with `fidelity`, a `MigrationTarget` a dry run can ask. */
-export function actorMemoryStore(client: MemoryStoreClient, batch = MEMORY_WIRE_BATCH, fidelity?: MemoryFidelity['fidelity']): MigrationTarget {
-    const store: MigrationTarget = {
+export function actorMemoryStore(client: MemoryStoreClient, batch = MEMORY_WIRE_BATCH, fidelity?: MemoryFidelity['fidelity']): ActorMemoryStore {
+    const stats = client.stats;
+    const store: ActorMemoryStore = {
         ...(fidelity ? { fidelity } : {}),
+        ...(typeof stats === 'function' ? { count: async () => (await stats.call(client)).entries } : {}),
         put: (entry: NewMemoryEntry): Promise<MemoryEntry> => client.put(entry),
         update: (id: string, patch: Partial<Omit<MemoryEntry, 'id'>>): Promise<MemoryEntry> => client.update(id, patch),
         retire: (id: string, why: string): Promise<void> => client.retire(id, why),

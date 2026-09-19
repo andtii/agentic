@@ -37,4 +37,10 @@ describe('memorySwitchText', () => {
         expect(text.scopes).toEqual(['Ada · 2 memories', 'Shared: team · 1 memory']);
         expect(text.confirmLabel).toBe('Move 2 memories and make active');
     });
+
+    it('when everything is already there, says so instead of "Move 0 memories"', () => {
+        const text = memorySwitchText(report({ entries: 3, imported: 0, skipped: 3, scopes: [scope('agent:agent_1', 3)] }), nameOf, agentName);
+        expect(text.description).toBe('Nothing new to move: all 3 memories in Flat memory are already in Memory or cannot be held there. Nothing is lost. Flat memory keeps its own copy, so switching back finds it again.');
+        expect(text.confirmLabel).toBe('Make active');
+    });
 });

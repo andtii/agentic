@@ -65,7 +65,9 @@ export function workspaceMemoryScopes(agents: readonly { readonly id: AgentId; r
     return [...out];
 }
 
-async function count(store: MemoryStore): Promise<number> {
+/** Entries a store holds: one `count()` call when the store has it (the actor-backed ones, via `stats`), else an export scan. */
+async function count(store: MemoryStore & { readonly count?: () => Promise<number> }): Promise<number> {
+    if (typeof store.count === 'function') return store.count();
     let n = 0;
     for await (const _ of store.export()) n++;
     return n;
