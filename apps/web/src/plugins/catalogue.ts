@@ -34,9 +34,9 @@
  * implementation is the Worker's A2A mount (`src/a2a/mount.ts`), which asks
  * the Registry on every request.
  */
-import { a2aServerPlugin } from '@agentic/a2a';
+import { A2A_PEER_PREFIX, a2aPeerRuntime, a2aServerPlugin } from '@agentic/a2a';
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
-import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
+import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInstanceRuntimes, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
@@ -56,12 +56,18 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     claudeCodeQuotaPlugin
 ];
 
-/** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
+/**
+ * Runtime id → where its sessions run. The ids are the runtime plugins' ids: the build's own, and the A2A peers a
+ * workspace adds (`a2a.<id>`, #246), each a local runtime over `a2aAgent` reading its card URL and token from its plugin.
+ */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
-    return {
-        [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
-        [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
-    };
+    return withInstanceRuntimes(
+        {
+            [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
+            [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
+        },
+        { [A2A_PEER_PREFIX]: (runtime) => a2aPeerRuntime(runtime) }
+    );
 }
 
 /** Memory plugin id → the store a session opens: the Memory actor for the default, the FlatMemory actor for the flat one. */
