@@ -7,7 +7,7 @@
  * Real Session, Memory and Agent actors; `mockAgent` as the runtime.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, type AgentId, type FrozenAgentConfig, type MemoryPlugin, type MemoryScope, type MessageId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type FrozenAgentConfig, type MemoryPlugin, type MemoryScope, type MessageId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { learningPlugin, memoryCorrectionLedger } from '@agentic/learning';
 import { flatMemoryPlugin, memoryDefaultPlugin } from '@agentic/memory';
 import { allowAll } from '@sigx/ai-agent';
@@ -233,7 +233,7 @@ describe('the memory tools follow the active plugin (#242)', () => {
     it('the daemon path: a tool.call reads the gate the session recorded and answers the same way', async () => {
         await session('s1').open(spec('task_1', gate({ memory: { id: MEM, enabled: false, config: {} } })));
         const port = createToolCallPort({ routing: () => Session, sessions: () => Session, memory: (g) => memoryAccess(ports, g) });
-        await expect(port.call({ tool: 'memory_search', input: { query: 'release' }, callId: 'c1' }, principal)).rejects.toMatchObject({ code: 'unsupported', message: expect.stringContaining(MEMORY_OFF) as string });
+        await expect(port.call({ sessionId: 's1' as SessionId, tool: 'memory_search', input: { query: 'release' }, callId: 'c1' }, principal)).rejects.toMatchObject({ code: 'unsupported', message: expect.stringContaining(MEMORY_OFF) as string });
     });
 });
 
