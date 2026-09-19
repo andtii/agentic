@@ -76,7 +76,7 @@ Both are normalized to 0..1. Only normalized snapshots leave the machine. Record
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |
 | `usage_limits` | `UsagePort.limits` (`PlatformPorts.usage`, #272): `{ machineId?, runtime? }` → core `UsageLimits`, every account's latest quota snapshot and its age; no `usage` port fails the call | `readOnly`, `idempotent` |
 
-`platformTools(ports)` gives all seven; `grantedPlatformTools(ports, grants)` the ones a config grants.
+`platformTools(ports)` gives all eight; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
 ## Plugin manifests (`src/plugins.ts`, #228)
 

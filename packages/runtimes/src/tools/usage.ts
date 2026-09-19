@@ -2,7 +2,7 @@
 
 import { defineTool } from '@sigx/ai';
 import { z } from 'zod';
-import type { UsageLimits } from '@agentic/core';
+import type { MachineId, UsageLimits } from '@agentic/core';
 import type { UsagePort } from './ports.js';
 
 export const usageLimitsInput = z.object({
@@ -21,7 +21,7 @@ export function usageLimitsTool(port: UsagePort | undefined) {
         annotations: { readOnly: true, idempotent: true },
         execute: async (input, ctx): Promise<UsageLimits> => {
             if (!port) throw new Error('usage_limits: usage limits are not available on this host');
-            return port.limits({ ...(input.machineId ? { machineId: input.machineId as never } : {}), ...(input.runtime ? { runtime: input.runtime } : {}) }, { callId: ctx.toolCallId, signal: ctx.signal });
+            return port.limits({ ...(input.machineId ? { machineId: input.machineId as MachineId } : {}), ...(input.runtime ? { runtime: input.runtime } : {}) }, { callId: ctx.toolCallId, signal: ctx.signal });
         }
     });
 }
