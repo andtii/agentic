@@ -225,6 +225,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 if (this.link) this.link.welcomed = true;
                 for (const [sessionId, cursor] of Object.entries(frame.wanted)) this.replay(sessionId, cursor);
                 if (this.heartbeat === undefined) this.heartbeat = setInterval(() => this.emit({ v: V, t: 'heartbeat', at: Date.now(), active: this.active() }), this.script.heartbeatMs);
+                // A daemon probes provider limits once welcomed (#261); the suite must pass over the unsolicited frame.
+                this.emit({ v: V, t: 'quota', environmentId: this.environmentId, snapshot: { sourceId: 'in-memory', runtime: 'in-memory', environmentId: this.environmentId, availability: 'not-reported', reason: 'the in-memory runtime has no provider limits', windows: [], observedAt: Date.now(), via: 'probe' } });
                 return;
             }
             case 'ping':

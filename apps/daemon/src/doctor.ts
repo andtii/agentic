@@ -50,6 +50,8 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     for (const env of loaded.environments) {
         if (!drivers.has(env.runtime)) error('no-driver', `environment ${env.name} uses runtime "${env.runtime}", which this daemon has no driver for`, [env.id]);
         else byRuntime.set(env.runtime, [...(byRuntime.get(env.runtime) ?? []), env]);
+        // Local only: the verdict a driver reports to the platform names no path (#274), so the operator here gets them.
+        findings.push({ level: 'info', code: 'profile-dir', message: `environment ${env.name} (${env.id}): ${env.profileDir === undefined ? 'no profile of its own — the runtime’s default' : `profile ${env.profileDir}`}`, environmentIds: [env.id] });
         for (const root of env.cwdRoots) {
             if (!(await isDirectory(root))) findings.push({ level: 'warn', code: 'cwd-root-missing', message: `environment ${env.name}: working root ${root} is not a directory`, environmentIds: [env.id] });
         }

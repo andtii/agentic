@@ -46,6 +46,8 @@ export type PluginDetailProps =
     & Define.Prop<'agentOf', (id: string) => { readonly name: string; readonly hue?: AgentHue }, true>
     /** The enable switch; the page draws it, because the page holds its state until the Registry answers. */
     & Define.Prop<'toggle', () => JSXElement, true>
+    /** One plugin's own action, drawn after its keys (Web Push's "Generate keys", #244); most plugins have none. */
+    & Define.Prop<'extra', () => JSXElement | null>
     & Define.Event<'configure', Record<string, unknown>>
     & Define.Event<'saveSecret', SecretWrite>
     & Define.Event<'removeSecret', string>
@@ -111,6 +113,8 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
                     ))}
                 </section>
             ) : null}
+
+            {props.extra?.() ?? null}
 
             <section data-plugin-panel="permissions" aria-label="Permissions">
                 <Label>Permissions</Label>

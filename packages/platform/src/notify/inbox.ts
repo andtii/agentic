@@ -7,10 +7,12 @@
  * `@sigx/actors` ships log appends is a one-line change per method.
  */
 
-import { defineActor } from '@sigx/actors';
+import { actor, defineActor, type AnyActorDefinition } from '@sigx/actors';
 import { workspaceOfKey, type WorkspaceId } from '@agentic/core';
-import { sameWorkspace } from '../auth/index.js';
+import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
+import { registryKey } from '../registry/key.js';
 import { deliverAll } from './deliver.js';
+import type { ChannelCatalogue } from './plugins.js';
 import type {
     DeliveryAttempt,
     InboxNotification,
@@ -100,28 +102,89 @@ export interface ListOptions {
 export interface InboxOptions {
     /** Notifications kept; default {@link INBOX_CAP}. */
     readonly cap?: number;
-    /** Outbound channels `push` fans out to after the inbox record is durable. */
+    /** Outbound channels `push` always fans out to after the inbox record is durable — tests, or a channel that is no plugin. */
     readonly channels?: readonly NotificationChannel[];
+    /**
+     * Channels that are plugins (#244): `push` asks the Registry once which
+     * notification plugins are enabled (`gate().channels`) and opens each one
+     * this build implements, with its config and a secret opener. Needs `registry`.
+     */
+    readonly channelPlugins?: ChannelCatalogue;
+    /** The Registry definition `channelPlugins` are resolved through. */
+    readonly registry?: () => AnyActorDefinition;
     /** Clock, for tests. */
     readonly now?: () => number;
 }
 
+/** What the Inbox asks the Registry, as the workspace's owner. */
+interface RegistryChannels {
+    gate(): Promise<{ readonly channels: readonly { readonly id: string; readonly config: Record<string, unknown> }[] }>;
+    openSecret(name: string, pluginId: string): Promise<string>;
+}
+
+/** A Registry refusal's code, whether the error crossed a hop as a code or only as its message. */
+function secretMissing(error: unknown): boolean {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === 'secret-missing') return true;
+    return error instanceof Error && /\[registry\] no secret "/.test(error.message);
+}
+
+/** The attempt recorded when the Registry cannot be asked which channels are on (OPS-04: shown, not lost). */
+export const PLUGIN_CHANNELS = 'plugins';
+
 /**
  * Build the Inbox definition. The default export {@link Inbox} has no outbound
- * channels; the app registers `defineInbox({ channels: [webPushChannel(...)] })`
- * where the environment (VAPID keys, fetch) is known. Both share the type
+ * channels; the app registers `defineInbox({ channelPlugins, registry })` so the
+ * workspace's enabled notification plugins deliver (#244). Both share the type
  * `'Inbox'`, so a client-side `actor(Inbox, key)` reaches whichever the host runs.
  */
 export function defineInbox(options: InboxOptions = {}) {
     const cap = options.cap ?? INBOX_CAP;
-    const channels = options.channels ?? [];
+    const staticChannels = options.channels ?? [];
+    const plugins = options.channelPlugins && options.registry ? { impls: options.channelPlugins, registry: options.registry } : null;
     const now = options.now ?? Date.now;
+
+    /**
+     * The channels one notification goes through: the static ones, then every enabled
+     * notification plugin this build implements — one Registry hop, whatever the number
+     * of subscribers. A Registry that cannot be asked is a recorded failure, not a throw.
+     */
+    const channelsFor = async (workspaceId: WorkspaceId): Promise<{ channels: NotificationChannel[]; failed?: string }> => {
+        if (!plugins) return { channels: [...staticChannels] };
+        let registry: RegistryChannels;
+        let enabled: readonly { readonly id: string; readonly config: Record<string, unknown> }[];
+        try {
+            // As the workspace's owner (v1: `workspaceId === userId`): whoever pushed, the Registry audits who opened a secret.
+            registry = actor(plugins.registry(), registryKey(workspaceId)).with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) }) as unknown as RegistryChannels;
+            enabled = (await registry.gate()).channels;
+        } catch (e) {
+            return { channels: [...staticChannels], failed: `the plugin registry could not be asked which channels are on: ${e instanceof Error ? e.message : String(e)}` };
+        }
+        const opened = enabled.flatMap(({ id, config }) => {
+            const impl = plugins.impls[id];
+            if (!impl) return [];
+            return [
+                impl.open({
+                    config,
+                    async secret(name) {
+                        try {
+                            return await registry.openSecret(name, id);
+                        } catch (e) {
+                            if (secretMissing(e)) return undefined;
+                            throw e;
+                        }
+                    }
+                })
+            ];
+        });
+        return { channels: [...staticChannels, ...opened] };
+    };
 
     return defineActor({
         type: 'Inbox',
         authorize: [sameWorkspace],
         state: initialInboxState,
-        reads: { list: { maxAge: 0 }, unread: { maxAge: 0 } },
+        reads: { list: { maxAge: 0 }, unread: { maxAge: 0 }, subscriptions: { maxAge: 0 } },
         methods: (ctx) => {
             const workspaceId = (): WorkspaceId => workspaceOfKey(ctx.key) ?? ('' as WorkspaceId);
             const find = (id: string): InboxNotification | undefined => ctx.state.notifications.find((n) => n.id === id);
@@ -149,13 +212,16 @@ export function defineInbox(options: InboxOptions = {}) {
                 /** Record, then deliver through every channel; attempts land on the record (OPS-04). */
                 async push(input: NotificationInput): Promise<InboxNotification> {
                     const notification = await append(input);
-                    if (channels.length === 0) return notification;
+                    if (staticChannels.length === 0 && !plugins) return notification;
+                    const { channels, failed } = await channelsFor(workspaceId());
+                    if (channels.length === 0 && failed === undefined) return notification;
                     const target = { workspaceId: workspaceId(), subscriptions: ctx.snapshot(ctx.state.subscriptions) };
                     const report = await deliverAll(channels, notification, target, now);
-                    reduceInbox(ctx.state, { type: 'delivered', id: notification.id, attempts: report.attempts }, cap);
+                    const attempts = failed === undefined ? report.attempts : [...report.attempts, { channel: PLUGIN_CHANNELS, at: now(), ok: false, error: failed }];
+                    reduceInbox(ctx.state, { type: 'delivered', id: notification.id, attempts }, cap);
                     if (report.expired.length > 0) reduceInbox(ctx.state, { type: 'unsubscribe', endpoints: report.expired }, cap);
                     await ctx.save();
-                    return ctx.snapshot(find(notification.id)) ?? { ...notification, deliveries: report.attempts };
+                    return ctx.snapshot(find(notification.id)) ?? { ...notification, deliveries: attempts };
                 },
 
                 /** Newest first. A live read: `useActorState(Inbox, key).list({ unreadOnly: true })` re-runs after every mutating turn. */
@@ -199,14 +265,21 @@ export function defineInbox(options: InboxOptions = {}) {
                     await ctx.save();
                 },
 
-                async unsubscribe(endpoint: string): Promise<boolean> {
-                    const had = ctx.state.subscriptions.some((s) => s.endpoint === endpoint);
-                    if (!had) return false;
-                    reduceInbox(ctx.state, { type: 'unsubscribe', endpoints: [endpoint] }, cap);
-                    await ctx.save();
-                    return true;
+                /**
+                 * Forget one endpoint (answers whether it was there) or many in one save (answers how many were) —
+                 * what replacing a Web Push key pair calls with every subscription made under the old key.
+                 */
+                async unsubscribe(endpoints: string | readonly string[]): Promise<boolean | number> {
+                    const wanted = typeof endpoints === 'string' ? [endpoints] : endpoints;
+                    const had = ctx.state.subscriptions.filter((s) => wanted.includes(s.endpoint)).length;
+                    if (had > 0) {
+                        reduceInbox(ctx.state, { type: 'unsubscribe', endpoints: wanted }, cap);
+                        await ctx.save();
+                    }
+                    return typeof endpoints === 'string' ? had > 0 : had;
                 },
 
+                /** The browsers push goes to. A live read: Settings → Notifications lists them. */
                 subscriptions(): PushSubscriptionRecord[] {
                     return ctx.snapshot(ctx.state.subscriptions);
                 }

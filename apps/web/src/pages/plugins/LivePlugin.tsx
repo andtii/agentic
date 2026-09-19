@@ -21,6 +21,8 @@ import { isInUse, registryErrorText } from './model';
 import { PluginDetail, type SecretWrite } from './PluginDetail';
 import { useWorkspaceReadiness } from './readiness';
 import { usePluginSwitches } from './switches';
+import { GenerateKeys } from '../../push/GenerateKeys';
+import { VAPID_SECRET, WEB_PUSH_PLUGIN } from '../../push/model';
 
 export type LivePluginProps = Define.Prop<'id', string, true>;
 
@@ -146,6 +148,9 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                     status={{ saving: st.saving, saved: st.saved, configError: st.configError || undefined, secretBusy: st.secretBusy, secretErrors: st.secretErrors, busy: st.busy, forceRemove: st.forceRemove }}
                                     agentOf={agents.lookup}
                                     toggle={() => switches.switchFor(p)}
+                                    extra={() => (p.manifest.id === WEB_PUSH_PLUGIN && viewer.workspaceId
+                                        ? <GenerateKeys plugin={p} workspaceId={viewer.workspaceId} hasKek={ready.overview()!.hasKek} hasPrivateKey={ready.overview()!.secretNames.includes(VAPID_SECRET)} defs={defs} />
+                                        : null)}
                                     onConfigure={(config: Record<string, unknown>) => { void configure(config); }}
                                     onSaveSecret={(w: SecretWrite) => { void saveSecret(w); }}
                                     onRemoveSecret={(name: string) => { void removeSecret(name); }}

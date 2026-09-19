@@ -28,7 +28,7 @@ export const LivePair = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
-    const st = signal({ name: '', minted: '', code: '', expiresIn: 0, machineId: '', busy: false, error: '' });
+    const st = signal({ name: '', minted: '', allowRoot: '', code: '', expiresIn: 0, machineId: '', busy: false, error: '' });
 
     /** Register a pending machine under the current name; the code and its expiry replace the page's. */
     const mint = async (ws: string): Promise<void> => {
@@ -107,7 +107,7 @@ export const LivePair = component(() => {
                 </OpsPage>
             );
         }
-        const commands = pairCommands(pageOrigin(), st.code, st.minted);
+        const commands = pairCommands(pageOrigin(), st.code, st.minted, st.allowRoot);
         return (
             <>
                 <PairView
@@ -119,9 +119,20 @@ export const LivePair = component(() => {
                     onRenew={() => { if (ws) void mint(ws); }}
                     slots={{
                         name: () => (
-                            <div onChange={rename}>
-                                <TextField model={() => st.name} name="machine-name" label="Machine name" description="The daemon registers under this name; changing it issues a new code." disabled={st.busy} />
-                            </div>
+                            <>
+                                <div onChange={rename}>
+                                    <TextField model={() => st.name} name="machine-name" label="Machine name" description="The daemon registers under this name; changing it issues a new code." disabled={st.busy} />
+                                </div>
+                                <div data-pair-allow-root>
+                                    <TextField
+                                        model={() => st.allowRoot}
+                                        name="allow-root"
+                                        label="Folder agents may work in (optional)"
+                                        placeholder="C:\Dev"
+                                        description="Lets this page add environments inside that folder once the machine is paired. Leave it empty to keep managing them on the machine."
+                                    />
+                                </div>
+                            </>
                         )
                     }}
                 />

@@ -14,12 +14,16 @@ import { actor, type AnyActorDefinition } from '@sigx/actors';
 
 import { asPrincipal } from '../auth/index.js';
 import { ToolCallError, type ToolCallPort } from '../machine/ports.js';
+import type { RegistryGate } from '../registry/types.js';
+import type { SessionMemory } from '../task/driver.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
 /** The slice of the Session actor the port reads (`defineSessionActor`). */
 interface SessionSpecClient {
-    get(): Promise<{ readonly spec?: { readonly chatId?: ChatId } }>;
+    get(): Promise<{ readonly spec?: { readonly chatId?: ChatId; readonly plugins?: RegistryGate } }>;
 }
+
+const MEMORY_TOOLS: readonly string[] = ['memory_search', 'memory_remember'];
 
 export interface ToolCallPortOptions {
     /** The Routing actor definition (`task_report`). */
@@ -28,6 +32,11 @@ export interface ToolCallPortOptions {
     readonly sessions: () => AnyActorDefinition;
     /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
     readonly files?: ChatFileStore;
+    /**
+     * The memory the memory tools reach (#242), for the gate recorded on the calling session's spec — read from the
+     * Session only for a memory tool. Absent → the Memory actor of the agent's own scope.
+     */
+    readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
 }
 
 /** A `tool.call` port over the actors: the Machine binds it as `MachinePorts.tools`. */
@@ -38,11 +47,22 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
             if (!isPlatformToolName(input.tool)) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
             const agent = principal as AgentPrincipal;
             let chatId: ChatId | undefined;
-            if (input.tool === 'chat_post') {
+            let memory: SessionMemory | undefined;
+            const memoryTool = MEMORY_TOOLS.includes(input.tool) && options.memory !== undefined;
+            if (input.tool === 'chat_post' || memoryTool) {
                 const session = actor(options.sessions(), `${agent.workspaceId}:session:${agent.sessionId}`).with({ context: asPrincipal(agent) }) as unknown as SessionSpecClient;
-                chatId = (await session.get()).spec?.chatId;
+                const spec = (await session.get()).spec;
+                chatId = spec?.chatId;
+                if (memoryTool) memory = options.memory!(spec?.plugins);
             }
-            const ports = createActorToolPorts({ principal: agent, ...(chatId ? { chatId } : {}), routing: options.routing, sessions: options.sessions, ...(options.files ? { files: options.files } : {}) });
+            const ports = createActorToolPorts({
+                principal: agent,
+                ...(chatId ? { chatId } : {}),
+                routing: options.routing,
+                sessions: options.sessions,
+                ...(options.files ? { files: options.files } : {}),
+                ...(memory ? { memory } : {})
+            });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
             try {

@@ -24,7 +24,7 @@
  * approval card all read the same log.
  */
 
-import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type UnstampedEvent } from '@sigx/ai-agent';
@@ -37,7 +37,7 @@ import { agentMemoryScope } from '../agent/agent.actor.js';
 import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
 import { inboxKey, type NotificationInput, type NotificationRef } from '../notify/index.js';
 import { describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
-import { correctionOf, instructionProposals, lastUserText, learningPluginFor, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts } from '../task/driver.js';
+import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
 import { applySessionEntry, bytesOf, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
@@ -400,8 +400,11 @@ export function defineSessionActor(ports: SessionPorts) {
         if (!parsed) return spec;
         const principal = mintAgentPrincipal({ workspaceId: parsed.workspaceId, agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) });
         const at = now();
+        // The workspace's active memory plugin, as the Registry told the router (#242); turned off → nothing retrieved, and the record says why.
+        const access = memoryAccess(learning, spec.plugins);
+        if ('off' in access) return { ...spec, memories: [], retrieval: { text: '', scopes: [], skipped: [{ scope: `agent:${spec.agentId}`, reason: access.off }], at } };
         try {
-            const r = await retrieveMemories(learning.memory, principal, spec.config, spec, learning.retrieval);
+            const r = await retrieveMemories(access.open, principal, spec.config, spec, access.retrieval);
             const system = spec.system !== undefined ? withMemoryBlock(spec.system, renderMemoryBlock(r.entries)) : undefined;
             return {
                 ...spec,
@@ -414,12 +417,20 @@ export function defineSessionActor(ports: SessionPorts) {
         }
     }
 
-    /** The plugin for this session — built over the session's objective and tags when the port is a factory. */
-    function pluginFor(c: ActorContext<SessionState>, learning: LearningPorts) {
+    /**
+     * What this session learns through (#242): the workspace's active learning plugin — built over the session's
+     * objective and tags when it is a factory — and the active memory plugin's store it writes to. `{ off }` says why
+     * there is none: learning or memory turned off, or no learning plugin configured.
+     */
+    function learnerFor(c: ActorContext<SessionState>, learning: LearningPorts): { readonly plugin: LearningPlugin; readonly memory: MemoryOpener } | { readonly off: string } {
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
-        if (!spec || !parsed) return undefined;
-        return learningPluginFor(learning.plugin, {
+        if (!spec || !parsed) return { off: `session "${c.key}" is not open` };
+        const access = learningAccess(learning, spec.plugins);
+        const memory = memoryAccess(learning, spec.plugins);
+        if (access.off !== undefined) return { off: access.off };
+        if ('off' in memory) return { off: memory.off };
+        const plugin = learningPluginFor(access.plugin, {
             workspaceId: parsed.workspaceId,
             agentId: spec.agentId,
             sessionId: parsed.sessionId,
@@ -427,6 +438,7 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(spec.objective ? { objective: spec.objective } : {}),
             ...(spec.tags ? { tags: spec.tags } : {})
         });
+        return plugin ? { plugin, memory: memory.open } : { off: 'no learning plugin is configured' };
     }
 
     /** Instruction proposals go to the Agent actor's review queue (LRN-08); the parker is the app's, or the platform default. */
@@ -450,8 +462,10 @@ export function defineSessionActor(ports: SessionPorts) {
         const spec = s.spec;
         const parsed = parseSessionKey(c.key);
         const principal = agentPrincipal(c);
-        const plugin = learning && pluginFor(c, learning);
-        if (!learning || !plugin || !spec?.taskId || !parsed || !principal) return;
+        const learner = learning && learnerFor(c, learning);
+        // Learning or memory turned off (#242): the outcome is not recorded, and nothing is written.
+        if (!learning || !learner || 'off' in learner || !spec?.taskId || !parsed || !principal) return;
+        const { plugin, memory } = learner;
         const end = knownEvents(s).findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
         if (!end || end.type !== 'turn-end' || isInterruptedTurnEnd(end)) return;
         const status = turnStatusOf(end.stopReason);
@@ -463,7 +477,7 @@ export function defineSessionActor(ports: SessionPorts) {
             const verdict = await learning.verify?.({ taskId: spec.taskId, agentId: spec.agentId, turnId, status, result });
             const outcome = taskOutcomeOf({ taskId: spec.taskId, agentId: spec.agentId, objective, tags: spec.tags ?? [], status, result, ...(verdict ? { verdict } : {}) });
             record = { ...record, verification: outcome.verification };
-            const proposals = await plugin.onTaskEnd(outcome, learning.memory(agentMemoryScope(spec.agentId), principal));
+            const proposals = await plugin.onTaskEnd(outcome, memory(agentMemoryScope(spec.agentId), principal));
             const instructions = instructionProposals(proposals);
             await park(c, learning, instructions, { kind: 'task-end', sessionId: parsed.sessionId, taskId: spec.taskId }, principal);
             record = { ...record, written: proposals.length - instructions.length, parked: instructions.length };
@@ -933,9 +947,11 @@ export function defineSessionActor(ports: SessionPorts) {
                     const learning = ports.learning;
                     const s = ctx.state;
                     const principal = agentPrincipal(ctx);
-                    if (!learning?.plugin) throw new Error(`session "${ctx.key}": no learning plugin is configured, corrections cannot be learned from`);
+                    if (!learning?.plugin && !learning?.learningPlugins) throw new Error(`session "${ctx.key}": no learning plugin is configured, corrections cannot be learned from`);
                     if (!s.opened || !s.spec || !parsed || !principal) throw new Error(`session "${ctx.key}" is not open`);
-                    const plugin = pluginFor(ctx, learning)!;
+                    const learner = learnerFor(ctx, learning);
+                    if ('off' in learner) throw new Error(`session "${ctx.key}": ${learner.off}, corrections cannot be learned from`);
+                    const { plugin, memory } = learner;
                     const message = (await snapshotTranscript(ctx)).messages.find((m) => m.id === messageId);
                     if (!message || message.role !== 'assistant') throw new Error(`session "${ctx.key}": "${messageId}" is not an assistant message of this session`);
                     const caller = ctx.principal as Principal | null;
@@ -948,7 +964,7 @@ export function defineSessionActor(ports: SessionPorts) {
                         by: caller?.kind === 'agent' ? 'agent' : 'user',
                         at: now()
                     });
-                    const proposals = await plugin.onCorrection(correction, learning.memory(agentMemoryScope(s.spec.agentId), principal));
+                    const proposals = await plugin.onCorrection(correction, memory(agentMemoryScope(s.spec.agentId), principal));
                     const instructions = instructionProposals(proposals);
                     await park(ctx, learning, instructions, { kind: 'correction', sessionId: parsed.sessionId, messageId, ...(s.spec.taskId ? { taskId: s.spec.taskId } : {}) }, principal);
                     const record: CorrectionRecord = { messageId, what: correction.what, by: correction.by, at: correction.at, written: proposals.length - instructions.length, parked: instructions.length };

@@ -38,6 +38,10 @@ export {
     correctionOf,
     instructionProposals,
     learningPluginFor,
+    memoryAccess,
+    learningAccess,
+    MEMORY_OFF,
+    LEARNING_OFF,
     platformLearningPorts,
     type RetrievalBudget,
     type RetrievalContext,
@@ -54,5 +58,10 @@ export {
     type LearningPluginFactory,
     type TaskOutcomeInput,
     type CorrectionInput,
-    type PlatformLearningPortsOptions
+    type PlatformLearningPortsOptions,
+    type PlatformMemory,
+    type MemoryPluginImpl,
+    type LearningPluginImpl,
+    type SessionMemory,
+    type SessionLearning
 } from './driver.js';

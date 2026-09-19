@@ -103,7 +103,7 @@ describe('discovery (RFC 8414 / RFC 9728)', () => {
             token_endpoint_auth_methods_supported: ['none'],
             scopes_supported: [...ALL_SCOPES]
         });
-        expect(ALL_SCOPES).toEqual(['machines', 'environments', 'agents', 'sessions', 'tasks', 'chats', 'memory', 'schedules'] satisfies Scope[]);
+        expect(ALL_SCOPES).toEqual(['machines', 'environments', 'agents', 'sessions', 'tasks', 'chats', 'memory', 'schedules', 'usage'] satisfies Scope[]);
     });
 
     it('serves protected-resource metadata naming this issuer, and the 401 challenge points at it', async () => {

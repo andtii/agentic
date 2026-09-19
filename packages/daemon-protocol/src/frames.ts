@@ -30,6 +30,7 @@ export type ToolCallFrame = DaemonFrameOf<'tool.call'>;
 export type PongFrame = DaemonFrameOf<'pong'>;
 export type FsResponseFrame = DaemonFrameOf<'fs.response'>;
 export type EnvResponseFrame = DaemonFrameOf<'env.response'>;
+export type QuotaFrame = DaemonFrameOf<'quota'>;
 
 export type WelcomeFrame = PlatformFrameOf<'welcome'>;
 export type SessionOpenFrame = PlatformFrameOf<'session.open'>;

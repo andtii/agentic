@@ -30,6 +30,8 @@ import { asPrincipal, mintAgentPrincipal, userPrincipal } from '../auth/index.js
 import { sessionPolicy } from '../policy/index.js';
 import { registryKey } from '../registry/key.js';
 import type { OpenedSession, SessionFactory, SessionFactoryContext } from '../session/ports.js';
+import type { SessionMemory } from '../task/driver.js';
+import type { RegistryGate } from '../registry/types.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
 /** What a local runtime is handed besides the factory context: its plugin's config and the way to its secrets. */
@@ -67,6 +69,11 @@ export interface AnthropicApiRuntimeOptions {
     readonly policy?: Policy;
     /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
     readonly files?: ChatFileStore;
+    /**
+     * The memory `memory_search` / `memory_remember` reach (#242): the workspace's active memory plugin for the gate on
+     * the spec — `(gate) => memoryAccess(learningPorts, gate)`. Absent → the Memory actor of the agent's own scope.
+     */
+    readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
 }
 
 export interface SessionFactoryOptions extends AnthropicApiRuntimeOptions {
@@ -111,7 +118,14 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
         host: 'local',
         async open(c, plugin) {
             const principal = mintAgentPrincipal({ workspaceId: c.workspaceId, agentId: c.spec.agentId, sessionId: c.sessionId, ...(c.spec.taskId ? { taskId: c.spec.taskId } : {}) }) as AgentPrincipal;
-            const ports = createActorToolPorts({ principal, ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}), routing: options.routing, ...(options.sessions ? { sessions: options.sessions } : {}), ...(options.files ? { files: options.files } : {}) });
+            const ports = createActorToolPorts({
+                principal,
+                ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}),
+                routing: options.routing,
+                ...(options.sessions ? { sessions: options.sessions } : {}),
+                ...(options.files ? { files: options.files } : {}),
+                ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {})
+            });
             let provider: PlatformAgentDeps['anthropic'];
             if (plugin.registry) {
                 const apiKey = await plugin.secret(ANTHROPIC_API_KEY_SECRET);
