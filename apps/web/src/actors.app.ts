@@ -17,9 +17,13 @@
  * on first use, so a principal resolved in the Worker survives the hop into
  * the object and every `ctx.actor()` call after it.
  *
- * Execution routing (#37): the Session factory runs `anthropic-api`
- * in-process (`createSessionFactory`, BYO key), the Routing actor drives
- * tasks to their environment (`Machine.openSession`) or the local runtime,
+ * Plugins (#231): the Registry lists the build's plugins (`src/plugins/
+ * catalogue.ts`); the Session factory and the Routing actor share one
+ * runtime catalogue. `anthropic-api` runs in-process (`createSessionFactory`)
+ * with the workspace's own key — the `anthropic-api-key` Registry secret,
+ * set at `/plugins/anthropic-api`; the deployment holds no Anthropic key.
+ * Execution routing (#37): the Routing actor gates each run on the
+ * Registry and drives tasks to their environment (`Machine.openSession`) or the local runtime,
  * the daemon's `tool.call` runs the platform tools over the actors
  * (`createToolCallPort`), and `POST /auth/pair` resolves codes through the
  * `PairingDirectory` (`pairingWiring`). The Schedule trigger is the
@@ -75,9 +79,10 @@ import {
     userPrincipal,
     type MachineActor,
     type NotificationChannel,
+    type CatalogueEntry,
     type RoutingActor,
+    type RuntimeCatalogue,
     type SessionFactory,
-    type SessionFactoryOptions,
     type ToolCallPort,
     type TriggerPort,
     type WorkspaceStore,
@@ -94,6 +99,7 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
+import { pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 
@@ -114,12 +120,6 @@ export interface PlatformEnv {
     /** Public origin, e.g. `https://agentic.example`. */
     readonly APP_ORIGIN?: string;
     /**
-     * The Anthropic API key the `anthropic-api` runtime uses, for every workspace
-     * of this deployment, until per-workspace BYO keys land with the Registry
-     * (architecture §5a). Absent → an API-runtime task fails `no-api-key`.
-     */
-    readonly ANTHROPIC_API_KEY?: string;
-    /**
      * PREVIEW ONLY (#35): when set (≥ 16 chars), `POST /auth/dev-login` mints a
      * `dev_<user>` session for a caller presenting it, so a scripted walk-through
      * can sign in without GitHub. Never set it on production; unset → no route.
@@ -129,10 +129,12 @@ export interface PlatformEnv {
 
 /** The seams an app (or a test) may override; the defaults are the real wiring. */
 export interface PlatformPorts {
-    /** Runtime id → in-process session, or `null` for a daemon-hosted runtime. Default: `createSessionFactory` over `anthropic`. */
+    /** Runtime id → in-process session, or `null` for a daemon-hosted runtime. Default: `createSessionFactory` over `runtimes`, keys from the Registry. */
     readonly factory?: SessionFactory;
-    /** The Anthropic provider options a workspace's sessions run with. Default: the deployment's `ANTHROPIC_API_KEY`. */
-    readonly anthropic?: SessionFactoryOptions['anthropic'];
+    /** Where each runtime's sessions run — shared by the factory and the router. Default: `runtimeCatalogue` (`src/plugins/catalogue.ts`). */
+    readonly runtimes?: RuntimeCatalogue;
+    /** The plugins every workspace's Registry lists (#231). Default: `pluginCatalogue` (`src/plugins/catalogue.ts`). */
+    readonly catalogue?: readonly CatalogueEntry[];
     /** Where a schedule firing goes. Default: `scheduleTrigger` over the Machines (environment probe) and the router (`Routing.run`). */
     readonly trigger?: TriggerPort;
     readonly channels: readonly NotificationChannel[];
@@ -153,7 +155,7 @@ export interface PlatformPorts {
 }
 
 /** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
-const secrets: { anthropicApiKey?: string; sessionSecret?: string; workspaceKek?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
+const secrets: { sessionSecret?: string; workspaceKek?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
 
 /**
  * The deployment's chat file store (#207): R2, the `ARTIFACTS` bucket under `files/`. One per
@@ -163,7 +165,6 @@ const secrets: { anthropicApiKey?: string; sessionSecret?: string; workspaceKek?
 export const platformFiles = r2ChatFileStore(() => secrets.artifacts);
 
 export const defaultPorts: PlatformPorts = {
-    anthropic: () => (secrets.anthropicApiKey ? { apiKey: secrets.anthropicApiKey } : undefined),
     sink: r2ArtifactSink(() => secrets.artifacts),
     files: platformFiles,
     store: durableObjectWorkspaceStore({ namespace: () => secrets.actors, secret: () => secrets.sessionSecret }),
@@ -182,20 +183,24 @@ export const daemonSockets = createDaemonSocketRegistry();
 /** Every platform actor this deployment hosts. */
 export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
     // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
-    const anthropic = ports.anthropic ?? defaultPorts.anthropic;
     const Inbox = defineInbox({ channels: ports.channels });
     // Chat attachments (#207): one store, passed everywhere it is used (architecture §7, "Wiring the file store").
     const files = ports.files ?? defaultPorts.files;
     const withFiles = files ? { files } : {};
+    // The build's plugins (#231): the Registry lists them, the router gates on them, a local runtime's key is their secret.
+    const kek = ports.kek ?? defaultPorts.kek;
+    const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue });
+    const registry = () => Registry;
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, ...withFiles });
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, ...(anthropic ? { anthropic } : {}), ...withFiles }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
         inbox: () => Inbox
     });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, ...withFiles });
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,
@@ -219,10 +224,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         });
     const sink = ports.sink ?? defaultPorts.sink;
     const store = ports.store ?? defaultPorts.store;
-    const kek = ports.kek ?? defaultPorts.kek;
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     const Chat = defineChatActor(withFiles);
-    const Registry = defineRegistry(kek ? { kek } : {});
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
     return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
@@ -305,7 +308,6 @@ let stampedFor: string | undefined;
  */
 export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefinition[] = defaultActors()): void {
     const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
-    secrets.anthropicApiKey = env.ANTHROPIC_API_KEY || undefined;
     secrets.sessionSecret = secret || undefined;
     secrets.workspaceKek = env.WORKSPACE_KEK || undefined;
     secrets.actors = env.ACTORS;

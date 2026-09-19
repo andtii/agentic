@@ -162,9 +162,15 @@ importers:
       '@agentic/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@agentic/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@agentic/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@agentic/runtimes':
+        specifier: workspace:*
+        version: link:../../packages/runtimes
       '@agentic/ui':
         specifier: workspace:*
         version: link:../../packages/ui

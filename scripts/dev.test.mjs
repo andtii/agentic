@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { devLoginLink, ensureDevVars, githubLoginConfigured, needsBuild, newestMtimeMs, parseArgs, parseDevVars, pnpmCommand, renderDevVars } from './dev.mjs';
+import { anthropicKeyLink, devLoginLink, ensureDevVars, githubLoginConfigured, needsBuild, newestMtimeMs, parseArgs, parseDevVars, pnpmCommand, renderDevVars } from './dev.mjs';
 
 // A deterministic "random": a counter from `seed`, so every draw is fixed for the seed and distinct from the last.
 const fakeRandom = (seed) => {
@@ -11,25 +11,26 @@ const fakeRandom = (seed) => {
     return (n) => Buffer.from(Array.from({ length: n }, () => next++ & 0xff));
 };
 
-test('renderDevVars: three long-enough random secrets, the key from the env, the placeholder without', () => {
-    const { text, vars, anthropic } = renderDevVars({ anthropicApiKey: 'sk-ant-test-123', random: fakeRandom(7) });
+test('renderDevVars: three long-enough random secrets and no Anthropic key (#231)', () => {
+    const { text, vars } = renderDevVars({ random: fakeRandom(7) });
     const parsed = parseDevVars(text);
-    assert.equal(anthropic, 'env');
     assert.deepEqual(parsed, vars);
+    assert.deepEqual(Object.keys(parsed).sort(), ['AGENTIC_DEV_LOGIN', 'SESSION_SECRET', 'WORKSPACE_KEK']);
     assert.ok(parsed.SESSION_SECRET.length >= 32, 'SESSION_SECRET ≥ 32 chars');
     assert.ok(parsed.AGENTIC_DEV_LOGIN.length >= 16, 'AGENTIC_DEV_LOGIN ≥ 16 chars');
     assert.equal(Buffer.from(parsed.WORKSPACE_KEK, 'base64').length, 32, 'WORKSPACE_KEK is base64 of 32 bytes');
-    assert.equal(parsed.ANTHROPIC_API_KEY, 'sk-ant-test-123');
     assert.match(parsed.SESSION_SECRET, /^[A-Za-z0-9_-]+$/, 'URL-safe, so the link needs no escaping');
     assert.match(parsed.AGENTIC_DEV_LOGIN, /^[A-Za-z0-9_-]+$/);
     assert.notEqual(parsed.SESSION_SECRET.slice(0, 16), parsed.AGENTIC_DEV_LOGIN.slice(0, 16), 'secrets are drawn separately');
+    assert.doesNotMatch(text, /ANTHROPIC_API_KEY/, 'not even as a placeholder: the key is a workspace secret now');
+    assert.match(text, /\/plugins\/anthropic-api/, 'the file says where the key goes instead');
+    // Reproducible for the same random source: the file is a pure function of it.
+    assert.equal(renderDevVars({ random: fakeRandom(7) }).text, text);
+});
 
-    const without = renderDevVars({ random: fakeRandom(7) });
-    assert.equal(without.anthropic, 'placeholder');
-    assert.equal(parseDevVars(without.text).ANTHROPIC_API_KEY, undefined);
-    assert.match(without.text, /^# ANTHROPIC_API_KEY=/m, 'a commented placeholder line to fill in');
-    // Reproducible for the same random source: the file is a pure function of it and the key.
-    assert.equal(renderDevVars({ random: fakeRandom(7) }).text, without.text);
+test('anthropicKeyLink: the anthropic-api plugin page on the dev port', () => {
+    assert.equal(anthropicKeyLink(), 'http://localhost:8787/plugins/anthropic-api');
+    assert.equal(anthropicKeyLink(9000), 'http://localhost:9000/plugins/anthropic-api');
 });
 
 test('parseDevVars: comments, blanks, quotes and CRLF', () => {
@@ -40,24 +41,30 @@ test('ensureDevVars: creates the file once (0600 where it applies), then only re
     const dir = mkdtempSync(join(tmpdir(), 'agentic-dev-vars-'));
     try {
         const file = join(dir, 'web', '.dev.vars');
+        // An env key is never copied in any more (#231) — only noticed, so the log can say it is ignored.
         const first = ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk-ant-env' }, { random: fakeRandom(1) });
         assert.equal(first.created, true);
-        assert.equal(first.anthropic, 'env');
+        assert.equal(first.legacyAnthropicKey, 'env');
         assert.ok(existsSync(file));
-        const onDisk = parseDevVars(readFileSync(file, 'utf8'));
-        assert.deepEqual(onDisk, first.vars);
+        const written = readFileSync(file, 'utf8');
+        assert.deepEqual(parseDevVars(written), first.vars);
+        assert.doesNotMatch(written, /sk-ant-env/);
 
-        // Second run: the file wins; the env is not re-read into it.
-        const again = ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk-ant-other' }, { random: fakeRandom(2) });
+        // Second run: the file wins and is not touched.
+        const again = ensureDevVars(file, {}, { random: fakeRandom(2) });
         assert.equal(again.created, false);
-        assert.equal(again.anthropic, 'file');
+        assert.equal(again.legacyAnthropicKey, undefined);
+        assert.equal(ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk' }).legacyAnthropicKey, 'env', 'only the shell has it: nothing in the file to delete');
         assert.deepEqual(again.vars, first.vars);
-        assert.equal(readFileSync(file, 'utf8'), readFileSync(file, 'utf8'));
+        assert.equal(readFileSync(file, 'utf8'), written);
 
-        // A file without the key: reports whether the env could have supplied it.
-        writeFileSync(file, 'SESSION_SECRET=x\nAGENTIC_DEV_LOGIN=y\n');
-        assert.equal(ensureDevVars(file, {}).anthropic, 'missing');
-        assert.equal(ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk' }).anthropic, 'env-only');
+        // A file from before #231 that still carries the key: read as it is (its WORKSPACE_KEK sealed the Registry's secrets), never rewritten, flagged.
+        const legacy = 'SESSION_SECRET=x\nWORKSPACE_KEK=k\nANTHROPIC_API_KEY=sk-ant-old\n';
+        writeFileSync(file, legacy);
+        const old = ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk' });
+        assert.equal(old.legacyAnthropicKey, 'file', 'the file wins: its line is the one to delete');
+        assert.equal(old.vars.WORKSPACE_KEK, 'k');
+        assert.equal(readFileSync(file, 'utf8'), legacy);
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }

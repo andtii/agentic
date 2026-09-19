@@ -12,8 +12,8 @@ WORKSPACE_KEK=replace-with-base64-of-32-random-bytes
 # Never set it on production.
 AGENTIC_DEV_LOGIN=replace-with-at-least-16-random-characters
 
-# The key the anthropic-api runtime uses. Without it an agent task fails `no-api-key`.
-# ANTHROPIC_API_KEY=sk-ant-...
+# No Anthropic key here: each workspace adds its own at /plugins/anthropic-api once
+# signed in; it is sealed in the Registry under WORKSPACE_KEK (#231).
 
 # Optional: a GitHub OAuth app whose callback is http://localhost:8787/auth/callback
 # enables "Sign in with GitHub" locally.

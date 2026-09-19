@@ -26,7 +26,7 @@ import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-pro
 import { AgentActor, Chat, TaskActor, Workspace, agentKey, defineMachineActor, machineKey, taskKey, workspaceKey, type IndexedEntry, type RoutingActor } from '@agentic/platform';
 import { chatKeyOf, routingKeyOf } from '../../src/actors/keys';
 import { runActivation, unknownAgent } from '../../src/pages/chat/live';
-import { overHttp, signIn } from './http';
+import { overHttp, setAnthropicKey, signIn } from './http';
 
 const userId = 'gh_scope';
 const WS = userId as WorkspaceId;
@@ -92,6 +92,7 @@ describe('worker: several ActorHost objects in one isolate resolve ambient hops 
         expect(await a.machine.get()).toMatchObject({ online: true });
 
         // A session turn over the mock runtime (#126): the Session's background save must land in its own object.
+        await setAnthropicKey(WS, cookie);
         const ws = overHttp(Workspace, workspaceKey(WS), cookie);
         const { agentId } = await ws.createAgent({ name: 'Ada' });
         await overHttp(AgentActor, agentKey(WS, agentId as AgentId), cookie).update({ name: 'Ada', instructions: 'Be brief.', execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } }, 'create');
