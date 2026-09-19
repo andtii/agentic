@@ -69,11 +69,15 @@ export function createAnswerFollowUp(options: AnswerFollowUpOptions): (followUp:
         };
 
         const id = answerTaskId(f.sessionId, f.requestId);
+        // Only "never created" means no follow-up yet; any other failure is real and must not start a second one.
         const exists = await task(id)
             .get()
             .then(
                 () => true,
-                () => false
+                (e: unknown) => {
+                    if ((e as { code?: unknown } | null)?.code === 'not-created' || (isServerFnError(e) && e.status === 404)) return false;
+                    throw e;
+                }
             );
         if (exists) return run(id);
 
