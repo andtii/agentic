@@ -39,7 +39,13 @@ await github.close();
 
 ### Connector manifest
 
-`mcpConnector({ id, name, transport: 'streamable-http', url, secret })` (or `transport: 'stdio', command, machine, secrets`) returns a `PluginManifest` of kind `connector` with permissions declared up front — `network:<host>` or `machine:<id>`, `secret:<name>`, `tools:<id>` — and `capabilities` listing what works plus `unsupported:<op>` for each gap (AST-09, PLG-04, PLG-09).
+`mcpConnector({ id, name, transport: 'streamable-http', url, secret?, headerSecrets? })` (or `transport: 'stdio', command, args?, machine?, secrets?, envSecrets?`) returns a `PluginManifest` of kind `connector` with permissions declared up front — `network:<host>` or `machine:<id>`, `secret:<name>`, `tools:<namespace>` — and `capabilities` listing what works plus `unsupported:<op>` for each gap (AST-09, PLG-04, PLG-09). Every credential is a declared `manifest.secrets` entry; the config holds only the endpoint (`url`, or `command` / `args` / `cwd`) — no `headers`, no `env`.
+
+To add a server the app stores what `mcpConnectorSetup(options)` returns: `Registry.register(manifest, { enabled: true, grant: 'declared' })`, `Registry.putConnector(connector)` (same id; `connector.auth` binds each secret name to the bearer, a header or an environment variable), then `Registry.setSecret(name, value)` for each `manifest.secrets` entry.
+
+### A connector on a session
+
+`openMcpConnector({ id, url, bearer?, headers?, fetch?, timeoutMs? })` → `{ tools, toolNames, close }` connects, lists and namespaces every tool `<id>__<tool>` (`connectorToolPrefix(id)`; an id with a `.` becomes `_`), with one deadline (default 10 s) for the handshake and the list. The platform injects it as the `connectors` opener of its local runtime (`apps/web/src/plugins/catalogue.ts`); credential values arrive already opened and go only into request headers. **Not yet:** stdio connectors on the daemon, and connectors on daemon-hosted sessions (#280).
 
 ## Server
 
