@@ -1,6 +1,7 @@
 import { render } from '@sigx/runtime-dom';
 import type { JSXElement } from '@sigx/runtime-core';
-import type { AgentConfig, AgentId, EnvironmentId, WorkspaceSettings } from '@agentic/core';
+import type { AgentConfig, AgentId, EnvironmentId } from '@agentic/core';
+import type { SettingsFormValue } from '@agentic/ui';
 
 /** Mount into a fresh container attached to the document (zero's ids and popovers need a live tree). */
 export function mount(node: JSXElement): HTMLElement {
@@ -81,7 +82,7 @@ export function fullAgentConfig(): AgentConfig {
     };
 }
 
-export function fullSettings(): WorkspaceSettings {
+export function fullSettings(): SettingsFormValue {
     return {
         timeZone: 'Europe/Stockholm',
         notifications: { kinds: { reminder: true, 'task-done': false, 'task-failed': true, approval: true, input: false }, push: true },
