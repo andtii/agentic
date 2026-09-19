@@ -61,12 +61,21 @@ describe('schema model', () => {
         expect(draft.number.retries).toBe(2);
         expect(draft.list.modes).toEqual(['read']);
         // untouched defaults are not written: the stored config keeps following the manifest
-        expect(fromSchemaDraft(schema, draft, source)).toEqual({ endpoint: 'https://mcp.example/', verbose: false });
+        expect(fromSchemaDraft(schema, draft, source)).toEqual({ endpoint: 'https://mcp.example/' });
+        // a switch left off with no declared default is "not set" — unless the stored config said `false`, or it is turned on
+        expect(fromSchemaDraft(schema, draft, { ...source, verbose: false })).toEqual({ endpoint: 'https://mcp.example/', verbose: false });
+        draft.flag.verbose = true;
+        expect(fromSchemaDraft(schema, draft, source)).toEqual({ endpoint: 'https://mcp.example/', verbose: true });
+        draft.flag.verbose = false;
+        // a REQUIRED switch has to answer, so `false` is written
+        const must: ConfigSchema = { type: 'object', properties: { agree: { type: 'boolean' } }, required: ['agree'] };
+        expect(fromSchemaDraft(must, toSchemaDraft(must, {}), {})).toEqual({ agree: false });
+        expect(validateSchemaDraft(must, toSchemaDraft(must, {}))).toEqual({});
         draft.text.defaultModel = 'claude-opus-5';
         draft.number.retries = 4;
         draft.list.modes = [];
         draft.map.headers = [{ key: ' X-Team ', value: 'core' }, { key: '', value: '' }];
-        expect(fromSchemaDraft(schema, draft, source)).toEqual({ endpoint: 'https://mcp.example/', defaultModel: 'claude-opus-5', retries: 4, verbose: false, modes: [], headers: { 'X-Team': 'core' } });
+        expect(fromSchemaDraft(schema, draft, source)).toEqual({ endpoint: 'https://mcp.example/', defaultModel: 'claude-opus-5', retries: 4, modes: [], headers: { 'X-Team': 'core' } });
     });
 
     it('keeps a key the source already carried, and whatever the form cannot draw', () => {

@@ -144,7 +144,9 @@ export function fromSchemaDraft(schema: ConfigSchema, draft: SchemaDraft, source
         drawn.add(field.key);
         const v = drafted(field, draft, defaults[field.key]);
         if (v === undefined) continue;
-        if (Object.hasOwn(source, field.key) || !same(v, defaults[field.key])) out.push([field.key, v]);
+        // A switch always holds a boolean: left off with no default declared it is "not set", not `false` — unless the schema requires an answer.
+        const resting = defaults[field.key] ?? (field.kind === 'switch' && !field.required ? false : undefined);
+        if (Object.hasOwn(source, field.key) || !same(v, resting)) out.push([field.key, v]);
     }
     for (const [key, v] of Object.entries(source)) if (!drawn.has(key) && v !== undefined) out.push([key, v]);
     return Object.fromEntries(out);
