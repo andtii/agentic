@@ -82,6 +82,25 @@ import { Row, Col, Spacer } from '@agentic/ui';
 
 The dialog never fetches and never assumes that a move happened: it shows what `path` / `listing` say. It holds no `<form>` and no named control, so it can sit inside a page's form. `workdirLabel(ref, environments)` is the chip text for any other surface.
 
+### Plugin setup (#232)
+
+`SchemaForm` draws a plugin's config form from its core `ConfigSchema`; `SecretField` takes its secrets; `PluginCard` and `ReadinessBadge` show it in a list. All four are data in and events out — the page owns the Registry calls.
+
+```tsx
+<SchemaForm schema={plugin.manifest.config} value={plugin.config} saving={st.saving} error={st.error} onSubmit={(config) => configure(plugin.manifest.id, config)} />
+{(plugin.manifest.secrets ?? []).map((s) => (
+    <SecretField name={s.name} label={s.title} description={s.description} required={s.required} isSet={secretNames.includes(s.name)} onSave={(value) => setSecret(s.name, value)} onRemove={() => deleteSecret(s.name)} />
+))}
+
+<PluginCard id={m.id} name={m.name} kind={m.kind} version={m.version} description={m.description} readiness={pluginReadiness(plugin, facts)} active={active.memory === m.id} slots={{ toggle, meta, configure }} />
+```
+
+- One field per property: string → text (`format: 'uri'` → URL), `enum` → select, number / integer → number (`minimum` / `maximum`), boolean → switch, string list → chips, string map → `MapField` rows. A property kind the form does not know is not drawn and is kept in the config. Validation is core's `validateConfig`, read over `configDefaults`.
+- `submit` emits a SPARSE config: a property left at its manifest default is not written, so the stored config keeps following the manifest. Write it as it comes.
+- `value` follows a live read while the draft is clean; an edited draft is never overwritten. `ref` gives `dirty()`, `reset()`, `submit()`, `errors()`, `draft`; `hideActions` leaves the buttons to a save rail.
+- `SecretField` never shows a value and never posts one: the input has no `name`, is disabled until mounted, and the typed value is dropped when `save` fires. Put it BESIDE `SchemaForm`, never inside another `<form>`. After a failed write the user pastes again.
+- `ReadinessBadge readiness={…} detail` adds the sentence (`readinessDetail`) after the pill; `READINESS` is the label / tone table.
+
 ## Component kit (`src/kit`)
 
 The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. Eight `ag-*` scopes ship in the fragment with recipes (`StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.

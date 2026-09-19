@@ -156,6 +156,35 @@ export const agWorkdirPickerAnatomy = defineAnatomy('ag-workdir-picker', {
     actions: { element: 'div', parent: 'worktree' }
 });
 
+/** One plugin of the build (PLG-02, PLG-03): name + version, kind and readiness tags, description, the page's sections, dependents + configure; tone `dim` disabled, `needs-you` / `failed` when it needs the user, `selected` = the active plugin of its kind. */
+export const agPluginCardAnatomy = defineAnatomy('ag-plugin-card', {
+    root: { element: 'article', tokens: ['color', 'radius-box'] },
+    header: { element: 'header', parent: 'root' },
+    name: { element: 'h3', parent: 'header', tokens: ['text'] },
+    version: { element: 'span', parent: 'name', tokens: ['color', 'text'] },
+    tags: { element: 'div', parent: 'root' },
+    readiness: { element: 'span', parent: 'tags', tokens: ['text'] },
+    'readiness-detail': { element: 'span', parent: 'readiness', tokens: ['color', 'text'] },
+    description: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
+    footer: { element: 'footer', parent: 'root', tokens: ['color', 'text'] },
+    meta: { element: 'span', parent: 'footer' }
+});
+
+/** A write-only secret: SET / NOT SET with Replace and Remove, and the one-line editor that takes a new value. */
+export const agSecretAnatomy = defineAnatomy('ag-secret', {
+    root: { element: 'div' },
+    state: { element: 'div', parent: 'root' },
+    actions: { element: 'span', parent: 'state' },
+    editor: { element: 'form', parent: 'root' }
+});
+
+/** A string → string map as name / value rows with a remove button each, and the add button. */
+export const agMapFieldAnatomy = defineAnatomy('ag-map-field', {
+    root: { element: 'div' },
+    row: { element: 'div', parent: 'root' },
+    actions: { element: 'div', parent: 'root' }
+});
+
 export const kitAnatomies = [
     agPillAnatomy,
     agAgentTileAnatomy,
@@ -169,5 +198,8 @@ export const kitAnatomies = [
     agBannerAnatomy,
     agEmptyAnatomy,
     agWorkdirAnatomy,
-    agWorkdirPickerAnatomy
+    agWorkdirPickerAnatomy,
+    agPluginCardAnatomy,
+    agSecretAnatomy,
+    agMapFieldAnatomy
 ] as const;
