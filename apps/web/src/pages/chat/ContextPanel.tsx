@@ -1,7 +1,8 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import type { EnvironmentId, WorkdirRef } from '@agentic/core';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
+import { memberQuota } from './quota';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
@@ -65,6 +66,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     <span data-member-role>{a.role}</span>
                                     <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     <EnvironmentLine tone="muted" {...a.environment} />
+                                    {props.environments ? <span data-member-quota><QuotaBadge {...memberQuota(a, member.workdir?.environmentId, props.environments)} /></span> : null}
                                     <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
                                     {props.environments && a.environment.runtime !== 'anthropic-api' ? (
                                         <span data-member-workdir>

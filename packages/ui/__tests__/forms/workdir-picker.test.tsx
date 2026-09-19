@@ -23,7 +23,13 @@ import { labelOf, setText } from './helpers';
 const W = 'env_w' as EnvironmentId;
 const L = 'env_l' as EnvironmentId;
 const envs: WorkdirEnvironment[] = [
-    { id: W, label: 'alien01 / work', os: 'windows', roots: ['C:\\Dev', 'D:\\src'] },
+    {
+        id: W,
+        label: 'alien01 / work',
+        os: 'windows',
+        roots: ['C:\\Dev', 'D:\\src'],
+        quota: { sourceId: 'q', runtime: 'claude-code', environmentId: W, availability: 'reported', windows: [{ id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.76, unit: 'percent', status: 'ok' }], observedAt: Date.now(), via: 'probe' }
+    },
     { id: L, label: 'pi / home', os: 'linux', roots: ['/home/pi'], unavailable: 'Machine offline' }
 ];
 const recent: WorkdirRecent[] = [
@@ -212,6 +218,14 @@ describe('WorkdirDialog', () => {
             ['navigate', { environmentId: W, path: 'D:\\src' }]
         ]);
         expect(buttonNamed(p.root, 'Use this folder').disabled).toBe(true);
+    });
+
+    it('shows each environment\'s usage limits in the strip, when it has them (#315)', async () => {
+        const { parts } = picker();
+        const [work, pi] = parts('env');
+        expect(work!.querySelector('[data-scope="ag-quota"][data-part="used"]')!.textContent).toBe('76% used');
+        expect(work!.querySelector('[data-scope="ag-quota"][data-part="root"]')!.hasAttribute('data-mod-compact')).toBe(true);
+        expect(pi!.querySelector('[data-scope="ag-quota"]')).toBeNull();
     });
 
     it('explains an unavailable environment instead of browsing it', async () => {

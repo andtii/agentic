@@ -23,6 +23,7 @@ import { closeNewChat, newChatRequest, openNewChat } from './head';
 import { LIST_TAIL, chatRow } from './live';
 import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
 import { NewChatDialog } from './NewChatDialog';
+import { useLiveWorkdirEnvironments } from '../workdir/environments';
 
 interface ChatRead {
     readonly id: string;
@@ -151,6 +152,8 @@ export const LiveChats = component(() => {
     const viewer = useViewer()();
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
+    // Where each agent runs and its account's limits, on the New chat cards (#315).
+    const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const st = signal({ busy: false, error: '' });
     const createChat = async (agentIds: readonly string[], coordinator: string | null): Promise<void> => {
         const ws = viewer.workspaceId;
@@ -172,7 +175,7 @@ export const LiveChats = component(() => {
                 ? <EmptyState variant="generic" title="Sign in to see your chats" caption="Chats belong to your workspace." />
                 : <LiveChatList wide directory={directory} onNewChat={openNewChat} />}
             {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
-            <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} busy={st.busy} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
+            <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} busy={st.busy} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
         </Page>
     );
 });

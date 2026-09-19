@@ -126,16 +126,27 @@ describe('/chats/:id (live)', () => {
     });
 
     it('new chat: creates the chat with the picked members and coordinator and navigates to it', async () => {
-        const { chatId, forge } = await seedChat();
+        const { chatId, forge, atlas } = await seedChat();
         const dom = await mountLive(`/chats/${chatId}`, h);
-        await until(() => dom.querySelectorAll('[data-new-chat-members] input').length === 2, 'the agents');
-        const box = dom.querySelector<HTMLInputElement>(`[data-new-chat-members] input[value="${forge}"]`)!;
-        box.checked = true;
-        box.dispatchEvent(new Event('change', { bubbles: true }));
+        await until(() => dom.querySelectorAll('[data-new-chat-members] input[name="member"]').length === 2, 'the agents');
+        const pick = (id: string) => {
+            const box = dom.querySelector<HTMLInputElement>(`[data-new-chat-members] input[name="member"][value="${id}"]`)!;
+            box.checked = !box.checked;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        // Two picked: a group, so each picked card offers the coordinator radio; then back to one.
+        pick(forge);
+        pick(atlas);
         await tick();
-        const coordinator = dom.querySelector<HTMLSelectElement>('[data-new-chat-coordinator] select')!;
-        coordinator.value = forge;
-        coordinator.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(dom.querySelector('[data-new-chat-agent][data-picked]')).not.toBeNull();
+        const radio = dom.querySelector<HTMLInputElement>(`[data-new-chat-agent="${forge}"] input[name="coordinator"]`)!;
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        await tick();
+        expect(dom.querySelector('[data-new-chat-summary]')!.textContent).toContain('Forge answers unless you mention someone');
+        pick(atlas);
+        await tick();
+        expect(dom.querySelector('[data-new-chat-summary]')!.textContent).toBe('A direct chat with Forge.');
         [...dom.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Create chat')!.click();
         await until(() => (h.app.saves.some((s) => s.type === 'Chat' && s.key !== chatKeyOf(USER, chatId))), 'the new chat');
         const ws = await h.app.as(owner).actor(Workspace, workspaceKey(WS)).get();

@@ -6,7 +6,7 @@
  * same label server-side.
  */
 
-import { normalizePath, pathWithin, type EnvironmentDescriptor, type EnvironmentId, type FsError, type FsErrorCode, type HostOs, type MachineInfo, type WorkdirRef } from '@agentic/core';
+import { normalizePath, pathWithin, type EnvironmentDescriptor, type EnvironmentId, type FsError, type FsErrorCode, type HostOs, type MachineInfo, type QuotaSnapshot, type WorkdirRef } from '@agentic/core';
 import { environmentStatus } from './environment-card.js';
 
 /** One environment the picker can browse. */
@@ -18,6 +18,8 @@ export interface WorkdirEnvironment {
     readonly roots: readonly string[];
     /** Why it cannot be browsed now ("Machine offline", "Sign-in expired"); absent = browsable. */
     readonly unavailable?: string;
+    /** Its account's provider limits (#315): `null` before the first report; absent when the caller has none to show. */
+    readonly quota?: QuotaSnapshot | null;
 }
 
 export interface WorkdirRecent {

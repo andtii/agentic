@@ -6,7 +6,7 @@
  */
 import type { WorkdirEnvironment } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { opsEnvironments, opsMachine } from '../../mock/ops';
+import { opsEnvironments, opsMachine, opsQuota } from '../../mock/ops';
 import { useEnvironmentDirectory, type EnvironmentEntry } from '../ops/environments';
 import { workdirEnvironmentsOf } from './model';
 
@@ -38,7 +38,8 @@ const mockEntries: readonly EnvironmentEntry[] = opsEnvironments.map((d) => {
         ...(m?.os ? { os: m.os } : {}),
         descriptor: d,
         line: { machine: m?.name ?? d.machineId, runtime: d.runtime, account: d.account.label },
-        label: `${m?.name ?? d.machineId} / ${d.runtime} / ${d.account.label}`
+        label: `${m?.name ?? d.machineId} / ${d.runtime} / ${d.account.label}`,
+        quota: opsQuota[d.id] ?? null
     };
 });
 

@@ -39,7 +39,9 @@ export function workdirEnvironmentOf(entry: EnvironmentEntry): WorkdirEnvironmen
         label: `${entry.machineName} / ${entry.descriptor.name}`,
         os: entry.os ?? DEFAULT_OS,
         roots: entry.descriptor.cwdRoots,
-        ...(unavailable ? { unavailable } : {})
+        ...(unavailable ? { unavailable } : {}),
+        // Its account's limits (#315): shown in the picker's strip, and where a chat member or New chat names this environment.
+        ...(entry.quota !== undefined ? { quota: entry.quota } : {})
     };
 }
 

@@ -373,7 +373,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                     </Drawer.Panel>
                 </Drawer.Root>
                 {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} busy={st.saving} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
-                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
+                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
             </Page>
         );
     };

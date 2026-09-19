@@ -20,6 +20,13 @@ export function quotaPercent(w: Pick<QuotaWindow, 'utilization'>): number | null
     return w.utilization === null ? null : Math.round(Math.min(1, Math.max(0, w.utilization)) * 100);
 }
 
+/** The window's name in one word or two, for the one-line meter: `Session`, `Week`, `Week · Fable`; the full label otherwise. */
+export function quotaShortLabel(w: Pick<QuotaWindow, 'label' | 'period' | 'scope'>): string {
+    const base = w.period === 'session' ? 'Session' : w.period === 'week' ? 'Week' : w.period === 'day' ? 'Day' : w.period === 'month' ? 'Month' : undefined;
+    if (!base) return w.label;
+    return w.scope?.model ? `${base} · ${w.scope.model}` : base;
+}
+
 /** `76% used`; a window without a number says so. */
 export function quotaUsedText(w: Pick<QuotaWindow, 'utilization'>): string {
     const p = quotaPercent(w);

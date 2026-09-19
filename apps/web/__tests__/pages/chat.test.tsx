@@ -71,6 +71,8 @@ describe('/chats/:id (Chat)', () => {
         expect(texts([...dom.querySelectorAll('[data-member-name]')])).toEqual(['Atlas', 'Forge', 'Lint']);
         expect(texts([...dom.querySelectorAll('[data-member-history]')])).toEqual(['Coordinator · sees all history', 'Sees all history', 'Added 14:02 · sees history from then']);
         expect(dom.querySelectorAll('[data-member] [data-scope="ag-env-line"][data-part="root"]')).toHaveLength(3);
+        // Each member's account limits where it runs (#315): Atlas is on the API, Forge and Lint on alien01's accounts.
+        expect(texts([...dom.querySelectorAll('[data-member-quota] [data-scope="ag-quota"][data-part="label"]')])).toEqual(['No plan limits · API key', 'Week · Fable', 'Session']);
         expect(dom.querySelectorAll('[data-mini-node]')).toHaveLength(3);
         expect(dom.querySelector('[data-privacy-note]')!.textContent).toContain('Membership shares the chat, not their memories.');
     });
