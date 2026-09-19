@@ -16,16 +16,16 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
-import { isWithin } from '@sigx/ai-agent/coding';
 import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
 import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
-import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener } from './connectors.js';
+import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener } from '../harness/connectors.js';
+import { assertCwdInRoots, assertRuntime as assertRuntimeOf, closingWith } from '../harness/session.js';
+import { bridgedPlatformTools } from '../harness/tools.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
-import { bridgedPlatformTools } from './tools.js';
 
 export interface ClaudeCodeDriverOptions {
     /** The SDK's `query`; a fake in tests. */
@@ -88,21 +88,6 @@ async function readText(path: string): Promise<string | undefined> {
     }
 }
 
-/** `session`, whose `close` also closes its connectors — every other member read through to the adapter's session. */
-function closingConnectors(session: AgentSession, closeConnectors: () => Promise<void>): AgentSession {
-    return Object.create(session, {
-        close: {
-            value: async () => {
-                try {
-                    await session.close();
-                } finally {
-                    await closeConnectors();
-                }
-            }
-        }
-    }) as AgentSession;
-}
-
 const joinPath = (dir: string, file: string) => `${dir.replace(/[\\/]+$/, '')}/${file}`;
 
 export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeCodeDriver {
@@ -114,9 +99,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         now: options.auth?.now ?? Date.now
     };
 
-    const assertRuntime = (env: LocalEnvironment) => {
-        if (env.runtime !== RUNTIME) throw new Error(`[claude-code] environment "${env.name}" runs "${env.runtime}", not ${RUNTIME}`);
-    };
+    const assertRuntime = (env: LocalEnvironment) => assertRuntimeOf(RUNTIME, env);
 
     const configDirOf = (env: LocalEnvironment) => env.profileDir ?? joinPath(home(), '.claude');
 
@@ -164,9 +147,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
 
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);
-            if (!env.cwdRoots.some((root) => isWithin(spec.cwd, root))) {
-                throw new Error(`[claude-code] cwd ${spec.cwd} is outside the cwdRoots of environment "${env.name}"`);
-            }
+            assertCwdInRoots(RUNTIME, env, spec.cwd);
             const { tools: platform, unknown } = bridgedPlatformTools(spec.tools, ctx.callTool);
             const connectors = await openDaemonConnectors({
                 connectors: spec.connectors ?? [],
@@ -203,7 +184,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 unknownTools: unknown.filter((name) => !name.includes('__')),
                 unavailableConnectors: connectors.unavailable
             });
-            return { session: closingConnectors(session, connectors.close), capabilities };
+            return { session: closingWith(session, connectors.close), capabilities };
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

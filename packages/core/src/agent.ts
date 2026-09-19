@@ -3,7 +3,7 @@
 import type { AgentId, EnvironmentId } from './ids.js';
 
 /** The runtime that executes an agent's sessions. Extended by runtime plugins. */
-export type RuntimeId = 'anthropic-api' | 'claude-code' | (string & {});
+export type RuntimeId = 'anthropic-api' | 'claude-code' | 'copilot-cli' | 'codex-cli' | (string & {});
 
 /** Reusable instructions or procedures. A skill never grants authority (AGT-04). */
 export interface SkillRef {

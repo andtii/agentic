@@ -1,5 +1,5 @@
 /**
- * An agent's MCP connectors on a daemon-hosted Claude Code session (#280,
+ * An agent's MCP connectors on a daemon-hosted harness session (#280,
  * architecture §9) — the daemon side of what `openSessionConnectors` does for a
  * local session (#240). The platform puts the agent's READY connectors on
  * `OpenSpec.connectors` with secret NAMES only; here each one is opened for this
@@ -11,7 +11,7 @@
  * - a stdio server runs in the connector's `cwd` (the session's `cwd` when it
  *   names none), which must lie inside the environment's `cwdRoots`, with the
  *   stdio client's allowlisted environment plus its credential variables;
- * - its tools join the session's client tools, served over Claude Code's tool
+ * - its tools join the session's client tools, served over the harness's tool
  *   server like the platform's, named `<id>__<tool>`, and it is closed with
  *   the session.
  *

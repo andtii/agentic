@@ -11,7 +11,7 @@ import { isPlatformToolName, platformTools } from '../tools/index.js';
 import type { PlatformToolCaller } from '@agentic/core';
 
 const unreachable = (): never => {
-    throw new Error('[claude-code] a bridged platform tool never runs its port on the daemon');
+    throw new Error('[harness] a bridged platform tool never runs its port on the daemon');
 };
 
 /** Ports that are never called: only the tool definitions are used. */
@@ -23,7 +23,7 @@ const DEFINITION_PORTS: PlatformPorts = {
 };
 
 export interface BridgedTools {
-    /** Client tools served to Claude Code over its MCP tool server, in the order asked. */
+    /** Client tools served to the harness (natively or over its MCP tool server), in the order asked. */
     readonly tools: readonly AnyTool[];
     /** Names the daemon has no definition for (connector tools, typos); never served. */
     readonly unknown: readonly string[];
