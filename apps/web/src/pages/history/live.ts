@@ -22,7 +22,7 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
     { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked'] },
-    { id: 'plugins', label: 'Plugins and secrets', kinds: ['plugin.enabled', 'plugin.disabled', 'plugin.granted', 'secret.opened'] }
+    { id: 'plugins', label: 'Plugins and secrets', kinds: ['plugin.enabled', 'plugin.disabled', 'plugin.activated', 'plugin.granted', 'secret.opened'] }
 ] as const satisfies readonly { id: string; label: string; kinds?: readonly AuditKind[] }[];
 
 export type HistoryKindFilter = (typeof HISTORY_KIND_FILTERS)[number]['id'];
@@ -68,6 +68,7 @@ export const KIND_TONE: Partial<Record<AuditKind, Tone>> = {
     'approval.requested': 'needs-you',
     'proposal.reviewed': 'live',
     'plugin.granted': 'live',
+    'plugin.activated': 'live',
     'machine.paired': 'live',
     'machine.revoked': 'failed',
     'workdir.worktree-created': 'live',
