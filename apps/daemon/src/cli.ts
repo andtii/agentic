@@ -1,6 +1,6 @@
 /**
  * `agentic-daemon pair <code> --url <platform> [--name <machine>] [--allow-root <dir>…]`
- * `agentic-daemon run [--verbose]`
+ * `agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]`
  * `agentic-daemon doctor`
  * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
  * `agentic-daemon policy show | allow-root | deny-root | off` (`policy-cli.ts`)
@@ -12,10 +12,11 @@
  */
 
 import { hostname } from 'node:os';
+import type { QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
 import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner, type Credentials } from './credentials.js';
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
-import { builtinDrivers, isDisposable } from './drivers.js';
+import { builtinDrivers, builtinQuotaSources, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
 import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.js';
 import { watchEnvironments } from './env-store.js';
@@ -31,6 +32,8 @@ import { DAEMON_VERSION } from './version.js';
 export interface CliContext {
     readonly paths?: DaemonPaths;
     readonly drivers?: readonly DaemonDriver[];
+    /** The `quota` sources `run` reads provider limits with; `builtinQuotaSources()` by default. */
+    readonly quotaSources?: readonly QuotaSource[];
     readonly fetch?: typeof fetch;
     readonly out?: (text: string) => void;
     readonly err?: (text: string) => void;
@@ -59,7 +62,8 @@ const USAGE = `agentic-daemon ${DAEMON_VERSION}
 Usage:
   agentic-daemon pair <code> --url <platform> [--name <machine name>] [--allow-root <dir>…]
                        (--allow-root lets the web add environments inside <dir>)
-  agentic-daemon run [--verbose]
+  agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
+                       (--quota-probe off: usage limits from running sessions only, no account probes)
   agentic-daemon doctor
 ${ENV_USAGE}
 ${POLICY_USAGE}
@@ -85,6 +89,23 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         } else positional.push(arg);
     }
     return { command: positional[0], positional: positional.slice(1), flags };
+}
+
+/** `--quota-probe on|off` and `--quota-poll-ms <ms>` (#271); a message when either is malformed. */
+export function quotaFlags(flags: ParsedArgs['flags']): { probe?: boolean; pollMs?: number } | string {
+    const out: { probe?: boolean; pollMs?: number } = {};
+    const probe = flags['quota-probe'];
+    if (probe !== undefined) {
+        if (probe !== 'on' && probe !== 'off') return '--quota-probe takes on or off';
+        out.probe = probe === 'on';
+    }
+    const poll = flags['quota-poll-ms'];
+    if (poll !== undefined) {
+        const ms = typeof poll === 'string' && /^\d+$/.test(poll) ? Number(poll) : NaN;
+        if (!Number.isSafeInteger(ms)) return '--quota-poll-ms takes a whole number of milliseconds (0 turns the poll off)';
+        out.pollMs = ms;
+    }
+    return out;
 }
 
 function stopSignal(): Promise<void> {
@@ -163,6 +184,11 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 }
                 secrets = credentialSecrets(credentials);
                 const log = logger(args.flags.verbose ? 'debug' : 'info');
+                const quota = quotaFlags(args.flags);
+                if (typeof quota === 'string') {
+                    err(`${quota}\n\n${USAGE}`);
+                    return 2;
+                }
                 const loaded = await loadEnvironments(paths.environmentsFile);
                 if (!loaded.ok) {
                     for (const e of loaded.errors) log.error('environments.json is invalid', { problem: e });
@@ -179,6 +205,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     policy: loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF,
                     manage: { paths, secure },
                     drivers,
+                    quota: { sources: context.quotaSources ?? builtinQuotaSources(), ...quota },
                     eventLog: ndjsonEventLog(paths.sessionsDir, { onError: (e, session) => log.error('session log write failed', { session, error: e }) }),
                     logger: log,
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),
