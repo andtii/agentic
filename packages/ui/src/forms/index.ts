@@ -40,8 +40,15 @@ export {
 } from './settings-model.js';
 export type { SettingsDraft, SettingsErrors, SettingsFormValue } from './settings-model.js';
 
-export { TextField, TextareaField, SelectField, NumberField, SwitchField, MultiSelectField } from './fields.js';
-export type { FieldOption, TextFieldProps, TextareaFieldProps, SelectFieldProps, NumberFieldProps, SwitchFieldProps, MultiSelectFieldProps } from './fields.js';
+export { TextField, TextareaField, SelectField, NumberField, SwitchField, MultiSelectField, MapField } from './fields.js';
+export type { FieldOption, TextFieldProps, TextareaFieldProps, SelectFieldProps, NumberFieldProps, SwitchFieldProps, MultiSelectFieldProps, MapFieldProps } from './fields.js';
+
+export { schemaFields, schemaLabel, toSchemaDraft, fromSchemaDraft, validateSchemaDraft } from './schema-model.js';
+export type { SchemaDraft, SchemaErrors, SchemaField, SchemaFieldKind, MapRow } from './schema-model.js';
+export { SchemaForm } from './schema-form.js';
+export type { SchemaFormApi, SchemaFormProps } from './schema-form.js';
+// `componentExportName(scope)` for the map field's `ag-*` scope — the fragment contract.
+export { MapField as AgMapField } from './fields.js';
 
 export { AgentForm } from './agent-form.js';
 export type { AgentFormApi, AgentFormProps, AgentFormRailProps, AgentFormLayout, AgentFormWorkdirProps } from './agent-form.js';

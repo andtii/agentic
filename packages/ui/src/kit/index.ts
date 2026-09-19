@@ -5,7 +5,7 @@
  */
 import './globals.js';
 
-export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy } from './anatomy.js';
+export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy } from './anatomy.js';
 export { recipes as kitRecipes } from './recipes.js';
 export { kitScopes, TONES, NEEDS_KINDS } from './vocabulary.js';
 export type { Tone, NeedsKind } from './vocabulary.js';

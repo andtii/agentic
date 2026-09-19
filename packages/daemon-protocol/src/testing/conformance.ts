@@ -3,8 +3,10 @@
  * and the behaviour every platform side may rely on: pair (hello/welcome),
  * env, heartbeat, session open/opened, a stream of session frames, a
  * reconnect that replays from the platform's `wanted` cursors without a
- * gap or a duplicate (OPS-04, OPS-06), a tool round trip, and folder
- * browsing that never leaves the environment's `cwdRoots` (#187). No test-runner
+ * gap or a duplicate (OPS-04, OPS-06), a tool round trip, folder
+ * browsing that never leaves the environment's `cwdRoots` (#187), and
+ * environments managed from the platform only inside the machine-local
+ * policy (#236). No test-runner
  * import: consumers wire the cases into theirs, e.g.
  *
  * ```ts
@@ -14,9 +16,9 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type Cursor, type EnvironmentDescriptor, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, HelloFrame, PlatformFrame, SessionFrameFrame } from '../frames.js';
+import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HelloFrame, PlatformFrame, SessionFrameFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
 import { LIMITS } from '../schema/limits.js';
 import { assert, assertEqual, fail, withTimeout } from './assert.js';
@@ -42,7 +44,7 @@ export interface DaemonConformanceOptions {
 
 const V = DAEMON_PROTOCOL_VERSION;
 /** Cases that need an optional harness feature. */
-const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs' };
+const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage' };
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
 
@@ -174,6 +176,30 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
     };
 
     const S1 = 'session_conformance_1' as SessionId;
+
+    /** Send one `env.request` and take its answer, plus the `env` frame that came with it — before or after, whichever the daemon chose. */
+    const manage = async (peer: Peer, requestId: string, op: { op: 'put'; environment: EnvironmentInput } | { op: 'remove'; environmentId: EnvironmentDescriptor['id'] }) => {
+        peer.send({ v: V, t: 'env.request', requestId, ...op });
+        let response: EnvResponseFrame | undefined;
+        let announced: EnvFrame | undefined;
+        const deadline = Date.now() + timeoutMs;
+        while (!response || (response.result && !announced)) {
+            const frame = await peer.next(response ? 'env' : 'env.response', Math.max(1, deadline - Date.now()));
+            if (frame.t === 'env.response') response = frame;
+            else if (frame.t === 'env') announced = frame;
+            else if (frame.t !== 'heartbeat') fail(`expected an env.response or env frame, got ${frame.t}`);
+        }
+        assertEqual(response.requestId, requestId, 'env.response answers the request it was sent');
+        return { response, announced };
+    };
+
+    /** The policy a harness with `'env-manage'` starts under, and a runtime the daemon has a driver for. */
+    const managed = (hello: HelloFrame, daemon: ConformanceDaemon) => {
+        assert(hello.policy?.webManaged === true, 'hello.policy says the web may manage environments (the harness declared "env-manage")');
+        const root = hello.policy.allowedRoots[0];
+        assert(root !== undefined, 'hello.policy names at least one allowed root');
+        return { root, allowedRoots: hello.policy.allowedRoots, runtime: hello.environments.find((e) => e.id === daemon.environmentId)!.runtime };
+    };
 
     const cases: ConformanceCase[] = [
         {
@@ -332,6 +358,82 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     }
                     const unknown = await ask('fs_unknown', 'env_conformance_unknown', root);
                     assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
+                })
+        },
+        {
+            name: 'env-put',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const { root, allowedRoots, runtime } = managed(hello, daemon);
+
+                    const made = await manage(peer, 'env_put', { op: 'put', environment: { name: 'conformance put', runtime, cwdRoots: [root] } });
+                    const id = made.response.result?.environmentId;
+                    assert(id !== undefined, `an environment inside the allowed roots is created (${made.response.error?.code ?? ''} ${made.response.error?.message ?? ''})`);
+                    const created = made.announced!.environments.find((e) => e.id === id);
+                    assert(created !== undefined, 'env lists the environment env.response names');
+                    assertEqual(created.machineId, daemon.machineId, 'the new environment belongs to the machine');
+                    assertEqual([created.name, created.runtime], ['conformance put', runtime], 'the new environment is what was asked for');
+                    assertEqual(created.cwdRoots.map((r) => normalizePath(r, hello.os)), [normalizePath(root, hello.os)], 'the new environment has the roots that were asked for');
+                    assert(
+                        made.announced!.environments.some((e) => e.id === daemon.environmentId),
+                        'the environments that were there are still there'
+                    );
+
+                    const changed = await manage(peer, 'env_change', { op: 'put', environment: { id, name: 'conformance put', runtime, cwdRoots: [root], concurrency: 3 } });
+                    assertEqual(changed.response.result?.environmentId, id, 'a put with an id changes that environment');
+                    assertEqual(changed.announced!.environments.filter((e) => e.id === id).map((e) => e.concurrency.max), [3], 'the change is announced, once');
+
+                    // A sibling of the allowed root: outside every one of them unless another covers it.
+                    const outside = normalizePath(`${root}/../__agentic_conformance_outside__`, hello.os);
+                    if (outside && !pathWithin(outside, allowedRoots, hello.os)) {
+                        const refused = await manage(peer, 'env_outside', { op: 'put', environment: { name: 'outside', runtime, cwdRoots: [root, outside] } });
+                        assertEqual(refused.response.error?.code, 'outside-allowed-roots', 'a working root outside the allowed roots is refused, even beside one inside (OPS-01)');
+                    }
+                    const unknown = await manage(peer, 'env_runtime', { op: 'put', environment: { name: 'no driver', runtime: 'conformance-no-such-runtime', cwdRoots: [root] } });
+                    assertEqual(unknown.response.error?.code, 'unknown-runtime', 'a runtime the daemon has no driver for is refused');
+                })
+        },
+        {
+            name: 'env-remove',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const { root, runtime } = managed(hello, daemon);
+                    await open(peer, hello, daemon, S1);
+
+                    const busy = await manage(peer, 'env_busy', { op: 'remove', environmentId: daemon.environmentId });
+                    assertEqual(busy.response.error?.code, 'in-use', 'an environment with a running session is not removed');
+
+                    const made = await manage(peer, 'env_put', { op: 'put', environment: { name: 'conformance remove', runtime, cwdRoots: [root] } });
+                    const id = made.response.result?.environmentId;
+                    assert(id !== undefined, `an environment to remove is created (${made.response.error?.code ?? ''})`);
+                    const removed = await manage(peer, 'env_remove', { op: 'remove', environmentId: id });
+                    assertEqual(removed.response.result?.environmentId, id, 'an idle environment is removed');
+                    assert(!removed.announced!.environments.some((e) => e.id === id), 'env no longer lists it');
+                    assert(
+                        removed.announced!.environments.some((e) => e.id === daemon.environmentId),
+                        'the environment in use is still there'
+                    );
+
+                    const gone = await manage(peer, 'env_gone', { op: 'remove', environmentId: id });
+                    assertEqual(gone.response.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
+                })
+        },
+        {
+            name: 'env-policy',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const { root, runtime } = managed(hello, daemon);
+                    await daemon.setPolicy!({ webManaged: false, allowedRoots: [] });
+                    const env = await peer.expect('env');
+                    assertEqual(env.policy, { webManaged: false, allowedRoots: [] }, 'a policy changed on the machine is announced with env');
+
+                    const put = await manage(peer, 'env_off_put', { op: 'put', environment: { name: 'policy off', runtime, cwdRoots: [root] } });
+                    assertEqual(put.response.error?.code, 'policy-disabled', 'with the policy off nothing is created');
+                    const remove = await manage(peer, 'env_off_remove', { op: 'remove', environmentId: daemon.environmentId });
+                    assertEqual(remove.response.error?.code, 'policy-disabled', 'with the policy off nothing is removed');
                 })
         },
         {

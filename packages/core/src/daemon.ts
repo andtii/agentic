@@ -8,7 +8,7 @@
  * `R` its reply, `C` a command. `@agentic/daemon-protocol` instantiates them.
  */
 
-import type { ApprovalRule, CapabilityReport, EnvironmentDescriptor, FsError, FsOp, FsResult, MachineId, SessionId, ToolGrant } from './index.js';
+import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -59,8 +59,11 @@ export type DaemonFrame<F = unknown, R = unknown> =
           readonly environments: readonly EnvironmentDescriptor[];
           readonly capabilities: readonly CapabilityReport[];
           readonly resume: Readonly<Record<string, Cursor>>;
+          /** The machine-local policy for web-managed environments (#236); absent from a daemon that predates it. */
+          readonly policy?: MachinePolicy;
       }
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env'; readonly environments: readonly EnvironmentDescriptor[] }
+    /** The environments changed — and, when it is carried, the policy too (it is edited on the machine while the daemon runs). */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env'; readonly environments: readonly EnvironmentDescriptor[]; readonly policy?: MachinePolicy }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'heartbeat'; readonly at: number; readonly active: readonly SessionId[] }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.opened'; readonly sessionId: SessionId; readonly ref: unknown; readonly capabilities: CapabilityReport; readonly head: Cursor }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.frame'; readonly sessionId: SessionId; readonly frame: F }
@@ -69,7 +72,9 @@ export type DaemonFrame<F = unknown, R = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'tool.call'; readonly callId: string; readonly sessionId: SessionId; readonly tool: string; readonly input: unknown }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'pong'; readonly at: number }
     /** The answer to `fs.request` (#185): exactly one of `result` / `error`. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.response'; readonly requestId: string; readonly result?: FsResult; readonly error?: FsError };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.response'; readonly requestId: string; readonly result?: FsResult; readonly error?: FsError }
+    /** The answer to `env.request` (#236): exactly one of `result` / `error`. A `result` comes with an `env` frame carrying the new descriptors, before or after it. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.response'; readonly requestId: string; readonly result?: EnvResult; readonly error?: EnvError };
 
 export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>> }
@@ -79,7 +84,12 @@ export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'tool.result'; readonly callId: string; readonly output?: unknown; readonly error?: { readonly code: string; readonly message: string } }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'ping' }
     /** Browse a folder or create a git worktree inside an environment's `cwdRoots` (#185); answered by `fs.response`. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.request'; readonly requestId: string; readonly environmentId: string; readonly op: FsOp };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'fs.request'; readonly requestId: string; readonly environmentId: string; readonly op: FsOp }
+    /**
+     * Create, change or remove an environment under the machine-local policy (#236; decisions 2026-09-19 (c)); answered by
+     * `env.response`. The `EnvOp` fields sit on the frame: `op: 'put'` carries `environment`, `op: 'remove'` carries `environmentId`.
+     */
+    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.request'; readonly requestId: string } & EnvOp);
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response'] as const;
-export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response'] as const;
+export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request'] as const;
