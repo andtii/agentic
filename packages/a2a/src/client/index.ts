@@ -6,3 +6,5 @@ export type { A2aSessionOptions, OpenA2aSessionOptions } from './session.js';
 export { openA2aSession } from './session.js';
 export type { A2aRpcClient, A2aTransportOptions, FetchLike } from './transport.js';
 export { createA2aRpcClient, fetchAgentCard, cardUrlFor, sseData } from './transport.js';
+export type { A2aPeerOpenContext, A2aPeerOptions, A2aPeerPluginAccess, A2aPeerRuntimeOptions } from './peer.js';
+export { a2aPeer, a2aPeerId, a2aPeerIdFrom, a2aPeerRuntime, a2aPeerTokenSecret, isA2aPeerRuntime, A2A_PEER_CAPABILITIES, A2A_PEER_PREFIX, A2A_PEER_VERSION } from './peer.js';

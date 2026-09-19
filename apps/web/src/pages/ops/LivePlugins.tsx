@@ -14,6 +14,7 @@ import { EmptyState, Icon, Label } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
+import { AddA2aPeer } from '../plugins/AddA2aPeer';
 import { LiveConnectors } from '../plugins/LiveConnectors';
 import { PluginCatalogue } from '../plugins/PluginCatalogue';
 import { dependentsById } from '../plugins/model';
@@ -52,6 +53,7 @@ export const LivePlugins = component(() => {
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return (
             <OpsPage page="plugins" title="Plugins">
+                {viewer.workspaceId ? <AddA2aPeer defs={defs} registryKey={key()} taken={rows.map((p) => p.manifest.id)} /> : null}
                 {signedOut
                     ? <EmptyState variant="generic" title="Sign in to see your plugins" caption="Plugins are set up per workspace." />
                     : overview && !rows.length
