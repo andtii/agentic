@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { main, parseArgs } from '../src/cli';
+import { quoteArg } from '../src/env-cli';
 import type { DaemonDriver } from '../src/daemon';
 import { loadEnvironments } from '../src/environments';
 import { daemonPaths } from '../src/paths';
@@ -168,6 +169,12 @@ describe('cli', () => {
             { command: 'copilot', args: ['login'], env: { PATH: '/bin', COPILOT_HOME: join(dir, 'profiles', 'env_octo') } },
             { command: '/opt/copilot', args: ['login'], env: { PATH: '/bin', COPILOT_HOME: join(dir, 'profiles', 'env_octo') } }
         ]);
+    });
+
+    it('env login on Windows: an argument with spaces or quotes stays one argument on the cmd line', () => {
+        expect(quoteArg('login')).toBe('login');
+        expect(quoteArg('C:/Program Files/agentic/node_modules/@openai/codex/bin/codex.js')).toBe('"C:/Program Files/agentic/node_modules/@openai/codex/bin/codex.js"');
+        expect(quoteArg('say "hi"')).toBe('"say \\"hi\\""');
     });
 
     it('env login: Codex signs in with `codex login` under its own CODEX_HOME, without the parent\'s OpenAI variables', async () => {

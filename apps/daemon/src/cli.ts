@@ -32,7 +32,7 @@ import { DAEMON_VERSION } from './version.js';
 export interface CliContext {
     readonly paths?: DaemonPaths;
     readonly drivers?: readonly DaemonDriver[];
-    /** The `quota` sources `run` reads provider limits with; `builtinQuotaSources()` by default. */
+    /** The `quota` sources `run` reads provider limits with; the built-in set's with the built-in drivers, none with injected ones. */
     readonly quotaSources?: readonly QuotaSource[];
     readonly fetch?: typeof fetch;
     readonly out?: (text: string) => void;
@@ -124,8 +124,10 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     const out = context.out ?? ((t: string) => process.stdout.write(`${t}\n`));
     const err = context.err ?? ((t: string) => process.stderr.write(`${t}\n`));
     const paths = context.paths ?? daemonPaths(context.platform ? { platform: context.platform } : {});
-    // One set, so a quota source that asks a runtime shares the driver's process for it.
-    const builtin = context.drivers && context.quotaSources ? undefined : builtinRuntimes();
+    // One set, so a quota source that asks a runtime shares the driver's process for it. Only with the built-in
+    // drivers: sources over drivers `run` does not own would hold processes nothing disposes. Building the set
+    // starts nothing — a driver spawns its runtime on first use.
+    const builtin = context.drivers ? undefined : builtinRuntimes();
     const drivers = context.drivers ?? builtin!.drivers;
     const args = parseArgs(argv);
     let secrets: string[] = [];
@@ -207,7 +209,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     policy: loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF,
                     manage: { paths, secure },
                     drivers,
-                    quota: { sources: context.quotaSources ?? builtin!.quotaSources, ...quota },
+                    quota: { sources: context.quotaSources ?? builtin?.quotaSources ?? [], ...quota },
                     eventLog: ndjsonEventLog(paths.sessionsDir, { onError: (e, session) => log.error('session log write failed', { session, error: e }) }),
                     logger: log,
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),

@@ -26,10 +26,13 @@ import type { DaemonPaths } from './paths.js';
 /** Runs an interactive sign-in attached to this terminal; resolves to its exit code. */
 export type LoginRunner = (command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>>) => Promise<number | null>;
 
+/** One argument on a `cmd.exe` line: quoted when it has spaces or quotes (a launcher under `C:\Program Files`, say). */
+export const quoteArg = (arg: string): string => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg);
+
 export const runLogin: LoginRunner = (command, args, env) =>
     new Promise((done, reject) => {
         // On Windows the CLI is usually a `.cmd` shim, which only a shell can start; one command string, so nothing is re-split.
-        const child = process.platform === 'win32' ? spawn(`"${command}" ${args.join(' ')}`, { shell: true, stdio: 'inherit', env }) : spawn(command, [...args], { stdio: 'inherit', env });
+        const child = process.platform === 'win32' ? spawn(`"${command}" ${args.map(quoteArg).join(' ')}`, { shell: true, stdio: 'inherit', env }) : spawn(command, [...args], { stdio: 'inherit', env });
         child.on('error', reject);
         child.on('close', done);
     });
