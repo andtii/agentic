@@ -29,6 +29,7 @@ export default defineConfig({
             { find: '@agentic/core', replacement: pkg('core') },
             { find: '@agentic/ui/design-system', replacement: resolve(__dirname, 'packages/ui/src/design-system/index.ts') },
             { find: '@agentic/ui', replacement: pkg('ui') },
+            { find: '@agentic/mcp/node', replacement: resolve(__dirname, 'packages/mcp/src/node/index.ts') },
             { find: '@agentic/mcp', replacement: pkg('mcp') },
             { find: '@agentic/a2a', replacement: pkg('a2a') }
         ]

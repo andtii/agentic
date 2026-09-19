@@ -43,6 +43,9 @@
       "@agentic/platform": [
         "./packages/platform/src/index.ts"
       ],
+      "@agentic/mcp/node": [
+        "./packages/mcp/src/node/index.ts"
+      ],
       "@agentic/mcp": [
         "./packages/mcp/src/index.ts"
       ],

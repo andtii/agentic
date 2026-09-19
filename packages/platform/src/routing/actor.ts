@@ -65,6 +65,7 @@ import { Workspace } from '../workspace/index.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
 import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
+import { daemonConnectors } from './connectors.js';
 import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
@@ -468,6 +469,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const opening = await work(route, t);
                 const tools = grantedToolNames(route);
                 const effective = withDefaultModel(route.config, route.plugins);
+                // The agent's MCP connectors (#280): the ready ones go to the daemon, secret names only; the rest are named in the prompt.
+                const placed = daemonConnectors(route.plugins?.connectors ?? [], machineId);
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
                     runtime: route.runtime,
@@ -482,7 +485,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
                     // The same prompt the API path builds (identity, role, instructions, skills, the chat, the tools);
                     // `open` appends the memory block. The daemon's runtime appends it to its own preset.
-                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}) }),
+                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
                     tools
                 };
                 // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
@@ -505,6 +508,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
                             tools: grantedToolNames(route),
                             policy: ctx.snapshot(openSpecPolicy(route)),
+                            ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
                             ...(opening.resume !== undefined ? { resume: opening.resume } : {})
                         },
                         { taskId: route.taskId }

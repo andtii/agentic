@@ -19,8 +19,15 @@
  * reach it, a connector tool's request is presented as `source: 'mcp'` with
  * a category from its MCP hints (`connectorCategory`): `destructiveHint` →
  * `destructive`, `readOnlyHint` → `read`, anything else → `network`.
+ *
+ * On a DAEMON-hosted session (#280) the daemon opens them instead:
+ * `daemonConnectors` puts the ready ones on `OpenSpec.connectors` with secret
+ * NAMES only (the Machine keeps the spec), and the daemon asks for the values
+ * over its own `tool.call` (`CONNECTOR_CREDENTIALS_TOOL`), answered by
+ * `connectorCredentials` for a connector the calling session's gate names.
  */
 
+import type { ConnectorCredentials, OpenSpecConnector } from '@agentic/core';
 import type { PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy, ToolAnnotations } from '@sigx/ai-agent';
 import type { ConnectorStatus, GateConnector } from '../registry/types.js';
@@ -105,11 +112,18 @@ interface Outcome {
     readonly unavailable?: UnavailableConnector;
 }
 
+/** Why a connector the gate did not find ready is left out — the same words on both paths. */
+function notReady(c: GateConnector): string | undefined {
+    if (c.state === 'missing') return 'no such connector is set up in this workspace';
+    if (c.state === 'disabled') return `its plugin is turned off (/plugins/${c.pluginId ?? c.id})`;
+    return undefined;
+}
+
 async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Promise<Outcome> {
     const skip = (reason: string): Outcome => ({ unavailable: { id: c.id, reason } });
-    if (c.state === 'missing') return skip('no such connector is set up in this workspace');
-    if (c.state === 'disabled') return skip(`its plugin is turned off (/plugins/${c.pluginId ?? c.id})`);
-    if (c.transport !== 'streamable-http') return skip('it runs on a machine over stdio, which sessions cannot use yet');
+    const why = notReady(c);
+    if (why !== undefined) return skip(why);
+    if (c.transport !== 'streamable-http') return skip('it runs on a machine over stdio; only an agent whose sessions run on a machine can use it');
     if (!input.opener) return skip('this deployment cannot open MCP connectors');
     if (c.url === undefined) return skip('it has no URL');
     const pluginId = c.pluginId ?? c.id;
@@ -177,4 +191,100 @@ export async function openSessionConnectors(input: OpenSessionConnectorsInput): 
             await Promise.all(opened.map((o) => o.close().catch(() => undefined)));
         }
     };
+}
+
+/** A plain copy of a gate answer's `auth` — it may be read out of actor state, which does not clone. */
+function plainAuth(auth: NonNullable<GateConnector['auth']>): NonNullable<OpenSpecConnector['auth']> {
+    return {
+        ...(auth.bearer !== undefined ? { bearer: auth.bearer } : {}),
+        ...(auth.headers ? { headers: { ...auth.headers } } : {}),
+        ...(auth.env ? { env: { ...auth.env } } : {})
+    };
+}
+
+export interface DaemonConnectorPlacement {
+    /** The ready connectors, as the daemon opens them — secret NAMES only. */
+    readonly connectors: readonly OpenSpecConnector[];
+    /** The rest, and why — for the session's system prompt. */
+    readonly unavailable: readonly UnavailableConnector[];
+}
+
+/**
+ * The agent's connectors for a session on machine `machineId` (#280): every ready one goes on the spec for the daemon
+ * to open, except a stdio server set up for another machine. Nothing here opens a secret — the spec is kept by the
+ * Machine and re-sent after a reconnect, so it never holds a credential.
+ */
+export function daemonConnectors(connectors: readonly GateConnector[], machineId: string): DaemonConnectorPlacement {
+    const placed: OpenSpecConnector[] = [];
+    const unavailable: UnavailableConnector[] = [];
+    for (const c of connectors) {
+        const why = notReady(c);
+        if (why !== undefined) {
+            unavailable.push({ id: c.id, reason: why });
+            continue;
+        }
+        const transport = c.transport ?? 'streamable-http';
+        // `*` (or none): any paired machine may run it.
+        if (transport === 'stdio' && c.machine !== undefined && c.machine !== '*' && c.machine !== machineId) {
+            unavailable.push({ id: c.id, reason: `it runs on machine ${c.machine}, not the one this session runs on` });
+            continue;
+        }
+        placed.push({
+            id: c.id,
+            transport,
+            ...(c.url !== undefined ? { url: c.url } : {}),
+            ...(c.command !== undefined ? { command: c.command } : {}),
+            ...(c.args !== undefined ? { args: [...c.args] } : {}),
+            ...(c.cwd !== undefined ? { cwd: c.cwd } : {}),
+            ...(c.auth ? { auth: plainAuth(c.auth) } : {})
+        });
+    }
+    return { connectors: placed, unavailable };
+}
+
+/** Why `connectorCredentials` refused: the connector is not the session's to open, or a secret it needs is not set. */
+export class ConnectorCredentialsError extends Error {
+    constructor(
+        readonly code: 'not-named' | 'secret-unset',
+        message: string
+    ) {
+        super(message);
+        this.name = 'ConnectorCredentialsError';
+    }
+}
+
+export interface ConnectorCredentialsInput {
+    /** The calling session's gate answer (`spec.plugins.connectors`): only a ready connector named there is answered. */
+    readonly connectors: readonly GateConnector[];
+    readonly connectorId: string;
+    /** A secret of the connector's plugin, through `Registry.openSecret(name, pluginId)`; `undefined` when not set. */
+    secret(name: string, pluginId: string): Promise<string | undefined>;
+    /** Record a secret that is not set on the connector — only when the Registry does not already say so. Never fails the call. */
+    report?(id: string, status: ConnectorStatus): Promise<void>;
+}
+
+/**
+ * A connector's credential VALUES for the daemon that opens it (#280; EXE-10): each secret its `auth` names, opened
+ * under the connector plugin's own `secret:` grants (audited by the Registry). Returned, never recorded.
+ */
+export async function connectorCredentials(input: ConnectorCredentialsInput): Promise<ConnectorCredentials> {
+    const c = input.connectors.find((x) => x.id === input.connectorId && x.state === 'ready');
+    if (!c) throw new ConnectorCredentialsError('not-named', `connector "${input.connectorId}" is not one this session may open`);
+    const pluginId = c.pluginId ?? c.id;
+    const need = async (name: string): Promise<string> => {
+        const value = await input.secret(name, pluginId);
+        if (value !== undefined) return value;
+        const message = `its secret "${name}" is not set (/plugins/${pluginId})`;
+        const error = `secret not set: ${message}`;
+        if (input.report && !(c.status?.state === 'error' && c.status.error === error)) {
+            await input.report(c.id, { state: 'error', error }).catch((e: unknown) => console.warn(`[routing] connector ${c.id}: status not recorded:`, e));
+        }
+        throw new ConnectorCredentialsError('secret-unset', message);
+    };
+    const bearer = c.auth?.bearer !== undefined ? await need(c.auth.bearer) : undefined;
+    const headers: Record<string, string> = {};
+    for (const [header, name] of Object.entries(c.auth?.headers ?? {})) headers[header] = await need(name);
+    const env: Record<string, string> = {};
+    for (const [variable, name] of Object.entries(c.auth?.env ?? {})) env[variable] = await need(name);
+    return { ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}), ...(Object.keys(env).length ? { env } : {}) };
 }

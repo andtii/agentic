@@ -110,6 +110,9 @@ importers:
       '@agentic/daemon-protocol':
         specifier: workspace:*
         version: link:../../packages/daemon-protocol
+      '@agentic/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@agentic/runtimes':
         specifier: workspace:*
         version: link:../../packages/runtimes

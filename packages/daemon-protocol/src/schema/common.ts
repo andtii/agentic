@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -109,6 +109,20 @@ export const openSpecPolicy: z.ZodType<OpenSpecPolicy> = z.object({
     constraints: z.array(approvalRule).max(LIMITS.list).optional()
 });
 
+/** A record of names (header or variable → secret name), bounded like any other list. */
+const nameRecord = z.record(name, name).refine((r) => Object.keys(r).length <= LIMITS.list, { message: `at most ${LIMITS.list} entries` });
+
+/** An MCP connector on the spec (#280): where it is and its secret NAMES — never a value. */
+export const openSpecConnector: z.ZodType<OpenSpecConnector> = z.object({
+    id: name,
+    transport: z.enum(['streamable-http', 'stdio']),
+    url: text.optional(),
+    command: text.optional(),
+    args: z.array(text).max(LIMITS.list).optional(),
+    cwd: text.optional(),
+    auth: z.object({ bearer: name.optional(), headers: nameRecord.optional(), env: nameRecord.optional() }).optional()
+});
+
 export const openSpec: z.ZodType<OpenSpec> = z.object({
     agentId: name,
     cwd: text,
@@ -118,6 +132,7 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     maxBudgetUsd: z.number().min(0).optional(),
     tools: z.array(name).max(LIMITS.list),
     policy: openSpecPolicy.optional(),
+    connectors: z.array(openSpecConnector).max(LIMITS.list).optional(),
     resume: z.unknown().optional()
 });
 
