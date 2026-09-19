@@ -166,7 +166,8 @@ describe('/chats (live)', () => {
     });
 
     it('orders chats whose last activity shares a millisecond by creation, newest first (#175)', async () => {
-        const fixed = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+        const now = Date.now();
+        const fixed = vi.spyOn(Date, 'now').mockReturnValue(now);
         try {
             const { chat, atlas } = await seedChat();
             await chat.post('first');
