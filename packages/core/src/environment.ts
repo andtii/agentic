@@ -82,7 +82,11 @@ export interface EnvironmentInput {
 }
 
 /** What `env.request` asks a daemon to do. */
-export type EnvOp = { readonly op: 'put'; readonly environment: EnvironmentInput } | { readonly op: 'remove'; readonly environmentId: EnvironmentId };
+export type EnvOp =
+    /** Create the environment, or change the one `environment.id` names. */
+    | { readonly op: 'put'; readonly environment: EnvironmentInput }
+    /** Forget the environment; its profile directory stays on the machine (it holds a login). */
+    | { readonly op: 'remove'; readonly environmentId: EnvironmentId };
 
 /** What `env.response` answers: the environment that was written or removed. The new descriptors follow in an `env` frame. */
 export interface EnvResult {
@@ -100,7 +104,9 @@ export type EnvErrorCode =
     | 'in-use'
     /** `remove`, or a `put` with an `id`: the daemon has no such environment. */
     | 'unknown-environment'
+    /** The daemon's own check of the input failed: a relative root, a name or id it cannot keep. */
     | 'invalid'
+    /** Reading or writing the environments file failed. */
     | 'io'
     /** The daemon did not answer in time — set by the platform, never sent by a daemon. */
     | 'timeout';
