@@ -15,8 +15,8 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, EnvironmentId, MachineId, RuntimeId, ScheduleId, WorkdirRef, WorkspaceId } from '@agentic/core';
-import { actorKey, createId } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, MachineId, NotificationPrefs, RetentionSettings, ScheduleId, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, createId, DEFAULT_WORKSPACE_SETTINGS } from '@agentic/core';
 import { defineActor, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
@@ -33,37 +33,10 @@ export const PAIRING_CODE_TTL_MS = 10 * 60_000;
 /** Unambiguous uppercase alphabet — no 0/O, 1/I. */
 const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-export interface NotificationPrefs {
-    readonly inbox: boolean;
-    readonly push: boolean;
-}
+/** The settings contract is core's (#227): one shape for the actor, the pages and the router (`defaults.environmentId`, AGT-05). */
+export type { NotificationPrefs, RetentionSettings, WorkspaceDefaults, WorkspaceSettings };
 
-/** Retention windows in days (OPS-10, `docs/retention.md`). */
-export interface RetentionSettings {
-    readonly sessionLogDays: number;
-    readonly artifactDays: number;
-}
-
-export interface WorkspaceDefaults {
-    readonly runtime: RuntimeId;
-    readonly environmentId?: EnvironmentId;
-    readonly model?: string;
-}
-
-export interface WorkspaceSettings {
-    /** IANA time zone the workspace's schedules and digests use. */
-    readonly timeZone: string;
-    readonly notifications: NotificationPrefs;
-    readonly defaults: WorkspaceDefaults;
-    readonly retention: RetentionSettings;
-}
-
-export const DEFAULT_SETTINGS: WorkspaceSettings = {
-    timeZone: 'UTC',
-    notifications: { inbox: true, push: false },
-    defaults: { runtime: 'anthropic-api' },
-    retention: { sessionLogDays: 90, artifactDays: 30 }
-};
+export const DEFAULT_SETTINGS: WorkspaceSettings = DEFAULT_WORKSPACE_SETTINGS;
 
 export type MachineStatus = 'pending' | 'paired';
 
@@ -331,10 +304,12 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
 
             async updateSettings(patch: SettingsPatch): Promise<WorkspaceSettings> {
                 const s = ctx.state.settings;
+                // Rebuilt field by field: a record written before #230 may still carry `defaults.model`, which is the runtime plugin's to say now.
+                const defaults = { ...s.defaults, ...patch.defaults };
                 ctx.state.settings = {
                     timeZone: patch.timeZone ?? s.timeZone,
                     notifications: { ...s.notifications, ...patch.notifications },
-                    defaults: { ...s.defaults, ...patch.defaults },
+                    defaults: { runtime: defaults.runtime, ...(defaults.environmentId ? { environmentId: defaults.environmentId } : {}) },
                     retention: { ...s.retention, ...patch.retention }
                 };
                 await ctx.save();
