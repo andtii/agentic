@@ -19,25 +19,20 @@
  *   learns through (#242); turned off, a session retrieves, writes and learns
  *   nothing.
  *
- * The flat memory plugin ships turned off: this build holds its entries in the
- * isolate's memory (lost when the isolate goes) and serves an agent's own
- * scope only — a plugin for trying the migration path (#243), not for keeping
- * memories.
+ * Both memory plugins are durable: the default one is the Memory actor of each
+ * scope, the flat one the FlatMemory actor of each scope (#281), and a shared
+ * scope's ACL (the Memory actor's) governs both. The flat plugin is enabled but
+ * not active — the default stays the workspace's memory until the owner makes
+ * another one active (#243 moves the memories with it).
  */
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
-import { anthropicApiRuntime, isolateMemoryImpl, memoryActorImpl } from '@agentic/platform';
+import { anthropicApiRuntime, flatMemoryActorImpl, memoryActorImpl } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
-import { flatMemoryPlugin, memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
+import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 
-/** The manifests the Registry lists for every workspace — enabled (the flat memory plugin excepted), with their declared scopes granted, until the owner changes them. */
-export const pluginCatalogue: readonly CatalogueEntry[] = [
-    anthropicApiPlugin,
-    claudeCodePlugin,
-    memoryDefaultPlugin,
-    { manifest: memoryFlatPlugin, enabledByDefault: false },
-    learningDefaultPlugin
-];
+/** The manifests the Registry lists for every workspace — enabled, with their declared scopes granted, until the owner changes them. */
+export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, claudeCodePlugin, memoryDefaultPlugin, memoryFlatPlugin, learningDefaultPlugin];
 
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
@@ -47,10 +42,10 @@ export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCa
     };
 }
 
-/** Memory plugin id → the store a session opens: the Memory actor for the default, the isolate's map for the flat one. */
+/** Memory plugin id → the store a session opens: the Memory actor for the default, the FlatMemory actor for the flat one. */
 export const memoryCatalogue: Readonly<Record<string, MemoryPluginImpl>> = {
     [memoryDefaultPlugin.id]: memoryActorImpl(),
-    [memoryFlatPlugin.id]: isolateMemoryImpl(() => flatMemoryPlugin())
+    [memoryFlatPlugin.id]: flatMemoryActorImpl()
 };
 
 function positiveInteger(value: unknown): number | undefined {

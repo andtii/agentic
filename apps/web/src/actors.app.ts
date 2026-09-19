@@ -49,6 +49,7 @@ import {
     ChatPage,
     LedgerActor,
     Memory,
+    FlatMemory,
     OAuthClients,
     OAuthGrants,
     PAIRING_DIRECTORY_KEY,
@@ -236,7 +237,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     const Chat = defineChatActor(withFiles);
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, Inbox, Registry, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
@@ -291,7 +292,8 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         TaskIndex: byType('task-index') as ActorDefs['TaskIndex'],
         Audit: byType('audit') as ActorDefs['Audit'],
         Ledger: byType('ledger') as ActorDefs['Ledger'],
-        Memory: byType('Memory') as ActorDefs['Memory']
+        Memory: byType('Memory') as ActorDefs['Memory'],
+        FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory']
     };
 }
 

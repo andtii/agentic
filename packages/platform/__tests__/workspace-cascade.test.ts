@@ -8,7 +8,7 @@ import type { AgentId, PluginManifest, WorkspaceId } from '@agentic/core';
 import { AgentActor, agentKey } from '../src/agent/index';
 import { generateWorkspaceKek, importWorkspaceKek, workspaceKey, workspaceOfActorKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
-import { Memory, memoryActorKey } from '../src/memory/index';
+import { FlatMemory, Memory, memoryActorKey } from '../src/memory/index';
 import { Inbox, inboxKey } from '../src/notify/index';
 import { defineRegistry, registryKey } from '../src/registry/index';
 import { defineScheduleActor } from '../src/schedule/index';
@@ -83,7 +83,7 @@ beforeEach(() => {
     files = new Map();
     purged = [];
     fileStore.deleted.length = 0;
-    app = testActorApp([Workspace, AgentActor, Memory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory], { storage: recordingStorage() });
+    app = testActorApp([Workspace, AgentActor, Memory, FlatMemory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory], { storage: recordingStorage() });
     return app.start();
 });
 afterEach(() => app.stop());
@@ -96,6 +96,8 @@ async function populate() {
     await app.as(owner).actor(AgentActor, agentKey(WS, agentId)).update({ name: 'Ada', memoryPolicy: { shared: ['team'] }, connectors: [{ id: 'github' }] }, 'setup');
     await app.as(owner).actor(Memory, memoryActorKey(WS, `agent:${agentId}`)).put({ kind: 'fact', text: 'deploys on fridays', tags: [], confidence: 'stated', provenance: { source: 'agent' } });
     await app.as(owner).actor(Memory, memoryActorKey(WS, 'shared:team')).put({ kind: 'fact', text: 'shared fact', tags: [], confidence: 'stated', provenance: { source: 'user' } });
+    // The flat memory plugin's store of the same scope is its own record (#281).
+    await app.as(owner).actor(FlatMemory, memoryActorKey(WS, `agent:${agentId}`)).put({ kind: 'fact', text: 'flat fact', tags: [], confidence: 'stated', provenance: { source: 'agent' } });
     const { chatId } = await ws().createChat({ title: 'general' });
     const chat = app.as(owner).actor(Chat, `${WS}:chat:${chatId}`);
     await chat.addAgent(agentId, 'all');
@@ -133,9 +135,10 @@ describe('Workspace.exportAll', () => {
 
         expect(at('workspace')[0]).toMatchObject({ kind: 'workspace', workspace: { owner: 'u1', agents: [agentId], chats: [chatId], schedules: [scheduleId] } });
         expect(at('agents')).toMatchObject([{ kind: 'agent', agent: { id: agentId, configVersion: 1, config: { name: 'Ada' }, versions: [{ version: 1, reason: 'setup' }] } }]);
-        expect(at('memory').map((r) => [r.scope, (r.entry as { text: string }).text])).toEqual([
-            [`agent:${agentId}`, 'deploys on fridays'],
-            ['shared:team', 'shared fact']
+        expect(at('memory').map((r) => [r.scope, (r.entry as { text: string }).text, r.plugin])).toEqual([
+            [`agent:${agentId}`, 'deploys on fridays', undefined],
+            ['shared:team', 'shared fact', undefined],
+            [`agent:${agentId}`, 'flat fact', 'agentic.memory.flat']
         ]);
         const chats = at('chats');
         // The title (#124) is the chat's first entry and rides in its summary.
@@ -178,7 +181,7 @@ describe('Workspace.deleteAll', () => {
     it('leaves no actor state for the workspace in storage', async () => {
         const { agentId, chatId } = await populate();
         const before = savedRefs();
-        expect(before.map((r) => r.type).sort()).toEqual(['Agent', 'Chat', 'Inbox', 'Memory', 'Memory', 'Registry', 'Schedule', 'Workspace']);
+        expect(before.map((r) => r.type).sort()).toEqual(['Agent', 'Chat', 'FlatMemory', 'Inbox', 'Memory', 'Memory', 'Registry', 'Schedule', 'Workspace']);
         for (const ref of before) expect(await app.storage.load(ref.type, ref.key)).not.toBeNull();
 
         await ws().deleteAll();
@@ -193,6 +196,7 @@ describe('Workspace.deleteAll', () => {
         expect(purgedKeys).toContain(`Chat ${WS}:chat:${chatId}`);
         expect(purgedKeys).toContain(`ChatPage ${WS}:chat:${chatId}:p0`);
         expect(purgedKeys).toContain(`Memory ${memoryActorKey(WS, 'shared:team')}`);
+        expect(purgedKeys).toContain(`FlatMemory ${memoryActorKey(WS, `agent:${agentId}`)}`);
         expect(purgedKeys).toContain(`Registry ${registryKey(WS)}`);
         expect(purgedKeys).not.toContain(`Workspace ${KEY}`);
         // Every chat's attachments went through the file store (#205).

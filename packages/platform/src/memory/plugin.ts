@@ -2,18 +2,25 @@
  * The Memory actor as a `MemoryPlugin` (MEM-01/02/03): `open(scope)` is a
  * `MemoryStore` whose every call is a method of the actor keyed
  * `{ws}:memory:{scope}`. `export()` walks the actor's id-ordered pages;
- * `import()` sends rows in batches and sums the fidelity reports.
+ * `import()` sends rows in batches and sums the fidelity reports. The flat
+ * plugin's durable backend, the FlatMemory actor (#281), has the same method
+ * table under the same key, so it is reached the same way.
  */
 
 import { actorKey, type ImportReport, type MemoryEntry, type MemoryPlugin, type MemoryQuery, type MemoryScope, type MemoryStore, type NewMemoryEntry, type PluginContext, type RankedMemory, type WorkspaceId } from '@agentic/core';
-import { memoryPlugin } from '@agentic/memory';
+import { FLAT_MEMORY_PLUGIN_ID, FLAT_MEMORY_PLUGIN_VERSION, memoryPlugin } from '@agentic/memory';
 import { actor, type ActorClientWith } from '@sigx/actors';
 import { asPrincipal } from '../auth/agent-token.js';
 import type { MemoryPluginImpl, RetrievalBudget } from '../task/driver.js';
 import { Memory } from './actor.js';
 import { scopeAgent } from './authorize.js';
+import { FlatMemory } from './flat-actor.js';
 
 export type MemoryActorClient = ActorClientWith<typeof Memory>;
+export type FlatMemoryActorClient = ActorClientWith<typeof FlatMemory>;
+
+/** The methods `actorMemoryStore` calls — what the Memory and the FlatMemory actor both answer. */
+export type MemoryStoreClient = Pick<MemoryActorClient, 'put' | 'update' | 'retire' | 'delete' | 'get' | 'query' | 'exportPage' | 'importBatch'>;
 
 /** Rows per `importBatch` call and entries per `exportPage`. */
 export const MEMORY_WIRE_BATCH = 100;
@@ -22,8 +29,8 @@ export function memoryActorKey(workspace: WorkspaceId, scope: MemoryScope): stri
     return actorKey(workspace, 'memory', scope);
 }
 
-/** A `MemoryStore` over one Memory actor client. */
-export function actorMemoryStore(client: MemoryActorClient, batch = MEMORY_WIRE_BATCH): MemoryStore {
+/** A `MemoryStore` over one Memory (or FlatMemory) actor client. */
+export function actorMemoryStore(client: MemoryStoreClient, batch = MEMORY_WIRE_BATCH): MemoryStore {
     const store: MemoryStore = {
         put: (entry: NewMemoryEntry): Promise<MemoryEntry> => client.put(entry),
         update: (id: string, patch: Partial<Omit<MemoryEntry, 'id'>>): Promise<MemoryEntry> => client.update(id, patch),
@@ -34,7 +41,7 @@ export function actorMemoryStore(client: MemoryActorClient, batch = MEMORY_WIRE_
         async *export(): AsyncIterable<MemoryEntry> {
             let after: string | null = null;
             do {
-                const page: Awaited<ReturnType<MemoryActorClient['exportPage']>> = await client.exportPage(after, batch);
+                const page: Awaited<ReturnType<MemoryStoreClient['exportPage']>> = await client.exportPage(after, batch);
                 for (const e of page.entries) yield e;
                 after = page.next;
             } while (after !== null);
@@ -107,11 +114,47 @@ export function memoryActorImpl(): MemoryPluginImpl {
     };
 }
 
+export interface FlatMemoryActorPluginOptions {
+    readonly workspace: WorkspaceId;
+    /** How to reach an actor by key. Default: the ambient `actor()` client. */
+    readonly client?: (key: string) => MemoryStoreClient;
+}
+
 /**
- * A memory plugin with no access control and no durable backend of its own — the flat plugin (#242) — as the platform
- * runs it: one instance per workspace, held in this isolate's memory. An agent reaches its OWN scope only: a shared
- * scope needs the ACL the Memory actor enforces, so it is refused (retrieval lists it as skipped). What it holds is
- * lost when the isolate goes — a plugin for trying the migration path, not for keeping memories.
+ * The flat plugin backed by the FlatMemory actor (#281): durable, with the scope's ACL, and — like the flat plugin
+ * itself — without conditions, evidence, superseding or expiry (`capabilities.export: 'partial'`). What a migration
+ * into it drops, `import` reports (MEM-09).
+ */
+export function flatMemoryActorPlugin(options: FlatMemoryActorPluginOptions): MemoryPlugin {
+    const client = options.client ?? ((key: string) => actor(FlatMemory, key) as MemoryStoreClient);
+    return {
+        id: FLAT_MEMORY_PLUGIN_ID,
+        version: FLAT_MEMORY_PLUGIN_VERSION,
+        capabilities: { semantic: false, export: 'partial' },
+        open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)))
+    };
+}
+
+/** The flat memory plugin as the platform runs it (#281): the FlatMemory actor of each scope, reached AS the caller's principal. */
+export function flatMemoryActorImpl(): MemoryPluginImpl {
+    return (config) => {
+        const retrieval = retrievalFromConfig(config);
+        return {
+            open: (scope, principal) =>
+                flatMemoryActorPlugin({
+                    workspace: principal.workspaceId,
+                    client: (key) => actor(FlatMemory, key).with({ context: asPrincipal(principal) }) as MemoryStoreClient
+                }).open(scope, PLUGIN_CONTEXT),
+            ...(retrieval ? { retrieval } : {})
+        };
+    };
+}
+
+/**
+ * A memory plugin held in this isolate's memory, with no access control — how a plugin with no durable backend of its
+ * own runs (tests; the flat plugin before #281). An agent reaches its OWN scope only: a shared scope needs the ACL
+ * the Memory actor enforces, so it is refused (retrieval lists it as skipped). What it holds is lost when the isolate
+ * goes.
  */
 export function isolateMemoryImpl(make: () => MemoryPlugin): MemoryPluginImpl {
     const byWorkspace = new Map<WorkspaceId, MemoryPlugin>();

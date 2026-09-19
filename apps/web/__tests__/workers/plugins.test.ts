@@ -37,12 +37,12 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
         const cookie = await signIn(userId);
         const registry = registryOverHttp(WS, cookie);
 
-        // A fresh workspace: every plugin of the build, enabled but the flat memory plugin (#242), and no key yet.
+        // A fresh workspace: every plugin of the build enabled (the durable flat memory plugin too, #281, but not active), and no key yet.
         const fresh = await registry.overview();
         expect(fresh.plugins.map((p) => [p.manifest.id, p.enabled, p.builtin])).toEqual([
             ['agentic.learning.default', true, true],
             ['agentic.memory.default', true, true],
-            ['agentic.memory.flat', false, true],
+            ['agentic.memory.flat', true, true],
             [ANTHROPIC_API_PLUGIN_ID, true, true],
             ['claude-code', true, true]
         ]);

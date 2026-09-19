@@ -46,7 +46,31 @@ export function toFlatEntry(entry: MemoryEntry): FlatEntryReport {
     return { entry: out as FlatMemoryEntry, dropped };
 }
 
+/** Why and when an entry was retired (MEM-08). */
+export interface FlatRetirement {
+    readonly why: string;
+    readonly at: number;
+}
+
+/**
+ * Everything a flat store holds, JSON-safe, so a host can persist it (the platform's FlatMemory actor saves it in the
+ * turn, #281). A store over a given state reads and writes it in place.
+ */
+export interface FlatMemoryState {
+    entries: Record<string, FlatMemoryEntry>;
+    retirements: Record<string, FlatRetirement>;
+}
+
+export function createFlatMemoryState(): FlatMemoryState {
+    return { entries: {}, retirements: {} };
+}
+
+/** Entries per `exportPage` unless the caller asks for another size. */
+export const FLAT_EXPORT_PAGE = 100;
+
 export interface FlatMemoryStoreOptions {
+    /** The state to read and write in place. Default: a fresh one of the store's own. */
+    readonly state?: FlatMemoryState;
     /** The clock. Default `Date.now`. */
     readonly now?: () => number;
     /** Where a `put` / `update` that had to drop a field is reported. Default: silent. */
@@ -57,35 +81,41 @@ export interface FlatMemoryStore extends MemoryStore, MemoryFidelity {
     /** Entries stored, retired included. */
     readonly size: number;
     /** Why and when an entry was retired (MEM-08). */
-    retirement(id: string): { readonly why: string; readonly at: number } | undefined;
+    retirement(id: string): FlatRetirement | undefined;
+    /** Entries ordered by id, `size` at a time; `next` is the cursor for the following page (`null` on the last). */
+    exportPage(after: string | null, size?: number): { readonly entries: readonly MemoryEntry[]; readonly next: string | null };
 }
 
-/** A `MemoryStore` over a map — the flat plugin's only backend. */
+/** Ids a plain-object record cannot hold as its own property: an import carrying one skips the row. */
+const UNSAFE_IDS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** A `MemoryStore` over plain records — its own, or a `state` its host persists. */
 export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): FlatMemoryStore {
     const now = options.now ?? Date.now;
     const log = options.log;
-    const entries = new Map<string, FlatMemoryEntry>();
-    const retirements = new Map<string, { readonly why: string; readonly at: number }>();
+    const { entries, retirements } = options.state ?? createFlatMemoryState();
 
+    const read = (id: string): FlatMemoryEntry | undefined => (Object.hasOwn(entries, id) ? entries[id] : undefined);
     const must = (id: string): FlatMemoryEntry => {
-        const e = entries.get(id);
+        const e = read(id);
         if (!e) throw new MemoryNotFoundError(id);
         return e;
     };
+    const sortedIds = (): string[] => Object.keys(entries).sort();
 
     const keep = (entry: MemoryEntry, op: 'put' | 'update'): FlatMemoryEntry => {
         const flat = toFlatEntry(entry);
         if (flat.dropped.length) log?.('warn', `flat memory: ${op} dropped ${flat.dropped.join(', ')}`, { id: entry.id, dropped: flat.dropped });
-        entries.set(flat.entry.id, flat.entry);
+        entries[flat.entry.id] = flat.entry;
         return flat.entry;
     };
 
     const store: FlatMemoryStore = {
         get size() {
-            return entries.size;
+            return Object.keys(entries).length;
         },
 
-        retirement: (id) => retirements.get(id),
+        retirement: (id) => (Object.hasOwn(retirements, id) ? retirements[id] : undefined),
 
         fidelity(entry) {
             const coerced = coerceEntry(entry);
@@ -105,17 +135,19 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
 
         async retire(id, why): Promise<void> {
             const old = must(id);
-            entries.set(id, { ...old, retired: true });
-            retirements.set(id, { why, at: now() });
+            entries[id] = { ...old, retired: true };
+            retirements[id] = { why, at: now() };
         },
 
         async delete(id): Promise<boolean> {
-            retirements.delete(id);
-            return entries.delete(id);
+            if (Object.hasOwn(retirements, id)) delete retirements[id];
+            if (!Object.hasOwn(entries, id)) return false;
+            delete entries[id];
+            return true;
         },
 
         async get(id): Promise<MemoryEntry | undefined> {
-            return entries.get(id);
+            return read(id);
         },
 
         async query(q: MemoryQuery): Promise<readonly RankedMemory[]> {
@@ -123,7 +155,7 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
             const tags = q.tags?.map(normalizeTag).filter(Boolean) ?? [];
             const subject = q.subject?.trim().toLowerCase();
             const ranked: RankedMemory[] = [];
-            for (const entry of entries.values()) {
+            for (const entry of Object.values(entries)) {
                 if (entry.retired) continue;
                 if (q.kinds && q.kinds.length && !q.kinds.includes(entry.kind)) continue;
                 if (q.since !== undefined && entry.provenance.at < q.since) continue;
@@ -135,9 +167,19 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
             return applyBudget(ranked, Math.max(0, q.limit ?? DEFAULT_QUERY_LIMIT), q.maxBytes ?? DEFAULT_MAX_BYTES);
         },
 
+        exportPage(after, size = FLAT_EXPORT_PAGE) {
+            const ids = sortedIds();
+            let start = 0;
+            // ids are sorted, so the page after `after` starts at the first id greater than it
+            if (after !== null) while (start < ids.length && ids[start]! <= after) start++;
+            const page = ids.slice(start, start + Math.max(1, size)).map((id) => entries[id]!);
+            const last = page[page.length - 1];
+            return { entries: page, next: last && start + page.length < ids.length ? last.id : null };
+        },
+
         async *export(): AsyncIterable<MemoryEntry> {
-            for (const id of [...entries.keys()].sort()) {
-                const e = entries.get(id);
+            for (const id of sortedIds()) {
+                const e = read(id);
                 if (e) yield e;
             }
         },
@@ -149,18 +191,18 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
             const dropped = new Set<string>();
             for await (const row of rows) {
                 const coerced = coerceEntry(row);
-                if (!coerced) {
+                if (!coerced || UNSAFE_IDS.has(coerced.entry.id)) {
                     skipped++;
                     continue;
                 }
                 const flat = toFlatEntry(coerced.entry);
                 for (const f of coerced.dropped) dropped.add(f);
                 for (const f of flat.dropped) dropped.add(f);
-                if (entries.has(flat.entry.id) && onConflict === 'skip') {
+                if (Object.hasOwn(entries, flat.entry.id) && onConflict === 'skip') {
                     skipped++;
                     continue;
                 }
-                entries.set(flat.entry.id, flat.entry);
+                entries[flat.entry.id] = flat.entry;
                 imported++;
             }
             return { imported, skipped, droppedFields: [...dropped].sort() };
@@ -183,7 +225,7 @@ export interface FlatMemoryPluginOptions {
     readonly version?: string;
 }
 
-/** The flat MemoryPlugin: one map-backed store per scope, partial export. */
+/** The flat MemoryPlugin: one store per scope in this process's memory, partial export. */
 export function flatMemoryPlugin(options: FlatMemoryPluginOptions = {}): MemoryPlugin {
     const stores = new Map<MemoryScope, FlatMemoryStore>();
     return {
