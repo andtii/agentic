@@ -62,7 +62,7 @@ export const PluginCard = component<PluginCardProps>(({ props, slots }) => () =>
             </header>
             <div data-scope={SCOPE} data-part="tags">
                 <Tag>{props.kindLabel ?? props.kind}</Tag>
-                {props.features?.map((f) => <Tag tone="live">{f}</Tag>)}
+                {props.features?.map((f) => <Tag key={f} tone="live">{f}</Tag>)}
                 {props.active ? <Tag tone="live">active</Tag> : null}
                 {readiness ? <ReadinessBadge readiness={readiness} /> : null}
             </div>

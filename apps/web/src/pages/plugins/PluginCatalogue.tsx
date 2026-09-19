@@ -30,7 +30,7 @@ export const PluginCatalogue = component<PluginCatalogueProps>(({ props }) => ()
     return (
         <div data-plugin-catalogue aria-busy={props.loading ? 'true' : undefined}>
             {groupByKind(props.plugins).map((group) => (
-                <section data-plugin-group={group.key} aria-label={group.title}>
+                <section key={group.key} data-plugin-group={group.key} aria-label={group.title}>
                     <Label>{group.title}</Label>
                     {group.note ? <p data-plugin-group-note>{group.note}</p> : null}
                     <div data-plugin-grid>
@@ -41,6 +41,7 @@ export const PluginCatalogue = component<PluginCatalogueProps>(({ props }) => ()
                             const missing = ungranted(p);
                             return (
                                 <PluginCard
+                                    key={id}
                                     id={id}
                                     name={p.manifest.name}
                                     kind={p.manifest.kind}

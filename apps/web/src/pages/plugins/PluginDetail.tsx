@@ -72,7 +72,7 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
                     </h2>
                     <div data-plugin-detail-tags>
                         <Tag>{kindLabel(m)}</Tag>
-                        {featuresOf(m).map((f) => <Tag tone="live">{f}</Tag>)}
+                        {featuresOf(m).map((f) => <Tag key={f} tone="live">{f}</Tag>)}
                         {p.builtin ? <Tag>built in</Tag> : null}
                         {p.active ? <Tag tone="live">active</Tag> : null}
                         {props.readiness ? <ReadinessBadge readiness={props.readiness} detail /> : null}
