@@ -10,7 +10,7 @@ import type { PluginReadiness } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
 import { AgentTile, Icon, Label, PluginCard, type AgentHue } from '@agentic/ui';
 import { dependentCount, dependentNames } from '../ops/live';
-import { groupByKind, pluginHref, ungranted, workspaceWideConsequence } from './model';
+import { featuresOf, groupByKind, kindLabel, pluginHref, ungranted, workspaceWideConsequence } from './model';
 
 export type PluginCatalogueProps =
     & Define.Prop<'plugins', readonly PluginView[], true>
@@ -30,8 +30,9 @@ export const PluginCatalogue = component<PluginCatalogueProps>(({ props }) => ()
     return (
         <div data-plugin-catalogue aria-busy={props.loading ? 'true' : undefined}>
             {groupByKind(props.plugins).map((group) => (
-                <section data-plugin-group={group.kind} aria-label={group.title}>
+                <section data-plugin-group={group.key} aria-label={group.title}>
                     <Label>{group.title}</Label>
+                    {group.note ? <p data-plugin-group-note>{group.note}</p> : null}
                     <div data-plugin-grid>
                         {group.plugins.map((p) => {
                             const id = p.manifest.id;
@@ -43,6 +44,8 @@ export const PluginCatalogue = component<PluginCatalogueProps>(({ props }) => ()
                                     id={id}
                                     name={p.manifest.name}
                                     kind={p.manifest.kind}
+                                    kindLabel={kindLabel(p.manifest)}
+                                    features={featuresOf(p.manifest)}
                                     version={p.manifest.version}
                                     description={p.manifest.description}
                                     readiness={props.readiness?.[id]}

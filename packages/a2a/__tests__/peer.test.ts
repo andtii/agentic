@@ -5,7 +5,7 @@ import { fakeServer } from './fake';
 describe('a2aPeer (#246)', () => {
     it('mints a runtime manifest a2a.<id> with its card URL as config, an optional token, and the permissions it uses', () => {
         const m = a2aPeer({ id: 'helper', name: 'Helper', cardUrl: 'https://peer.example.com/a2a/helper' });
-        expect(m).toMatchObject({ id: 'a2a.helper', kind: 'runtime', name: 'Helper', capabilities: ['a2a-peer'] });
+        expect(m).toMatchObject({ id: 'a2a.helper', kind: 'runtime', name: 'Helper', capabilities: ['a2a-peer', 'remote'] });
         expect(m.config).toMatchObject({ required: ['cardUrl'], properties: { cardUrl: { type: 'string', format: 'uri', default: 'https://peer.example.com/a2a/helper' } } });
         expect(m.secrets).toEqual([expect.objectContaining({ name: 'a2a-helper-token', required: false })]);
         expect(m.permissions.map((p) => p.scope)).toEqual(['network:peer.example.com', 'secret:a2a-helper-token']);

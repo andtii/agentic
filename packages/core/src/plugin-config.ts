@@ -5,7 +5,7 @@
  */
 
 import type { RuntimeId } from './agent.js';
-import type { PermissionScope, PluginState } from './plugin.js';
+import type { PermissionScope, PluginManifest, PluginState } from './plugin.js';
 
 interface ConfigPropertyBase {
     readonly title?: string;
@@ -161,6 +161,31 @@ export function configDefaults(schema: ConfigSchema): Record<string, unknown> {
 
 /** The capability a `runtime` plugin lists when its sessions run on a machine's daemon: it needs an environment of that runtime. */
 export const DAEMON_HOSTED_CAPABILITY = 'daemon-hosted';
+/** The capability a `runtime` plugin lists when its sessions run on the platform itself. */
+export const PLATFORM_HOSTED_CAPABILITY = 'platform-hosted';
+
+/**
+ * What kind of runtime a `runtime` plugin is (decisions 2026-09-19, #313) — independent of where it runs:
+ * - `harness`: a product with its own agent loop, tools and sign-in (Claude Code; Codex, Copilot…), driven through
+ *   its CLI or SDK package — the platform hands it a turn and follows its events.
+ * - `model`: the platform runs the loop itself over a model API (`anthropic-api`).
+ * - `remote`: an independently hosted agent reached through an adapter (an A2A peer).
+ */
+export type RuntimeKind = 'harness' | 'model' | 'remote';
+export const HARNESS_RUNTIME_CAPABILITY = 'harness';
+export const MODEL_RUNTIME_CAPABILITY = 'model';
+export const REMOTE_RUNTIME_CAPABILITY = 'remote';
+/** A runtime that reports its accounts' plan usage limits (a `QuotaSource`, #261) lists this. */
+export const USAGE_LIMITS_CAPABILITY = 'usage-limits';
+
+/** The kind a runtime manifest declares; `undefined` for other kinds, or a runtime that declares neither. */
+export function runtimeKindOf(manifest: Pick<PluginManifest, 'kind' | 'capabilities'>): RuntimeKind | undefined {
+    if (manifest.kind !== 'runtime') return undefined;
+    if (manifest.capabilities.includes(HARNESS_RUNTIME_CAPABILITY)) return 'harness';
+    if (manifest.capabilities.includes(MODEL_RUNTIME_CAPABILITY)) return 'model';
+    if (manifest.capabilities.includes(REMOTE_RUNTIME_CAPABILITY)) return 'remote';
+    return undefined;
+}
 
 export type PluginReadinessStatus = 'ready' | 'disabled' | 'needs-config' | 'needs-secret' | 'needs-grant' | 'needs-machine' | 'no-kek';
 

@@ -1,6 +1,7 @@
 import type { SDKControlGetUsageResponse, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
 import type { EnvironmentId, LocalEnvironment, PluginContext } from '@agentic/core';
-import { ANTHROPIC_API_QUOTA_REASON, CLAUDE_CODE_QUOTA_ID, QUOTA_PLUGINS, anthropicApiQuota } from '../../src/index';
+import { HARNESS_RUNTIME_CAPABILITY, MODEL_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY, runtimeKindOf } from '@agentic/core';
+import { ANTHROPIC_API_QUOTA_REASON, CLAUDE_CODE_QUOTA_ID, anthropicApiPlugin, anthropicApiQuota, claudeCodePlugin } from '../../src/index';
 import { claudeCodeQuota, quotaFromRateLimit, quotaFromUsage, type QuotaQueryFn } from '../../src/claude-code/index';
 import usageMax from './fixtures/usage-max.json';
 import usageSignedOut from './fixtures/usage-signed-out.json';
@@ -172,9 +173,13 @@ describe('probe', () => {
     });
 });
 
-describe('the quota manifest', () => {
-    it('is a quota plugin for the claude-code runtime’s source id', () => {
-        expect(QUOTA_PLUGINS.map((m) => [m.id, m.kind])).toEqual([[CLAUDE_CODE_QUOTA_ID, 'quota']]);
+describe('usage limits are a capability of the runtime plugin (#313)', () => {
+    it('the Claude Code runtime is a harness that reports usage limits; the Anthropic API a model runtime without them', () => {
+        expect(claudeCodePlugin.capabilities).toEqual(expect.arrayContaining([HARNESS_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY]));
+        expect(runtimeKindOf(claudeCodePlugin)).toBe('harness');
+        expect(runtimeKindOf(anthropicApiPlugin)).toBe('model');
+        expect(anthropicApiPlugin.capabilities).toContain(MODEL_RUNTIME_CAPABILITY);
+        expect(anthropicApiPlugin.capabilities).not.toContain(USAGE_LIMITS_CAPABILITY);
         expect(claudeCodeQuota().id).toBe(CLAUDE_CODE_QUOTA_ID);
     });
 });

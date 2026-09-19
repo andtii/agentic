@@ -15,7 +15,7 @@
 import { query as sdkQuery, type AccountInfo, type Options, type Query, type SDKControlGetUsageResponse, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { childEnv } from '@sigx/ai-agent-claude-code';
 import type { LocalEnvironment, PluginContext, QuotaSignal, QuotaSnapshot, QuotaSource, QuotaStatus, QuotaWindow } from '@agentic/core';
-import { CLAUDE_CODE_QUOTA_ID, QUOTA_PLUGIN_VERSION } from '../plugins.js';
+import { CLAUDE_CODE_QUOTA_ID, QUOTA_SOURCE_VERSION } from '../plugins.js';
 import { accountEnv } from './env.js';
 
 const RUNTIME = 'claude-code';
@@ -121,7 +121,7 @@ export function claudeCodeQuota(options: ClaudeCodeQuotaOptions = {}): QuotaSour
 
     return {
         id: CLAUDE_CODE_QUOTA_ID,
-        version: QUOTA_PLUGIN_VERSION,
+        version: QUOTA_SOURCE_VERSION,
         runtime: RUNTIME,
 
         fromSignal(signal, env) {

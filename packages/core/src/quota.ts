@@ -54,7 +54,7 @@ export interface QuotaSignal {
     readonly data: unknown;
 }
 
-/** The `quota` plugin seam: one source per runtime (not single-slot). */
+/** What a runtime supplies to report its accounts' limits — not a plugin of its own: a runtime plugin that has one lists `USAGE_LIMITS_CAPABILITY` (#313). */
 export interface QuotaSource {
     readonly id: string;
     readonly version: string;

@@ -7,7 +7,7 @@
  * nothing here registers anything.
  */
 
-import { DAEMON_HOSTED_CAPABILITY, type PluginManifest, type RuntimeId } from '@agentic/core';
+import { DAEMON_HOSTED_CAPABILITY, HARNESS_RUNTIME_CAPABILITY, MODEL_RUNTIME_CAPABILITY, PLATFORM_HOSTED_CAPABILITY, USAGE_LIMITS_CAPABILITY, type PluginManifest, type RuntimeId } from '@agentic/core';
 import { DEFAULT_ANTHROPIC_MODEL } from '@sigx/ai-anthropic';
 import { ANTHROPIC_PRICING } from './anthropic/pricing.js';
 
@@ -27,7 +27,8 @@ export const anthropicApiPlugin: PluginManifest = {
     kind: 'runtime',
     name: 'Anthropic API',
     description: 'Agents run on the platform against the Anthropic API with your own key.',
-    capabilities: ['platform-hosted'],
+    // A model runtime: the platform runs the loop over the API (#313).
+    capabilities: [PLATFORM_HOSTED_CAPABILITY, MODEL_RUNTIME_CAPABILITY],
     config: {
         type: 'object',
         properties: {
@@ -58,31 +59,17 @@ export const claudeCodePlugin: PluginManifest = {
     version: RUNTIME_PLUGIN_VERSION,
     kind: 'runtime',
     name: 'Claude Code',
-    description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment. Credentials stay on the machine.',
-    capabilities: [DAEMON_HOSTED_CAPABILITY],
+    description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment, and each account reports its plan usage limits. Credentials stay on the machine.',
+    // A harness runtime (its own loop, driven through the Agent SDK) that reports its accounts' usage limits (#261, #313).
+    capabilities: [DAEMON_HOSTED_CAPABILITY, HARNESS_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY],
     config: { type: 'object', properties: {}, additionalProperties: false },
     permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }],
     compat: { platform: '*', core: '*' }
 };
 
-/** The `quota` source for Claude Code subscriptions (#269): what `claude` → `/usage` shows, per environment. */
+/** The id of the Claude Code `QuotaSource` (#269): the `sourceId` its snapshots carry. A capability of `claudeCodePlugin`, not a plugin (#313). */
 export const CLAUDE_CODE_QUOTA_ID = 'agentic.quota.claude-code';
-export const QUOTA_PLUGIN_VERSION = '0.1.0';
-
-export const claudeCodeQuotaPlugin: PluginManifest = {
-    id: CLAUDE_CODE_QUOTA_ID,
-    version: QUOTA_PLUGIN_VERSION,
-    kind: 'quota',
-    name: 'Claude Code usage limits',
-    description: 'Shows how close each Claude Code account is to its plan limits (session, week, per model), read on the machine from the account itself. Only the percentages and reset times leave the machine.',
-    capabilities: [DAEMON_HOSTED_CAPABILITY],
-    config: { type: 'object', properties: {}, additionalProperties: false },
-    permissions: [{ scope: 'machine:*', reason: 'Reads each Claude Code environment’s plan usage on your paired machines.' }],
-    compat: { platform: '*', core: '*' }
-};
-
-/** Every quota manifest this package ships. */
-export const QUOTA_PLUGINS: readonly PluginManifest[] = [claudeCodeQuotaPlugin];
+export const QUOTA_SOURCE_VERSION = '0.1.0';
 
 /** Every runtime manifest this package ships. */
 export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin];

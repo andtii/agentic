@@ -47,7 +47,6 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
             ['agentic.memory.flat', true, true],
             // Off until the owner sets it up (#244).
             ['agentic.notify.web-push', false, true],
-            ['agentic.quota.claude-code', true, true],
             [ANTHROPIC_API_PLUGIN_ID, true, true],
             ['claude-code', true, true]
         ]);

@@ -15,7 +15,7 @@
  * (`/plugins/:id`).
  */
 
-import type { ConfigSchema, PermissionScope, PluginManifest } from '@agentic/core';
+import { REMOTE_RUNTIME_CAPABILITY, type ConfigSchema, type PermissionScope, type PluginManifest } from '@agentic/core';
 import type { AgentCapabilities, AgentSession, SessionRef } from '@sigx/ai-agent';
 import { a2aAgent } from './agent.js';
 import type { FetchLike } from './transport.js';
@@ -24,7 +24,7 @@ import type { FetchLike } from './transport.js';
 export const A2A_PEER_PREFIX = 'a2a.';
 export const A2A_PEER_VERSION = '0.1.0';
 /** What a peer's manifest says it is. */
-export const A2A_PEER_CAPABILITIES: readonly string[] = ['a2a-peer'];
+export const A2A_PEER_CAPABILITIES: readonly string[] = ['a2a-peer', REMOTE_RUNTIME_CAPABILITY];
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 

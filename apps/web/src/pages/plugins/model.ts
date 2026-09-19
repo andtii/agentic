@@ -4,12 +4,12 @@
  * page draw. Nothing here touches a hook or the DOM; the mock pages feed the
  * same functions from `mock/ops.ts`.
  */
-import { isSingleSlot, type PermissionScope, type PluginKind, type PluginReadiness } from '@agentic/core';
+import { USAGE_LIMITS_CAPABILITY, isSingleSlot, runtimeKindOf, type PermissionScope, type PluginKind, type PluginManifest, type PluginReadiness, type RuntimeKind } from '@agentic/core';
 import type { Dependents, MemorySwitchReport, PluginView } from '@agentic/platform';
 import { dependentCount } from '../ops/live';
 
 /** The catalogue's sections, in the order a person sets a workspace up: what runs agents, what they reach, what they keep. */
-export const KIND_ORDER: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'quota'];
+export const KIND_ORDER: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
 
 export const KIND_TITLE: Record<PluginKind, string> = {
     runtime: 'Runtimes',
@@ -18,20 +18,59 @@ export const KIND_TITLE: Record<PluginKind, string> = {
     learning: 'Learning',
     notification: 'Notifications',
     trigger: 'Triggers',
-    a2a: 'A2A',
-    quota: 'Usage limits'
+    a2a: 'A2A'
 };
 
+/** Runtimes are split by what they are (#313): harness, model, remote — each its own section, in this order. */
+export const RUNTIME_KIND_ORDER: readonly RuntimeKind[] = ['harness', 'model', 'remote'];
+
+export const RUNTIME_KIND_TITLE: Record<RuntimeKind, string> = {
+    harness: 'Harness runtimes',
+    model: 'Model runtimes',
+    remote: 'Remote agents'
+};
+
+/** One line under each runtime section: what makes a runtime this kind. */
+export const RUNTIME_KIND_NOTE: Record<RuntimeKind, string> = {
+    harness: 'Agent products with their own loop, tools and sign-in — driven through their CLI or SDK on a paired machine, under that machine’s account.',
+    model: 'The platform runs the agent loop itself, calling a model API with your key.',
+    remote: 'Independently hosted agents, reached over A2A.'
+};
+
+/** The kind tag a card and a plugin's page show: `harness runtime`, `model runtime`, `remote agent`, else the plugin kind. */
+export function kindLabel(m: Pick<PluginManifest, 'kind' | 'capabilities'>): string {
+    const runtime = runtimeKindOf(m);
+    return runtime === 'remote' ? 'remote agent' : runtime ? `${runtime} runtime` : m.kind;
+}
+
+/** What a plugin does beyond its kind, as tags: a runtime that reports its accounts' plan usage limits (#261). */
+export function featuresOf(m: Pick<PluginManifest, 'capabilities'>): string[] {
+    return m.capabilities.includes(USAGE_LIMITS_CAPABILITY) ? ['usage limits'] : [];
+}
+
 export interface PluginGroup {
+    /** `runtime:harness`, `runtime:model`, `runtime:remote`, `runtime` (declares no runtime kind), or the plugin kind. */
+    readonly key: string;
     readonly kind: PluginKind;
     readonly title: string;
+    readonly note?: string;
     readonly plugins: readonly PluginView[];
 }
 
-/** The plugins by kind, `KIND_ORDER`, empty kinds left out; a kind this build does not know sorts last. */
+/** The plugins by kind, `KIND_ORDER`, runtimes split by `RUNTIME_KIND_ORDER`; empty groups left out; a kind this build does not know sorts last. */
 export function groupByKind(plugins: readonly PluginView[]): PluginGroup[] {
     const kinds = [...KIND_ORDER, ...new Set(plugins.map((p) => p.manifest.kind).filter((k) => !KIND_ORDER.includes(k)))];
-    return kinds.map((kind) => ({ kind, title: KIND_TITLE[kind] ?? kind, plugins: plugins.filter((p) => p.manifest.kind === kind) })).filter((g) => g.plugins.length);
+    const groups: PluginGroup[] = [];
+    for (const kind of kinds) {
+        const ofKind = plugins.filter((p) => p.manifest.kind === kind);
+        if (kind !== 'runtime') {
+            groups.push({ key: kind, kind, title: KIND_TITLE[kind] ?? kind, plugins: ofKind });
+            continue;
+        }
+        for (const rk of RUNTIME_KIND_ORDER) groups.push({ key: `runtime:${rk}`, kind, title: RUNTIME_KIND_TITLE[rk], note: RUNTIME_KIND_NOTE[rk], plugins: ofKind.filter((p) => runtimeKindOf(p.manifest) === rk) });
+        groups.push({ key: 'runtime', kind, title: KIND_TITLE.runtime, plugins: ofKind.filter((p) => runtimeKindOf(p.manifest) === undefined) });
+    }
+    return groups.filter((g) => g.plugins.length);
 }
 
 /** `dependentsAll()` by plugin id. */

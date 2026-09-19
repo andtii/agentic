@@ -13,7 +13,7 @@ import { isSingleSlot, type PermissionScope, type PluginReadiness } from '@agent
 import type { Dependents, PluginView } from '@agentic/platform';
 import { AgentTile, Button, Icon, Label, ReadinessBadge, SchemaForm, SecretField, Tag, type AgentHue } from '@agentic/ui';
 import { dependentCount } from '../ops/live';
-import { canActivate, permissionRows, workspaceWideConsequence } from './model';
+import { canActivate, featuresOf, kindLabel, permissionRows, workspaceWideConsequence } from './model';
 
 export interface SecretWrite {
     readonly name: string;
@@ -71,7 +71,8 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
                         <span data-plugin-detail-version>{m.version}</span>
                     </h2>
                     <div data-plugin-detail-tags>
-                        <Tag>{m.kind}</Tag>
+                        <Tag>{kindLabel(m)}</Tag>
+                        {featuresOf(m).map((f) => <Tag tone="live">{f}</Tag>)}
                         {p.builtin ? <Tag>built in</Tag> : null}
                         {p.active ? <Tag tone="live">active</Tag> : null}
                         {props.readiness ? <ReadinessBadge readiness={props.readiness} detail /> : null}
@@ -80,6 +81,11 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
                 {props.toggle()}
             </header>
             <p data-plugin-detail-description>{m.description}</p>
+            {featuresOf(m).length ? (
+                <p data-plugin-usage-limits>
+                    Each account reports how close it is to its plan limits (session, week, per model). See them on Machines, in Usage → Limits, and when choosing where an agent runs.
+                </p>
+            ) : null}
 
             <section data-plugin-panel="config" aria-label="Settings">
                 <Label>Settings</Label>

@@ -134,10 +134,14 @@ describe('/plugins', () => {
     it('renders a card per plugin by kind, with readiness, granted scopes, dependents and the link to its page', async () => {
         const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
         expect(root.querySelectorAll('[data-scope="ag-plugin-card"][data-part="root"]').length).toBe(opsPlugins.length);
-        expect([...root.querySelectorAll('[data-plugin-group]')].map(g => g.getAttribute('data-plugin-group'))).toEqual(['runtime', 'connector', 'memory', 'learning', 'a2a']);
+        expect([...root.querySelectorAll('[data-plugin-group]')].map(g => g.getAttribute('data-plugin-group'))).toEqual(['runtime:harness', 'runtime:model', 'connector', 'memory', 'learning', 'a2a']);
 
         const claude = card(root, 'claude-code');
         expect(claude.getAttribute('aria-label')).toBe('Claude Code');
+        // Runtimes by what they are (#313): the harness reports usage limits; the model runtime is labelled as one.
+        expect([...claude.querySelectorAll('[data-part="tags"] [data-scope="ag-pill"] [data-part="label"]')].map(t => t.textContent)).toEqual(expect.arrayContaining(['harness runtime', 'usage limits']));
+        expect(card(root, 'anthropic-api').querySelector('[data-part="tags"]')!.textContent).toContain('model runtime');
+        expect(root.querySelector('[data-plugin-group="runtime:harness"] [data-plugin-group-note]')!.textContent).toContain('CLI or SDK');
         expect(claude.querySelector('[data-plugin-granted]')!.textContent).toContain('machine:*');
         expect(claude.querySelectorAll('[data-plugin-used] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(2);
         expect(claude.querySelector('[data-plugin-schedules]')!.textContent).toBe('1 schedule');
