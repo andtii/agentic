@@ -33,6 +33,8 @@ const registry = () => h.app.as(owner).actor(Registry, registryKey(WS));
 const agentOf = (id: AgentId) => h.app.as(owner).actor(AgentActor, agentKey(WS, id));
 const runtimeSelect = (dom: ParentNode) => dom.querySelector<HTMLSelectElement>('form[data-form="agent"] select[name="runtime"]');
 const optionsOf = (select: HTMLSelectElement | null) => (select ? [...select.options].map((o) => [o.value, text(o)]) : []);
+/** What a screen reader announces with the control: the text of every element its `aria-describedby` names. */
+const describedBy = (el: Element | null) => (el?.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => text(document.getElementById(id))).join(' ');
 
 describe('Home: the setup checklist (live)', () => {
     it('a fresh workspace is told to add the Anthropic key or pair a machine; the list goes once the key is set, without a reload', async () => {
@@ -58,9 +60,8 @@ describe('/agents/:id Config tab: runtimes and models from the plugins (live)', 
         await until(() => optionsOf(runtimeSelect(dom)).some(([, label]) => label === 'Anthropic API — needs a key'), 'the runtime plugins in the select');
 
         expect(optionsOf(runtimeSelect(dom))).toEqual([['anthropic-api', 'Anthropic API — needs a key']]);
-        const hint = dom.querySelector('[data-runtime-hint="anthropic-api"]')!;
-        expect(text(hint)).toContain('anthropic-api-key');
-        expect(hint.querySelector('a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
+        expect(describedBy(runtimeSelect(dom))).toContain('anthropic-api-key');
+        expect(dom.querySelector('[data-runtime-hint="anthropic-api"] [data-runtime-fix] a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
         const models = [...dom.querySelector<HTMLSelectElement>('form[data-form="agent"] select[name="model"]')!.options].map((o) => o.value);
         expect(models[0]).toBe('');
         expect(models).toContain('claude-opus-5');
@@ -81,7 +82,8 @@ describe('/agents/:id Config tab: runtimes and models from the plugins (live)', 
 
         expect(runtimeSelect(dom)!.value).toBe('claude-code');
         expect(optionsOf(runtimeSelect(dom))).toContainEqual(['claude-code', 'Claude Code — turned off']);
-        expect(text(dom.querySelector('[data-runtime-hint="claude-code"]'))).toMatch(/turned off/);
+        expect(dom.querySelector('[data-runtime-hint="claude-code"]')).not.toBeNull();
+        expect(describedBy(runtimeSelect(dom))).toMatch(/turned off/);
         // Nothing moved: the form is clean, so no save card offers to write another runtime.
         expect(dom.querySelector('[data-save-card]')).toBeNull();
     }, 20_000);

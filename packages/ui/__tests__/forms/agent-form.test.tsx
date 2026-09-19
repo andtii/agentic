@@ -199,9 +199,10 @@ describe('AgentForm', () => {
             const select = root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!;
             expect([...select.options].map((o) => o.value)).toEqual(['anthropic-api', 'claude-code']);
             expect(select.selectedOptions[0]!.textContent).toBe('Anthropic API — needs a key');
-            const hint = root.querySelector('[data-runtime-hint="anthropic-api"]')!;
-            expect(hint.textContent).toContain('Not set yet: anthropic-api-key.');
-            expect(hint.querySelector('a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
+            // The hint is the select's description, so a screen reader announces it with the field.
+            const described = (select.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+            expect(described).toContain('Not set yet: anthropic-api-key.');
+            expect(root.querySelector('[data-runtime-hint="anthropic-api"] [data-runtime-fix] a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
 
             setSelect(select, 'claude-code');
             expect(root.querySelector('[data-runtime-hint]')).toBeNull();

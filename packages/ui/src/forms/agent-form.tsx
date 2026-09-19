@@ -165,13 +165,16 @@ function modelOptions(models: readonly string[], defaultModel: string | undefine
     ];
 }
 
-/** Why the chosen runtime cannot run work yet, and where to fix it (#234). */
-function runtimeHint(runtime: RuntimeOption | undefined): JSXElement | null {
-    if (!runtime?.hint) return null;
+/**
+ * Where to fix what the chosen runtime's hint says (#234). The hint itself is
+ * the select's `description`, so `aria-describedby` announces it with the
+ * field; the link sits beside it.
+ */
+function runtimeFix(runtime: RuntimeOption | undefined): JSXElement | null {
+    if (!runtime?.hint || !runtime.href) return null;
     return (
-        <p data-scope="ai-form" data-part="hint" data-runtime-hint={runtime.value} role="note">
-            {runtime.hint}
-            {runtime.href ? <> <a href={runtime.href}>{runtime.hrefLabel ?? 'Set it up'}</a></> : null}
+        <p data-scope="ai-form" data-part="hint" data-runtime-fix={runtime.value}>
+            <a href={runtime.href}>{runtime.hrefLabel ?? 'Set it up'}</a>
         </p>
     );
 }
@@ -362,9 +365,9 @@ export const AgentForm = component<AgentFormProps>(
 
                     {section('execution', 'Execution', (
                         <>
-                            <div data-runtime-field="">
-                                <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={runtimeFieldOptions(runtimes())} required error={err.runtime} />
-                                {runtimeHint(chosenRuntime())}
+                            <div data-runtime-field="" data-runtime-hint={chosenRuntime()?.hint ? chosenRuntime()!.value : undefined}>
+                                <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={runtimeFieldOptions(runtimes())} required error={err.runtime} description={chosenRuntime()?.hint} />
+                                {runtimeFix(chosenRuntime())}
                             </div>
                             <SelectField model={() => draft.defaultEnvironmentId} name={F.environment} label="Default environment" options={props.environments ?? []} placeholder="Any available" />
                             <input type="hidden" name={F.workdir} value={draft.defaultWorkdir} />
