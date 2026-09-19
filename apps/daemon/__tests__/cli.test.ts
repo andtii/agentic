@@ -150,6 +150,26 @@ describe('cli', () => {
         expect(calls).toHaveLength(2);
     });
 
+    it('env login: Copilot CLI signs in with `copilot login` under its own COPILOT_HOME, without the parent\'s tokens', async () => {
+        const calls: { command: string; args: readonly string[]; env: Readonly<Record<string, string | undefined>> }[] = [];
+        const ctx = () => ({
+            paths: paths(),
+            drivers: [{ ...scripted(), runtime: 'copilot-cli' }],
+            ...secure,
+            ...io(),
+            env: { PATH: '/bin', GH_TOKEN: 'ghp_leak', GITHUB_TOKEN: 'ghs_leak', COPILOT_HOME: '/elsewhere' },
+            login: async (command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>>) => (calls.push({ command, args, env }), 0)
+        });
+        expect(await main(['env', 'add', '--name', 'Octo', '--runtime', 'copilot-cli', '--root', dir], ctx())).toBe(0);
+        expect(out.join('\n')).toMatch(/sign it in with: agentic-daemon env login env_octo/);
+        expect(await main(['env', 'login', 'env_octo'], ctx())).toBe(0);
+        expect(await main(['env', 'login', 'env_octo', '--cli', '/opt/copilot'], ctx())).toBe(0);
+        expect(calls).toEqual([
+            { command: 'copilot', args: ['login'], env: { PATH: '/bin', COPILOT_HOME: join(dir, 'profiles', 'env_octo') } },
+            { command: '/opt/copilot', args: ['login'], env: { PATH: '/bin', COPILOT_HOME: join(dir, 'profiles', 'env_octo') } }
+        ]);
+    });
+
     it('run: env add reaches the platform without a restart; an invalid edit keeps the running set', async () => {
         const relay = await startRelay();
         let stop!: () => void;

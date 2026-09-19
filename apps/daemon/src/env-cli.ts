@@ -1,19 +1,21 @@
 /**
- * `agentic-daemon env add --name <name> --root <dir>… [--runtime claude-code] [--id <id>]
+ * `agentic-daemon env add --name <name> --root <dir>… [--runtime claude-code|copilot-cli] [--id <id>]
  *                         [--concurrency <n>] [--account <label>] [--profile-dir <dir>] [--replace]`
  * `agentic-daemon env list`
  * `agentic-daemon env rm <id>`
- * `agentic-daemon env login <id> [--claude <path to the claude CLI>]`
+ * `agentic-daemon env login <id> [--cli <path to the runtime's CLI>]`
  *
  * Thin over `env-store.ts` (#235). A running daemon watches the file, so none
  * of these needs a restart. `login` runs the runtime's own sign-in with the
- * environment's profile (`CLAUDE_CONFIG_DIR`) and nothing inherited that could
- * pick another account — the same rule the driver opens sessions under.
+ * environment's profile (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`) and nothing
+ * inherited that could pick another account — the same rule the driver opens
+ * sessions under (#321).
  */
 
 import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { copilotAccountEnv } from '@agentic/runtimes/copilot-cli';
 import type { SecureWriteOptions } from './credentials.js';
 import type { DaemonDriver } from './daemon.js';
 import { deleteEnvironment, EnvironmentStoreError, putEnvironment, readEnvironmentsForEdit } from './env-store.js';
@@ -51,20 +53,44 @@ export function flagValues(argv: readonly string[], flag: string): string[] {
     return out;
 }
 
-export const ENV_USAGE = `  agentic-daemon env add --name <name> --root <dir> [--root <dir>…] [--runtime claude-code] [--id <id>]
+export const ENV_USAGE = `  agentic-daemon env add --name <name> --root <dir> [--root <dir>…] [--runtime claude-code|copilot-cli] [--id <id>]
                          [--concurrency <n>] [--account <label>] [--profile-dir <dir>]
                          [--replace]   (with --id: change an environment; its profile is kept)
   agentic-daemon env list
   agentic-daemon env rm <id>
-  agentic-daemon env login <id> [--claude <path>]`;
+  agentic-daemon env login <id> [--cli <path>]`;
 
-/** The sign-in environment: the parent's, minus what could select another account, plus this profile. */
+/** The Claude Code sign-in environment: the parent's, minus what could select another account, plus this profile. */
 export function loginEnv(parent: Readonly<Record<string, string | undefined>>, profileDir: string | undefined): Record<string, string | undefined> {
     const env: Record<string, string | undefined> = {};
     for (const [key, value] of Object.entries(parent)) if (!/^ANTHROPIC_/i.test(key) && !/^CLAUDE_CONFIG_DIR$/i.test(key)) env[key] = value;
     if (profileDir !== undefined) env.CLAUDE_CONFIG_DIR = profileDir;
     return env;
 }
+
+/** `parent` with a runtime's account variables applied: `undefined` removes a key. */
+function withAccount(parent: Readonly<Record<string, string | undefined>>, account: Readonly<Record<string, string | undefined>>): Record<string, string | undefined> {
+    const env: Record<string, string | undefined> = { ...parent };
+    for (const [key, value] of Object.entries(account)) {
+        if (value === undefined) delete env[key];
+        else env[key] = value;
+    }
+    return env;
+}
+
+/** How a runtime signs an environment in: its CLI, the sign-in command, and the environment it runs under. */
+export interface RuntimeSignIn {
+    /** The CLI on `PATH`; `--cli` names another. */
+    readonly command: string;
+    readonly args: readonly string[];
+    env(parent: Readonly<Record<string, string | undefined>>, profileDir: string | undefined): Record<string, string | undefined>;
+}
+
+/** The runtimes `env login` can sign in, by runtime id. */
+export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
+    'claude-code': { command: 'claude', args: ['/login'], env: loginEnv },
+    'copilot-cli': { command: 'copilot', args: ['login'], env: (parent, profileDir) => withAccount(parent, copilotAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)) }
+};
 
 const text = (v: string | true | undefined): string | undefined => (typeof v === 'string' ? v : undefined);
 
@@ -117,7 +143,7 @@ ${ENV_USAGE}`);
                     if (!ok) c.err(`warning: working root ${root} is not a directory (yet)`);
                 }
                 c.out(`${flags.replace === true ? 'saved' : 'added'} environment ${environment.id} (${environment.name}, ${environment.runtime}); profile ${environment.profileDir ?? "(the runtime default)"}`);
-                if (environment.runtime === 'claude-code') c.out(`sign it in with: agentic-daemon env login ${environment.id}`);
+                if (SIGN_INS[environment.runtime]) c.out(`sign it in with: agentic-daemon env login ${environment.id}`);
                 return 0;
             }
             case 'list': {
@@ -147,11 +173,14 @@ ${ENV_USAGE}`);
                     c.err(`no environment "${id}"`);
                     return 1;
                 }
-                if (environment.runtime !== 'claude-code') {
-                    c.err(`env login knows how to sign in claude-code environments; "${id}" runs ${environment.runtime}`);
+                const signIn = SIGN_INS[environment.runtime];
+                if (!signIn) {
+                    c.err(`env login knows how to sign in ${Object.keys(SIGN_INS).join(', ')} environments; "${id}" runs ${environment.runtime}`);
                     return 1;
                 }
-                const code = await (c.login ?? runLogin)(text(flags.claude) ?? 'claude', ['/login'], loginEnv(c.env ?? process.env, environment.profileDir));
+                // `--claude` is the flag's first name, kept for Claude Code.
+                const cli = text(flags.cli) ?? (environment.runtime === 'claude-code' ? text(flags.claude) : undefined) ?? signIn.command;
+                const code = await (c.login ?? runLogin)(cli, signIn.args, signIn.env(c.env ?? process.env, environment.profileDir));
                 if (code !== 0) {
                     c.err(`the sign-in exited ${code}`);
                     return 1;

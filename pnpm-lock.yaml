@@ -119,6 +119,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.274
         version: 0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
+      '@github/copilot-sdk':
+        specifier: ^1.0.14
+        version: 1.0.14
       '@sigx/ai':
         specifier: 'catalog:'
         version: 0.1.0(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)

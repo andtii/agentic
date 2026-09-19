@@ -8,6 +8,7 @@ import type { QuotaSource } from '@agentic/core';
 import { openMcpConnector } from '@agentic/mcp';
 import { openStdioMcpConnector } from '@agentic/mcp/node';
 import { claudeCodeDriver, claudeCodeQuota, type DaemonConnectorOpener } from '@agentic/runtimes/claude-code';
+import { copilotCliDriver, copilotCliQuota } from '@agentic/runtimes/copilot-cli';
 import type { DaemonDriver } from './daemon.js';
 
 /** A driver that holds processes or agents to release when the daemon stops. */
@@ -26,13 +27,31 @@ export const openConnector: DaemonConnectorOpener = (c) => {
     return openMcpConnector({ id: c.id, url: c.url, ...(c.bearer !== undefined ? { bearer: c.bearer } : {}), ...(c.headers ? { headers: c.headers } : {}) });
 };
 
+/** What this build ships: a driver per runtime, and the `quota` source each reads provider limits with (#271). */
+export interface BuiltinRuntimes {
+    readonly drivers: DaemonDriver[];
+    readonly quotaSources: QuotaSource[];
+}
+
+/**
+ * Claude Code, Copilot CLI (#321). A source that asks the runtime itself shares its driver, so a usage probe
+ * reuses the Copilot runtime a session would start, not a second one per environment.
+ */
+export function builtinRuntimes(): BuiltinRuntimes {
+    const copilot = copilotCliDriver({ connectors: openConnector });
+    return {
+        drivers: [claudeCodeDriver({ connectors: openConnector }), copilot],
+        quotaSources: [claudeCodeQuota(), copilotCliQuota({ client: (env) => copilot.clientFor(env) })]
+    };
+}
+
 export function builtinDrivers(): DaemonDriver[] {
-    return [claudeCodeDriver({ connectors: openConnector })];
+    return builtinRuntimes().drivers;
 }
 
 /** The `quota` sources this build ships, one per runtime (#271): what the daemon reads provider limits with. */
 export function builtinQuotaSources(): QuotaSource[] {
-    return [claudeCodeQuota()];
+    return builtinRuntimes().quotaSources;
 }
 
 export function isDisposable(driver: DaemonDriver): driver is DisposableDriver {

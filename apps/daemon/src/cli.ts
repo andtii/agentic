@@ -16,7 +16,7 @@ import type { QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
 import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner, type Credentials } from './credentials.js';
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
-import { builtinDrivers, builtinQuotaSources, isDisposable } from './drivers.js';
+import { builtinRuntimes, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
 import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.js';
 import { watchEnvironments } from './env-store.js';
@@ -124,7 +124,9 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     const out = context.out ?? ((t: string) => process.stdout.write(`${t}\n`));
     const err = context.err ?? ((t: string) => process.stderr.write(`${t}\n`));
     const paths = context.paths ?? daemonPaths(context.platform ? { platform: context.platform } : {});
-    const drivers = context.drivers ?? builtinDrivers();
+    // One set, so a quota source that asks a runtime shares the driver's process for it.
+    const builtin = context.drivers && context.quotaSources ? undefined : builtinRuntimes();
+    const drivers = context.drivers ?? builtin!.drivers;
     const args = parseArgs(argv);
     let secrets: string[] = [];
     const logger = (level: LogLevel): Logger => createLogger({ level, write: context.log ?? err, secrets: () => secrets });
@@ -205,7 +207,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     policy: loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF,
                     manage: { paths, secure },
                     drivers,
-                    quota: { sources: context.quotaSources ?? builtinQuotaSources(), ...quota },
+                    quota: { sources: context.quotaSources ?? builtin!.quotaSources, ...quota },
                     eventLog: ndjsonEventLog(paths.sessionsDir, { onError: (e, session) => log.error('session log write failed', { session, error: e }) }),
                     logger: log,
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),

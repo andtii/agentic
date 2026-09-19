@@ -63,10 +63,10 @@ describe('zip', () => {
 });
 
 describe('installer', () => {
-    it('resolves the production closure: workspace packages, the Claude Code SDK with this platform’s CLI, no dev dependencies', () => {
+    it('resolves the production closure: workspace packages, the Claude Code and Copilot SDKs with this platform’s runtimes, no dev dependencies', () => {
         const closure = resolveClosure(DAEMON_DIR);
         const names = new Set([...closure.values()].map((s) => s.name));
-        for (const name of ['@agentic/core', '@agentic/daemon-protocol', '@agentic/runtimes', '@sigx/ai-agent-claude-code', '@anthropic-ai/claude-agent-sdk', `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`, 'ws']) {
+        for (const name of ['@agentic/core', '@agentic/daemon-protocol', '@agentic/runtimes', '@sigx/ai-agent-claude-code', '@anthropic-ai/claude-agent-sdk', `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`, '@github/copilot-sdk', `@github/copilot-sdk-${process.platform}-${process.arch}`, 'ws']) {
             expect(names, name).toContain(name);
         }
         for (const name of ['vite', 'typescript', 'vitest', '@sigx/vite', '@types/ws']) expect(names, name).not.toContain(name);

@@ -370,10 +370,11 @@ describe('daemon helpers', () => {
 });
 
 describe('builtin drivers', () => {
-    it('ship the Claude Code driver, disposable', async () => {
-        const { builtinDrivers, isDisposable } = await import('../src/drivers');
-        const drivers = builtinDrivers();
-        expect(drivers.map((d) => d.runtime)).toEqual(['claude-code']);
+    it('ship a disposable driver and a quota source per harness runtime', async () => {
+        const { builtinRuntimes, isDisposable } = await import('../src/drivers');
+        const { drivers, quotaSources } = builtinRuntimes();
+        expect(drivers.map((d) => d.runtime)).toEqual(['claude-code', 'copilot-cli']);
         expect(drivers.every(isDisposable)).toBe(true);
+        expect(quotaSources.map((s) => s.runtime)).toEqual(['claude-code', 'copilot-cli']);
     });
 });
