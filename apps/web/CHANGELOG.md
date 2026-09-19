@@ -4,6 +4,7 @@ All notable changes to `@agentic/web` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- `/plugins` has a "Usage limits" section for `quota` plugins (#267, part of #261).
 - @mentions of multi-word names (#279): `mentionsIn` matched one word after `@`, so a name as the picker inserts it — "@Claude Code 2 (claude2@ekdahls.net" — addressed nobody (or a member called "Claude") and the message went to the coordinator. It now matches whole member names and ids, longest first, at a word boundary, skipping an `@` inside a matched name; the composer's "To" line reads the same. Mentions are still stored as agent ids, so a rename never changes whom a sent message addressed.
 - Memory and learning through the active plugin (#242, part of #224): `src/plugins/catalogue.ts` adds `memoryCatalogue` (`agentic.memory.default` → `memoryActorImpl()`, `agentic.memory.flat` → `isolateMemoryImpl(flatMemoryPlugin)`) and `learningCatalogue` (`agentic.learning.default` → `learningPlugin` with the config's `repeatThreshold`); `platformActors` hands them to `platformLearningPorts` and passes the resolved memory to the local runtime and the daemon `tool.call` port. The flat memory plugin now ships turned off (`enabledByDefault: false`): this build holds its entries in the isolate's memory and serves an agent's own scope only.
 - Set a machine up from its page (#239, part of #224; EXE-03, EXE-04, EXE-06):

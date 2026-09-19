@@ -3,7 +3,7 @@ import { DEFAULT_ANTHROPIC_MODEL } from '@sigx/ai-anthropic';
 import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_MODEL_IDS, ANTHROPIC_PRICING, RUNTIME_PLUGINS, anthropicApiPlugin, claudeCodePlugin } from '../src/index';
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
-const KINDS = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
+const KINDS = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'quota'];
 
 /** What a catalogue manifest must satisfy: the shape the Registry's `assertPluginManifest` checks (restated — this package sits below `@agentic/platform` and cannot import it) plus this track's own rules, which the Registry does not enforce: a reason per permission, a `secret:<name>` scope per secret, defaults that validate, no stray config key. */
 function expectRegistrable(m: PluginManifest): void {
