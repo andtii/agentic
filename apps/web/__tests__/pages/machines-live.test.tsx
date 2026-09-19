@@ -204,6 +204,34 @@ describe('/pair on the live pages', () => {
     });
 });
 
+describe('provider limits on the live pages (#270)', () => {
+    it('a quota frame from the daemon reaches the environment card and the /usage Limits', { timeout: 15_000 }, async () => {
+        const m = await pairMachine('alien01');
+        await m.daemon.socketMessage(hello(m.machineId, [env(m.machineId, 'env_work', 'work', 'ok'), env(m.machineId, 'env_personal', 'personal', 'ok')]));
+        const snapshot = {
+            sourceId: 'agentic.quota.claude-code',
+            runtime: 'claude-code',
+            environmentId: 'env_work',
+            plan: 'max',
+            availability: 'reported',
+            windows: [{ id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.76, unit: 'percent', status: 'ok' }],
+            observedAt: Date.now(),
+            via: 'probe'
+        };
+        await m.daemon.socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'quota', environmentId: 'env_work', snapshot }));
+
+        const machines = await mountLive('/machines', h);
+        const used = () => machines.querySelector('[aria-label="work"] [data-scope="ag-env-card"][data-part="quota"] [data-scope="ag-quota"][data-part="used"]');
+        await until(() => used() !== null, 'the work card quota');
+        expect(used()!.textContent).toBe('76% used');
+        expect(machines.querySelector('[aria-label="personal"] [data-scope="ag-env-card"][data-part="quota"]')!.textContent).toContain('No usage reported yet');
+
+        const usage = await mountLive('/usage', h);
+        await until(() => usage.querySelector('[data-limit-account="env_work"] [data-scope="ag-quota"]') !== null, 'the /usage limits');
+        expect(usage.querySelector('[data-limit-account="env_work"] [data-limit-caption]')!.textContent).toBe('alien01 · claude-code');
+    });
+});
+
 describe('the agent Config tab’s environment picker on the live pages', () => {
     it('offers every paired machine’s environments and saves execution.defaultEnvironmentId', { timeout: 15_000 }, async () => {
         const m = await pairMachine('alien01');

@@ -9,15 +9,17 @@
  * (one 18 × 6 segment per slot, `working` when used), the queued count,
  * "Default for" tiles, the isolation mechanism. Expired or missing auth
  * turns the border `failed` (`data-tone`), shows the `AUTH EXPIRED` pill
- * and a fix line with `Re-check`; an offline machine dims the card.
+ * and a fix line with `Re-check`; an offline machine dims the card. With
+ * `quota`, the account's provider limits follow (`QuotaPanel`, #270).
  */
 
 import { component, type Define } from '@sigx/runtime-core';
 import { Status } from '@sigx/zero';
-import type { EnvironmentDescriptor, EnvironmentId, MachineInfo } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, MachineInfo, QuotaSnapshot } from '@agentic/core';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { agEnvCardAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
+import { QuotaPanel } from '../kit/QuotaMeter.js';
 import { StatusPill } from '../kit/StatusPill.js';
 import type { Tone } from '../kit/vocabulary.js';
 
@@ -92,6 +94,8 @@ export type EnvironmentCardProps = Define.Prop<'environment', EnvironmentDescrip
     Define.Prop<'queued', number> &
     /** The agents that default to this environment. */
     Define.Prop<'defaultFor', readonly DefaultForAgent[]> &
+    /** The account's provider limits (#270); `null` shows "No usage reported yet", absent shows nothing. */
+    Define.Prop<'quota', QuotaSnapshot | null> &
     Define.Event<'select', EnvironmentId> &
     Define.Event<'recheck', EnvironmentId>;
 
@@ -158,6 +162,11 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
                             <span>{fix}</span>
                             <Button intent="default" onClick={() => emit('recheck', env.id)}>Re-check</Button>
                         </p>
+                    ) : null}
+                    {props.quota !== undefined ? (
+                        <div data-scope={SCOPE} data-part="quota">
+                            <QuotaPanel snapshot={props.quota} />
+                        </div>
                     ) : null}
                     {props.selectLabel ? (
                         <div data-scope={SCOPE} data-part="actions">

@@ -122,6 +122,23 @@ import { AgentTile, Button, DataTable, EnvironmentLine, StatusPill, WaitReasonLi
 
 `PILLS` is the table: if core gains a state, add its row there before it reaches a screen. `Button intent="icon"` needs a `label`; `EnvironmentLine` refuses a lone part in development (EXE-06); `DataTable` refuses a template that does not match its columns.
 
+### Provider limits (#270)
+
+Two components show what Claude Code's `/usage` shows, for any provider:
+
+- **`QuotaMeter`** (`ag-quota`) draws one `QuotaWindow`:
+  - the bold label
+  - an 8 px bar coloured by status (`ok` → `live`, `warning` → `needs-you`, `exhausted` → `failed`, `unknown` → `muted`)
+  - "76% used"
+  - "Resets Sep 22 at 8pm (Europe/Stockholm)" in the viewer's zone (time only when it resets today)
+- **`QuotaPanel`** (`ag-quota-panel`) draws one account's `QuotaSnapshot` or `null`:
+  - the title, plan tag and age
+  - the windows, all of them or with `compact` only the tightest
+  - a panel older than `QUOTA_STALE_MS` (30 min) is `stale`, which dims the meters and turns the age warning
+  - `not-reported` reads "Not reported by provider — <reason>" and `null` reads "No usage reported yet", never an empty bar (OPS-07, PLG-09)
+- **`EnvironmentCard`** takes an optional `quota` prop and shows the panel under the facts.
+- The helpers `resetsText`, `quotaUsedText`, `quotaTone`, `ageText` and `isQuotaStale` are exported.
+
 ### States (`src/kit/states`)
 
 The handoff's failure, empty and loading states, one component each, so no page invents "Something went wrong" (OPS-04, OPS-05). `FailureCard kind=…` renders one of the six named states on `ag-failure` — `client-offline`, `machine`, `auth`, `runtime`, `task`, `interrupted` — each with its own name, icon, mono signal caption, tone and action, all from the `FAILURES` table (`kit/states/kinds.ts`, shared with the inbox row's kinds); `data-kind` carries the design system's axis spelling (`client-offline` → `offline`). `OfflineBanner` (`ag-banner`) is the "This browser is offline · Reconnecting…" strip over the content; `EventsLostRow` the amber "Events lost between seq A and B" line in a session log; `browserRow` / `machineRow` / `connectionRows` turn the two signals into `ConnectionStrip` rows (hollow dot when nothing is happening). `EmptyState variant=…` (`ag-empty`) is the workspace card, the inbox line, the dashed machines card, the chat hint, or a generic title + caption. `TableSkeleton` / `CardSkeleton` / `RailSkeleton` stand in while data loads, one `aria-busy` region with a hidden "Loading" each. Mapping live signals to these is #46's job.

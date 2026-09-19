@@ -4,7 +4,8 @@
  * (`Machine.get`: online, last seen, the environments the daemon reported
  * with their auth status), the router's parked tasks as the queued counts
  * (EXE-12), the directory's agents on the "Default for" tiles — rendered
- * as the same machine groups the mock page draws.
+ * as the same machine groups the mock page draws. Each environment card
+ * carries its account's provider limits from `MachineView.quota` (#270).
  */
 import { component, type JSXElement } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
@@ -23,7 +24,7 @@ const LiveMachineGroup = component<{ id: string; name: string; workspaceId: stri
     return (): JSXElement => {
         const v = view.value;
         if (!v) return <section data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />;
-        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={props.defaultFor} />;
+        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={props.defaultFor} quota={v.quota ?? {}} />;
     };
 });
 
