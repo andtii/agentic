@@ -853,6 +853,11 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-connector-name], [data-secret-name] { font-family: var(--font-mono); font-weight: var(--weight-semibold); }
 [data-connector-plugin], [data-connector-secrets], [data-secret-masked] { color: var(--ag-text-dim); }
 [data-connector-error] { color: var(--color-error); }
+/* #241: the Add MCP server button beside the heading; the tools a connector lists, on their own line. */
+[data-connectors-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+[data-connector-list] li [data-connector-tools], [data-connector-probe] [data-connector-tools] { flex-basis: 100%; list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-sm); color: var(--ag-text-dim); }
+[data-add-connector] { display: flex; flex-direction: column; gap: var(--space-md); margin-bottom: var(--space-lg); }
+[data-connector-test], [data-connector-probe] { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); }
 [data-secret-list] svg { color: var(--ag-text-dim); }
 /* One plugin, `/plugins/:id` (#233): a head row, then one panel per concern. */
 [data-plugin-detail] { display: flex; flex-direction: column; gap: var(--space-xl); max-inline-size: 760px; }
