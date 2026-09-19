@@ -18,7 +18,7 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 ### Demos
 
-- [ ] Demo 1 recorded (#35): `smoke:demo1` against the preview Worker with a real `ANTHROPIC_API_KEY` — `apps/web/test-results/demo1/**/video.webm` attached to the issue (`docs/runbook.md` §6).
+- [ ] Demo 1 recorded (#35): `smoke:demo1` against the preview Worker, a real `ANTHROPIC_API_KEY` in the shell running it (stored as the workspace key, #231) — `apps/web/test-results/demo1/**/video.webm` attached to the issue (`docs/runbook.md` §6).
 - [ ] Demo 2 recorded (#38): the manual run of `docs/runbook.md` §7 on a paired Windows machine — approval round trip, deny, cancel, restart mid-turn — screen recording linked from the issue. `smoke:demo2` with the mock driver in CI, or the issue re-scoped to say why not.
 
 ### Deploy
