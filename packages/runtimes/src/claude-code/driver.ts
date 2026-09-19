@@ -20,7 +20,7 @@ import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSess
 import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
-import { claudeCodeDoctor } from './doctor.js';
+import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { claudeCodeSystemPrompt } from './system.js';
 import { bridgedPlatformTools } from './tools.js';
 
@@ -169,7 +169,24 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {
             const mine = envs.filter((e) => e.runtime === RUNTIME);
-            const inputs = await Promise.all(mine.map(async (env) => ({ env, configDir: configDirOf(env), inspection: await inspect(env) })));
+            // One unreadable profile is that environment's finding, not a failed check for all of them — and
+            // the error's message names the path, which never leaves the machine (#274): only its code goes.
+            const inputs = await Promise.all(
+                mine.map(async (env): Promise<DoctorInput> => {
+                    const configDir = configDirOf(env);
+                    try {
+                        return { env, configDir, inspection: await inspect(env) };
+                    } catch (e) {
+                        const code = (e as { code?: unknown }).code;
+                        const inspection: EnvironmentInspection = {
+                            authStatus: 'unknown',
+                            isolation: env.profileDir === undefined ? 'none' : 'config-dir',
+                            capabilities: claudeCodeCapabilityReport(agentFor(env).capabilities)
+                        };
+                        return { env, configDir, inspection, unreadable: typeof code === 'string' ? code : 'unreadable' };
+                    }
+                })
+            );
             return claudeCodeDoctor(inputs);
         },
 
