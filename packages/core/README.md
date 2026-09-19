@@ -8,15 +8,16 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `agent` | `AgentConfig`, `FrozenAgentConfig`, `AgentConfigVersion`, `Limits`, `ApprovalRule`, `MemoryPolicy`, `ExecutionDefaults`, `ToolGrant`, `SkillRef`, `RuntimeId`, `OfflinePolicy` |
 | `chat` | `ChatEntry`, `Author`, `PromptPart`, `ChatMember`, `PostResult`, `resolveActivation` (the CHT-06 rule) |
 | `task` | `TaskStatus`, `WaitReason`, `TaskOrigin`, `TaskContract`, `TaskResult`, `TaskSnapshot`, `TaskTransition`, `canTransition`, `isTerminal`, `childTaskId` |
-| `environment` | `EnvironmentDescriptor` (with the optional `doctor` verdict), `EnvironmentVerdict`, `DoctorFinding`, `CapabilityReport`, `MachineInfo`, `AuthStatus`, `IsolationMechanism` |
-| `plugin` | `PluginManifest`, `PluginKind`, `PermissionScope`, `PluginState`, `JsonSchema` |
+| `environment` | `EnvironmentDescriptor` (with the optional `doctor` verdict), `EnvironmentVerdict`, `DoctorFinding`, `CapabilityReport`, `MachineInfo`, `AuthStatus`, `IsolationMechanism`, and the `env.request` vocabulary (`EnvironmentInput` — no `profileDir`, `EnvOp`, `EnvResult`, `EnvError`, `EnvErrorCode`, `MachinePolicy`) |
+| `plugin` | `PluginManifest` (with `secrets`), `PluginKind`, `PermissionScope`, `PluginState`, `SINGLE_SLOT_KINDS` / `isSingleSlot` (`memory` and `learning` run one active plugin per workspace), `JsonSchema` (deprecated alias of `ConfigSchema`) |
+| `plugin-config` | `ConfigSchema` — the typed JSON-Schema subset a manifest's `config` is written in (string with `enum` / `format: 'uri'`, number / integer with bounds, boolean, string list, string map) — and `PluginSecretDeclaration`; the pure helpers `validateConfig` (unknown keys rejected once `properties` are declared; defaults not filled in), `configDefaults`, and `pluginReadiness(state, facts)` → `PluginReadiness` (`ready` | `disabled` | `needs-config` | `needs-secret` | `needs-grant` | `needs-machine` | `no-kek`), where the caller supplies the facts (`PluginReadinessFacts`); `DAEMON_HOSTED_CAPABILITY` |
 | `memory` | `MemoryKind`, `MemoryEntry`, `NewMemoryEntry`, `MemoryQuery`, `RankedMemory`, `MemoryScope`, `MemoryStore`, `MemoryPlugin`, `ImportReport`, `PluginContext` |
 | `learning` | `LearningPlugin`, `Proposal`, `Correction`, `TaskOutcome` |
 | `principal` | `Principal` (user, machine, agent, external), `Scope`, `sameWorkspace`, `hasScope` |
 | `daemon` | `DaemonFrame<F, R>`, `PlatformFrame<C>`, `Cursor`, `OpenSpec`, `DAEMON_PROTOCOL_VERSION` — generic over the `@sigx/ai-agent/wire` types so this package needs no dependency |
 | `runtime` | `RuntimeDriver<S, P>` (`inspect` / `open` / `doctor`), `LocalEnvironment`, `EnvironmentInspection`, `RuntimeOpenContext`, `PlatformToolCaller`, `DoctorReport`, `environmentVerdict`, `toEnvironmentDescriptor` — the seam between the daemon and a runtime driver, generic over the session and policy types |
 | `usage` | `Usage`, `UsageRow`, `addUsage`, `ZERO_USAGE` |
-| `workspace` | `WorkspaceSettings`, `NotificationPrefs`, `NotificationKind`, `NOTIFICATION_KINDS` |
+| `workspace` | `WorkspaceSettings` (what the Workspace actor stores), `NotificationPrefs`, `WorkspaceDefaults`, `RetentionSettings`, `DEFAULT_WORKSPACE_SETTINGS`, `NotificationKind`, `NOTIFICATION_KINDS` |
 | `workdir` | `WorkdirRef`, `HostOs`, the `fs.request` vocabulary (`FsOp`, `FsResult`, `FsListResult`, `FsEntry`, `FsGitInfo`, `FsWorktreeResult`, `FsError`, `FsErrorCode`, `FS_LIST_MAX_ENTRIES`), and the pure path helpers `pathWithin`, `normalizePath`, `suggestWorktreePath` — the one lexical `cwdRoots` check every layer shares |
 
 Design: `docs/architecture.md` §1, §4, §5b, §8, §9.

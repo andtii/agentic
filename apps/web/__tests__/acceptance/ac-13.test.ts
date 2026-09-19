@@ -9,10 +9,12 @@
  * one of those agents. Disabling it names every dependent, blocks new use
  * (`requireEnabled`, the secret) with a typed error, and leaves the
  * dependents' own records untouched; removal refuses while anything
- * depends on it unless forced. Deeper: `packages/platform/__tests__/registry/`
+ * depends on it unless forced. The same for a runtime the build ships
+ * (#231): the router refuses a new task on it `plugin-disabled` before any
+ * session opens. Deeper: `packages/platform/__tests__/registry/`
  * (manifests, grants never beyond the manifest, connectors, secrets).
  */
-import type { AgentId, PluginManifest } from '@agentic/core';
+import type { AgentId, PluginManifest, TaskId } from '@agentic/core';
 import { AgentActor, agentKey, isPluginDisabledError, isRegistryError, registryKey, type RegistryActor, type ScheduleActor } from '@agentic/platform';
 import { startHost, type AcceptanceHost } from './host';
 
@@ -65,7 +67,9 @@ describe('AC-13: a plugin is disabled', () => {
         ]);
         expect(dependents.schedules).toEqual([{ id: scheduleId, title: 'nightly triage', agentId: byTool }]);
         expect(await registry.dependents('github')).toEqual(dependents);
-        expect((await registry.list()).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
+        // Beside the build's own plugins (#231), which stay as they were.
+        expect((await registry.list()).filter((p) => !p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
+        expect((await registry.list()).filter((p) => p.builtin).every((p) => p.enabled)).toBe(true);
 
         // New use is refused from now on, with a typed error a caller can show — the gate and the secret alike.
         const refused = await registry.requireEnabled('github').catch((e: unknown) => e);
@@ -91,5 +95,32 @@ describe('AC-13: a plugin is disabled', () => {
         expect(await registry.get('github')).toBeNull();
         expect(await registry.connectors()).toEqual([]);
         expect(await registry.requireEnabled('github').catch((e: unknown) => e)).toMatchObject({ pluginId: 'github', state: 'missing' });
+    });
+
+    it('a runtime the build ships (#231): its agents are named, a new task on it is refused before it opens, and turning it back on restores use', async () => {
+        const me = h.user('ac13_runtime');
+        const registry = h.as(me.principal).actor(h.Registry as RegistryActor, registryKey(me.ws));
+        // Listed with no install step, enabled (PLG-05).
+        expect(await registry.get('anthropic-api')).toMatchObject({ builtin: true, enabled: true });
+        const ada = await me.agent('Ada');
+        await me.createTask('t_before', ada);
+        await me.routing().run('t_before' as TaskId);
+        expect((await me.settled('t_before')).status).toBe('completed');
+
+        const { dependents } = await registry.disable('anthropic-api');
+        expect(dependents.agents.map((a) => [a.id, a.via])).toEqual([[ada, ['runtime']]]);
+        await me.createTask('t_off', ada);
+        await me.routing().run('t_off' as TaskId);
+        const off = await me.settled('t_off');
+        expect(off.status).toBe('failed');
+        expect(off.error).toMatchObject({ code: 'plugin-disabled', recoverable: true });
+        expect(off.sessionId).toBeUndefined();
+        // A built-in is turned off, never removed.
+        expect(isRegistryError(await registry.remove('anthropic-api', { force: true }).catch((e: unknown) => e), 'builtin')).toBe(true);
+
+        await registry.enable('anthropic-api');
+        await me.createTask('t_after', ada);
+        await me.routing().run('t_after' as TaskId);
+        expect((await me.settled('t_after')).status).toBe('completed');
     });
 });

@@ -28,7 +28,7 @@ console.log(await r.json());   // { machineId, pairingCode, expiresAt }
 ## Install
 
 1. Unpack the zip to a folder that stays put, e.g. `C:\agentic\daemon`.
-2. Create `%APPDATA%\agentic\environments.json` (see below) — one entry per Claude Code account you want the platform to use. You can do this after pairing; the daemon reports changes without a restart.
+2. Add one environment per Claude Code account you want the platform to use — `node bin\agentic-daemon.mjs env add --name Work --root C:\src\work`, then `env login <id>` (see below). You can do this before or after pairing: a daemon with no environments still connects, and a running daemon watches `environments.json` and reports a change within a second, no restart.
 3. From the folder, in PowerShell:
 
    ```powershell
@@ -44,11 +44,29 @@ Already paired (upgrade, or you ran `pair` yourself)? Run `install.ps1` with no 
 ```powershell
 node bin\agentic-daemon.mjs pair <code> --url https://<platform> [--name <machine name>]
 node bin\agentic-daemon.mjs doctor      # pairing, environments.json, drivers, profile isolation, sign-in per profile
+node bin\agentic-daemon.mjs env add --name <name> --root <dir> [--root <dir>…] [--concurrency <n>] [--account <label>] [--id <id>] [--profile-dir <dir>]
+node bin\agentic-daemon.mjs env list
+node bin\agentic-daemon.mjs env rm <id>         # the profile folder (the sign-in) stays on disk
+node bin\agentic-daemon.mjs env login <id> [--claude <path to claude.exe>]
 node bin\agentic-daemon.mjs run         # foreground, logs on stderr (--verbose for debug lines)
 node bin\agentic-daemon.mjs --version
 ```
 
+## Letting the web add environments (optional)
+
+By default the platform cannot add, change or remove this machine's environments. To let the Machine page do it inside chosen folders only, allow them here, on the machine (never from the web):
+
+```bat
+node bin\agentic-daemon.mjs policy allow-root C:\src
+node bin\agentic-daemon.mjs policy show
+node bin\agentic-daemon.mjs policy off
+```
+
+(or `pair … --allow-root C:\src`). A running daemon picks the change up without a restart. The web can then only use folders inside the allowed ones: never a network share, never the daemon's own folder (`%APPDATA%\agentic`, which holds the token and the sign-ins), and a link or junction that leads out does not count as inside. New environments still need a sign-in on the machine: `node bin\agentic-daemon.mjs env login <id>`.
+
 ## `environments.json`
+
+`env add | rm` write it for you (atomically, owner-only); editing it by hand works too — a running daemon picks either up without a restart, and an edit that does not validate is logged and ignored (the running environments stay). `env add` gives each environment its own profile folder, `%APPDATA%\agentic\profiles\<id>`, unless you pass `--profile-dir`, and refuses a folder another environment already uses.
 
 `%APPDATA%\agentic\environments.json`:
 
@@ -61,11 +79,11 @@ node bin\agentic-daemon.mjs --version
 }
 ```
 
-- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `$env:CLAUDE_CONFIG_DIR = "C:/Users/me/.claude-work"; claude /login` — with the `claude` CLI if you have it, or the copy in this folder: `node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe /login`. Sessions always run on the copy in this folder.
+- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `node bin\agentic-daemon.mjs env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; without the `claude` CLI on `PATH`, add `--claude node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`. A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the copy in this folder.
 - `cwdRoots`: the folders sessions may run in. A session outside them is refused.
 - `concurrency` (default 1): sessions at once on that account.
 
-`doctor` reports a shared config dir as an error and a profile that is not signed in as a warning; the same verdict is sent to the platform per environment (`Machine.doctor()`).
+`doctor` reports a shared config dir as an error, and a profile that is not signed in — or having no environments at all — as a warning; the same verdict is sent to the platform per environment (`Machine.doctor()`).
 
 ## Files
 

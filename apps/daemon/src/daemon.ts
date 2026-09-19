@@ -22,6 +22,11 @@
  * - `fs.request` lists folders or adds a git worktree inside the named
  *   environment's `cwdRoots` (`./fs.ts`, #188) and is answered by
  *   `fs.response`; `session.open` passes the same symlink-aware root check.
+ * - `env.request` adds, changes or removes an environment when — and only
+ *   inside the folders — the machine-local policy allows (`./env-manage.ts`,
+ *   #238); the answer is `env.response` plus the `env` frame it caused.
+ *   `hello` and `env` carry that policy so the platform can explain a refusal.
+ *   The policy itself only ever changes on the machine (`setPolicy`).
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -40,6 +45,7 @@ import {
     type EnvironmentVerdict,
     type LocalEnvironment,
     type MachineId,
+    type MachinePolicy,
     type RuntimeDriver,
     type SessionId
 } from '@agentic/core';
@@ -48,10 +54,14 @@ import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, type ServedSession } from '@sigx/ai-agent/wire';
 import { reconnectingConnection, type BackoffOptions, type Connection, type Socket } from './connection.js';
+import type { SecureWriteOptions } from './credentials.js';
+import { answerEnvRequest } from './env-manage.js';
 import type { NdjsonEventLog } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
 import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
+import type { DaemonPaths } from './paths.js';
+import { POLICY_OFF, reportedPolicy } from './policy.js';
 import { DAEMON_VERSION } from './version.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -68,6 +78,11 @@ export interface DaemonOptions {
     /** Default 30 s. */
     readonly heartbeatMs?: number;
     readonly backoff?: BackoffOptions;
+    /**
+     * How often environments that are not signed in are inspected again, so a
+     * `claude /login` shows up without a restart (#235). Default 30 s; 0 turns it off.
+     */
+    readonly reinspectMs?: number;
     /** How long a platform tool call may take. Default 10 minutes. */
     readonly toolTimeoutMs?: number;
     readonly daemonVersion?: string;
@@ -75,6 +90,14 @@ export interface DaemonOptions {
     /** Overrides the socket URL derived from `credentials.url`. */
     readonly socketUrl?: string;
     readonly platform?: NodeJS.Platform;
+    /** The machine-local policy as loaded from `policy.json` (#238). Default: off. */
+    readonly policy?: MachinePolicy;
+    /**
+     * Where `env.request` reads and writes (`environments.json`, and the folders a
+     * working root may never overlap). Without it every `env.request` is refused
+     * `policy-disabled` and the policy is reported off.
+     */
+    readonly manage?: { readonly paths: Pick<DaemonPaths, 'configDir' | 'stateDir' | 'environmentsFile'>; readonly secure?: SecureWriteOptions };
 }
 
 export interface Daemon {
@@ -82,6 +105,12 @@ export interface Daemon {
     stop(): Promise<void>;
     /** Replace the environments and announce them with `env`. */
     setEnvironments(environments: readonly LocalEnvironment[]): Promise<void>;
+    /** Inspect every environment again now; `env` goes out when a descriptor changed. Resolves to whether one did. */
+    reinspect(): Promise<boolean>;
+    /** Replace the machine-local policy (its owner edited `policy.json`) and announce it with `env`. Never called for anything from the socket. */
+    setPolicy(policy: MachinePolicy): Promise<void>;
+    /** What the daemon runs with now. */
+    readonly environments: readonly LocalEnvironment[];
     readonly connected: boolean;
     readonly activeSessions: readonly SessionId[];
     /** Malformed platform messages dropped so far. */
@@ -156,11 +185,15 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const platform = options.platform ?? process.platform;
     const machineId = options.credentials.machineId as MachineId;
     const heartbeatMs = options.heartbeatMs ?? 30_000;
+    const reinspectMs = options.reinspectMs ?? 30_000;
     const toolTimeoutMs = options.toolTimeoutMs ?? 10 * 60_000;
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const log = options.eventLog;
 
     let environments: readonly LocalEnvironment[] = options.environments;
+    let policy: MachinePolicy = options.policy ?? POLICY_OFF;
+    /** What `hello` / `env` say: off unless this daemon can act on it. */
+    const announcedPolicy = (): MachinePolicy => (options.manage ? reportedPolicy(policy) : POLICY_OFF);
     let inspections = new Map<EnvironmentId, EnvironmentInspection>();
     let verdicts = new Map<EnvironmentId, EnvironmentVerdict>();
     const sessions = new Map<SessionId, LiveSession>();
@@ -169,6 +202,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
     let socket: Socket | undefined;
     let welcomed = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let reinspectTimer: ReturnType<typeof setInterval> | undefined;
+    // `setEnvironments` and the periodic re-inspect both replace the inspection maps: one at a time, in order.
+    let inspecting: Promise<unknown> = Promise.resolve();
+    const serial = <T>(work: () => Promise<T>): Promise<T> => {
+        const run = inspecting.then(work, work);
+        inspecting = run.catch(() => undefined);
+        return run;
+    };
     let calls = 0;
     let rejected = 0;
     let connection: Connection | undefined;
@@ -229,6 +270,16 @@ export function createDaemon(options: DaemonOptions): Daemon {
         verdicts = nextVerdicts;
     }
 
+    async function reinspect(): Promise<boolean> {
+        // When a check ran is not a change; what it found is.
+        const fingerprint = (): string => JSON.stringify(descriptors(), (key, value: unknown) => (key === 'checkedAt' ? undefined : value));
+        const before = fingerprint();
+        await inspectAll();
+        const changed = fingerprint() !== before;
+        if (changed && socket) send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+        return changed;
+    }
+
     function descriptors(): EnvironmentDescriptor[] {
         const out: EnvironmentDescriptor[] = [];
         for (const env of environments) {
@@ -255,7 +306,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         // The later of the served head and what was last sent: the served head (and the log behind it) advances
         // only as appends reach disk, so it can trail frames already on the wire.
         for (const s of sessions.values()) resume[s.id] = cursorBefore(s.served.head, s.lastSent) ? s.lastSent : s.served.head;
-        send({ v: V, t: 'hello', machineId, daemonVersion: options.daemonVersion ?? DAEMON_VERSION, os: options.os ?? osOf(platform), environments: descriptors(), capabilities: runtimeReports(), resume });
+        send({ v: V, t: 'hello', machineId, daemonVersion: options.daemonVersion ?? DAEMON_VERSION, os: options.os ?? osOf(platform), environments: descriptors(), capabilities: runtimeReports(), resume, policy: announcedPolicy() });
     }
 
     function onClose(): void {
@@ -294,6 +345,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 return;
             case 'fs.request':
                 void fsRequest(frame);
+                return;
+            case 'env.request':
+                void envRequest(frame);
                 return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
@@ -404,6 +458,37 @@ export function createDaemon(options: DaemonOptions): Daemon {
         send({ v: V, t: 'fs.response', requestId: frame.requestId, ...outcome });
     }
 
+    // ---------------------------------------------------------- environments
+
+    /** Sessions running or opening on an environment. */
+    const activeOn = (environmentId: EnvironmentId): number => [...sessions.values()].filter((s) => s.environmentId === environmentId).length + [...opening.values()].filter((id) => id === environmentId).length;
+
+    /**
+     * One at a time and in order with every other change to the environments:
+     * the answer reads, changes and writes `environments.json`. The `env` frame
+     * with the new descriptors goes out before `env.response`.
+     */
+    function envRequest(frame: PlatformFrameOf<'env.request'>): Promise<void> {
+        return serial(async () => {
+            const op = frame.op === 'put' ? { op: 'put' as const, environment: frame.environment } : { op: 'remove' as const, environmentId: frame.environmentId };
+            const outcome = options.manage
+                ? await answerEnvRequest(op, { paths: options.manage.paths, policy, runtimes: new Set(drivers.keys()), activeOn, platform, logger, ...(options.manage.secure ? { secure: options.manage.secure } : {}) })
+                : { error: { code: 'policy-disabled' as const, message: 'this daemon does not manage its environments from the platform' } };
+            if ('result' in outcome) {
+                environments = outcome.environments;
+                await inspectAll();
+                send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+                send({ v: V, t: 'env.response', requestId: frame.requestId, result: outcome.result });
+            } else {
+                logger.info('env: request refused', { code: outcome.error.code });
+                send({ v: V, t: 'env.response', requestId: frame.requestId, error: outcome.error });
+            }
+        }).catch((e: unknown) => {
+            logger.error('env: request failed', { error: e });
+            send({ v: V, t: 'env.response', requestId: frame.requestId, error: { code: 'io', message: 'the machine could not answer; see the daemon log' } });
+        });
+    }
+
     async function command(frame: PlatformFrameOf<'session.command'>): Promise<void> {
         const { sessionId } = frame;
         const s = sessions.get(sessionId);
@@ -487,9 +572,23 @@ export function createDaemon(options: DaemonOptions): Daemon {
             });
             logger.info('daemon: starting', { machine: machineId, environments: environments.length });
             connection.start();
+            if (reinspectMs > 0) {
+                let pending = false;
+                reinspectTimer = setInterval(() => {
+                    // Only while something is not signed in (a healthy machine is left alone), and never two queued.
+                    if (stopped || pending || ![...inspections.values()].some((i) => i.authStatus !== 'ok')) return;
+                    pending = true;
+                    void serial(reinspect)
+                        .catch((e: unknown) => logger.warn('environment re-inspection failed', { error: e }))
+                        .finally(() => (pending = false));
+                }, reinspectMs);
+                reinspectTimer.unref?.();
+            }
         },
         async stop() {
             stopped = true;
+            if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
+            reinspectTimer = undefined;
             for (const id of sessions.keys()) await closeSession(id, 'daemon stopping');
             await connection?.stop();
             onClose();
@@ -501,10 +600,22 @@ export function createDaemon(options: DaemonOptions): Daemon {
             await log.flush();
             logger.info('daemon: stopped');
         },
-        async setEnvironments(next) {
-            environments = next;
-            await inspectAll();
-            if (socket) send({ v: V, t: 'env', environments: descriptors() });
+        setEnvironments(next) {
+            return serial(async () => {
+                environments = next;
+                await inspectAll();
+                if (socket) send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+            });
+        },
+        setPolicy(next) {
+            return serial(async () => {
+                policy = next;
+                if (socket) send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+            });
+        },
+        reinspect: () => serial(reinspect),
+        get environments() {
+            return environments;
         },
         get connected() {
             return connection?.connected ?? false;

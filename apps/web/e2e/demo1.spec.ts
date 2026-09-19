@@ -1,16 +1,21 @@
 import { test, expect } from '@playwright/test';
+import { fetchTransport } from '@sigx/actors/client';
 
 /**
  * Demo 1 (issue #35): user ↔ platform-managed Anthropic agent in the web UI
  * on Cloudflare. Runs ONLY through `playwright.demo1.config.ts`
- * (`smoke:demo1`) against a deployed Worker with a real `ANTHROPIC_API_KEY`;
- * the default e2e config ignores this file.
+ * (`smoke:demo1`) against a deployed Worker; the default e2e config ignores
+ * this file.
  *
  * Environment:
  *   BASE_URL           the Worker (the config refuses to start without it)
  *   AGENTIC_DEV_LOGIN  the preview's dev-login secret — the walk-through signs
  *                      in through `POST /auth/dev-login` (preview-only; GitHub
  *                      OAuth cannot run headless)
+ *   ANTHROPIC_API_KEY  a real key, in the RUNNER's environment: the Worker holds
+ *                      none (#231), so the walk-through stores it as the fresh
+ *                      workspace's `anthropic-api-key` secret, as
+ *                      `/plugins/anthropic-api` does
  *   DEMO1_USER         optional; default: a fresh `demo1-<stamp>` identity, so the
  *                      roster starts empty and the recording shows the whole flow
  *
@@ -19,17 +24,26 @@ import { test, expect } from '@playwright/test';
  * message → Ada's answer streaming in.
  */
 const token = process.env.AGENTIC_DEV_LOGIN;
+const apiKey = process.env.ANTHROPIC_API_KEY;
 const user = process.env.DEMO1_USER ?? `demo1-${Date.now().toString(36)}`;
 const PROMPT = 'Say hello in exactly five words.';
 
 test('demo 1: sign in, create an agent on anthropic-api, chat with it, watch the answer stream', async ({ page }) => {
     test.skip(!token, 'AGENTIC_DEV_LOGIN is not set: the preview dev login cannot be used');
+    test.skip(!apiKey, 'ANTHROPIC_API_KEY is not set in this shell: it becomes the workspace key the agent answers with');
 
     // Sign in through the preview-only door; the session cookie lands in this context.
     const login = await page.request.post('/auth/dev-login', { data: { token, user } });
     expect(login.status(), 'dev login (is AGENTIC_DEV_LOGIN set on the Worker, and does it match?)').toBe(200);
     const { principal } = (await login.json()) as { principal: { userId: string; workspaceId: string } };
     expect(principal.workspaceId).toBe(`dev_${user}`);
+
+    // The workspace's own Anthropic key (#231), stored the way `/plugins/anthropic-api` stores it: `Registry.setSecret` over the actor mount.
+    const origin = new URL(process.env.BASE_URL!).origin;
+    const cookie = (login.headers()['set-cookie'] ?? '').split(';')[0]!;
+    const registry = { type: 'Registry', key: `${principal.workspaceId}:registry` };
+    const transport = fetchTransport({ endpoint: `${origin}/_sigx/actor`, headers: { cookie, origin } });
+    await transport.call(`${registry.type}#setSecret`, [registry.key, 'anthropic-api-key', apiKey], { ref: registry });
 
     // The roster, live: nothing yet for a fresh identity.
     await page.goto('/agents');
@@ -81,7 +95,7 @@ test('demo 1: sign in, create an agent on anthropic-api, chat with it, watch the
 
     // Ada's row appears while her turn is still running (the streaming pill), then settles with text.
     const ada = messages.filter({ has: page.locator('[data-part="name"]', { hasText: 'Ada' }) }).first();
-    await expect(ada, 'Ada answers (is ANTHROPIC_API_KEY set on the Worker?)').toBeVisible({ timeout: 120_000 });
+    await expect(ada, 'Ada answers (is the ANTHROPIC_API_KEY stored above a working key?)').toBeVisible({ timeout: 120_000 });
     const sawStreaming = await ada.locator('[data-scope="ag-pill"][data-status="streaming"]').isVisible().catch(() => false);
     await expect(ada.locator('[data-part="body"]')).not.toHaveText('', { timeout: 120_000 });
     await expect(ada.locator('[data-scope="ag-pill"][data-status="streaming"]')).toHaveCount(0, { timeout: 120_000 });

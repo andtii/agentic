@@ -9,12 +9,25 @@
 import type { ChatFileStore, Principal, SessionId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
+import type { RuntimeCatalogue } from './factory.js';
 
 export interface RoutingPorts {
     /** The Session actor definition this app built (`defineSessionActor`). */
     readonly sessions: () => AnyActorDefinition;
     /** The Machine actor definition this app built (`defineMachineActor`). */
     readonly machines: () => AnyActorDefinition;
+    /**
+     * The Registry actor definition this app built (`defineRegistry`). With it, `run` asks `gate({ runtime })` once
+     * before a route is written: a runtime plugin that is missing or disabled fails the task `plugin-disabled`, and the
+     * answer rides on the session spec (`plugins`). Absent: nothing is gated, as before the catalogue.
+     */
+    readonly registry?: () => AnyActorDefinition;
+    /**
+     * The build's runtimes — the same catalogue the session factory has. A `local` runtime needs no environment; a
+     * `daemon` one runs on a machine; an id it does not know fails the task `unknown-runtime`. Absent:
+     * `anthropic-api` is local and every other id is daemon-hosted.
+     */
+    readonly runtimes?: RuntimeCatalogue;
     /**
      * The principal the router drives Task, Session, Machine and Agent with.
      * Default: the workspace's user (v1: `workspaceId === userId`, see

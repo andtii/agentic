@@ -1,42 +1,52 @@
 import { component, signal, type Define } from 'sigx';
-import { Link } from '@sigx/router';
-import { AgentTile, Button, ConfirmDialog, Icon, Label, Switch, Tag } from '@agentic/ui';
-import { disableConsequence, opsAgent, opsPlugins, type OpsPlugin } from '../mock/ops';
+import type { PluginReadinessFacts } from '@agentic/core';
+import type { Dependents, PluginView } from '@agentic/platform';
+import { ConfirmDialog, Switch } from '@agentic/ui';
+import { opsAgent, opsEnvironments, opsPluginDependents, opsPluginFacts, opsPlugins } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
-import { defineTopbar } from '../components/topbar';
+import { dependentCount, dependentNames, disableLabel } from './ops/live';
 import { dataMode } from '../data-mode';
 import { LivePlugins } from './ops/LivePlugins';
+import { PluginCatalogue } from './plugins/PluginCatalogue';
+import { dependentsById, disableDescription, isLastReadyRuntime, needsConfirm } from './plugins/model';
+import { readinessById, readinessFacts } from './plugins/readiness';
 
-export type PluginsViewProps = Define.Prop<'plugins', readonly OpsPlugin[], true>;
+export type PluginsViewProps =
+    & Define.Prop<'plugins', readonly PluginView[], true>
+    & Define.Prop<'dependents', readonly Dependents[]>
+    /** What `pluginReadiness` reads; default: the mock workspace's. */
+    & Define.Prop<'facts', PluginReadinessFacts>;
 
-/** A dependent, by name, for the confirm dialog: "Forge — default environment · 1 active session". */
-export function dependentName(d: OpsPlugin['dependents'][number]): string {
-    const who = d.agentId ? opsAgent(d.agentId).name : (d.schedule ?? '');
-    return `${who} — ${d.reason}`;
-}
+/** The mock workspace's readiness facts: its secrets, and the environments its machines report. */
+export const mockPluginFacts = (): PluginReadinessFacts => readinessFacts(opsPluginFacts, opsEnvironments);
+
+/** A mock agent as the plugin views name one. */
+export const mockAgentOf = (id: string) => opsAgent(id);
 
 /**
- * `/plugins` — three-column cards: name and version, kind tag,
- * description, granted permissions, declared unsupported operations
- * (PLG-09), dependents as tiles, enable switch. Turning a switch off on a
- * plugin with dependents opens the dialog that lists them by name and
- * states the consequence ("Disable and stop 2 sessions"); the switch stays
- * on until the user confirms.
+ * `/plugins` — the build's plugins by kind on three-column cards: name and
+ * version, kind tag, readiness, description, granted permissions,
+ * dependents as tiles, the enable switch and the link to the plugin's page.
+ * Turning a switch off on a plugin somebody depends on opens the dialog that
+ * lists them by name; the switch stays on until the user confirms. The same
+ * `PluginCatalogue` the live page draws, over `mock/ops.ts`.
  */
-defineTopbar('plugins', () => ({ actions: () => <Button intent="default" icon="plus">Add MCP connector</Button> }));
-
 export const PluginsView = component<PluginsViewProps>(({ props }) => {
-    const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.plugins.map(p => [p.id, p.enabled])));
+    const enabled = signal<Record<string, boolean>>(Object.fromEntries(props.plugins.map(p => [p.manifest.id, p.enabled])));
     const ui = signal<{ confirming: string | null }>({ confirming: null });
+    const facts = (): PluginReadinessFacts => props.facts ?? mockPluginFacts();
+    const plugins = (): PluginView[] => props.plugins.map(p => ({ ...p, enabled: enabled[p.manifest.id] ?? p.enabled }));
+    const deps = (): Record<string, Dependents> => dependentsById(props.dependents ?? opsPluginDependents);
 
-    const toggle = (plugin: OpsPlugin, next: boolean) => {
-        if (!next && plugin.dependents.length) {
+    const toggle = (plugin: PluginView, next: boolean) => {
+        const id = plugin.manifest.id;
+        if (!next && (needsConfirm(deps()[id]) || isLastReadyRuntime(plugin, readinessById(plugins(), facts()), plugins()))) {
             // Hold the switch on; the dialog decides.
-            enabled[plugin.id] = true;
-            ui.confirming = plugin.id;
+            enabled[id] = true;
+            ui.confirming = id;
             return;
         }
-        enabled[plugin.id] = next;
+        enabled[id] = next;
     };
     const confirmDisable = () => {
         if (ui.confirming) enabled[ui.confirming] = false;
@@ -44,50 +54,27 @@ export const PluginsView = component<PluginsViewProps>(({ props }) => {
     };
 
     return () => {
-        const confirming = props.plugins.find(p => p.id === ui.confirming);
+        const rows = plugins();
+        const readiness = readinessById(rows, facts());
+        const confirming = rows.find(p => p.manifest.id === ui.confirming);
+        const confirmingDeps = confirming ? deps()[confirming.manifest.id] : undefined;
+        const names = confirmingDeps ? dependentNames(confirmingDeps, id => opsAgent(id).name) : [];
         return (
             <OpsPage page="plugins" title="Plugins">
-                <div data-plugin-grid>
-                    {props.plugins.map(p => (
-                        <article data-plugin-card data-enabled={enabled[p.id] ? '' : undefined} aria-label={p.name}>
-                            <header data-plugin-head>
-                                <span data-plugin-name>
-                                    <span>{p.name}</span>
-                                    <span data-plugin-version>{p.version}</span>
-                                </span>
-                                <Switch label={`Enable ${p.name}`} hideLabel model={() => enabled[p.id]} onCheckedChange={(v: boolean) => toggle(p, v)} />
-                            </header>
-                            <Tag>{p.kind}</Tag>
-                            <p data-plugin-description>{p.description}</p>
-                            <div data-plugin-section>
-                                <Label>Granted</Label>
-                                {p.granted.length
-                                    ? <ul data-plugin-granted>{p.granted.map(g => <li><Icon name="check" size={14} /><span>{g}</span></li>)}</ul>
-                                    : <span data-plugin-none>nothing</span>}
-                            </div>
-                            {p.unsupported.length ? (
-                                <div data-plugin-section>
-                                    <Label>Declared unsupported</Label>
-                                    <span data-plugin-unsupported>{p.unsupported.join(', ')}</span>
-                                </div>
-                            ) : null}
-                            <footer data-plugin-foot>
-                                {p.usedBy.length
-                                    ? <span data-plugin-used>Used by {p.usedBy.map(id => <AgentTile name={opsAgent(id).name} hue={opsAgent(id).hue} size={20} labelled />)}</span>
-                                    : <span data-plugin-none>No dependents</span>}
-                                <Link to="/plugins" class="ag-link">Configure</Link>
-                            </footer>
-                        </article>
-                    ))}
-                </div>
+                <PluginCatalogue
+                    plugins={rows}
+                    readiness={readiness}
+                    dependents={deps()}
+                    agentOf={mockAgentOf}
+                    toggle={(p: PluginView) => <Switch label={`Enable ${p.manifest.name}`} hideLabel model={() => enabled[p.manifest.id]} onCheckedChange={(v: boolean) => toggle(p, v)} />}
+                />
                 {confirming ? (
                     <ConfirmDialog
                         model={() => ui.confirming !== null}
-                        title={`Disable ${confirming.name}?`}
-                        description="These stop being able to start work. Nothing is deleted, and nothing is moved to another runtime."
-                        dependents={confirming.dependents.map(dependentName)}
-                        dependentsLabel={`Depends on it · ${confirming.dependents.length}`}
-                        confirmLabel={disableConsequence(confirming)}
+                        title={`Disable ${confirming.manifest.name}?`}
+                        description={disableDescription(confirming, confirmingDeps, isLastReadyRuntime(confirming, readiness, rows))}
+                        {...(names.length ? { dependents: names, dependentsLabel: `Depends on it · ${dependentCount(confirmingDeps!)}` } : {})}
+                        confirmLabel={disableLabel(confirming)}
                         cancelLabel="Keep enabled"
                         onConfirm={confirmDisable}
                         onCancel={() => { ui.confirming = null; }}
@@ -98,5 +85,5 @@ export const PluginsView = component<PluginsViewProps>(({ props }) => {
     };
 });
 
-/** `/plugins`: the workspace Registry on the platform (`LivePlugins`, #145), or the mock cards. */
+/** `/plugins`: the workspace Registry on the platform (`LivePlugins`, #145, #233), or the mock catalogue. */
 export const Plugins = component(() => () => (dataMode() === 'live' ? <LivePlugins /> : <PluginsView plugins={opsPlugins} />));

@@ -4,6 +4,10 @@ All notable changes to `@agentic/runtimes` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- claude-code doctor (#238): a signed-out environment's finding says to sign in on the machine with `agentic-daemon env login <id>` instead of spelling out `CLAUDE_CONFIG_DIR=<dir> claude /login`.
+- Plugin manifests (#228, PLG-02): `anthropicApiPlugin` (id `anthropic-api`; config `defaultModel` over `ANTHROPIC_MODEL_IDS`, default `DEFAULT_ANTHROPIC_MODEL`; required secret `ANTHROPIC_API_KEY_SECRET` = `anthropic-api-key` with its `secret:` scope) and `claudeCodePlugin` (id `claude-code`, `DAEMON_HOSTED_CAPABILITY`, `machine:*`), plus `RUNTIME_PLUGINS`, `ANTHROPIC_API_PLUGIN_ID`, `CLAUDE_CODE_PLUGIN_ID`, `RUNTIME_PLUGIN_VERSION`. Ids equal the `RuntimeId`. Declarations only — nothing is registered here.
+- `ChatPort.post` answers `ChatPostResult` (#222): `messageId` plus optional `activated` (the task each mentioned member was started on) and `notActivated` (who was not, and why). The `chat_post` description and the system prompt's "This chat" say a mention starts the agent, which answers in the chat, and that `delegate` is how to get the answer back as a result.
+- `delegate`: the `environmentId` description says the child falls back to the caller's environment when the assignee has no default (#220).
 - `chat_file_read` (#206, part of #203): reads a chat attachment by its `agentic-file:` URI through `PlatformPorts.files` — the text of a text file (flagged `truncated` with a note past 256 KB), a "binary file <name> (<type>, N KB)" note otherwise (an image: attached to the turn when it fits), a clear error on a host without a `files` port. Added to `PLATFORM_TOOL_NAMES` after `chat_post`, to the system prompt's tool guide, and bridged to Claude Code (`DEFINITION_PORTS.files`). `chat_post` takes optional `attachments` (`agentic-file:` URIs, validated before the port) passed as `ChatPost.attachments`.
 - Chat attachments ports (#204, part of #203):
   - `PlatformPorts.files?: ChatFilesPort` (`read(uri, call)` → `ChatFileRead`). It is optional, so hosts without a file store and existing fakes keep compiling.

@@ -7,7 +7,7 @@
  * in-memory queue, a WebSocket pair, a relay.
  */
 
-import type { Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, SessionId } from '@agentic/core';
+import type { Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, MachinePolicy, SessionId } from '@agentic/core';
 import type { PlatformFrame } from '../frames.js';
 
 /** What the scripted runtime behind the daemon must do. */
@@ -25,10 +25,14 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage';
 
 export interface DaemonConformanceHarness {
-    /** `'env'`: `setEnvironments`; `'gap'`: `truncateLog`; `'raw'`: `PlatformSeat.sendRaw`; `'fs'`: the daemon answers `fs.request` (#187). */
+    /**
+     * `'env'`: `setEnvironments`; `'gap'`: `truncateLog`; `'raw'`: `PlatformSeat.sendRaw`; `'fs'`: the daemon answers `fs.request` (#187);
+     * `'env-manage'`: the daemon answers `env.request` (#236), starts with a policy that has `webManaged` on and at least one allowed root
+     * that exists, and implements `setPolicy`.
+     */
     readonly features?: readonly ConformanceFeature[];
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;
@@ -43,6 +47,8 @@ export interface ConformanceDaemon {
     dial(): Promise<PlatformSeat> | PlatformSeat;
     /** Feature `'env'`: change the daemon's environments; it must announce them with `env`. */
     setEnvironments?(environments: readonly EnvironmentDescriptor[]): void | Promise<void>;
+    /** Feature `'env-manage'`: change the machine-local policy the way its owner would, on the machine; the daemon must announce it with `env`. */
+    setPolicy?(policy: MachinePolicy): void | Promise<void>;
     /** Feature `'gap'`: forget the session log before `keepFrom`, so a `wanted` cursor older than that cannot be replayed. */
     truncateLog?(sessionId: SessionId, keepFrom: Cursor): void | Promise<void>;
     stop(): void | Promise<void>;

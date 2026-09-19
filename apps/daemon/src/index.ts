@@ -10,6 +10,44 @@ export { answerFsRequest, checkWithinRoots, gitInfo, withinRoots, type FsOptions
 export { builtinDrivers, isDisposable, type DisposableDriver } from './drivers.js';
 export { runDoctor, formatDoctorReport, type DoctorOptions } from './doctor.js';
 export { parseEnvironments, loadEnvironments, type EnvironmentsResult } from './environments.js';
+export {
+    addEnvironment,
+    removeEnvironment,
+    putEnvironment,
+    deleteEnvironment,
+    writeEnvironments,
+    readEnvironmentsForEdit,
+    watchEnvironments,
+    profileDirFor,
+    newEnvironmentId,
+    EnvironmentStoreError,
+    type EnvironmentInput,
+    type EnvironmentStoreErrorCode,
+    type PutOptions,
+    type WatchEnvironmentsOptions,
+    watchConfigFile,
+    type WatchConfigFileOptions
+} from './env-store.js';
+export { answerEnvRequest, type EnvManageContext, type EnvOutcome } from './env-manage.js';
+export {
+    POLICY_OFF,
+    parsePolicy,
+    loadPolicy,
+    writePolicy,
+    watchPolicy,
+    reportedPolicy,
+    allowRoot,
+    denyRoot,
+    checkWorkingRoot,
+    isRemoteOrDevicePath,
+    PolicyError,
+    type PolicyErrorCode,
+    type PolicyResult,
+    type ProtectedDirs,
+    type WorkingRootCheck
+} from './policy.js';
+export { policyCommand, describePolicy, POLICY_USAGE, type PolicyCommandContext } from './policy-cli.js';
+export { envCommand, flagValues, loginEnv, runLogin, ENV_USAGE, type EnvCommandContext, type LoginRunner } from './env-cli.js';
 export { ndjsonEventLog, type NdjsonEventLog, type NdjsonEventLogOptions } from './event-log.js';
 export { reconnectingConnection, backoffDelay, type BackoffOptions, type Connection, type ConnectionHandlers, type ConnectionOptions, type Socket } from './connection.js';
 export { pair, normalizePlatformUrl, normalizePairingCode, daemonSocketUrl, PairingError, type PairOptions, type PairResult } from './pair.js';

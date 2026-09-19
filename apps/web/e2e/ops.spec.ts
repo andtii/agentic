@@ -55,12 +55,13 @@ test('Plugins asks before disabling a plugin with dependents', async ({ page }, 
     test.skip(info.project.name !== 'desktop-1280', 'the mobile pass (#91) covers 400 px');
     await page.goto('/plugins');
     // The input is visually hidden under its control; a person clicks the switch itself.
-    const claude = page.getByRole('switch', { name: 'Enable claude-code' });
+    const claude = page.getByRole('switch', { name: 'Enable Claude Code' });
     await page.locator('[data-scope="switch"][data-part="root"]', { has: claude }).click();
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Disable claude-code?');
-    await expect(dialog.getByRole('button', { name: 'Disable and stop 2 sessions' })).toBeVisible();
+    await expect(dialog).toContainText('Disable Claude Code?');
+    await expect(dialog).toContainText('Forge');
+    await expect(dialog.getByRole('button', { name: 'Disable Claude Code' })).toBeVisible();
     await dialog.getByRole('button', { name: 'Keep enabled' }).click();
     await expect(dialog).toBeHidden();
     await expect(claude).toBeChecked();

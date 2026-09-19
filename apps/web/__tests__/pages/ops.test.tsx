@@ -10,14 +10,17 @@ import { HistoryView, HISTORY_COLS, filterHistory } from '../../src/pages/Histor
 import { Machine } from '../../src/pages/Machine';
 import { MachinesView as MachinesList } from '../../src/pages/Machines';
 import { CODE_LIFETIME, PairView } from '../../src/pages/Pair';
-import { PluginsView, dependentName } from '../../src/pages/Plugins';
+import { PluginPageView } from '../../src/pages/Plugin';
+import { PluginsView } from '../../src/pages/Plugins';
+import { LAST_RUNTIME_WARNING, workspaceWideConsequence } from '../../src/pages/plugins/model';
 import { SCHEDULES_COLS, SchedulesView } from '../../src/pages/Schedules';
 import { SettingsView } from '../../src/pages/Settings';
 import { USAGE_COLS, UsageView } from '../../src/pages/Usage';
 import { SESSIONS_COLS } from '../../src/pages/machines/SessionsTable';
-import { dstRule, opsHistory, opsMachines, opsPlugins, opsSchedules, opsSettings, pairing, usageRows, money } from '../../src/mock/ops';
+import { dstRule, opsHistory, opsMachines, opsPluginDependents, opsPlugins, opsSchedules, opsSettings, pairing, usageRows, money } from '../../src/mock/ops';
 import { groupByDay } from '../../src/pages/ops/format';
-import { buttonNamed, colWidths, mountAt, tick } from './helpers';
+import { buttonNamed, colWidths, mountAt, setText, tick } from './helpers';
+import { mountRoute, texts } from './mount';
 
 const offlineMachine = opsMachines.find(m => !m.online)!;
 
@@ -118,50 +121,132 @@ describe('/schedules', () => {
 });
 
 describe('/plugins', () => {
-    it('renders a card per plugin with kind, granted, unsupported and dependents', async () => {
+    const card = (root: ParentNode, id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-scope="ag-plugin-card"][data-part="root"][data-plugin="${id}"]`)!;
+    const readinessOf = (el: ParentNode): string | null => el.querySelector('[data-readiness]')?.getAttribute('data-readiness') ?? null;
+
+    it('renders a card per plugin by kind, with readiness, granted scopes, dependents and the link to its page', async () => {
         const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
-        const cards = [...root.querySelectorAll('[data-plugin-card]')];
-        expect(cards.length).toBe(opsPlugins.length);
-        const claude = cards.find(c => c.getAttribute('aria-label') === 'claude-code')!;
-        expect(claude.querySelector('[data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('runtime');
-        expect(claude.querySelector('[data-plugin-granted]')!.textContent).toContain('machines: open sessions');
-        expect(claude.querySelector('[data-plugin-unsupported]')!.textContent).toBe('usage and cost, live migration');
+        expect(root.querySelectorAll('[data-scope="ag-plugin-card"][data-part="root"]').length).toBe(opsPlugins.length);
+        expect([...root.querySelectorAll('[data-plugin-group]')].map(g => g.getAttribute('data-plugin-group'))).toEqual(['runtime', 'connector', 'memory', 'learning', 'a2a']);
+
+        const claude = card(root, 'claude-code');
+        expect(claude.getAttribute('aria-label')).toBe('Claude Code');
+        expect(claude.querySelector('[data-plugin-granted]')!.textContent).toContain('machine:*');
         expect(claude.querySelectorAll('[data-plugin-used] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(2);
-        const a2a = cards.find(c => c.getAttribute('aria-label') === 'a2a')!;
+        expect(claude.querySelector('[data-plugin-schedules]')!.textContent).toBe('1 schedule');
+        // The mock workspace has a claude-code environment; its Anthropic key is not set yet.
+        expect(readinessOf(claude)).toBe('ready');
+        expect(readinessOf(card(root, 'anthropic-api'))).toBe('needs-secret');
+        expect(card(root, 'anthropic-api').querySelector('a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
+
+        // The active memory plugin: used by everyone, nobody singled out.
+        const memory = card(root, 'agentic.memory.default');
+        expect(memory.hasAttribute('data-mod-selected')).toBe(true);
+        expect(memory.querySelector('[data-workspace-wide]')!.textContent).toBe('Used by every agent');
+        expect(card(root, 'agentic.memory.flat').hasAttribute('data-mod-selected')).toBe(false);
+
+        const a2a = card(root, 'a2a');
         expect(a2a.textContent).toContain('No dependents');
+        expect(readinessOf(a2a)).toBe('disabled');
         expect(a2a.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(false);
     });
 
-    it('turning off a plugin with dependents opens the dialog listing them and stating the consequence; the switch holds until confirmed', async () => {
+    it('turning off a plugin with dependents opens the dialog listing them; the switch holds until confirmed', async () => {
         const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
-        const claude = [...root.querySelectorAll('[data-plugin-card]')].find(c => c.getAttribute('aria-label') === 'claude-code')!;
-        const control = claude.querySelector<HTMLInputElement>('input[role="switch"]')!;
-        expect(control.checked).toBe(true);
-        control.click();
+        const claude = card(root, 'claude-code');
+        const control = () => claude.querySelector<HTMLInputElement>('input[role="switch"]')!;
+        expect(control().checked).toBe(true);
+        control().click();
         await tick();
         const popup = root.querySelector('[data-scope="dialog"][data-part="popup"]')!;
         expect(popup.getAttribute('role')).toBe('alertdialog');
-        expect(popup.textContent).toContain('Disable claude-code?');
-        const claudePlugin = opsPlugins.find(p => p.id === 'claude-code')!;
-        for (const d of claudePlugin.dependents) expect(popup.textContent).toContain(dependentName(d));
-        expect(popup.textContent).toContain('Nightly dependency audit — schedule');
-        const confirm = buttonNamed(popup, 'Disable and stop 2 sessions');
+        expect(popup.textContent).toContain('Disable Claude Code?');
+        expect(popup.textContent).toContain('Depends on it · 3');
+        for (const name of ['Forge — runtime', 'Lint — runtime', 'Nightly dependency audit — schedule via Lint']) expect(popup.textContent).toContain(name);
+        // It is the only runtime that is ready (the Anthropic key is not set): the dialog says so.
+        expect(popup.textContent).toContain(LAST_RUNTIME_WARNING);
+        const confirm = buttonNamed(popup, 'Disable Claude Code');
         // Still on while the dialog is open.
-        expect(claude.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
+        expect(control().checked).toBe(true);
         confirm.click();
         await tick();
-        expect(claude.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(false);
-        expect(claude.hasAttribute('data-enabled')).toBe(false);
+        expect(control().checked).toBe(false);
+        expect(readinessOf(claude)).toBe('disabled');
     });
 
-    it('turning off a plugin without dependents needs no dialog', async () => {
+    it('the active memory plugin states the workspace-wide consequence instead of a list', async () => {
         const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
-        const a2a = [...root.querySelectorAll('[data-plugin-card]')].find(c => c.getAttribute('aria-label') === 'a2a')!;
-        const control = a2a.querySelector<HTMLInputElement>('input[role="switch"]')!;
+        card(root, 'agentic.memory.default').querySelector<HTMLInputElement>('input[role="switch"]')!.click();
+        await tick();
+        const popup = root.querySelector('[data-scope="dialog"][data-part="popup"]')!;
+        expect(popup.textContent).toContain(workspaceWideConsequence('memory'));
+        expect(popup.querySelector('[data-confirm-dependents]')).toBeNull();
+    });
+
+    it('a plugin nobody depends on switches without a dialog', async () => {
+        const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
+        const control = card(root, 'a2a').querySelector<HTMLInputElement>('input[role="switch"]')!;
         control.click();
         await tick();
         expect(root.querySelector('[data-scope="dialog"][data-part="popup"]')).toBeNull();
-        expect(a2a.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
+        expect(card(root, 'a2a').querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
+    });
+});
+
+describe('/plugins/:id', () => {
+    const plugin = (id: string) => opsPlugins.find(p => p.manifest.id === id)!;
+    const dependents = (id: string) => opsPluginDependents.find(d => d.pluginId === id);
+    const secretInput = (root: ParentNode, name: string): HTMLInputElement => root.querySelector<HTMLInputElement>(`[data-secret="${name}"] input`)!;
+
+    it('the route renders the plugin, and an unknown id says so', async () => {
+        const root = await mountRoute('/plugins/agentic.memory.default');
+        expect(root.querySelector('[data-plugin-detail]')!.getAttribute('data-plugin')).toBe('agentic.memory.default');
+        expect(root.querySelector('[data-plugin-action="activate"]')!.textContent).toContain('This is the memory plugin the workspace runs.');
+        expect(root.querySelector('[data-plugin-panel="config"]')!.textContent).toContain('Nothing to configure.');
+        // Built in: no Remove.
+        expect(root.querySelector('[data-plugin-action="remove"]')).toBeNull();
+
+        const missing = await mountRoute('/plugins/nope');
+        expect(missing.textContent).toContain('No plugin with id nope');
+    });
+
+    it('settings on the schema form, permissions with their reasons, and a key that is write-only', async () => {
+        const root = await mountAt('/plugins/anthropic-api', <PluginPageView plugin={plugin('anthropic-api')} dependents={dependents('anthropic-api')} />);
+        expect(root.querySelector('[data-readiness]')!.getAttribute('data-readiness')).toBe('needs-secret');
+        expect(root.querySelector<HTMLSelectElement>('select')!.value).toBe('claude-opus-5');
+        const row = root.querySelector('[data-permission="secret:anthropic-api-key"]')!;
+        expect(row.hasAttribute('data-granted')).toBe(true);
+        expect(row.querySelector('[data-permission-reason]')!.textContent).toBe('Calls the Anthropic API with your key when a session starts.');
+        expect(texts([...root.querySelectorAll('[data-dependent-via]')])).toEqual(['runtime', 'runtime', 'fallback']);
+
+        // The field hydrates enabled; the value leaves through `save` once and the page keeps the NAME only.
+        await tick();
+        const SECRET = 'sk-ant-mock-0123456789';
+        setText(secretInput(root, 'anthropic-api-key'), SECRET);
+        await tick();
+        root.querySelector<HTMLFormElement>('[data-secret="anthropic-api-key"] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        expect(root.querySelector('[data-secret="anthropic-api-key"]')!.hasAttribute('data-set')).toBe(true);
+        expect(root.querySelector('[data-readiness]')!.getAttribute('data-readiness')).toBe('ready');
+        expect(root.innerHTML).not.toContain(SECRET);
+        expect(root.querySelector('[data-secret="anthropic-api-key"] input')).toBeNull();
+
+        // Revoking the scope it declared takes it out of service again.
+        buttonNamed(row, 'Revoke').click();
+        await tick();
+        expect(root.querySelector('[data-readiness]')!.getAttribute('data-readiness')).toBe('needs-grant');
+    });
+
+    it('a memory plugin that is not the active one can be made active; a connector can be removed', async () => {
+        const flat = await mountAt('/plugins/agentic.memory.flat', <PluginPageView plugin={plugin('agentic.memory.flat')} dependents={dependents('agentic.memory.flat')} />);
+        buttonNamed(flat, 'Make active').click();
+        await tick();
+        expect(flat.querySelector('[data-plugin-action="activate"]')!.textContent).toContain('This is the memory plugin the workspace runs.');
+        expect(flat.querySelector('[data-plugin-action="activate"] button')).toBeNull();
+
+        const github = await mountAt('/plugins/github-mcp', <PluginPageView plugin={plugin('github-mcp')} dependents={dependents('github-mcp')} />);
+        expect(buttonNamed(github, 'Remove')).not.toBeNull();
+        expect(github.querySelector('[data-secret="github-token"]')!.hasAttribute('data-set')).toBe(true);
     });
 });
 

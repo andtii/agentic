@@ -254,6 +254,38 @@ describe('working folder resolution (#190)', () => {
         for (const [id, cwd] of Object.entries(routes)) expect(await cwdOf(m.machineId, id)).toEqual({ sent: cwd, record: cwd });
     });
 
+    it("a delegated task whose assignee names no environment runs in the delegating task's; an assignee default still wins (#220)", async () => {
+        // Offline under `queue`, so the parent's route stands while its children are routed (a real parent waits on them).
+        const m = await pairMachine();
+        const seat = m.connect();
+        await until(async () => (await machine(m.machineId).get()).online, 'online');
+        seat.drop();
+        await until(async () => !(await machine(m.machineId).get()).online, 'offline');
+        // The parent's environment is its AGENT's default — nothing on its Task record, as for a chat-started task.
+        const lead = await agent('agent_lead', { runtime: 'in-memory', defaultEnvironmentId: E1, defaultWorkdir: '/scratch/app', offlinePolicy: 'queue' });
+        const member = await agent('agent_member', { runtime: 'in-memory', offlinePolicy: 'queue' });
+        const other = await agent('agent_other', { runtime: 'in-memory', defaultEnvironmentId: E2, offlinePolicy: 'queue' });
+        await createTask('p1', lead);
+        expect((await routing().run('p1' as TaskId)).status).toBe('waiting');
+        expect((await task('p1').get()).environmentId).toBeUndefined();
+        const origin = { kind: 'agent', agentId: lead, taskId: 'p1' as TaskId, sessionId: 'session_p1' as SessionId, callId: 'call_1' } as const;
+        await task('c1').create({ objective: 'child', origin, assignee: member, context: [], constraints: {} }, { owner: lead, depth: 1, parentId: 'p1' as TaskId });
+        await task('c2').create({ objective: 'child', origin: { ...origin, callId: 'call_2' }, assignee: other, context: [], constraints: {} }, { owner: lead, depth: 1, parentId: 'p1' as TaskId });
+        await routing().run('c1' as TaskId);
+        await routing().run('c2' as TaskId);
+        m.connect();
+        await Promise.all(['p1', 'c1', 'c2'].map(settled));
+        expect((await task('c1').get()).status).toBe('completed');
+        expect(await cwdOf(m.machineId, 'c1')).toEqual({ sent: '/scratch/app', record: '/scratch/app' });
+        expect(chosenFor('c1')).toMatchObject({ data: { environmentId: E1, cwd: '/scratch/app' } });
+        expect(chosenFor('c1')!.summary).toMatch(/environment env_1 \(the delegating task's\)/);
+        expect(chosenFor('c2')).toMatchObject({ data: { environmentId: E2, cwd: '/other' } });
+        expect(chosenFor('c2')!.summary).toMatch(/environment env_2 \(the agent's default\)/);
+        // Not delegated: nothing to inherit, still no-environment.
+        await createTask('t1', member);
+        expect((await routing().run('t1' as TaskId)).error).toMatchObject({ code: 'no-environment' });
+    });
+
     it('anthropic-api ignores a workdir and says so in the record', async () => {
         const a = await agent('agent_api', { runtime: 'anthropic-api' });
         await createTask('t1', a, { environmentId: E1, workdir: '/work/app' });

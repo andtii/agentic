@@ -4,8 +4,24 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+### Changed
+
+- `WorkspaceSettings` is the shape the Workspace actor stores (#227, part of #224): `{ timeZone, notifications: { inbox, push }, defaults: { runtime, environmentId? }, retention: { sessionLogDays, artifactDays } }`, with `WorkspaceDefaults`, `RetentionSettings` and `DEFAULT_WORKSPACE_SETTINGS`. It replaces the shape from #25 (`notifications.kinds`, a flat `defaultEnvironmentId`), which no actor ever stored; `NotificationPrefs` is now `{ inbox, push }`. There is no `defaults.model`: a model is a runtime's to default. `NotificationKind` / `NOTIFICATION_KINDS` are unchanged.
+
 ### Added
 
+- `env.request` / `env.response` on `PlatformFrame` / `DaemonFrame` (#236), carrying the `EnvOp` / `EnvResult` / `EnvError` vocabulary; both frame-type lists include them. `hello` and `env` carry the optional `policy: MachinePolicy`. `put` is an upsert, so `unknown-environment` answers a `remove` only.
+- Web-managed environments vocabulary (#236, part of #224; decisions 2026-09-19 (c)), in `environment.ts`:
+  - `EnvironmentInput` (`id?`, `name`, `runtime`, `cwdRoots`, `concurrency?`, `accountLabel?`): what the platform may ask a daemon to create or change. It has no `profileDir` — the daemon allocates it and it never crosses the wire.
+  - `EnvOp` (`put` | `remove`), `EnvResult`, `EnvError` / `EnvErrorCode` (`policy-disabled`, `outside-allowed-roots`, `unknown-runtime`, `in-use`, `unknown-environment`, `invalid`, `io`, and the platform-side `timeout`).
+  - `MachinePolicy` (`webManaged`, `allowedRoots`): the machine-local policy a daemon reports. The frames themselves land with their schemas.
+- Plugin configuration contract (#226, part of #224; PLG-02, PLG-04), in `plugin-config.ts`:
+  - `ConfigSchema`: the typed JSON-Schema SUBSET a manifest's `config` is written in. Properties are a string (with `enum`, `format: 'uri'`), a number / integer (with `minimum` / `maximum`), a boolean, a string list or a string map, each with `title`, `description`, `default`; plus `required` and `additionalProperties`. A bare `{ type: 'object' }` or `{}` still means "anything". `JsonSchema` stays as a deprecated alias of it, so existing manifests compile unchanged.
+  - `PluginManifest.secrets` (`PluginSecretDeclaration`: `name`, `title`, `description`, `required`). A secret is never a config property.
+  - `validateConfig(schema, value)` → `{ ok: true, value } | { ok: false, errors: { path, message }[] }`. Unknown keys are rejected once the schema declares `properties`, unless `additionalProperties: true`. Defaults are not filled in.
+  - `configDefaults(schema)`.
+  - `PluginReadiness` and the pure `pluginReadiness(state, facts)`: `disabled`, then `needs-config`, `no-kek` / `needs-secret`, `needs-grant`, `needs-machine` (a `runtime` plugin listing the `daemon-hosted` capability, `DAEMON_HOSTED_CAPABILITY`, with no environment of its id), else `ready`. The caller supplies `PluginReadinessFacts` (`secretNames`, `environments`, `hasKek`).
+  - `SINGLE_SLOT_KINDS` (`memory`, `learning`) and `isSingleSlot(kind)`.
 - Chat attachments contract (#204, part of #203), in `files.ts`:
   - `ChatFile`: a file attached to a chat. Messages reference it as `agentic-file:<chatId>/<fileId>` in the `url` of an `image` or `file` part, never inline.
   - URI helpers: `chatFileUri`, `parseChatFileUri` (strict, url-safe segments) and `isChatFilePart` / `ChatFilePart`.

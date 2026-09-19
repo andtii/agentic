@@ -6,6 +6,7 @@
 
 import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
+import type { RegistryGate } from '../registry/types.js';
 
 /**
  * Where a route stands:
@@ -40,6 +41,8 @@ export interface Route {
     readonly config: FrozenAgentConfig;
     /** For a delegated task: the approval rules of every ancestor's agent (the parent route's chain plus the parent's own) — the child session's policy never widens them. */
     readonly constraints?: readonly ApprovalRule[];
+    /** What `Registry.gate()` answered for this route's runtime (§9) — asked once at `run`, again only when `fallback-api` changes the runtime; copied onto the session spec. */
+    plugins?: RegistryGate;
     /** Allocated at placement; the same id is retried so `Machine.openSession` stays idempotent. */
     sessionId?: SessionId;
     status: RouteStatus;

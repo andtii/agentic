@@ -1,4 +1,4 @@
-import { actorKey, type EnvironmentId, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
+import { actorKey, DEFAULT_WORKSPACE_SETTINGS, type EnvironmentId, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
 import { workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
@@ -116,6 +116,17 @@ describe('Workspace index', () => {
         expect(settings).toEqual({ ...DEFAULT_SETTINGS, timeZone: 'Europe/Stockholm', notifications: { inbox: true, push: true } });
         const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
         expect(stored.settings).toEqual(settings);
+    });
+
+    it("keeps core's settings shape: a default environment is set and cleared, and a model is never a workspace default (#230)", async () => {
+        expect(DEFAULT_SETTINGS).toBe(DEFAULT_WORKSPACE_SETTINGS);
+        const set = await ws().updateSettings({ defaults: { runtime: 'claude-code', environmentId: 'env_1' as EnvironmentId } });
+        expect(set.defaults).toEqual({ runtime: 'claude-code', environmentId: 'env_1' });
+        // What a page written before #230 may still send is dropped, not stored: the model is the runtime plugin's to default.
+        const legacy = { defaults: { runtime: 'anthropic-api', environmentId: undefined, model: 'claude-x' } } as unknown as Parameters<ReturnType<typeof ws>['updateSettings']>[0];
+        expect((await ws().updateSettings(legacy)).defaults).toEqual({ runtime: 'anthropic-api' });
+        const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
+        expect(stored.settings.defaults).toEqual({ runtime: 'anthropic-api' });
     });
 
     it('starts the export and delete tasks (v1 stubs)', async () => {

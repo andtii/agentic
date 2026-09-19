@@ -4,3 +4,4 @@ export const PACKAGE = '@agentic/runtimes';
 export * from './tools/index.js';
 export * from './anthropic/index.js';
 export * from './policy/index.js';
+export * from './plugins.js';

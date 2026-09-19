@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -53,6 +53,29 @@ export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
 });
 
 export const environments = z.array(environment).max(LIMITS.list);
+
+/**
+ * What `env.request` may ask for (#236). Strict: a key the contract does not name — `profileDir` above all — fails the frame
+ * instead of being stripped, so a profile directory can never ride along (decisions 2026-09-19 (c)).
+ */
+export const environmentInput: z.ZodType<EnvironmentInput> = z.strictObject({
+    id: environmentId.optional(),
+    name,
+    runtime: name,
+    cwdRoots: z.array(text.min(1)).min(1).max(LIMITS.list),
+    concurrency: z.number().int().min(1).optional(),
+    accountLabel: text.optional()
+});
+
+export const envResult: z.ZodType<EnvResult> = z.object({ environmentId });
+
+export const envError: z.ZodType<EnvError> = z.object({
+    code: z.enum(['policy-disabled', 'outside-allowed-roots', 'unknown-runtime', 'in-use', 'unknown-environment', 'invalid', 'io', 'timeout']),
+    message: text
+});
+
+/** The machine-local policy a daemon reports in `hello` / `env`. */
+export const machinePolicy: z.ZodType<MachinePolicy> = z.object({ webManaged: z.boolean(), allowedRoots: z.array(text.min(1)).max(LIMITS.list) });
 
 export const capabilityReport: z.ZodType<CapabilityReport> = z.object({
     runtime: name,

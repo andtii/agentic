@@ -7,7 +7,7 @@ describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness(), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, none skipped', () => {
-        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'tool-round-trip']);
+        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
         expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
@@ -18,7 +18,10 @@ describe('daemonConformance × inMemoryHarness', () => {
         expect(bare.filter((c) => c.skip).map((c) => [c.name, c.skip])).toEqual([
             ['env', 'the harness does not declare the "env" feature'],
             ['gap', 'the harness does not declare the "gap" feature'],
-            ['fs-list', 'the harness does not declare the "fs" feature']
+            ['fs-list', 'the harness does not declare the "fs" feature'],
+            ['env-put', 'the harness does not declare the "env-manage" feature'],
+            ['env-remove', 'the harness does not declare the "env-manage" feature'],
+            ['env-policy', 'the harness does not declare the "env-manage" feature']
         ]);
     });
 });
@@ -46,6 +49,23 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that lists folders outside its working roots (OPS-01)', async () => {
         await expect(only('fs-list', { browseAnywhere: true }).run()).rejects.toThrow(/a folder outside the working roots is refused/);
+    });
+
+    it('a daemon that takes working roots outside the allowed roots (OPS-01)', async () => {
+        await expect(only('env-put', { acceptAnyRoot: true }).run()).rejects.toThrow(/a working root outside the allowed roots is refused/);
+    });
+
+    it('a daemon that removes an environment with running sessions', async () => {
+        await expect(only('env-remove', { removeInUse: true }).run()).rejects.toThrow(/an environment with a running session is not removed/);
+    });
+
+    it('a daemon that manages environments with the policy off', async () => {
+        await expect(only('env-policy', { ignorePolicy: true }).run()).rejects.toThrow(/with the policy off nothing is created/);
+    });
+
+    it('a daemon whose policy does not allow the web at all cannot claim the feature', async () => {
+        const off = daemonConformance(inMemoryHarness({ policy: { webManaged: false, allowedRoots: [] } }), { timeoutMs: 500 }).find((c) => c.name === 'env-put')!;
+        await expect(off.run()).rejects.toThrow(/hello\.policy says the web may manage environments/);
     });
 
     it('a daemon that never announces environments', async () => {

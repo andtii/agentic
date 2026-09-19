@@ -10,13 +10,15 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AgentId, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AgentId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
     'approval.resolved',
     'delegation.created',
     'environment.chosen',
+    'environment.put',
+    'environment.removed',
     'task.transition',
     'config.versioned',
     'proposal.reviewed',
@@ -25,6 +27,7 @@ export const AUDIT_KINDS = [
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
+    'plugin.activated',
     'secret.opened',
     'workdir.worktree-created'
 ] as const;
@@ -161,6 +164,13 @@ export interface PluginGrantedData {
     readonly scopes: readonly PermissionScope[];
 }
 
+/** `Registry.activate` changed which plugin a single-slot kind (memory, learning) runs on; `previous` is the one it replaced. */
+export interface PluginActivatedData {
+    readonly pluginId: string;
+    readonly kind: 'memory' | 'learning';
+    readonly previous?: string;
+}
+
 /** A secret's plaintext left the Registry (`openSecret`) — every call is an occurrence. */
 export interface SecretOpenedData {
     readonly name: string;
@@ -178,12 +188,36 @@ export interface WorktreeCreatedData {
     readonly base?: string;
 }
 
+/**
+ * A daemon answered an owner's `Machine.putEnvironment` (#237, OPS-03): the roots that were asked for and what the
+ * machine said — `ok`, or the refusal its local policy gave. `by` is the owner who asked.
+ */
+export interface EnvironmentPutData {
+    readonly machineId: MachineId;
+    /** The id the daemon wrote, or the one the request named when it refused. */
+    readonly environmentId?: EnvironmentId;
+    readonly name: string;
+    readonly runtime: RuntimeId;
+    /** As requested: absolute, machine-native. */
+    readonly cwdRoots: readonly string[];
+    readonly outcome: 'ok' | EnvErrorCode;
+}
+
+/** A daemon answered an owner's `Machine.removeEnvironment` (#237). */
+export interface EnvironmentRemovedData {
+    readonly machineId: MachineId;
+    readonly environmentId: EnvironmentId;
+    readonly outcome: 'ok' | EnvErrorCode;
+}
+
 /** The per-kind payload. */
 export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
     readonly 'approval.resolved': ApprovalResolvedData;
     readonly 'delegation.created': DelegationCreatedData;
     readonly 'environment.chosen': EnvironmentChosenData;
+    readonly 'environment.put': EnvironmentPutData;
+    readonly 'environment.removed': EnvironmentRemovedData;
     readonly 'task.transition': TaskTransitionData;
     readonly 'config.versioned': ConfigVersionedData;
     readonly 'proposal.reviewed': ProposalReviewedData;
@@ -192,6 +226,7 @@ export interface AuditDataByKind {
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
+    readonly 'plugin.activated': PluginActivatedData;
     readonly 'secret.opened': SecretOpenedData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
 }

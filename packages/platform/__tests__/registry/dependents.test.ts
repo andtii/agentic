@@ -58,6 +58,20 @@ describe('computeDependents', () => {
         expect(deps.schedules).toEqual([{ id: 's1', title: 'nightly', agentId: 'a2' }]);
     });
 
+    it('fallback-api is an edge to anthropic-api — unless the agent already runs there', () => {
+        const api = manifest('anthropic-api');
+        const falling = agent('a5', { execution: { runtime: 'claude-code', limits: {}, offlinePolicy: 'fallback-api' } });
+        const onApi = agent('a6', { execution: { runtime: 'anthropic-api', limits: {}, offlinePolicy: 'fallback-api' } });
+        expect(dependencyOf(falling, api)).toEqual(['fallback']);
+        expect(dependencyOf(onApi, api)).toEqual(['runtime']);
+        expect(dependencyOf(falling, gh)).toEqual([]);
+        expect(dependencyOf(a3, api)).toEqual([]);
+    });
+
+    it('a workspace-wide plugin names nobody', () => {
+        expect(computeDependents(gh, [a1, a2], schedules, { workspaceWide: true })).toEqual({ pluginId: 'github', agents: [], schedules: [], workspaceWide: true });
+    });
+
     it('is empty when nothing references the plugin', () => {
         expect(computeDependents(manifest('nobody'), [a1, a2, a3, a4], schedules)).toEqual({ pluginId: 'nobody', agents: [], schedules: [] });
     });

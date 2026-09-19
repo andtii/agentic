@@ -1,7 +1,9 @@
 /**
  * `environments.json` → `LocalEnvironment[]` (EXE-03/04). The file is either
  * an array or `{ "environments": [...] }`; every row is checked and every
- * problem reported at once, so `doctor` can show them all.
+ * problem reported at once, so `doctor` can show them all. A missing file is
+ * zero environments (`missing: true`): a freshly paired machine has none yet
+ * (#235) — `agentic-daemon env add` writes the first (`env-store.ts`).
  *
  * ```json
  * { "environments": [
@@ -14,7 +16,7 @@
 import type { EnvironmentId, LocalEnvironment } from '@agentic/core';
 import { readFile } from 'node:fs/promises';
 
-export type EnvironmentsResult = { readonly ok: true; readonly environments: readonly LocalEnvironment[] } | { readonly ok: false; readonly errors: readonly string[] };
+export type EnvironmentsResult = { readonly ok: true; readonly environments: readonly LocalEnvironment[]; readonly missing?: true } | { readonly ok: false; readonly errors: readonly string[] };
 
 const ID = /^[A-Za-z0-9_-]{1,256}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -62,7 +64,7 @@ export async function loadEnvironments(file: string): Promise<EnvironmentsResult
     try {
         text = await readFile(file, 'utf8');
     } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, errors: [`no environments file at ${file}`] };
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, environments: [], missing: true };
         throw e;
     }
     try {

@@ -3,14 +3,22 @@
  * EXE-11, EXE-12, AST-05). A task always runs where it was told to, or
  * waits / fails with a visible reason:
  *
+ * - `run(taskId)` asks the Registry ONE question before anything is written
+ *   (`gate({ runtime })`, §9): a runtime plugin that is missing or turned off
+ *   fails the task `plugin-disabled` and opens nothing (AC-13) — so does a
+ *   `fallback-api` that would land on a turned-off `anthropic-api`. The answer
+ *   rides on the route and on the session spec (`plugins`); the plugin's
+ *   `defaultModel` fills in where the agent names no model.
  * - `run(taskId)` resolves the runtime, the environment and the folder ONCE —
- *   the task's `environmentId`, else the agent's default; the task's
+ *   the task's `environmentId`, else the agent's default, else a delegating
+ *   task's, else the workspace's default (AGT-05); the task's
  *   `workdir`, else a delegating parent's folder in the same environment,
  *   else the agent's `defaultWorkdir` in its default environment, else the
  *   environment's first root (#190) — and records them on the route; nothing
  *   later changes them (EXE-12). A folder outside the environment's
  *   `cwdRoots` fails the task `workdir-outside-roots` before any session opens.
- * - `anthropic-api` opens a local Session (the `SessionFactory`) and prompts.
+ * - a runtime the build hosts in-process (`RoutingPorts.runtimes`; `anthropic-api`)
+ *   opens a local Session (the `SessionFactory`) and prompts.
  * - a daemon runtime opens the Session on the environment's machine through
  *   `Machine.openSession`: `opened` → prompted when the daemon acknowledges
  *   (`sessionOpened`), `queued` → Task `waiting {capacity, position}` until
@@ -40,7 +48,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -54,6 +62,10 @@ import { machineKey, type MachineView, type OpenSessionResult } from '../machine
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
+import { FALLBACK_RUNTIME } from '../registry/dependents.js';
+import { registryKey } from '../registry/key.js';
+import type { RegistryGate } from '../registry/types.js';
+import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, type LocatedEnvironment } from './locate.js';
@@ -131,6 +143,21 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
 
 /** The machine's path rules (`hello.os`); a daemon that never said is taken for Windows, the first platform (decision 2). */
 const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
+
+/** The slice of the Registry actor the router asks (`defineRegistry`). */
+interface RegistryClient {
+    gate(input: { readonly runtime: string }): Promise<RegistryGate>;
+}
+
+/**
+ * The config a session opens with: the agent's own, with the runtime plugin's `defaultModel` where the agent names no
+ * model (§9). Only when the gate answered for the route's current runtime — after a `fallback-api` that is `anthropic-api`.
+ */
+function withDefaultModel(config: FrozenAgentConfig, plugins: RegistryGate | undefined): FrozenAgentConfig {
+    const model = plugins?.runtime?.config['defaultModel'];
+    if (config.execution.model || typeof model !== 'string' || !model) return config;
+    return { ...config, execution: { ...config.execution, model } };
+}
 
 const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
 
@@ -301,24 +328,28 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 }
             }
 
-            /** Open a local (`anthropic-api`) Session for the route and prompt it. */
+            /** Open a local Session (a runtime hosted in this process — `anthropic-api`) for the route and prompt it. */
             async function placeLocal(route: Route, why: string, t?: TaskView): Promise<void> {
                 const sessionId = (route.sessionId ??= newSessionId());
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
-                    runtime: 'anthropic-api',
+                    runtime: route.runtime,
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
                     ...(await work(route, t)),
-                    config: ctx.snapshot(route.config),
+                    config: ctx.snapshot(withDefaultModel(route.config, route.plugins)),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
-                    tools: grantedToolNames(route)
+                    tools: grantedToolNames(route),
+                    ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {})
                 };
                 try {
                     await session(sessionId).open(spec);
                 } catch (e) {
-                    await fail(route, { code: 'session-open', message: e instanceof Error ? e.message : String(e), recoverable: false });
+                    const message = e instanceof Error ? e.message : String(e);
+                    // The plugin was turned off between the gate and the open: the same failure the gate gives, not a broken session.
+                    const disabled = message.includes(`${PLUGIN_DISABLED_CODE}:`);
+                    await fail(route, { code: disabled ? PLUGIN_DISABLED_CODE : 'session-open', message, recoverable: disabled });
                     return;
                 }
                 await activate(route, why, sessionId);
@@ -343,10 +374,17 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await fail(route, { code: 'environment-offline', message: `${where} is offline; the agent's offline policy is "fail"`, recoverable: true });
                         return;
                     case 'fallback-api': {
+                        // NEW use of another runtime: its plugin answers for itself before the task leaves its environment (AC-13).
+                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`);
+                        if (asked.error) {
+                            await fail(route, asked.error);
+                            return;
+                        }
+                        if (asked.plugins) route.plugins = asked.plugins;
                         // Explicitly allowed by the config: the record says the task left its environment, and why (EXE-11/12).
                         const why = `fallback-api: ${where} is offline; running on anthropic-api as the agent's offline policy allows`;
                         const from = { runtime: route.runtime, environmentId, ...(route.machineId ? { machineId: route.machineId } : {}) };
-                        route.runtime = 'anthropic-api';
+                        route.runtime = FALLBACK_RUNTIME;
                         delete route.sessionId;
                         touch(route);
                         await audit.record(ctx, workspaceId, {
@@ -406,6 +444,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const sessionId = (route.sessionId ??= newSessionId());
                 const opening = await work(route, t);
                 const tools = grantedToolNames(route);
+                const effective = withDefaultModel(route.config, route.plugins);
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
                     runtime: route.runtime,
@@ -415,8 +454,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     machineId,
                     ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
                     ...opening,
-                    config: ctx.snapshot(route.config),
+                    config: ctx.snapshot(effective),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
+                    ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
                     // The same prompt the API path builds (identity, role, instructions, skills, the chat, the tools);
                     // `open` appends the memory block. The daemon's runtime appends it to its own preset.
                     system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}) }),
@@ -437,7 +477,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             agentId: route.agentId,
                             cwd: route.cwd ?? '',
                             system: opened.spec?.system ?? spec.system ?? route.config.instructions,
-                            ...(route.config.execution.model ? { model: route.config.execution.model } : {}),
+                            ...(effective.execution.model ? { model: effective.execution.model } : {}),
                             ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                             ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
                             tools: grantedToolNames(route),
@@ -466,6 +506,37 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             const locate = (environmentId: EnvironmentId) => locateEnvironment(workspaceId, environmentId, { machines: ports.machines, driver });
+
+            /**
+             * The one question to the Registry before NEW work on `runtime` (§9, AC-13): `undefined` when the app has no
+             * Registry — nothing is gated. A plugin that is missing or turned off, or a Registry that cannot be asked,
+             * comes back as the error the task fails with; running work is never touched.
+             */
+            async function gate(runtime: RuntimeId, leaving?: string): Promise<{ plugins?: RegistryGate; error?: TaskError }> {
+                if (!ports.registry) return {};
+                const because = leaving ? ` (${leaving})` : '';
+                let plugins: RegistryGate;
+                try {
+                    plugins = await (actor(ports.registry(), registryKey(workspaceId)).with({ context }) as unknown as RegistryClient).gate({ runtime });
+                } catch (e) {
+                    return { error: { code: 'registry-unavailable', message: `the plugin registry could not be asked about runtime ${runtime}${because}: ${e instanceof Error ? e.message : String(e)}`, recoverable: true } };
+                }
+                if (!plugins.runtime) return { error: { code: PLUGIN_DISABLED_CODE, message: `no runtime plugin "${runtime}" is installed in this workspace${because}`, recoverable: true } };
+                if (!plugins.runtime.enabled) return { error: { code: PLUGIN_DISABLED_CODE, message: `the "${runtime}" runtime plugin is turned off${because}; turn it on at /plugins/${runtime}`, recoverable: true } };
+                return { plugins };
+            }
+
+            /** Whether `runtime` opens in this process. Without a catalogue: `anthropic-api` does, everything else is a daemon's. */
+            const hostOf = (runtime: RuntimeId): 'local' | 'daemon' | undefined => (ports.runtimes ? resolveRuntime(ports.runtimes, runtime)?.host : runtime === FALLBACK_RUNTIME ? 'local' : 'daemon');
+
+            /** The workspace's default environment (AGT-05) — asked only when the task, the agent and a delegating task all name none. */
+            async function workspaceEnvironment(): Promise<EnvironmentId | undefined> {
+                try {
+                    return (await as(Workspace, workspaceKey(workspaceId)).get()).settings.defaults.environmentId;
+                } catch {
+                    return undefined;
+                }
+            }
 
             /** `Workspace.noteWorkdir` as a one-way hop under the driver (a user principal): the recents are a convenience, never a gate. */
             async function noteWorkdir(ref: WorkdirRef): Promise<void> {
@@ -515,7 +586,16 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         const parentRules = parent ? parent.config.approvalPolicy : (await agent(t.origin.agentId).get()).config.approvalPolicy;
                         constraints = [...(parent?.constraints ?? []), ...parentRules];
                     }
-                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), createdAt: at, updatedAt: at };
+                    // The plugin behind the runtime, asked once and before anything is written (§9, AC-13); the answer rides on the route and the spec.
+                    const gated = await gate(runtime);
+                    const host = hostOf(runtime);
+                    const refused: TaskError | undefined = gated.error ?? (host === undefined ? { code: UNKNOWN_RUNTIME_CODE, message: `agent ${t.assignee} runs on "${runtime}", which this build does not have`, recoverable: false } : undefined);
+                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), createdAt: at, updatedAt: at };
+                    if (refused) {
+                        // No route was written; `fail` tells the task's chat where the answer would have been (#128).
+                        await fail({ ...base, status: 'opening' }, refused);
+                        return task(taskId).get();
+                    }
                     /** The one resolution of where this task runs (EXE-12), recorded before placement so a placement that fails still shows the choice (OPS-03). */
                     const chosen = (why: string, environmentId?: EnvironmentId, folder: { cwd?: string; ignoredWorkdir?: string } = {}): Promise<void> =>
                         audit.record(ctx, workspaceId, {
@@ -528,24 +608,32 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             taskId,
                             data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, ...folder, why }
                         });
-                    if (runtime === 'anthropic-api') {
+                    if (host === 'local') {
                         s.routes[taskId] = { ...base, status: 'opening' };
-                        // The API runtime runs in no local folder: a workdir the task asked for is ignored, and the record says so (#190).
-                        const ignored = t.workdir !== undefined ? `; folder ${t.workdir} ignored (anthropic-api runs in no local folder)` : '';
-                        await chosen(`runtime anthropic-api (the agent's runtime); no environment needed${ignored}`, undefined, t.workdir !== undefined ? { ignoredWorkdir: t.workdir } : {});
+                        // A platform-hosted runtime runs in no local folder: a workdir the task asked for is ignored, and the record says so (#190).
+                        const ignored = t.workdir !== undefined ? `; folder ${t.workdir} ignored (${runtime} runs in no local folder)` : '';
+                        await chosen(`runtime ${runtime} (the agent's runtime); no environment needed${ignored}`, undefined, t.workdir !== undefined ? { ignoredWorkdir: t.workdir } : {});
                         await placeLocal(s.routes[taskId]!, 'started', t);
                         await ctx.save();
                         return task(taskId).get();
                     }
-                    // A daemon runtime: the environment is the task's, else the agent's — and from here on, this one only (EXE-12).
-                    const environmentId = t.environmentId ?? config.execution.defaultEnvironmentId;
+                    // A daemon runtime: the environment is the task's, else the agent's, else — for a delegated task — the
+                    // delegating task's route (#220: a chat-started parent's environment lives on its route, not its record),
+                    // else the workspace's default (AGT-05). From here on, this one only (EXE-12).
+                    const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
+                    const named = t.environmentId ?? config.execution.defaultEnvironmentId ?? parent?.environmentId;
+                    const environmentId = named ?? (await workspaceEnvironment());
                     if (!environmentId) {
-                        await task(taskId).fail({ code: 'no-environment', message: `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`, recoverable: false }, ROUTER);
+                        const message =
+                            t.origin.kind === 'agent'
+                                ? `agent ${t.assignee} runs on ${runtime} but no environment is named by the task, the agent, the delegating task or the workspace's defaults`
+                                : `agent ${t.assignee} runs on ${runtime} but neither the task, the agent nor the workspace's defaults name an environment`;
+                        await task(taskId).fail({ code: 'no-environment', message, recoverable: false }, ROUTER);
                         return task(taskId).get();
                     }
+                    const envFrom = t.environmentId ? "the task's own" : config.execution.defaultEnvironmentId ? "the agent's default" : named ? "the delegating task's" : "the workspace's default";
                     // The folder, once (#190, EXE-12): the task's own, a delegating parent's in the same environment, the agent's
                     // default in its default environment, else the environment's first root — which needs the machine's report.
-                    const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
                     const asked: { cwd: string; from: string } | undefined =
                         t.workdir !== undefined
                             ? { cwd: t.workdir, from: "the task's own" }
@@ -557,7 +645,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const located = await locate(environmentId);
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
                     const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
-                    await chosen(`runtime ${runtime} in environment ${environmentId} (${t.environmentId ? "the task's own" : "the agent's default"})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
+                    await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
                     // A folder picked for this task joins the workspace's recent folders — one-way, never failing the run.
                     if (t.workdir !== undefined) await noteWorkdir({ environmentId, path: t.workdir });
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
