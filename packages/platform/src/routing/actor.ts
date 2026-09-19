@@ -800,11 +800,14 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 // The Task settling while the turn runs — cancelled by a user or a parent's cascade, failed on budget — is the
                 // cue to cancel the session (COL-12); the turn then ends `cancelled` and the task hears `sessionStopped`.
                 const never = new Promise<IteratorResult<AgentEvent>>(() => undefined);
-                const outcomes = taskClient.result()[Symbol.asyncIterator]();
+                const outcomes = taskClient.result({ eager: true })[Symbol.asyncIterator]();
                 let settledEarly: Promise<IteratorResult<AgentEvent> & { settled?: TaskOutcome }> = outcomes.next().then((r) => (r.done ? never : { value: undefined as never, done: false, settled: r.value }));
                 // One `next()` in flight at a time: a race the tail loses must not discard the event it will resolve with.
                 let pending: Promise<IteratorResult<AgentEvent>> | undefined;
                 let end: Extract<AgentEvent, { type: 'turn-end' }> | undefined;
+                // Seen settling from outside: no more Task reads. A `cancel` parks its turn until `sessionStopped`, and a
+                // FIFO `get()` queued behind it would hold the turn end (and that word) until the stop deadline (#168).
+                let settledOutside = false;
                 try {
                     for (;;) {
                         pending ??= it.next();
@@ -813,6 +816,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         const early = (next as { settled?: TaskOutcome }).settled;
                         if (early) {
                             settledEarly = never;
+                            settledOutside = true;
                             if (early.status !== 'completed') await sessionClient.cancel().catch(() => undefined);
                             continue;
                         }
@@ -823,7 +827,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             // The Session already told the Inbox and the chat; the Task record says what it waits for.
                             const kind = ev.kind === 'permission' ? 'approval' : 'input';
                             await tryTask(() => taskClient.reportWaiting({ kind, requestId: ev.requestId, sessionId }, ROUTER));
-                        } else if (ev.type === 'request-resolved') {
+                        } else if (ev.type === 'request-resolved' && !settledOutside) {
                             // Only the wait this request parked: a policy decision resolves with no request, and a task waiting on a child stays waiting.
                             const wait = (await taskClient.get()).wait;
                             if (wait && (wait.kind === 'approval' || wait.kind === 'input') && wait.requestId === ev.requestId) {
@@ -839,12 +843,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await outcomes.return?.().catch(() => undefined);
                 }
                 if (!end) return;
+                // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
+                const stopped = async (): Promise<void> => settled(() => tryTask(() => taskClient.sessionStopped()));
+                if (settledOutside) return stopped();
                 const t = await taskClient.get();
-                if (isTerminal(t.status)) {
-                    // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
-                    await settled(() => tryTask(() => taskClient.sessionStopped()));
-                    return;
-                }
+                if (isTerminal(t.status)) return stopped();
                 if (end.stopReason === 'error') {
                     if (isInterruptedTurnEnd(end)) {
                         // Cut short by an eviction: nothing was re-run (OPS-05/06); the user decides whether to resume.

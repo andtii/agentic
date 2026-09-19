@@ -5,20 +5,21 @@
  * workspace's live environments (PLG-02/03). Secrets are listed by NAME
  * only (PLG-04 — no read returns a value); a plugin's own page sets them.
  * The switch is `Registry.enable` / `disable` (`usePluginSwitches`, AC-13).
+ * MCP servers are added, tested and removed in `LiveConnectors` (#241).
  */
 import { component, useData, useHead } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
 import type { Dependents } from '@agentic/platform';
-import { EmptyState, Icon, Label, StatusPill, Tag } from '@agentic/ui';
+import { EmptyState, Icon, Label } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
+import { AddA2aPeer } from '../plugins/AddA2aPeer';
+import { LiveConnectors } from '../plugins/LiveConnectors';
 import { PluginCatalogue } from '../plugins/PluginCatalogue';
 import { dependentsById } from '../plugins/model';
 import { useWorkspaceReadiness } from '../plugins/readiness';
 import { usePluginSwitches } from '../plugins/switches';
-import { connectorWhere } from './live';
 import { OpsPage } from './OpsPage';
 
 export const LivePlugins = component(() => {
@@ -28,7 +29,6 @@ export const LivePlugins = component(() => {
     const agents = useAgentDirectory(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? registryKeyOf(viewer.workspaceId) : null);
     const ready = useWorkspaceReadiness(defs, viewer);
-    const connectors = useActorState(defs.Registry, () => { const k = key(); return k && ([k, 'connectors'] as const); }, { live: true });
     // Who uses each plugin — one read for all of them (the Registry walks the Workspace, its agents and schedules once).
     const usedBy = useData(
         () => {
@@ -53,6 +53,7 @@ export const LivePlugins = component(() => {
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return (
             <OpsPage page="plugins" title="Plugins">
+                {viewer.workspaceId ? <AddA2aPeer defs={defs} registryKey={key()} taken={rows.map((p) => p.manifest.id)} /> : null}
                 {signedOut
                     ? <EmptyState variant="generic" title="Sign in to see your plugins" caption="Plugins are set up per workspace." />
                     : overview && !rows.length
@@ -60,26 +61,13 @@ export const LivePlugins = component(() => {
                         : <PluginCatalogue plugins={rows} readiness={ready.byId()} dependents={usedBy.value ?? undefined} left={switches.left()} agentOf={agents.lookup} toggle={switches.switchFor} loading={ready.loading} />}
 
                 {viewer.workspaceId ? (
-                    <section data-plugin-connectors aria-label="Connectors">
-                        <Label>MCP connectors</Label>
-                        {connectors.value?.length
-                            ? (
-                                <ul data-connector-list>
-                                    {connectors.value.map((c) => (
-                                        <li data-connector={c.id}>
-                                            <span data-connector-name>{c.id}</span>
-                                            <Tag>{c.transport}</Tag>
-                                            <code data-mono data-dim>{connectorWhere(c)}</code>
-                                            <StatusPill status={c.status.state === 'ok' ? 'online' : c.status.state === 'error' ? 'error' : 'unknown'} label={c.status.state === 'ok' ? `${c.tools.length} ${c.tools.length === 1 ? 'tool' : 'tools'}` : c.status.state === 'error' ? 'ERROR' : 'UNCHECKED'} />
-                                            <span data-connector-plugin>plugin {c.pluginId}</span>
-                                            {c.secrets?.length ? <span data-connector-secrets>secrets: {c.secrets.join(', ')}</span> : null}
-                                            {c.status.error ? <span data-connector-error>{c.status.error}</span> : null}
-                                        </li>
-                                    ))}
-                                </ul>
-                            )
-                            : <p data-plugin-none>{connectors.value ? 'No connectors configured.' : 'Loading…'}</p>}
-                    </section>
+                    <LiveConnectors
+                        defs={defs}
+                        registryKey={registryKeyOf(viewer.workspaceId)}
+                        pluginIds={rows.map((p) => p.manifest.id)}
+                        agentName={(id: string) => agents.lookup(id).name}
+                        onChanged={() => { if (usedBy.hasValue) void usedBy.refresh(); }}
+                    />
                 ) : null}
 
                 {viewer.workspaceId ? (
