@@ -10,7 +10,7 @@ describe('/ (Home)', () => {
         expect(page(dom, 'home')).not.toBeNull();
         expect(dom.querySelector('[data-page-title]')?.textContent).toBe('Home');
         expect(dom.querySelector('[data-home-needs]')?.getAttribute('aria-label')).toBe('Needs you');
-        expect(dom.querySelector('[data-home-rail]')?.getAttribute('aria-label')).toBe('Today and spend');
+        expect(dom.querySelector('[data-home-rail]')?.getAttribute('aria-label')).toBe('Today, spend and limits');
         expect(dom.querySelector('[data-home-tasks]')?.getAttribute('aria-label')).toBe('Active tasks');
         // The table carries the handoff's column template as <col> widths.
         const cols = [...dom.querySelectorAll('[data-home-tasks] colgroup col')].map((c) => (c.getAttribute('style') ?? '').replace(/;$/, ''));
@@ -63,5 +63,12 @@ describe('/ (Home)', () => {
         expect(dom.querySelector('[data-spend-bar]')?.getAttribute('aria-valuenow')).toBe('37');
         expect(dom.querySelector('[data-home-rail]')!.textContent).toContain('Today · Europe/Stockholm');
         expect(texts([...dom.querySelectorAll('[data-today-time]')])).toEqual(['15:00', '17:30', '02:00']);
+    });
+
+    it('the rail shows each account\'s tightest limit (#270)', async () => {
+        const dom = await mountRoute('/');
+        const rail = dom.querySelector('[data-home-rail] [data-usage-limits][data-compact]')!;
+        const work = rail.querySelector('[data-limit-account="env_alien01_work"]')!;
+        expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="label"]')].map(l => l.textContent)).toEqual(['Current week (Fable)']);
     });
 });

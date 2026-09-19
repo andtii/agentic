@@ -1,5 +1,5 @@
 import { component, type Define, type JSXElement } from 'sigx';
-import type { EnvironmentDescriptor } from '@agentic/core';
+import type { EnvironmentDescriptor, QuotaSnapshot } from '@agentic/core';
 import { AgentTile, EnvironmentCard, Icon, StatusPill } from '@agentic/ui';
 import { defaultAgentsFor, opsAgent, type OpsMachine } from '../../mock/ops';
 import { LinkButton } from '../ops/LinkButton';
@@ -11,7 +11,9 @@ export const mockDefaultFor: Readonly<Record<string, readonly DefaultForAgent[]>
 /** Tasks queued per environment id (EXE-12) and the agents defaulting to each — what the mock workspace and the actors both provide. */
 export type EnvironmentFacts =
     & Define.Prop<'queued', Readonly<Record<string, number>>, true>
-    & Define.Prop<'defaultFor', Readonly<Record<string, readonly DefaultForAgent[]>>, true>;
+    & Define.Prop<'defaultFor', Readonly<Record<string, readonly DefaultForAgent[]>>, true>
+    /** Provider limits by environment id (#270); absent: the cards show none. */
+    & Define.Prop<'quota', Readonly<Record<string, QuotaSnapshot>>>;
 
 export type EnvironmentGridProps =
     & Define.Prop<'environments', readonly EnvironmentDescriptor[], true>
@@ -30,6 +32,7 @@ export const EnvironmentGrid = component<EnvironmentGridProps>(({ props }) => ()
                     machine={props.machine}
                     queued={props.queued[env.id]}
                     defaultFor={props.defaultFor[env.id] ?? []}
+                    quota={props.quota ? (props.quota[env.id] ?? null) : undefined}
                 />
             );
             const actions = props.actions?.(env);
@@ -61,7 +64,7 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                 <StatusPill status={m.online ? 'online' : 'offline'} />
                 <LinkButton to={`/machines/${m.id}`}>Details</LinkButton>
             </header>
-            <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} />
+            <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} />
             {queued ? (
                 <p data-machine-queued>
                     <Icon name="schedules" size={14} />

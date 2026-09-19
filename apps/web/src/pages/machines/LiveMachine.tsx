@@ -170,6 +170,7 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     footnote={LIVE_DOCTOR_FOOTNOTE}
                     queued={queuedByEnvironment(routing.value ?? undefined, v.machineId)}
                     defaultFor={defaultForByEnvironment(agents)}
+                    quota={v.quota ?? {}}
                     revokedAt={v.revokedAt}
                     agents={(agentId) => { const a = directory.lookup(agentId); return { name: a.name, hue: a.hue }; }}
                     onRevoke={() => { void revoke(); }}
