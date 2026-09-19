@@ -202,6 +202,8 @@ export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = 
 export function pruneQuota(s: MachineState): void {
     if (!s.quota) return;
     for (const id of Object.keys(s.quota)) if (!s.environments.some((e) => e.id === id)) delete s.quota[id];
+    // Absent until something is reported, and again once nothing is left.
+    if (Object.keys(s.quota).length === 0) delete s.quota;
 }
 
 /** `pruneFs` for environment requests: the same TTL-then-oldest rule over `ENV_RESULT_TTL_MS` / `MAX_ENV_REQUESTS`. */

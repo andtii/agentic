@@ -875,6 +875,7 @@ describe('Machine quota (#268, OPS-07)', () => {
         expect(Object.keys((await machine().get()).quota!)).toEqual([E1]);
         await asDaemon.socketMessage(hello([inMemoryEnvironment(M1, E2)]));
         expect((await machine().get()).quota).toBeUndefined();
+        expect(((await app.storage.load('machine', K1))!.state as { quota?: unknown }).quota).toBeUndefined();
     });
 
     it('keeps the last snapshot while the machine is offline', async () => {
