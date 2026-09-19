@@ -2,7 +2,7 @@ import { configDefaults, isSingleSlot, validateConfig } from '@agentic/core';
 import { learningDefaultPlugin, learningPlugin } from '../src/index';
 
 describe('learning plugin manifest', () => {
-    // The Registry's `assertPluginManifest` rules, restated: this package sits below `@agentic/platform` and cannot import it.
+    // What a catalogue manifest must satisfy: the shape the Registry's `assertPluginManifest` checks (restated — this package sits below `@agentic/platform` and cannot import it) plus this track's own rules, which the Registry does not enforce: a reason per permission, a `secret:<name>` scope per secret, defaults that validate, no stray config key.
     it('is registrable', () => {
         const m = learningDefaultPlugin;
         expect(m.kind).toBe('learning');
