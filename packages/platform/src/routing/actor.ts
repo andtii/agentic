@@ -543,8 +543,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
                     const environmentId = t.environmentId ?? config.execution.defaultEnvironmentId ?? parent?.environmentId;
                     if (!environmentId) {
-                        const where = t.origin.kind === 'agent' ? ', the agent nor the delegating task' : ' nor the agent';
-                        await task(taskId).fail({ code: 'no-environment', message: `agent ${t.assignee} runs on ${runtime} but neither the task${where} names an environment`, recoverable: false }, ROUTER);
+                        const message =
+                            t.origin.kind === 'agent'
+                                ? `agent ${t.assignee} runs on ${runtime} but no environment is named by the task, the agent or the delegating task`
+                                : `agent ${t.assignee} runs on ${runtime} but neither the task nor the agent names an environment`;
+                        await task(taskId).fail({ code: 'no-environment', message, recoverable: false }, ROUTER);
                         return task(taskId).get();
                     }
                     const envFrom = t.environmentId ? "the task's own" : config.execution.defaultEnvironmentId ? "the agent's default" : "the delegating task's";
