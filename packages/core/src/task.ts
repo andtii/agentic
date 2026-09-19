@@ -40,6 +40,12 @@ export interface TaskContract {
      * (a delegating parent's folder, the agent's `defaultWorkdir`, else the first root).
      */
     readonly workdir?: string;
+    /**
+     * An earlier session this task continues (#285): when the placement allows (same
+     * runtime and environment), the router opens the task's session resuming that
+     * session's engine conversation; otherwise it opens fresh and `context` carries on.
+     */
+    readonly resumeFrom?: SessionId;
 }
 
 export type JsonSchemaObject = { readonly type: 'object'; readonly [key: string]: unknown };
