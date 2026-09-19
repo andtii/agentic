@@ -9,7 +9,8 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `chat` | `ChatEntry`, `Author`, `PromptPart`, `ChatMember`, `PostResult`, `resolveActivation` (the CHT-06 rule) |
 | `task` | `TaskStatus`, `WaitReason`, `TaskOrigin`, `TaskContract`, `TaskResult`, `TaskSnapshot`, `TaskTransition`, `canTransition`, `isTerminal`, `childTaskId` |
 | `environment` | `EnvironmentDescriptor` (with the optional `doctor` verdict), `EnvironmentVerdict`, `DoctorFinding`, `CapabilityReport`, `MachineInfo`, `AuthStatus`, `IsolationMechanism` |
-| `plugin` | `PluginManifest`, `PluginKind`, `PermissionScope`, `PluginState`, `JsonSchema` |
+| `plugin` | `PluginManifest` (with `secrets`), `PluginKind`, `PermissionScope`, `PluginState`, `SINGLE_SLOT_KINDS` / `isSingleSlot` (`memory` and `learning` run one active plugin per workspace), `JsonSchema` (deprecated alias of `ConfigSchema`) |
+| `plugin-config` | `ConfigSchema` — the typed JSON-Schema subset a manifest's `config` is written in (string with `enum` / `format: 'uri'`, number / integer with bounds, boolean, string list, string map) — and `PluginSecretDeclaration`; the pure helpers `validateConfig` (unknown keys rejected once `properties` are declared; defaults not filled in), `configDefaults`, and `pluginReadiness(state, facts)` → `PluginReadiness` (`ready` | `disabled` | `needs-config` | `needs-secret` | `needs-grant` | `needs-machine` | `no-kek`), where the caller supplies the facts (`PluginReadinessFacts`); `DAEMON_HOSTED_CAPABILITY` |
 | `memory` | `MemoryKind`, `MemoryEntry`, `NewMemoryEntry`, `MemoryQuery`, `RankedMemory`, `MemoryScope`, `MemoryStore`, `MemoryPlugin`, `ImportReport`, `PluginContext` |
 | `learning` | `LearningPlugin`, `Proposal`, `Correction`, `TaskOutcome` |
 | `principal` | `Principal` (user, machine, agent, external), `Scope`, `sameWorkspace`, `hasScope` |
