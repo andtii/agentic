@@ -207,6 +207,22 @@ describe('createFlatMemoryStore over a given state (#281)', () => {
         expect(pages).toBe(3);
     });
 
+    it('exportPage follows puts, imports and deletes between pages', async () => {
+        const store = createFlatMemoryStore({ now: () => NOW });
+        const [a, b, c] = [await store.put(entry('a')), await store.put(entry('b')), await store.put(entry('c'))].map((e) => e.id).sort();
+        const first = store.exportPage(null, 1);
+        expect(first.entries.map((e) => e.id)).toEqual([a]);
+        await store.delete(b!);
+        const added = await store.put(entry('d'));
+        const rest: string[] = [];
+        for (let after = first.next; after !== null; ) {
+            const page: ReturnType<typeof store.exportPage> = store.exportPage(after, 1);
+            rest.push(...page.entries.map((e) => e.id));
+            after = page.next;
+        }
+        expect(rest).toEqual([c!, added.id].filter((id) => id > a!).sort());
+    });
+
     it('never reads an inherited property as an entry, and skips an import row whose id a record cannot hold', async () => {
         const store = createFlatMemoryStore({ now: () => NOW });
         expect(await store.get('toString')).toBeUndefined();

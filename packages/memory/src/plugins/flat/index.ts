@@ -101,12 +101,18 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
         if (!e) throw new MemoryNotFoundError(id);
         return e;
     };
-    const sortedIds = (): string[] => Object.keys(entries).sort();
+    // Sorted once and kept until an id is added or removed, so paging through an export does not re-sort per page.
+    let sorted: string[] | null = null;
+    const sortedIds = (): string[] => (sorted ??= Object.keys(entries).sort());
+    const write = (entry: FlatMemoryEntry): void => {
+        if (!Object.hasOwn(entries, entry.id)) sorted = null;
+        entries[entry.id] = entry;
+    };
 
     const keep = (entry: MemoryEntry, op: 'put' | 'update'): FlatMemoryEntry => {
         const flat = toFlatEntry(entry);
         if (flat.dropped.length) log?.('warn', `flat memory: ${op} dropped ${flat.dropped.join(', ')}`, { id: entry.id, dropped: flat.dropped });
-        entries[flat.entry.id] = flat.entry;
+        write(flat.entry);
         return flat.entry;
     };
 
@@ -143,6 +149,7 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
             if (Object.hasOwn(retirements, id)) delete retirements[id];
             if (!Object.hasOwn(entries, id)) return false;
             delete entries[id];
+            sorted = null;
             return true;
         },
 
@@ -169,9 +176,16 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
 
         exportPage(after, size = FLAT_EXPORT_PAGE) {
             const ids = sortedIds();
-            let start = 0;
             // ids are sorted, so the page after `after` starts at the first id greater than it
-            if (after !== null) while (start < ids.length && ids[start]! <= after) start++;
+            let start = 0;
+            if (after !== null) {
+                let hi = ids.length;
+                while (start < hi) {
+                    const mid = (start + hi) >>> 1;
+                    if (ids[mid]! <= after) start = mid + 1;
+                    else hi = mid;
+                }
+            }
             const page = ids.slice(start, start + Math.max(1, size)).map((id) => entries[id]!);
             const last = page[page.length - 1];
             return { entries: page, next: last && start + page.length < ids.length ? last.id : null };
@@ -202,7 +216,7 @@ export function createFlatMemoryStore(options: FlatMemoryStoreOptions = {}): Fla
                     skipped++;
                     continue;
                 }
-                entries[flat.entry.id] = flat.entry;
+                write(flat.entry);
                 imported++;
             }
             return { imported, skipped, droppedFields: [...dropped].sort() };
