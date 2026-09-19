@@ -40,7 +40,7 @@ import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInsta
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
-import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, claudeCodeQuotaPlugin } from '@agentic/runtimes';
+import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 
 /** The manifests the Registry lists for every workspace — enabled (Web Push and the A2A server excepted), with their declared scopes granted, until the owner changes them. */
 export const pluginCatalogue: readonly CatalogueEntry[] = [
@@ -51,9 +51,7 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     learningDefaultPlugin,
     // Off until the owner sets a contact and generates keys on its page (#244).
     { manifest: webPushPlugin, enabledByDefault: false },
-    { manifest: a2aServerPlugin, enabledByDefault: false },
-    // What the daemon reads each Claude Code account's plan limits with (#261); the daemon runs it, the Registry lists it.
-    claudeCodeQuotaPlugin
+    { manifest: a2aServerPlugin, enabledByDefault: false }
 ];
 
 /**

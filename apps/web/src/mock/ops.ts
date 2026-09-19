@@ -211,15 +211,15 @@ const NOTHING_TO_SET = { type: 'object', properties: {}, additionalProperties: f
  */
 export const opsPlugins: readonly PluginView[] = [
     builtin(manifest({
-        id: 'anthropic-api', version: '0.1.0', kind: 'runtime', name: 'Anthropic API', capabilities: ['platform-hosted'],
+        id: 'anthropic-api', version: '0.1.0', kind: 'runtime', name: 'Anthropic API', capabilities: ['platform-hosted', 'model'],
         description: 'Agents run on the platform against the Anthropic API with your own key.',
         config: { type: 'object', properties: { defaultModel: { type: 'string', title: 'Default model', description: 'The model an agent runs on when its own config names none.', enum: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'], default: 'claude-opus-5' } }, additionalProperties: false },
         secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session.', required: true }],
         permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts.' }]
     }), { config: { defaultModel: 'claude-opus-5' } }),
     builtin(manifest({
-        id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted'],
-        description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment. Credentials stay on the machine.',
+        id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
+        description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment, and each account reports its plan usage limits. Credentials stay on the machine.',
         config: NOTHING_TO_SET,
         permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
     })),

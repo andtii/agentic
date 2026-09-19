@@ -1,9 +1,9 @@
 import { DAEMON_HOSTED_CAPABILITY, configDefaults, pluginReadiness, validateConfig, type PluginManifest, type PluginState } from '@agentic/core';
 import { DEFAULT_ANTHROPIC_MODEL } from '@sigx/ai-anthropic';
-import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_MODEL_IDS, ANTHROPIC_PRICING, QUOTA_PLUGINS, RUNTIME_PLUGINS, anthropicApiPlugin, claudeCodePlugin } from '../src/index';
+import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_MODEL_IDS, ANTHROPIC_PRICING, RUNTIME_PLUGINS, anthropicApiPlugin, claudeCodePlugin } from '../src/index';
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
-const KINDS = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'quota'];
+const KINDS = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
 
 /** What a catalogue manifest must satisfy: the shape the Registry's `assertPluginManifest` checks (restated — this package sits below `@agentic/platform` and cannot import it) plus this track's own rules, which the Registry does not enforce: a reason per permission, a `secret:<name>` scope per secret, defaults that validate, no stray config key. */
 function expectRegistrable(m: PluginManifest): void {
@@ -34,10 +34,6 @@ const granted = (manifest: PluginManifest): PluginState => ({
 });
 
 describe('runtime plugin manifests', () => {
-    it.each(QUOTA_PLUGINS.map((m) => [m.id, m] as const))('quota source %s is registrable', (_id, m) => {
-        expectRegistrable(m);
-    });
-
     it.each(RUNTIME_PLUGINS.map((m) => [m.id, m] as const))('%s is registrable', (_id, m) => {
         expect(m.kind).toBe('runtime');
         expectRegistrable(m);

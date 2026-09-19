@@ -96,7 +96,7 @@ An agent's MCP connectors now open on daemon-hosted sessions, so their credentia
 With several Claude Code accounts connected, neither a person nor an orchestrating AI could see how close each account is to its plan limits. `claude` → `/usage` shows it, and OPS-07 asks for it.
 
 - **Quota is not the Ledger.** The Ledger records what was consumed ($, tokens). A quota snapshot records what is left, as the provider reports it (`QuotaWindow`: utilization 0..1, reset time, status). They are separate types, and the words differ too: "usage" stays the Ledger's word, "quota" is the new concept. The MCP/OAuth scope is still named `usage`, so a later `usage_summary` over the Ledger can live beside `usage_limits`.
-- **One source per runtime; not single-slot.** `quota` is a plugin kind (`QuotaSource`: `probe?`, `fromSignal?`). Every runtime brings its own source, and all enabled sources run, so `quota` is not in `SINGLE_SLOT_KINDS`. Only normalized snapshots cross package boundaries and the wire; credentials and profile paths stay on the machine (EXE-10).
+- **One source per runtime.** A runtime supplies its own `QuotaSource` (`probe?`, `fromSignal?`). *Amended by #313:* this is not a plugin kind of its own; the runtime plugin lists the `usage-limits` capability. Only normalized snapshots cross package boundaries and the wire; credentials and profile paths stay on the machine (EXE-10).
 - **v1 is Claude Code subscriptions.** `anthropic-api` reports `not-reported` with its reason (per-minute rate limits, not a plan allowance), never an empty bar (PLG-09).
 - **The probe uses an experimental SDK call, behind a flag.** Freshness comes from two places:
   - the rate-limit events of running sessions, which are passive and always on
@@ -113,3 +113,15 @@ A blocking `ask_user` lost every answer that came after the tool call timed out.
 - **The answer is always visible.** It is posted in the chat as the person who gave it, mentioning the asker, before anyone is started. If starting the agent fails, the chat says so.
 - **Continue the same conversation where possible.** The follow-up resumes the asking session's engine conversation when a daemon ran it on the same machine, environment and runtime. Otherwise it opens fresh, with the question, the answer and the chat as context.
 - **Chatless asks keep blocking.** A delegated child runs outside any chat, and its parent already has its result by the time a late answer could start it again. Its `ask_user` waits as before, capped by the daemon's tool timeout.
+
+## 2026-09-19 — harness, model and remote runtimes (#313)
+
+A `runtime` plugin is one of three kinds, independent of where it runs:
+
+- **Harness runtime.** An agent product with its own loop, tools and sign-in: Claude Code, and later Codex, Copilot and others. We drive it through its CLI or SDK package; the delivery doesn't matter. The platform hands it a turn and follows its events, and credentials stay with its account. Capability `harness`.
+- **Model runtime.** The platform runs the agent loop itself over a model API with the workspace's key (`anthropic-api`). Capability `model`.
+- **Remote agent.** An independently hosted agent reached through an adapter, such as an A2A peer. Capability `remote`.
+
+Where it runs is the other axis: `daemon-hosted` or `platform-hosted`. Today every harness is daemon-hosted and every model runtime is platform-hosted, but nothing forces that. "CLI runtime" is not used, because a harness can arrive as an SDK.
+
+**Usage limits are a runtime capability, not a plugin.** A runtime that reports its accounts' plan limits lists `usage-limits` and supplies a `QuotaSource`. #261's separate `quota` plugin kind and its `claudeCodeQuotaPlugin` manifest are removed: the manifest had nothing to configure, and its switch did nothing. `/plugins` shows Harness runtimes, Model runtimes and Remote agents as separate sections.

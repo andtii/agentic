@@ -67,7 +67,7 @@ describe('/plugins: Add A2A peer (live)', () => {
         expect(peer).toMatchObject({ enabled: true, manifest: { kind: 'runtime', name: 'Research Bot' } });
         expect(peer.grantedPermissions).toEqual(['network:research.example.com', 'secret:a2a-research-bot-token']);
         expect((await registry().secrets()).map((s) => s.name)).toContain('a2a-research-bot-token');
-        expect(card(dom, 'a2a.research-bot')!.closest('[data-plugin-group]')!.getAttribute('data-plugin-group')).toBe('runtime');
+        expect(card(dom, 'a2a.research-bot')!.closest('[data-plugin-group]')!.getAttribute('data-plugin-group')).toBe('runtime:remote');
         expect(text(dom.querySelector('[data-a2a-peer-added]'))).toContain('Added Research Bot');
         expect(document.body.innerHTML).not.toContain(TOKEN);
     }, 20_000);

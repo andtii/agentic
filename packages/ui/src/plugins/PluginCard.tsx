@@ -25,6 +25,10 @@ export type PluginCardProps =
     & Define.Prop<'id', string>
     & Define.Prop<'name', string, true>
     & Define.Prop<'kind', PluginKind, true>
+    /** The kind tag's text when it says more than the kind (`harness runtime`, #313); the kind by default. */
+    & Define.Prop<'kindLabel', string>
+    /** Extra tags for what it does beyond its kind (`usage limits`). */
+    & Define.Prop<'features', readonly string[]>
     & Define.Prop<'version', string>
     & Define.Prop<'description', string>
     & Define.Prop<'readiness', PluginReadiness>
@@ -57,7 +61,8 @@ export const PluginCard = component<PluginCardProps>(({ props, slots }) => () =>
                 {slots.toggle?.()}
             </header>
             <div data-scope={SCOPE} data-part="tags">
-                <Tag>{props.kind}</Tag>
+                <Tag>{props.kindLabel ?? props.kind}</Tag>
+                {props.features?.map((f) => <Tag key={f} tone="live">{f}</Tag>)}
                 {props.active ? <Tag tone="live">active</Tag> : null}
                 {readiness ? <ReadinessBadge readiness={readiness} /> : null}
             </div>

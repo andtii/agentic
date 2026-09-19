@@ -88,7 +88,7 @@ Each runtime ships a `PluginManifest` (PLG-02) for the composition root's catalo
 | `anthropicApiPlugin` | `anthropic-api` | `defaultModel`: one of `ANTHROPIC_MODEL_IDS` (the priced ids plus the provider default), default `DEFAULT_ANTHROPIC_MODEL` | `anthropic-api-key` (`ANTHROPIC_API_KEY_SECRET`, required) | `secret:anthropic-api-key` |
 | `claudeCodePlugin` | `claude-code` | none | none — the login stays on the machine (EXE-10) | `machine:*` |
 
-`claudeCodePlugin` lists core's `DAEMON_HOSTED_CAPABILITY`, so `pluginReadiness` answers `needs-machine` until a machine offers a `claude-code` environment. `RUNTIME_PLUGINS` is both. The key is a secret, never a config value: the schema refuses unknown keys.
+`claudeCodePlugin` is a **harness runtime** that reports usage limits (capabilities `daemon-hosted`, `harness`, `usage-limits`); `anthropicApiPlugin` is a **model runtime** (`platform-hosted`, `model`; #313). `claudeCodePlugin` lists core's `DAEMON_HOSTED_CAPABILITY`, so `pluginReadiness` answers `needs-machine` until a machine offers a `claude-code` environment. `RUNTIME_PLUGINS` is both. The key is a secret, never a config value: the schema refuses unknown keys.
 
 ## Policy (`src/policy`, #121)
 

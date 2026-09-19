@@ -54,7 +54,7 @@ describe('/plugins (live, with the catalogue)', () => {
     it('a fresh workspace lists every built-in by kind; a key set elsewhere turns anthropic-api from Needs key to Ready without a reload', async () => {
         const dom = await mountLive('/plugins', h);
         await until(() => readinessOf(card(dom, 'anthropic-api')) !== null, 'the catalogue with readiness');
-        expect([...dom.querySelectorAll('[data-plugin-group]')].map((g) => g.getAttribute('data-plugin-group'))).toEqual(['runtime', 'memory', 'learning']);
+        expect([...dom.querySelectorAll('[data-plugin-group]')].map((g) => g.getAttribute('data-plugin-group'))).toEqual(['runtime:harness', 'runtime:model', 'memory', 'learning']);
         for (const id of ['anthropic-api', 'claude-code', 'agentic.memory.default', 'agentic.memory.flat', 'agentic.learning.default']) expect(card(dom, id), id).not.toBeNull();
         expect(readinessOf(card(dom, 'anthropic-api'))).toBe('needs-secret');
         expect(card(dom, 'anthropic-api')!.textContent).toContain('NEEDS KEY');
