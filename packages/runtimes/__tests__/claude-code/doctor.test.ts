@@ -60,6 +60,65 @@ describe('claudeCodeDoctor', () => {
     });
 });
 
+/**
+ * The report IS what the platform receives (the verdict on each `EnvironmentDescriptor`), and a
+ * profile path never leaves the machine (decisions 2026-09-19 (c), #274): no finding names one,
+ * however it is spelled.
+ */
+describe('the reported verdict carries no local profile path (#274)', () => {
+    const spellings = (path: string): string[] => {
+        const slash = path.replace(/\\/g, '/');
+        return [path, slash, path.replace(/\//g, '\\'), slash.toLowerCase(), slash.replace(/\/+$/, '')];
+    };
+    const expectNoPath = (report: unknown, paths: readonly string[], fragments: readonly string[]) => {
+        const text = JSON.stringify(report);
+        const lower = text.toLowerCase();
+        for (const p of paths) for (const s of spellings(p)) expect(lower).not.toContain(JSON.stringify(s).slice(1, -1).toLowerCase());
+        for (const f of fragments) expect(lower).not.toContain(f.toLowerCase());
+    };
+    // An 8.3 short spelling (what Windows hands back for `C:\Users\runneradmin`) and a long one.
+    const short = 'C:\\Users\\RUNNER~1\\AppData\\Roaming\\agentic\\profiles\\p7x1';
+    const long = 'D:/Accounts/andy/claude-profiles/q9z2/';
+
+    it('shared, signed out, expired, unknown and ok: messages name environments, never their profile dirs', () => {
+        const report = claudeCodeDoctor([
+            { env: { ...env('a', short), name: 'Work account' }, configDir: short, inspection: { ...ok, authStatus: 'missing' } },
+            { env: { ...env('b', short.toLowerCase()), name: 'Work again' }, configDir: short.toLowerCase(), inspection: { ...ok, authStatus: 'expired' } },
+            { env: { ...env('c', long), name: 'Personal' }, configDir: long, inspection: { ...ok, authStatus: 'unknown' } },
+            { env: { ...env('d', 'E:\\keep\\r4t5'), name: 'Side' }, configDir: 'E:\\keep\\r4t5', inspection: { ...ok, identity: 'me@side.example' } }
+        ]);
+        expect(report.findings.map((f) => f.code)).toEqual(['shared-config-dir', 'auth-missing', 'auth-expired', 'auth-unknown', 'auth-ok']);
+        expectNoPath(report, [short, long, 'E:\\keep\\r4t5'], ['RUNNER~1', 'p7x1', 'q9z2', 'r4t5', 'AppData', 'claude-profiles', 'CLAUDE_CONFIG_DIR']);
+        // What the user needs is still there: who, which environment, and the command that fixes it.
+        expect(report.findings[0]!.message).toContain('"Work account", "Work again"');
+        expect(report.findings[1]!.message).toContain('agentic-daemon env login environment_a');
+        expect(report.findings[4]!.message).toContain('me@side.example');
+    });
+
+    it('the default config dir is local too: its warning and a shared default name no path', async () => {
+        const driver = claudeCodeDriver({ home: 'C:/Users/q8w3', parentEnv: {}, auth: { platform: 'win32', now: () => 10, readText: async () => undefined } });
+        const report = await driver.doctor([env('a'), env('b')]);
+        expect(report.findings.map((f) => f.code)).toEqual(['shared-config-dir', 'default-config-dir', 'auth-missing', 'default-config-dir', 'auth-missing']);
+        expectNoPath(report, ['C:/Users/q8w3/.claude'], ['q8w3', '.claude']);
+    });
+
+    it('a profile that cannot be read is reported for that environment alone, without the path the error named', async () => {
+        const denied = Object.assign(new Error(`EACCES: permission denied, open '${short}\\.credentials.json'`), { code: 'EACCES' });
+        const driver = claudeCodeDriver({
+            home: 'C:/Users/me',
+            parentEnv: {},
+            auth: { platform: 'win32', now: () => 10, readText: async (p) => (p.includes('p7x1') ? Promise.reject(denied) : undefined) }
+        });
+        const report = await driver.doctor([env('locked', short), env('fine', 'C:\\profiles\\fine')]);
+        expect(report.findings.map((f) => [f.code, f.environmentIds])).toEqual([
+            ['profile-unreadable', ['environment_locked']],
+            ['auth-missing', ['environment_fine']]
+        ]);
+        expect(report.findings[0]!.message).toContain('EACCES');
+        expectNoPath(report, [short], ['RUNNER~1', 'p7x1', 'permission denied, open']);
+    });
+});
+
 describe('claudeCodeDriver.doctor', () => {
     const files: Record<string, string> = {
         'C:/profiles/work/.credentials.json': JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: 1 } }),
@@ -80,7 +139,7 @@ describe('claudeCodeDriver.doctor', () => {
     it('fails for two environments that both fall back to the default config dir', async () => {
         const report = await driver.doctor([env('a'), env('b')]);
         expect(report.ok).toBe(false);
-        expect(report.findings.find((f) => f.level === 'error')?.message).toContain('C:/Users/me/.claude');
+        expect(report.findings.find((f) => f.level === 'error')?.message).toContain('the default Claude Code config dir');
     });
 
     it('checks only its own runtime and reports each profile once', async () => {

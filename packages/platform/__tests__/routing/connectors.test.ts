@@ -199,6 +199,9 @@ describe('a ready connector on a local session', () => {
         expect((await task('t1').get()).status).toBe('completed');
         expect(hasTool(model.requests[0]!, 'acme__echo')).toBe(false);
         expect(model.requests[0]!.system).toContain('- acme: its secret "acme.token" is not set (/plugins/acme)');
+        // Recorded, so the plugin page shows why the connector does nothing.
+        const c = await registry().getConnector('acme');
+        expect(c?.status).toMatchObject({ state: 'error', error: expect.stringContaining('secret not set') });
     });
 });
 

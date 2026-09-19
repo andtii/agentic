@@ -95,6 +95,22 @@ describe('daemon', () => {
         for (const e of hello.environments) expect(typeof e.doctor?.checkedAt).toBe('number');
     });
 
+    it('a driver error that names a local path reaches the platform without it (#274)', async () => {
+        const reasons = [
+            "EACCES: permission denied, open 'C:\\Users\\RUNNER~1\\AppData\\Roaming\\agentic\\profiles\\p7x1\\.credentials.json'",
+            'ENOENT: no such file or directory, scandir /home/q8w3/.config/agentic/profiles/r4t5',
+            'cannot read \\\\fileserver\\share\\s6u7 and D:/keep/v1w2/x'
+        ];
+        for (const reason of reasons) {
+            const broken: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'broken', doctor: async () => Promise.reject(new Error(reason)) };
+            const { hello } = await start([env('env_d', { runtime: 'broken' })], [broken]);
+            const message = hello.environments[0]!.doctor!.findings[0]!.message;
+            for (const secret of ['RUNNER~1', 'p7x1', 'q8w3', 'r4t5', 'fileserver', 's6u7', 'v1w2']) expect(message).not.toContain(secret);
+            expect(message).toMatch(/EACCES|ENOENT|cannot read/);
+            expect(message).toContain('agentic-daemon doctor');
+        }
+    });
+
     it('leaves out environments without a driver and reports an inspection failure as unknown auth', async () => {
         const failing: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'flaky', inspect: async () => Promise.reject(new Error('no claude binary')) };
         const { hello } = await start([env('env_a'), env('env_b', { runtime: 'nobody' }), env('env_c', { runtime: 'flaky' })], [scriptedDriver({ events: 1, heartbeatMs: 1_000 }), failing]);

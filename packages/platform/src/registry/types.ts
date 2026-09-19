@@ -134,7 +134,7 @@ export interface RegistryGate {
     readonly learning: GateEntry | null;
     /** Enabled `notification` plugins, id order. */
     readonly channels: readonly { readonly id: string; readonly config: Record<string, unknown> }[];
-    /** One answer per connector asked for (`gate({ connectors })`), in the order asked; absent when none was. */
+    /** One answer per distinct connector asked for (`gate({ connectors })`) — duplicates dropped, first-seen order kept; absent when none was asked for. */
     readonly connectors?: readonly GateConnector[];
 }
 

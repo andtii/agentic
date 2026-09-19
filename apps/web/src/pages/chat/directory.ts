@@ -3,10 +3,16 @@
  * Workspace index, then `Agent.get()` per id in one `useData` fetch, so
  * the pages resolve names, hues and environments synchronously through a
  * lookup — the same shape the mock `agentNamed` has.
+ *
+ * Each agent is also a live `Agent.get` subscription on the page's live
+ * channel (#258), so a config edit — a new default environment, a rename —
+ * reaches every page without a reload; the fetch fills in until a frame
+ * comes, and on the server nothing subscribes.
  */
-import { useData } from 'sigx';
+import { effect, onMounted, onUnmounted, signal, useData } from 'sigx';
 import { actor } from '@sigx/actors';
-import { useActorState } from '@sigx/actors/app';
+import { useActorState, useActorsContext, type ActorLiveChannel } from '@sigx/actors/app';
+import type { AgentId } from '@agentic/core';
 import type { AgentView } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -48,9 +54,46 @@ export function useAgentDirectory(defs: ActorDefs, viewer: ViewerState): AgentDi
             return out;
         }
     );
+    // Live identities, by id; a fetched one answers until its first frame (#258).
+    const live = signal<{ byId: Record<string, AgentIdentity> }>({ byId: {} });
+    const channel: ActorLiveChannel = useActorsContext().live;
+    const subs = new Map<string, () => void>();
+    let stop: (() => void) | undefined;
+    // Client only: `onMounted` never runs in a server render.
+    onMounted(() => {
+        stop = effect(() => {
+            const ws = viewer.workspaceId;
+            const ids = ws ? (index.value?.agents ?? []) : [];
+            // Keyed by actor key, not id: a workspace switch drops every old subscription and its identity.
+            const wanted = new Map(ids.map((id, i) => [agentKeyOf(ws!, id as AgentId), { id, i }] as const));
+            for (const [key, off] of subs) {
+                if (wanted.has(key)) continue;
+                off();
+                subs.delete(key);
+            }
+            const keep = new Set<string>(ids);
+            if (Object.keys(live.byId).some((id) => !keep.has(id))) live.byId = Object.fromEntries(Object.entries(live.byId).filter(([id]) => keep.has(id)));
+            for (const [key, { id, i }] of wanted) {
+                if (subs.has(key)) continue;
+                subs.set(
+                    key,
+                    channel.subscribe({ type: 'Agent', key, method: 'get' }, (value: unknown) => {
+                        const view = value as AgentView | null;
+                        if (view?.config && subs.has(key)) live.byId = { ...live.byId, [id]: identityOf(view, i) };
+                    })
+                );
+            }
+        });
+    });
+    onUnmounted(() => {
+        stop?.();
+        for (const off of subs.values()) off();
+        subs.clear();
+    });
+    const merged = (): Record<string, AgentIdentity> => ({ ...agents.value, ...live.byId });
     return {
-        lookup: (id) => lookupOver(agents.value ?? {})(id),
-        all: () => Object.values(agents.value ?? {}),
+        lookup: (id) => lookupOver(merged())(id),
+        all: () => Object.values(merged()),
         get loading() {
             return index.loading || agents.loading;
         },

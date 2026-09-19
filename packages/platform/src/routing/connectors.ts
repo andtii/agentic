@@ -134,8 +134,10 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
         return { opened };
     } catch (e) {
         const message = scrub(e instanceof Error ? e.message : String(e), values);
-        if (!(e as { unset?: boolean }).unset) await record({ state: 'error', error: message });
-        return skip((e as { unset?: boolean }).unset ? message : `it could not be reached: ${message}`);
+        const unset = (e as { unset?: boolean }).unset === true;
+        // A secret not set is recorded too, so the plugin page shows why the connector does nothing.
+        await record({ state: 'error', error: unset ? `secret not set: ${message}` : message });
+        return skip(unset ? message : `it could not be reached: ${message}`);
     }
 }
 

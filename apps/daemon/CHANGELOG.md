@@ -6,6 +6,7 @@ All notable changes to `@agentic/daemon` (Keep a Changelog, semver).
 
 ### Fixed
 
+- No local path reaches the platform through a doctor verdict (#274): when a driver's checks throw, the reported `driver-doctor-failed` message has every absolute path (drive, UNC, POSIX) replaced by `<path>` (`withoutLocalPaths`, exported) and points at `agentic-daemon doctor`; the daemon log keeps the original. `agentic-daemon doctor` itself, which never leaves the machine, now lists each environment's profile (`profile-dir`, info), since the driver's findings no longer name it.
 - `agentic-daemon run` no longer exits 1 on a freshly paired machine (#235): a missing `environments.json` is zero environments (`loadEnvironments` → `{ ok: true, environments: [], missing: true }`), so the daemon connects and reports none. `doctor` reports `no-environments` as a warning with the command to add one, not an error.
 - The installer README claimed the daemon reports `environments.json` changes without a restart when nothing watched the file; it now does (below).
 

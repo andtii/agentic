@@ -64,7 +64,8 @@ describe('/machines/:id', () => {
         expect(root.querySelector('[data-card][data-tone="failed"]')!.textContent).toContain('disconnected, not failed');
         buttonNamed(root, 'Revoke alien01').click();
         await tick();
-        const popup = root.querySelector('[data-scope="dialog"][data-part="popup"]')!;
+        // The open one: the page's other dialogs (#239) stay in the DOM closed.
+        const popup = root.querySelector('[data-scope="dialog"][data-part="popup"][data-state="open"]')!;
         expect(popup.getAttribute('role')).toBe('alertdialog');
         expect(popup.textContent).toContain('disconnected, not failed');
         expect(buttonNamed(popup, 'Revoke and disconnect 2 sessions')).toBeTruthy();
