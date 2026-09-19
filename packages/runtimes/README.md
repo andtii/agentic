@@ -51,6 +51,16 @@ const report = await driver.doctor(environments);         // ok: false when two 
 - **Platform tools**: the names in `OpenSpec.tools` are served as client tools with the platform's own name, description and schema; `execute` calls `callTool`, which the daemon sends as `tool.call`. A name the daemon has no definition for is not served and is listed as unsupported.
 - **Auth** (`readProfileAuth`): `.credentials.json` in the config dir — a refresh token is `ok`, an expired access token without one `expired`, none `missing`; identity from `.claude.json`. macOS keeps credentials in the Keychain, so it reports `unknown` there.
 
+### Usage limits: `claudeCodeQuota` (#269)
+
+`claudeCodeQuota()` is the `quota` source the daemon runs per Claude Code environment (#261). It **probes** an idle account for what `claude` → `/usage` shows. It uses the SDK's experimental usage call on a query that is never prompted, so there is no model call and no cost. Measured 2026-09-19 on three Max profiles and one signed-out profile: 0.25–0.9 s, `total_cost_usd` 0, no messages, no leftover process. It also maps each streamed `rate_limit_event` to a one-window update (`fromSignal`).
+
+Scales differ:
+- the probe reports utilization as 0..100
+- the stream reports it as a 0..1 fraction, taken from the `anthropic-ratelimit-unified-*` response headers
+
+Both are normalized to 0..1. Only normalized snapshots leave the machine. Recorded fixtures: `__tests__/claude-code/fixtures/usage-*.json`.
+
 ## Platform tools
 
 `defineTool`s over abstract ports (`packages/runtimes/src/tools/ports.ts`), so they run and test without actors. Names are provider tool names (`[A-Za-z0-9_-]`):
