@@ -14,7 +14,7 @@ import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 
 import { AgentActor } from '../src/agent/index';
-import { isolateMemoryImpl, Memory, memoryActorImpl, memoryActorKey } from '../src/memory/index';
+import { isolateMemoryImpl, MAX_RETRIEVAL_LIMIT, Memory, memoryActorImpl, memoryActorKey, retrievalFromConfig } from '../src/memory/index';
 import type { RegistryGate } from '../src/registry/index';
 import { createActorToolPorts, createToolCallPort, type AgentPrincipal } from '../src/routing/index';
 import { defineSessionActor, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
@@ -149,7 +149,17 @@ describe('the active memory and learning plugins (#242)', () => {
         await remember(2);
         const opened = await session('s1').open(spec('task_1', gate({ memory: { id: MEM, enabled: true, config: { retrievalLimit: 0 } } })));
         expect(opened.spec?.memories).toEqual([]);
+        // The record says no scope was asked, not which scopes would have been.
+        expect(opened.spec?.retrieval?.scopes).toEqual([]);
         expect(opened.spec?.retrieval?.skipped).toEqual([]);
+    });
+
+    it('retrievalFromConfig keeps the budget inside the manifest’s bounds, even for a config that skipped validation', () => {
+        expect(retrievalFromConfig({ retrievalLimit: 3 })).toEqual({ limit: 3 });
+        expect(retrievalFromConfig({ retrievalLimit: 5000 })).toEqual({ limit: MAX_RETRIEVAL_LIMIT });
+        expect(retrievalFromConfig({ retrievalLimit: -1 })).toBeUndefined();
+        expect(retrievalFromConfig({ retrievalLimit: 2.5 })).toBeUndefined();
+        expect(retrievalFromConfig({})).toBeUndefined();
     });
 
     it('memory turned off: nothing retrieved, written or learned — and what was stored stays', async () => {

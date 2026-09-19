@@ -287,7 +287,7 @@ export async function retrieveMemories(
     const skipped: SkippedScope[] = [];
     const all: RetrievedMemory[] = [];
     // A budget of none asks no scope at all.
-    if (query.limit <= 0) return { text: query.text ?? '', scopes, skipped, hits: [], entries: [] };
+    if (query.limit <= 0) return { text: query.text ?? '', scopes: [], skipped, hits: [], entries: [] };
     for (const scope of scopes) {
         try {
             const ranked = await open(scope, principal).query(query);

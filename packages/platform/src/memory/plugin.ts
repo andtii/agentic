@@ -137,8 +137,11 @@ export function isolateMemoryImpl(make: () => MemoryPlugin): MemoryPluginImpl {
 /** The config key the memory plugins share (#242): entries retrieved at session start (MEM-07); `0` retrieves none. */
 export const RETRIEVAL_LIMIT_KEY = 'retrievalLimit';
 
+/** The manifests' upper bound on `retrievalLimit`; a config past it (one that skipped validation) is held to it. */
+export const MAX_RETRIEVAL_LIMIT = 50;
+
 /** The retrieval budget a memory plugin's config asks for; nothing when it names none. */
 export function retrievalFromConfig(config: Readonly<Record<string, unknown>>): RetrievalBudget | undefined {
     const limit = config[RETRIEVAL_LIMIT_KEY];
-    return typeof limit === 'number' && Number.isInteger(limit) && limit >= 0 ? { limit } : undefined;
+    return typeof limit === 'number' && Number.isInteger(limit) && limit >= 0 ? { limit: Math.min(limit, MAX_RETRIEVAL_LIMIT) } : undefined;
 }

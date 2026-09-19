@@ -7,4 +7,4 @@ export type { MemoryActorState, MemoryActorEntry, MemoryStats, ExportPage } from
 export { MEMORY_ACTOR_TYPE, Memory, applyMemoryActorEntry, createMemoryActorState } from './actor.js';
 
 export type { MemoryActorClient, MemoryActorPluginOptions } from './plugin.js';
-export { MEMORY_WIRE_BATCH, RETRIEVAL_LIMIT_KEY, memoryActorKey, actorMemoryStore, memoryActorPlugin, memoryActorImpl, isolateMemoryImpl, retrievalFromConfig } from './plugin.js';
+export { MEMORY_WIRE_BATCH, MAX_RETRIEVAL_LIMIT, RETRIEVAL_LIMIT_KEY, memoryActorKey, actorMemoryStore, memoryActorPlugin, memoryActorImpl, isolateMemoryImpl, retrievalFromConfig } from './plugin.js';
