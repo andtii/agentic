@@ -31,6 +31,58 @@ export interface OpenSpecPolicy {
     readonly constraints?: readonly ApprovalRule[];
 }
 
+/**
+ * Where a connector's credentials go — secret NAMES only, never values (#280;
+ * decisions 2026-09-19 (a)). The daemon asks the platform for the values when
+ * it opens the session (`CONNECTOR_CREDENTIALS_TOOL`).
+ */
+export interface OpenSpecConnectorAuth {
+    /** The name of the secret whose value is sent as the bearer token of the `Authorization` header (Streamable HTTP). */
+    readonly bearer?: string;
+    /** Header name → secret name (Streamable HTTP). */
+    readonly headers?: Readonly<Record<string, string>>;
+    /** Environment variable → secret name (stdio). */
+    readonly env?: Readonly<Record<string, string>>;
+}
+
+/**
+ * An MCP connector the daemon opens for one session (#280, architecture §9):
+ * a ready connector of the agent's, as the platform's gate found it. Its tools
+ * reach the runtime as `<namespace>__<tool>`, the namespace being the id made
+ * tool-safe (`.` → `_`). Plain JSON with no credential VALUE in it: the
+ * platform keeps the spec and re-sends it after a reconnect.
+ */
+export interface OpenSpecConnector {
+    readonly id: string;
+    readonly transport: 'streamable-http' | 'stdio';
+    /** Streamable HTTP endpoint. */
+    readonly url?: string;
+    /** Stdio: the executable and its arguments. */
+    readonly command?: string;
+    readonly args?: readonly string[];
+    /** Stdio: where it runs — inside the environment's `cwdRoots`; the session's `cwd` when absent. */
+    readonly cwd?: string;
+    readonly auth?: OpenSpecConnectorAuth;
+}
+
+/**
+ * The `tool.call` a daemon makes on its own — never offered to the model — for
+ * a connector's credential VALUES while it opens a session (#280; EXE-10).
+ * Input `{ connectorId }`, output `ConnectorCredentials`. The platform answers
+ * only for a connector the calling session's spec names, opens each secret
+ * under the connector plugin's own grants, and records no value; the daemon
+ * holds the values in memory for that session only, never logging or writing
+ * them.
+ */
+export const CONNECTOR_CREDENTIALS_TOOL = 'connector_credentials';
+
+/** The answer to `CONNECTOR_CREDENTIALS_TOOL`: the values, keyed as in `OpenSpecConnectorAuth`. */
+export interface ConnectorCredentials {
+    readonly bearer?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly env?: Readonly<Record<string, string>>;
+}
+
 /** What a daemon needs to open a runtime session. */
 export interface OpenSpec {
     readonly agentId: string;
@@ -46,6 +98,8 @@ export interface OpenSpec {
      * own terms (Claude Code: every non-trivial call) and every question reaches the user.
      */
     readonly policy?: OpenSpecPolicy;
+    /** The agent's ready MCP connectors (#280); a daemon that predates them ignores the field. */
+    readonly connectors?: readonly OpenSpecConnector[];
     readonly resume?: unknown;
 }
 
