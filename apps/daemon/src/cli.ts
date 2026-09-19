@@ -2,6 +2,7 @@
  * `agentic-daemon pair <code> --url <platform> [--name <machine>]`
  * `agentic-daemon run [--verbose]`
  * `agentic-daemon doctor`
+ * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
  * `agentic-daemon --version` (also `version`)
  *
  * Everything the CLI touches — paths, fetch, drivers, the output streams, the
@@ -15,6 +16,8 @@ import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
 import { builtinDrivers, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
+import { envCommand, ENV_USAGE, type LoginRunner } from './env-cli.js';
+import { watchEnvironments } from './env-store.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
 import { createLogger, redact, type Logger, type LogLevel } from './logger.js';
@@ -39,6 +42,13 @@ export interface CliContext {
     readonly onStarted?: (daemon: Daemon) => void;
     readonly heartbeatMs?: number;
     readonly backoff?: { readonly initialMs?: number; readonly maxMs?: number };
+    /** How long `run` waits for `environments.json` to settle before re-reading it. Default 250 ms. */
+    readonly watchDebounceMs?: number;
+    /** `DaemonOptions.reinspectMs`. */
+    readonly reinspectMs?: number;
+    /** `env login`'s sign-in process (tests). */
+    readonly login?: LoginRunner;
+    readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 const USAGE = `agentic-daemon ${DAEMON_VERSION}
@@ -47,6 +57,7 @@ Usage:
   agentic-daemon pair <code> --url <platform> [--name <machine name>]
   agentic-daemon run [--verbose]
   agentic-daemon doctor
+${ENV_USAGE}
   agentic-daemon --version
 `;
 
@@ -129,6 +140,9 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     for (const e of loaded.errors) log.error('environments.json is invalid', { problem: e });
                     return 1;
                 }
+                // No file yet is a machine with nothing to offer, not a failure (#235): it connects and reports none.
+                if (loaded.environments.length === 0) log.warn('no environments yet — add one with `agentic-daemon env add`; this daemon picks it up while running', { file: paths.environmentsFile });
+                let running = JSON.stringify(loaded.environments);
                 const daemon = createDaemon({
                     credentials,
                     environments: loaded.environments,
@@ -137,17 +151,49 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     logger: log,
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),
                     ...(context.backoff ? { backoff: context.backoff } : {}),
+                    ...(context.reinspectMs !== undefined ? { reinspectMs: context.reinspectMs } : {}),
                     ...(context.platform ? { platform: context.platform } : {})
                 });
                 await daemon.start();
+                // `env add` / `env rm` / an edit reach the platform without a restart. An invalid file keeps the running set.
+                const watcher = await watchEnvironments({
+                    file: paths.environmentsFile,
+                    ...(context.watchDebounceMs !== undefined ? { debounceMs: context.watchDebounceMs } : {}),
+                    onError: (e) => log.warn('watching environments.json failed', { error: e }),
+                    onChange: async (next) => {
+                        if (!next.ok) {
+                            for (const e of next.errors) log.error('environments.json is invalid; keeping the running environments', { problem: e });
+                            return;
+                        }
+                        const text = JSON.stringify(next.environments);
+                        if (text === running) return;
+                        running = text;
+                        await daemon.setEnvironments(next.environments);
+                        log.info('environments reloaded', { environments: next.environments.length });
+                    }
+                }).catch((e: unknown) => {
+                    log.warn('cannot watch environments.json; changes need a restart', { error: e });
+                    return undefined;
+                });
                 context.onStarted?.(daemon);
                 await (context.until ?? stopSignal());
+                watcher?.close();
                 await daemon.stop();
                 for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
                 return 0;
             }
+            case 'env':
+                return await envCommand(argv, args.positional[0], args.positional.slice(1), args.flags, {
+                    paths,
+                    drivers,
+                    out,
+                    err,
+                    secure: { ...(context.platform ? { platform: context.platform } : {}), ...(context.run ? { run: context.run } : {}) },
+                    ...(context.login ? { login: context.login } : {}),
+                    ...(context.env ? { env: context.env } : {})
+                });
             case 'doctor': {
                 const report = await runDoctor({ paths, drivers });
                 out(formatDoctorReport(report));

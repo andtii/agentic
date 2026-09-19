@@ -6,13 +6,16 @@
 
 ```sh
 agentic-daemon pair <code> --url https://agentic.example [--name my-desktop]
+agentic-daemon env add --name Work --root C:\src\work [--root …] [--concurrency 2] [--account me@work.example]
+agentic-daemon env login env_work
 agentic-daemon doctor
 agentic-daemon run [--verbose]
 ```
 
+- **env add | list | rm | login** edit `environments.json` so nobody writes it by hand (`src/env-store.ts`, `src/env-cli.ts`). `add` takes `--name` and one or more `--root`, plus `--runtime` (default `claude-code`; it must be one this daemon has a driver for), `--id` (default `env_<name>`), `--concurrency`, `--account`, `--profile-dir`; with `--id <id> --replace` it changes an environment in place, keeping its profile. Each environment gets its own profile directory, `<config dir>/profiles/<id>`, and a directory another environment already uses is refused — two environments never share an account. The file is written atomically (temp + rename) and owner-only, like the credentials. `rm <id>` leaves the profile directory, which holds the sign-in. `login <id>` runs `claude /login` (or `--claude <path>`) with that profile as `CLAUDE_CONFIG_DIR` and the parent's `CLAUDE_CONFIG_DIR` / `ANTHROPIC_*` removed — the same rule sessions are opened under.
 - **pair** presents the 6-character code from the Machines page to `POST /auth/pair` and stores the machine token. Case, spaces and dashes in the code are ignored.
-- **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error. The token is never printed.
-- **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines.
+- **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error; having no environments yet is a warning. The token is never printed.
+- **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines. A missing `environments.json` is zero environments — the machine connects and reports none. While running, the daemon watches the config directory: an `env add` / `env rm` or a hand edit is re-read once it settles (250 ms) and announced with an `env` frame, no restart; an edit that does not validate is logged and ignored, the running environments stay. Environments that are not signed in are inspected again every 30 s (`DaemonOptions.reinspectMs`), so a sign-in shows up on the platform by itself.
 - **--version** (or `version`) prints `agentic-daemon <version>` (`DAEMON_VERSION`, what `hello.daemonVersion` reports) and exits 0 — the installer test and `install.ps1` use it.
 
 ### Files
@@ -28,6 +31,8 @@ agentic-daemon run [--verbose]
 `credentials.json` is owner-only: `0600` on POSIX; on Windows inheritance is removed and only the current user is granted (`icacls`) before the token is written — if that fails, nothing is written.
 
 ### `environments.json`
+
+What `env add` writes; the shape, for reading or a hand edit:
 
 ```json
 {

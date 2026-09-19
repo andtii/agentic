@@ -45,10 +45,10 @@ describe('environments.json', () => {
             'environments[3] must be an object'
         ]);
     });
-    it('a missing or non-JSON file is a named problem, not a crash', async () => {
+    it('a missing file is zero environments (#235); a non-JSON file is a named problem, not a crash', async () => {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-env-'));
         try {
-            expect(await loadEnvironments(join(dir, 'environments.json'))).toEqual({ ok: false, errors: [`no environments file at ${join(dir, 'environments.json')}`] });
+            expect(await loadEnvironments(join(dir, 'environments.json'))).toEqual({ ok: true, environments: [], missing: true });
             await writeFile(join(dir, 'environments.json'), '{nope');
             const bad = await loadEnvironments(join(dir, 'environments.json'));
             expect(bad.ok).toBe(false);

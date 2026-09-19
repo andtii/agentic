@@ -68,6 +68,11 @@ export interface DaemonOptions {
     /** Default 30 s. */
     readonly heartbeatMs?: number;
     readonly backoff?: BackoffOptions;
+    /**
+     * How often environments that are not signed in are inspected again, so a
+     * `claude /login` shows up without a restart (#235). Default 30 s; 0 turns it off.
+     */
+    readonly reinspectMs?: number;
     /** How long a platform tool call may take. Default 10 minutes. */
     readonly toolTimeoutMs?: number;
     readonly daemonVersion?: string;
@@ -82,6 +87,8 @@ export interface Daemon {
     stop(): Promise<void>;
     /** Replace the environments and announce them with `env`. */
     setEnvironments(environments: readonly LocalEnvironment[]): Promise<void>;
+    /** Inspect every environment again now; `env` goes out when a descriptor changed. Resolves to whether one did. */
+    reinspect(): Promise<boolean>;
     readonly connected: boolean;
     readonly activeSessions: readonly SessionId[];
     /** Malformed platform messages dropped so far. */
@@ -156,6 +163,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const platform = options.platform ?? process.platform;
     const machineId = options.credentials.machineId as MachineId;
     const heartbeatMs = options.heartbeatMs ?? 30_000;
+    const reinspectMs = options.reinspectMs ?? 30_000;
     const toolTimeoutMs = options.toolTimeoutMs ?? 10 * 60_000;
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const log = options.eventLog;
@@ -169,6 +177,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
     let socket: Socket | undefined;
     let welcomed = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let reinspectTimer: ReturnType<typeof setInterval> | undefined;
+    // `setEnvironments` and the periodic re-inspect both replace the inspection maps: one at a time, in order.
+    let inspecting: Promise<unknown> = Promise.resolve();
+    const serial = <T>(work: () => Promise<T>): Promise<T> => {
+        const run = inspecting.then(work, work);
+        inspecting = run.catch(() => undefined);
+        return run;
+    };
     let calls = 0;
     let rejected = 0;
     let connection: Connection | undefined;
@@ -227,6 +243,16 @@ export function createDaemon(options: DaemonOptions): Daemon {
         }
         inspections = next;
         verdicts = nextVerdicts;
+    }
+
+    async function reinspect(): Promise<boolean> {
+        // When a check ran is not a change; what it found is.
+        const fingerprint = (): string => JSON.stringify(descriptors(), (key, value: unknown) => (key === 'checkedAt' ? undefined : value));
+        const before = fingerprint();
+        await inspectAll();
+        const changed = fingerprint() !== before;
+        if (changed && socket) send({ v: V, t: 'env', environments: descriptors() });
+        return changed;
     }
 
     function descriptors(): EnvironmentDescriptor[] {
@@ -487,9 +513,23 @@ export function createDaemon(options: DaemonOptions): Daemon {
             });
             logger.info('daemon: starting', { machine: machineId, environments: environments.length });
             connection.start();
+            if (reinspectMs > 0) {
+                let pending = false;
+                reinspectTimer = setInterval(() => {
+                    // Only while something is not signed in (a healthy machine is left alone), and never two queued.
+                    if (stopped || pending || ![...inspections.values()].some((i) => i.authStatus !== 'ok')) return;
+                    pending = true;
+                    void serial(reinspect)
+                        .catch((e: unknown) => logger.warn('environment re-inspection failed', { error: e }))
+                        .finally(() => (pending = false));
+                }, reinspectMs);
+                reinspectTimer.unref?.();
+            }
         },
         async stop() {
             stopped = true;
+            if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
+            reinspectTimer = undefined;
             for (const id of sessions.keys()) await closeSession(id, 'daemon stopping');
             await connection?.stop();
             onClose();
@@ -501,11 +541,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
             await log.flush();
             logger.info('daemon: stopped');
         },
-        async setEnvironments(next) {
-            environments = next;
-            await inspectAll();
-            if (socket) send({ v: V, t: 'env', environments: descriptors() });
+        setEnvironments(next) {
+            return serial(async () => {
+                environments = next;
+                await inspectAll();
+                if (socket) send({ v: V, t: 'env', environments: descriptors() });
+            });
         },
+        reinspect: () => serial(reinspect),
         get connected() {
             return connection?.connected ?? false;
         },
