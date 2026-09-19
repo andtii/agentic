@@ -12,6 +12,7 @@ import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAg
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
+import type { RegistryGate } from '../registry/types.js';
 import type { LearningPorts, SkippedScope } from '../task/driver.js';
 
 /** How the memory block of a session was retrieved — recorded on the spec (MEM-10: the supply path is visible). */
@@ -65,6 +66,12 @@ export interface SessionOpenSpec {
     readonly tools?: readonly string[];
     /** The chat the session works in (CHT-07), filled by the router for a chat-originated task: the prompt's chat section. */
     readonly roster?: ChatRoster;
+    /**
+     * What `Registry.gate()` answered when the router placed the task (§9): the runtime plugin with its config, the
+     * active memory and learning plugins, the enabled channels. Recorded so nothing downstream asks the Registry again.
+     * Absent when the router has no Registry, and on a session the router did not open.
+     */
+    readonly plugins?: RegistryGate;
     /** Resume an earlier runtime session. */
     readonly resume?: SessionRef;
 }
