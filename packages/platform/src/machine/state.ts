@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, OpenSpec, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -69,6 +69,25 @@ export interface FsRequestRecord {
     error?: FsError;
 }
 
+/**
+ * One `putEnvironment` / `removeEnvironment` (#237): sent as `env.request`,
+ * answered by the daemon's `env.response` in a later `socketMessage` turn —
+ * stored like an `fsRequest`, read with `envResult(requestId)`.
+ */
+export interface EnvRequestRecord {
+    readonly requestId: string;
+    readonly op: EnvOp;
+    status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** After this the liveness reminder fails a pending request with `timeout`. */
+    readonly deadline: number;
+    /** Who asked (`principalLabel`) — the `by` of the `environment.put` / `environment.removed` audit record. */
+    readonly by: string;
+    finishedAt?: number;
+    result?: EnvResult;
+    error?: EnvError;
+}
+
 export interface SessionClosure {
     readonly sessionId: SessionId;
     readonly reason: string;
@@ -95,6 +114,10 @@ export interface MachineState {
     pending: Record<string, PendingCommand>;
     /** `fsRequest` entries by request id, at most `MAX_FS_REQUESTS`; absent on a record saved before #189. */
     fs?: Record<string, FsRequestRecord>;
+    /** `putEnvironment` / `removeEnvironment` entries by request id, at most `MAX_ENV_REQUESTS`; absent on a record saved before #237. */
+    envRequests?: Record<string, EnvRequestRecord>;
+    /** The machine-local policy the daemon last reported (`hello` / `env`); absent when it reports none (it predates web-managed environments). */
+    policy?: MachinePolicy;
     /** The most recent closures, newest last (capped). */
     closures: SessionClosure[];
     /** Daemon messages refused by the protocol codec since pairing. */
@@ -106,6 +129,10 @@ export const MAX_CLOSURES = 32;
 export const MAX_FS_REQUESTS = 16;
 /** A finished `fsRequest` entry is pruned this long after it finished. */
 export const FS_RESULT_TTL_MS = 120_000;
+/** At most this many environment requests are kept; the oldest is evicted first. */
+export const MAX_ENV_REQUESTS = 16;
+/** A finished environment request is pruned this long after it finished. */
+export const ENV_RESULT_TTL_MS = 120_000;
 
 export function initialMachineState(): MachineState {
     return {
@@ -118,6 +145,7 @@ export function initialMachineState(): MachineState {
         queued: [],
         pending: {},
         fs: {},
+        envRequests: {},
         closures: [],
         rejected: 0
     };
@@ -161,8 +189,17 @@ export function advances(cursor: Cursor | undefined, at: Cursor): boolean {
  * than `MAX_FS_REQUESTS` remain. `room: false` only prunes.
  */
 export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = true): void {
-    for (const [id, r] of Object.entries(fs)) if (r.status !== 'pending' && (r.finishedAt ?? r.requestedAt) + FS_RESULT_TTL_MS <= at) delete fs[id];
+    prune(fs, at, room, FS_RESULT_TTL_MS, MAX_FS_REQUESTS);
+}
+
+/** `pruneFs` for environment requests: the same TTL-then-oldest rule over `ENV_RESULT_TTL_MS` / `MAX_ENV_REQUESTS`. */
+export function pruneEnvRequests(requests: Record<string, EnvRequestRecord>, at: number, room = true): void {
+    prune(requests, at, room, ENV_RESULT_TTL_MS, MAX_ENV_REQUESTS);
+}
+
+function prune(entries: Record<string, { readonly requestId: string; readonly status: string; readonly requestedAt: number; readonly finishedAt?: number }>, at: number, room: boolean, ttlMs: number, max: number): void {
+    for (const [id, r] of Object.entries(entries)) if (r.status !== 'pending' && (r.finishedAt ?? r.requestedAt) + ttlMs <= at) delete entries[id];
     if (!room) return;
-    const byAge = Object.values(fs).sort((a, b) => a.requestedAt - b.requestedAt);
-    while (byAge.length >= MAX_FS_REQUESTS) delete fs[byAge.shift()!.requestId];
+    const byAge = Object.values(entries).sort((a, b) => a.requestedAt - b.requestedAt);
+    while (byAge.length >= max) delete entries[byAge.shift()!.requestId];
 }

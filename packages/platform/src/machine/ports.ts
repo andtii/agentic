@@ -76,4 +76,6 @@ export interface MachinePorts {
      * 60 s floor, so a silent daemon's request fails within one tick after.
      */
     readonly fsTimeoutMs?: number;
+    /** The same deadline for `putEnvironment` / `removeEnvironment` and the daemon's `env.response`. Default 30 s. */
+    readonly envTimeoutMs?: number;
 }
