@@ -6,10 +6,13 @@
  * (`Agent.update(..., 'create')`), then lands on its Config tab. Each card's
  * pill follows the agent's tasks (one read of the task index for the roster)
  * and its stats its own Memory scope and the week's corrections (#153).
+ * The dialog offers the enabled runtime plugins and opens on the workspace's
+ * `defaults.runtime` (#234).
  */
 import { component, signal, useHead, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
+import { useActorState } from '@sigx/actors/app';
 import type { AgentId } from '@agentic/core';
 import { AgentTile, EmptyState, EnvironmentLine, Icon, Label, Row, Stack, StatusPill } from '@agentic/ui';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
@@ -20,6 +23,8 @@ import { useAgentCorrections, useMemoryCount, useWorkspaceTasks } from './activi
 import { closeNewAgent, newAgentRequest } from './head';
 import { CREATED_REASON, newAgentPatch, presenceOf, tasksByAssignee, type NewAgentInput } from './live';
 import { NewAgentDialog } from './NewAgentDialog';
+import { useWorkspaceReadiness } from '../plugins/readiness';
+import { runtimeOptions } from './runtimes';
 
 /** Create the agent in `ws` with its first config version; resolves to the new id. */
 export async function createAgentWith(defs: ActorDefs, ws: string, input: NewAgentInput): Promise<string> {
@@ -50,6 +55,9 @@ export const LiveAgents = component(() => {
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
     const tasks = useWorkspaceTasks(defs, viewer);
+    const readiness = useWorkspaceReadiness(defs, viewer);
+    const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
+    const runtimes = () => { const plugins = readiness.overview()?.plugins; return plugins ? runtimeOptions(plugins, readiness.byId()) : undefined; };
     const st = signal({ busy: false, error: '' });
     const create = async (input: NewAgentInput): Promise<void> => {
         const ws = viewer.workspaceId;
@@ -111,7 +119,7 @@ export const LiveAgents = component(() => {
                     <Icon name="delegate" size={14} />
                     <span>Agents may delegate to every agent in this workspace. Depth 3, concurrency 3, budgets split from the parent.</span>
                 </p>
-                <NewAgentDialog model={() => newAgentRequest.open} busy={st.busy} onCancel={closeNewAgent} onCreate={(e) => { void create(e); }} />
+                <NewAgentDialog model={() => newAgentRequest.open} busy={st.busy} runtimes={runtimes()} defaultRuntime={workspace.value?.settings.defaults.runtime} onCancel={closeNewAgent} onCreate={(e) => { void create(e); }} />
             </div>
         );
     };

@@ -41,6 +41,10 @@ Every refusal is a JSON-RPC error with HTTP 200 — never a 500: `SubscribeToTas
 
 The data-part conventions are the **agentic extension**, declared on the card under `capabilities.extensions` (`required: false`) — a plain A2A peer sees text and files only.
 
+### As a plugin
+
+`a2aServerPlugin` is the server's manifest (id `agentic.a2a.server`, kind `a2a`): config `{ exposedAgents: string[] }` — the agents a remote client may reach, by id or name — no secrets and no permissions of its own. The web app lists it off by default and mounts the handler behind it (`apps/web/src/a2a`): bearer = an access token of the platform's OAuth server, 404 while the plugin is off, and each A2A task an ordinary platform task of the exposed agent. See `docs/runbook.md` §9, "Expose agents over A2A".
+
 ## Client
 
 ```ts

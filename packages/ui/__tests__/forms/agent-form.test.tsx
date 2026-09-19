@@ -1,6 +1,6 @@
 import { signal } from '@sigx/reactivity';
 import type { AgentConfig } from '@agentic/core';
-import { AgentForm, AGENT_FIELDS as F, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi, type AgentFormWorkdirProps } from '@agentic/ui';
+import { AgentForm, AGENT_FIELDS as F, CUSTOM_MODEL, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi, type AgentFormWorkdirProps, type RuntimeOption } from '@agentic/ui';
 import { controls, describedByRole, fullAgentConfig, labelOf, mount, setSelect, setText, submit, toggle } from './helpers';
 
 function mountForm(config: AgentConfig = fullAgentConfig()) {
@@ -175,4 +175,87 @@ describe('AgentForm', () => {
         expect(root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!.value).toBe('anthropic-api');
         expect(root.querySelector<HTMLInputElement>(`input[name="${F.collaborateAll}"]`)!.checked).toBe(true);
     });
+
+    describe('runtimes and models from the workspace (#234)', () => {
+        const RUNTIMES: readonly RuntimeOption[] = [
+            { value: 'anthropic-api', label: 'Anthropic API — needs a key', hint: 'Not set yet: anthropic-api-key.', href: '/plugins/anthropic-api', hrefLabel: 'Add the key', models: ['claude-opus-5', 'claude-sonnet-5'], defaultModel: 'claude-opus-5' },
+            { value: 'claude-code', label: 'Claude Code' }
+        ];
+        function mountWith(model: string, runtimes: readonly RuntimeOption[] = RUNTIMES) {
+            const base = fullAgentConfig();
+            const { model: _stored, ...execution } = base.execution;
+            const state = signal({ config: { ...base, execution: { ...execution, runtime: 'anthropic-api', ...(model ? { model } : {}) } } as AgentConfig });
+            const ref = { current: null as AgentFormApi | null };
+            const root = mount(<AgentForm model={() => state.config} ref={ref} runtimes={runtimes} environments={[{ value: 'env_1', label: 'Laptop' }]} />);
+            const form = root.querySelector('form')!;
+            const modelSelect = () => root.querySelector<HTMLSelectElement>(`select[name="${F.model}"]`);
+            const custom = () => root.querySelector<HTMLInputElement>(`input[name="${F.modelCustom}"]`);
+            const posted = () => fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+            return { root, form, state, api: () => ref.current!, modelSelect, custom, posted };
+        }
+
+        it('offers the given runtimes; the chosen one says what is in the way and links to the fix', () => {
+            const { root } = mountWith('');
+            const select = root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!;
+            expect([...select.options].map((o) => o.value)).toEqual(['anthropic-api', 'claude-code']);
+            expect(select.selectedOptions[0]!.textContent).toBe('Anthropic API — needs a key');
+            // The hint is the select's description, so a screen reader announces it with the field.
+            const described = (select.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+            expect(described).toContain('Not set yet: anthropic-api-key.');
+            expect(root.querySelector('[data-runtime-hint="anthropic-api"] [data-runtime-fix] a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
+
+            setSelect(select, 'claude-code');
+            expect(root.querySelector('[data-runtime-hint]')).toBeNull();
+        });
+
+        it('the model select round-trips the runtime default, a listed model and a custom id', () => {
+            const blank = mountWith('');
+            expect(blank.modelSelect()!.value).toBe('');
+            expect(blank.modelSelect()!.options[0]!.textContent).toBe('Runtime default (claude-opus-5)');
+            expect(blank.posted().execution).not.toHaveProperty('model');
+
+            setSelect(blank.modelSelect()!, 'claude-sonnet-5');
+            expect(blank.api().draft.model).toBe('claude-sonnet-5');
+            expect(blank.posted().execution.model).toBe('claude-sonnet-5');
+
+            setSelect(blank.modelSelect()!, CUSTOM_MODEL);
+            expect(blank.custom()).not.toBeNull();
+            setText(blank.custom()!, 'claude-opus-4-1');
+            expect(blank.api().draft.model).toBe('claude-opus-4-1');
+            expect(blank.posted().execution.model).toBe('claude-opus-4-1');
+
+            setSelect(blank.modelSelect()!, '');
+            expect(blank.custom()).toBeNull();
+            expect(blank.posted().execution).not.toHaveProperty('model');
+        });
+
+        it('a stored id the runtime does not list opens on Custom… with the id kept; reset() goes back to it', () => {
+            const { modelSelect, custom, posted, api, state } = mountWith('claude-opus-4');
+            expect(modelSelect()!.value).toBe(CUSTOM_MODEL);
+            expect(custom()!.value).toBe('claude-opus-4');
+            expect(posted().execution.model).toBe('claude-opus-4');
+
+            setSelect(modelSelect()!, 'claude-opus-5');
+            expect(custom()).toBeNull();
+            api().reset();
+            expect(modelSelect()!.value).toBe(CUSTOM_MODEL);
+            expect(custom()!.value).toBe('claude-opus-4');
+            expect(posted()).toEqual(state.config);
+        });
+
+        it('a runtime that lists no models keeps the typed model field', () => {
+            const { root, modelSelect } = mountWith('');
+            setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!, 'claude-code');
+            expect(modelSelect()).toBeNull();
+            expect(root.querySelector<HTMLInputElement>(`input[name="${F.model}"]`)).not.toBeNull();
+        });
+
+        it('every control still has a label', () => {
+            const { root, modelSelect, custom } = mountWith('claude-opus-4');
+            expect(modelSelect()).not.toBeNull();
+            expect(custom()).not.toBeNull();
+            for (const el of controls(root)) expect(labelOf(el), `${el.tagName} name=${el.getAttribute('name')} has a label`).not.toBe('');
+        });
+    });
 });
+
