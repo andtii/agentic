@@ -171,9 +171,15 @@ export function defineRegistry(options: RegistryOptions = {}) {
 
     const mergedConfig = (p: PluginRecord): Record<string, unknown> => ({ ...configDefaults(p.manifest.config), ...p.config });
 
-    const checkConfig = (manifest: PluginManifest, config: Record<string, unknown>): void => {
-        const checked = validateConfig(manifest.config, { ...configDefaults(manifest.config), ...config });
+    /**
+     * Hold `config` to the manifest's schema, defaults filled in, and answer what to STORE: the owner's own
+     * keys, `undefined` dropped, rebuilt with `Object.fromEntries` so a `__proto__` key stays data — as core does.
+     */
+    const checkConfig = (manifest: PluginManifest, config: Record<string, unknown>): Record<string, unknown> => {
+        const own = Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined));
+        const checked = validateConfig(manifest.config, { ...configDefaults(manifest.config), ...own });
         if (!checked.ok) throw new BadConfigError(manifest.id, checked.errors);
+        return own;
     };
 
     /** The plugin a single-slot kind runs on: the owner's choice while it exists, else the catalogue's first, else the first installed. */
@@ -326,7 +332,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             async register(manifest: PluginManifest, options: RegisterOptions = {}): Promise<PluginView> {
                 assertPluginManifest(manifest);
                 if (catalogue.has(manifest.id)) throw new RegistryError('builtin', `[registry] "${manifest.id}" ships with the build: it cannot be registered over`);
-                if (options.config !== undefined) checkConfig(manifest, options.config);
+                const config = options.config !== undefined ? checkConfig(manifest, options.config) : undefined;
                 const at = now();
                 const declared = declaredScopes(manifest);
                 const existing = ctx.state.plugins[manifest.id];
@@ -344,7 +350,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 const record: PluginRecord = {
                     manifest: ctx.snapshot(manifest),
                     enabled: options.enabled ?? existing?.enabled ?? false,
-                    config: ctx.snapshot(options.config ?? existing?.config ?? {}),
+                    config: ctx.snapshot(config ?? existing?.config ?? {}),
                     grantedPermissions: [...new Set(wanted)],
                     registeredAt: existing?.registeredAt ?? at,
                     updatedAt: at
@@ -398,8 +404,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
             /** Replace the plugin's config. Held to the manifest's schema with its defaults filled in: `bad-config` names every path, and nothing is stored. */
             async configure(id: string, config: Record<string, unknown>): Promise<PluginView> {
                 if (config === null || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('[registry] config must be an object');
-                checkConfig(plugin(ctx, id).manifest, config);
-                const p = patchPlugin(ctx, id, { config: ctx.snapshot(config) });
+                const own = checkConfig(plugin(ctx, id).manifest, config);
+                const p = patchPlugin(ctx, id, { config: ctx.snapshot(own) });
                 await ctx.save();
                 return view(ctx, p);
             },

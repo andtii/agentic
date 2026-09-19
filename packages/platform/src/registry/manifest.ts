@@ -40,7 +40,8 @@ export function assertPluginManifest(value: unknown): asserts value is PluginMan
     for (const p of m.permissions as unknown[]) {
         if (!isRecord(p) || !isPermissionScope(p.scope) || typeof p.reason !== 'string') bad(`permission ${JSON.stringify(p)}`);
     }
-    const secrets = m.secrets ?? [];
+    // Optional, never null: `secrets` is either absent or a list.
+    const secrets = m.secrets === undefined ? [] : m.secrets;
     if (!Array.isArray(secrets)) bad('secrets');
     const scopes = (m.permissions as { scope: PermissionScope }[]).map((p) => p.scope);
     for (const s of secrets as unknown[]) {

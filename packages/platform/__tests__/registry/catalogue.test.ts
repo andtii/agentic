@@ -109,6 +109,12 @@ describe('configure', () => {
 
         const ok = await reg().configure('anthropic-api', { defaultModel: 'opus' });
         expect(ok.config).toEqual({ defaultModel: 'opus' });
+
+        // What is stored is the owner's own keys: an `undefined` is dropped, never kept as a key.
+        await reg().configure('anthropic-api', { defaultModel: undefined });
+        const stored = (await app.storage.load('Registry', KEY))!.state as RegistryState;
+        expect(Object.keys(stored.plugins['anthropic-api']!.config)).toEqual([]);
+        expect((await reg().get('anthropic-api'))!.config).toEqual({ defaultModel: 'fable' });
     });
 });
 
@@ -255,6 +261,8 @@ describe('manifest secrets', () => {
             permissions: [...github.permissions, { scope: 'secret:*', reason: 'tokens' }]
         });
         expect(star.manifest.secrets).toHaveLength(1);
+        // Optional means absent, not null.
+        expect(isRegistryError(await reg().register({ ...github, id: 'gh2', config: { type: 'object' }, secrets: null } as never).catch((e: unknown) => e), 'bad-manifest')).toBe(true);
         // A catalogue that breaks the rule is a build error, not a runtime surprise.
         expect(() => defineRegistry({ catalogue: [{ ...anthropic, permissions: [] }] })).toThrow(/bad plugin manifest/);
         expect(() => defineRegistry({ catalogue: [anthropic, anthropic] })).toThrow(/twice/);
