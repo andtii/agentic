@@ -69,7 +69,8 @@ describe('AC-13: a plugin is disabled', () => {
         expect(await registry.dependents('github')).toEqual(dependents);
         // Beside the build's own plugins (#231), which stay as they were.
         expect((await registry.list()).filter((p) => !p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
-        expect((await registry.list()).filter((p) => p.builtin).every((p) => p.enabled)).toBe(true);
+        // The flat memory plugin ships turned off (#242: isolate-held, own scope only); every other built-in is on.
+        expect((await registry.list()).filter((p) => p.builtin && !p.enabled).map((p) => p.manifest.id)).toEqual(['agentic.memory.flat']);
 
         // New use is refused from now on, with a typed error a caller can show — the gate and the secret alike.
         const refused = await registry.requireEnabled('github').catch((e: unknown) => e);

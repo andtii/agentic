@@ -5,10 +5,13 @@
  * `import()` sends rows in batches and sums the fidelity reports.
  */
 
-import { actorKey, type ImportReport, type MemoryEntry, type MemoryPlugin, type MemoryQuery, type MemoryScope, type MemoryStore, type NewMemoryEntry, type RankedMemory, type WorkspaceId } from '@agentic/core';
+import { actorKey, type ImportReport, type MemoryEntry, type MemoryPlugin, type MemoryQuery, type MemoryScope, type MemoryStore, type NewMemoryEntry, type PluginContext, type RankedMemory, type WorkspaceId } from '@agentic/core';
 import { memoryPlugin } from '@agentic/memory';
 import { actor, type ActorClientWith } from '@sigx/actors';
+import { asPrincipal } from '../auth/agent-token.js';
+import type { MemoryPluginImpl, RetrievalBudget } from '../task/driver.js';
 import { Memory } from './actor.js';
+import { scopeAgent } from './authorize.js';
 
 export type MemoryActorClient = ActorClientWith<typeof Memory>;
 
@@ -76,4 +79,66 @@ export function memoryActorPlugin(options: MemoryActorPluginOptions): MemoryPlug
         version: options.version,
         open: (scope) => actorMemoryStore(client(memoryActorKey(options.workspace, scope)))
     });
+}
+
+/** What the platform hands a plugin's `open`. */
+const PLUGIN_CONTEXT: PluginContext = {
+    now: () => Date.now(),
+    log: (level, message, data) => console[level](`[memory] ${message}`, ...(data ? [data] : []))
+};
+
+/**
+ * The default memory plugin as the platform runs it (#242): the Memory actor of each scope, reached AS the principal
+ * the caller names — so `memoryAuthorize` and the shared-scope ACL decide for the agent, not for whoever opened the
+ * session (MEM-11). Its config's `retrievalLimit` is the session-start budget.
+ */
+export function memoryActorImpl(): MemoryPluginImpl {
+    return (config) => {
+        const retrieval = retrievalFromConfig(config);
+        return {
+            open: (scope, principal) =>
+                memoryActorPlugin({
+                    workspace: principal.workspaceId,
+                    // `actorMemoryStore` only calls methods; a bound client is one minus `with`.
+                    client: (key) => actor(Memory, key).with({ context: asPrincipal(principal) }) as MemoryActorClient
+                }).open(scope, PLUGIN_CONTEXT),
+            ...(retrieval ? { retrieval } : {})
+        };
+    };
+}
+
+/**
+ * A memory plugin with no access control and no durable backend of its own — the flat plugin (#242) — as the platform
+ * runs it: one instance per workspace, held in this isolate's memory. An agent reaches its OWN scope only: a shared
+ * scope needs the ACL the Memory actor enforces, so it is refused (retrieval lists it as skipped). What it holds is
+ * lost when the isolate goes — a plugin for trying the migration path, not for keeping memories.
+ */
+export function isolateMemoryImpl(make: () => MemoryPlugin): MemoryPluginImpl {
+    const byWorkspace = new Map<WorkspaceId, MemoryPlugin>();
+    return (config) => {
+        const retrieval = retrievalFromConfig(config);
+        return {
+            open: (scope, principal) => {
+                if (principal.kind === 'agent' && scopeAgent(scope) !== principal.agentId) {
+                    throw new Error(`[memory] the "${scope}" scope needs the default memory plugin: this one has no access control`);
+                }
+                let plugin = byWorkspace.get(principal.workspaceId);
+                if (!plugin) {
+                    plugin = make();
+                    byWorkspace.set(principal.workspaceId, plugin);
+                }
+                return plugin.open(scope, PLUGIN_CONTEXT);
+            },
+            ...(retrieval ? { retrieval } : {})
+        };
+    };
+}
+
+/** The config key the memory plugins share (#242): entries retrieved at session start (MEM-07); `0` retrieves none. */
+export const RETRIEVAL_LIMIT_KEY = 'retrievalLimit';
+
+/** The retrieval budget a memory plugin's config asks for; nothing when it names none. */
+export function retrievalFromConfig(config: Readonly<Record<string, unknown>>): RetrievalBudget | undefined {
+    const limit = config[RETRIEVAL_LIMIT_KEY];
+    return typeof limit === 'number' && Number.isInteger(limit) && limit >= 0 ? { limit } : undefined;
 }

@@ -43,6 +43,7 @@ import type { InstructionProposal, ProposalOrigin } from '../agent/entries.js';
 import { asPrincipal } from '../auth/agent-token.js';
 import { Memory } from '../memory/actor.js';
 import { actorMemoryStore, memoryActorKey, type MemoryActorClient } from '../memory/plugin.js';
+import type { RegistryGate } from '../registry/types.js';
 
 /**
  * The heading of the injected block. The same literal the Claude Code driver
@@ -152,8 +153,73 @@ export interface LearningPorts {
     readonly park?: ProposalParker;
     /** An independent check of a turn's result; `undefined` leaves the claim a claim. */
     readonly verify?: (input: VerificationInput) => Promise<Verdict | undefined> | Verdict | undefined;
+    /**
+     * The build's memory plugins by id (#242). With a Registry answer on the session spec (`spec.plugins`), the
+     * workspace's ACTIVE memory plugin — built over its config — replaces `memory` and `retrieval`; without one
+     * (no Registry behind the router, a test) `memory` and `retrieval` are used as they are.
+     */
+    readonly memoryPlugins?: Readonly<Record<string, MemoryPluginImpl>>;
+    /** The build's learning plugins by id (#242); the active one replaces `plugin` the same way. */
+    readonly learningPlugins?: Readonly<Record<string, LearningPluginImpl>>;
 }
 
+/** A memory plugin as the platform runs it (#242): a store per scope, reached as a principal, and the session-start budget its config asks for. */
+export interface PlatformMemory {
+    readonly open: MemoryOpener;
+    /** Absent → the ports' own `retrieval`. */
+    readonly retrieval?: RetrievalBudget;
+}
+
+/** A memory plugin's implementation over its Registry config (defaults filled in). */
+export type MemoryPluginImpl = (config: Readonly<Record<string, unknown>>) => PlatformMemory;
+/** A learning plugin's implementation over its Registry config. */
+export type LearningPluginImpl = (config: Readonly<Record<string, unknown>>) => LearningPlugin | LearningPluginFactory;
+
+/** A session's memory: a store to open, or why it has none. */
+export type SessionMemory = PlatformMemory | { readonly off: string };
+/** A session's learning: the plugin, or why it has none (`{}` — nothing configured, as without a plugin port). */
+export interface SessionLearning {
+    readonly plugin?: LearningPlugin | LearningPluginFactory;
+    readonly off?: string;
+}
+
+export const MEMORY_OFF = 'memory is turned off for this workspace';
+export const LEARNING_OFF = 'learning is turned off for this workspace';
+
+function implOf<T>(impls: Readonly<Record<string, T>>, id: string): T | undefined {
+    return Object.prototype.hasOwnProperty.call(impls, id) ? impls[id] : undefined;
+}
+
+/**
+ * Which store a session remembers in (#242): the workspace's active memory plugin as the gate reported it on the
+ * spec. Turned off, or not implemented by this build → `{ off }`, and nothing is retrieved or written; the stored
+ * memories are left as they are. No gate, no memory plugin in it, or no `memoryPlugins` port → the static wiring.
+ */
+export function memoryAccess(ports: Pick<LearningPorts, 'memory' | 'retrieval' | 'memoryPlugins'>, gate?: RegistryGate): SessionMemory {
+    const active = gate?.memory;
+    if (!active || !ports.memoryPlugins) return { open: ports.memory, ...(ports.retrieval ? { retrieval: ports.retrieval } : {}) };
+    if (!active.enabled) return { off: `${MEMORY_OFF}: the "${active.id}" memory plugin is turned off (turn it on at /plugins/${active.id})` };
+    const impl = implOf(ports.memoryPlugins, active.id);
+    if (!impl) return { off: `${MEMORY_OFF}: this deployment has no implementation of the "${active.id}" memory plugin` };
+    const built = impl(active.config);
+    const retrieval = built.retrieval ?? ports.retrieval;
+    return { open: built.open, ...(retrieval ? { retrieval } : {}) };
+}
+
+/**
+ * Which plugin a session learns through (#242), resolved like `memoryAccess`. Learning writes to memory, so memory
+ * turned off turns learning off too.
+ */
+export function learningAccess(ports: Pick<LearningPorts, 'memory' | 'retrieval' | 'memoryPlugins' | 'plugin' | 'learningPlugins'>, gate?: RegistryGate): SessionLearning {
+    const memory = memoryAccess(ports, gate);
+    if ('off' in memory) return { off: `${LEARNING_OFF}: ${memory.off}` };
+    const active = gate?.learning;
+    if (!active || !ports.learningPlugins) return ports.plugin ? { plugin: ports.plugin } : {};
+    if (!active.enabled) return { off: `${LEARNING_OFF}: the "${active.id}" learning plugin is turned off (turn it on at /plugins/${active.id})` };
+    const impl = implOf(ports.learningPlugins, active.id);
+    if (!impl) return { off: `${LEARNING_OFF}: this deployment has no implementation of the "${active.id}" learning plugin` };
+    return { plugin: impl(active.config) };
+}
 const encoder = new TextEncoder();
 
 /** The last text part — the latest user message. */
@@ -220,6 +286,8 @@ export async function retrieveMemories(
     const scopes = memoryScopesOf(config);
     const skipped: SkippedScope[] = [];
     const all: RetrievedMemory[] = [];
+    // A budget of none asks no scope at all.
+    if (query.limit <= 0) return { text: query.text ?? '', scopes, skipped, hits: [], entries: [] };
     for (const scope of scopes) {
         try {
             const ranked = await open(scope, principal).query(query);
@@ -345,6 +413,10 @@ export interface PlatformLearningPortsOptions {
     readonly plugin?: LearningPlugin | LearningPluginFactory;
     readonly retrieval?: RetrievalBudget;
     readonly verify?: LearningPorts['verify'];
+    /** The build's memory plugins by id (#242) — the app's catalogue; the active one is picked per session. */
+    readonly memoryPlugins?: LearningPorts['memoryPlugins'];
+    /** The build's learning plugins by id (#242). */
+    readonly learningPlugins?: LearningPorts['learningPlugins'];
 }
 
 /**
@@ -364,6 +436,8 @@ export function platformLearningPorts(options: PlatformLearningPortsOptions = {}
         },
         ...(options.plugin ? { plugin: options.plugin } : {}),
         ...(options.retrieval ? { retrieval: options.retrieval } : {}),
-        ...(options.verify ? { verify: options.verify } : {})
+        ...(options.verify ? { verify: options.verify } : {}),
+        ...(options.memoryPlugins ? { memoryPlugins: options.memoryPlugins } : {}),
+        ...(options.learningPlugins ? { learningPlugins: options.learningPlugins } : {})
     };
 }
