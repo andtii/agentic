@@ -107,6 +107,11 @@ describe('chat and task tools', () => {
         expect(out).toEqual({ answer: 'blue' });
         await expect(tool('ask_user').run({ question: 'One?', choices: ['only'] }, ctx())).rejects.toBeInstanceOf(SchemaValidationError);
     });
+    it('ask_user passes `pending` through: the question outlives the call (#285)', async () => {
+        const { tool } = byName(fakePorts({ pending: true }));
+        const out = await tool('ask_user').run({ question: 'Which colour?' }, ctx());
+        expect(out).toMatchObject({ status: 'pending', questionId: expect.stringMatching(/^ask:/) });
+    });
     it('task_report reports and acknowledges', async () => {
         const { ports, tool } = byName();
         const out = await tool('task_report').run({ status: 'done', summary: 'Audited.', output: { count: 3 } }, ctx());

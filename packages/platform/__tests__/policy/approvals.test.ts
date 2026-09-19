@@ -123,7 +123,7 @@ describe('policy: ask on destructive prompts, allow on read never does', () => {
         expect((await task('t_1').get()).wait).toEqual({ kind: 'approval', requestId, sessionId: sid });
 
         // The Inbox: one unread approval, deep-linked to the session and the request.
-        expect(await inbox().list()).toMatchObject([{ kind: 'approval', title: `${ADA} asks for approval: rm`, read: false, ref: { kind: 'session', sessionId: sid, requestId } }]);
+        expect(await inbox().list()).toMatchObject([{ kind: 'approval', title: `Ada asks for approval: rm`, read: false, ref: { kind: 'session', sessionId: sid, requestId } }]);
         expect(await inbox().unread()).toBe(1);
         // The chat: a `request` status entry with the pairing ref.
         expect(await statuses()).toEqual(['session-started', `request:approval:${requestId}`]);
@@ -176,7 +176,7 @@ describe('policy: ask on destructive prompts, allow on read never does', () => {
         await awaiting('t_3');
         const evs = await events(t.sessionId!);
         expect(evs.filter((e) => e.type === 'request').map((e) => (e as { toolName?: string }).toolName)).toEqual(['rm']);
-        expect((await inbox().list()).map((n) => n.title)).toEqual([`${ADA} asks for approval: rm`]);
+        expect((await inbox().list()).map((n) => n.title)).toEqual([`Ada asks for approval: rm`]);
         await session(t.sessionId!).respond((await session(t.sessionId!).get()).openRequests[0]!, { type: 'permission', outcome: 'deny', scope: 'once', message: 'not today' });
         await settled('t_3');
         expect(ofKind('approval.resolved')[0]).toMatchObject({ data: { outcome: 'deny', resolvedBy: 'client' } });
@@ -241,7 +241,7 @@ describe('respond from any client, once or for the session', () => {
         const sid = t.sessionId!;
         const requestId = (await session(sid).get()).openRequests[0]!;
         expect((await task('t_6').get()).wait).toEqual({ kind: 'input', requestId, sessionId: sid });
-        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `${ADA} needs input`, body: 'Which one?', ref: { kind: 'session', sessionId: sid, requestId } }]);
+        expect(await inbox().list()).toMatchObject([{ kind: 'input', title: `Ada needs input`, body: 'Which one?', ref: { kind: 'session', sessionId: sid, requestId } }]);
         expect(await statuses()).toContain(`request:input:${requestId}`);
         await session(sid).respond(requestId, { type: 'input', answers: 'the first' });
         await settled('t_6');

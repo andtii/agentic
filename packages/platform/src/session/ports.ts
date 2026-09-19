@@ -8,7 +8,7 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, Principal, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
@@ -118,6 +118,27 @@ export interface CommandSink {
     send(target: { readonly workspaceId: WorkspaceId; readonly machineId: MachineId; readonly sessionId: SessionId }, command: WireCommand): Promise<void>;
 }
 
+/**
+ * A late answer to a detached `ask_user` (#285): the question outlived its tool call and the session is closed,
+ * so the asker is started again with the answer — `createAnswerFollowUp` in the app.
+ */
+export interface AnswerFollowUp {
+    readonly workspaceId: WorkspaceId;
+    /** The session that asked — closed by now; its `ref` is what a resume continues. */
+    readonly sessionId: SessionId;
+    readonly agentId: AgentId;
+    /** Detached asks only happen in a chat: that is where the answer is posted and the asker started again. */
+    readonly chatId: ChatId;
+    readonly taskId?: TaskId;
+    readonly environmentId?: EnvironmentId;
+    readonly requestId: string;
+    readonly question: string;
+    readonly choices?: readonly string[];
+    /** The answer as the model reads it. */
+    readonly answer: string;
+    readonly answeredBy: Principal;
+}
+
 export interface SessionPorts {
     readonly factory: SessionFactory;
     /** Required for the daemon path; without it a remote command is refused as `unsupported`. */
@@ -138,6 +159,12 @@ export interface SessionPorts {
      * ref, and its `request-resolved` marks that notification read (OPS-02). Best effort, one-way.
      */
     readonly inbox?: () => AnyActorDefinition;
+    /**
+     * Start the asker again with a late answer (#285): called once per detached `ask_user` answered, when the
+     * session is closed — at the answer, or at the close when the answer came first. Without it the answer is
+     * recorded (and shown in the chat and the Inbox) but nobody is started. A throw is said in the chat.
+     */
+    readonly answered?: (followUp: AnswerFollowUp) => Promise<void>;
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }
