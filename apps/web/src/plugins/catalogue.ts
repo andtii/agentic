@@ -18,6 +18,9 @@
  *   learning plugin, over its config, is what each session remembers in and
  *   learns through (#242); turned off, a session retrieves, writes and learns
  *   nothing.
+ * - `channelCatalogue` → `defineInbox({ channelPlugins })`: the notification
+ *   plugins this build implements, opened per notification while the
+ *   workspace has them on (#244). Web Push ships off: it needs keys first.
  *
  * Both memory plugins are durable: the default one is the Memory actor of each
  * scope, the flat one the FlatMemory actor of each scope (#281), and a shared
@@ -25,14 +28,24 @@
  * not active — the default stays the workspace's memory until the owner makes
  * another one active (#243 moves the memories with it).
  */
-import type { AnthropicApiRuntimeOptions, CatalogueEntry, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
-import { anthropicApiRuntime, flatMemoryActorImpl, memoryActorImpl } from '@agentic/platform';
+import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
+import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
-import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
+import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, claudeCodeQuotaPlugin } from '@agentic/runtimes';
 
-/** The manifests the Registry lists for every workspace — enabled, with their declared scopes granted, until the owner changes them. */
-export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, claudeCodePlugin, memoryDefaultPlugin, memoryFlatPlugin, learningDefaultPlugin];
+/** The manifests the Registry lists for every workspace — enabled (Web Push excepted), with their declared scopes granted, until the owner changes them. */
+export const pluginCatalogue: readonly CatalogueEntry[] = [
+    anthropicApiPlugin,
+    claudeCodePlugin,
+    memoryDefaultPlugin,
+    memoryFlatPlugin,
+    learningDefaultPlugin,
+    // Off until the owner sets a contact and generates keys on its page (#244).
+    { manifest: webPushPlugin, enabledByDefault: false },
+    // What the daemon reads each Claude Code account's plan limits with (#261); the daemon runs it, the Registry lists it.
+    claudeCodeQuotaPlugin
+];
 
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
@@ -62,4 +75,9 @@ export const learningCatalogue: Readonly<Record<string, LearningPluginImpl>> = {
                 contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) })
             });
     }
+};
+
+/** Notification plugin id → its channel. The ids are the notification plugins' ids. */
+export const channelCatalogue: ChannelCatalogue = {
+    [WEB_PUSH_PLUGIN_ID]: webPushChannelPlugin()
 };

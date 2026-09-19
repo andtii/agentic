@@ -51,6 +51,16 @@ const report = await driver.doctor(environments);         // ok: false when two 
 - **Platform tools**: the names in `OpenSpec.tools` are served as client tools with the platform's own name, description and schema; `execute` calls `callTool`, which the daemon sends as `tool.call`. A name the daemon has no definition for is not served and is listed as unsupported.
 - **Auth** (`readProfileAuth`): `.credentials.json` in the config dir — a refresh token is `ok`, an expired access token without one `expired`, none `missing`; identity from `.claude.json`. macOS keeps credentials in the Keychain, so it reports `unknown` there.
 
+### Usage limits: `claudeCodeQuota` (#269)
+
+`claudeCodeQuota()` is the `quota` source the daemon runs per Claude Code environment (#261). It **probes** an idle account for what `claude` → `/usage` shows. It uses the SDK's experimental usage call on a query that is never prompted, so there is no model call and no cost. Measured 2026-09-19 on three Max profiles and one signed-out profile: 0.25–0.9 s, `total_cost_usd` 0, no messages, no leftover process. It also maps each streamed `rate_limit_event` to a one-window update (`fromSignal`).
+
+Scales differ:
+- the probe reports utilization as 0..100
+- the stream reports it as a 0..1 fraction, taken from the `anthropic-ratelimit-unified-*` response headers
+
+Both are normalized to 0..1. Only normalized snapshots leave the machine. Recorded fixtures: `__tests__/claude-code/fixtures/usage-*.json`.
+
 ## Platform tools
 
 `defineTool`s over abstract ports (`packages/runtimes/src/tools/ports.ts`), so they run and test without actors. Names are provider tool names (`[A-Za-z0-9_-]`):
@@ -64,8 +74,9 @@ const report = await driver.doctor(environments);         // ok: false when two 
 | `chat_file_read` | `ChatFilesPort.read` (`PlatformPorts.files`, #203): `{ uri }` an `agentic-file:` URI; a text file returns `{ name, mediaType, bytes, text }` (`truncated` + a note past 256 KB), any other file a `note` naming it as binary (an image: attached to the turn when it fits); no `files` port fails the call | `readOnly`, `idempotent` |
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` (the platform parks the Task `waiting {input}`) | |
+| `usage_limits` | `UsagePort.limits` (`PlatformPorts.usage`, #272): `{ machineId?, runtime? }` → core `UsageLimits`, every account's latest quota snapshot and its age; no `usage` port fails the call | `readOnly`, `idempotent` |
 
-`platformTools(ports)` gives all seven; `grantedPlatformTools(ports, grants)` the ones a config grants.
+`platformTools(ports)` gives all eight; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
 ## Plugin manifests (`src/plugins.ts`, #228)
 

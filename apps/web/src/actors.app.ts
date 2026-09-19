@@ -83,6 +83,7 @@ import {
     userPrincipal,
     type MachineActor,
     type NotificationChannel,
+    type ChannelCatalogue,
     type CatalogueEntry,
     type RoutingActor,
     type RegistryGate,
@@ -105,7 +106,7 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
-import { learningCatalogue, memoryCatalogue, pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
+import { channelCatalogue, learningCatalogue, memoryCatalogue, pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 
@@ -143,7 +144,10 @@ export interface PlatformPorts {
     readonly catalogue?: readonly CatalogueEntry[];
     /** Where a schedule firing goes. Default: `scheduleTrigger` over the Machines (environment probe) and the router (`Routing.run`). */
     readonly trigger?: TriggerPort;
+    /** Channels every notification goes through whatever the Registry says — tests. The workspace's own are `channelPlugins`. */
     readonly channels: readonly NotificationChannel[];
+    /** Notification plugin id → implementation, opened per notification when that plugin is on (#244). Default: `channelCatalogue` (`src/plugins/catalogue.ts`). */
+    readonly channelPlugins?: ChannelCatalogue;
     /** Platform tools a daemon session calls back through `tool.call`. Default: `createToolCallPort` over the actors. */
     readonly tools?: ToolCallPort;
     /** Where `Workspace.exportAll` writes. Default: the `ARTIFACTS` R2 bucket. */
@@ -179,7 +183,7 @@ export const defaultPorts: PlatformPorts = {
         if (!secrets.workspaceKek) throw new RegistryError('no-kek', '[actors.app] WORKSPACE_KEK is not set: secrets cannot be stored (wrangler secret put WORKSPACE_KEK)');
         return importWorkspaceKek(secrets.workspaceKek);
     },
-    // Web Push lands with VAPID keys (architecture §3).
+    // Web Push is a notification plugin (#244): `channelPlugins`, opened per workspace while its plugin is on.
     channels: []
 };
 
@@ -189,7 +193,6 @@ export const daemonSockets = createDaemonSocketRegistry();
 /** Every platform actor this deployment hosts. */
 export function platformActors(ports: PlatformPorts = defaultPorts): readonly AnyActorDefinition[] {
     // Session, Machine and Routing reference each other: every cross-reference is a thunk resolved at call time.
-    const Inbox = defineInbox({ channels: ports.channels });
     // Chat attachments (#207): one store, passed everywhere it is used (architecture §7, "Wiring the file store").
     const files = ports.files ?? defaultPorts.files;
     const withFiles = files ? { files } : {};
@@ -197,13 +200,15 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const kek = ports.kek ?? defaultPorts.kek;
     const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue });
     const registry = () => Registry;
+    // Notification channels (#244): the static ones, then every enabled notification plugin this build implements — one Registry hop per notification.
+    const Inbox = defineInbox({ channels: ports.channels, channelPlugins: ports.channelPlugins ?? channelCatalogue, registry });
     // Memory and learning (#242): the workspace's active plugin of each, from the gate the router recorded on the spec. The
     // tools reach the same store the session retrieves from, on both paths.
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
     const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, memory, ...withFiles });
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles });
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, registry, runtimes, ...withFiles }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
         learning,
@@ -215,7 +220,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         socket: daemonSockets.port,
         sessions: () => Session,
         routing: () => Routing,
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, memory, ...withFiles })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.

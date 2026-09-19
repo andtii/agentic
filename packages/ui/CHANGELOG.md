@@ -4,6 +4,12 @@ All notable changes to `@agentic/ui` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Provider limits (#270, part of #261; OPS-07, PLG-09): new `ag-quota` and `ag-quota-panel` scopes with recipes, and a new kit modifier `stale`.
+  - `QuotaMeter` (`AgQuota`): label, a status-coloured `progressbar`, "76% used", and the reset time in the viewer's zone.
+  - `QuotaPanel` (`AgQuotaPanel`): one snapshot, with title, plan, age and windows. `compact` shows the tightest window; it goes stale past `QUOTA_STALE_MS`. Not-reported and not-yet-reported get explicit lines.
+  - `EnvironmentCard` has an optional `quota` prop, rendered in a new `quota` part.
+  - Helpers `resetsText`, `quotaUsedText`, `quotaPercent`, `quotaTone`, `ageText`, `isQuotaStale`.
+  - Size budget raised to 78 KB.
 - Plugin setup kit (#232; new `ag-plugin-card`, `ag-secret` and `ag-map-field` scopes, `AgPluginCard` / `AgSecret` / `AgMapField`).
   - `SchemaForm` draws a plugin's config form from its core `ConfigSchema`: string → `TextField` (`format: 'uri'` → a URL input), `enum` → `SelectField`, number / integer → `NumberField` with `minimum` / `maximum`, boolean → `SwitchField`, string list → `MultiSelectField` (`allowCustom` unless `items.enum`), string map → the new `MapField` (name / value rows). Labels come from `title`, else the key in words (`schemaLabel`); a schema with no drawable property renders "Nothing to configure." and no buttons. It follows the `AgentForm` pattern — a draft, errors from core `validateConfig` shown after the first attempt (`Field.Error`, `role="alert"`), `submit` / `invalid` events, and `reset()`, `submit()`, `errors()`, `dirty()`, `draft` through `expose()`; errors no field can carry (the whole config, a key the schema does not draw, the write's own `error`) go in the `summary` alert. `value` is the stored config: a changed `value` is taken up while the draft is clean and never over an edit.
   - The config it emits is SPARSE (`fromSchemaDraft`): a property left at its manifest default is not written, so a stored config keeps following the manifest; a key the stored config already carried stays, as does anything the form cannot draw (an unknown property kind, an extra key of an open schema). Validation reads over `configDefaults`, as the platform does. `schemaFields`, `toSchemaDraft`, `fromSchemaDraft`, `validateSchemaDraft` are exported and pure.

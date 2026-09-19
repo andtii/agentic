@@ -20,10 +20,20 @@ export {
     initialInboxState,
     reduceInbox,
     INBOX_CAP,
+    PLUGIN_CHANNELS,
     type InboxEntry,
     type InboxOptions,
     type InboxState,
     type ListOptions
 } from './inbox.js';
 export { webPushChannel, vapidSigner, WEB_PUSH_CHANNEL, type VapidKeys, type VapidSigner, type WebPushOptions } from './web-push.js';
+export {
+    webPushPlugin,
+    webPushChannelPlugin,
+    WEB_PUSH_PLUGIN_ID,
+    VAPID_PRIVATE_KEY_SECRET,
+    type ChannelCatalogue,
+    type ChannelPlugin,
+    type ChannelPluginContext
+} from './plugins.js';
 export { toBase64Url, fromBase64Url } from './encoding.js';

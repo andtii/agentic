@@ -14,4 +14,7 @@ export type { ClaudeCodeReportInput } from './capabilities.js';
 export { claudeCodeCapabilityReport } from './capabilities.js';
 export type { BridgedTools } from './tools.js';
 export { bridgedPlatformTools } from './tools.js';
+export type { ClaudeCodeQuotaOptions, QuotaQueryFn } from './quota.js';
+export { claudeCodeQuota, quotaFromUsage, quotaFromRateLimit, QUOTA_WARNING_AT } from './quota.js';
+export { accountEnv } from './env.js';
 export { claudeCodeSystemPrompt, PLATFORM_MEMORY_HEADING, PLATFORM_MEMORY_NOTE } from './system.js';

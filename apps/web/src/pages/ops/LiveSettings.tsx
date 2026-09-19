@@ -19,6 +19,7 @@ import { formatAge } from '../../mock/workspace';
 import { useEnvironmentDirectory } from './environments';
 import { opStatus, settingsPatch, timeZoneOptions, toDraft, validateDraft, type SettingsDraft } from './live';
 import { OpsPage } from './OpsPage';
+import { PushDevices } from '../../push/PushDevices';
 
 /** The one form id the topbar's Save submits. */
 export const SETTINGS_FORM = 'settings-form';
@@ -165,6 +166,7 @@ export const LiveSettings = component(() => {
                                 </tr>
                             </tbody>
                         </table>
+                        <PushDevices />
                     </Section>
 
                     <Section title="API keys" hint="Secrets are sealed under the workspace key; only their names are ever shown. Runtime logins never leave their machine.">
