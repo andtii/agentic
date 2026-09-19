@@ -156,8 +156,8 @@ describe('isolation (EXE-04/05)', () => {
         await driver.dispose();
     });
 
-    it('leaves the default home (and the user\'s own gh login) to an environment without a profile', () => {
-        expect(copilotAccountEnv({}, { COPILOT_HOME: 'x', GH_TOKEN: 't' })).toEqual({ COPILOT_HOME: undefined });
+    it('leaves the default home to an environment without a profile, still without the parent\'s tokens', () => {
+        expect(copilotAccountEnv({}, { COPILOT_HOME: 'x', GH_TOKEN: 't', PATH: 'p' })).toEqual({ COPILOT_HOME: undefined, GH_TOKEN: undefined });
     });
 
     it('starts one runtime per environment and reuses it', async () => {
