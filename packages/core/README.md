@@ -14,7 +14,7 @@ Edge-safe platform contracts. Types plus a few pure helpers, zero dependencies, 
 | `memory` | `MemoryKind`, `MemoryEntry`, `NewMemoryEntry`, `MemoryQuery`, `RankedMemory`, `MemoryScope`, `MemoryStore`, `MemoryPlugin`, `ImportReport`, `PluginContext` |
 | `learning` | `LearningPlugin`, `Proposal`, `Correction`, `TaskOutcome` |
 | `principal` | `Principal` (user, machine, agent, external), `Scope`, `sameWorkspace`, `hasScope` |
-| `daemon` | `DaemonFrame<F, R>`, `PlatformFrame<C>`, `Cursor`, `OpenSpec`, `DAEMON_PROTOCOL_VERSION` — generic over the `@sigx/ai-agent/wire` types so this package needs no dependency |
+| `daemon` | `DaemonFrame<F, R>`, `PlatformFrame<C>`, `Cursor`, `OpenSpec` (with its MCP `connectors`, secret names only), `CONNECTOR_CREDENTIALS_TOOL` + `ConnectorCredentials` (the daemon's own `tool.call` for their values, #280), `DAEMON_PROTOCOL_VERSION` — generic over the `@sigx/ai-agent/wire` types so this package needs no dependency |
 | `runtime` | `RuntimeDriver<S, P>` (`inspect` / `open` / `doctor`), `LocalEnvironment`, `EnvironmentInspection`, `RuntimeOpenContext`, `PlatformToolCaller`, `DoctorReport`, `environmentVerdict`, `toEnvironmentDescriptor` — the seam between the daemon and a runtime driver, generic over the session and policy types |
 | `usage` | `Usage`, `UsageRow`, `addUsage`, `ZERO_USAGE` |
 | `quota` | `QuotaWindow`, `QuotaSnapshot`, `QuotaUnit`, `QuotaStatus`, `QuotaSignal`, the `QuotaSource` seam (plugin kind `quota`), `mergeQuota`, `tightestWindow` — provider limits per account, not Ledger consumption |
