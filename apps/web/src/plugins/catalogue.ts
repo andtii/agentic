@@ -16,7 +16,12 @@
  *
  * Memory and learning are still wired statically (`platformLearningPorts`);
  * #242 resolves them through the active plugin.
+ *
+ * The A2A server (#245) is off until the owner turns it on: its implementation
+ * is the Worker's `/a2a` mount (`src/a2a/mount.ts`), which asks the Registry on
+ * every request.
  */
+import { a2aServerPlugin } from '@agentic/a2a';
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, RuntimeCatalogue } from '@agentic/platform';
 import { anthropicApiRuntime } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
@@ -24,7 +29,7 @@ import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 
 /** The manifests the Registry lists for every workspace — enabled, with their declared scopes granted, until the owner changes them. */
-export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, claudeCodePlugin, memoryDefaultPlugin, memoryFlatPlugin, learningDefaultPlugin];
+export const pluginCatalogue: readonly CatalogueEntry[] = [anthropicApiPlugin, claudeCodePlugin, memoryDefaultPlugin, memoryFlatPlugin, learningDefaultPlugin, { manifest: a2aServerPlugin, enabledByDefault: false }];
 
 /** Runtime id → where its sessions run. The ids are the runtime plugins' ids. */
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {

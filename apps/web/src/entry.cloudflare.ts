@@ -3,7 +3,7 @@
 // this code — wrangler's `assets` config serves matching files first.
 // What is left, in order:
 //
-//     auth + file routes  ->  daemon socket + actor mount + actor sockets
+//     auth + A2A + file routes  ->  daemon socket + actor mount + actor sockets
 //                  ->  server functions  ->  document render
 //
 // all of it inside ONE `runWithHost` scope — the Worker's own host (#137, #172), booted from `env`
@@ -13,6 +13,7 @@ import { template, assets } from 'virtual:sigx-app';
 import { handleServerFnRequest, matchesServerFn } from '@sigx/server/server';
 import { serverFns, serverFnBase } from 'virtual:sigx-server-fns';
 import { createApp } from './entry-server';
+import { createA2aMount } from './a2a/mount';
 import { createActorHost, createActorWorker, pairingWiring, platformFiles, platformRegistry, type PlatformEnv } from './actors.app';
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { createAuthMount, githubEnabled } from './auth/mount';
@@ -58,6 +59,12 @@ const authRoute = createAuthMount({ pairing: pairingWiring(), actors: platformRe
 /** Chat attachments (#207): `POST /files/chats/:chatId` and `GET /files/chats/:chatId/:fileId` over R2, decided by the Chat actor. */
 const filesRoute = createFilesMount({ store: platformFiles });
 
+/**
+ * The A2A server (#245): `/.well-known/agent-card.json` and `/_agentic/a2a/*`, bearer = an access token of the OAuth
+ * server above; answers only in a workspace that turned the `agentic.a2a.server` plugin on (404 otherwise).
+ */
+const a2aRoute = createA2aMount({ actors: platformRegistry() });
+
 export default {
     // Every route runs under the Worker's own host scope (#137, #172): the auth routes hop
     // to the objects too (`pairingWiring`, the token lookup, the MCP mount), and an unscoped
@@ -69,7 +76,7 @@ export default {
             // The preview / local-only dev login (#35, #143): `GET` (the form) and `POST` (JSON or the form's
             // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
             // The chat file routes (#207) hop to the Chat actor as the caller, so they boot the host too.
-            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
             if (route) {
                 // The auth routes hop (`pairingWiring`, the token lookup): the Worker host must exist before
                 // one runs, and on a cold isolate nothing else has booted it yet (#182).

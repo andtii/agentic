@@ -19,6 +19,7 @@
     "test:acceptance": "tsc -p __tests__/acceptance && vitest run --config vitest.acceptance.config.ts && vitest run --root ../.. apps/web/__tests__/acceptance"
   },
   "dependencies": {
+    "@agentic/a2a": "workspace:*",
     "@agentic/core": "workspace:*",
     "@agentic/learning": "workspace:*",
     "@agentic/mcp": "workspace:*",
