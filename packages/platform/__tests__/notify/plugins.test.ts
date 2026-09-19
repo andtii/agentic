@@ -116,6 +116,23 @@ describe('Inbox — notification channels from enabled plugins', () => {
     });
 });
 
+describe('Inbox.unsubscribe — many at once', () => {
+    it('drops every endpoint given in one save, and answers how many it had', async () => {
+        const Inbox = defineInbox();
+        app = testActorApp([Inbox]);
+        await app.start();
+        const inbox = app.as(owner).actor(Inbox, inboxKey(WS));
+        for (const n of [1, 2, 3]) await inbox.subscribe({ ...SUB, endpoint: `https://push.example/sub/${n}` });
+        const saves = app.saves.filter((r) => r.type === 'Inbox').length;
+        expect(await inbox.unsubscribe(['https://push.example/sub/1', 'https://push.example/sub/3', 'https://push.example/gone'])).toBe(2);
+        expect(app.saves.filter((r) => r.type === 'Inbox').length - saves).toBe(1);
+        expect((await inbox.subscriptions()).map((s) => s.endpoint)).toEqual(['https://push.example/sub/2']);
+        // One endpoint still answers a boolean, as before.
+        expect(await inbox.unsubscribe('https://push.example/sub/2')).toBe(true);
+        expect(await inbox.unsubscribe('https://push.example/sub/2')).toBe(false);
+    });
+});
+
 describe('Inbox — a Registry that cannot be asked', () => {
     it('records a failed attempt instead of throwing, and keeps the static channels', async () => {
         const delivered: string[] = [];
@@ -190,9 +207,30 @@ describe('webPushChannelPlugin', () => {
         const noConfig = await webPushChannelPlugin({ fetch }).open({ config: {}, secret: async () => 'k' }).deliver(notification, target());
         expect(noConfig).toMatchObject({ ok: false });
         expect(noConfig.error).toMatch(/a contact and a public key/);
-        const noKey = await webPushChannelPlugin({ fetch }).open({ config: { subject: 'mailto:me@example.com', publicKey: 'BPUB' }, secret: async () => undefined }).deliver(notification, target());
+        const { publicKey } = await vapidPair();
+        const noKey = await webPushChannelPlugin({ fetch }).open({ config: { subject: 'mailto:me@example.com', publicKey }, secret: async () => undefined }).deliver(notification, target());
         expect(noKey.error).toMatch(/no vapid-private-key/);
         expect(sent).toEqual([]);
+    });
+
+    it('a contact that is not mailto:/https:, or a public key that is not a P-256 point, is reported before anything is signed or sent', async () => {
+        const keys = await vapidPair();
+        let opened = 0;
+        const sent: string[] = [];
+        const fetch = (async (url: string) => { sent.push(url); return new Response(null, { status: 201 }); }) as typeof globalThis.fetch;
+        const deliver = (config: Record<string, unknown>) =>
+            webPushChannelPlugin({ fetch }).open({ config, secret: async () => { opened += 1; return keys.privateKey; } }).deliver(notification, target());
+
+        const ftp = await deliver({ subject: 'ftp://me.example', publicKey: keys.publicKey });
+        expect(ftp).toMatchObject({ ok: false });
+        expect(ftp.error).toMatch(/contact must be a mailto: or https: address/);
+        const short = await deliver({ subject: 'mailto:me@example.com', publicKey: 'BPUB' });
+        expect(short.error).toMatch(/public key is not a base64url P-256 point/);
+        expect(opened).toBe(0);
+        expect(sent).toEqual([]);
+
+        // Surrounding whitespace is not a mistake worth failing a push over.
+        expect(await deliver({ subject: '  mailto:me@example.com ', publicKey: ` ${keys.publicKey} ` })).toEqual({ ok: true });
     });
 
     it('signs each push with the configured key pair', async () => {

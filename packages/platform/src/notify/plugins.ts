@@ -7,6 +7,7 @@
  */
 
 import type { PluginManifest } from '@agentic/core';
+import { fromBase64Url } from './encoding.js';
 import type { DeliveryResult, DeliveryTarget, InboxNotification, NotificationChannel } from './types.js';
 import { WEB_PUSH_CHANNEL, webPushChannel, type WebPushOptions } from './web-push.js';
 
@@ -72,7 +73,25 @@ export const webPushPlugin: PluginManifest = {
     compat: { platform: '*', core: '*' }
 };
 
-const text = (value: unknown): string => (typeof value === 'string' ? value : '');
+const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+/** RFC 8292 §2.1: the contact is a `mailto:` or an `https:` URI. */
+function contactProblem(subject: string): string | undefined {
+    try {
+        const url = new URL(subject);
+        if (url.protocol === 'mailto:' || url.protocol === 'https:') return undefined;
+    } catch {
+        // not a URL at all — same answer
+    }
+    return 'its contact must be a mailto: or https: address';
+}
+
+/** What `vapidSigner` needs: base64url of a 65-byte uncompressed P-256 point. */
+function publicKeyProblem(publicKey: string): string | undefined {
+    if (!/^[A-Za-z0-9_-]+$/.test(publicKey)) return 'its public key is not a base64url P-256 point';
+    const point = fromBase64Url(publicKey);
+    return point.length === 65 && point[0] === 4 ? undefined : 'its public key is not a base64url P-256 point';
+}
 
 /**
  * Web Push as a `ChannelPlugin`: `webPushChannel` over the plugin's config and
@@ -91,6 +110,9 @@ export function webPushChannelPlugin(options: Omit<WebPushOptions, 'vapid'> = {}
                     const publicKey = text(config.publicKey);
                     const missing = [!subject ? 'a contact' : '', !publicKey ? 'a public key' : ''].filter(Boolean);
                     if (missing.length > 0) return { ok: false, error: `web push is not set up: it needs ${missing.join(' and ')} (/plugins/${WEB_PUSH_PLUGIN_ID})` };
+                    // Checked before the key is opened or anything signed: a clear attempt beats a signing or push-service error.
+                    const problem = contactProblem(subject) ?? publicKeyProblem(publicKey);
+                    if (problem) return { ok: false, error: `web push is misconfigured: ${problem} (/plugins/${WEB_PUSH_PLUGIN_ID})` };
                     const privateKey = await secret(VAPID_PRIVATE_KEY_SECRET);
                     if (!privateKey) return { ok: false, error: `web push is not set up: no ${VAPID_PRIVATE_KEY_SECRET} (/plugins/${WEB_PUSH_PLUGIN_ID})` };
                     return webPushChannel({ ...options, vapid: { subject, publicKey, privateKey } }).deliver(notification, target);

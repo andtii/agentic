@@ -265,12 +265,18 @@ export function defineInbox(options: InboxOptions = {}) {
                     await ctx.save();
                 },
 
-                async unsubscribe(endpoint: string): Promise<boolean> {
-                    const had = ctx.state.subscriptions.some((s) => s.endpoint === endpoint);
-                    if (!had) return false;
-                    reduceInbox(ctx.state, { type: 'unsubscribe', endpoints: [endpoint] }, cap);
-                    await ctx.save();
-                    return true;
+                /**
+                 * Forget one endpoint (answers whether it was there) or many in one save (answers how many were) —
+                 * what replacing a Web Push key pair calls with every subscription made under the old key.
+                 */
+                async unsubscribe(endpoints: string | readonly string[]): Promise<boolean | number> {
+                    const wanted = typeof endpoints === 'string' ? [endpoints] : endpoints;
+                    const had = ctx.state.subscriptions.filter((s) => wanted.includes(s.endpoint)).length;
+                    if (had > 0) {
+                        reduceInbox(ctx.state, { type: 'unsubscribe', endpoints: wanted }, cap);
+                        await ctx.save();
+                    }
+                    return typeof endpoints === 'string' ? had > 0 : had;
                 },
 
                 /** The browsers push goes to. A live read: Settings → Notifications lists them. */

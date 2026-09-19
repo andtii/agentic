@@ -46,7 +46,9 @@ export const GenerateKeys = component<GenerateKeysProps>(({ props }) => {
             let dropped = 0;
             if (replacing) {
                 const inbox = actor(props.defs.Inbox, inboxKeyOf(props.workspaceId));
-                for (const sub of await inbox.subscriptions()) if (await inbox.unsubscribe(sub.endpoint)) dropped += 1;
+                // One call, one save, however many browsers there were.
+                const endpoints = (await inbox.subscriptions()).map((s) => s.endpoint);
+                if (endpoints.length > 0) dropped = Number(await inbox.unsubscribe(endpoints));
             }
             st.dropped = dropped;
             st.done = true;
