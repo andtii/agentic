@@ -32,8 +32,10 @@
  * parked `waiting {environment-offline}` — is handed to `Routing.run`.
  * Delegation (#39): the same tool ports serve `delegate` on both paths; a
  * session's `request` reaches the Inbox through the Session (#40). Memory and
- * learning (#41) run through `platformLearningPorts` over the default
- * `@agentic/learning` plugin. Retention (#100, `docs/retention.md`): the
+ * learning (#41) run through `platformLearningPorts`, and each session uses
+ * the workspace's ACTIVE memory and learning plugin over its config (#242,
+ * `memoryCatalogue` / `learningCatalogue`) — the same store its tools reach,
+ * on both paths. Retention (#100, `docs/retention.md`): the
  * Workspace exports to the `ARTIFACTS` bucket and purges each record
  * through its own object (`src/retention.ts`); the Registry seals secrets
  * under `WORKSPACE_KEK`. Chat attachments (#207): one `ChatFileStore` on R2
@@ -71,6 +73,7 @@ import {
     ledgerRecorder,
     machineKey,
     machinePrincipal,
+    memoryAccess,
     platformLearningPorts,
     principalCodec,
     routingKey,
@@ -81,7 +84,9 @@ import {
     type NotificationChannel,
     type CatalogueEntry,
     type RoutingActor,
+    type RegistryGate,
     type RuntimeCatalogue,
+    type SessionMemory,
     type SessionFactory,
     type ToolCallPort,
     type TriggerPort,
@@ -89,7 +94,7 @@ import {
     type ArtifactSink,
     type KekSource
 } from '@agentic/platform';
-import { learningPlugin } from '@agentic/learning';
+import { learningDefaultPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
 import { defineActorApp, type ActorApp } from '@sigx/actors/host';
 import { createFetchHandler } from '@sigx/actors/server';
@@ -99,7 +104,7 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
-import { pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
+import { learningCatalogue, memoryCatalogue, pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 
@@ -191,12 +196,16 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const kek = ports.kek ?? defaultPorts.kek;
     const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue });
     const registry = () => Registry;
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, ...withFiles });
+    // Memory and learning (#242): the workspace's active plugin of each, from the gate the router recorded on the spec. The
+    // tools reach the same store the session retrieves from, on both paths.
+    const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
+    const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, memory, ...withFiles });
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         usage: ledgerRecorder(),
-        learning: platformLearningPorts({ plugin: (c) => learningPlugin({ contextFor: () => ({ ...(c.objective ? { objective: c.objective } : {}), ...(c.tags ? { tags: c.tags } : {}) }) }) }),
+        learning,
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
         inbox: () => Inbox
     });
@@ -205,7 +214,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         socket: daemonSockets.port,
         sessions: () => Session,
         routing: () => Routing,
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, ...withFiles })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, memory, ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.

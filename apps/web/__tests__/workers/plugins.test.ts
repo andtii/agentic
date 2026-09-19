@@ -38,13 +38,13 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
         const cookie = await signIn(userId);
         const registry = registryOverHttp(WS, cookie);
 
-        // A fresh workspace: every plugin of the build as it ships — the A2A server off, the rest on — and no key yet.
+        // A fresh workspace: every plugin of the build as it ships — on but the flat memory plugin (#242) and the A2A server (#245) — and no key yet.
         const fresh = await registry.overview();
         expect(fresh.plugins.map((p) => [p.manifest.id, p.enabled, p.builtin])).toEqual([
             ['agentic.a2a.server', false, true],
             ['agentic.learning.default', true, true],
             ['agentic.memory.default', true, true],
-            ['agentic.memory.flat', true, true],
+            ['agentic.memory.flat', false, true],
             [ANTHROPIC_API_PLUGIN_ID, true, true],
             ['claude-code', true, true]
         ]);

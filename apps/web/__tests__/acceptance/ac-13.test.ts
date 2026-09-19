@@ -16,7 +16,6 @@
  */
 import type { AgentId, PluginManifest, TaskId } from '@agentic/core';
 import { AgentActor, agentKey, isPluginDisabledError, isRegistryError, registryKey, type RegistryActor, type ScheduleActor } from '@agentic/platform';
-import { pluginCatalogue } from '../../src/plugins/catalogue';
 import { startHost, type AcceptanceHost } from './host';
 
 const github: PluginManifest = {
@@ -70,8 +69,8 @@ describe('AC-13: a plugin is disabled', () => {
         expect(await registry.dependents('github')).toEqual(dependents);
         // Beside the build's own plugins (#231), which stay as they were.
         expect((await registry.list()).filter((p) => !p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([['github', false]]);
-        const shipped = new Map(pluginCatalogue.map((e) => ('manifest' in e ? [e.manifest.id, e.enabledByDefault !== false] : [e.id, true])));
-        expect((await registry.list()).filter((p) => p.builtin).map((p) => [p.manifest.id, p.enabled])).toEqual([...shipped].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+        // The flat memory plugin (#242: isolate-held, own scope only) and the A2A server (#245) ship turned off; every other built-in is on.
+        expect((await registry.list()).filter((p) => p.builtin && !p.enabled).map((p) => p.manifest.id)).toEqual(['agentic.a2a.server', 'agentic.memory.flat']);
 
         // New use is refused from now on, with a typed error a caller can show — the gate and the secret alike.
         const refused = await registry.requireEnabled('github').catch((e: unknown) => e);
