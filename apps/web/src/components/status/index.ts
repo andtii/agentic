@@ -5,7 +5,7 @@
  * connection strip. The named cards themselves are the design track's
  * (`@agentic/ui` `kit/states`); nothing here duplicates them.
  */
-export { failureOf, taskFailureKind, authUnavailable, isResumeWait, INTERRUPTED_CODE } from './failure';
+export { failureOf, taskFailureKind, authUnavailable, isResumeWait, pluginOfFailure, pluginLink, INTERRUPTED_CODE } from './failure';
 export type { FailureSignals, FailureState, ClientConnection, SessionSignalState } from './failure';
 export { clientConnection, setClientConnection, watchTransport, installClientConnection } from './client';
 export { FailureNotice, failureAction, UNCERTAIN_LINE } from './FailureNotice';

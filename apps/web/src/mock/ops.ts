@@ -8,7 +8,8 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, NotificationKind } from '@agentic/core';
+import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, NotificationKind, PluginManifest, ScheduleId } from '@agentic/core';
+import type { Dependents, PluginView } from '@agentic/platform';
 
 export interface OpsAgent {
     readonly id: string;
@@ -173,45 +174,100 @@ export function offlinePolicyLine(schedule: OpsSchedule): string | undefined {
 
 /* ------------------------------------------------------------------ plugins */
 
-export type PluginKind = 'runtime' | 'memory' | 'learning' | 'connector' | 'a2a';
+const FIRST_PARTY = { platform: '*', core: '*' } as const;
 
-export interface PluginDependent {
-    /** An agent (by id) or a schedule (by title). */
-    readonly agentId?: string;
-    readonly schedule?: string;
-    /** "default environment · 1 active session" */
-    readonly reason: string;
-    readonly activeSessions?: number;
-}
+const manifest = (m: Omit<PluginManifest, 'compat' | 'capabilities'> & { readonly capabilities?: readonly string[] }): PluginManifest => ({ capabilities: [], compat: FIRST_PARTY, ...m });
 
-export interface OpsPlugin {
-    readonly id: string;
-    readonly name: string;
-    readonly version: string;
-    readonly kind: PluginKind;
-    readonly description: string;
-    readonly granted: readonly string[];
-    /** PLG-09: what the plugin declares it cannot do. */
-    readonly unsupported: readonly string[];
-    readonly usedBy: readonly string[];
-    readonly dependents: readonly PluginDependent[];
-    readonly enabled: boolean;
-}
+const builtin = (m: PluginManifest, more: Partial<Pick<PluginView, 'enabled' | 'config' | 'active' | 'grantedPermissions'>> = {}): PluginView => ({
+    manifest: m,
+    enabled: true,
+    config: {},
+    grantedPermissions: m.permissions.map(p => p.scope),
+    registeredAt: 0,
+    updatedAt: 0,
+    builtin: true,
+    ...more
+});
 
-export const opsPlugins: readonly OpsPlugin[] = [
-    { id: 'anthropic-api', name: 'anthropic-api', version: '0.1.0', kind: 'runtime', description: 'Platform-managed agent over the Anthropic API.', granted: ['secret: anthropic key'], unsupported: [], usedBy: ['atlas', 'scout'], dependents: [{ agentId: 'atlas', reason: 'default runtime' }, { agentId: 'scout', reason: 'default runtime' }], enabled: true },
-    { id: 'claude-code', name: 'claude-code', version: '0.1.0', kind: 'runtime', description: 'Drives Claude Code on a paired machine through the daemon.', granted: ['machines: open sessions'], unsupported: ['usage and cost', 'live migration'], usedBy: ['forge', 'lint'], dependents: [{ agentId: 'forge', reason: 'default environment · 1 active session', activeSessions: 1 }, { agentId: 'lint', reason: 'default environment · 1 active session', activeSessions: 1 }, { schedule: 'Nightly dependency audit', reason: 'schedule' }], enabled: true },
-    { id: 'memory-default', name: 'memory-default', version: '0.1.0', kind: 'memory', description: 'Keyword and recency retrieval. No embeddings.', granted: ['memory: own scopes'], unsupported: ['semantic search'], usedBy: ['atlas', 'forge', 'lint', 'scout'], dependents: opsAgents.map(a => ({ agentId: a.id, reason: 'memory plugin' })), enabled: true },
-    { id: 'learning-default', name: 'learning-default', version: '0.1.0', kind: 'learning', description: 'Turns corrections into lessons. Instruction changes wait for review.', granted: ['memory: write lessons'], unsupported: [], usedBy: ['atlas', 'forge', 'lint', 'scout'], dependents: opsAgents.map(a => ({ agentId: a.id, reason: 'learning plugin' })), enabled: true },
-    { id: 'github-mcp', name: 'github (mcp)', version: 'streamable-http', kind: 'connector', description: 'Issues and pull requests as tools.', granted: ['secret: github token'], unsupported: ['resources', 'prompts', 'sampling'], usedBy: ['forge'], dependents: [{ agentId: 'forge', reason: 'connector' }], enabled: true },
-    { id: 'a2a', name: 'a2a', version: '1.0 json-rpc', kind: 'a2a', description: 'Expose agents as A2A cards and connect remote A2A agents.', granted: [], unsupported: ['gRPC and REST bindings', 'push config', 'extended card', 'Subscribe'], usedBy: [], dependents: [], enabled: false }
+const NOTHING_TO_SET = { type: 'object', properties: {}, additionalProperties: false } as const;
+
+/**
+ * The Registry's `overview().plugins` of the mock workspace (#233): the
+ * plugins a build ships, under their real ids, plus a connector the
+ * workspace added and an A2A server it has not turned on.
+ */
+export const opsPlugins: readonly PluginView[] = [
+    builtin(manifest({
+        id: 'anthropic-api', version: '0.1.0', kind: 'runtime', name: 'Anthropic API', capabilities: ['platform-hosted'],
+        description: 'Agents run on the platform against the Anthropic API with your own key.',
+        config: { type: 'object', properties: { defaultModel: { type: 'string', title: 'Default model', description: 'The model an agent runs on when its own config names none.', enum: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'], default: 'claude-opus-5' } }, additionalProperties: false },
+        secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session.', required: true }],
+        permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts.' }]
+    }), { config: { defaultModel: 'claude-opus-5' } }),
+    builtin(manifest({
+        id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted'],
+        description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment. Credentials stay on the machine.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
+    })),
+    {
+        manifest: manifest({
+            id: 'github-mcp', version: '1.2.0', kind: 'connector', name: 'GitHub (MCP)', capabilities: ['tools'],
+            description: 'Issues and pull requests as tools, over streamable HTTP.',
+            config: { type: 'object', properties: { url: { type: 'string', format: 'uri', title: 'Server URL', default: 'https://api.github.com/mcp' } }, required: ['url'], additionalProperties: false },
+            secrets: [{ name: 'github-token', title: 'GitHub token', description: 'A fine-grained token with access to the repositories agents work on.', required: true }],
+            permissions: [
+                { scope: 'network:api.github.com', reason: 'Reaches the GitHub MCP server.' },
+                { scope: 'secret:github-token', reason: 'Signs its requests with your token.' },
+                { scope: 'tools:github-mcp', reason: 'Offers its tools to the agents that select it.' }
+            ]
+        }),
+        enabled: true,
+        config: { url: 'https://api.github.com/mcp' },
+        grantedPermissions: ['network:api.github.com', 'secret:github-token', 'tools:github-mcp'],
+        registeredAt: Date.parse('2026-09-12T09:00:00Z'),
+        updatedAt: Date.parse('2026-09-12T09:00:00Z'),
+        builtin: false
+    },
+    builtin(manifest({
+        id: 'agentic.memory.default', version: '0.1.0', kind: 'memory', name: 'Memory',
+        description: 'The default memory: ranked keyword retrieval, conditions, evidence and superseding, with a full export.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'memory:read', reason: 'Retrieves memories for a session.' }, { scope: 'memory:write', reason: 'Stores, updates and retires memories.' }]
+    }), { active: true }),
+    builtin(manifest({
+        id: 'agentic.memory.flat', version: '0.1.0', kind: 'memory', name: 'Flat memory',
+        description: 'A plain list with substring retrieval. It keeps no conditions, evidence, superseding or expiry — a migration into it reports what is lost.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'memory:read', reason: 'Retrieves memories for a session.' }, { scope: 'memory:write', reason: 'Stores, updates and retires memories.' }]
+    }), { active: false }),
+    builtin(manifest({
+        id: 'agentic.learning.default', version: '0.1.0', kind: 'learning', name: 'Learning',
+        description: 'Turns corrections into lessons and task outcomes into records. Memory writes are automatic; instruction changes are proposals you review.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'memory:read', reason: 'Finds earlier lessons before it writes a new one.' }, { scope: 'memory:write', reason: 'Writes lessons and task records to memory.' }]
+    }), { active: true }),
+    builtin(manifest({
+        id: 'a2a', version: '1.0.0', kind: 'a2a', name: 'A2A server',
+        description: 'Expose chosen agents as A2A cards to remote A2A clients.',
+        config: { type: 'object', properties: { exposedAgents: { type: 'array', items: { type: 'string' }, title: 'Exposed agents', default: [] } }, additionalProperties: false },
+        permissions: []
+    }), { enabled: false })
 ];
 
-/** "Disable and stop 2 sessions" — the consequence the confirm button states. */
-export function disableConsequence(plugin: OpsPlugin): string {
-    const sessions = plugin.dependents.reduce((n, d) => n + (d.activeSessions ?? 0), 0);
-    return sessions ? `Disable and stop ${sessions} ${sessions === 1 ? 'session' : 'sessions'}` : `Disable ${plugin.name}`;
-}
+/** The Registry's `dependentsAll()` of the mock workspace: one row per plugin. */
+export const opsPluginDependents: readonly Dependents[] = [
+    { pluginId: 'anthropic-api', agents: [{ id: 'atlas' as AgentId, name: 'Atlas', via: ['runtime'] }, { id: 'scout' as AgentId, name: 'Scout', via: ['runtime'] }, { id: 'forge' as AgentId, name: 'Forge', via: ['fallback'] }], schedules: [] },
+    { pluginId: 'claude-code', agents: [{ id: 'forge' as AgentId, name: 'Forge', via: ['runtime'] }, { id: 'lint' as AgentId, name: 'Lint', via: ['runtime'] }], schedules: [{ id: 'sch_audit' as ScheduleId, title: 'Nightly dependency audit', agentId: 'lint' as AgentId }] },
+    { pluginId: 'github-mcp', agents: [{ id: 'forge' as AgentId, name: 'Forge', via: ['connector', 'tool'] }], schedules: [] },
+    { pluginId: 'agentic.memory.default', agents: [], schedules: [], workspaceWide: true },
+    { pluginId: 'agentic.memory.flat', agents: [], schedules: [] },
+    { pluginId: 'agentic.learning.default', agents: [], schedules: [], workspaceWide: true },
+    { pluginId: 'a2a', agents: [], schedules: [] }
+];
+
+/** What `pluginReadiness` reads in the mock workspace: the GitHub token is set, the Anthropic key is not yet. */
+export const opsPluginFacts: { readonly secretNames: readonly string[]; readonly hasKek: boolean } = { secretNames: ['github-token'], hasKek: true };
 
 /* ----------------------------------------------------------------- settings */
 

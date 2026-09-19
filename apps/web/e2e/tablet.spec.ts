@@ -64,7 +64,7 @@ test.describe('tablet', () => {
         await page.goto('/machines');
         expect(await page.locator('[data-env-grid]').first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2);
         await page.goto('/plugins');
-        expect(await page.locator('[data-plugin-grid]').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2);
+        expect(await page.locator('[data-plugin-grid]').first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2);
         for (const path of ['/', '/chats/c1', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage']) {
             await page.goto(path);
             const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
