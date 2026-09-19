@@ -19,6 +19,8 @@ docs/dist/
 !*.config.js
 !examples/*.js
 !scripts/*.js
+# The web app's service worker (#244), served as-is from the assets root
+!apps/web/public/sw.js
 
 # TypeScript cache
 *.tsbuildinfo
