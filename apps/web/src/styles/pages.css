@@ -75,6 +75,15 @@
     align-items: start;
 }
 [data-page="home"] > [data-scope="ag-empty"] { grid-column: 1 / -1; }
+/* the first-run checklist (#234): full width above the inbox while no runtime is ready */
+[data-home-setup] { grid-column: 1 / -1; }
+[data-setup-steps] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+[data-setup-steps] > li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--space-md); align-items: center; padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); }
+[data-setup-steps] > li:last-child { border-block-end: 0; }
+[data-setup-text] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
+[data-setup-title] { font-weight: var(--weight-semibold); }
+[data-setup-detail] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-setup-action] { white-space: nowrap; }
 [data-home-needs] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 [data-needs-list] { display: flex; flex-direction: column; gap: var(--space-md); }
 [data-needs-row] { display: contents; }
