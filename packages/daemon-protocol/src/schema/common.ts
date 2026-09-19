@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecPolicy, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -139,4 +139,33 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
 export const fsError: z.ZodType<FsError> = z.object({
     code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'internal']),
     message: text
+});
+
+const quotaStatus = z.enum(['ok', 'warning', 'exhausted', 'unknown']);
+
+/** One provider limit window (#261); `utilization` is 0..1 or `null` when the provider gave no number. */
+export const quotaWindow: z.ZodType<QuotaWindow> = z.object({
+    id: name,
+    label: text.min(1),
+    period: z.enum(['minute', 'session', 'day', 'week', 'month', 'other']),
+    scope: z.object({ model: name.optional() }).optional(),
+    utilization: z.number().min(0).max(1).nullable(),
+    used: z.number().min(0).optional(),
+    limit: z.number().min(0).optional(),
+    unit: z.enum(['percent', 'tokens', 'requests', 'usd', 'credits']),
+    resetsAt: z.iso.datetime({ offset: true }).optional(),
+    status: quotaStatus
+});
+
+/** A normalized quota snapshot — never credentials, never a profile directory (EXE-10). */
+export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z.object({
+    sourceId: name,
+    runtime: name,
+    environmentId,
+    plan: name.optional(),
+    availability: z.enum(['reported', 'partial', 'not-reported']),
+    reason: text.optional(),
+    windows: z.array(quotaWindow).max(LIMITS.list),
+    observedAt: nonNegativeInt,
+    via: z.enum(['probe', 'stream', 'headers'])
 });

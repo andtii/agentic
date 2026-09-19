@@ -11,6 +11,10 @@ const W = WIRE_PROTOCOL_VERSION;
 const env = inMemoryEnvironment();
 const cursor = { epoch: 0, seq: 3 };
 
+const week = { id: 'seven_day', label: 'Current week (all models)', period: 'week', utilization: 0.5, unit: 'percent', resetsAt: '2026-09-22T18:00:00Z', status: 'ok' } as const;
+const quotaOf = (windows: readonly unknown[]) =>
+    ({ sourceId: 'agentic.quota.claude-code', runtime: 'claude-code', environmentId: env.id, plan: 'max', availability: 'reported', windows, observedAt: 1, via: 'probe' }) as never;
+
 type Case<T> = { readonly valid: T; readonly invalid: unknown; readonly path: string };
 
 const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, { t: T }>> } = {
@@ -57,6 +61,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         valid: { v: V, t: 'env.response', requestId: 'env_1', error: { code: 'outside-allowed-roots', message: '/etc is not inside an allowed root' } },
         invalid: { v: V, t: 'env.response', requestId: 'env_1' },
         path: 'result'
+    },
+    quota: {
+        valid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 0.76 }]) },
+        invalid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 76 }]) },
+        path: 'snapshot.windows.0.utilization'
     }
 };
 
@@ -150,6 +159,17 @@ describe('daemon frame schemas', () => {
         expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
         expect(daemonFrame.safeParse({ ...ok, error: { code: 'io', message: 'disk' } }).success).toBe(false);
         expect(daemonFrame.safeParse({ v: V, t: 'env.response', requestId: 'env_1', error: { code: 'nope', message: 'x' } }).success).toBe(false);
+    });
+
+    it('a quota frame carries a normalized snapshot for its own environment (#261)', () => {
+        const session = { id: 'five_hour', label: 'Current session', period: 'session', utilization: null, unit: 'percent', status: 'unknown' };
+        const ok = { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([week, session]) };
+        expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
+        const none = { v: V, t: 'quota', environmentId: env.id, snapshot: { ...(quotaOf([]) as object), availability: 'not-reported', reason: 'API-key login: no subscription limits' } };
+        expect(daemonFrame.safeParse(none).success).toBe(true);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: { ...(quotaOf([]) as object), environmentId: 'env_other' } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, resetsAt: 'next tuesday' }]) }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, status: 'fine' }]) }).success).toBe(false);
     });
 
     it('are Standard Schemas', async () => {
