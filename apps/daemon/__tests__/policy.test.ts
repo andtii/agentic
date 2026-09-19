@@ -37,6 +37,8 @@ describe('policy.json', () => {
 
     it('reports the roots only while the web may use them', () => {
         expect(reportedPolicy({ webManaged: false, allowedRoots: [dir] })).toEqual(POLICY_OFF);
+        // On with nothing allowed is refused like off, so it is reported off.
+        expect(reportedPolicy({ webManaged: true, allowedRoots: [] })).toEqual(POLICY_OFF);
         expect(reportedPolicy({ webManaged: true, allowedRoots: [dir] })).toEqual({ webManaged: true, allowedRoots: [dir] });
     });
 

@@ -75,9 +75,9 @@ export async function writePolicy(file: string, policy: MachinePolicy, options: 
     await writeOwnerOnly(file, `${JSON.stringify({ webManaged: policy.webManaged, allowedRoots: policy.allowedRoots }, null, 2)}\n`, options);
 }
 
-/** What `hello` / `env` carry: the roots only while the web may use them. */
+/** What `hello` / `env` carry: the roots only while the web may use them — on with none allowed is refused like off, so it says off. */
 export function reportedPolicy(policy: MachinePolicy): MachinePolicy {
-    return policy.webManaged ? { webManaged: true, allowedRoots: [...policy.allowedRoots] } : POLICY_OFF;
+    return policy.webManaged && policy.allowedRoots.length > 0 ? { webManaged: true, allowedRoots: [...policy.allowedRoots] } : POLICY_OFF;
 }
 
 export function watchPolicy(options: Omit<WatchConfigFileOptions<PolicyResult>, 'load'>): Promise<{ close(): void }> {
