@@ -18,6 +18,12 @@
       "development": "./dist/claude-code.js",
       "production": "./dist/claude-code.prod.js",
       "import": "./dist/claude-code.js"
+    },
+    "./copilot-cli": {
+      "types": "./dist/copilot-cli/index.d.ts",
+      "development": "./dist/copilot-cli.js",
+      "production": "./dist/copilot-cli.prod.js",
+      "import": "./dist/copilot-cli.js"
     }
   },
   "sideEffects": false,
@@ -40,6 +46,7 @@
     "@sigx/reactivity": "catalog:",
     "@sigx/runtime-core": "catalog:",
     "@anthropic-ai/sdk": "^0.126.0",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.274"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.274",
+    "@github/copilot-sdk": "^1.0.14"
   }
 }

@@ -37,6 +37,9 @@
       "@agentic/runtimes/claude-code": [
         "./packages/runtimes/src/claude-code/index.ts"
       ],
+      "@agentic/runtimes/copilot-cli": [
+        "./packages/runtimes/src/copilot-cli/index.ts"
+      ],
       "@agentic/runtimes": [
         "./packages/runtimes/src/index.ts"
       ],

@@ -71,5 +71,23 @@ export const claudeCodePlugin: PluginManifest = {
 export const CLAUDE_CODE_QUOTA_ID = 'agentic.quota.claude-code';
 export const QUOTA_SOURCE_VERSION = '0.1.0';
 
+export const COPILOT_CLI_PLUGIN_ID = 'copilot-cli' satisfies RuntimeId;
+/** The id of the Copilot CLI `QuotaSource`: the `sourceId` its snapshots carry. */
+export const COPILOT_CLI_QUOTA_ID = 'agentic.quota.copilot-cli';
+
+/** GitHub Copilot CLI on a paired machine (#319): harness runtime, one GitHub account per environment. */
+export const copilotCliPlugin: PluginManifest = {
+    id: COPILOT_CLI_PLUGIN_ID,
+    version: RUNTIME_PLUGIN_VERSION,
+    kind: 'runtime',
+    name: 'Copilot CLI',
+    description: 'Agents run in GitHub Copilot CLI on a paired machine, signed in with the GitHub account of the chosen environment, and each account reports its monthly premium requests. Credentials stay on the machine.',
+    // A harness runtime (its own loop, driven through the Copilot SDK) that reports its accounts' request allowance.
+    capabilities: [DAEMON_HOSTED_CAPABILITY, HARNESS_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY],
+    config: { type: 'object', properties: {}, additionalProperties: false },
+    permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }],
+    compat: { platform: '*', core: '*' }
+};
+
 /** Every runtime manifest this package ships. */
-export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin];
+export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin, copilotCliPlugin];
