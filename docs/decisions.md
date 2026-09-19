@@ -125,3 +125,12 @@ A `runtime` plugin is one of three kinds, independent of where it runs:
 Where it runs is the other axis: `daemon-hosted` or `platform-hosted`. Today every harness is daemon-hosted and every model runtime is platform-hosted, but nothing forces that. "CLI runtime" is not used, because a harness can arrive as an SDK.
 
 **Usage limits are a runtime capability, not a plugin.** A runtime that reports its accounts' plan limits lists `usage-limits` and supplies a `QuotaSource`. #261's separate `quota` plugin kind and its `claudeCodeQuotaPlugin` manifest are removed: the manifest had nothing to configure, and its switch did nothing. `/plugins` shows Harness runtimes, Model runtimes and Remote agents as separate sections.
+
+## 2026-09-19 — GitHub Copilot CLI is a harness runtime, driven through its SDK (#319)
+
+`copilot-cli` is the runtime id, plugin id and agent id. The daemon drives Copilot through `@github/copilot-sdk`, which starts the Copilot runtime once per environment and speaks JSON-RPC to it. The SDK is not the interactive CLI, and it ships the runtime for each platform. That gives us permission callbacks, native client tools, resume by session id, and `account.getQuota` for usage limits without a model call.
+
+- **Isolation:** each environment gets its own `COPILOT_HOME`, and the parent's `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN` are stripped. That is not airtight. A profile with no Copilot login of its own falls back to `gh auth token`, and the GitHub CLI reads its token from the OS keyring whatever its config dir. So the doctor warns (`shared-login`) instead of claiming isolation, and `env login` gives the profile its own login, which Copilot prefers.
+- **Usage limits:** Copilot meters requests per month. Premium requests, chat and completions each become a `month` window counted in `requests`. An unlimited entitlement has no utilization.
+- **Permissions:** `harness-filtered`. Copilot runs reads inside the folder without asking. Platform tools and connectors run in the daemon as client tools with `skipPermission`, and their handler asks the platform policy, so every call to one is ruled on.
+- **Memory:** repository instructions and config discovery are off (`skipCustomInstructions`, `enableConfigDiscovery: false`). Memory comes from the platform (MEM-10).

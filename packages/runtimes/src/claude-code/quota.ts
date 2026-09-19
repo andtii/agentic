@@ -17,10 +17,10 @@ import { childEnv } from '@sigx/ai-agent-claude-code';
 import type { LocalEnvironment, PluginContext, QuotaSignal, QuotaSnapshot, QuotaSource, QuotaStatus, QuotaWindow } from '@agentic/core';
 import { CLAUDE_CODE_QUOTA_ID, QUOTA_SOURCE_VERSION } from '../plugins.js';
 import { accountEnv } from './env.js';
+import { quotaStatusOf } from '../harness/quota.js';
 
 const RUNTIME = 'claude-code';
-/** From here a window reads as `warning` when the provider did not say. */
-export const QUOTA_WARNING_AT = 0.8;
+export { QUOTA_WARNING_AT } from '../harness/quota.js';
 const DEFAULT_PROBE_TIMEOUT_MS = 20_000;
 
 /** Just the part of `query` the probe uses; a fake in tests. */
@@ -39,7 +39,7 @@ export interface ClaudeCodeQuotaOptions {
 type Limit = { readonly utilization: number | null; readonly resets_at: string | null } | null | undefined;
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
-const statusOf = (utilization: number | null): QuotaStatus => (utilization === null ? 'unknown' : utilization >= 1 ? 'exhausted' : utilization >= QUOTA_WARNING_AT ? 'warning' : 'ok');
+const statusOf = quotaStatusOf;
 const weekOf = (model: string): Pick<QuotaWindow, 'id' | 'label' | 'period' | 'scope'> => ({ id: `seven_day:${model.toLowerCase()}`, label: `Current week (${model})`, period: 'week', scope: { model } });
 
 /** A 0..100 window of the usage response; `undefined` when the provider sent none. */

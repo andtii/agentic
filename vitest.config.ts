@@ -22,6 +22,7 @@ export default defineConfig({
             { find: '@agentic/daemon-protocol', replacement: pkg('daemon-protocol') },
             { find: '@agentic/platform', replacement: pkg('platform') },
             { find: '@agentic/runtimes/claude-code', replacement: resolve(__dirname, 'packages/runtimes/src/claude-code/index.ts') },
+            { find: '@agentic/runtimes/copilot-cli', replacement: resolve(__dirname, 'packages/runtimes/src/copilot-cli/index.ts') },
             { find: '@agentic/runtimes', replacement: pkg('runtimes') },
             { find: '@agentic/learning', replacement: pkg('learning') },
             { find: '@agentic/memory/testing', replacement: resolve(__dirname, 'packages/memory/src/testing/index.ts') },

@@ -13,3 +13,4 @@ export { PLATFORM_MEMORY_HEADING, CONNECTORS_UNAVAILABLE_HEADING, withPlatformMe
 export type { HarnessReportSubject, HarnessReportInput } from './capabilities.js';
 export { harnessCapabilityReport, HARNESS_OPS } from './capabilities.js';
 export { assertCwdInRoots, assertRuntime, closingWith } from './session.js';
+export { QUOTA_WARNING_AT, quotaStatusOf } from './quota.js';

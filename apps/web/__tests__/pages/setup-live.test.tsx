@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentId } from '@agentic/core';
 import { AgentActor, Workspace, agentKey, defineRegistry, generateWorkspaceKek, importWorkspaceKek, registryKey, workspaceKey } from '@agentic/platform';
-import { RUNTIME_PLUGINS } from '@agentic/runtimes';
+import { anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 import { MEMORY_PLUGINS } from '@agentic/memory';
 import { learningDefaultPlugin } from '@agentic/learning';
 import { openNewAgent, closeNewAgent } from '../../src/pages/agent/head';
@@ -18,7 +18,9 @@ import { buttonNamed, setText, text } from './helpers';
 import { WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
 
 const KEK = generateWorkspaceKek();
-const Registry = defineRegistry({ kek: () => importWorkspaceKek(KEK), catalogue: [...RUNTIME_PLUGINS, ...MEMORY_PLUGINS, learningDefaultPlugin] });
+/** The runtimes the setup flows are written against: one model runtime, one daemon-hosted harness — not every runtime this build ships. */
+const SETUP_RUNTIMES = [anthropicApiPlugin, claudeCodePlugin];
+const Registry = defineRegistry({ kek: () => importWorkspaceKek(KEK), catalogue: [...SETUP_RUNTIMES, ...MEMORY_PLUGINS, learningDefaultPlugin] });
 
 let h: LiveHarness;
 beforeEach(async () => {

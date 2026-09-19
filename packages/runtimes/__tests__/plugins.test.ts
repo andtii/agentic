@@ -1,6 +1,6 @@
-import { DAEMON_HOSTED_CAPABILITY, configDefaults, pluginReadiness, validateConfig, type PluginManifest, type PluginState } from '@agentic/core';
+import { DAEMON_HOSTED_CAPABILITY, USAGE_LIMITS_CAPABILITY, configDefaults, runtimeKindOf, pluginReadiness, validateConfig, type PluginManifest, type PluginState } from '@agentic/core';
 import { DEFAULT_ANTHROPIC_MODEL } from '@sigx/ai-anthropic';
-import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_MODEL_IDS, ANTHROPIC_PRICING, RUNTIME_PLUGINS, anthropicApiPlugin, claudeCodePlugin } from '../src/index';
+import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_MODEL_IDS, ANTHROPIC_PRICING, RUNTIME_PLUGINS, anthropicApiPlugin, claudeCodePlugin, copilotCliPlugin } from '../src/index';
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const KINDS = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
@@ -40,7 +40,7 @@ describe('runtime plugin manifests', () => {
     });
 
     it('ids are the runtime ids — the Registry matches an agent by execution.runtime', () => {
-        expect(RUNTIME_PLUGINS.map((m) => m.id)).toEqual(['anthropic-api', 'claude-code']);
+        expect(RUNTIME_PLUGINS.map((m) => m.id)).toEqual(['anthropic-api', 'claude-code', 'copilot-cli']);
     });
 
     it('anthropic-api offers every priced model and defaults to the provider default', () => {
@@ -66,5 +66,13 @@ describe('runtime plugin manifests', () => {
         const state = granted(claudeCodePlugin);
         expect(pluginReadiness(state, { secretNames: [], environments: [], hasKek: true }).status).toBe('needs-machine');
         expect(pluginReadiness(state, { secretNames: [], environments: [{ runtime: 'claude-code' }], hasKek: true }).status).toBe('ready');
+    });
+
+    it('copilot-cli is a daemon-hosted harness that reports usage limits: ready once a machine offers an environment of it', () => {
+        expect(runtimeKindOf(copilotCliPlugin)).toBe('harness');
+        expect(copilotCliPlugin.capabilities).toEqual(expect.arrayContaining([DAEMON_HOSTED_CAPABILITY, USAGE_LIMITS_CAPABILITY]));
+        const state = granted(copilotCliPlugin);
+        expect(pluginReadiness(state, { secretNames: [], environments: [{ runtime: 'claude-code' }], hasKek: true }).status).toBe('needs-machine');
+        expect(pluginReadiness(state, { secretNames: [], environments: [{ runtime: 'copilot-cli' }], hasKek: true }).status).toBe('ready');
     });
 });
