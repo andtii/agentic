@@ -14,13 +14,14 @@ import { kitAnatomies, kitRecipes, kitScopes, NEEDS_KINDS } from '../../src/kit'
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
 
 describe('the ag-* kit', () => {
-    it('declares thirteen scopes, every one in the fragment with a recipe and a vocabulary claim', () => {
+    it('declares sixteen scopes, every one in the fragment with a recipe, and a vocabulary claim where it paints one', () => {
         const scopes = kitAnatomies.map((a) => a.scope);
-        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty', 'ag-workdir', 'ag-workdir-picker']);
+        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty', 'ag-workdir', 'ag-workdir-picker', 'ag-plugin-card', 'ag-secret', 'ag-map-field']);
         for (const scope of scopes) {
             expect(fragment.components.some((c) => c.scope === scope), scope).toBe(true);
             expect(kitRecipes.some((r) => r.component === scope), scope).toBe(true);
-            expect(kitScopes[scope], scope).toBeDefined();
+            // Layout-only scopes paint no tone and no modifier: they make no vocabulary claim (the validator refuses an empty one).
+            if (!['ag-secret', 'ag-map-field'].includes(scope)) expect(kitScopes[scope], scope).toBeDefined();
             expect(tokens.scopes?.[scope], scope).toEqual(kitScopes[scope]);
         }
     });
