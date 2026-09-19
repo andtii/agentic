@@ -14,7 +14,7 @@ import type { CapabilityReport, ChatRoster, FrozenAgentConfig, MemoryEntry, Usag
 import { grantedPlatformTools, type PlatformPorts } from '../tools/index.js';
 import { anthropicCapabilityReport } from './capabilities.js';
 import { costOf, resolvePricing, type ResolvedPricing } from './pricing.js';
-import { buildSystemPrompt, type ResolvedSkill } from './system-prompt.js';
+import { buildSystemPrompt, type ResolvedSkill, type SystemPromptInput } from './system-prompt.js';
 
 export interface PlatformAgentDeps {
     readonly ports: PlatformPorts;
@@ -34,6 +34,8 @@ export interface PlatformAgentDeps {
     readonly roster?: ChatRoster;
     /** Extra tools beyond the platform's (connectors); they are on every session's roster as given. */
     readonly tools?: readonly AnyTool[];
+    /** Connectors the agent names that this session runs without, and why (#240); the prompt says so. */
+    readonly unavailableConnectors?: SystemPromptInput['unavailableConnectors'];
 }
 
 export interface PlatformModelAgent {
@@ -60,7 +62,8 @@ export function createPlatformModelAgent(config: FrozenAgentConfig, deps: Platfo
         tools: roster,
         ...(deps.skills ? { skills: deps.skills } : {}),
         ...(deps.memories ? { memories: deps.memories } : {}),
-        ...(deps.roster ? { roster: deps.roster } : {})
+        ...(deps.roster ? { roster: deps.roster } : {}),
+        ...(deps.unavailableConnectors?.length ? { unavailableConnectors: deps.unavailableConnectors } : {})
     });
     const limits = config.execution.limits;
     const agent = modelAgent({

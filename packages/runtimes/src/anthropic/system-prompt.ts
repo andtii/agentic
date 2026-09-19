@@ -28,6 +28,11 @@ export interface SystemPromptInput {
     readonly memories?: readonly MemoryEntry[];
     /** The chat the session works in, when it came from one (CHT-07): who else is there and who coordinates. */
     readonly roster?: ChatRoster;
+    /**
+     * Connectors the agent is configured with that this session could not use, and why (#240) — so the agent
+     * says what it cannot do instead of guessing at tools that are not there.
+     */
+    readonly unavailableConnectors?: readonly { readonly id: string; readonly reason: string }[];
 }
 
 const TOOL_GUIDE: Readonly<Record<string, string>> = {
@@ -120,6 +125,10 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
         sections.push(`## Tools\n\nYou may call only these tools; some calls need approval, which is asked for automatically.\n\n${lines.join('\n')}`);
     } else {
         sections.push('## Tools\n\nYou have no tools in this session.');
+    }
+    if (input.unavailableConnectors?.length) {
+        const lines = input.unavailableConnectors.map((c) => `- ${c.id}: ${c.reason}`);
+        sections.push(`## Connectors not available\n\nThese connectors are configured for you but their tools are not in this session; if the user needs one, say which and why.\n\n${lines.join('\n')}`);
     }
 
     if (input.memories?.length) {

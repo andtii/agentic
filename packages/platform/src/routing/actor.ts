@@ -144,9 +144,12 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
 /** The machine's path rules (`hello.os`); a daemon that never said is taken for Windows, the first platform (decision 2). */
 const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 
+/** The connectors an agent names, for `gate()` to answer for (#240). */
+const connectorIds = (config: Pick<FrozenAgentConfig, 'connectors'>): readonly string[] => config.connectors.map((c) => c.id);
+
 /** The slice of the Registry actor the router asks (`defineRegistry`). */
 interface RegistryClient {
-    gate(input: { readonly runtime: string }): Promise<RegistryGate>;
+    gate(input: { readonly runtime: string; readonly connectors?: readonly string[] }): Promise<RegistryGate>;
 }
 
 /**
@@ -375,7 +378,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return;
                     case 'fallback-api': {
                         // NEW use of another runtime: its plugin answers for itself before the task leaves its environment (AC-13).
-                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`);
+                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`, connectorIds(route.config));
                         if (asked.error) {
                             await fail(route, asked.error);
                             return;
@@ -512,12 +515,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * Registry — nothing is gated. A plugin that is missing or turned off, or a Registry that cannot be asked,
              * comes back as the error the task fails with; running work is never touched.
              */
-            async function gate(runtime: RuntimeId, leaving?: string): Promise<{ plugins?: RegistryGate; error?: TaskError }> {
+            async function gate(runtime: RuntimeId, leaving?: string, connectors?: readonly string[]): Promise<{ plugins?: RegistryGate; error?: TaskError }> {
                 if (!ports.registry) return {};
                 const because = leaving ? ` (${leaving})` : '';
                 let plugins: RegistryGate;
                 try {
-                    plugins = await (actor(ports.registry(), registryKey(workspaceId)).with({ context }) as unknown as RegistryClient).gate({ runtime });
+                    // The agent's connectors ride on the same hop (#240): the session opens the ready ones and says why the others are not there.
+                    plugins = await (actor(ports.registry(), registryKey(workspaceId)).with({ context }) as unknown as RegistryClient).gate({ runtime, ...(connectors?.length ? { connectors } : {}) });
                 } catch (e) {
                     return { error: { code: 'registry-unavailable', message: `the plugin registry could not be asked about runtime ${runtime}${because}: ${e instanceof Error ? e.message : String(e)}`, recoverable: true } };
                 }
@@ -587,7 +591,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         constraints = [...(parent?.constraints ?? []), ...parentRules];
                     }
                     // The plugin behind the runtime, asked once and before anything is written (§9, AC-13); the answer rides on the route and the spec.
-                    const gated = await gate(runtime);
+                    const gated = await gate(runtime, undefined, connectorIds(config));
                     const host = hostOf(runtime);
                     const refused: TaskError | undefined = gated.error ?? (host === undefined ? { code: UNKNOWN_RUNTIME_CODE, message: `agent ${t.assignee} runs on "${runtime}", which this build does not have`, recoverable: false } : undefined);
                     const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), createdAt: at, updatedAt: at };
