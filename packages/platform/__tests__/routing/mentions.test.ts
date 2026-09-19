@@ -50,8 +50,8 @@ describe('mentionContract', () => {
 
     it("places the task in the member's folder for this chat, else the fallback environment", () => {
         const member: ChatMember = { since: 0, historyFrom: 0, workdir: { environmentId: 'env_1' as EnvironmentId, path: '/work/app' } };
-        expect(mentionContract({ ...base, member, fallbackEnvironmentId: 'env_2' })).toMatchObject({ environmentId: 'env_1', workdir: '/work/app' });
-        const bare = mentionContract({ ...base, member: { since: 0, historyFrom: 0 }, fallbackEnvironmentId: 'env_2' });
+        expect(mentionContract({ ...base, member, fallbackEnvironmentId: 'env_2' as EnvironmentId })).toMatchObject({ environmentId: 'env_1', workdir: '/work/app' });
+        const bare = mentionContract({ ...base, member: { since: 0, historyFrom: 0 }, fallbackEnvironmentId: 'env_2' as EnvironmentId });
         expect(bare.environmentId).toBe('env_2');
         expect(bare).not.toHaveProperty('workdir');
     });
@@ -139,6 +139,14 @@ describe("chat_post mentions over the actors", () => {
         const result = await ports().chat.post({ text: '@bob @cy ping', mentions: [BOB, CY] }, call);
         expect(result.activated?.map((a) => a.agentId)).toEqual([CY]);
         expect(result.notActivated).toEqual([{ agentId: BOB, reason: 'not a collaborator of agent_ada' }]);
+    });
+
+    it('says which mentions are no member of the chat instead of dropping them; a self-mention is ignored', async () => {
+        await posting();
+        const result = await ports().chat.post({ text: '@bob @stranger ping', mentions: [BOB, 'agent_stranger' as AgentId, ADA] }, call);
+        expect(result.activated?.map((a) => a.agentId)).toEqual([BOB]);
+        expect(result.notActivated).toEqual([{ agentId: 'agent_stranger', reason: 'not a member of this chat' }]);
+        expect(await ports().chat.post({ text: '@stranger', mentions: ['agent_stranger' as AgentId] }, call)).toMatchObject({ notActivated: [{ agentId: 'agent_stranger', reason: 'not a member of this chat' }] });
     });
 
     it('stops at the depth limit: agents mentioning each other cannot loop', async () => {

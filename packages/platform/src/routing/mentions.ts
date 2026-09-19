@@ -7,7 +7,7 @@
  * may be activated and hands each task to the router.
  */
 
-import { isChatFilePart, type AgentId, type ChatEntry, type ChatId, type ChatMember, type MessageId, type PromptPart, type TaskContract } from '@agentic/core';
+import { isChatFilePart, type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MessageId, type PromptPart, type TaskContract } from '@agentic/core';
 
 import type { IndexedEntry } from '../chat/state.js';
 
@@ -45,7 +45,7 @@ export function mentionContract(input: {
     readonly member: ChatMember;
     readonly entries: readonly IndexedEntry[];
     readonly nameOf: (id: AgentId) => string;
-    readonly fallbackEnvironmentId?: string;
+    readonly fallbackEnvironmentId?: EnvironmentId;
 }): TaskContract {
     const { member } = input;
     const messages = input.entries
@@ -71,5 +71,5 @@ export function mentionContract(input: {
         context,
         constraints: {},
         ...where
-    } as TaskContract;
+    };
 }

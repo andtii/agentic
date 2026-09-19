@@ -34,7 +34,7 @@
  * `files` port.
  */
 
-import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type MemoryEntry, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MemoryEntry, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
 import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -57,7 +57,7 @@ export type AgentPrincipal = Extract<Principal, { kind: 'agent' }>;
 interface RoutingClient {
     report(taskId: TaskId, report: TaskReport): Promise<void>;
     run(taskId: TaskId): Promise<TaskView>;
-    get(): Promise<{ readonly routes: readonly { readonly taskId: TaskId; readonly environmentId?: string }[] }>;
+    get(): Promise<{ readonly routes: readonly { readonly taskId: TaskId; readonly environmentId?: EnvironmentId }[] }>;
 }
 
 /** The slice of the Session actor `ask_user` uses (`defineSessionActor`). */
@@ -181,11 +181,13 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
      * is stored, and what could not be started is said in `notActivated`.
      */
     async function activateMentions(chatId: ChatId, messageId: MessageId, post: ChatPost, addressed: readonly AgentId[]): Promise<Pick<ChatPostResult, 'activated' | 'notActivated'>> {
-        const targets = addressed.filter((id) => post.mentions.includes(id));
-        if (targets.length === 0) return {};
-        const activated: { agentId: AgentId; taskId: TaskId; status: string }[] = [];
-        const notActivated: { agentId: AgentId; reason: string }[] = [];
-        const skip = (reason: string, ids: readonly AgentId[] = targets) => ({ notActivated: ids.map((agentId) => ({ agentId, reason })) });
+        // `addressed` is Chat.post's answer: the mentions that are members, less the poster. A mention it left out is said, not dropped.
+        const mentioned = [...new Set(post.mentions)].filter((id) => id !== agentId);
+        const targets = mentioned.filter((id) => addressed.includes(id));
+        const activated: { agentId: AgentId; taskId: TaskId; status: TaskStatus }[] = [];
+        const notActivated: { agentId: AgentId; reason: string }[] = mentioned.filter((id) => !addressed.includes(id)).map((id) => ({ agentId: id, reason: 'not a member of this chat' }));
+        if (targets.length === 0) return notActivated.length ? { notActivated } : {};
+        const skip = (reason: string) => ({ notActivated: [...notActivated, ...targets.map((id) => ({ agentId: id, reason }))] });
         const def = options.routing?.();
         if (!def) return skip('the router is not wired on this deployment');
         const router = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principal) }) as unknown as RoutingClient;
@@ -202,13 +204,14 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         const { entries } = await chat.history(null, MENTION_CONTEXT_WINDOW + 1);
         const names = new Map<AgentId, string>([[agentId, poster.config.name]]);
         const nameOf = (id: AgentId): string => names.get(id) ?? id;
-        for (const e of entries) {
-            if (e.entry.t !== 'msg' || e.entry.author.kind !== 'agent' || names.has(e.entry.author.agentId)) continue;
-            const id = e.entry.author.agentId;
-            names.set(id, await as(AgentActor, agentKey(workspaceId, id)).get().then((a) => a.config.name, () => id));
-        }
-        let posterEnvironment: string | null | undefined;
-        const posterEnv = async (): Promise<string | undefined> => {
+        const authors = new Set(entries.flatMap((e) => (e.entry.t === 'msg' && e.entry.author.kind === 'agent' && !names.has(e.entry.author.agentId) ? [e.entry.author.agentId] : [])));
+        await Promise.all(
+            [...authors].map(async (id) => {
+                names.set(id, await as(AgentActor, agentKey(workspaceId, id)).get().then((a) => a.config.name, () => id));
+            })
+        );
+        let posterEnvironment: EnvironmentId | null | undefined;
+        const posterEnv = async (): Promise<EnvironmentId | undefined> => {
             if (posterEnvironment === undefined) posterEnvironment = (await router.get().then((r) => r.routes.find((x) => x.taskId === taskId)?.environmentId, () => undefined)) ?? null;
             return posterEnvironment ?? undefined;
         };

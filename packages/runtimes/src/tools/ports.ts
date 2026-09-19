@@ -5,7 +5,7 @@
  * Memory, Task and Chat under the agent's principal.
  */
 
-import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult } from '@agentic/core';
+import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, PromptPart, RankedMemory, TaskError, TaskId, TaskResult, TaskStatus } from '@agentic/core';
 
 /** What every port call learns about the tool call behind it. */
 export interface ToolCall {
@@ -79,7 +79,7 @@ export interface UserQuestion {
 export interface ChatPostResult {
     readonly messageId: MessageId;
     /** One task per mentioned member that was activated; its reply comes back into the chat when its turn ends. */
-    readonly activated?: readonly { readonly agentId: AgentId; readonly taskId: TaskId; readonly status: string }[];
+    readonly activated?: readonly { readonly agentId: AgentId; readonly taskId: TaskId; readonly status: TaskStatus }[];
     /** Mentioned members that were not activated, and why (not a collaborator, depth limit, failed to start). */
     readonly notActivated?: readonly { readonly agentId: AgentId; readonly reason: string }[];
 }
