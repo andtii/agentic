@@ -48,7 +48,8 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
             // Off until the owner sets it up (#244).
             ['agentic.notify.web-push', false, true],
             [ANTHROPIC_API_PLUGIN_ID, true, true],
-            ['claude-code', true, true]
+            ['claude-code', true, true],
+            ['copilot-cli', true, true]
         ]);
         expect(fresh.active).toEqual({ memory: 'agentic.memory.default', learning: 'agentic.learning.default' });
         expect(fresh.secretNames).toEqual([]);
