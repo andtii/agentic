@@ -11,6 +11,7 @@ export * from './chat.js';
 export * from './task.js';
 export * from './environment.js';
 export * from './plugin.js';
+export * from './plugin-config.js';
 export * from './memory.js';
 export * from './learning.js';
 export * from './principal.js';
