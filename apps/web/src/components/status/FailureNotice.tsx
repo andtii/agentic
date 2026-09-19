@@ -41,7 +41,7 @@ export function failureAction(state: FailureState, handlers: { onResume?: () => 
         case 'runtime':
             return handlers.onRetry ? { onAction: handlers.onRetry, loading } : state.taskId ? { href: `/tasks/${state.taskId}`, label: 'Open task' } : null;
         case 'task':
-            return state.taskId ? { href: `/tasks/${state.taskId}` } : null;
+            return state.link ? { href: state.link.href, label: state.link.label } : state.taskId ? { href: `/tasks/${state.taskId}` } : null;
         case 'interrupted':
             // Resume is the one action; a page that cannot issue it shows it disabled rather than pretending.
             return handlers.onResume ? { onAction: handlers.onResume, loading } : { disabled: true };
