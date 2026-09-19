@@ -1,4 +1,6 @@
-/** Plugin declarations (PLG-01..05). */
+/** Plugin declarations (PLG-01..05). The config schema, its validation and readiness live in `plugin-config.ts`. */
+
+import type { ConfigSchema, PluginSecretDeclaration } from './plugin-config.js';
 
 export type PluginKind = 'runtime' | 'connector' | 'memory' | 'learning' | 'notification' | 'trigger' | 'a2a';
 
@@ -14,7 +16,15 @@ export type PermissionScope =
     | 'tools:*'
     | `tools:${string}`;
 
-export type JsonSchema = { readonly [key: string]: unknown };
+/** @deprecated The old name of a manifest's config schema — use `ConfigSchema`. */
+export type JsonSchema = ConfigSchema;
+
+/** Kinds a workspace runs exactly ONE plugin of at a time (the active one); every other kind runs all that are enabled. */
+export const SINGLE_SLOT_KINDS: readonly PluginKind[] = ['memory', 'learning'];
+
+export function isSingleSlot(kind: PluginKind): boolean {
+    return SINGLE_SLOT_KINDS.includes(kind);
+}
 
 export interface PluginManifest {
     readonly id: string;
@@ -23,7 +33,9 @@ export interface PluginManifest {
     readonly name: string;
     readonly description: string;
     readonly capabilities: readonly string[];
-    readonly config: JsonSchema;
+    readonly config: ConfigSchema;
+    /** Secrets the plugin needs. Never config properties; each takes a declared `secret:<name>` permission to open (PLG-04). */
+    readonly secrets?: readonly PluginSecretDeclaration[];
     readonly permissions: readonly { readonly scope: PermissionScope; readonly reason: string }[];
     readonly compat: { readonly platform: string; readonly core: string };
 }
