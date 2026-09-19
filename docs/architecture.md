@@ -149,15 +149,17 @@ The daemon runs one `claudeCode({ settingSources: [], env: { CLAUDE_CONFIG_DIR: 
 **One hibernatable WebSocket** from the daemon to its Machine DO carries the daemon-protocol envelope (types in `@agentic/core` as `DaemonFrame<F, R>` / `PlatformFrame<C>`, generic over the `@sigx/ai-agent/wire` frame, reply and command types so core stays dependency-free; `@agentic/daemon-protocol` instantiates and validates them):
 
 ```
-daemon → platform: hello {machineId, daemonVersion, os, environments[], capabilities[], resume: {sessionId → cursor}}
-                   env {environments[]} · heartbeat · session.opened {sessionId, ref, capabilities, head}
+daemon → platform: hello {machineId, daemonVersion, os, environments[], capabilities[], resume: {sessionId → cursor}, policy?}
+                   env {environments[], policy?} · heartbeat · session.opened {sessionId, ref, capabilities, head}
                    session.frame {sessionId, frame: WireFrame} · session.reply {sessionId, reply} · session.closed {sessionId, reason}
                    tool.call {callId, sessionId, tool, input} · pong
                    fs.response {requestId, exactly one of result: FsResult | error: {code, message}}
+                   env.response {requestId, exactly one of result: {environmentId} | error: {code, message}}
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · session.open {sessionId, environmentId, spec}
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
                    tool.result {callId, exactly one of output | error} · ping
                    fs.request {requestId, environmentId, op: list {path} | worktree {repo, branch, base?, path}}
+                   env.request {requestId, op: 'put', environment: EnvironmentInput} | {requestId, op: 'remove', environmentId}
 ```
 
 **Folder browsing** (#185, frames #187): `fs.request` asks a daemon for the immediate subfolders of a folder, or to `git worktree add` a new branch, always inside the named environment's `cwdRoots`. `fs.response` answers with one of two things:
@@ -165,6 +167,13 @@ platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}} · ses
 - the added worktree `{ path, branch }`.
 
 Refusals are named: `outside-roots`, `not-found`, `not-a-repo`, `branch-exists`, `invalid-branch`, `exists`, `timeout`, `unknown-environment`, `unsupported` and `internal`. The shared lexical check is core's `pathWithin`, and the daemon additionally resolves symlinks. `daemonConformance` has an `fs-list` case for daemons that declare the `fs` feature. As implemented in `agentic-daemon` (#188, `apps/daemon/src/fs.ts`): every path is checked lexically first (answered `outside-roots` before the disk is touched), then again after `realpath` of the path and of every root, and all reads go through the resolved path; `session.open` runs the same check on its `cwd` and refuses a missing one. Git badges are read from `.git` / `HEAD` files, never by running git; `worktree` runs `git -C <repo> worktree add -b <branch> -- <path> [base]` through `execFile` with no shell and a 60 s timeout, after `git check-ref-format --branch`.
+
+**Web-managed environments** (#224, frames #236; decisions 2026-09-19 (c)): `env.request` asks a daemon to create or change (`put`, an upsert) or to `remove` an environment. `EnvironmentInput` is `{ id?, name, runtime, cwdRoots, concurrency?, accountLabel? }`.
+- It has **no `profileDir`**. The daemon allocates one per environment, and its schema is strict: a frame whose input carries any key the contract does not name fails validation instead of having the key stripped.
+- `env.response` answers with `{ environmentId }` or a named refusal: `policy-disabled`, `outside-allowed-roots`, `unknown-runtime`, `in-use`, `unknown-environment`, `invalid`, `io` (and `timeout`, which only the platform sets).
+- The descriptors themselves travel in an `env` frame that comes with a `result`, before or after it.
+- `hello` and `env` carry the optional `policy: { webManaged, allowedRoots }`, the machine-local policy. It is edited only on the machine and nothing on the wire changes it; a daemon that predates it sends none.
+- `daemonConformance` has `env-put`, `env-remove` and `env-policy` for daemons whose harness declares the `env-manage` feature. `agentic-daemon` does not declare it until it answers the frame (#238); the Machine actor's end is #237.
 
 The Machine actor is the platform end (#189). The daemon's reply arrives as a separate `socketMessage` turn on the same actor, so the answer is a **stored result**, never an awaited promise:
 - `fsRequest(environmentId, op)` → `{ requestId }` (`fs_<uuid>`) validates the op against the protocol schema (400), refuses a revoked machine (403), an unknown environment (404) and an offline machine or one with no open socket (503), sends `fs.request` and stores `fs[requestId] = { environmentId, op, status: 'pending', requestedAt, deadline, by }`. `list` is open to session drivers (a user, an agent, an external client with `sessions`); `worktree` changes the machine, so only its owner (a user principal) may ask — checked inside the method, since `methodAuthorize` sees only the method.
