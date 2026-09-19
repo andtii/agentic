@@ -1,14 +1,14 @@
 /**
  * `SettingsForm` — workspace settings (time zone, notification preferences,
- * default environment) bound to a `WorkspaceSettings` through `model=`,
+ * default environment) bound to a `SettingsFormValue` through `model=`,
  * posting pre-hydration with the names in `SETTINGS_FIELDS`.
  */
 
 import { component, type Define } from '@sigx/runtime-core';
 import { batch, computed, signal } from '@sigx/reactivity';
 import { Button, Combobox, Field } from '@sigx/zero';
-import { NOTIFICATION_KINDS, type NotificationKind, type WorkspaceSettings } from '@agentic/core';
-import { SETTINGS_FIELDS as F, defaultWorkspaceSettings, fromSettingsDraft, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsDraft, type SettingsErrors } from './settings-model.js';
+import { NOTIFICATION_KINDS, type NotificationKind } from '@agentic/core';
+import { SETTINGS_FIELDS as F, defaultSettingsFormValue, fromSettingsDraft, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsDraft, type SettingsErrors, type SettingsFormValue } from './settings-model.js';
 import { SelectField, SwitchField, type FieldOption } from './fields.js';
 
 export interface SettingsFormApi {
@@ -18,7 +18,7 @@ export interface SettingsFormApi {
     readonly draft: SettingsDraft;
 }
 
-export type SettingsFormProps = Define.Model<WorkspaceSettings> &
+export type SettingsFormProps = Define.Model<SettingsFormValue> &
     Define.Prop<'environments', readonly FieldOption[]> &
     /** The zones offered; defaults to what `Intl` knows here. */
     Define.Prop<'timeZones', readonly string[]> &
@@ -26,7 +26,7 @@ export type SettingsFormProps = Define.Model<WorkspaceSettings> &
     Define.Prop<'method', 'post' | 'get'> &
     Define.Prop<'submitLabel', string> &
     Define.Prop<'disabled', boolean> &
-    Define.Event<'submit', WorkspaceSettings> &
+    Define.Event<'submit', SettingsFormValue> &
     Define.Event<'invalid', SettingsErrors> &
     Define.Expose<SettingsFormApi>;
 
@@ -43,7 +43,7 @@ const ZONE_WINDOW = 50;
 
 export const SettingsForm = component<SettingsFormProps>(
     ({ props, emit, expose }) => {
-        const source = (): WorkspaceSettings => props.model?.value ?? defaultWorkspaceSettings();
+        const source = (): SettingsFormValue => props.model?.value ?? defaultSettingsFormValue();
         const draft = signal<SettingsDraft>(toSettingsDraft(source()));
         const ui = signal({ attempted: false, zoneQuery: '' });
         let intlZones: readonly string[] | undefined;

@@ -1,14 +1,14 @@
 import { signal } from '@sigx/reactivity';
-import { NOTIFICATION_KINDS, type WorkspaceSettings } from '@agentic/core';
-import { SettingsForm, SETTINGS_FIELDS as F, defaultWorkspaceSettings, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi } from '@agentic/ui';
+import { NOTIFICATION_KINDS } from '@agentic/core';
+import { SettingsForm, SETTINGS_FIELDS as F, defaultSettingsFormValue, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi, type SettingsFormValue } from '@agentic/ui';
 import { controls, describedByRole, fullSettings, labelOf, mount, setText, submit, toggle } from './helpers';
 
 const zones = ['Europe/Stockholm', 'Europe/London', 'America/New_York', 'UTC'];
 
-function mountForm(settings: WorkspaceSettings = fullSettings()) {
+function mountForm(settings: SettingsFormValue = fullSettings()) {
     const state = signal({ settings });
     const ref = { current: null as SettingsFormApi | null };
-    const submitted: WorkspaceSettings[] = [];
+    const submitted: SettingsFormValue[] = [];
     const invalid: SettingsErrors[] = [];
     const root = mount(<SettingsForm model={() => state.settings} ref={ref} timeZones={zones} environments={[{ value: 'env_1', label: 'Laptop' }]} onSubmit={(s) => submitted.push(s)} onInvalid={(e) => invalid.push(e)} />);
     const form = root.querySelector('form')!;
@@ -17,8 +17,8 @@ function mountForm(settings: WorkspaceSettings = fullSettings()) {
 
 describe('settings model', () => {
     it('defaults enable exactly the core notification kinds', () => {
-        expect(Object.keys(defaultWorkspaceSettings().notifications.kinds)).toEqual([...NOTIFICATION_KINDS]);
-        expect(Object.values(defaultWorkspaceSettings().notifications.kinds).every(Boolean)).toBe(true);
+        expect(Object.keys(defaultSettingsFormValue().notifications.kinds)).toEqual([...NOTIFICATION_KINDS]);
+        expect(Object.values(defaultSettingsFormValue().notifications.kinds).every(Boolean)).toBe(true);
     });
 
     it('round-trips through the draft and through FormData', () => {
