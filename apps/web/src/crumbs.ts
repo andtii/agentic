@@ -29,6 +29,7 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     pair: { label: 'Machines', href: '/machines' },
     schedules: { label: 'Schedules', href: '/schedules' },
     plugins: { label: 'Plugins', href: '/plugins' },
+    plugin: { label: 'Plugins', href: '/plugins' },
     settings: { label: 'Settings', href: '/settings' },
     history: { label: 'History', href: '/history' },
     usage: { label: 'Usage', href: '/usage' }

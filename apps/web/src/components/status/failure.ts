@@ -56,6 +56,8 @@ export interface FailureState {
     readonly taskId?: string;
     /** For `machine` and `auth`: the machine to open. */
     readonly machineId?: string;
+    /** Where the fix is when it is neither the task nor the machine: a plugin that is turned off is fixed on `/plugins`. */
+    readonly link?: { readonly href: string; readonly label: string };
     /** Interrupted work is uncertain (OPS-05): what ran before the cut may or may not have taken effect. */
     readonly uncertain?: boolean;
 }
@@ -83,6 +85,39 @@ export function taskFailureKind(error: TaskError): FailureKind {
     if (code.startsWith('auth')) return 'auth';
     if (RUNTIME_CODES.has(code) || code.startsWith('prompt-')) return 'runtime';
     return 'task';
+}
+
+/** The router refused the work because a plugin it needs is off or gone (`Registry.gate`, AC-13): the task's, recoverable, and fixed on the Plugins page. */
+export const isPluginOff = (code: string): boolean => code === 'plugin-disabled' || code === 'plugin-missing';
+
+/** The router could not ask the Registry (`registry-unavailable`): nothing is wrong with the work, so it is retried like a runtime hiccup. */
+export const REGISTRY_UNAVAILABLE_CODE = 'registry-unavailable';
+
+/** The agent names a runtime this build does not ship (`unknown-runtime`). */
+export const UNKNOWN_RUNTIME_CODE = 'unknown-runtime';
+
+/**
+ * The plugin a failure names, from its message: the router says
+ * `turn it on at /plugins/<id>` or quotes the id (`the "claude-code" runtime
+ * plugin`, `runtime plugin "x"`), and `no-api-key` names `/plugins/anthropic-api`.
+ */
+export function pluginOfFailure(message: string): string | null {
+    const page = /\/plugins\/([^\s;,)'"]+)/.exec(message);
+    if (page) {
+        try {
+            return decodeURIComponent(page[1]!).replace(/[.]+$/, '');
+        } catch {
+            return page[1]!;
+        }
+    }
+    const quoted = /"([^"]+)" runtime plugin|runtime plugin "([^"]+)"/.exec(message);
+    return quoted ? (quoted[1] ?? quoted[2] ?? null) : null;
+}
+
+/** Where a person fixes it: the named plugin's page, else the catalogue. */
+export function pluginLink(message: string): { readonly href: string; readonly label: string } {
+    const id = pluginOfFailure(message);
+    return id ? { href: `/plugins/${encodeURIComponent(id)}`, label: 'Open plugin' } : { href: '/plugins', label: 'Open plugins' };
 }
 
 const AUTH_FINDING = /auth|login|credential|token|sign/i;
@@ -144,9 +179,21 @@ export function failureOf(signals: FailureSignals, now: number = Date.now()): Fa
     // 6. The task reported it could not finish — by the code the router gave it.
     if (task && task.status === 'failed') {
         const error = task.error ?? { code: 'failed', message: 'The agent reported it could not finish.', recoverable: false };
+        const signal = `Task.error ${error.code}`;
+        if (isPluginOff(error.code)) {
+            return { kind: 'task', signal, detail: `${error.message} A plugin this work needs is turned off. Turn it on under Plugins, then send the work again.`, taskId: task.id, link: pluginLink(error.message) };
+        }
+        if (error.code === REGISTRY_UNAVAILABLE_CODE) {
+            return { kind: 'runtime', signal, detail: `${error.message} The platform could not check its plugins; nothing about the work is wrong. Send it again.`, taskId: task.id };
+        }
+        if (error.code === UNKNOWN_RUNTIME_CODE) {
+            return { kind: 'task', signal, detail: `${error.message} Pick a runtime this workspace has in the agent's config.`, taskId: task.id, link: { href: '/plugins', label: 'Open plugins' } };
+        }
         const kind = taskFailureKind(error);
         const detail = kind === 'task' ? `${error.message} Delegating agents are told.` : error.message;
-        return { kind, signal: `Task.error ${error.code}`, detail, taskId: task.id, ...(machine ? { machineId: machine.id } : {}) };
+        // A failure that names the plugin page that fixes it (`no-api-key` → `/plugins/anthropic-api`) links there.
+        const named = kind === 'task' && pluginOfFailure(error.message) ? { link: pluginLink(error.message) } : {};
+        return { kind, signal, detail, taskId: task.id, ...(machine ? { machineId: machine.id } : {}), ...named };
     }
     return null;
 }
