@@ -17,8 +17,6 @@ import { openNewAgent, closeNewAgent } from '../../src/pages/agent/head';
 import { buttonNamed, setText, text } from './helpers';
 import { WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
 
-/** The runtimes this page's flows are written against; more runtimes in the catalogue would change the picker it drives. */
-const SETUP_RUNTIMES = [anthropicApiPlugin, claudeCodePlugin];
 const KEK = generateWorkspaceKek();
 /** The runtimes the setup flows are written against: one model runtime, one daemon-hosted harness — not every runtime this build ships. */
 const SETUP_RUNTIMES = [anthropicApiPlugin, claudeCodePlugin];
