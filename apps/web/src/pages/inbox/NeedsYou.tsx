@@ -115,6 +115,7 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                     <QuestionPrompt
                         request={openRequestOf(view.view)}
                         requestedBy={view.requestedBy}
+                        stale={view.view.detached}
                         answered={resolved && resolved.outcome !== 'cancel' ? (resolved.answers ?? '') : undefined}
                         cancelled={resolved?.outcome === 'cancel'}
                         onRespond={(_, decision) => respond(decision)}

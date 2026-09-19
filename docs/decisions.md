@@ -95,3 +95,12 @@ With several Claude Code accounts connected, neither a person nor an orchestrati
 
   The spike measured the probe on four local profiles: no model call, cost 0, no leftover process, 0.25–0.9 s. It ships **on**. `agentic-daemon run --quota-probe off` leaves the stream only, and the probe returns `null` on any failure, so an SDK change degrades to passive rather than breaking.
 - **No automatic account switching (EXE-12).** The limits are information for planning. `usage_limits` and the UI never move or re-place work; the caller chooses an environment explicitly, as `sessions_open` already requires.
+
+## 2026-09-19 — `ask_user` questions outlive the turn (#285)
+
+A blocking `ask_user` lost every answer that came after the tool call timed out. That includes the engine's MCP timeout, which the platform does not control, and the router closing the session at turn end.
+
+- **Async, not a longer wait.** Raising timeouts would only move the cliff: an hours-long pause still needs the engine, the daemon and the machine to stay up throughout. In a chat, `ask_user` waits a short window (25 s) and then answers `pending`. The agent ends its turn, and the answer starts it again as a new task in the chat. The question outlives the turn and the session; it is not cancelled when the call ends.
+- **The answer is always visible.** It is posted in the chat as the person who gave it, mentioning the asker, before anyone is started. If starting the agent fails, the chat says so.
+- **Continue the same conversation where possible.** The follow-up resumes the asking session's engine conversation when a daemon ran it on the same machine, environment and runtime. Otherwise it opens fresh, with the question, the answer and the chat as context.
+- **Chatless asks keep blocking.** A delegated child runs outside any chat, and its parent already has its result by the time a late answer could start it again. Its `ask_user` waits as before, capped by the daemon's tool timeout.

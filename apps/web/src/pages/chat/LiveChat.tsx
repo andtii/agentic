@@ -30,17 +30,18 @@ import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, 
 import { Page } from '../../components/Page';
 import { FailureNotice } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { chatKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { chatKeyOf, inboxKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { resolveAddressing, type MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
 import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
 import { ContextPanel } from './ContextPanel';
+import { DetachedQuestionCard } from './DetachedQuestionCard';
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
@@ -65,6 +66,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
 
     // Every task of the workspace, live: the panel keeps this chat's chains (`chatTasks`).
     const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    // Which session asked each open question (#285): a question that outlived its session is answered from its own card.
+    const inbox = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
     const zone = useWorkspaceZone(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const time = (at: number): string => zoneFormat(zone()).time(at);
@@ -322,8 +325,19 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 transcript={transcript}
                                 describe={(m) => authors.value[m.id]}
                                 onRespond={respond}
+                                describeRequest={(r) => {
+                                    const feed = feeds.list.find((f) => f.transcript.requests[r.requestId]);
+                                    if (!feed) return undefined;
+                                    const who = directory.lookup(feed.agentId);
+                                    return { requestedBy: { name: who.name, hue: who.hue } };
+                                }}
                             />
                         )}
+                    {detachedQuestions(entries, inbox.value ?? [], feeds.list).map((q) => (
+                        <div key={`${q.sessionId}:${q.requestId}`} data-chat-question>
+                            <DetachedQuestionCard question={q} lookup={directory.lookup} onError={fail} />
+                        </div>
+                    ))}
                     {failure ? (
                         <div data-chat-failure>
                             <FailureNotice

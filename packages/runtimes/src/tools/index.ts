@@ -17,7 +17,7 @@ import type { PlatformPorts } from './ports.js';
 import { taskReportTool } from './task.js';
 import { usageLimitsTool } from './usage.js';
 
-export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, ChatPostResult, UserQuestion, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, ChatFilesPort, UsagePort, PlatformPorts } from './ports.js';
+export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, ChatPostResult, UserQuestion, AskOutcome, DelegateSpec, DelegateCall, DelegateOutcome, TaskReport, ChatFilesPort, UsagePort, PlatformPorts } from './ports.js';
 export { memorySearchTool, memoryRememberTool, memorySearchInput, memoryRememberInput } from './memory.js';
 export { delegateTool, delegateInput, delegateResult, type DelegateResult } from './delegate.js';
 export { chatPostTool, askUserTool, chatPostInput, askUserInput } from './chat.js';

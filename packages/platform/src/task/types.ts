@@ -139,6 +139,8 @@ export interface TaskState {
     environmentId?: EnvironmentId;
     /** The folder the task's session runs in (#190); only with `environmentId`. */
     workdir?: string;
+    /** The earlier session whose engine conversation this task continues (#285). */
+    resumeFrom?: SessionId;
     owner: AgentId;
     depth: number;
     parentId?: TaskId;

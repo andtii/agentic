@@ -34,7 +34,8 @@ export function chatPostTool(port: ChatPort) {
 export function askUserTool(port: ChatPort) {
     return defineTool({
         name: 'ask_user',
-        description: 'Ask the user a question and wait for the answer. Use it when you cannot proceed without a decision only they can make; otherwise state your assumption and go on.',
+        description:
+            'Ask the user a question. Use it when you cannot proceed without a decision only they can make; otherwise state your assumption and go on. A quick answer comes back as `answer`. If the result is `status: "pending"`, the user has not answered yet: end your turn now, saying you are waiting on that question — do not ask again or guess. When the user answers, you are started again in this chat with the question and the answer, and continue the work from there.',
         input: askUserInput,
         annotations: { idempotent: false },
         execute: (input, ctx) => port.ask({ question: input.question, ...(input.choices ? { choices: input.choices } : {}) }, { callId: ctx.toolCallId, signal: ctx.signal })

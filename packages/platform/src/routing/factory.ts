@@ -86,6 +86,8 @@ export function withInstanceRuntimes(fixed: RuntimeCatalogue, instances: Instanc
 export interface AnthropicApiRuntimeOptions {
     /** The Routing actor definition (`task_report`). */
     readonly routing: () => AnyActorDefinition;
+    /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
+    readonly askQuickWaitMs?: number;
     /** The Session actor definition (`ask_user`, #122); without it the tool answers `unsupported`. */
     readonly sessions?: () => AnyActorDefinition;
     /** A model to run every session on instead of the provider's — tests pass `mockModel`. With a `registry` the key is still required; without one, it is the only way to open. */
@@ -158,7 +160,8 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 ...(options.sessions ? { sessions: options.sessions } : {}),
                 ...(options.files ? { files: options.files } : {}),
                 ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {}),
-                ...(options.machines ? { machines: options.machines } : {})
+                ...(options.machines ? { machines: options.machines } : {}),
+                ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {})
             });
             let provider: PlatformAgentDeps['anthropic'];
             if (plugin.registry) {

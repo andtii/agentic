@@ -16,7 +16,7 @@ import { Chat } from '../../src/chat/index';
 import { ToolCallError, type ToolCallPort } from '../../src/machine/index';
 import { Memory, memoryActorKey } from '../../src/memory/index';
 import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
-import { defineSessionActor } from '../../src/session/index';
+import { defineSessionActor, type AnswerFollowUp } from '../../src/session/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
@@ -46,13 +46,18 @@ const config: FrozenAgentConfig = {
 
 let app: TestActorApp;
 let port: ToolCallPort;
+/** The same port with `ask_user`'s quick window cut to 20 ms, so a question detaches (#285). */
+let quickPort: ToolCallPort;
+let followUps: AnswerFollowUp[];
 let Session: ReturnType<typeof defineSessionActor>;
 let Routing: ReturnType<typeof defineRoutingActor>;
 
 beforeEach(async () => {
-    Session = defineSessionActor({ factory: () => null });
+    followUps = [];
+    Session = defineSessionActor({ factory: () => null, answered: async (f) => void followUps.push(f) });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     port = createToolCallPort({ routing: () => Routing, sessions: () => Session });
+    quickPort = createToolCallPort({ routing: () => Routing, sessions: () => Session, askQuickWaitMs: 20 });
     app = testActorApp([Session, Routing, Memory, Chat]);
     await app.start();
     await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: AGENT, runtime: 'in-memory', chatId: CHAT, taskId: TASK, machineId: 'machine_1' as never, config });
@@ -134,6 +139,60 @@ describe('createToolCallPort', () => {
         await until(async () => (await session.get()).openRequests.length === 1, 'the second request to land');
         await session.respond('ask:call_cancel', { type: 'cancel' });
         expect(await codeOf(cancelled)).toBe('cancelled');
+    });
+
+    it('in a chat, ask_user answers `pending` once the quick window passes; an answer before the close is handed over at the close (#285)', async () => {
+        const session = app.as(owner).actor(Session, actorKey(WS, 'session', SESSION));
+        const out = await quickPort.call({ callId: 'call_late', sessionId: SESSION, tool: 'ask_user', input: { question: 'Which colour?', choices: ['red', 'blue'] } }, principal);
+        expect(out).toMatchObject({ status: 'pending', questionId: 'ask:call_late' });
+        expect(await session.request('ask:call_late')).toMatchObject({ agentName: 'Ada', detached: true });
+        // Answered while the session is still open (the asker's turn may still run): parked, nobody started yet.
+        expect((await session.respond('ask:call_late', { type: 'input', answers: 'blue' })).kind).toBe('ack');
+        expect(followUps).toEqual([]);
+        expect((await session.get()).openRequests).toEqual([]);
+        // The session closes: the answer goes to the asker once, with who gave it.
+        await session.close();
+        await until(() => followUps.length === 1, 'the follow-up');
+        expect(followUps[0]).toEqual({
+            workspaceId: WS,
+            sessionId: SESSION,
+            agentId: AGENT,
+            chatId: CHAT,
+            taskId: TASK,
+            requestId: 'ask:call_late',
+            question: 'Which colour?',
+            choices: ['red', 'blue'],
+            answer: 'blue',
+            answeredBy: owner
+        });
+        await new Promise((r) => setTimeout(r, 30));
+        expect(followUps).toHaveLength(1);
+    });
+
+    it('detaching is atomic with respond: an answer that beat the detach is returned, never lost (#285)', async () => {
+        const asAgent = app.as(principal).actor(Session, actorKey(WS, 'session', SESSION));
+        const { requestId } = await asAgent.raiseInput({ callId: 'call_race', message: 'Which colour?' });
+        await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).respond(requestId, { type: 'input', answers: 'red' });
+        expect(await asAgent.detachInput(requestId)).toMatchObject({ resolved: { outcome: 'input', answers: 'red' } });
+        expect((await asAgent.get()).openRequests).toEqual([]);
+        // Only the asking agent detaches its own question.
+        const other = mintAgentPrincipal({ workspaceId: WS, agentId: OTHER, sessionId: 'session_2' as SessionId });
+        await expect(app.as(other).actor(Session, actorKey(WS, 'session', SESSION)).detachInput(requestId)).rejects.toThrow();
+    });
+
+    it('without a chat, ask_user keeps waiting past the quick window: there is nowhere to start the asker again (#285)', async () => {
+        const LONE = 'session_lone' as SessionId;
+        const lone = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: LONE, taskId: TASK });
+        const session = app.as(owner).actor(Session, actorKey(WS, 'session', LONE));
+        await session.open({ agentId: AGENT, runtime: 'in-memory', taskId: TASK, machineId: 'machine_1' as never, config });
+        let answered: unknown;
+        const asked = quickPort.call({ callId: 'call_lone', sessionId: LONE, tool: 'ask_user', input: { question: 'Sure?' } }, lone).then((r) => (answered = r));
+        await until(async () => (await session.get()).openRequests.length === 1, 'the request to land');
+        await new Promise((r) => setTimeout(r, 60));
+        expect(answered).toBeUndefined();
+        expect(await session.request('ask:call_lone')).toMatchObject({ detached: false });
+        await session.respond('ask:call_lone', { type: 'input', answers: 'yes' });
+        expect(await asked).toEqual({ answer: 'yes' });
     });
 
     it('refuses what it does not serve, with the code the daemon reports', async () => {
