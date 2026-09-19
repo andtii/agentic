@@ -8,7 +8,7 @@
 import { useData } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import type { EnvironmentDescriptor, HostOs } from '@agentic/core';
+import type { EnvironmentDescriptor, HostOs, QuotaSnapshot } from '@agentic/core';
 import type { EnvironmentParts } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -25,6 +25,8 @@ export interface EnvironmentEntry {
     readonly line: EnvironmentParts;
     /** "alien01 / claude-code / work" — the select's label. */
     readonly label: string;
+    /** Its account's provider limits as the machine last reported them (#315); `null` before the first report. */
+    readonly quota?: QuotaSnapshot | null;
 }
 
 export interface EnvironmentDirectory {
@@ -59,7 +61,8 @@ export function useEnvironmentDirectory(defs: Pick<ActorDefs, 'Workspace' | 'Mac
                                 ...(m.os ? { os: m.os } : {}),
                                 descriptor: d,
                                 line: { machine: m.name, runtime: d.runtime, account: d.account.label },
-                                label: `${m.name} / ${d.runtime} / ${d.account.label}`
+                                label: `${m.name} / ${d.runtime} / ${d.account.label}`,
+                                quota: m.quota?.[d.id] ?? null
                             });
                         }
                     } catch {

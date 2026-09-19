@@ -9,7 +9,7 @@
 import { component, type Define } from '@sigx/runtime-core';
 import { tightestWindow, type QuotaSnapshot, type QuotaWindow } from '@agentic/core';
 import { agQuotaAnatomy, agQuotaPanelAnatomy } from './anatomy.js';
-import { ageText, isQuotaStale, quotaPercent, quotaTone, quotaUsedText, resetsText } from './quota.js';
+import { ageText, isQuotaStale, quotaPercent, quotaShortLabel, quotaTone, quotaUsedText, resetsText } from './quota.js';
 import { Tag } from './StatusPill.js';
 
 const SCOPE = agQuotaAnatomy.scope;
@@ -23,6 +23,8 @@ export type QuotaMeterProps =
     & Define.Prop<'now', number>
     /** The viewer's time zone by default. */
     & Define.Prop<'timeZone', string>
+    /** One line — label, a short bar, the percent — with the reset time as the tooltip (#315: chat members, the folder picker, New chat). */
+    & Define.Prop<'compact', boolean>
     & Define.Prop<'class', string>;
 
 export const QuotaMeter = component<QuotaMeterProps>(({ props }) => () => {
@@ -30,8 +32,8 @@ export const QuotaMeter = component<QuotaMeterProps>(({ props }) => () => {
     const percent = quotaPercent(w);
     const resets = resetsText(w.resetsAt, { ...(props.now !== undefined ? { now: props.now } : {}), ...(props.timeZone ? { timeZone: props.timeZone } : {}) });
     return (
-        <div data-scope={SCOPE} data-part="root" data-tone={quotaTone(w.status)} data-status={w.status} data-mod-stale={props.stale ? '' : undefined} data-window={w.id} class={props.class}>
-            <span data-scope={SCOPE} data-part="label">{w.label}</span>
+        <div data-scope={SCOPE} data-part="root" data-tone={quotaTone(w.status)} data-status={w.status} data-mod-stale={props.stale ? '' : undefined} data-mod-compact={props.compact ? '' : undefined} data-window={w.id} title={props.compact ? [w.label, resets].filter(Boolean).join(' · ') : undefined} class={props.class}>
+            <span data-scope={SCOPE} data-part="label">{props.compact ? quotaShortLabel(w) : w.label}</span>
             <span
                 data-scope={SCOPE}
                 data-part="bar"
@@ -45,10 +47,36 @@ export const QuotaMeter = component<QuotaMeterProps>(({ props }) => () => {
                 <span data-scope={SCOPE} data-part="fill" style={`inline-size: ${percent ?? 0}%`} />
             </span>
             <span data-scope={SCOPE} data-part="used">{quotaUsedText(w)}</span>
-            {resets ? <span data-scope={SCOPE} data-part="resets">{resets}</span> : null}
+            {resets && !props.compact ? <span data-scope={SCOPE} data-part="resets">{resets}</span> : null}
         </div>
     );
 }, { name: 'QuotaMeter' });
+
+export type QuotaBadgeProps =
+    /** The account's snapshot; `null` = nothing reported yet, `undefined` = not an account with limits (say `note`). */
+    & Define.Prop<'snapshot', QuotaSnapshot | null | undefined>
+    /** What to say when there is no window to show — e.g. "No plan limits" for a model runtime. */
+    & Define.Prop<'note', string>
+    & Define.Prop<'now', number>
+    & Define.Prop<'staleMs', number>
+    & Define.Prop<'class', string>;
+
+/**
+ * One account's limits in one line (#315): the window closest to its limit as a compact meter, or a muted note —
+ * "Not reported — <reason>", "No usage reported yet", or the caller's `note`. For wherever an account is chosen.
+ */
+export const QuotaBadge = component<QuotaBadgeProps>(({ props }) => () => {
+    const s = props.snapshot;
+    const w = s ? (tightestWindow(s) ?? s.windows[0]) : undefined;
+    if (s && w) return <QuotaMeter window={w} compact stale={isQuotaStale(s, props.now ?? Date.now(), props.staleMs)} class={props.class} />;
+    const note = s?.availability === 'not-reported' ? `Not reported${s.reason ? ` — ${s.reason}` : ''}` : s === null ? 'No usage reported yet' : props.note;
+    if (!note) return null;
+    return (
+        <span data-scope={SCOPE} data-part="root" data-tone="muted" data-mod-compact="" data-quota-note="" class={props.class}>
+            <span data-scope={SCOPE} data-part="label">{note}</span>
+        </span>
+    );
+}, { name: 'QuotaBadge' });
 
 export type QuotaPanelProps =
     /** `null`: nothing reported yet. */

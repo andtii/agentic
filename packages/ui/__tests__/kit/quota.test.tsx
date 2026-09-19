@@ -4,7 +4,7 @@
  * why the provider reports nothing (OPS-07, PLG-09).
  */
 import type { EnvironmentId, QuotaSnapshot, QuotaWindow } from '@agentic/core';
-import { QuotaMeter, QuotaPanel, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsText } from '@agentic/ui';
+import { QuotaBadge, QuotaMeter, QuotaPanel, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsText } from '@agentic/ui';
 import { mount } from '../helpers';
 
 const TZ = 'Europe/Stockholm';
@@ -116,3 +116,30 @@ describe('QuotaPanel', () => {
         expect(parts(root, 'ag-quota', 'label').map((l) => l.textContent)).toEqual(['Current week (Fable)']);
     });
 });
+
+describe('QuotaBadge (#315)', () => {
+    it('shows the tightest window as a one-line meter, with the reset time as its tooltip', () => {
+        const root = mount(<QuotaBadge snapshot={snapshot()} now={NOW} />);
+        const meter = part(root, 'ag-quota', 'root')!;
+        expect(meter.hasAttribute('data-mod-compact')).toBe(true);
+        expect(part(root, 'ag-quota', 'label')!.textContent).toBe('Week · Fable');
+        expect(part(root, 'ag-quota', 'used')!.textContent).toBe('80% used');
+        expect(part(root, 'ag-quota', 'resets')).toBeNull();
+        expect(meter.getAttribute('title')).toMatch(/^Current week \(Fable\) · Resets /);
+    });
+
+    it('dims an old snapshot without being given staleMs (QUOTA_STALE_MS by default)', () => {
+        const root = mount(<QuotaBadge snapshot={snapshot({ observedAt: NOW - 2 * 3_600_000 })} now={NOW} />);
+        expect(part(root, 'ag-quota', 'root')!.hasAttribute('data-mod-stale')).toBe(true);
+        expect(part(mount(<QuotaBadge snapshot={snapshot()} now={NOW} />), 'ag-quota', 'root')!.hasAttribute('data-mod-stale')).toBe(false);
+    });
+
+    it('says why there is no number: not reported, nothing yet, or the caller\'s note', () => {
+        const none = mount(<QuotaBadge snapshot={snapshot({ availability: 'not-reported', reason: 'API-key login', windows: [] })} />);
+        expect(none.textContent).toBe('Not reported — API-key login');
+        expect(mount(<QuotaBadge snapshot={null} />).textContent).toBe('No usage reported yet');
+        expect(mount(<QuotaBadge note="No plan limits · API key" />).textContent).toBe('No plan limits · API key');
+        expect(mount(<QuotaBadge />).textContent).toBe('');
+    });
+});
+

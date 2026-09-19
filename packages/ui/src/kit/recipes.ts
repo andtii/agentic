@@ -691,7 +691,13 @@ const quota: RecipeInput = {
         }
     },
     modifiers: {
-        stale: { root: { base: { opacity: '0.6' } } }
+        stale: { root: { base: { opacity: '0.6' } } },
+        // One line (#315): label, a 56 px bar, the percent; the reset time is the tooltip.
+        compact: {
+            root: { base: { display: 'inline-grid', gridTemplateColumns: 'minmax(0, auto) 56px auto', columnGap: 'var(--space-sm)', maxInlineSize: '100%' } },
+            label: { base: { gridColumn: 'auto', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            bar: { base: { blockSize: '6px' } }
+        }
     }
 };
 

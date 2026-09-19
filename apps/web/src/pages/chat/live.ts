@@ -26,6 +26,8 @@ export interface AgentIdentity {
     readonly description?: string;
     readonly hue: AgentHue;
     readonly environment: EnvironmentParts;
+    /** The environment it runs in by default (`execution.defaultEnvironmentId`); absent for a platform runtime or none chosen. */
+    readonly environmentId?: string;
     readonly configVersion: number;
 }
 
@@ -58,6 +60,7 @@ export function identityOf(view: AgentView, index: number): AgentIdentity {
             runtime,
             account: platform ? 'byo-key' : 'machine'
         },
+        ...(!platform && config.execution.defaultEnvironmentId ? { environmentId: config.execution.defaultEnvironmentId } : {}),
         configVersion: view.configVersion
     };
 }

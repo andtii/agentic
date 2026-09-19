@@ -30,6 +30,7 @@ import { FS_LIST_MAX_ENTRIES, normalizePath, pathWithin, type EnvironmentId, typ
 import { agWorkdirPickerAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
 import { Icon } from '../kit/icons.js';
+import { QuotaBadge } from '../kit/QuotaMeter.js';
 import { Tag } from '../kit/StatusPill.js';
 import { TableSkeleton } from '../kit/states/Skeletons.js';
 import { FS_ERROR_TEXT, fsErrorText, middleTruncate, samePath, workdirCrumbs, type WorkdirEnvironment, type WorkdirRecent, type WorkdirWorktreeRequest } from './workdir-model.js';
@@ -222,6 +223,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
                 >
                     <span data-scope={SCOPE} data-part="env-name">{e.label}</span>
                     <span data-scope={SCOPE} data-part="env-note">{e.unavailable ?? 'Available'}</span>
+                    {e.quota !== undefined ? <QuotaBadge snapshot={e.quota} /> : null}
                 </button>
             ))}
         </div>
