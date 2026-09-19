@@ -17,6 +17,7 @@ export {
     type EnvironmentChosenData,
     type MachinePairedData,
     type MachineRevokedData,
+    type PluginActivatedData,
     type PluginGrantedData,
     type PluginToggledData,
     type ProposalReviewedData,

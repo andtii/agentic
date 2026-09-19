@@ -25,6 +25,7 @@ export const AUDIT_KINDS = [
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
+    'plugin.activated',
     'secret.opened',
     'workdir.worktree-created'
 ] as const;
@@ -161,6 +162,13 @@ export interface PluginGrantedData {
     readonly scopes: readonly PermissionScope[];
 }
 
+/** `Registry.activate` changed which plugin a single-slot kind (memory, learning) runs on; `previous` is the one it replaced. */
+export interface PluginActivatedData {
+    readonly pluginId: string;
+    readonly kind: 'memory' | 'learning';
+    readonly previous?: string;
+}
+
 /** A secret's plaintext left the Registry (`openSecret`) — every call is an occurrence. */
 export interface SecretOpenedData {
     readonly name: string;
@@ -192,6 +200,7 @@ export interface AuditDataByKind {
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
+    readonly 'plugin.activated': PluginActivatedData;
     readonly 'secret.opened': SecretOpenedData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
 }
