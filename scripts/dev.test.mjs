@@ -44,7 +44,7 @@ test('ensureDevVars: creates the file once (0600 where it applies), then only re
         // An env key is never copied in any more (#231) — only noticed, so the log can say it is ignored.
         const first = ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk-ant-env' }, { random: fakeRandom(1) });
         assert.equal(first.created, true);
-        assert.equal(first.legacyAnthropicKey, true);
+        assert.equal(first.legacyAnthropicKey, 'env');
         assert.ok(existsSync(file));
         const written = readFileSync(file, 'utf8');
         assert.deepEqual(parseDevVars(written), first.vars);
@@ -53,15 +53,16 @@ test('ensureDevVars: creates the file once (0600 where it applies), then only re
         // Second run: the file wins and is not touched.
         const again = ensureDevVars(file, {}, { random: fakeRandom(2) });
         assert.equal(again.created, false);
-        assert.equal(again.legacyAnthropicKey, false);
+        assert.equal(again.legacyAnthropicKey, undefined);
+        assert.equal(ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk' }).legacyAnthropicKey, 'env', 'only the shell has it: nothing in the file to delete');
         assert.deepEqual(again.vars, first.vars);
         assert.equal(readFileSync(file, 'utf8'), written);
 
         // A file from before #231 that still carries the key: read as it is (its WORKSPACE_KEK sealed the Registry's secrets), never rewritten, flagged.
         const legacy = 'SESSION_SECRET=x\nWORKSPACE_KEK=k\nANTHROPIC_API_KEY=sk-ant-old\n';
         writeFileSync(file, legacy);
-        const old = ensureDevVars(file, {});
-        assert.equal(old.legacyAnthropicKey, true);
+        const old = ensureDevVars(file, { ANTHROPIC_API_KEY: 'sk' });
+        assert.equal(old.legacyAnthropicKey, 'file', 'the file wins: its line is the one to delete');
         assert.equal(old.vars.WORKSPACE_KEK, 'k');
         assert.equal(readFileSync(file, 'utf8'), legacy);
     } finally {

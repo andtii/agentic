@@ -116,18 +116,20 @@ export function renderDevVars({ random = randomBytes } = {}) {
 /**
  * Create `file` when missing, read it otherwise — never rewrite it: a new
  * `WORKSPACE_KEK` would orphan every secret the Registry sealed under the old
- * one. `legacyAnthropicKey` says the file (or `env`) still carries the
- * `ANTHROPIC_API_KEY` the Worker no longer reads (#231), so the log can say so.
+ * one. `legacyAnthropicKey` says where an `ANTHROPIC_API_KEY` the Worker no
+ * longer reads (#231) still sits — `'file'` (a line to delete) or `'env'`
+ * (only the shell) — so the log can say so; `undefined` when nowhere.
  */
 export function ensureDevVars(file, env = process.env, { random = randomBytes } = {}) {
+    const inEnv = env.ANTHROPIC_API_KEY ? 'env' : undefined;
     if (existsSync(file)) {
         const vars = parseDevVars(readFileSync(file, 'utf8'));
-        return { created: false, vars, legacyAnthropicKey: !!vars.ANTHROPIC_API_KEY || !!env.ANTHROPIC_API_KEY };
+        return { created: false, vars, legacyAnthropicKey: vars.ANTHROPIC_API_KEY ? 'file' : inEnv };
     }
     const rendered = renderDevVars({ random });
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, rendered.text, { encoding: 'utf8', mode: 0o600 });
-    return { created: true, vars: rendered.vars, legacyAnthropicKey: !!env.ANTHROPIC_API_KEY };
+    return { created: true, vars: rendered.vars, legacyAnthropicKey: inEnv };
 }
 
 /** Where a signed-in user adds the workspace's Anthropic key (the `anthropic-api` plugin's page, #233). */
@@ -292,7 +294,10 @@ export async function main(argv = process.argv.slice(2)) {
     } else {
         log(`using ${rel}`);
     }
-    if (dv.legacyAnthropicKey) log(`ANTHROPIC_API_KEY is no longer read (#231): each workspace keeps its own key — add it at ${anthropicKeyLink(flags.port)}. The line in ${rel} can be deleted; the file is left as it is.`);
+    if (dv.legacyAnthropicKey) {
+        const where = dv.legacyAnthropicKey === 'file' ? `The line in ${rel} can be deleted (the file is left as it is).` : 'The variable in your shell is not used.';
+        log(`ANTHROPIC_API_KEY is no longer read (#231): each workspace keeps its own key — add it at ${anthropicKeyLink(flags.port)}. ${where}`);
+    }
     if (!dv.vars.AGENTIC_DEV_LOGIN || dv.vars.AGENTIC_DEV_LOGIN.length < 16) warn(`AGENTIC_DEV_LOGIN is missing or shorter than 16 chars in ${rel}: the dev login will not be mounted`);
     if (!dv.vars.SESSION_SECRET || dv.vars.SESSION_SECRET.length < 32) warn(`SESSION_SECRET is missing or shorter than 32 chars in ${rel}: every request will be anonymous`);
     log(githubLoginConfigured(dv.vars) ? 'GitHub login: configured (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set)' : `GitHub login: not configured (no GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET in ${rel}) — the dev login and machine pairing work without it`);
