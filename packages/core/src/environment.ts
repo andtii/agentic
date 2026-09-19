@@ -62,3 +62,61 @@ export interface MachineInfo {
     readonly online: boolean;
     readonly lastSeenAt: number;
 }
+
+/**
+ * What the platform may ask a daemon to create or change with `env.request`
+ * (#236; decisions 2026-09-19 (c)). There is no `profileDir`: the daemon
+ * allocates one per environment and it never crosses the wire, in either
+ * direction. `id` absent → the daemon mints one; present → that environment is
+ * updated in place and keeps its profile directory.
+ */
+export interface EnvironmentInput {
+    readonly id?: EnvironmentId;
+    readonly name: string;
+    readonly runtime: RuntimeId;
+    /** Absolute, machine-native; each must lie within the machine's `MachinePolicy.allowedRoots`. */
+    readonly cwdRoots: readonly string[];
+    /** Sessions at once; the daemon's default when absent. */
+    readonly concurrency?: number;
+    readonly accountLabel?: string;
+}
+
+/** What `env.request` asks a daemon to do. */
+export type EnvOp = { readonly op: 'put'; readonly environment: EnvironmentInput } | { readonly op: 'remove'; readonly environmentId: EnvironmentId };
+
+/** What `env.response` answers: the environment that was written or removed. The new descriptors follow in an `env` frame. */
+export interface EnvResult {
+    readonly environmentId: EnvironmentId;
+}
+
+export type EnvErrorCode =
+    /** The machine's policy does not let the web manage environments (the default). */
+    | 'policy-disabled'
+    /** A working root is not inside `allowedRoots` — after the daemon resolved links. */
+    | 'outside-allowed-roots'
+    /** The daemon has no driver for the runtime. */
+    | 'unknown-runtime'
+    /** `remove`: the environment has running sessions. */
+    | 'in-use'
+    /** `remove`, or a `put` with an `id`: the daemon has no such environment. */
+    | 'unknown-environment'
+    | 'invalid'
+    | 'io'
+    /** The daemon did not answer in time — set by the platform, never sent by a daemon. */
+    | 'timeout';
+
+export interface EnvError {
+    readonly code: EnvErrorCode;
+    readonly message: string;
+}
+
+/**
+ * The machine-local policy a daemon reports in `hello` / `env` so the web can
+ * explain itself. It is only ever edited on the machine; nothing on the wire
+ * changes it. Absent → the daemon predates web-managed environments.
+ */
+export interface MachinePolicy {
+    readonly webManaged: boolean;
+    /** Absolute, machine-native; empty when `webManaged` is off. */
+    readonly allowedRoots: readonly string[];
+}

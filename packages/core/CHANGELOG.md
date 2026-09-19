@@ -10,6 +10,10 @@ All notable changes to `@agentic/core` (Keep a Changelog, semver).
 
 ### Added
 
+- Web-managed environments vocabulary (#236, part of #224; decisions 2026-09-19 (c)), in `environment.ts`:
+  - `EnvironmentInput` (`id?`, `name`, `runtime`, `cwdRoots`, `concurrency?`, `accountLabel?`): what the platform may ask a daemon to create or change. It has no `profileDir` — the daemon allocates it and it never crosses the wire.
+  - `EnvOp` (`put` | `remove`), `EnvResult`, `EnvError` / `EnvErrorCode` (`policy-disabled`, `outside-allowed-roots`, `unknown-runtime`, `in-use`, `unknown-environment`, `invalid`, `io`, and the platform-side `timeout`).
+  - `MachinePolicy` (`webManaged`, `allowedRoots`): the machine-local policy a daemon reports. The frames themselves land with their schemas.
 - Plugin configuration contract (#226, part of #224; PLG-02, PLG-04), in `plugin-config.ts`:
   - `ConfigSchema`: the typed JSON-Schema SUBSET a manifest's `config` is written in. Properties are a string (with `enum`, `format: 'uri'`), a number / integer (with `minimum` / `maximum`), a boolean, a string list or a string map, each with `title`, `description`, `default`; plus `required` and `additionalProperties`. A bare `{ type: 'object' }` or `{}` still means "anything". `JsonSchema` stays as a deprecated alias of it, so existing manifests compile unchanged.
   - `PluginManifest.secrets` (`PluginSecretDeclaration`: `name`, `title`, `description`, `required`). A secret is never a config property.
