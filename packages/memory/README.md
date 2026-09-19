@@ -54,6 +54,10 @@ const report = await migrate(defaultStore, flatStore, { dryRun: true });
 
 Known limitations of the round trip default → flat → default: exactly the four fields above come back missing, nothing else (AC-11). Consequences on the way back: a `working` entry without `ttl` never expires, a superseded record keeps `retired: true` but loses its `supersedes` link, a lesson loses its `conditions` (so it no longer matches a tags query by them) and its `evidence`. Retirement reasons are not part of `MemoryEntry` and so not of any export — both plugins keep them (`state.retirements` / `retirement(id)`), neither migrates them.
 
+## Plugin manifests (`src/manifest.ts`, #228)
+
+`memoryDefaultPlugin` (`agentic.memory.default`) and `memoryFlatPlugin` (`agentic.memory.flat`) are the `PluginManifest`s (PLG-02) of the two plugins above, with the ids and versions the plugins report; `MEMORY_PLUGINS` lists both, the default first. `memory` is a single-slot kind: a workspace runs one at a time. Both declare `memory:read` and `memory:write`, no secrets and no config yet; `capabilities` names the retrieval and the export fidelity (`export:full` / `export:partial`).
+
 ## Conformance
 
 ```ts

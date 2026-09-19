@@ -4,6 +4,7 @@ All notable changes to `@agentic/memory` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+- Plugin manifests (#228, PLG-02): `memoryDefaultPlugin` (`agentic.memory.default`), `memoryFlatPlugin` (`agentic.memory.flat`) and `MEMORY_PLUGINS` (default first) — kind `memory`, `memory:read` + `memory:write`, no config yet. Declarations only.
 - Delete (#149, MEM-05 / MEM-08): `MemoryLogEntry` gains `{ op: 'delete', id }` — `applyMemoryLog` drops the entry and its retirement; `createMemoryStore().delete(id)` and the flat store's `delete(id)` resolve `false` for an unknown id; `memoryConformance` gains a core case (gone from `get`, `query`, `export`).
 
 - Migration between plugins (#49, MEM-09): the flat plugin (`flatMemoryPlugin()` / `createFlatMemoryStore()` under `src/plugins/flat`, `capabilities.export: 'partial'`, no `conditions` / `evidence` / `supersedes` / `ttl`, substring retrieval), `migrate(from, to, { dryRun, onConflict })` → `MigrationReport` with the dropped fields and counts per entry kind, the `fidelity(entry)` seam on both stores (`MemoryFidelity`), `memoryConformance(make, { without })` with `requires: MemoryFeature[]` per case, and a fix: a record put already retired (an import) no longer supersedes the live record of its task.
