@@ -24,6 +24,12 @@
       "development": "./dist/copilot-cli.js",
       "production": "./dist/copilot-cli.prod.js",
       "import": "./dist/copilot-cli.js"
+    },
+    "./codex-cli": {
+      "types": "./dist/codex-cli/index.d.ts",
+      "development": "./dist/codex-cli.js",
+      "production": "./dist/codex-cli.prod.js",
+      "import": "./dist/codex-cli.js"
     }
   },
   "sideEffects": false,

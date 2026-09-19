@@ -40,6 +40,9 @@
       "@agentic/runtimes/copilot-cli": [
         "./packages/runtimes/src/copilot-cli/index.ts"
       ],
+      "@agentic/runtimes/codex-cli": [
+        "./packages/runtimes/src/codex-cli/index.ts"
+      ],
       "@agentic/runtimes": [
         "./packages/runtimes/src/index.ts"
       ],

@@ -134,3 +134,21 @@ Where it runs is the other axis: `daemon-hosted` or `platform-hosted`. Today eve
 - **Usage limits:** Copilot meters requests per month. Premium requests, chat and completions each become a `month` window counted in `requests`. An unlimited entitlement has no utilization.
 - **Permissions:** `harness-filtered`. Copilot runs reads inside the folder without asking. Platform tools and connectors run in the daemon as client tools with `skipPermission`, and their handler asks the platform policy, so every call to one is ruled on.
 - **Memory:** repository instructions and config discovery are off (`skipCustomInstructions`, `enableConfigDiscovery: false`). Memory comes from the platform (MEM-10).
+
+## 2026-09-19 — Codex runs through `codex app-server` (#320)
+
+The Codex harness runtime has the id `codex-cli`. The id is the plugin id, the `RuntimeId`, the `Agent.id` prefix and the quota source's runtime.
+
+**It drives `codex app-server`**, the stdio JSON-RPC protocol the Codex IDE extension uses. It does not use `codex exec` or `@openai/codex-sdk`, which wraps `exec`. `exec` has no per-call approvals, so our policy could only choose a sandbox mode up front. It also reports no rate limits. The app-server provides:
+
+- per-call approval requests, which go to the session's policy
+- `turn/steer` and `turn/interrupt`
+- `thread/resume`
+- `account/read` for auth status
+- `account/rateLimits/read` and `account/rateLimits/updated`, for the 5-hour and weekly windows (usage limits)
+
+We use only the stable surface (`experimentalApi: false`). The types we use are trimmed by hand from `generate-ts` of codex-cli 0.155.1.
+
+**Tools reach Codex over MCP, not `dynamicTools`.** The platform's tools and the agent's connectors are served on a loopback Streamable-HTTP MCP server per session, behind a bearer token. The thread's config names it as `mcp_servers.agentic` (`url`, `http_headers`). The app-server's `dynamicTools` would avoid the port, but it is experimental. Codex runs MCP tools without asking, so each tool call first goes through the session's policy before it runs. Permissions are `harness-filtered`: Codex decides which of its own commands and edits need an approval.
+
+Isolation is one `CODEX_HOME` per environment, with the daemon's `OPENAI_*` removed. The profile's own `config.toml` still applies inside that home, including any MCP servers configured there.

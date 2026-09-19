@@ -13,6 +13,7 @@ import { ANTHROPIC_PRICING } from './anthropic/pricing.js';
 
 export const ANTHROPIC_API_PLUGIN_ID = 'anthropic-api' satisfies RuntimeId;
 export const CLAUDE_CODE_PLUGIN_ID = 'claude-code' satisfies RuntimeId;
+export const CODEX_CLI_PLUGIN_ID = 'codex-cli' satisfies RuntimeId;
 export const RUNTIME_PLUGIN_VERSION = '0.1.0';
 
 /** The workspace's Anthropic API key (BYO, EXE-10): a Registry secret, never a config value. */
@@ -89,5 +90,21 @@ export const copilotCliPlugin: PluginManifest = {
     compat: { platform: '*', core: '*' }
 };
 
+export const codexCliPlugin: PluginManifest = {
+    id: CODEX_CLI_PLUGIN_ID,
+    version: RUNTIME_PLUGIN_VERSION,
+    kind: 'runtime',
+    name: 'Codex',
+    description: 'Agents run in OpenAI Codex on a paired machine, signed in with the account of the chosen environment, and each ChatGPT account reports its plan usage limits. Credentials stay on the machine.',
+    // A harness runtime driven through `codex app-server` that reports its accounts' usage limits (#320).
+    capabilities: [DAEMON_HOSTED_CAPABILITY, HARNESS_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY],
+    config: { type: 'object', properties: {}, additionalProperties: false },
+    permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }],
+    compat: { platform: '*', core: '*' }
+};
+
+/** The id of the Codex `QuotaSource` (#320): the `sourceId` its snapshots carry. */
+export const CODEX_CLI_QUOTA_ID = 'agentic.quota.codex-cli';
+
 /** Every runtime manifest this package ships. */
-export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin, copilotCliPlugin];
+export const RUNTIME_PLUGINS: readonly PluginManifest[] = [anthropicApiPlugin, claudeCodePlugin, copilotCliPlugin, codexCliPlugin];
