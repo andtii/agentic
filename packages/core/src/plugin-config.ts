@@ -128,33 +128,35 @@ export function validateConfig(schema: ConfigSchema, value: unknown): ConfigVali
     const properties = schema.properties ?? {};
     const open = schema.additionalProperties ?? schema.properties === undefined;
     const errors: ConfigError[] = [];
-    const out: Record<string, unknown> = {};
+    // Entries, not assignment: a `__proto__` key must stay data (`Object.fromEntries` defines, never sets).
+    const kept: [string, unknown][] = [];
     for (const [key, v] of Object.entries(value)) {
         if (v === undefined) continue;
         const property = Object.hasOwn(properties, key) ? properties[key] : undefined;
         if (!property) {
-            if (open) out[key] = v;
+            if (open) kept.push([key, v]);
             else errors.push({ path: key, message: 'is not a setting of this plugin' });
             continue;
         }
         const message = propertyError(property, v);
         if (message) errors.push({ path: key, message });
-        else out[key] = v;
+        else kept.push([key, v]);
     }
     for (const key of schema.required ?? []) {
-        if (value[key] === undefined) errors.push({ path: key, message: 'is required' });
+        if (!Object.hasOwn(value, key) || value[key] === undefined) errors.push({ path: key, message: 'is required' });
     }
-    return errors.length > 0 ? { ok: false, errors } : { ok: true, value: out };
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, value: Object.fromEntries(kept) };
 }
 
 /** The `default` of every property that declares one. */
 export function configDefaults(schema: ConfigSchema): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
+    const out: [string, unknown][] = [];
     for (const [key, property] of Object.entries(schema.properties ?? {})) {
         if (property.default === undefined) continue;
-        out[key] = Array.isArray(property.default) ? [...property.default] : isRecord(property.default) ? { ...property.default } : property.default;
+        const value = Array.isArray(property.default) ? [...property.default] : isRecord(property.default) ? { ...property.default } : property.default;
+        out.push([key, value]);
     }
-    return out;
+    return Object.fromEntries(out);
 }
 
 /** The capability a `runtime` plugin lists when its sessions run on a machine's daemon: it needs an environment of that runtime. */

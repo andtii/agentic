@@ -4,6 +4,7 @@ import {
     pluginReadiness,
     SINGLE_SLOT_KINDS,
     validateConfig,
+    type ConfigProperty,
     type ConfigSchema,
     type PluginManifest,
     type PluginReadinessFacts,
@@ -96,6 +97,20 @@ describe('validateConfig', () => {
         const closed: ConfigSchema = { type: 'object', additionalProperties: false };
         expect(validateConfig(closed, {})).toEqual({ ok: true, value: {} });
         expect(errorsOf(closed, { a: 1 })).toEqual(['a: is not a setting of this plugin']);
+    });
+
+    it('keeps a `__proto__` key as data, never as the prototype', () => {
+        const r = validateConfig({ type: 'object' }, JSON.parse('{"__proto__":{"polluted":true},"a":1}'));
+        expect(r.ok).toBe(true);
+        const value = r.ok ? r.value : {};
+        expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+        expect((value as { polluted?: boolean }).polluted).toBeUndefined();
+        expect(Object.keys(value).sort()).toEqual(['__proto__', 'a']);
+    });
+
+    it('a required key is not satisfied by an inherited one', () => {
+        const properties: Record<string, ConfigProperty> = Object.fromEntries([['toString', { type: 'string' }]]);
+        expect(errorsOf({ type: 'object', properties, required: ['toString'] }, {})).toEqual(['toString: is required']);
     });
 
     it('is not fooled by inherited keys', () => {
