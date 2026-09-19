@@ -101,7 +101,9 @@ export type AgentFormProps = Define.Model<AgentConfig> &
 
 const DEFAULT_RUNTIMES: readonly RuntimeOption[] = [
     { value: 'anthropic-api', label: 'Anthropic API' },
-    { value: 'claude-code', label: 'Claude Code' }
+    { value: 'claude-code', label: 'Claude Code' },
+    { value: 'copilot-cli', label: 'Copilot CLI' },
+    { value: 'codex-cli', label: 'Codex' }
 ];
 const TOOL_MODE_OPTIONS: readonly FieldOption[] = [
     { value: 'allow', label: 'Allow' },

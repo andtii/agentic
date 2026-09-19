@@ -13,7 +13,7 @@
  *   and `defineRoutingActor({ runtimes })`: `anthropic-api` runs in-process
  *   with its key from the workspace's `anthropic-api-key` Registry secret,
  *   and opens the agent's MCP connectors with `openMcpConnector` (#240);
- *   `claude-code` on a machine's daemon.
+ *   the harness runtimes (`claude-code`, `copilot-cli`, `codex-cli`, #322) on a machine's daemon.
  * - `memoryCatalogue` / `learningCatalogue` → `platformLearningPorts({
  *   memoryPlugins, learningPlugins })`: the workspace's ACTIVE memory and
  *   learning plugin, over its config, is what each session remembers in and
@@ -40,12 +40,14 @@ import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInsta
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
-import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
+import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, CODEX_CLI_PLUGIN_ID, COPILOT_CLI_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, codexCliPlugin, copilotCliPlugin } from '@agentic/runtimes';
 
 /** The manifests the Registry lists for every workspace — enabled (Web Push and the A2A server excepted), with their declared scopes granted, until the owner changes them. */
 export const pluginCatalogue: readonly CatalogueEntry[] = [
     anthropicApiPlugin,
     claudeCodePlugin,
+    copilotCliPlugin,
+    codexCliPlugin,
     memoryDefaultPlugin,
     memoryFlatPlugin,
     learningDefaultPlugin,
@@ -62,7 +64,9 @@ export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCa
     return withInstanceRuntimes(
         {
             [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
-            [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
+            [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' },
+            [COPILOT_CLI_PLUGIN_ID]: { host: 'daemon' },
+            [CODEX_CLI_PLUGIN_ID]: { host: 'daemon' }
         },
         { [A2A_PEER_PREFIX]: (runtime) => a2aPeerRuntime(runtime) }
     );

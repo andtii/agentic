@@ -19,8 +19,8 @@ const READY: PluginReadiness = { status: 'ready' };
 
 describe('runtimeOptions', () => {
     it('offers each enabled runtime plugin by name, with its models and default, and a hint only when it is not ready', () => {
-        const options = runtimeOptions(opsPlugins, { 'anthropic-api': NEEDS_KEY, 'claude-code': READY })!;
-        expect(options.map((o) => o.value)).toEqual(['anthropic-api', 'claude-code']);
+        const options = runtimeOptions(opsPlugins, { 'anthropic-api': NEEDS_KEY, 'claude-code': READY, 'copilot-cli': READY, 'codex-cli': NEEDS_MACHINE })!;
+        expect(options.map((o) => o.value)).toEqual(['anthropic-api', 'claude-code', 'copilot-cli', 'codex-cli']);
         const api = options[0]!;
         expect(api.label).toBe('Anthropic API — needs a key');
         expect(api.hint).toContain('anthropic-api-key');
@@ -28,6 +28,8 @@ describe('runtimeOptions', () => {
         expect(api.models).toEqual(modelsOf(plugin('anthropic-api')));
         expect(api.models).toContain('claude-sonnet-5');
         expect(options[1]).toEqual({ value: 'claude-code', label: 'Claude Code' });
+        expect(options[2]).toEqual({ value: 'copilot-cli', label: 'Copilot CLI' });
+        expect(options[3]).toMatchObject({ value: 'codex-cli', label: 'Codex — needs a machine', href: '/pair' });
     });
 
     it('a runtime that needs a machine links to pairing', () => {
@@ -37,11 +39,12 @@ describe('runtimeOptions', () => {
 
     it('a disabled runtime is not offered — unless the agent is on it, then it stays, marked turned off', () => {
         const plugins = opsPlugins.map((p) => (p.manifest.id === 'claude-code' ? off(p) : p));
-        expect(runtimeOptions(plugins, {})!.map((o) => o.value)).toEqual(['anthropic-api']);
+        expect(runtimeOptions(plugins, {})!.map((o) => o.value)).toEqual(['anthropic-api', 'copilot-cli', 'codex-cli']);
         const kept = runtimeOptions(plugins, {}, 'claude-code')!;
-        expect(kept.map((o) => o.value)).toEqual(['anthropic-api', 'claude-code']);
-        expect(kept[1]).toMatchObject({ label: 'Claude Code — turned off', href: '/plugins/claude-code', hrefLabel: 'Turn it on' });
-        expect(kept[1]!.hint).toMatch(/turned off/);
+        // The agent's own runtime is kept at the end, after the ones on offer.
+        expect(kept.map((o) => o.value)).toEqual(['anthropic-api', 'copilot-cli', 'codex-cli', 'claude-code']);
+        expect(kept[3]).toMatchObject({ label: 'Claude Code — turned off', href: '/plugins/claude-code', hrefLabel: 'Turn it on' });
+        expect(kept[3]!.hint).toMatch(/turned off/);
     });
 
     it('a runtime no plugin provides stays when it is the agent’s, marked not installed', () => {

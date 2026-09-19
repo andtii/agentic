@@ -143,7 +143,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
         const profile = profileOf(v, log.versions, index, activity.activity());
         const pill = presencePill(profile.presence);
         const sessions = sessionRowsOf(activity.activity().tasks ?? [], profile.environment!);
-        const agent: MockAgent = { id, name: v.config.name || id, description: v.config.description, runtime: v.config.execution.runtime === 'claude-code' ? 'claude-code' : 'anthropic-api', status: profile.presence === 'idle' ? 'idle' : 'busy', configVersion: v.configVersion };
+        const agent: MockAgent = { id, name: v.config.name || id, description: v.config.description, runtime: v.config.execution.runtime, status: profile.presence === 'idle' ? 'idle' : 'busy', configVersion: v.configVersion };
         const collaborators = directory.all().filter((a) => a.id !== id).map((a) => ({ value: a.id, label: a.name }));
         return (
             <div data-page="agent" data-agent={id}>

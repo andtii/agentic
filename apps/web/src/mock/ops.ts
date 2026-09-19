@@ -48,11 +48,11 @@ export const opsMachine = (id: string): OpsMachine | undefined => opsMachines.fi
 /** Ids as the workspace mock names them (`env_alien01_work`), so an agent's environment and the Machines page agree. */
 const envId = (machineId: string, name: string): EnvironmentId => `env_${machineId.replace(/-/g, '')}_${name.replace(/-/g, '_')}` as EnvironmentId;
 
-const env = (machineId: string, name: string, account: EnvironmentDescriptor['account'], active: number, max: number, cwdRoots: readonly string[]): EnvironmentDescriptor => ({
+const env = (machineId: string, name: string, account: EnvironmentDescriptor['account'], active: number, max: number, cwdRoots: readonly string[], runtime: EnvironmentDescriptor['runtime'] = 'claude-code'): EnvironmentDescriptor => ({
     id: envId(machineId, name),
     machineId: machineId as MachineId,
     name,
-    runtime: 'claude-code',
+    runtime,
     account,
     cwdRoots,
     concurrency: { active, max },
@@ -63,6 +63,8 @@ export const opsEnvironments: readonly EnvironmentDescriptor[] = [
     env('alien01', 'work', { label: 'work', authStatus: 'ok' }, 1, 3, ['C:\\Dev', 'D:\\scratch']),
     env('alien01', 'personal', { label: 'personal', authStatus: 'ok' }, 1, 3, ['C:\\Users\\andy\\src']),
     env('alien01', 'client-acme', { label: 'client-acme', authStatus: 'expired' }, 0, 2, ['C:\\clients\\acme']),
+    env('alien01', 'copilot', { label: 'octocat', authStatus: 'ok' }, 0, 2, ['C:\\Dev'], 'copilot-cli'),
+    env('alien01', 'codex', { label: 'andy@team', authStatus: 'ok' }, 0, 2, ['C:\\Dev'], 'codex-cli'),
     env('nuc-lab', 'work', { label: 'work', authStatus: 'unknown' }, 0, 2, ['C:\\work'])
 ];
 
@@ -220,6 +222,18 @@ export const opsPlugins: readonly PluginView[] = [
     builtin(manifest({
         id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
         description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment, and each account reports its plan usage limits. Credentials stay on the machine.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
+    })),
+    builtin(manifest({
+        id: 'copilot-cli', version: '0.1.0', kind: 'runtime', name: 'Copilot CLI', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
+        description: 'Agents run in GitHub Copilot CLI on a paired machine, signed in with the GitHub account of the chosen environment, and each account reports its monthly premium requests. Credentials stay on the machine.',
+        config: NOTHING_TO_SET,
+        permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
+    })),
+    builtin(manifest({
+        id: 'codex-cli', version: '0.1.0', kind: 'runtime', name: 'Codex', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
+        description: 'Agents run in OpenAI Codex on a paired machine, signed in with the account of the chosen environment, and each ChatGPT account reports its plan usage limits. Credentials stay on the machine.',
         config: NOTHING_TO_SET,
         permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }]
     })),
@@ -399,7 +413,31 @@ export const opsQuota: Readonly<Record<string, QuotaSnapshot>> = {
     [envId('nuc-lab', 'work')]: claudeQuota(envId('nuc-lab', 'work'), [
         quotaWin('five_hour', 'Current session', 'session', 0.05, 0.5),
         quotaWin('seven_day', 'Current week (all models)', 'week', 0.58, 60)
-    ], 180)
+    ], 180),
+    // Copilot meters requests per month: premium requests against the plan, chat unlimited.
+    [envId('alien01', 'copilot')]: {
+        sourceId: 'agentic.quota.copilot-cli',
+        runtime: 'copilot-cli',
+        environmentId: envId('alien01', 'copilot'),
+        availability: 'reported',
+        windows: [
+            { id: 'premium_interactions', label: 'Premium requests', period: 'month', utilization: 0.42, used: 126, limit: 300, unit: 'requests', resetsAt: inHours(9 * 24), status: 'ok' },
+            { id: 'chat', label: 'Chat messages (unlimited)', period: 'month', utilization: null, used: 0, unit: 'requests', resetsAt: inHours(9 * 24), status: 'ok' }
+        ],
+        observedAt: QUOTA_AT - 3 * 60_000,
+        via: 'probe'
+    },
+    // Codex: a 5-hour and a weekly window, as `codex` → `/status` shows them.
+    [envId('alien01', 'codex')]: {
+        sourceId: 'agentic.quota.codex-cli',
+        runtime: 'codex-cli',
+        environmentId: envId('alien01', 'codex'),
+        plan: 'team',
+        availability: 'reported',
+        windows: [quotaWin('primary', 'Current session', 'session', 0.18, 2.5), quotaWin('secondary', 'Current week', 'week', 0.61, 96)],
+        observedAt: QUOTA_AT - 60_000,
+        via: 'probe'
+    }
 };
 
 /** The platform's own runtime: no environment, no plan allowance to report. */

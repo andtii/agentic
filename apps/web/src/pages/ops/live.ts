@@ -5,7 +5,7 @@
  * form submit persists. Nothing here touches a hook or the DOM, and
  * nothing of `@agentic/platform` is imported at runtime.
  */
-import type { AgentId, EnvironmentId } from '@agentic/core';
+import type { AgentId, EnvironmentId, RuntimeId } from '@agentic/core';
 import type { ConnectorRecord, Dependents, PluginView, ScheduleSpec, ScheduleView, SettingsPatch, WorkspaceOpRecord, WorkspaceSettings } from '@agentic/platform';
 import type { OpsSchedule, ScheduleKind } from '../../mock/ops';
 
@@ -211,15 +211,19 @@ export function validateDraft(draft: SettingsDraft, zones: readonly string[]): S
     return errors;
 }
 
-/** The draft as the one-level patch `Workspace.updateSettings` takes; `null` while it does not validate. */
-export function settingsPatch(draft: SettingsDraft, zones: readonly string[]): SettingsPatch | null {
+/**
+ * The draft as the one-level patch `Workspace.updateSettings` takes; `null` while it does not validate.
+ * `runtimeOf` names the runtime a machine environment runs (Claude Code, Copilot CLI, Codex, …); an
+ * environment it does not know yet keeps `claude-code`, the first daemon runtime.
+ */
+export function settingsPatch(draft: SettingsDraft, zones: readonly string[], runtimeOf: (environmentId: EnvironmentId) => RuntimeId | undefined = () => undefined): SettingsPatch | null {
     if (Object.keys(validateDraft(draft, zones)).length) return null;
     const environmentId = draft.environmentId.trim();
     return {
         timeZone: draft.timeZone.trim(),
         notifications: { inbox: draft.inbox, push: draft.push },
-        // The platform runtime for no environment; a machine environment runs claude-code (v1's one daemon runtime).
-        defaults: environmentId ? { runtime: 'claude-code', environmentId: environmentId as EnvironmentId } : { runtime: 'anthropic-api', environmentId: undefined },
+        // The platform runtime for no environment; a machine environment runs its own.
+        defaults: environmentId ? { runtime: runtimeOf(environmentId as EnvironmentId) ?? 'claude-code', environmentId: environmentId as EnvironmentId } : { runtime: 'anthropic-api', environmentId: undefined },
         retention: { sessionLogDays: days(draft.sessionLogDays)!, artifactDays: days(draft.artifactDays)! }
     };
 }
