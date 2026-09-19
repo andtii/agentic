@@ -27,6 +27,10 @@
  *   #238); the answer is `env.response` plus the `env` frame it caused.
  *   `hello` and `env` carry that policy so the platform can explain a refusal.
  *   The policy itself only ever changes on the machine (`setPolicy`).
+ * - `quota` reports each environment's provider limits (`./quota.ts`, #271):
+ *   from rate-limit events in the live session streams and, unless
+ *   `quota.probe` is off, by probing accounts once welcomed, when idle and
+ *   after a turn. Unchanged snapshots are not sent again.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -46,6 +50,7 @@ import {
     type LocalEnvironment,
     type MachineId,
     type MachinePolicy,
+    type QuotaSource,
     type RuntimeDriver,
     type SessionId
 } from '@agentic/core';
@@ -62,6 +67,7 @@ import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
 import { POLICY_OFF, reportedPolicy } from './policy.js';
+import { createQuotaMonitor } from './quota.js';
 import { DAEMON_VERSION } from './version.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -98,6 +104,12 @@ export interface DaemonOptions {
      * `policy-disabled` and the policy is reported off.
      */
     readonly manage?: { readonly paths: Pick<DaemonPaths, 'configDir' | 'stateDir' | 'environmentsFile'>; readonly secure?: SecureWriteOptions };
+    /**
+     * Provider limits (#271): the `quota` sources by runtime (`builtinQuotaSources()`; none → no `quota` frames),
+     * whether to probe accounts (default on; off is the stream only), the idle poll (default 5 min, 0 off), the
+     * probe after a turn ends (default 30 s later) and how long an unchanged snapshot is not sent again (default 15 min).
+     */
+    readonly quota?: { readonly sources?: readonly QuotaSource[]; readonly probe?: boolean; readonly pollMs?: number; readonly turnEndDebounceMs?: number; readonly refreshMs?: number };
 }
 
 export interface Daemon {
@@ -135,6 +147,8 @@ interface LiveSession {
     readonly capabilities: CapabilityReport;
     /** The last frame this daemon handed to a socket. */
     lastSent: Cursor;
+    /** The last event shown to the quota monitor: a replay after a reconnect is not news. */
+    tapped: Cursor;
     pump: AbortController | undefined;
 }
 
@@ -223,6 +237,17 @@ export function createDaemon(options: DaemonOptions): Daemon {
     let rejected = 0;
     let connection: Connection | undefined;
     let stopped = false;
+    const quota = createQuotaMonitor({
+        sources: options.quota?.sources ?? [],
+        send: (environmentId, snapshot) => welcomed && send({ v: V, t: 'quota', environmentId, snapshot }),
+        environments: () => environments,
+        busy: (environmentId) => activeOn(environmentId) > 0,
+        logger,
+        ...(options.quota?.probe !== undefined ? { probe: options.quota.probe } : {}),
+        ...(options.quota?.pollMs !== undefined ? { pollMs: options.quota.pollMs } : {}),
+        ...(options.quota?.turnEndDebounceMs !== undefined ? { turnEndDebounceMs: options.quota.turnEndDebounceMs } : {}),
+        ...(options.quota?.refreshMs !== undefined ? { refreshMs: options.quota.refreshMs } : {})
+    });
 
     function send(frame: DaemonFrame): boolean {
         if (!socket) return false;
@@ -382,6 +407,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (heartbeat === undefined) {
             heartbeat = setInterval(() => send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] }), heartbeatMs);
         }
+        quota.welcomed();
     }
 
     // ---------------------------------------------------------------- sessions
@@ -408,6 +434,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
                         // A store that no longer reaches back to `from` replays from where it starts: name the hole (OPS-04).
                         if (!follows(at, last) && !send({ v: V, t: 'session.frame', sessionId: s.id, frame: { v: frame.v, kind: 'gap', from, resumeAt: { epoch: at.epoch, seq: at.seq - 1 } } })) return;
                         last = at;
+                        if (cursorBefore(s.tapped, at)) {
+                            s.tapped = at;
+                            quota.observe(s.environmentId, frame.event);
+                        }
                     } else if (frame.kind === 'gap') last = frame.resumeAt;
                     if (!send({ v: V, t: 'session.frame', sessionId: s.id, frame })) return;
                     s.lastSent = last;
@@ -451,7 +481,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             }
             // Logged under the platform's session id: the runtime names its sessions its own way.
             const served = serveSession(opened.session, { agentId: spec.agentId, capabilities: agentCapabilitiesOf(opened.capabilities), eventLog: log.forSession(sessionId) });
-            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, lastSent: served.head, pump: undefined };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, lastSent: served.head, tapped: served.head, pump: undefined };
             sessions.set(sessionId, live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime });
             send({ v: V, t: 'session.opened', sessionId, ref: opened.session.ref, capabilities: opened.capabilities, head: served.head });
@@ -491,6 +521,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 await inspectAll();
                 send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
                 send({ v: V, t: 'env.response', requestId: frame.requestId, result: outcome.result });
+                quota.environmentsChanged();
             } else {
                 logger.info('env: request refused', { code: outcome.error.code });
                 send({ v: V, t: 'env.response', requestId: frame.requestId, error: outcome.error });
@@ -584,6 +615,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             });
             logger.info('daemon: starting', { machine: machineId, environments: environments.length });
             connection.start();
+            quota.start();
             if (reinspectMs > 0) {
                 let pending = false;
                 reinspectTimer = setInterval(() => {
@@ -599,6 +631,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         },
         async stop() {
             stopped = true;
+            quota.stop();
             if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
             reinspectTimer = undefined;
             for (const id of sessions.keys()) await closeSession(id, 'daemon stopping');
@@ -617,6 +650,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 environments = next;
                 await inspectAll();
                 if (socket) send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+                quota.environmentsChanged();
             });
         },
         setPolicy(next) {

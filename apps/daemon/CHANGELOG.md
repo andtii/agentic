@@ -4,6 +4,14 @@ All notable changes to `@agentic/daemon` (Keep a Changelog, semver).
 
 ## [Unreleased]
 
+### Added
+
+- Usage limits (#271, part of #261; OPS-07, EXE-10): `quota` frames per environment from a new `QuotaMonitor` (`src/quota.ts`, `createQuotaMonitor`, `quotaSignalOf`).
+  - **Passive:** rate-limit events in live sessions, tapped once per cursor.
+  - **Probes:** unless off, after `welcome`, on an idle poll, and debounced after `turn-end`; one at a time.
+  - **Dedupe:** unchanged snapshots are dropped, but re-sent every 15 min.
+  - **New options and exports:** `DaemonOptions.quota { sources, probe, pollMs, turnEndDebounceMs, refreshMs }`; `builtinQuotaSources()` (the Claude Code source) next to `builtinDrivers()`; `run --quota-probe on|off` and `--quota-poll-ms <ms>`; `CliContext.quotaSources`.
+
 ### Fixed
 
 - No local path reaches the platform through a doctor verdict (#274): when a driver's checks throw, the reported `driver-doctor-failed` message has every absolute path (drive, UNC, POSIX) replaced by `<path>` (`withoutLocalPaths`, exported) and points at `agentic-daemon doctor`; the daemon log keeps the original. `agentic-daemon doctor` itself, which never leaves the machine, now lists each environment's profile (`profile-dir`, info), since the driver's findings no longer name it.
