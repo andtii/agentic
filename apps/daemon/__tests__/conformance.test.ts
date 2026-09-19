@@ -1,11 +1,12 @@
 /** `daemonConformance` against the real daemon: real WebSockets, NDJSON logs on disk, a scripted runtime. */
 // @vitest-environment node
-import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, SessionId } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, MachinePolicy, SessionId } from '@agentic/core';
 import { daemonConformance, type ConformanceDaemon, type DaemonConformanceHarness } from '@agentic/daemon-protocol/testing';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDaemon } from '../src/daemon';
+import { writeEnvironments } from '../src/env-store';
 import { ndjsonEventLog } from '../src/event-log';
 import { scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE } from './helpers/relay';
@@ -20,16 +21,25 @@ const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
 });
 
 const harness: DaemonConformanceHarness = {
-    features: ['env', 'gap', 'raw', 'fs'],
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
+        // The machine's own folders beside the one its owner allowed (#238): configuration, state, and the work.
+        const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), environmentsFile: join(dir, 'config', 'environments.json') };
+        await mkdir(join(dir, 'work'), { recursive: true });
+        const work = await realpath(join(dir, 'work'));
         const relay = await startRelay();
         const driver = scriptedDriver(script);
-        const log = ndjsonEventLog(join(dir, 'sessions'));
-        const environments: LocalEnvironment[] = [{ id: 'env_scripted' as EnvironmentId, name: 'scripted', runtime: 'scripted', cwdRoots: [dir], concurrency: 4 }];
+        const log = ndjsonEventLog(join(paths.stateDir, 'sessions'));
+        const environments: LocalEnvironment[] = [{ id: 'env_scripted' as EnvironmentId, name: 'scripted', runtime: 'scripted', cwdRoots: [work], concurrency: 4 }];
+        const secure = { run: async () => ({ code: 0, stderr: '' }) };
+        await writeEnvironments(paths.environmentsFile, environments, secure);
+        const policy: MachinePolicy = { webManaged: true, allowedRoots: [work] };
         const daemon = createDaemon({
             credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
             environments,
+            policy,
+            manage: { paths, secure },
             drivers: [driver],
             eventLog: log,
             heartbeatMs: script.heartbeatMs,
@@ -49,6 +59,9 @@ const harness: DaemonConformanceHarness = {
             async setEnvironments(next) {
                 for (const d of next) driver.auth.set(d.id, d.account.authStatus);
                 await daemon.setEnvironments(next.map(toLocal));
+            },
+            async setPolicy(next) {
+                await daemon.setPolicy(next);
             },
             async truncateLog(sessionId: SessionId, keepFrom) {
                 await log.truncate(sessionId, keepFrom);

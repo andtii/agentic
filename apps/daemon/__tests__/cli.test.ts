@@ -1,13 +1,14 @@
 // @vitest-environment node
 import type { EnvironmentId } from '@agentic/core';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { main, parseArgs } from '../src/cli';
 import type { DaemonDriver } from '../src/daemon';
 import { loadEnvironments } from '../src/environments';
 import { daemonPaths } from '../src/paths';
+import { loadPolicy, POLICY_OFF } from '../src/policy';
 import { scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
@@ -21,10 +22,18 @@ describe('cli', () => {
         dir = await mkdtemp(join(tmpdir(), 'agentic-cli-'));
         out = [];
     });
+    const works: string[] = [];
     afterEach(async () => {
         await rm(dir, { recursive: true, force: true });
+        for (const w of works.splice(0)) await rm(w, { recursive: true, force: true });
     });
     const paths = () => daemonPaths({ env: { AGENTIC_DAEMON_HOME: dir } });
+    /** A folder to allow: outside the daemon's home, which is its configuration folder and never allowed (#238). */
+    const workDir = async () => {
+        const w = await mkdtemp(join(tmpdir(), 'agentic-work-'));
+        works.push(w);
+        return w;
+    };
 
     it('parses commands, positionals and flags', () => {
         expect(parseArgs(['pair', 'ABC234', '--url', 'https://x', '--name=box', '--verbose'])).toEqual({ command: 'pair', positional: ['ABC234'], flags: { url: 'https://x', name: 'box', verbose: true } });
@@ -166,6 +175,84 @@ describe('cli', () => {
             const work = { id: 'env_work', name: 'Work', runtime: 'scripted', profileDir: join(dir, 'profiles', 'env_work'), cwdRoots: [dir] };
             await writeFile(paths().environmentsFile, JSON.stringify([work, { ...work, id: 'env_home', name: 'Home', profileDir: join(dir, 'profiles', 'env_home') }]));
             expect((await expectFrame(seat, 'env')).environments.map((e) => e.id)).toEqual(['env_work', 'env_home']);
+            stop();
+            expect(await running).toBe(0);
+        } finally {
+            stop();
+            await relay.close();
+        }
+    });
+
+    // #238: the policy is edited on the machine and nowhere else.
+    it('policy show | allow-root | deny-root | off', async () => {
+        const ctx = () => ({ paths: paths(), ...secure, ...io() });
+        const work = await workDir();
+        expect(await main(['policy', 'show'], ctx())).toBe(0);
+        expect(out.pop()).toMatch(/web management: off/);
+        expect(await main(['policy', 'allow-root', work], ctx())).toBe(0);
+        expect(await loadPolicy(paths().policyFile)).toEqual({ ok: true, policy: { webManaged: true, allowedRoots: [await realpath(work)] } });
+        expect(await main(['policy', 'show'], ctx())).toBe(0);
+        expect(out.pop()).toContain(await realpath(work));
+        // The daemon's own folder, a missing one, no folder at all.
+        expect(await main(['policy', 'allow-root', paths().configDir], ctx())).toBe(1);
+        expect(await main(['policy', 'allow-root', join(dir, 'missing')], ctx())).toBe(1);
+        expect(await main(['policy', 'allow-root'], ctx())).toBe(2);
+        expect(await main(['policy', 'deny-root', work], ctx())).toBe(0);
+        expect(await loadPolicy(paths().policyFile)).toEqual({ ok: true, policy: POLICY_OFF });
+        // A broken file is not silently replaced by an edit, but `off` starts over.
+        await writeFile(paths().policyFile, '{nope');
+        expect(await main(['policy', 'allow-root', work], ctx())).toBe(1);
+        expect(out.join('\n')).toMatch(/is invalid/);
+        expect(await main(['policy', 'off'], ctx())).toBe(0);
+        expect(await loadPolicy(paths().policyFile)).toEqual({ ok: true, policy: POLICY_OFF });
+        expect(await main(['policy', 'on'], ctx())).toBe(2);
+    });
+
+    it('pair --allow-root: every folder is checked before the code is spent', async () => {
+        const relay = await startRelay();
+        try {
+            const work = await workDir();
+            const ctx = { paths: paths(), ...secure, ...io() };
+            expect(await main(['pair', 'ABC234', '--url', relay.url, '--allow-root', join(dir, 'missing')], ctx)).toBe(1);
+            expect(relay.paired).toEqual([]);
+            expect(await main(['pair', 'ABC234', '--url', relay.url, '--name', 'box', '--allow-root', work], ctx)).toBe(0);
+            expect(relay.paired).toEqual(['box']);
+            expect(await loadPolicy(paths().policyFile)).toEqual({ ok: true, policy: { webManaged: true, allowedRoots: [await realpath(work)] } });
+        } finally {
+            await relay.close();
+        }
+    });
+
+    it('run: env.request is answered under the policy; a policy edit is announced without a restart', async () => {
+        const relay = await startRelay();
+        let stop!: () => void;
+        const until = new Promise<void>((r) => (stop = r));
+        try {
+            await pairedWith(relay);
+            const work = await workDir();
+            await mkdir(join(work, 'repo'), { recursive: true });
+            const ctx = { paths: paths(), drivers: [scripted()], ...secure, ...io() };
+            let started!: () => void;
+            const ready = new Promise<void>((r) => (started = r));
+            const running = main(['run'], { ...ctx, until, backoff: { initialMs: 5, maxMs: 20 }, watchDebounceMs: 20, onStarted: () => started() });
+            const seat = await relay.nextSeat();
+            expect((await expectFrame(seat, 'hello')).policy).toEqual(POLICY_OFF);
+            seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
+            await ready;
+
+            const request = (requestId: string) => seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'env.request', requestId, op: 'put', environment: { name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'repo')] } });
+            request('env_1');
+            expect((await expectFrame(seat, 'env.response')).error?.code).toBe('policy-disabled');
+
+            expect(await main(['policy', 'allow-root', work], ctx)).toBe(0);
+            expect((await expectFrame(seat, 'env')).policy).toEqual({ webManaged: true, allowedRoots: [await realpath(work)] });
+            const policyOnDisk = await readFile(paths().policyFile, 'utf8');
+
+            request('env_2');
+            expect((await expectFrame(seat, 'env')).environments.map((e) => e.id)).toEqual(['env_web']);
+            expect((await expectFrame(seat, 'env.response')).result).toEqual({ environmentId: 'env_web' });
+            expect((await loadEnvironments(paths().environmentsFile)).ok).toBe(true);
+            expect(await readFile(paths().policyFile, 'utf8')).toBe(policyOnDisk);
             stop();
             expect(await running).toBe(0);
         } finally {

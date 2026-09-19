@@ -15,6 +15,9 @@ One **environment** = one account = one Claude Code config dir.
   (`<config dir>/profiles/<id>`), refusing one another environment already
   uses; `agentic-daemon env login <id>` signs it in (`claude /login` with that
   `CLAUDE_CONFIG_DIR` and the same stripped environment a session gets).
+  An environment the platform adds (`env.request`, only when the machine's
+  `policy.json` allows it, #238) gets its directory the same way: the
+  request can never name one, and a changed environment keeps its own.
   The daemon's Claude Code driver (`@agentic/runtimes/claude-code`) runs one
   `claudeCode()` agent per environment with `CLAUDE_CONFIG_DIR = profileDir`,
   `settingSources: []`, and a child environment from which the daemon's own

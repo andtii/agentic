@@ -5,15 +5,17 @@
 ## Use
 
 ```sh
-agentic-daemon pair <code> --url https://agentic.example [--name my-desktop]
+agentic-daemon pair <code> --url https://agentic.example [--name my-desktop] [--allow-root C:\src]
 agentic-daemon env add --name Work --root C:\src\work [--root …] [--concurrency 2] [--account me@work.example]
 agentic-daemon env login env_work
+agentic-daemon policy show | allow-root <dir> | deny-root <dir> | off
 agentic-daemon doctor
 agentic-daemon run [--verbose]
 ```
 
 - **env add | list | rm | login** edit `environments.json` so nobody writes it by hand (`src/env-store.ts`, `src/env-cli.ts`). `add` takes `--name` and one or more `--root`, plus `--runtime` (default `claude-code`; it must be one this daemon has a driver for), `--id` (default `env_<name>`), `--concurrency`, `--account`, `--profile-dir`; with `--id <id> --replace` it changes an environment in place, keeping its profile. Each environment gets its own profile directory, `<config dir>/profiles/<id>`, and a directory another environment already uses is refused — two environments never share an account. The file is written atomically (temp + rename) and owner-only, like the credentials. `rm <id>` leaves the profile directory, which holds the sign-in. `login <id>` runs `claude /login` (or `--claude <path>`) with that profile as `CLAUDE_CONFIG_DIR` and the parent's `CLAUDE_CONFIG_DIR` / `ANTHROPIC_*` removed — the same rule sessions are opened under.
-- **pair** presents the 6-character code from the Machines page to `POST /auth/pair` and stores the machine token. Case, spaces and dashes in the code are ignored.
+- **pair** presents the 6-character code from the Machines page to `POST /auth/pair` and stores the machine token. Case, spaces and dashes in the code are ignored. Each `--allow-root <dir>` (repeatable) lets the web add environments inside `<dir>` (below); every folder is checked before the code is spent.
+- **policy show | allow-root | deny-root | off** edit `policy.json`, the machine-local policy for web-managed environments (#238, below). Only on the machine: nothing the platform sends can change it.
 - **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error; having no environments yet is a warning. The token is never printed.
 - **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines. A missing `environments.json` is zero environments — the machine connects and reports none. While running, the daemon watches the config directory: an `env add` / `env rm` or a hand edit is re-read once it settles (250 ms) and announced with an `env` frame, no restart; an edit that does not validate is logged and ignored, the running environments stay. Environments that are not signed in are inspected again every 30 s (`DaemonOptions.reinspectMs`), so a sign-in shows up on the platform by itself.
 - **--version** (or `version`) prints `agentic-daemon <version>` (`DAEMON_VERSION`, what `hello.daemonVersion` reports) and exits 0 — the installer test and `install.ps1` use it.
@@ -24,6 +26,7 @@ agentic-daemon run [--verbose]
 |---|---|---|---|
 | `credentials.json` (the token) | `%APPDATA%\agentic` | `$XDG_CONFIG_HOME/agentic` | `~/Library/Application Support/agentic` |
 | `environments.json` | `%APPDATA%\agentic` | `$XDG_CONFIG_HOME/agentic` | same |
+| `policy.json` (web-managed environments) | `%APPDATA%\agentic` | `$XDG_CONFIG_HOME/agentic` | same |
 | session logs `{sessionId}.ndjson` | `%LOCALAPPDATA%\agentic\sessions` | `$XDG_STATE_HOME/agentic/sessions` | same |
 
 `AGENTIC_DAEMON_HOME` puts all of them in one directory.
@@ -44,6 +47,22 @@ What `env add` writes; the shape, for reading or a hand edit:
 ```
 
 `profileDir` becomes the runtime's per-account config dir (`CLAUDE_CONFIG_DIR`) and never leaves the machine. `concurrency` defaults to 1. A session whose `cwd` is outside `cwdRoots` (after symlinks are resolved), does not exist, or would exceed `concurrency`, is refused with a reason. `cwdRoots` are also the only folders the platform can browse (below).
+
+### Environments from the web: `policy.json` (#238)
+
+The platform can ask this machine to add, change or remove an environment (`env.request`, answered `env.response`; the Machine page, #239). The machine decides, under a policy its owner edits locally (decisions 2026-09-19 (c)):
+
+```json
+{ "webManaged": true, "allowedRoots": ["C:\\src"] }
+```
+
+- **Off by default.** No file, a file that does not parse, or no allowed root: every `env.request` is refused `policy-disabled`. `agentic-daemon policy allow-root <dir>` (or `pair --allow-root <dir>`) turns it on for `<dir>`; `deny-root` removes one, `off` forgets them all. `<dir>` must be an existing local folder outside the daemon's configuration and state folders; it is stored with links resolved, so it cannot later be re-pointed.
+- **Only on the machine.** The file is written atomically and owner-only, like the credentials. No frame, flag or code path lets the platform write it (`src/env-manage.ts` cannot reach a policy writer, and a test holds it to that). A running daemon watches it and announces a change with an `env` frame; `hello` and `env` carry the policy (`policy`, with the roots only while it is on) so the web can explain a refusal.
+- **Every working root is checked** (`checkWorkingRoot`, `src/policy.ts`): absolute; not a UNC share or a device path (`\\server\share`, `\\?\…`, `\\.\…`, `//…`), also after resolution (a mapped drive); inside an allowed root lexically, so `..` is judged by where it leads, and again after `realpath` of both sides, so a symlink or junction cannot lead out (the folder browser's `checkWithinRoots`) — another spelling of a folder inside (an 8.3 short name, a link to it) counts as that folder, and a folder outside is refused the same whether it exists or not; an existing folder; and overlapping none of the daemon's own folders in either direction: its configuration (the token, this policy, `profiles/`), its state (session logs) and every environment's profile. One bad root refuses the whole request (`outside-allowed-roots`); what is stored is the resolved root.
+- **The machine chooses the profile.** A new environment gets `<config dir>/profiles/<id>`; a changed one keeps its own (also the runtime's default one, for a row written by hand) and keeps its `concurrency` and account label unless the request sets them. Nothing on the request can name a profile directory. The runtime must be one this daemon has a driver for, and an environment's runtime is never changed (its profile is signed in for that runtime).
+- **Removing** refuses `in-use` while a session runs or opens on the environment and `unknown-environment` for one the machine does not have, and leaves the profile directory (the sign-in) on disk.
+- The answer goes out after the `env` frame with the new descriptors. A failure that is the machine's own business (`environments.json` invalid, a write failed) is `io` with a message that names no local path; the details are in the daemon's log.
+- Signing a new environment in stays local: `agentic-daemon env login <id>`.
 
 ### Installer zip (Windows)
 
