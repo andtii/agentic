@@ -10,7 +10,7 @@ import { component } from 'sigx';
 import { actorKey, type MachineId, type SessionId, type TaskId } from '@agentic/core';
 import { Chat, TaskActor, Workspace, machineKey, workspaceKey, type SessionFactory } from '@agentic/platform';
 import { chatKeyOf } from '../../src/actors/keys';
-import { clientConnection, failureAction, failureOf, setClientConnection, taskFailureKind, watchTransport, LiveConnection, machineRowsOf, UNCERTAIN_LINE } from '../../src/components/status';
+import { clientConnection, failureAction, failureOf, pluginOfFailure, setClientConnection, taskFailureKind, watchTransport, LiveConnection, machineRowsOf, UNCERTAIN_LINE } from '../../src/components/status';
 import { SessionView } from '../../src/pages/Session';
 import { chatFailure, unknownAgent } from '../../src/pages/chat/live';
 import { transitionText, waitDetailOf } from '../../src/pages/task/LiveTask';
@@ -62,6 +62,25 @@ describe('failureOf — one named state from the signals', () => {
         expect(state?.detail).toContain('no-api-key');
         expect(failureOf({ task: { id: 't1', status: 'failed' } })).toMatchObject({ kind: 'task', detail: expect.stringContaining('could not finish') });
         for (const code of ['runtime-mismatch', 'turn-cancelled', 'agent-unconfigured', 'no-environment', 'budget']) expect(taskFailureKind({ code, message: '', recoverable: false })).toBe('task');
+    });
+
+    it('plugin failures (#230, #233): plugin-disabled links to the plugin it names, unknown-runtime to the catalogue, registry-unavailable is retried', () => {
+        const off = failureOf({ task: { id: 't1', status: 'failed', error: { code: 'plugin-disabled', message: 'the "claude-code" runtime plugin is turned off; turn it on at /plugins/claude-code', recoverable: true } } });
+        expect(off).toMatchObject({ kind: 'task', signal: 'Task.error plugin-disabled', link: { href: '/plugins/claude-code', label: 'Open plugin' } });
+        expect(failureAction(off!, {})).toEqual({ href: '/plugins/claude-code', label: 'Open plugin' });
+        const missing = failureOf({ task: { id: 't1', status: 'failed', error: { code: 'plugin-disabled', message: 'no runtime plugin "a2a:peer" is installed in this workspace', recoverable: true } } });
+        expect(missing?.link).toEqual({ href: '/plugins/a2a%3Apeer', label: 'Open plugin' });
+        expect(pluginOfFailure('plugin-disabled: the "anthropic-api" runtime plugin is turned off for workspace w1')).toBe('anthropic-api');
+        expect(pluginOfFailure('nothing named here')).toBeNull();
+
+        expect(failureOf({ task: { id: 't1', status: 'failed', error: { code: 'unknown-runtime', message: 'agent a1 runs on "x", which this build does not have', recoverable: false } } }))
+            .toMatchObject({ kind: 'task', link: { href: '/plugins', label: 'Open plugins' } });
+        expect(failureOf({ task: { id: 't1', status: 'failed', error: { code: 'registry-unavailable', message: 'the plugin registry could not be asked about runtime anthropic-api: boom', recoverable: true } } }))
+            .toMatchObject({ kind: 'runtime', taskId: 't1', signal: 'Task.error registry-unavailable' });
+
+        // `no-api-key` names the page that sets the key: the task card links there instead of to the task.
+        const noKey = failureOf({ task: { id: 't1', status: 'failed', error: { code: 'session-open', message: 'no-api-key: workspace w1 has no Anthropic API key — add it at /plugins/anthropic-api', recoverable: false } } });
+        expect(noKey).toMatchObject({ kind: 'task', link: { href: '/plugins/anthropic-api' } });
     });
 
     it('interrupted, uncertain: the session’s marker or the task’s resume wait — before a runtime error, after the machine and the account', () => {
