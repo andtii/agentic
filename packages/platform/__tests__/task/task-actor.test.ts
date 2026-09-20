@@ -84,6 +84,20 @@ describe('lifecycle', () => {
         for (const x of view.transitions) expect(typeof x.at).toBe('number');
     });
 
+    it('its errors are branded server-fn errors, so they keep a status across the wire', async () => {
+        // A late answer's follow-up probes the task with `get()` from another actor (#285); a masked 500 there
+        // was "answer-not-delivered: Internal error". Only a ServerFnError crosses with its status.
+        // `statusOf` only reports a status for errors `isServerFnError` recognises, so it is the branding check.
+        const t = task(id('task_0'));
+        expect(await statusOf(t.get())).toBe(404);
+        await expect(t.get()).rejects.toMatchObject({ code: 'not-created', data: { code: 'not-created' } });
+        await t.create(contract(), { owner: a });
+        expect(await statusOf(t.resolveWaiting('user:u1'))).toBe(409);
+        await expect(t.resolveWaiting('user:u1')).rejects.toMatchObject({ code: 'wrong-state', data: { code: 'wrong-state' } });
+        expect(await statusOf(t.complete({ artifacts: [], verified: false }, 'x'))).toBe(409);
+        await expect(t.complete({ artifacts: [], verified: false }, 'x')).rejects.toMatchObject({ code: 'illegal-transition', data: { code: 'illegal-transition' } });
+    });
+
     it('illegal transitions throw and leave no entry behind', async () => {
         const t = task(id('task_3'));
         await expect(t.start('user:u1')).rejects.toThrow(/has not been created/);
