@@ -84,6 +84,16 @@ describe('lifecycle', () => {
         for (const x of view.transitions) expect(typeof x.at).toBe('number');
     });
 
+    it('its errors are branded server-fn errors, so they keep a status across the wire', async () => {
+        // A late answer's follow-up probes the task with `get()` from another actor (#285); a masked 500 there
+        // was "answer-not-delivered: Internal error". Only a ServerFnError crosses with its status.
+        const t = task(id('task_0'));
+        await expect(t.get()).rejects.toMatchObject({ __sigxServerFnError: true, status: 404, code: 'not-created', data: { code: 'not-created' } });
+        await t.create(contract(), { owner: a });
+        await expect(t.resolveWaiting('user:u1')).rejects.toMatchObject({ __sigxServerFnError: true, status: 409, code: 'wrong-state' });
+        await expect(t.complete({ artifacts: [], verified: false }, 'x')).rejects.toMatchObject({ __sigxServerFnError: true, status: 409, code: 'illegal-transition' });
+    });
+
     it('illegal transitions throw and leave no entry behind', async () => {
         const t = task(id('task_3'));
         await expect(t.start('user:u1')).rejects.toThrow(/has not been created/);

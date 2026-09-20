@@ -114,10 +114,11 @@ export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
     return `${workspaceId}:chat:${chatId}`;
 }
 
-/** The Task actor's own errors carry a `code`; map them onto the codes a daemon (and the model) sees. */
+/** The Task actor's own errors carry a `code` (in `data` once over the wire); map them onto the codes a daemon (and the model) sees. */
 function asToolCallError(e: unknown): unknown {
     if (e instanceof ToolCallError) return e;
-    const code = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
+    const shaped = typeof e === 'object' && e !== null ? (e as { code?: unknown; data?: { code?: unknown } | null }) : undefined;
+    const code = shaped?.code ?? shaped?.data?.code;
     const message = e instanceof Error ? e.message : String(e);
     if (code === 'limit') return new ToolCallError('limit', `delegate: ${message}`);
     if (code === 'not-active' || code === 'wrong-state' || code === 'no-session' || code === 'not-created') return new ToolCallError('invalid', `delegate: ${message}`);
