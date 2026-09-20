@@ -14,6 +14,12 @@
  * and their decisions, turn boundaries, the calls requests ask about) is
  * kept in `index`; `knownEvents` is that index before the window, then
  * the window.
+ *
+ * The record itself is bounded (#391): the index carries no prompt (a
+ * `turn-start` is indexed stripped of its `input`, with a byte count) and
+ * keeps only the last `INDEX_TURNS` turns, a replied command forgets its
+ * input, and a single-record reader (`findEvent`, `requestById`) scans
+ * newest-first without materialising the log.
  */
 
 import type { Correction, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
@@ -21,6 +27,9 @@ import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, Promp
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
 import type { SessionOpenSpec } from './ports.js';
+
+type RequestEvent = Extract<AgentEvent, { type: 'request' }>;
+type RequestResolvedEvent = Extract<AgentEvent, { type: 'request-resolved' }>;
 
 /** What the last finished turn taught (architecture §8): the outcome the plugin saw and what it proposed. */
 export interface LearningRecord {
@@ -78,16 +87,38 @@ export interface RunningTurn {
 }
 
 /**
- * One command by its idempotency key: what was sent and, once known, the reply. `taskId` is
- * record-level — the task a prompt was sent for (#390) — never part of the `WireCommand` itself,
- * so a daemon's ack (`commandReplied`) starts the turn under the right task.
+ * One command by its idempotency key: what was sent while its reply is out and, once known, the reply.
+ * A replied command forgets its input (#391): `command` — a prompt carries the whole prompt, images
+ * inlined — is dropped, and only the id, the type and the reply stay for the retry to answer with.
+ * `taskId` is record-level — the task a prompt was sent for (#390) — never part of the `WireCommand`
+ * itself, so a daemon's ack (`commandReplied`) starts the turn under the right task; it survives the reply.
  */
 export interface CommandRecord {
-    readonly command: WireCommand;
+    readonly commandId: string;
+    readonly type: WireCommand['type'];
     readonly at: number;
+    /** The command as sent — until its reply is known. */
+    readonly command?: WireCommand;
     readonly reply?: WireReply;
     readonly taskId?: TaskId;
 }
+
+/** A `turn-start` as the index holds it (#391): the prompt stays in the window or a page; here only what it weighed. */
+export interface IndexedTurnStart {
+    readonly type: 'turn-start';
+    readonly turnId: string;
+    readonly epoch: number;
+    readonly seq: number;
+    readonly sessionId: string;
+    /** UTF-8 JSON bytes of the whole event. */
+    readonly bytes: number;
+}
+
+/** What the index holds: an indexed event as it was, or a `turn-start` without its prompt. */
+export type IndexEntry = AgentEvent | IndexedTurnStart;
+
+/** Turn-starts the index keeps: older entries leave it on a roll, and `eventsSince` reaches the pages for them. */
+export const INDEX_TURNS = 64;
 
 export interface SessionState {
     opened: boolean;
@@ -100,14 +131,17 @@ export interface SessionState {
     head: EventCursor;
     /** The recent end of the durable event log, in `(epoch, seq)` order (= `EventLogStore`); older events are in `pages`. */
     events: AgentEvent[];
-    /** JSON bytes of `events`, kept per event (never recomputed while it grows). Absent on a record from before #198. */
+    /** JSON bytes of `events`, kept per event (never recomputed while it grows). */
     windowBytes?: number;
     /** The slices paged out of `events`, oldest first. */
     pages?: SessionPageMeta[];
     /** How many events `pages` hold. */
     archived?: number;
-    /** Every `request`, `request-resolved`, `turn-start` and `turn-end`, and the `tool-call` a request asks about — whole-history readers never read a page. */
-    index?: AgentEvent[];
+    /**
+     * Every `request`, `request-resolved`, `turn-start` (stripped of its prompt) and `turn-end`, and the `tool-call`
+     * a request asks about, in cursor order — for the last `INDEX_TURNS` turns; whole-history readers never read a page.
+     */
+    index?: IndexEntry[];
     /** Snapshot taken at every turn end (= `TranscriptStore`). */
     transcript?: AgentTranscript;
     running?: RunningTurn;
@@ -190,24 +224,27 @@ export function applySessionEntry(state: SessionState, entry: SessionEntry): voi
                 else (state as unknown as Record<string, unknown>)[k] = v;
             }
             return;
-        case 'command':
-            if (!state.commands[entry.command.commandId]) remember(state, entry.command.commandId, { command: entry.command, at: entry.at, ...(entry.taskId ? { taskId: entry.taskId } : {}) });
+        case 'command': {
+            const id = entry.command.commandId;
+            if (!state.commands[id]) remember(state, id, { commandId: id, type: entry.command.type, at: entry.at, command: entry.command, ...(entry.taskId ? { taskId: entry.taskId } : {}) });
             return;
+        }
         case 'reply': {
             const id = entry.command.commandId;
             const known = state.commands[id];
             const taskId = entry.taskId ?? known?.taskId;
-            remember(state, id, { command: entry.command, at: known?.at ?? entry.at, reply: entry.reply, ...(taskId ? { taskId } : {}) });
+            // Replied: the input is forgotten, the reply is what a retry gets (#391); the task stays on the record.
+            remember(state, id, { commandId: id, type: entry.command.type, at: known?.at ?? entry.at, reply: entry.reply, ...(taskId ? { taskId } : {}) });
             return;
         }
         case 'roll': {
-            migrate(state);
             // Idempotent: a page already rolled (a replayed entry) drops nothing twice.
             if ((state.pages ?? []).some((p) => p.page === entry.page.page)) return;
             const dropped = state.events.splice(0, entry.page.count);
             state.windowBytes = Math.max(0, (state.windowBytes ?? 0) - bytesOf(dropped));
             (state.pages ??= []).push(entry.page);
             state.archived = (state.archived ?? 0) + dropped.length;
+            rollIndex(state);
             return;
         }
     }
@@ -245,30 +282,18 @@ export function bytesOf(events: readonly AgentEvent[]): number {
 /** The index types: what a whole-history reader looks up. */
 const INDEXED: ReadonlySet<AgentEvent['type']> = new Set(['request', 'request-resolved', 'turn-start', 'turn-end']);
 
-/** Insert `ev` into the index in cursor order, once. */
-function indexEvent(state: SessionState, ev: AgentEvent): void {
+/** Insert `entry` into the index in cursor order, once. */
+function indexEvent(state: SessionState, entry: IndexEntry): void {
     const index = (state.index ??= []);
-    if (index.some((e) => e.epoch === ev.epoch && e.seq === ev.seq)) return;
+    if (index.some((e) => e.epoch === entry.epoch && e.seq === entry.seq)) return;
     let at = index.length;
-    while (at > 0 && cursorAfter(ev, index[at - 1]!)) at--;
-    index.splice(at, 0, ev);
+    while (at > 0 && cursorAfter(entry, index[at - 1]!)) at--;
+    index.splice(at, 0, entry);
 }
 
-/**
- * A record written before #198 carries its whole log in `events` and no
- * `windowBytes` / `index`: derive both once, from what it holds — a pure
- * function of the state, so a replay derives the same. The next append
- * rolls the oversized window down.
- */
-function migrate(state: SessionState): void {
-    if (state.windowBytes === undefined) state.windowBytes = bytesOf(state.events);
-    if (state.index === undefined) {
-        state.index = [];
-        for (const ev of state.events) {
-            if (INDEXED.has(ev.type)) indexEvent(state, ev);
-            if (ev.type === 'request' && ev.callId !== undefined) indexCall(state, ev.callId);
-        }
-    }
+/** `ev` as the index holds a `turn-start`: its cursor, its turn, and the bytes the whole event took — never the prompt. */
+function stripTurnStart(ev: Extract<AgentEvent, { type: 'turn-start' }>, bytes: number): IndexedTurnStart {
+    return { type: 'turn-start', turnId: ev.turnId ?? '', epoch: ev.epoch, seq: ev.seq, sessionId: ev.sessionId, bytes };
 }
 
 /** The `tool-call` a request asks about, from the window, into the index. */
@@ -277,8 +302,33 @@ function indexCall(state: SessionState, callId: string): void {
     if (call) indexEvent(state, call);
 }
 
+/**
+ * Bound the index (#391): keep the last `INDEX_TURNS` turn-starts and everything since, drop what is
+ * older — except a request still open (a detached question outlives its turn, #285) and the call it
+ * asks about, which `request(id)` must still find. What leaves is still in the pages (`eventsSince`).
+ */
+function rollIndex(state: SessionState): void {
+    const index = state.index;
+    if (!index) return;
+    let turns = 0;
+    let keepFrom = 0;
+    for (let i = index.length - 1; i >= 0; i--) {
+        if (index[i]!.type !== 'turn-start') continue;
+        if (++turns === INDEX_TURNS) {
+            keepFrom = i;
+            break;
+        }
+    }
+    if (keepFrom === 0) return;
+    const open = new Set(state.openRequests);
+    const calls = new Set<string>();
+    for (const e of index) if (e.type === 'request' && open.has(e.requestId) && e.callId !== undefined) calls.add(e.callId);
+    const kept = index.slice(0, keepFrom).filter((e) => (e.type === 'request' && open.has(e.requestId)) || (e.type === 'tool-call' && calls.has(e.callId)));
+    index.splice(0, keepFrom, ...kept);
+}
+
 /** The events a whole-history reader sees without a page: the index older than the window, then the window. */
-export function knownEvents(state: Pick<SessionState, 'events' | 'index'>): AgentEvent[] {
+export function knownEvents(state: Pick<SessionState, 'events' | 'index'>): IndexEntry[] {
     const first = state.events[0];
     const older = (state.index ?? []).filter((e) => !first || cursorAfter(e, first));
     return [...older, ...state.events];
@@ -294,6 +344,32 @@ export function currentTaskId(s: Pick<SessionState, 'running' | 'spec'>): TaskId
     return s.running?.taskId ?? s.spec?.taskId;
 }
 
+/**
+ * The newest entry `pred` accepts, without materialising the log (#391): the window newest-first,
+ * then the index before the window. A `turn-start` found in the index carries no `input`.
+ */
+export function findEvent(state: Pick<SessionState, 'events' | 'index'>, pred: (e: IndexEntry) => boolean): IndexEntry | undefined {
+    const { events } = state;
+    for (let i = events.length - 1; i >= 0; i--) if (pred(events[i]!)) return events[i];
+    const index = state.index ?? [];
+    const first = events[0];
+    for (let i = index.length - 1; i >= 0; i--) {
+        const e = index[i]!;
+        // The index's tail overlaps the window, which was just scanned.
+        if (first && !cursorAfter(e, first)) continue;
+        if (pred(e)) return e;
+    }
+    return undefined;
+}
+
+/** One request and, once decided, its decision — the lookup a request card, a `respond` and `resolution` make. */
+export function requestById(state: Pick<SessionState, 'events' | 'index'>, requestId: string): { readonly request: RequestEvent; readonly resolved?: RequestResolvedEvent } | undefined {
+    const request = findEvent(state, (e) => e.type === 'request' && e.requestId === requestId) as RequestEvent | undefined;
+    if (!request) return undefined;
+    const resolved = findEvent(state, (e) => e.type === 'request-resolved' && e.requestId === requestId) as RequestResolvedEvent | undefined;
+    return resolved ? { request, resolved } : { request };
+}
+
 function remember(state: SessionState, id: string, record: CommandRecord): void {
     if (!state.commands[id]) state.commandOrder.push(id);
     state.commands[id] = record;
@@ -306,10 +382,11 @@ function remember(state: SessionState, id: string, record: CommandRecord): void 
 function applyEvent(state: SessionState, ev: AgentEvent): void {
     // Idempotent: a frame replayed twice, or a live subscription overlapping the log, folds once.
     if (!cursorAfter(state.head, ev)) return;
-    migrate(state);
     state.events.push(ev);
-    state.windowBytes = (state.windowBytes ?? 0) + jsonBytes(ev);
-    if (INDEXED.has(ev.type)) indexEvent(state, ev);
+    const bytes = jsonBytes(ev);
+    state.windowBytes = (state.windowBytes ?? 0) + bytes;
+    if (ev.type === 'turn-start') indexEvent(state, stripTurnStart(ev, bytes));
+    else if (INDEXED.has(ev.type)) indexEvent(state, ev);
     if (ev.type === 'request' && ev.callId !== undefined) indexCall(state, ev.callId);
     state.head = { epoch: ev.epoch, seq: ev.seq };
     const closed = state.status === 'closed';

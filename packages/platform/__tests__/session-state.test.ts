@@ -2,14 +2,18 @@ import { createTranscript, type AgentEvent } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
 import {
+    INDEX_TURNS,
     MAX_COMMANDS,
     applySessionEntry,
     createEventLogStore,
     createTranscriptStore,
     cursorAfter,
     eventsAfter,
+    findEvent,
     initialSessionState,
+    knownEvents,
     parseSessionKey,
+    requestById,
     type SessionState,
     type SessionStoreContext
 } from '../src/session/index';
@@ -66,18 +70,79 @@ describe('applySessionEntry', () => {
         expect('closedAt' in s).toBe(false);
     });
 
-    it('remembers commands by id, keeps the first send time, and caps at MAX_COMMANDS oldest first', () => {
+    it('remembers commands by id, keeps the first send time, forgets the input once replied (#391), and caps at MAX_COMMANDS oldest first', () => {
         const s = initialSessionState();
-        const cmd = (id: string): WireCommand => ({ v: 1, commandId: id, type: 'cancel' });
+        const cmd = (id: string): WireCommand => ({ v: 1, commandId: id, type: 'prompt', turnId: id, input: [{ type: 'text', text: 'x'.repeat(1000) }] });
         const ack = (id: string): WireReply => ({ v: 1, kind: 'ack', commandId: id });
         applySessionEntry(s, { t: 'command', command: cmd('c0'), at: 1 });
         applySessionEntry(s, { t: 'command', command: cmd('c0'), at: 2 });
+        // Sent, reply out: the whole command, for the reply to be applied against.
+        expect(s.commands.c0).toEqual({ commandId: 'c0', type: 'prompt', at: 1, command: cmd('c0') });
         applySessionEntry(s, { t: 'reply', command: cmd('c0'), reply: ack('c0'), at: 3 });
-        expect(s.commands.c0).toEqual({ command: cmd('c0'), at: 1, reply: ack('c0') });
+        expect(s.commands.c0).toEqual({ commandId: 'c0', type: 'prompt', at: 1, reply: ack('c0') });
         for (let i = 1; i <= MAX_COMMANDS; i++) applySessionEntry(s, { t: 'reply', command: cmd(`c${i}`), reply: ack(`c${i}`), at: i });
         expect(s.commandOrder).toHaveLength(MAX_COMMANDS);
         expect(s.commands.c0).toBeUndefined();
         expect(s.commandOrder[0]).toBe('c1');
+        // What MAX_COMMANDS replied prompts weigh: their ids and replies, never their inputs.
+        expect(JSON.stringify(s.commands).length).toBeLessThan(MAX_COMMANDS * 200);
+    });
+});
+
+describe('the index without prompts (#391)', () => {
+    const image = { type: 'image', mediaType: 'image/png', data: 'A'.repeat(100_000) } as const;
+    const start = (seq: number, turnId: string) => ev(1, seq, { type: 'turn-start', turnId, input: [{ type: 'text', text: 'hi' }, image] });
+
+    it('indexes a turn-start stripped of its input, with the bytes the whole event took', () => {
+        const s = initialSessionState();
+        applySessionEntry(s, { t: 'ev', ev: start(1, 't1') });
+        expect(s.index).toEqual([{ type: 'turn-start', turnId: 't1', epoch: 1, seq: 1, sessionId: 's1', bytes: JSON.stringify(start(1, 't1')).length }]);
+        expect(JSON.stringify(s.index).length).toBeLessThan(200);
+    });
+
+    it('findEvent scans the window newest-first, then the index before the window — the full event while the window holds it', () => {
+        const s = initialSessionState();
+        applySessionEntry(s, { t: 'ev', ev: start(1, 't1') });
+        applySessionEntry(s, { t: 'ev', ev: ev(1, 2, { type: 'request', turnId: 't1', requestId: 'r1', kind: 'input' }) });
+        applySessionEntry(s, { t: 'ev', ev: ev(1, 3, { type: 'turn-end', turnId: 't1', stopReason: 'end_turn' }) });
+        applySessionEntry(s, { t: 'ev', ev: start(4, 't2') });
+        const inWindow = findEvent(s, (e) => e.type === 'turn-start' && e.turnId === 't1');
+        expect(inWindow && 'input' in inWindow).toBe(true);
+        expect(findEvent(s, (e) => e.type === 'turn-start')).toMatchObject({ turnId: 't2' });
+        // Rolled out of the window: the stripped entry answers.
+        applySessionEntry(s, { t: 'roll', page: { page: 0, count: 3, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: 3 } } });
+        const paged = findEvent(s, (e) => e.type === 'turn-start' && e.turnId === 't1');
+        expect(paged).toEqual({ type: 'turn-start', turnId: 't1', epoch: 1, seq: 1, sessionId: 's1', bytes: expect.any(Number) });
+        expect(findEvent(s, (e) => e.type === 'part-delta')).toBeUndefined();
+        expect(requestById(s, 'r1')).toEqual({ request: expect.objectContaining({ requestId: 'r1' }) });
+        applySessionEntry(s, { t: 'ev', ev: ev(1, 5, { type: 'request-resolved', turnId: 't2', requestId: 'r1', outcome: 'input', by: 'client' }) });
+        expect(requestById(s, 'r1')).toEqual({ request: expect.objectContaining({ requestId: 'r1' }), resolved: expect.objectContaining({ outcome: 'input' }) });
+        expect(requestById(s, 'r9')).toBeUndefined();
+    });
+
+    it('a roll keeps the last INDEX_TURNS turns in the index and the requests still open, whatever their age', () => {
+        const s = initialSessionState();
+        let seq = 0;
+        for (let t = 1; t <= INDEX_TURNS + 10; t++) {
+            applySessionEntry(s, { t: 'ev', ev: ev(1, ++seq, { type: 'turn-start', turnId: `t${t}`, input: [] }) });
+            applySessionEntry(s, { t: 'ev', ev: ev(1, ++seq, { type: 'tool-call', turnId: `t${t}`, callId: `c${t}`, name: 'ask_user', input: {} }) });
+            applySessionEntry(s, { t: 'ev', ev: ev(1, ++seq, { type: 'request', turnId: `t${t}`, requestId: `r${t}`, callId: `c${t}`, kind: 'input' }) });
+            // Every question but the third is answered.
+            if (t !== 3) applySessionEntry(s, { t: 'ev', ev: ev(1, ++seq, { type: 'request-resolved', turnId: `t${t}`, requestId: `r${t}`, outcome: 'input', by: 'client' }) });
+            applySessionEntry(s, { t: 'ev', ev: ev(1, ++seq, { type: 'turn-end', turnId: `t${t}`, stopReason: 'end_turn' }) });
+        }
+        const before = s.index!.length;
+        applySessionEntry(s, { t: 'roll', page: { page: 0, count: seq - 5, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: seq - 5 } } });
+        const turns = s.index!.filter((e) => e.type === 'turn-start').map((e) => e.turnId);
+        expect(turns).toHaveLength(INDEX_TURNS);
+        expect(turns[0]).toBe('t11');
+        expect(s.index!.length).toBeLessThan(before);
+        // The open question of turn 3 and the call it asks about stay; its answered neighbours are gone.
+        expect(s.index!.filter((e) => e.type === 'request').map((e) => e.requestId).slice(0, 2)).toEqual(['r3', 'r11']);
+        expect(s.index!.filter((e) => e.type === 'tool-call').map((e) => e.callId).slice(0, 2)).toEqual(['c3', 'c11']);
+        expect(requestById(s, 'r3')).toEqual({ request: expect.objectContaining({ requestId: 'r3' }) });
+        expect(requestById(s, 'r4')).toBeUndefined();
+        expect(knownEvents(s).some((e) => e.type === 'turn-start' && e.turnId === 't10')).toBe(false);
     });
 });
 

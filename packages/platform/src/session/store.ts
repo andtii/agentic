@@ -45,7 +45,10 @@ export const TRANSCRIPT_BYTES = 1024 * 1024;
 const trimmed = (bytes: number): string => `[trimmed from the stored snapshot: ${Math.max(1, Math.round(bytes / 1024))} KB — the session's events keep it]`;
 const sizeOf = jsonBytes;
 
-/** Drop a part's bulk (tool output, content blocks, streaming argument text; reasoning text and provider data); the bytes saved. */
+/**
+ * Drop a part's bulk (tool output, content blocks, streaming argument text; reasoning text and provider data;
+ * an inlined image's or file's bytes, #391 — the part becomes a text note, since a marker is no base64); the bytes saved.
+ */
 function trimBulk(part: AgentPart): number {
     const before = sizeOf(part);
     if (part.type === 'tool') {
@@ -56,6 +59,15 @@ function trimBulk(part: AgentPart): number {
     } else if (part.type === 'reasoning') {
         if (part.text.length > 256) part.text = trimmed(utf8Bytes(part.text));
         delete part.providerData;
+    } else if ((part.type === 'image' || part.type === 'file') && part.data !== undefined && part.data.length > 256) {
+        const p = part as { type: string; text?: string; data?: string; url?: string; mediaType?: string; filename?: string };
+        const note = `[${part.type}${'filename' in part && part.filename ? ` ${part.filename}` : ''} ${part.mediaType}] ${trimmed(utf8Bytes(part.data))}`;
+        delete p.data;
+        delete p.url;
+        delete p.mediaType;
+        delete p.filename;
+        p.type = 'text';
+        p.text = note;
     }
     return before - sizeOf(part);
 }
