@@ -462,6 +462,20 @@ export function defineMachineActor(ports: MachinePorts) {
                 await session(frame.sessionId)?.noteRef(frame.ref as SessionRef);
             }
 
+            /**
+             * Hand a daemon's word about a session to its record, and keep the socket whatever the record says (#393):
+             * a Session refuses a frame for a session it is not hosted on by this machine (a stale one after a restart,
+             * one re-opened elsewhere, one it never opened) with a 403, and that refusal must not reach the host's
+             * `webSocketMessage` — it would take the daemon's whole socket down with every other session on it.
+             */
+            async function toSession(fn: () => Promise<void> | undefined): Promise<void> {
+                try {
+                    await fn();
+                } catch {
+                    // The record said no; the frame is dropped, the socket stays.
+                }
+            }
+
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {
                 const h = ctx.state.activeSessions[frame.sessionId];
                 const wire = frame.frame;
@@ -469,7 +483,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (wire.kind === 'event' && advances(h.cursor, { epoch: wire.epoch, seq: wire.seq })) h.cursor = { epoch: wire.epoch, seq: wire.seq };
                     else if (wire.kind === 'gap') h.cursor = { epoch: wire.resumeAt.epoch, seq: wire.resumeAt.seq };
                 }
-                await session(frame.sessionId)?.forwardFrames([wire]);
+                await toSession(() => session(frame.sessionId)?.forwardFrames([wire]));
             }
 
             async function onSessionReply(frame: DaemonFrameOf<'session.reply'>): Promise<void> {
@@ -477,7 +491,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 const key = pendingKey(frame.sessionId, frame.reply.commandId);
                 const pending = s.pending[key];
                 delete s.pending[key];
-                await replied(frame.sessionId, frame.reply);
+                await toSession(() => replied(frame.sessionId, frame.reply));
                 if (pending?.command.type === 'close' && frame.reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
             }
 

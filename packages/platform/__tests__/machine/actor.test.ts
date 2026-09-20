@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actorKey, type EnvironmentId, type FrozenAgentConfig, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
-import type { WireCommand } from '@sigx/ai-agent/wire';
+import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/ai-agent/wire';
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
@@ -325,6 +325,25 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         expect(m.activeSessions[0]?.cursor).toEqual({ epoch: 0, seq: 3 });
         // The reply is remembered: the same command answers with the ack it got.
         expect(await session(S1).prompt('hello', 't1')).toMatchObject({ kind: 'ack', commandId: 't1' });
+    });
+
+    it('a frame or a reply for a session the record refuses is dropped, and the socket stays (#393)', async () => {
+        connect(K1, daemon(M1, undefined, { events: 3 }));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        const asDaemon = machine(K1, asMachine(M1));
+        // S2 was never opened on this machine: the Session record admits no machine for it (403). A daemon that still
+        // runs it after a restart, or a stale one, must not take the whole socket down with that refusal.
+        const event: WireFrame = { v: WIRE_PROTOCOL_VERSION, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p1', delta: 'x', turnId: 't1', sessionId: S2, epoch: 0, seq: 1 } };
+        expect(await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.frame', sessionId: S2, frame: event }))).toMatchObject({ ok: true, t: 'session.frame' });
+        expect(await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: S2, reply: { v: WIRE_PROTOCOL_VERSION, kind: 'ack', commandId: 'c1' } }))).toMatchObject({ ok: true, t: 'session.reply' });
+        expect((await machine(K1).get()).online).toBe(true);
+        expect((await session(S2).get()).opened).toBe(false);
+        // The socket still carries a real session's turn after that.
+        await session(S1).open(sessionSpec(M1));
+        expect(await machine(K1).openSession(S1, E1, openSpec)).toBe('opened');
+        await until(async () => (await machine(K1).get()).activeSessions[0]?.status === 'open', 'session.opened');
+        await session(S1).prompt('hello', 't1');
+        await until(async () => (await session(S1).get()).transcriptAt?.seq === 3, 'the turn to end');
     });
 
     it('a tool.call runs on the ToolCallPort under the agent principal and answers tool.result', async () => {

@@ -59,16 +59,17 @@ describe('session feeds', () => {
         const second = openFeed(session, sessionId, agentId, (e) => errors.push(e));
         await until(() => text(second).length >= seen, 'the reloaded tab to catch up', 3_000);
         expect(text(second)).toBe('abcdefghij'.slice(0, text(second).length));
-        // The router closes the session once the task it ran is settled, so the turn's end is the session's.
-        await until(() => second.transcript.state === 'closed' && text(second) === 'abcdefghij', 'the turn to finish', 3_000);
+        // A chat member's session stays live after its task settles (#393): the turn ends, the session goes idle, nothing closes.
+        await until(() => second.transcript.state === 'idle' && text(second) === 'abcdefghij', 'the turn to finish', 3_000);
         expect(inFlightMessages(second.transcript)).toEqual([]);
         expect(second.transcript.turn?.stopReason).toBe('end_turn');
         expect(second.client()?.agentId).toBe(agentId);
         expect(errors).toEqual([]);
         second.disconnect();
-        // The record agrees: the durable log has the whole turn.
+        // The record agrees: the durable log has the whole turn, and the session is idle, not closed.
         const info = await session.get();
-        expect(info.status).toBe('closed');
+        expect(info.status).toBe('idle');
+        expect(info.running).toBeUndefined();
         expect(info.eventCount).toBeGreaterThan(10);
     });
 });
@@ -79,7 +80,8 @@ describe('the session view', () => {
         let info: Awaited<ReturnType<SessionActorClient['get']>>;
         await (async () => {
             const deadline = Date.now() + 3_000;
-            while ((await session.get()).status !== 'closed') {
+            // The turn's end, not the session's close: a chat member's session is not closed when its task settles (#393).
+            while ((await session.get()).running !== undefined) {
                 if (Date.now() > deadline) throw new Error('turn did not end');
                 await new Promise((r) => setTimeout(r, 20));
             }
@@ -95,7 +97,7 @@ describe('the session view', () => {
         expect(report.unsupported.map((u) => u.op)).toContain('migrate');
         expect(capabilityReport('claude-code', undefined).supported).toEqual([]);
         const view = liveSessionView(sessionId, info, log, { id: agentId, name: 'Atlas', role: '', hue: 1, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, configVersion: 1 });
-        expect(view).toMatchObject({ id: sessionId, agentId, state: 'closed', taskId: 't_live', openedFrom: expect.stringContaining('chat '), machine: { name: 'platform' }, runtimeVersion: 'anthropic-api', head: info.head });
+        expect(view).toMatchObject({ id: sessionId, agentId, state: 'idle', taskId: 't_live', openedFrom: expect.stringContaining('chat '), machine: { name: 'platform' }, runtimeVersion: 'anthropic-api', head: info.head });
         expect(view.interrupted).toBeUndefined();
         expect(view.events).toHaveLength(2);
         expect(view.current).toBeUndefined();
@@ -116,8 +118,9 @@ describe('the session view', () => {
         expect(dom.textContent).not.toContain('3.4s');
         expect(dom.querySelectorAll('[data-grant] button')).toHaveLength(0);
         expect(sessionHead.value?.id).toBe(sessionId);
-        await until(() => sessionHead.value?.view.state === 'closed', 'the head to follow the close');
-        expect(dom.querySelector('[data-session-head] [data-scope="ag-pill"]')!.textContent).toMatch(/completed/i);
+        // The turn ends and the session stays live, idle (#393); what the pill says of an idle live session is #398's.
+        await until(() => sessionHead.value?.view.state === 'idle', 'the head to follow the turn end');
+        expect(dom.querySelector('[data-session-head] [data-scope="ag-pill"]')!.textContent).not.toMatch(/active/i);
         const missing = await mountLive('/sessions/nope', h);
         await until(() => missing.querySelector('[data-scope="ag-empty"]') !== null, 'the not-found state');
         expect(missing.textContent).toContain('No session with that id');

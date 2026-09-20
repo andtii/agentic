@@ -191,9 +191,12 @@ function sameRefIdentity(a: SessionRef, b: SessionRef): boolean {
 }
 const refEpoch = (ref: SessionRef): unknown => (typeof ref.data === 'object' && ref.data !== null ? (ref.data as { epoch?: unknown }).epoch : undefined);
 
-/** A platform request nobody's tool call waits on (#285): detached by its call, or its session closed. */
+/**
+ * A platform request nobody's tool call waits on (#285): detached by its call, its session closed, or no turn running
+ * — a live chat session is idle between turns (#393), and no call of a turn that ended can be waiting.
+ */
 function isDetached(s: SessionState, requestId: string): boolean {
-    return !!s.platformRequests?.includes(requestId) && (s.status === 'closed' || !!s.detachedRequests?.includes(requestId));
+    return !!s.platformRequests?.includes(requestId) && (s.status === 'closed' || !s.running || !!s.detachedRequests?.includes(requestId));
 }
 
 /** Who answered a detached question — the principal its answer is posted as; the workspace's own user when unknown. */
@@ -724,6 +727,8 @@ export function defineSessionActor(ports: SessionPorts) {
         if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(taskId ? { taskId } : {}) });
         await learnFromTurn(c, turnId, text, taskId, transcript);
         await c.save();
+        // Answers that came while this turn ran (#285): the turn is over and a live session does not close (#393), so start their askers now.
+        if (s.answeredDetached?.length && !s.running) await c.tasks.start('deliverAnswers', {});
     }
 
     /**
@@ -885,11 +890,12 @@ export function defineSessionActor(ports: SessionPorts) {
                         at: now()
                     });
                     if (detached && d.type === 'input') {
-                        // Nobody waits on the call any more (#285): park the answer; the asker is started again once the
-                        // session is closed — now, or when its turn is over — outside this turn (`deliverAnswers`).
+                        // Nobody waits on the call any more (#285): park the answer; the asker is started again once no turn
+                        // runs — now, or when its turn is over (a live chat session stays open between turns, #393) —
+                        // outside this turn (`deliverAnswers`).
                         const answer: DetachedAnswer = { requestId: command.requestId, answeredBy: answererOf(ctx.principal as Principal | null, parsed!.workspaceId) };
                         await appendEntry(ctx, set({ answeredDetached: [...(s.answeredDetached ?? []), answer] }));
-                        if (s.status === 'closed') await ctx.tasks.start('deliverAnswers', {});
+                        if (s.status === 'closed' || !s.running) await ctx.tasks.start('deliverAnswers', {});
                     }
                 }
                 const ack: WireReply = { v: V, kind: 'ack', commandId: command.commandId };
@@ -925,15 +931,24 @@ export function defineSessionActor(ports: SessionPorts) {
             }
 
             return {
-                /** Record the spec and open the runtime session. Idempotent: a second call returns the record. */
+                /**
+                 * Record the spec and open the runtime session. A record already open is RE-OPENED (#393): the spec is
+                 * replaced by this placement's — the task, its objective and context, the memories retrieved for them
+                 * (MEM-07), and the machine, environment and folder, so `assertHostingMachine` admits the daemon the
+                 * session comes back on — and the status is `idle` again; a local runtime session that is gone resumes
+                 * from the recorded ref (`ensureLive`), a daemon one from the same ref the router passes on. The ref is
+                 * seeded from `spec.resume` on the first open only; nothing here touches one a runtime reported. While
+                 * a turn runs the record is left as it is (#395 decides what a mid-turn message does). The chat hears
+                 * `session-started` once, at the first open: the binding it keeps is for the session's life.
+                 */
                 async open(spec: SessionOpenSpec): Promise<SessionInfo> {
                     const s = ctx.state;
                     if (s.status === 'closed') throw new Error(`session "${ctx.key}" is closed`);
                     const first = !s.opened;
-                    if (first) {
+                    if (first || !s.running) {
                         // Memory is retrieved before the runtime session exists, so the factory (and a daemon) sees the block in the spec.
                         const recorded = ports.learning ? await withRetrievedMemory(ctx, structuredClone(spec), ports.learning) : structuredClone(spec);
-                        await appendEntry(ctx, set({ opened: true, spec: recorded, status: 'idle', ...(spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
+                        await appendEntry(ctx, set({ opened: true, spec: recorded, status: 'idle', ...(first && spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
                     }
                     await ensureLive();
                     if (first) await publishChat(ctx, { kind: 'status', status: 'session-started' });
@@ -1209,7 +1224,8 @@ export function defineSessionActor(ports: SessionPorts) {
             async deliverAnswers(): Promise<void> {
                 for (;;) {
                     const snap = ctx.snapshot();
-                    const next = snap.status === 'closed' ? snap.answeredDetached?.[0] : undefined;
+                    // Closed, or idle between turns (#393): the asker's next turn runs in this same session, so never while one does.
+                    const next = snap.status === 'closed' || !snap.running ? snap.answeredDetached?.[0] : undefined;
                     if (!next) return;
                     const followUp = followUpOf(snap, ctx.key, next);
                     let failed: string | undefined;

@@ -18,7 +18,7 @@ import { ToolCallError, type ToolCallPort } from '../../src/machine/index';
 import { Memory, memoryActorKey } from '../../src/memory/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
-import { defineSessionActor, type AnswerFollowUp } from '../../src/session/index';
+import { defineSessionActor, type AnswerFollowUp, type CommandSink } from '../../src/session/index';
 import { Workspace } from '../../src/workspace/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
@@ -60,7 +60,14 @@ let Routing: ReturnType<typeof defineRoutingActor>;
 
 beforeEach(async () => {
     followUps = [];
-    Session = defineSessionActor({ factory: () => null, answered: async (f) => void followUps.push(f) });
+    // A daemon path with no daemon: a prompt goes nowhere (`startTurn` acks it as the hosting machine would); a close is acked the way a daemon does, in a turn of its own.
+    const commands: CommandSink = {
+        send: async (t, cmd) => {
+            if (cmd.type !== 'close') return;
+            setTimeout(() => void app.as({ kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never }).actor(Session, actorKey(WS, 'session', t.sessionId)).commandReplied({ v: 1, kind: 'ack', commandId: cmd.commandId }), 0);
+        }
+    };
+    Session = defineSessionActor({ factory: () => null, commands, answered: async (f) => void followUps.push(f) });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     port = createToolCallPort({ routing: () => Routing, sessions: () => Session });
     quickPort = createToolCallPort({ routing: () => Routing, sessions: () => Session, askQuickWaitMs: 20 });
@@ -74,6 +81,11 @@ afterEach(() => app.stop());
 
 /** A `tool.call` as the Machine relays it: the frame's session and the principal's are the same session. */
 const call = (tool: string, input: unknown, as: Principal = principal, callId = 'call_1', sessionId: SessionId = SESSION) => port.call({ callId, sessionId, tool, input }, as);
+/** A turn running on `sessionId`, the way a daemon's ack starts one: a `tool.call` belongs to a running turn, and a question asked outside one is detached (#393). */
+async function startTurn(sessionId: SessionId, turnId: string): Promise<void> {
+    await app.as(owner).actor(Session, actorKey(WS, 'session', sessionId)).prompt('go', turnId);
+    await app.as({ kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never }).actor(Session, actorKey(WS, 'session', sessionId)).commandReplied({ v: 1, kind: 'ack', commandId: turnId, turnId });
+}
 const until = async (check: () => Promise<boolean> | boolean, what: string, timeoutMs = 4_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs;
     while (!(await check())) {
@@ -152,16 +164,17 @@ describe('createToolCallPort', () => {
         expect(await codeOf(cancelled)).toBe('cancelled');
     });
 
-    it('in a chat, ask_user answers `pending` once the quick window passes; an answer before the close is handed over at the close (#285)', async () => {
+    it('in a chat, ask_user answers `pending` once the quick window passes; an answer while the asker’s turn still runs is handed over once it is over (#285, #393)', async () => {
         const session = app.as(owner).actor(Session, actorKey(WS, 'session', SESSION));
+        await startTurn(SESSION, 'turn_late');
         const out = await quickPort.call({ callId: 'call_late', sessionId: SESSION, tool: 'ask_user', input: { question: 'Which colour?', choices: ['red', 'blue'] } }, principal);
         expect(out).toMatchObject({ status: 'pending', questionId: 'ask:call_late' });
         expect(await session.request('ask:call_late')).toMatchObject({ agentName: 'Ada', detached: true });
-        // Answered while the session is still open (the asker's turn may still run): parked, nobody started yet.
+        // Answered while the asker's turn still runs: parked, nobody started yet — the asker's next turn runs in this same session.
         expect((await session.respond('ask:call_late', { type: 'input', answers: 'blue' })).kind).toBe('ack');
         expect(followUps).toEqual([]);
         expect((await session.get()).openRequests).toEqual([]);
-        // The session closes: the answer goes to the asker once, with who gave it.
+        // The turn is over (here: the session closes on it): the answer goes to the asker once, with who gave it.
         await session.close();
         await until(() => followUps.length === 1, 'the follow-up');
         expect(followUps[0]).toEqual({
@@ -196,6 +209,7 @@ describe('createToolCallPort', () => {
         const lone = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: LONE, taskId: TASK });
         const session = app.as(owner).actor(Session, actorKey(WS, 'session', LONE));
         await session.open({ agentId: AGENT, runtime: 'in-memory', taskId: TASK, machineId: 'machine_1' as never, config });
+        await startTurn(LONE, 'turn_lone');
         let answered: unknown;
         const asked = quickPort.call({ callId: 'call_lone', sessionId: LONE, tool: 'ask_user', input: { question: 'Sure?' } }, lone).then((r) => (answered = r));
         await until(async () => (await session.get()).openRequests.length === 1, 'the request to land');

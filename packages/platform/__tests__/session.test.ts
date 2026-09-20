@@ -287,13 +287,21 @@ describe('Session turns (local path)', () => {
         expect((await session().events()).find((e) => e.type === 'request-resolved')).toMatchObject({ answers: { q1: 'bugs', q2: ['small'] } });
     });
 
-    it('never switches a recorded session to another environment or machine on a second open', async () => {
-        const first = await session().open({ ...spec, environmentId: 'env_a' as SessionOpenSpec['environmentId'] });
-        const again = await session().open({ ...spec, environmentId: 'env_b' as SessionOpenSpec['environmentId'], machineId: 'machine_2' as MachineId });
-        expect(again.spec).toEqual(first.spec);
-        expect(again).toMatchObject({ mode: 'local', spec: { environmentId: 'env_a' } });
+    it('a second open re-opens the record with the new placement (#393): the spec is replaced, the runtime session is not opened twice, the chat hears session-started once; a running turn leaves it as it is', async () => {
+        const first = await session().open({ ...spec, environmentId: 'env_a' as SessionOpenSpec['environmentId'], objective: 'first' });
+        expect(first.spec).toMatchObject({ environmentId: 'env_a', objective: 'first', taskId: 'task_1' });
+        const again = await session().open({ ...spec, environmentId: 'env_b' as SessionOpenSpec['environmentId'], taskId: 'task_2' as TaskId, objective: 'second' });
+        expect(again).toMatchObject({ mode: 'local', status: 'idle', spec: { environmentId: 'env_b', taskId: 'task_2', objective: 'second' } });
         expect(again.spec?.machineId).toBeUndefined();
         expect(agent.sessions).toHaveLength(1);
+        expect(received.filter((e) => e.kind === 'status' && e.status === 'session-started')).toHaveLength(1);
+        // Mid-turn the record is not touched: the running turn keeps the task and objective it was prompted under (#395 decides what a mid-turn message does).
+        await session().prompt('hello', 't1');
+        await until(async () => (await session().get()).running?.turnId === 't1', 'the turn to start');
+        const running = await session().open({ ...spec, taskId: 'task_3' as TaskId, objective: 'third' });
+        expect(running.spec).toMatchObject({ taskId: 'task_2', objective: 'second' });
+        expect(running.status).toBe('running');
+        await settled();
     });
 
     it('cancels a running turn', async () => {
