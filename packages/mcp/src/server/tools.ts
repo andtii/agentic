@@ -382,7 +382,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             scope: 'chats',
             description: 'Put a chat in a project (a project id from projects_list), or in none with `projectId: null`: the sessions of its members then run in the project’s folder on their environment and get its connectors. An unknown project is an error. Idempotent.',
             input: z.object({ chatId: id('The chat id.'), projectId: z.string().min(1).nullable().describe('The project id, or null to leave the project.') }),
-            annotations: WRITE,
+            annotations: { ...WRITE, idempotent: true },
             run: async (input) => {
                 await port.projects.setChatProject(input.chatId as ChatId, input.projectId as ProjectId | null);
                 return { chatId: input.chatId, projectId: input.projectId };

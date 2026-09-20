@@ -490,7 +490,7 @@ describe('platform MCP server: projects (#334)', () => {
         const { tools } = await client.listTools();
         const byName = new Map(tools.map((t) => [t.name, t]));
         expect(byName.get('projects_list')!.annotations).toEqual({ readOnlyHint: true, idempotentHint: true });
-        expect(byName.get('chats_set_project')!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false });
+        expect(byName.get('chats_set_project')!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
         expect(byName.get('chats_set_project')!.inputSchema.required).toEqual(expect.arrayContaining(['chatId', 'projectId']));
         expect(client.getInstructions()).toContain('chats_set_project');
         await client.close();
