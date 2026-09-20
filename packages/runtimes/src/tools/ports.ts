@@ -5,7 +5,7 @@
  * Memory, Task and Chat under the agent's principal.
  */
 
-import type { AgentId, ChatFileRead, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, ProjectId, PromptPart, RankedMemory, TaskError, TaskId, TaskResult, TaskStatus, UsageLimits, UsageLimitsQuery } from '@agentic/core';
+import type { AgentId, ChatFileRead, ChatId, EnvironmentId, Limits, MemoryEntry, MemoryQuery, MessageId, NewMemoryEntry, ProjectId, PromptPart, RankedMemory, TaskError, TaskId, TaskResult, TaskStatus, UsageLimits, UsageLimitsQuery } from '@agentic/core';
 
 /** What every port call learns about the tool call behind it. */
 export interface ToolCall {
@@ -113,6 +113,34 @@ export interface UsagePort {
     limits(query: UsageLimitsQuery, call: ToolCall): Promise<UsageLimits>;
 }
 
+/** A project as the `projects` tool lists it (#334): the catalogue entry, with the environments it has a folder on. */
+export interface ProjectSummary {
+    readonly id: ProjectId;
+    readonly name: string;
+    readonly description?: string;
+    /** The environments the project has a folder on (`Object.keys(ProjectRecord.folders)`). */
+    readonly environments: readonly EnvironmentId[];
+}
+
+/** The project a chat is in, as `Chat.get()` reports it; `name` is absent when the Workspace no longer has the project. */
+export interface ChatProject {
+    readonly id: ProjectId;
+    readonly name?: string;
+}
+
+/**
+ * Projects for the coordinator (#334, COL-02/04): the registered projects are listed and one is set on a chat;
+ * matching a project to what the user wrote is the model's job, never the port's.
+ */
+export interface ProjectPort {
+    /** The workspace's projects, read as the workspace's user (the Workspace admits its owner only). */
+    list(call: ToolCall): Promise<readonly ProjectSummary[]>;
+    /** The chat's current project, under the agent's principal; `null` when it is in none. */
+    current(chatId: ChatId, call: ToolCall): Promise<ChatProject | null>;
+    /** `Chat.setProject` under the agent's principal (a member of the chat, else forbidden); `null` leaves the project. Audited by the chat as `chat.project-set`. */
+    set(chatId: ChatId, projectId: ProjectId | null, call: ToolCall): Promise<void>;
+}
+
 export interface PlatformPorts {
     readonly memory: MemoryPort;
     readonly task: TaskPort;
@@ -121,4 +149,6 @@ export interface PlatformPorts {
     readonly files?: ChatFilesPort;
     /** Absent on hosts without machines — `usage_limits` then reports it unavailable. */
     readonly usage?: UsagePort;
+    /** Absent on hosts without a Workspace — `projects` then reports it unavailable. */
+    readonly projects?: ProjectPort;
 }

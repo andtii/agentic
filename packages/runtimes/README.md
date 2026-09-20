@@ -76,8 +76,9 @@ Both are normalized to 0..1. Only normalized snapshots leave the machine. Record
 | `task_report` | `TaskPort.report` | `idempotent` |
 | `ask_user` | `ChatPort.ask` → `AskOutcome`: `{ answer }` within a short window, else `{ status: 'pending', questionId, note }` — the agent ends its turn and the answer starts it again in the chat (#285) | |
 | `usage_limits` | `UsagePort.limits` (`PlatformPorts.usage`, #272): `{ machineId?, runtime? }` → core `UsageLimits`, every account's latest quota snapshot and its age; no `usage` port fails the call | `readOnly`, `idempotent` |
+| `projects` | `ProjectPort` (`PlatformPorts.projects`, #334): `{ action: 'list' }` → `{ projects: ProjectSummary[] }` (id, name, description, the environments with a folder); `{ action: 'set', chatId, projectId \| null, force? }` → `ProjectPort.set` (`Chat.setProject` as the agent, audited `chat.project-set`), answering `{ chatId, projectId, previous }`. The guard: a chat already in another project is refused unless `force`, which the description reserves for an explicit request from the user; the description also tells the coordinator to `list` only when the chat has no project and the message names one, to set only a registered project (never a folder on disk) and to `ask_user` with the candidates when none or several match. No `projects` port fails the call | `idempotent` |
 
-`platformTools(ports)` gives all eight; `grantedPlatformTools(ports, grants)` the ones a config grants.
+`platformTools(ports)` gives all nine; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
 ## Plugin manifests (`src/plugins.ts`, #228)
 

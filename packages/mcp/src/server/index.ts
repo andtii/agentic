@@ -17,6 +17,7 @@ export type {
     ChatHistoryPage,
     CreateScheduleInput,
     ScheduleSummary,
+    ProjectSummary,
     PlatformPort,
     PlatformPortFactory
 } from './port.js';
