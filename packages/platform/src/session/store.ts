@@ -60,14 +60,12 @@ function trimBulk(part: AgentPart): number {
         if (part.text.length > 256) part.text = trimmed(utf8Bytes(part.text));
         delete part.providerData;
     } else if ((part.type === 'image' || part.type === 'file') && part.data !== undefined && part.data.length > 256) {
-        const p = part as { type: string; text?: string; data?: string; url?: string; mediaType?: string; filename?: string };
+        // The part becomes exactly `{ type: 'text', text }`: nothing of the attachment (its bytes, url, media type, name, size, …) lingers.
+        // Rebuilt in place, since the passes run over views of the cloned transcript's own part objects.
         const note = `[${part.type}${'filename' in part && part.filename ? ` ${part.filename}` : ''} ${part.mediaType}] ${trimmed(utf8Bytes(part.data))}`;
-        delete p.data;
-        delete p.url;
-        delete p.mediaType;
-        delete p.filename;
-        p.type = 'text';
-        p.text = note;
+        const p = part as unknown as Record<string, unknown>;
+        for (const key of Object.keys(p)) delete p[key];
+        Object.assign(p, { type: 'text', text: note });
     }
     return before - sizeOf(part);
 }

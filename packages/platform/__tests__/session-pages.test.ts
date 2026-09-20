@@ -311,6 +311,18 @@ describe('boundTranscript (#198)', () => {
         expect((t.messages[0]!.parts[1] as { output?: unknown }).output).toBe('o'.repeat(60_000));
     });
 
+    it('an old inlined image becomes exactly a text note — nothing of the attachment lingers (#391)', () => {
+        const t = createTranscript('s');
+        for (let i = 0; i < 3; i++) {
+            t.messages.push({ id: `u${i}`, role: 'user', turnId: `t${i}`, parts: [{ type: 'text', text: `turn ${i}` }, { type: 'image', mediaType: 'image/png', data: 'A'.repeat(600_000), name: 'shot.png', size: 450_000 } as never] });
+            t.messages.push({ id: `a${i}`, role: 'assistant', turnId: `t${i}`, parts: [{ type: 'text', id: `x${i}`, text: `answer ${i}` }] });
+        }
+        const b = boundTranscript(t);
+        expect(JSON.stringify(b).length).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+        expect(b.messages[0]!.parts[1]).toEqual({ type: 'text', text: expect.stringMatching(/^\[image image\/png\] \[trimmed from the stored snapshot: \d+ KB/) });
+        expect(Object.keys(b.messages[0]!.parts[1]!)).toEqual(['type', 'text']);
+    });
+
     it('is a guarantee: one message alone past the budget is trimmed too, largest parts first', () => {
         const t = transcript(1, 3_000_000);
         const b = boundTranscript(t);

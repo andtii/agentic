@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -469,8 +469,8 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
             corrections: c.snapshot(s.corrections ?? []),
-            // The whole set, genuinely: every grant of the session. A stripped `turn-start` is opaque to a reader of requests and decisions.
-            grants: sessionGrantsOf(knownEvents(s) as AgentEvent[])
+            // The whole set, genuinely: every grant of the session — the index's stripped turn-starts are no events and say nothing about one.
+            grants: sessionGrantsOf(knownEvents(s).filter(isWholeEvent))
         };
     }
 
@@ -1083,7 +1083,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 requests(options: { readonly openOnly?: boolean } = {}): SessionRequestView[] {
                     const s = ctx.state;
                     // The whole set, genuinely: every request of the session.
-                    const all = requestRecordsOf(knownEvents(s) as AgentEvent[], s.transcript);
+                    const all = requestRecordsOf(knownEvents(s).filter(isWholeEvent), s.transcript);
                     return ctx.snapshot(options.openOnly ? all.filter((r) => !r.resolved) : all).map((r) => requestView(ctx, r));
                 },
 

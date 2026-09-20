@@ -327,6 +327,11 @@ function rollIndex(state: SessionState): void {
     index.splice(0, keepFrom, ...kept);
 }
 
+/** `e` is an event as it was logged — not a `turn-start` the index stripped of its prompt (the one non-event the index holds). */
+export function isWholeEvent(e: IndexEntry): e is AgentEvent {
+    return e.type !== 'turn-start' || 'input' in e;
+}
+
 /** The events a whole-history reader sees without a page: the index older than the window, then the window. */
 export function knownEvents(state: Pick<SessionState, 'events' | 'index'>): IndexEntry[] {
     const first = state.events[0];
