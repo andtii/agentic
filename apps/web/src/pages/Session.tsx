@@ -19,7 +19,8 @@ const sessionPill = (s: MockSessionView): string => {
         case 'disconnected': return 'disconnected';
         case 'error': return 'error';
         case 'closed': return 'completed';
-        default: return s.interrupted ? 'interrupted' : 'queued';
+        // Idle: a live session between turns (#393) — it stays, so it reads LIVE, not queued (#398).
+        default: return s.interrupted ? 'interrupted' : 'live';
     }
 };
 

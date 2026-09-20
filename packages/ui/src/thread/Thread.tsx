@@ -18,6 +18,13 @@
  * window's `end` freezes at that moment so rows do not shift under the
  * reader while the agent goes on streaming.
  *
+ * The host may hold more than the transcript (a chat whose older entries are
+ * paged from a store): with `hasEarlier` the chip stays once the window is
+ * fully open and reaching the top — the chip, or a scroll to within
+ * `threshold` of it — calls `onEarlier`; rows the host then prepends keep
+ * the frozen rows where they were (the window's end moves with them and the
+ * scroll offset absorbs the new height), so paging never jumps the reader.
+ *
  * Who an author is (hue, environment, time) comes from the page through
  * `describe`; the STREAMING pill sits on the last assistant row while the
  * session is mid-turn.
@@ -52,6 +59,10 @@ export type ThreadProps =
     & Define.Prop<'window', number, false>
     /** Pixels from the bottom within which the thread still counts as following. Default 24. */
     & Define.Prop<'threshold', number, false>
+    /** The host holds rows before the transcript's first (#398): the "Load earlier" chip stays once the window is fully open, and reaching the top asks for them. */
+    & Define.Prop<'hasEarlier', boolean, false>
+    /** Asked for the rows before the transcript's first — by the chip, or by a scroll to within `threshold` of the top — while `hasEarlier`; the host prepends them. */
+    & Define.Prop<'onEarlier', () => void, false>
     /** Accessible name of the log. Default "Transcript". */
     & Define.Prop<'label', string, false>;
 
@@ -86,6 +97,15 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         extra: 0
     });
     let root: HTMLElement | null = null;
+    /** The first message when the window froze: rows prepended before it move the frozen `end` by their units. */
+    let frozenFirst: string | undefined;
+    /** The last render's first unit; its first row against the first row the DOM last settled on, and the scroll height before the change — the prepend correction reads them. */
+    let lastStart = 0;
+    let firstKey: string | undefined;
+    let settledFirstKey: string | undefined;
+    let heightBefore: number | undefined;
+    /** The top was reached and `onEarlier` asked; re-armed by a scroll away or by rows arriving. */
+    let askedTop = false;
 
     const size = (): number => Math.max(1, props.window ?? DEFAULT_WINDOW);
     const threshold = (): number => props.threshold ?? 24;
@@ -94,37 +114,82 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         if (root) root.scrollTop = root.scrollHeight;
     };
 
+    /** The units now before the message that was first when the window froze — what the host prepended since. */
+    const prepended = (messages: readonly AgentMessage[]): number => {
+        if (frozenFirst === undefined) return 0;
+        const at = messages.findIndex((m) => m.id === frozenFirst);
+        return at > 0 ? unitCount(messages.slice(0, at)) : 0;
+    };
+
+    /** More before the first row shown: widen the window while rows are windowed away, else ask the host. */
+    const earlier = (): void => {
+        if (lastStart > 0) st.extra += size();
+        else if (props.hasEarlier) props.onEarlier?.();
+    };
+
     const onScroll = (e: Event): void => {
         const el = e.currentTarget as HTMLElement;
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
         const following = gap <= threshold();
-        if (following === st.following) return;
-        if (!following) st.end = unitCount(threadMessages(props.transcript));
-        else st.extra = 0;
-        st.following = following;
+        if (following !== st.following) {
+            if (!following) {
+                const messages = threadMessages(props.transcript);
+                st.end = unitCount(messages);
+                frozenFirst = messages[0]?.id;
+            } else {
+                st.extra = 0;
+                frozenFirst = undefined;
+            }
+            st.following = following;
+        }
+        // The top: asked once per approach, so a fetch in flight is not asked for again on every scroll tick. The
+        // flag is set before the ask, whose re-render may settle synchronously and re-arm it for the new rows.
+        const atTop = el.scrollTop <= threshold();
+        const ask = atTop && !askedTop;
+        askedTop = atTop;
+        if (ask) earlier();
     };
 
     const jump = (): void => {
         st.following = true;
         st.extra = 0;
+        frozenFirst = undefined;
         scrollToBottom();
     };
 
-    // After every render: keep the tail in view while following. The DOM
-    // has been patched by now, which is what makes scrollHeight current.
+    // After every render: keep the tail in view while following; frozen, keep
+    // the reader's rows where they were when rows were prepended (the first
+    // row changed) by moving the offset by the height that arrived above. The
+    // DOM has been patched by now, which is what makes scrollHeight current.
     onUpdated(() => {
-        if (st.following) scrollToBottom();
+        const arrived = !st.following && firstKey !== settledFirstKey;
+        settledFirstKey = firstKey;
+        const before = heightBefore;
+        heightBefore = undefined;
+        if (!root) return;
+        if (st.following) {
+            scrollToBottom();
+            return;
+        }
+        if (!arrived) return;
+        if (before) root.scrollTop += root.scrollHeight - before;
+        askedTop = false;
     });
 
     return () => {
         const messages = threadMessages(props.transcript);
         const total = unitCount(messages);
-        const range = st.following ? followRange(total, size(), st.extra) : frozenRange(total, st.end, size(), st.extra);
+        const range = st.following ? followRange(total, size(), st.extra) : frozenRange(total, st.end + prepended(messages), size(), st.extra);
         const rows = windowRows(messages, range);
         const loose = looseRequests(props.transcript);
         const streaming = midTurn(props.transcript);
         const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
         const shown = range.end - range.start;
+        const more = range.start > 0 || props.hasEarlier === true;
+        lastStart = range.start;
+        firstKey = rows[0]?.key;
+        // Before the DOM is patched: the height `onUpdated` compares against (a layout read, so only while frozen and only once per change).
+        if (!st.following && root && heightBefore === undefined) heightBefore = root.scrollHeight;
         return (
             <div
                 data-scope={SCOPE}
@@ -138,14 +203,12 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                 }}
                 onScroll={onScroll}
             >
-                {range.start > 0 && (
+                {more && (
                     <button
                         type="button"
                         data-scope={SCOPE}
                         data-part="earlier"
-                        onClick={() => {
-                            st.extra += size();
-                        }}
+                        onClick={earlier}
                     >
                         <span>{`Showing the last ${shown} entries`}</span>
                         <span aria-hidden="true">·</span>

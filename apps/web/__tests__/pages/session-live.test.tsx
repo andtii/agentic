@@ -72,6 +72,50 @@ describe('session feeds', () => {
         expect(info.running).toBeUndefined();
         expect(info.eventCount).toBeGreaterThan(10);
     });
+
+    it("a feed opened after a turn follows from that turn's end (#398): it replays nothing of the session's past, and the next turn streams into it", async () => {
+        const { sessionId, session, agentId, chatId, chat } = await startTurn();
+        await until(async () => (await session.get()).status === 'idle', 'the first turn to finish', 3_000);
+        const info = await session.get();
+        expect(info.transcriptAt).toBeDefined();
+        expect(info.transcriptAt).not.toEqual({ epoch: 0, seq: 0 });
+        // What the feed asks the actor to tail from.
+        const froms: unknown[] = [];
+        const spied: SessionActorClient = {
+            get: () => session.get(),
+            prompt: (...a) => session.prompt(...a),
+            respond: (...a) => session.respond(...a),
+            cancel: (...a) => session.cancel(...a),
+            configure: (...a) => session.configure(...a),
+            close: (...a) => session.close(...a),
+            tail: (from) => {
+                froms.push(from);
+                return session.tail(from);
+            }
+        };
+        const errors: Error[] = [];
+        const feed = openFeed(spied, sessionId, agentId, (e) => errors.push(e));
+        await until(() => froms.length === 1, 'the feed to tail');
+        expect(froms[0]).toEqual(info.transcriptAt);
+        await until(() => feed.client() !== undefined, 'the feed to connect');
+        // Nothing of the finished turn is folded: the chat holds its final message as an entry already.
+        expect(feed.transcript.messages).toEqual([]);
+        expect(text(feed)).toBe('');
+        // A second message to the member runs in the same session (#393) — and the feed carries that turn.
+        const { messageId } = await chat.post('again', [agentId]);
+        const taskId = 't_live2' as TaskId;
+        await h.app.as(owner).actor(TaskActor, taskKey(WS, taskId)).create({ objective: 'again', origin: { kind: 'user', chatId: chatId as ChatId, messageId: messageId as MessageId }, assignee: agentId, context: [], constraints: {} }, { owner: agentId });
+        const view = await h.app.as(owner).actor(h.Routing, routingKey(WS)).run(taskId);
+        expect(view.sessionId).toBe(sessionId);
+        await until(() => text(feed).length >= 3, 'the second turn to stream into the feed', 3_000);
+        expect(feed.transcript.state).toBe('running');
+        expect(inFlightMessages(feed.transcript)).toHaveLength(1);
+        await until(() => feed.transcript.state === 'idle' && text(feed) === 'abcdefghij', 'the second turn to finish', 3_000);
+        // One tail, from the anchor — never a replay from the log's start.
+        expect(froms).toEqual([info.transcriptAt]);
+        expect(errors).toEqual([]);
+        feed.disconnect();
+    });
 });
 
 describe('the session view', () => {

@@ -31,7 +31,7 @@ export const LIFECYCLE_STATES = ['loading', 'active', 'complete', 'error', 'clos
  */
 export const aiThreadAnatomy = defineAnatomy('ai-thread', {
     root: { element: 'div', states: ['on', 'off'], tokens: ['color'] },
-    /** "Showing the last N entries · Load earlier" — rendered only while rows are windowed away at the top. */
+    /** "Showing the last N entries · Load earlier" — rendered while rows are windowed away at the top, or while the host says it holds earlier ones (`hasEarlier`). */
     earlier: { element: 'button', parent: 'root', tokens: ['color', 'radius-selector', 'text'] },
     list: { element: 'ol', parent: 'root' },
     row: { element: 'li', parent: 'list' },

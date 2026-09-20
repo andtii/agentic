@@ -5,8 +5,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { component } from '@sigx/runtime-core';
+import { signal } from '@sigx/reactivity';
 import { allowAll, createTranscript, type Agent } from '@sigx/ai-agent';
-import { useAgentSession, type AgentSessionView, type AgentTranscript, type Decision } from '@sigx/ai-agent/app';
+import { useAgentSession, type AgentMessage, type AgentSessionView, type AgentTranscript, type Decision } from '@sigx/ai-agent/app';
 import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
 import { expectAnatomy } from '@sigx/zero/testing';
 import { Thread, aiThreadAnatomy, aiMessageAnatomy, aiToolCallAnatomy, DEFAULT_WINDOW } from '../src/thread';
@@ -135,6 +136,60 @@ describe('the thread over mockAgent', () => {
         expect(parts(dom)).toHaveLength(40);
         expect(one(dom, 'ai-thread', 'earlier')!.textContent).toContain('Showing the last 40 entries');
         expect(dom.textContent).toContain('part 60');
+    });
+
+    it('with `hasEarlier` the chip stays once the window is fully open and reaching the top asks the host; prepended rows keep the frozen rows in place (#398)', async () => {
+        const rowsFrom = (from: number, n: number): AgentMessage[] => Array.from({ length: n }, (_, i) => ({ id: `m${from + i}`, role: 'user' as const, parts: [{ type: 'text' as const, id: `p${from + i}`, text: `row ${from + i}` }] }));
+        const transcript = signal(createTranscript('s1'));
+        transcript.messages = rowsFrom(100, 30);
+        const asked: number[] = [];
+        const dom = mount(<Thread transcript={transcript} window={20} hasEarlier onEarlier={() => asked.push(transcript.messages.length)} />);
+        const chip = (): HTMLElement => one(dom, 'ai-thread', 'earlier')!;
+        const shown = (): string[] => rows(dom).map((r) => one(r, 'ai-message', 'body')!.textContent!.trim());
+        // Windowed: the chip widens the window first, asking nothing.
+        expect(chip().textContent).toBe('Showing the last 20 entries·Load earlier');
+        chip().click();
+        await tick();
+        expect(rows(dom)).toHaveLength(30);
+        expect(asked).toEqual([]);
+        // Fully open: the chip stays, and asks the host.
+        expect(chip().textContent).toBe('Showing the last 30 entries·Load earlier');
+        chip().click();
+        await tick();
+        expect(asked).toEqual([30]);
+        // Scrolled to the top: frozen, and asked once — not again on the next tick at the top.
+        const root = one(dom, 'ai-thread', 'root')!;
+        scrollTo(root, 0);
+        scrollTo(root, 0);
+        await tick();
+        expect(root.getAttribute('data-state')).toBe('off');
+        expect(asked).toEqual([30, 30]);
+        const before = shown();
+        expect(before[0]).toBe('row 100');
+        // The host prepends: the rows in view stay, the new ones precede them, and the top is re-armed.
+        transcript.messages = [...rowsFrom(80, 20), ...transcript.messages];
+        await tick();
+        const after = shown();
+        expect(after.slice(-before.length)).toEqual(before);
+        expect(after[0]).toBe('row 90');
+        expect(after).toHaveLength(40);
+        // Reaching the top again widens onto the ten rows still windowed away, then asks the host once more.
+        scrollTo(root, 0);
+        await tick();
+        expect(asked).toEqual([30, 30]);
+        expect(shown()).toHaveLength(50);
+        expect(shown()[0]).toBe('row 80');
+        scrollTo(root, 0);
+        await tick();
+        expect(asked).toEqual([30, 30, 50]);
+        // Scrolling away and back asks again; a scroll that stays away asks nothing.
+        scrollTo(root, 500);
+        scrollTo(root, 600);
+        await tick();
+        expect(asked).toEqual([30, 30, 50]);
+        scrollTo(root, 0);
+        await tick();
+        expect(asked).toEqual([30, 30, 50, 50]);
     });
 
     it('renders the approval prompt on the waiting card, and the chosen scope lands as a session grant', async () => {

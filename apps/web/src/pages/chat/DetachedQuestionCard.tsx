@@ -1,9 +1,10 @@
 /**
- * An open question of the chat whose asker stopped waiting (#285): the
- * session is gone from `activeSessions`, so no feed carries it. The card
- * reads the request live from its Session, says who asked and that answering
- * starts that agent again, and answers through `Session.respond` — which takes
- * a question's answer even on a closed session.
+ * An open question of the chat whose asker stopped waiting (#285): it was
+ * asked in a turn that has ended, and a feed carries only the turn that runs
+ * now (#398), so no feed holds it. The card reads the request live from the
+ * Session that asked (`detachedQuestions` names it), says who asked and that
+ * answering starts that agent again, and answers through `Session.respond` —
+ * which takes a question's answer on an idle session and on a closed one.
  */
 import { component } from 'sigx';
 import { actor } from '@sigx/actors';
