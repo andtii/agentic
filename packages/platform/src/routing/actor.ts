@@ -41,6 +41,14 @@
  *   the daemon path the same rules, grants and constraints travel as
  *   `OpenSpec.policy` for the daemon to compile (#121). A
  *   `request` it raises reaches the Inbox through the Session itself (#40).
+ * - a chat task (`route.chatId`, #393; CHT-01, CHT-11, EXE-12) runs in the
+ *   member's ONE live session — the chat's binding (`ChatSummary.sessions`)
+ *   names it — re-opened with the current placement and prompted with what
+ *   the engine has not seen; the session is not closed when the task settles.
+ *   A binding that cannot go on (closed, moved, or never named by its
+ *   runtime) is ended and a fresh session takes its place. Chatless work
+ *   (a delegated child, a schedule, a trigger, an external client) keeps one
+ *   session per task, closed at the turn's end.
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -48,7 +56,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -102,7 +110,7 @@ async function tellChat(c: ActorContext<RoutingState>, workspaceId: WorkspaceId,
 /** The slice of the Session actor the router drives (`defineSessionActor`). */
 interface SessionClient {
     open(spec: SessionOpenSpec): Promise<SessionInfo>;
-    prompt(input: readonly PromptPart[], turnId: string): Promise<SessionCommandResult>;
+    prompt(input: readonly PromptPart[], turnId: string, output?: undefined, commandId?: undefined, opts?: { readonly taskId?: TaskId }): Promise<SessionCommandResult>;
     resume(): Promise<SessionCommandResult>;
     get(): Promise<SessionInfo>;
     transcript(): Promise<AgentTranscript | undefined>;
@@ -173,6 +181,44 @@ const grantedToolNames = (route: Route): string[] => route.config.tools.filter((
 
 /** What the daemon compiles the session policy from (#121): the agent's rules and grants, and the ancestors' rules on a delegated task (AC-12) — the same input `sessionPolicy` takes on the local path. */
 const openSpecPolicy = (route: Route): OpenSpecPolicy => ({ rules: route.config.approvalPolicy, grants: route.config.tools, ...(route.constraints?.length ? { constraints: route.constraints } : {}) });
+
+/** How many caught-up messages a reused session's prompt carries at most (#393) — the activation's own window. */
+const CATCH_UP_WINDOW = 50;
+
+type ChatMessage = Extract<ChatEntry, { readonly t: 'msg' }>;
+
+/** A part as one line of a caught-up message: its text, or a note naming the attachment (the part itself follows, for `hydrateChatFiles`). */
+function partText(p: PromptPart): string {
+    const url = 'url' in p && p.url && !p.url.startsWith('data:') ? ` ${p.url}` : '';
+    switch (p.type) {
+        case 'text':
+            return p.text;
+        case 'image':
+            return `[image${url}]`;
+        case 'file':
+            return `[file${p.name ? ` "${p.name}"` : ''}${url}]`;
+        case 'resource':
+            return `[${p.uri}]`;
+    }
+}
+
+/**
+ * What a reused session is told beside the objective (#393): the chat's messages its engine has not seen — after the
+ * member's last answer, the triggering message left out since it is the objective — each attributed, oldest first,
+ * then their chat-file parts once each for `hydrateChatFiles`. Nothing when there is nothing new.
+ */
+function catchUp(messages: readonly ChatMessage[], nameOf: (author: Author) => string): PromptPart[] {
+    const lines = messages.map((m) => `${nameOf(m.author)}: ${m.parts.map(partText).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()}`);
+    if (!lines.length) return [];
+    const parts: PromptPart[] = [{ type: 'text', text: `In the chat since your last message:\n${lines.join('\n')}` }];
+    const seen = new Set<string>();
+    for (const part of messages.flatMap((m) => m.parts)) {
+        if (!isChatFilePart(part) || seen.has(part.url)) continue;
+        seen.add(part.url);
+        parts.push(part);
+    }
+    return parts;
+}
 
 /** Build the Routing actor definition over its ports. One call per app — the actor `type` is `'routing'`. */
 export function defineRoutingActor(ports: RoutingPorts) {
@@ -257,15 +303,53 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             /**
-             * The turn's input: the objective, the triggering message's attachments the context does not
-             * already carry, then the context — every attachment resolved for the route's agent (#205):
-             * images inlined within `CHAT_FILE_INLINE_BUDGET` (the trigger's first, then the newest),
-             * everything else a note (`hydrateChatFiles`).
+             * The chat's messages a reused session's engine has not seen (#393): those after the route's `seenSeq`
+             * that its agent may read — `Chat.history` as the agent applies `historyFrom`, which is where `seenSeq: 0`
+             * starts — oldest first, the triggering message left out, at most `CATCH_UP_WINDOW`; rendered by
+             * `catchUp` with every author named. Best effort: a chat that cannot be read gives nothing.
+             */
+            async function unseen(route: Route, t: TaskView): Promise<PromptPart[]> {
+                const { chatId, seenSeq } = route;
+                if (!chatId || seenSeq === undefined || !route.sessionId) return [];
+                const trigger = t.origin.kind === 'user' ? t.origin.messageId : undefined;
+                try {
+                    const room = chatAsAgent(route, chatId);
+                    const messages: ChatMessage[] = [];
+                    let cursor: number | null = null;
+                    for (;;) {
+                        const page = await room.history(cursor, CATCH_UP_WINDOW);
+                        const fresh = page.entries.filter((e): e is typeof e & { entry: ChatMessage } => e.seq > seenSeq && e.entry.t === 'msg' && e.entry.id !== trigger);
+                        messages.unshift(...fresh.map((e) => e.entry));
+                        const oldest = page.entries[0]?.seq;
+                        if (page.next === null || oldest === undefined || oldest <= seenSeq || messages.length >= CATCH_UP_WINDOW) break;
+                        cursor = page.next;
+                    }
+                    const window = messages.slice(-CATCH_UP_WINDOW);
+                    const names = new Map<string, string>([[route.agentId, `${route.config.name || route.agentId} (you)`]]);
+                    for (const m of window) {
+                        if (m.author.kind !== 'agent' || names.has(m.author.agentId)) continue;
+                        const id = m.author.agentId;
+                        names.set(id, await agent(id).snapshotForSession().then((c) => c.name || id, () => id));
+                    }
+                    return catchUp(window, (author) => (author.kind === 'user' ? 'User' : (names.get(author.agentId) ?? author.agentId)));
+                } catch {
+                    return [];
+                }
+            }
+
+            /**
+             * The turn's input: the objective, the triggering message's attachments the rest does not already
+             * carry, then the rest — the task's context on a fresh session, the chat's unseen messages on a
+             * reused one (#393: its engine keeps its own conversation, so the pre-rendered chat is not sent
+             * again) — every attachment resolved for the route's agent (#205): images inlined within
+             * `CHAT_FILE_INLINE_BUDGET` (the trigger's first, then the newest), everything else a note
+             * (`hydrateChatFiles`).
              */
             async function promptInput(route: Route, t: TaskView): Promise<PromptPart[]> {
                 const trigger = await triggerFiles(route, t);
-                const inContext = new Set(t.context.filter(isChatFilePart).map((p) => p.url));
-                const parts: PromptPart[] = [{ type: 'text', text: t.objective }, ...trigger.filter((p) => !inContext.has(p.url)), ...t.context];
+                const rest = route.seenSeq === undefined ? t.context : await unseen(route, t);
+                const inRest = new Set(rest.filter(isChatFilePart).map((p) => p.url));
+                const parts: PromptPart[] = [{ type: 'text', text: t.objective }, ...trigger.filter((p) => !inRest.has(p.url)), ...rest];
                 if (!parts.some(isChatFilePart)) return parts;
                 return hydrateChatFiles(parts, {
                     workspaceId,
@@ -275,7 +359,12 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 });
             }
 
-            /** The one prompt of a route: objective + context, idempotent by its turn id (a retry after an eviction runs once). */
+            /**
+             * The one prompt of a route, under its own task (#390), idempotent by its turn id (a retry after an eviction
+             * runs once). A session already running another route's turn (a second message while the first is worked,
+             * #393) refuses this one `prompt-busy` here, on both paths alike — a daemon's `busy` reply comes back after
+             * the pending ack and would leave the route waiting for a turn that never starts. #395 steers instead.
+             */
             async function prompt(route: Route): Promise<void> {
                 if (!route.sessionId) return;
                 const t = await task(route.taskId).get();
@@ -283,9 +372,14 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     drop(route.taskId);
                     return;
                 }
+                const busy = Object.values(ctx.state.routes).find((r) => r !== route && r.sessionId === route.sessionId && r.status === 'running');
+                if (busy) {
+                    await fail(route, { code: 'prompt-busy', message: `session ${route.sessionId} is running task ${busy.taskId}`, recoverable: true });
+                    return;
+                }
                 const turnId = `${route.taskId}:turn:1`;
                 const input = await promptInput(route, t);
-                const reply = await session(route.sessionId).prompt(input, turnId);
+                const reply = await session(route.sessionId).prompt(input, turnId, undefined, undefined, { taskId: route.taskId });
                 if (reply.kind === 'error') {
                     await fail(route, { code: `prompt-${reply.code}`, message: reply.message, recoverable: reply.code === 'busy' });
                     return;
@@ -406,12 +500,61 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 return { ...(outcome.cwd !== undefined ? { cwd: outcome.cwd } : {}), ...(outcome.instructions !== undefined ? { instructions: outcome.instructions } : {}) };
             }
 
+            /**
+             * Whether the chat's session for the route's member can carry on with THIS placement (#393). Refused — never
+             * migrated (EXE-12/13) — when the record is closed or was never opened, when the placement moved (runtime,
+             * environment, machine or folder differ from the record's spec), or when a daemon-path record has no ref:
+             * its runtime never named it, so nothing could be resumed. A record that cannot be read is not reused.
+             */
+            async function reusable(route: Route, sessionId: SessionId): Promise<boolean> {
+                let earlier: SessionInfo;
+                try {
+                    earlier = await session(sessionId).get();
+                } catch {
+                    return false;
+                }
+                const spec = earlier.spec;
+                if (!earlier.opened || !spec || earlier.status === 'closed') return false;
+                if (spec.runtime !== route.runtime || spec.environmentId !== route.environmentId || spec.machineId !== route.machineId || spec.cwd !== route.cwd) return false;
+                if (earlier.mode === 'remote' && !earlier.ref) return false;
+                return true;
+            }
+
+            /**
+             * Bind the route to its session (#393; CHT-01, CHT-11): a chat route takes the member's live session from the
+             * chat's binding (`ChatSummary.sessions[agentId]`) when `reusable`, with the chat's `seenSeq` for the prompt;
+             * otherwise — and always for a chatless route — a fresh id. A binding refused is ended first: its
+             * `session-ended` drops the chat's row, and the new session's `session-started` replaces it either way.
+             * Idempotent: a route already bound (a retry) keeps its id. Called once the placement is final (the folder
+             * included), since that is what reuse is judged on.
+             */
+            async function bindSession(route: Route): Promise<SessionId> {
+                if (route.sessionId) return route.sessionId;
+                if (route.chatId) {
+                    const row = await chat(route.chatId)
+                        .get()
+                        .then((summary) => summary.sessions[route.agentId], () => undefined);
+                    if (row) {
+                        if (await reusable(route, row.sessionId)) {
+                            route.sessionId = row.sessionId;
+                            route.seenSeq = row.seenSeq;
+                            return row.sessionId;
+                        }
+                        await session(row.sessionId)
+                            .close()
+                            .catch(() => undefined);
+                    }
+                }
+                route.sessionId = newSessionId();
+                return route.sessionId;
+            }
+
             /** Open a local Session (a runtime hosted in this process — `anthropic-api`) for the route and prompt it. */
             async function placeLocal(route: Route, why: string, t?: TaskView): Promise<void> {
                 // The project's plugins first (#332): a platform-hosted runtime runs in no folder, so only their instructions apply here.
                 const hooks = await projectHooks(route, 'local');
                 if (!hooks) return;
-                const sessionId = (route.sessionId ??= newSessionId());
+                const sessionId = await bindSession(route);
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
@@ -425,8 +568,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
                     ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {})
                 };
+                let opened: SessionInfo;
                 try {
-                    await session(sessionId).open(spec);
+                    opened = await session(sessionId).open(spec);
                 } catch (e) {
                     const message = e instanceof Error ? e.message : String(e);
                     // The plugin was turned off between the gate and the open: the same failure the gate gives, not a broken session.
@@ -434,6 +578,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await fail(route, { code: disabled ? PLUGIN_DISABLED_CODE : 'session-open', message, recoverable: disabled });
                     return;
                 }
+                route.head = opened.head;
                 await activate(route, why, sessionId);
                 await prompt(route);
             }
@@ -540,7 +685,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                     route.cwd = hooks.cwd;
                 }
-                const sessionId = (route.sessionId ??= newSessionId());
+                const sessionId = await bindSession(route);
                 const opening = await work(route, t);
                 const tools = grantedToolNames(route);
                 const effective = withDefaultModel(route.config, route.plugins);
@@ -568,6 +713,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 // is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
                 // The record's `system` is the one the daemon runs: the instructions plus the memory block `open` retrieved (§8).
                 const opened = await session(sessionId).open(spec);
+                route.head = opened.head;
                 route.status = 'opening';
                 const limits = route.config.execution.limits;
                 let result: OpenSessionResult;
@@ -585,7 +731,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             tools: grantedToolNames(route),
                             policy: ctx.snapshot(openSpecPolicy(route)),
                             ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
-                            ...(opening.resume !== undefined ? { resume: opening.resume } : {})
+                            // A re-opened record resumes from the ref its runtime reported (#393, #389); a fresh one from what the task named (#285).
+                            ...(opened.ref !== undefined ? { resume: opened.ref } : opening.resume !== undefined ? { resume: opening.resume } : {})
                         },
                         { taskId: route.taskId }
                     );
@@ -599,7 +746,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 }
                 const where = `environment ${environmentId} on machine ${machineId}`;
                 if (result === 'opened') {
-                    await activate(route, `${where} is online; session opening`, sessionId);
+                    // A session the machine already hosts and the daemon acknowledged (a reused one, #393) gets no
+                    // `session.opened` of its own — `openSession` is idempotent by id — so it is prompted here.
+                    const live = m.activeSessions.some((h) => h.sessionId === sessionId && h.status === 'open');
+                    await activate(route, `${where} is online; session ${live ? 'live' : 'opening'}`, sessionId);
+                    if (live) await prompt(route);
                 } else {
                     const after = await machine(machineId).get();
                     const position = after.queued.findIndex((q) => q.sessionId === sessionId) + 1;
@@ -812,22 +963,26 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await ctx.save();
                 },
 
-                /** Machine → router: the daemon acknowledged a session — a queued one included. Time to prompt. */
-                async sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void> {
+                /**
+                 * Machine → router: the daemon acknowledged a session — a queued one included. Time to prompt every route
+                 * waiting on it: a chat's session serves many tasks (#393), and the task the machine names is the one it was
+                 * opened for, which need not be any of them.
+                 */
+                async sessionOpened(sessionId: SessionId, _taskId?: TaskId): Promise<void> {
                     const s = ctx.state;
-                    const route = (taskId ? s.routes[taskId] : undefined) ?? Object.values(s.routes).find((r) => r.sessionId === sessionId);
-                    if (!route || route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity')) return;
-                    if (route.status === 'waiting-capacity') await activate(route, `a slot freed in environment ${route.environmentId}; session opened`, sessionId);
-                    await prompt(route);
+                    for (const route of Object.values(s.routes)) {
+                        if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity')) continue;
+                        if (route.status === 'waiting-capacity') await activate(route, `a slot freed in environment ${route.environmentId}; session opened`, sessionId);
+                        await prompt(route);
+                    }
                     await ctx.save();
                 },
 
-                /** Machine → router: a session is gone. One the daemon refused before it opened fails its task with the daemon's reason. */
-                async sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void> {
+                /** Machine → router: a session is gone. Every task still waiting for it to open fails with the daemon's reason (a running one hears its turn end). */
+                async sessionClosed(sessionId: SessionId, reason: string, _taskId?: TaskId): Promise<void> {
                     const s = ctx.state;
-                    const route = (taskId ? s.routes[taskId] : undefined) ?? Object.values(s.routes).find((r) => r.sessionId === sessionId);
-                    if (!route || route.sessionId !== sessionId) return;
-                    if (route.status === 'opening' || route.status === 'waiting-capacity') {
+                    for (const route of Object.values(s.routes)) {
+                        if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity')) continue;
                         await fail(route, { code: 'session-refused', message: `machine ${route.machineId} closed the session before it opened: ${reason}`, recoverable: true });
                     }
                     await ctx.save();
@@ -863,7 +1018,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${route.sessionId}`).with({ context }) as unknown as SessionClient;
                 const { turnId, sessionId } = route;
 
-                /** Settle the task, forget the route, and close the session: a daemon session holds an environment slot (EXE-09), and the record keeps its `ref` for a resume. */
+                /**
+                 * Settle the task and forget the route. A chatless session is closed here — it holds an environment slot
+                 * (EXE-09), and its record keeps its `ref`. A chat member's session is not (#393): it lives on for the
+                 * chat's next message, whatever this turn's outcome.
+                 */
                 const settled = async (fn: (c: ActorContext<RoutingState>) => Promise<void>): Promise<void> => {
                     await ctx.turn(async (c) => {
                         await fn(c);
@@ -871,7 +1030,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         delete c.state.reports[route.taskId];
                         await c.save();
                     });
-                    await sessionClient.close().catch(() => undefined);
+                    if (!route.chatId) await sessionClient.close().catch(() => undefined);
                 };
                 const tryTask = async (fn: () => Promise<unknown>): Promise<void> => {
                     try {
@@ -881,7 +1040,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     }
                 };
 
-                const it = sessionClient.tail({ epoch: 0, seq: 0 })[Symbol.asyncIterator]();
+                // From the head the placement saw (#393): a chat session's log outlives this turn, and what came before it is not replayed. The follower ends itself at the turn's end below — a live session never closes the tail.
+                const it = sessionClient.tail(route.head ?? { epoch: 0, seq: 0 })[Symbol.asyncIterator]();
                 const aborted = new Promise<IteratorResult<AgentEvent>>((resolve) => {
                     const done = () => resolve({ value: undefined as never, done: true });
                     if (signal.aborted) done();

@@ -48,8 +48,20 @@ export interface Route {
     readonly constraints?: readonly ApprovalRule[];
     /** What `Registry.gate()` answered for this route's runtime (§9) — asked once at `run`, again only when `fallback-api` changes the runtime; copied onto the session spec. */
     plugins?: RegistryGate;
-    /** Allocated at placement; the same id is retried so `Machine.openSession` stays idempotent. */
+    /**
+     * Bound at placement (#393): a chat route takes the member's live session from the chat's binding
+     * (`ChatSummary.sessions[agentId]`) when it can go on, else — and always for a chatless route — a fresh id is
+     * minted. The same id is retried so `Machine.openSession` stays idempotent.
+     */
     sessionId?: SessionId;
+    /**
+     * Set when the route reuses the chat's session (#393): the chat's `seenSeq` for the member at binding — the
+     * entries after it are what its engine has not seen, so the prompt carries them instead of the task's context.
+     * `0` means nothing seen in this session: the prompt carries everything from the member's `historyFrom`.
+     */
+    seenSeq?: number;
+    /** The session's head as `open()` returned it at placement: `follow` tails from here, never from the start of a log that outlives the turn. */
+    head?: { readonly epoch: number; readonly seq: number };
     status: RouteStatus;
     /** The turn `follow` waits for. */
     turnId?: string;

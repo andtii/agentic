@@ -150,7 +150,8 @@ describe('policy: ask on destructive prompts, allow on read never does', () => {
         expect(ofKind('approval.resolved')[0]).toMatchObject({ by: `user:${WS}`, data: { requestId, outcome: 'allow', resolvedBy: 'client', scope: 'once' } });
         expect((await inbox().list()).map((n) => n.read)).toEqual([true]);
         expect(await inbox().unread()).toBe(0);
-        expect(await statuses()).toEqual(['session-started', `request:approval:${requestId}`, `request-resolved:approval:${requestId}`, 'session-ended']);
+        // The chat member's session stays live after its task settles (#393): no `session-ended` in the thread.
+        expect(await statuses()).toEqual(['session-started', `request:approval:${requestId}`, `request-resolved:approval:${requestId}`]);
         expect((await session(sid).request(requestId))!.resolved).toMatchObject({ outcome: 'allow', scope: 'once', by: 'client' });
         expect((await session(sid).get()).grants).toEqual([]);
         expect(parseRequestRef(requestRef(record.request))).toEqual({ need: 'approval', requestId });

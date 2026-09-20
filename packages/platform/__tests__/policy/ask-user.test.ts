@@ -53,13 +53,15 @@ const lastToolResultText = (req: ModelRequest): string => {
 
 /**
  * The scripted model: asks once, then answers with what it was told. Started again with a late answer (#285) it
- * carries on with the answer instead of asking again.
+ * carries on with the answer instead of asking again — the answer reaches it as the follow-up's objective
+ * (`The answer to your question “…”: tea`) in its own live session (#393), or as the contract's `Answer:` line
+ * in a fresh one.
  */
 function askingModel() {
     return mockModel({
         modelId: 'claude-test',
         respond: (req) => {
-            const said = /Answer: (\w+)/.exec(JSON.stringify(req.messages));
+            const said = /(?:Answer|question “[^”]*”): (tea|coffee|water)/.exec(JSON.stringify(req.messages));
             if (said) return { text: `carrying on with ${said[1]}` };
             return hasToolResult(req) ? { text: `you said: ${lastToolResultText(req)}` } : { toolCalls: [{ name: 'ask_user', input: { question: 'Tea or coffee?', choices: ['tea', 'coffee'] }, id: 'ask_1' }] };
         }
@@ -265,7 +267,7 @@ describe('a late answer starts the asker again (#285)', () => {
         await start(30);
     });
 
-    it('local path: `pending` ends the turn, the question outlives the session, and the answer is posted and resumes the asker', async () => {
+    it('local path: `pending` ends the turn, the question outlives it on the live chat session, and the answer given while it is idle is posted and resumes the asker there (#393)', async () => {
         await agent();
         await chat().addAgent(ADA, 'all');
         const t = await run('t_1', 'decide');
@@ -276,26 +278,27 @@ describe('a late answer starts the asker again (#285)', () => {
         expect(done.result?.text).toContain('pending');
         const sid = t.sessionId!;
         const requestId = platformRequestId('ask_1');
-        const closed = await session(sid).get();
-        expect(closed.status).toBe('closed');
-        expect(closed.openRequests).toEqual([requestId]);
+        // The chat member's session is not closed when its task settles: it is idle, with the question still open.
+        const idle = await session(sid).get();
+        expect(idle.status).not.toBe('closed');
+        expect(idle.running).toBeUndefined();
+        expect(idle.openRequests).toEqual([requestId]);
         expect(await session(sid).request(requestId)).toMatchObject({ agentName: 'Ada', detached: true });
         expect(await inbox().unread()).toBe(1);
 
-        // Answered long after: taken on the closed session, not refused as `closed`.
+        // Answered long after, while no turn runs: taken, and delivered at once — not stranded until a close that never comes.
         expect((await session(sid).respond(requestId, { type: 'input', answers: 'tea' })).kind).toBe('ack');
         expect(await session(sid).request(requestId)).toMatchObject({ detached: false, resolved: { outcome: 'input', answers: 'tea' } });
         expect(await inbox().unread()).toBe(0);
-        // The asker carries on with it, and the answer is in the chat as the person who gave it.
+        // The asker carries on with it — in its own session, whose engine still holds the question — and the answer is in the chat as the person who gave it.
         const follow = answerTaskId(sid, requestId);
         await until(() => exists(follow), 'the follow-up task');
         await settled(follow);
         const next = await task(follow).get();
-        expect(next).toMatchObject({ status: 'completed', owner: ADA, assignee: ADA, resumeFrom: sid, origin: { kind: 'user', chatId: CHAT } });
+        expect(next).toMatchObject({ status: 'completed', owner: ADA, assignee: ADA, resumeFrom: sid, sessionId: sid, origin: { kind: 'user', chatId: CHAT } });
         expect(next.result?.text).toBe('carrying on with tea');
         expect(await messages()).toContain('user: @Ada — re: “Tea or coffee?” → tea');
-        // An API session's transcript lives in its own record: the follow-up opens fresh, its context carrying the answer.
-        expect((await session(next.sessionId!).get()).spec?.resume).toBeUndefined();
+        expect((await session(sid).get()).status).not.toBe('closed');
 
         // A replayed answer starts nobody twice and posts nothing twice.
         expect((await session(sid).respond(requestId, { type: 'input', answers: 'coffee' }, 'respond:again')).kind).toBe('ack');
@@ -357,11 +360,12 @@ describe('a late answer starts the asker again (#285)', () => {
         await until(async () => (await exists(follow)) && (await task(follow).get()).sessionId !== undefined, 'the follow-up task to open its session');
         expect(await messages()).toContain('user: @Ada — re: “Tea or coffee?” → coffee');
         const next = await task(follow).get();
-        expect(next).toMatchObject({ owner: ADA, resumeFrom: sid, environmentId: E1 });
-        // The daemon's engine keeps its conversation: the follow-up session resumes the asking one's ref, on the same machine.
-        expect((await session(next.sessionId!).get()).spec).toMatchObject({ resume: ref, machineId: m1 });
-        await until(() => sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open').length === 2, 'the second session.open');
-        expect(sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open')[1]).toMatchObject({ spec: { resume: ref } });
+        // The asker's own live session (#393): still hosted by the daemon, so no second `session.open` — a second prompt in the one session.
+        expect(next).toMatchObject({ owner: ADA, resumeFrom: sid, sessionId: sid, environmentId: E1 });
+        expect((await session(sid).get()).spec).toMatchObject({ taskId: follow, machineId: m1 });
+        await until(() => sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.command' && (f.command as { type: string }).type === 'prompt').length === 2, 'the second prompt');
+        expect(sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.open')).toHaveLength(1);
+        expect((await session(sid).get()).ref).toEqual(ref);
     });
 });
 

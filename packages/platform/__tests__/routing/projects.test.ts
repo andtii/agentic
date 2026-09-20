@@ -478,11 +478,12 @@ describe('the git feature (#335)', () => {
         expect(chosenFor('t2')).toMatchObject({ data: { environmentId: E3, cwd: '/home/b/agentic' } });
     });
 
-    it('a second task in the same chat reuses the worktree: the daemon answers branch-exists and the session opens at the same path, no park', async () => {
+    it('a second task in the same chat keeps the worktree: the daemon answers branch-exists, the same folder is the same placement, and the member’s live session is reused (#393)', async () => {
         const m1 = await onlineMachine();
         const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
         const projectId = await project({ features: { [GIT_FEATURE_ID]: { worktreePerChat: true } } });
         const { chatId } = await workspace().createChat({ projectId });
+        await app.as(owner).actor(Chat, actorKey(WS, 'chat', chatId)).addAgent(a, 'all');
         const branch = gitBranchFor(chatId);
         const cwd = `/work/agentic-worktrees/${slugOf(branch)}`;
         const branches = new Set<string>();
@@ -492,19 +493,27 @@ describe('the git feature (#335)', () => {
             return made(environmentId, op);
         };
         await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId });
-        await createTask('t2', a, { origin: chatOrigin(chatId, 2), projectId });
         expect((await routing().run('t1' as TaskId)).status).not.toBe('waiting');
-        expect((await routing().run('t2' as TaskId)).status).not.toBe('waiting');
-        await Promise.all([settled('t1'), settled('t2')]);
+        await settled('t1');
         expect((await task('t1').get()).status).toBe('completed');
+        await createTask('t2', a, { origin: chatOrigin(chatId, 2), projectId });
+        const second = await routing().run('t2' as TaskId);
+        expect(second.status).not.toBe('waiting');
+        await settled('t2');
         expect((await task('t2').get()).status).toBe('completed');
+        // The hook ran for each placement — idempotent: the branch exists, the folder is the same — so the placement is unchanged.
         expect(sockets.worktreeRequests.map((r) => r.op)).toEqual([
             { kind: 'worktree', repo: '/work/agentic', branch, path: cwd },
             { kind: 'worktree', repo: '/work/agentic', branch, path: cwd }
         ]);
-        expect((await openOf(m1, 't1')).sent?.cwd).toBe(cwd);
-        expect((await openOf(m1, 't2')).sent?.cwd).toBe(cwd);
-        expect((await openOf(m1, 't2')).sent?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
+        // One session for the member: opened once on the daemon in the worktree, re-opened for the second task with the same folder and the branch named.
+        expect(second.sessionId).toBe((await task('t1').get()).sessionId);
+        const opened = await openOf(m1, 't1');
+        expect(opened.sent?.cwd).toBe(cwd);
+        expect(Object.keys(sockets.opens(machineKey(WS, m1)))).toEqual([second.sessionId]);
+        const record = (await session(second.sessionId!).get()).spec;
+        expect(record).toMatchObject({ taskId: 't2', cwd });
+        expect(record?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
     });
 
     it("a daemon that cannot make the worktree parks the task waiting { project-feature } with the daemon's message; a task from no chat opens in the project's folder", async () => {
