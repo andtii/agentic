@@ -6,10 +6,10 @@ import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCapabilitiesOf, createDaemon, follows, type Daemon, type DaemonDriver } from '../src/daemon';
+import { agentCapabilitiesOf, createDaemon, follows, sameRefIdentity, type Daemon, type DaemonDriver } from '../src/daemon';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
-import { agentDriver, scriptedDriver } from './helpers/drivers';
+import { agentDriver, namingDriver, scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
 async function next(seat: PlatformSeat): Promise<DaemonFrame> {
@@ -255,6 +255,32 @@ describe('daemon', () => {
         expect(seqs).toEqual([3, 4, 5]);
     });
 
+    it('reports the id the runtime names its session with: session.ref once it changes, nothing while it does not (#389)', async () => {
+        const { seat } = await start([env('env_a')], [namingDriver({ events: 3, heartbeatMs: 1_000 })]);
+        open(seat, 'session_1', 'env_a');
+        const opened = await expectFrame(seat, 'session.opened');
+        expect(opened.ref).toEqual({ agent: 'scripted', v: 1, id: 'session_1' });
+        /** One turn: every frame in order until its `turn-end`, and the `session.ref` frames among them. */
+        const turn = async (n: number) => {
+            seat.send({ v: V, t: 'session.command', sessionId: 'session_1' as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+            const order: string[] = [];
+            const refs: DaemonFrameOf<'session.ref'>[] = [];
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'heartbeat') continue;
+                order.push(frame.t === 'session.frame' && frame.frame.kind === 'event' ? `event:${frame.frame.event.type}` : frame.t);
+                if (frame.t === 'session.ref') refs.push(frame);
+                if (frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') return { order, refs };
+            }
+        };
+        const first = await turn(1);
+        expect(first.refs).toEqual([{ v: V, t: 'session.ref', sessionId: 'session_1', ref: { agent: 'scripted', v: 1, id: 'session_1.run' } }]);
+        // Sent with the first frame that shows the new id, not held for the turn-end: a turn that errors before ending still named the session.
+        expect(first.order.indexOf('session.ref')).toBeLessThan(first.order.indexOf('event:turn-end'));
+        // The same identity again is not news.
+        expect((await turn(2)).refs).toEqual([]);
+    });
+
     it('bridges platform tools as tool.call; an unanswered call times out', async () => {
         const script = { events: 2, heartbeatMs: 1_000, tool: { name: 'memory_search', input: { q: 'x' } } };
         const { seat } = await start([env('env_a')], [scriptedDriver(script)], 50);
@@ -372,6 +398,14 @@ describe('daemon helpers', () => {
         expect(follows({ epoch: 1, seq: 6 }, { epoch: 1, seq: 4 })).toBe(false);
         expect(follows({ epoch: 1, seq: 1 }, { epoch: 0, seq: 0 })).toBe(true);
         expect(follows({ epoch: 2, seq: 3 }, { epoch: 1, seq: 9 })).toBe(false);
+    });
+    it('sameRefIdentity: the id and data.epoch decide, nothing else (#389)', () => {
+        const ref = { agent: 'claude-code', v: 1, id: 'a', data: { cwd: '/w', epoch: 1 } };
+        expect(sameRefIdentity(ref, { ...ref })).toBe(true);
+        expect(sameRefIdentity(ref, { ...ref, data: { cwd: '/elsewhere', epoch: 1 } })).toBe(true);
+        expect(sameRefIdentity(ref, { ...ref, id: 'b' })).toBe(false);
+        expect(sameRefIdentity(ref, { ...ref, data: { cwd: '/w', epoch: 2 } })).toBe(false);
+        expect(sameRefIdentity({ agent: 'x', v: 1, id: 'a' }, { agent: 'x', v: 1, id: 'a', data: 'opaque' })).toBe(true);
     });
     it('withinRoots refuses escapes and is case-insensitive on Windows', () => {
         expect(withinRoots('/src/app', ['/src'], 'linux')).toBe(true);
