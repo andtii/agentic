@@ -79,11 +79,12 @@ describe('mock machine folders', () => {
         expect(root.path).toBe('C:\\Dev');
         expect(root.parent).toBeUndefined();
         expect(root.entries.map((e) => e.name)).toEqual(['agentic', 'agentic-ui-handoff', 'sigx']);
-        expect(root.entries.find((e) => e.name === 'sigx')?.git).toEqual({ kind: 'repo', branch: 'main' });
+        expect(root.entries.find((e) => e.name === 'sigx')?.git).toEqual({ kind: 'repo', branch: 'main', origin: 'https://github.com/signalxjs/sigx.git' });
         const branches = list('C:\\Dev\\agentic\\branches');
         expect(branches.parent).toBe('C:\\Dev\\agentic');
         expect(branches.entries[0]).toMatchObject({ name: '186-workdir-contract', path: 'C:\\Dev\\agentic\\branches\\186-workdir-contract', git: { kind: 'worktree' } });
-        expect(list('C:\\Dev\\agentic\\main').git).toEqual({ kind: 'repo', branch: 'main' });
+        // Checkouts of the agentic repo carry its origin (#333), so a project can locate them on another machine.
+        expect(list('C:\\Dev\\agentic\\main').git).toEqual({ kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/agentic.git' });
     });
 
     it('truncates a big folder and refuses what a daemon would', () => {

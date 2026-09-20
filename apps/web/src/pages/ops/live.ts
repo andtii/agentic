@@ -5,7 +5,7 @@
  * form submit persists. Nothing here touches a hook or the DOM, and
  * nothing of `@agentic/platform` is imported at runtime.
  */
-import type { AgentId, EnvironmentId, RuntimeId } from '@agentic/core';
+import type { AgentId, EnvironmentId, ProjectId, RuntimeId } from '@agentic/core';
 import type { ConnectorRecord, Dependents, PluginView, ScheduleSpec, ScheduleView, SettingsPatch, WorkspaceOpRecord, WorkspaceSettings } from '@agentic/platform';
 import type { OpsSchedule, ScheduleKind } from '../../mock/ops';
 
@@ -113,6 +113,8 @@ export interface NewScheduleInput {
     readonly environmentId: string;
     /** `agent-task`: the folder the task runs in, inside `environmentId` (#193); `''` = the environment's default. Optional for callers that predate it. */
     readonly workdir?: string;
+    /** `agent-task`: the project the task belongs to (#333) — the router picks its folder per environment; exclusive with `environmentId` / `workdir`. `''` = none. */
+    readonly projectId?: string;
     readonly prompt: string;
 }
 
@@ -142,9 +144,14 @@ export function newScheduleSpec(input: NewScheduleInput, tz: string): ScheduleSp
         ...(input.kind === 'agent-task'
             ? {
                   agentId: input.agentId as AgentId,
-                  ...(input.environmentId ? { environmentId: input.environmentId as EnvironmentId } : {}),
-                  // A folder only means something in its environment.
-                  ...(input.environmentId && input.workdir?.trim() ? { workdir: input.workdir.trim() } : {}),
+                  // A project says where the work lives (#333): then no environment or folder of its own.
+                  ...(input.projectId
+                      ? { projectId: input.projectId as ProjectId }
+                      : {
+                            ...(input.environmentId ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                            // A folder only means something in its environment.
+                            ...(input.environmentId && input.workdir?.trim() ? { workdir: input.workdir.trim() } : {})
+                        }),
                   offlinePolicy: 'queue' as const
               }
             : {})

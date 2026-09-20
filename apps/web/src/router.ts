@@ -5,6 +5,7 @@ import { Chats } from './pages/Chats';
 import { Tasks } from './pages/Tasks';
 import { Agents } from './pages/Agents';
 import { Agent } from './pages/Agent';
+import { EditProject, NewProject, Projects } from './pages/Projects';
 import { Task } from './pages/Task';
 import { Session } from './pages/Session';
 import { Machines } from './pages/Machines';
@@ -22,6 +23,10 @@ export const routes: RouteRecordRaw[] = [
     { path: '/', name: 'home', component: Home },
     { path: '/chats', name: 'chats', component: Chats },
     { path: '/chats/:id', name: 'chat', component: Chat },
+    // `/projects/new` before `/projects/:id`, so "new" is never read as an id (#333).
+    { path: '/projects', name: 'projects', component: Projects },
+    { path: '/projects/new', name: 'project-new', component: NewProject },
+    { path: '/projects/:id', name: 'project', component: EditProject },
     { path: '/agents', name: 'agents', component: Agents },
     { path: '/agents/:id', name: 'agent', component: Agent },
     { path: '/tasks', name: 'tasks', component: Tasks },

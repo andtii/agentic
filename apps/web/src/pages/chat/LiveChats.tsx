@@ -11,7 +11,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { useRouter } from '@sigx/router';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
-import type { AgentId } from '@agentic/core';
+import type { AgentId, ProjectId } from '@agentic/core';
 import { EmptyState } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
@@ -23,6 +23,7 @@ import { closeNewChat, newChatRequest, openNewChat } from './head';
 import { LIST_TAIL, chatRow } from './live';
 import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
 import { NewChatDialog } from './NewChatDialog';
+import { useProjects } from '../projects/live';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 
 interface ChatRead {
@@ -126,20 +127,21 @@ export const LiveChatList = component<LiveChatListProps>(({ props, emit }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const chats = useChatRows(defs, viewer, props.directory);
+    const projects = useProjects(defs, viewer);
     return () => {
         const ws = viewer.workspaceId;
         return (
             <>
-                <ChatList chats={chats.rows(props.currentId)} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} onNewChat={() => emit('newChat')} />
+                <ChatList chats={chats.rows(props.currentId)} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} projects={projects.list()} onNewChat={() => emit('newChat')} />
                 {ws ? chats.ids().map((id) => <ChatWatch key={id} id={id} workspaceId={ws} onRead={chats.report} />) : null}
             </>
         );
     };
 });
 
-/** Create a chat with `agentIds` as members (all history) and an optional coordinator; resolves to the new id. */
-export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null): Promise<string> {
-    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({});
+/** Create a chat with `agentIds` as members (all history), an optional coordinator and, in a project (#333), its id; resolves to the new id. */
+export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null, projectId: string | null = null): Promise<string> {
+    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat(projectId ? { projectId: projectId as ProjectId } : {});
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     for (const id of agentIds) await chat.addAgent(id as AgentId, 'all');
     if (coordinator) await chat.setCoordinator(coordinator as AgentId);
@@ -154,13 +156,15 @@ export const LiveChats = component(() => {
     const directory = useAgentDirectory(defs, viewer);
     // Where each agent runs and its account's limits, on the New chat cards (#315).
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
+    // The project picker (#333): the workspace's projects and the one used last.
+    const projects = useProjects(defs, viewer);
     const st = signal({ busy: false, error: '' });
-    const createChat = async (agentIds: readonly string[], coordinator: string | null): Promise<void> => {
+    const createChat = async (agentIds: readonly string[], coordinator: string | null, projectId: string | null): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) return;
         st.busy = true;
         try {
-            const chatId = await createChatWith(defs, ws, agentIds, coordinator);
+            const chatId = await createChatWith(defs, ws, agentIds, coordinator, projectId);
             closeNewChat();
             await router.push(`/chats/${chatId}`);
         } catch (e) {
@@ -175,7 +179,7 @@ export const LiveChats = component(() => {
                 ? <EmptyState variant="generic" title="Sign in to see your chats" caption="Chats belong to your workspace." />
                 : <LiveChatList wide directory={directory} onNewChat={openNewChat} />}
             {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
-            <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} busy={st.busy} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
+            <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} busy={st.busy} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId); }} />
         </Page>
     );
 });

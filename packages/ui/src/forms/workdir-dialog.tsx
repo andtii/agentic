@@ -38,6 +38,11 @@ import { WorkdirWorktreeForm } from './workdir-worktree.js';
 
 const SCOPE = agWorkdirPickerAnatomy.scope;
 
+/** What `select` hands back: the folder, and its git badge when the listing showed one (#333: a project form keeps it). */
+export interface WorkdirSelection extends WorkdirRef {
+    readonly git?: FsGitInfo;
+}
+
 export type WorkdirDialogProps =
     /** Open. */
     & Define.Model<boolean>
@@ -57,7 +62,7 @@ export type WorkdirDialogProps =
     & Define.Prop<'creating', boolean>
     & Define.Prop<'worktreeError', FsError | string | null>
     & Define.Event<'navigate', { readonly environmentId: EnvironmentId; readonly path: string | null }>
-    & Define.Event<'select', WorkdirRef>
+    & Define.Event<'select', WorkdirSelection>
     & Define.Event<'createWorktree', WorkdirWorktreeRequest>
     & Define.Event<'cancel', void>;
 
@@ -127,7 +132,7 @@ export const WorkdirDialog = component<WorkdirDialogProps>(({ props, emit }) => 
         const l = current();
         if (!l || !props.environmentId || props.error) return;
         finished = true;
-        emit('select', { environmentId: props.environmentId, path: l.path });
+        emit('select', { environmentId: props.environmentId, path: l.path, ...(l.git ? { git: l.git } : {}) });
         close();
     };
     const onOpenChange = (open: boolean): void => {

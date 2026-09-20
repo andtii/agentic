@@ -7,7 +7,7 @@
  * `mockFsWorktree` answer like a daemon's `fs.response`; a created worktree
  * stays until the page reloads.
  */
-import { FS_LIST_MAX_ENTRIES, normalizePath, pathWithin, type FsError, type FsGitInfo, type FsListResult, type FsWorktreeResult, type WorkdirRef } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, normalizePath, pathWithin, sameOrigin, type FsError, type FsGitInfo, type FsListResult, type FsLocateResult, type FsWorktreeResult, type WorkdirRef } from '@agentic/core';
 import { opsEnvironment, opsMachine } from './ops';
 
 interface Dir {
@@ -24,9 +24,11 @@ const dir = (spec: Spec): Dir => {
     return { ...(spec.$git ? { git: spec.$git } : {}), children };
 };
 
-const repo = (branch: string, rest: Spec = {}): Spec => ({ $git: { kind: 'repo', branch }, ...rest });
-const worktree = (branch: string, rest: Spec = {}): Spec => ({ $git: { kind: 'worktree', branch }, ...rest });
+const repo = (branch: string, rest: Spec = {}, origin?: string): Spec => ({ $git: { kind: 'repo', branch, ...(origin ? { origin } : {}) }, ...rest });
+const worktree = (branch: string, rest: Spec = {}, origin?: string): Spec => ({ $git: { kind: 'worktree', branch, ...(origin ? { origin } : {}) }, ...rest });
 const project: Spec = { apps: {}, packages: {}, docs: {}, scripts: {} };
+/** The agentic repo's remote: every checkout of it carries this origin (#333), so a project can find it on another machine. */
+export const AGENTIC_ORIGIN = 'https://github.com/andtii/agentic.git';
 
 /** 600 run folders — more than one listing carries. */
 const runs: Spec = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`run-${String(i).padStart(3, '0')}`, {}]));
@@ -36,19 +38,20 @@ const TREES: Record<string, Record<string, Dir>> = {
     env_alien01_work: {
         'C:\\Dev': dir({
             agentic: {
-                main: repo('main', project),
+                main: repo('main', project, AGENTIC_ORIGIN),
                 branches: {
-                    '47-mobile-drawer': worktree('47-mobile-drawer', project),
-                    '186-workdir-contract': worktree('186-workdir-contract', project)
+                    '47-mobile-drawer': worktree('47-mobile-drawer', project, AGENTIC_ORIGIN),
+                    '186-workdir-contract': worktree('186-workdir-contract', project, AGENTIC_ORIGIN)
                 }
             },
-            sigx: repo('main', { packages: {}, docs: {} }),
+            sigx: repo('main', { packages: {}, docs: {} }, 'https://github.com/signalxjs/sigx.git'),
             'agentic-ui-handoff': { artboards: {}, screenshots: {} }
         }),
         'D:\\scratch': dir({ runs, 'detached-demo': { $git: { kind: 'repo', head: '3f9c2e1' } } })
     },
     env_alien01_personal: {
-        'C:\\Users\\andy\\src': dir({ blog: repo('main', { posts: {} }), dotfiles: repo('master') })
+        // A second checkout of agentic under another account's roots: what Find (locate) turns up there (#333).
+        'C:\\Users\\andy\\src': dir({ blog: repo('main', { posts: {} }, 'https://github.com/andtii/blog.git'), dotfiles: repo('master'), agentic: repo('main', project, 'git@github.com:andtii/agentic') })
     },
     env_alien01_client_acme: { 'C:\\clients\\acme': dir({ portal: repo('develop') }) },
     env_nuclab_work: { 'C:\\work': dir({ nightly: {} }) }
@@ -106,6 +109,28 @@ export function mockFsWorktree(environmentId: string, repoPath: string, branch: 
     if ('code' in parent) return parent;
     parent.at.children.set(target.slice(target.lastIndexOf('\\') + 1), { git: { kind: 'worktree', branch }, children: new Map() });
     return { kind: 'worktree', path: `${parent.path}\\${target.slice(target.lastIndexOf('\\') + 1)}`, branch };
+}
+
+/**
+ * `fs.request locate` against the mock trees (#333): every repo or worktree of
+ * `origin` under the environment's roots, `FS_LOCATE_MAX_DEPTH` levels down,
+ * roots first and shallowest first — what a project's Find button offers.
+ */
+export function mockFsLocate(environmentId: string, origin: string, depth: number = FS_LOCATE_MAX_DEPTH): FsLocateResult | FsError {
+    const env = opsEnvironment(environmentId);
+    const trees = TREES[environmentId];
+    if (!env || !trees) return fail('unknown-environment', `no environment ${environmentId}`);
+    const machine = opsMachine(env.machineId);
+    if (machine && !machine.online) return fail('timeout', `${machine.name} is offline`);
+    const matches: { path: string; git: FsGitInfo }[] = [];
+    const walk = (at: Dir, path: string, level: number): void => {
+        if (at.git?.origin && sameOrigin(at.git.origin, origin)) matches.push({ path, git: at.git });
+        if (level >= Math.min(depth, FS_LOCATE_MAX_DEPTH)) return;
+        for (const [name, child] of [...at.children].sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))) walk(child, `${path}\\${name}`, level + 1);
+    };
+    for (const [root, tree] of Object.entries(trees)) walk(tree, root, 0);
+    matches.sort((a, b) => a.path.split('\\').length - b.path.split('\\').length);
+    return { kind: 'locate', origin, matches: matches.slice(0, FS_LOCATE_MAX_MATCHES), truncated: matches.length > FS_LOCATE_MAX_MATCHES };
 }
 
 /** Folders the mock user picked lately. */
