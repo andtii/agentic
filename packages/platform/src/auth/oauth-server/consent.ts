@@ -26,7 +26,8 @@ const SCOPE_TEXT: Readonly<Record<Scope, string>> = {
     chats: 'Post into and read your chats',
     memory: 'Search and add to agent memory',
     schedules: 'Create schedules',
-    usage: "See how close each account is to its provider's usage limits"
+    usage: "See how close each account is to its provider's usage limits",
+    projects: 'List your projects and set the project a chat belongs to'
 };
 
 export function escapeHtml(text: string): string {

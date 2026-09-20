@@ -71,7 +71,7 @@ Keys are workspace-prefixed so every `authorize` chain starts with `sameWorkspac
 
 Agent config log (#15): every version is one entry `{ t: 'config', v, patch, by, at, reason, rollbackOf? }` folded by the pure reducer `applyAgentEntry`; the log stays in state so `rollback(v)` replays it from `defaultAgentConfig()` and appends a new version equal to `v` — a rollback entry carries the whole target config and replaces rather than merges, so keys added after `v` do not survive it. `snapshotForSession()` is a detached copy stamped `configVersion`; version 0 (never updated) cannot start a session. `by` is `user:|agent:|machine:|external:<id>` from `ctx.principal`, which needs the app's principal `codec`.
 
-`TaskStatus = queued | active | waiting | completed | failed | cancelled`. `WaitReason = approval {requestId, sessionId} | input {requestId} | environment-offline {environmentId, policy} | child {childTaskIds} | capacity {environmentId} | budget {limit}`.
+`TaskStatus = queued | active | waiting | completed | failed | cancelled`. `WaitReason = approval {requestId, sessionId} | input {requestId} | environment-offline {environmentId, policy} | child {childTaskIds} | capacity {environmentId} | budget {limit} | project-feature {pluginId, message}` (#339: a project feature plugin's `beforeSession` threw; the router parks the task with the plugin's message).
 
 ### Audit
 
