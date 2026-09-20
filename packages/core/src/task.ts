@@ -15,7 +15,7 @@ export type WaitReason =
     | { readonly kind: 'child'; readonly childTaskIds: readonly TaskId[] }
     | { readonly kind: 'capacity'; readonly environmentId: EnvironmentId; readonly position: number }
     | { readonly kind: 'budget'; readonly limit: keyof Limits }
-    /** A project feature plugin's `beforeSession` threw (#329): parked with its message, never a silent fallback (EXE-12). */
+    /** A project feature plugin's `beforeSession` threw (#339): parked with its message, never a silent fallback (EXE-12). */
     | { readonly kind: 'project-feature'; readonly pluginId: string; readonly message: string };
 
 /** Where a task came from (COL-04 "originating agent or task"). */
