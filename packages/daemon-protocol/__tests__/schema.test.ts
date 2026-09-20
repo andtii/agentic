@@ -257,6 +257,7 @@ describe('daemon frame schemas', () => {
         expect(response({ result: located(FS_LOCATE_MAX_MATCHES) }).success).toBe(true);
         expect(response({ result: located(FS_LOCATE_MAX_MATCHES + 1) }).success).toBe(false);
         expect(response({ result: { kind: 'locate', origin: '', matches: [], truncated: false } }).success).toBe(false);
+        expect(response({ result: { kind: 'locate', origin: 'x', matches: [{ path: '/work/r', git: { kind: 'repo', origin: '' } }], truncated: false } }).success).toBe(false);
         expect(response({ error: { code: 'outside-roots', message: 'no' } }).success).toBe(true);
         expect(response({ error: { code: 'teapot', message: 'no' } }).success).toBe(false);
         const neither = response({});

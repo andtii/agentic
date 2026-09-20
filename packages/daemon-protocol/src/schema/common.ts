@@ -146,8 +146,8 @@ export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('locate'), origin: text.min(1), depth: nonNegativeInt.optional() })
 ]);
 
-/** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name. */
-const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.optional(), head: name.optional(), origin: text.optional() });
+/** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name — absent rather than empty. */
+const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.optional(), head: name.optional(), origin: text.min(1).optional() });
 const fsEntry = z.object({ name: text.min(1), path: text.min(1), git: fsGitInfo.optional() });
 
 /**

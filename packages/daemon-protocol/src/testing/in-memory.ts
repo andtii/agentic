@@ -10,6 +10,7 @@
 
 import {
     DAEMON_PROTOCOL_VERSION,
+    FS_LIST_MAX_ENTRIES,
     FS_LOCATE_MAX_DEPTH,
     FS_LOCATE_MAX_MATCHES,
     normalizePath,
@@ -290,10 +291,11 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 const isRoot = env.cwdRoots.some((r) => normalizePath(r, 'linux') === path);
                 const parent = isRoot ? undefined : normalizePath(`${path}/..`, 'linux')!;
                 const own = this.repos().find((r) => r.path === path);
-                const entries = this.repos()
+                const below = this.repos()
                     .filter((r) => r.path !== path && normalizePath(`${r.path}/..`, 'linux') === path)
                     .map((r) => ({ name: r.path.slice(r.path.lastIndexOf('/') + 1), path: r.path, git: r.git }));
-                return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), ...(own ? { git: own.git } : {}), entries, truncated: false } });
+                const entries = below.slice(0, FS_LIST_MAX_ENTRIES);
+                return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), ...(own ? { git: own.git } : {}), entries, truncated: below.length > entries.length } });
             }
             case 'env.request': {
                 const outcome = this.manage(frame);
