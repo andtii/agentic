@@ -13,6 +13,14 @@
  *   replayed from its log and then reported closed.
  * - `session.command` goes through `ServedSession.handleCommand`
  *   (idempotent by `commandId`) and comes back as `session.reply`.
+ * - Capacity counts running turns, not open sessions (#394, EXE-09): a chat
+ *   member's session stays open between messages and costs nothing. A
+ *   `prompt` is tracked per live session — accepted on its ack, over once
+ *   its `turn-end` passes (`watchTurns`) — and `env.concurrency` bounds how
+ *   many run at once: `session.open` is refused at capacity, and a `prompt`
+ *   that would exceed it is answered with the wire `busy` error, which the
+ *   platform parks its task on. Removing an environment is still refused
+ *   while any session is hosted in it; the platform closes idle ones first.
  * - A driver's `callTool` becomes `tool.call`; `tool.result` settles it.
  *   Calls still open when the socket drops are sent again after `welcome`.
  * - `session.open` carries the agent's approval policy (`OpenSpec.policy`,
@@ -156,6 +164,14 @@ interface LiveSession {
     /** The last event shown to the quota monitor: a replay after a reconnect is not news. */
     tapped: Cursor;
     pump: AbortController | undefined;
+    /**
+     * A turn is in flight (#394): set when a `prompt` is taken — tentatively while its reply is out, kept on the ack —
+     * and cleared by the turn's `turn-end`, seen by `watchTurns` off the served stream rather than the socket pump, so a
+     * turn that ends while the platform is away still frees its slot.
+     */
+    running: boolean;
+    /** `watchTurns`: aborted when the session closes. */
+    readonly turns: AbortController;
 }
 
 /**
@@ -256,7 +272,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         sources: options.quota?.sources ?? [],
         send: (environmentId, snapshot) => welcomed && send({ v: V, t: 'quota', environmentId, snapshot }),
         environments: () => environments,
-        busy: (environmentId) => activeOn(environmentId) > 0,
+        busy: (environmentId) => runningOn(environmentId) > 0,
         logger,
         ...(options.quota?.probe !== undefined ? { probe: options.quota.probe } : {}),
         ...(options.quota?.pollMs !== undefined ? { pollMs: options.quota.pollMs } : {}),
@@ -337,8 +353,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
         for (const env of environments) {
             const inspection = inspections.get(env.id);
             if (!inspection) continue;
-            const active = [...sessions.values()].filter((s) => s.environmentId === env.id).length;
-            out.push(toEnvironmentDescriptor(env, machineId, inspection, active, verdicts.get(env.id)));
+            // `concurrency.active` is what the budget counts: turns running, not sessions open (#394).
+            out.push(toEnvironmentDescriptor(env, machineId, inspection, runningOn(env.id), verdicts.get(env.id)));
         }
         return out;
     }
@@ -493,8 +509,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (!env) return refuse(`unknown environment ${environmentId}`);
         const driver = drivers.get(env.runtime);
         if (!driver) return refuse(`no driver for runtime ${env.runtime} on this machine`);
-        const busy = [...sessions.values()].filter((s) => s.environmentId === env.id).length + [...opening.values()].filter((id) => id === env.id).length;
-        if (busy >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency})`);
+        // Turns in flight, never sessions open (#394): a live chat session costs nothing until it is prompted.
+        const running = runningOn(env.id);
+        if (running >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running`);
 
         opening.set(sessionId, env.id);
         try {
@@ -513,8 +530,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
             // `session.opened` carries whatever the runtime calls the session before its first prompt — a placeholder for a CLI.
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, sentRef: ref, lastSent: served.head, tapped: served.head, pump: undefined };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, sentRef: ref, lastSent: served.head, tapped: served.head, pump: undefined, running: false, turns: new AbortController() };
             sessions.set(sessionId, live);
+            watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime });
             send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: served.head });
             if (welcomed) startPump(live, served.head);
@@ -534,8 +552,30 @@ export function createDaemon(options: DaemonOptions): Daemon {
 
     // ---------------------------------------------------------- environments
 
-    /** Sessions running or opening on an environment. */
-    const activeOn = (environmentId: EnvironmentId): number => [...sessions.values()].filter((s) => s.environmentId === environmentId).length + [...opening.values()].filter((id) => id === environmentId).length;
+    /** Sessions hosted or opening on an environment — what removing it is refused over (the platform closes idle ones first, #394). */
+    const hostedOn = (environmentId: EnvironmentId): number => [...sessions.values()].filter((s) => s.environmentId === environmentId).length + [...opening.values()].filter((id) => id === environmentId).length;
+    /** Turns running on an environment: what `concurrency` bounds (#394), and what makes it busy for the quota probe. */
+    const runningOn = (environmentId: EnvironmentId): number => [...sessions.values()].filter((s) => s.environmentId === environmentId && s.running).length;
+
+    /**
+     * Keep `running` true to the turn, off the served stream (#394): `turn-start` marks it (a steered or resumed turn
+     * included), `turn-end` clears it. Independent of the socket pump, which only runs while the platform is welcomed
+     * and restarts from the platform's cursor — a `turn-end` that went out before a drop would never pass it again.
+     */
+    function watchTurns(s: LiveSession): void {
+        void (async () => {
+            try {
+                for await (const frame of s.served.events(s.served.head, { signal: s.turns.signal })) {
+                    if (s.turns.signal.aborted) return;
+                    if (frame.kind !== 'event') continue;
+                    if (frame.event.type === 'turn-start') s.running = true;
+                    else if (frame.event.type === 'turn-end') s.running = false;
+                }
+            } catch (e) {
+                if (!s.turns.signal.aborted) logger.warn('session: turn watch failed', { session: s.id, error: e });
+            }
+        })();
+    }
 
     /**
      * One at a time and in order with every other change to the environments:
@@ -546,7 +586,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         return serial(async () => {
             const op = frame.op === 'put' ? { op: 'put' as const, environment: frame.environment } : { op: 'remove' as const, environmentId: frame.environmentId };
             const outcome = options.manage
-                ? await answerEnvRequest(op, { paths: options.manage.paths, policy, runtimes: new Set(drivers.keys()), activeOn, platform, logger, ...(options.manage.secure ? { secure: options.manage.secure } : {}) })
+                ? await answerEnvRequest(op, { paths: options.manage.paths, policy, runtimes: new Set(drivers.keys()), activeOn: hostedOn, platform, logger, ...(options.manage.secure ? { secure: options.manage.secure } : {}) })
                 : { error: { code: 'policy-disabled' as const, message: 'this daemon does not manage its environments from the platform' } };
             if ('result' in outcome) {
                 environments = outcome.environments;
@@ -571,9 +611,24 @@ export function createDaemon(options: DaemonOptions): Daemon {
             send({ v: V, t: 'session.reply', sessionId, reply: { v: frame.command.v, kind: 'error', commandId: frame.command.commandId, code: 'closed', message: 'no such session on this machine' } });
             return;
         }
-        const reply = await s.served.handleCommand(frame.command);
+        const { command } = frame;
+        // A prompt that would start a turn beyond the environment's concurrency is answered `busy` (#394): the platform
+        // parks its task and prompts again when a turn ends here. A session already running one is left to the runtime
+        // (a steer, or its own `busy`). The slot is taken before the reply is known so two prompts cannot share it.
+        const starts = command.type === 'prompt' && !s.running;
+        if (starts) {
+            const env = environments.find((e) => e.id === s.environmentId);
+            const running = runningOn(s.environmentId);
+            if (env && running >= env.concurrency) {
+                send({ v: V, t: 'session.reply', sessionId, reply: { v: command.v, kind: 'error', commandId: command.commandId, code: 'busy', message: `environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running` } });
+                return;
+            }
+            s.running = true;
+        }
+        const reply = await s.served.handleCommand(command);
+        if (starts && reply.kind !== 'ack') s.running = false;
         send({ v: V, t: 'session.reply', sessionId, reply });
-        if (frame.command.type === 'close' && reply.kind === 'ack') await closeSession(sessionId, 'closed by command');
+        if (command.type === 'close' && reply.kind === 'ack') await closeSession(sessionId, 'closed by command');
     }
 
     async function closeSession(sessionId: SessionId, reason: string): Promise<void> {
@@ -581,6 +636,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (!s) return;
         sessions.delete(sessionId);
         stopPump(s);
+        s.turns.abort();
+        s.running = false;
         for (const [callId, pending] of pendingTools) {
             if (pending.frame.sessionId !== sessionId) continue;
             pendingTools.delete(callId);

@@ -6,7 +6,7 @@ import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/a
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
@@ -77,6 +77,16 @@ let sockets: FakeSockets;
 let scheduler: ManualScheduler;
 let toolCalls: { input: ToolCallInput; principal: Principal }[];
 let toolFails = false;
+let toolHold: Promise<void> | undefined;
+/** A turn-holding tool: the daemon's scripted `tool.call` waits on it until `release` (#394). */
+const holdTurns = (): (() => void) => {
+    let release!: () => void;
+    toolHold = new Promise<void>((r) => (release = r));
+    return () => {
+        toolHold = undefined;
+        release();
+    };
+};
 let Machine: ReturnType<typeof defineMachineActor>;
 let Session: ReturnType<typeof defineSessionActor>;
 const daemons: InMemoryDaemon[] = [];
@@ -87,6 +97,7 @@ beforeEach(async () => {
     scheduler = manualScheduler();
     toolCalls = [];
     toolFails = false;
+    toolHold = undefined;
     const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
     Session = defineSessionActor({ factory: () => null, commands: sink });
     Machine = defineMachineActor({
@@ -96,6 +107,8 @@ beforeEach(async () => {
             async call(input, principal) {
                 toolCalls.push({ input, principal });
                 if (toolFails) throw new ToolCallError('denied', 'not allowed');
+                // A held call keeps the daemon's turn running for as long as the test wants (#394).
+                if (toolHold) await toolHold;
                 return { echoed: input.input };
             }
         },
@@ -373,30 +386,48 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         expect(sockets.frames(K1).find((f) => f.t === 'tool.result')).toMatchObject({ error: { code: 'denied', message: 'not allowed' } });
     });
 
-    it('queues beyond an environment capacity and opens the next when a session closes', async () => {
-        connect(K1, daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { max: 1, active: 0 } }]));
+    it('capacity counts running turns, not open sessions (#394): idle sessions open freely, a turn queues the next open, and the turn ending — not a close — dequeues it', async () => {
+        const S3 = 'session_3' as SessionId;
+        connect(K1, daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { max: 1, active: 0 } }], { tool: { name: 'hold', input: {} } }));
         await until(async () => (await machine(K1).get()).online, 'online');
-        await session(S1).open(sessionSpec(M1));
-        await session(S2).open(sessionSpec(M1));
+        for (const id of [S1, S2, S3]) await session(id).open(sessionSpec(M1));
+        // Two conversations in a concurrency-1 environment: both open, neither queued — nothing runs yet.
         expect(await machine(K1).openSession(S1, E1, openSpec)).toBe('opened');
-        expect(await machine(K1).openSession(S2, E1, openSpec)).toBe('queued');
-        expect(await machine(K1).openSession(S2, E1, openSpec)).toBe('queued');
-        expect((await machine(K1).get()).queued.map((q) => q.sessionId)).toEqual([S2]);
-        expect(sockets.frames(K1).filter((f) => f.t === 'session.open')).toHaveLength(1);
+        expect(await machine(K1).openSession(S2, E1, openSpec)).toBe('opened');
+        await until(async () => (await machine(K1).get()).activeSessions.filter((h) => h.status === 'open').length === 2, 'both opened');
+        expect(freeSlots(await machine(K1).get(), E1)).toBe(1);
 
-        await machine(K1).closeSession(S1);
-        await until(async () => (await machine(K1).get()).activeSessions.map((s) => s.sessionId).join() === S2, 'S2 dequeued');
-        const m = await machine(K1).get();
-        expect(m.queued).toEqual([]);
-        expect(m.closures[0]).toMatchObject({ sessionId: S1, reason: 'closed' });
-        await until(async () => (await machine(K1).get()).activeSessions[0]?.status === 'open', 'S2 opened');
+        // A turn on S1 takes the one slot: the third open queues behind it, with a visible position.
+        const release = holdTurns();
+        await session(S1).prompt('go', 't1');
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S1)?.running?.turnId === 't1', 'the ack to mark the turn running');
+        expect(freeSlots(await machine(K1).get(), E1)).toBe(0);
+        expect(await machine(K1).openSession(S3, E1, openSpec)).toBe('queued');
+        expect(await machine(K1).openSession(S3, E1, openSpec)).toBe('queued');
+        expect((await machine(K1).get()).queued.map((q) => q.sessionId)).toEqual([S3]);
         expect(sockets.frames(K1).filter((f) => f.t === 'session.open')).toHaveLength(2);
 
+        // The turn ends; S1 stays open, and that alone opens the queued session.
+        release();
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S3)?.status === 'open', 'S3 dequeued and opened');
+        const m = await machine(K1).get();
+        expect(m.queued).toEqual([]);
+        expect(m.closures).toEqual([]);
+        expect(m.activeSessions.map((h) => h.sessionId).sort()).toEqual([S1, S2, S3]);
+        expect(m.activeSessions.find((h) => h.sessionId === S1)?.running).toBeUndefined();
+        expect(sockets.frames(K1).filter((f) => f.t === 'session.open')).toHaveLength(3);
+        expect(freeSlots(m, E1)).toBe(1);
+
         // Closing a queued session just drops it.
-        await machine(K1).openSession(S1, E1, openSpec);
-        expect((await machine(K1).get()).queued.map((q) => q.sessionId)).toEqual([S1]);
-        await machine(K1).closeSession(S1);
+        const S4 = 'session_4' as SessionId;
+        await session(S4).open(sessionSpec(M1));
+        const again = holdTurns();
+        await session(S2).prompt('go', 't2');
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S2)?.running !== undefined, 'S2 running');
+        expect(await machine(K1).openSession(S4, E1, openSpec)).toBe('queued');
+        await machine(K1).closeSession(S4);
         expect((await machine(K1).get()).queued).toEqual([]);
+        again();
     });
 
     it('refuses an unknown environment and an offline machine', async () => {
@@ -778,19 +809,75 @@ describe('Machine environment management (#237, EXE-03/04, OPS-01/03)', () => {
         expect(offline?.status).toBe(503);
         expect(offline?.message).toContain(MACHINE_OFFLINE_CODE);
 
-        connect(K1, daemon(M1));
+        connect(K1, daemon(M1, undefined, { tool: { name: 'hold', input: {} } }));
         await online();
         expect(await statusOf(machine(K1).removeEnvironment(E2))).toBe(404);
-        await app.as(owner).actor(Session, actorKey(WS, 'session', 'session_1')).open({ agentId: config.agentId, runtime: 'in-memory', environmentId: E1, machineId: M1, config });
+        const s1 = app.as(owner).actor(Session, actorKey(WS, 'session', 'session_1'));
+        await s1.open({ agentId: config.agentId, runtime: 'in-memory', environmentId: E1, machineId: M1, config });
         await machine(K1).openSession('session_1' as SessionId, E1, openSpec);
-        expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(409);
+        await until(async () => (await machine(K1).get()).activeSessions[0]?.status === 'open', 'session.opened');
+        // In use means a turn running there (#394) — and the refusal names it.
+        const release = holdTurns();
+        await s1.prompt('go', 't1');
+        await until(async () => (await machine(K1).get()).activeSessions[0]?.running !== undefined, 'the turn running');
+        const inUse = await machine(K1)
+            .removeEnvironment(E1)
+            .then(() => null)
+            .catch((e: unknown) => e as { status?: number; message?: string });
+        expect(inUse?.status).toBe(409);
+        expect(inUse?.message).toMatch(/^in-use: environment "env_1" on machine "machine_1" has work in it — running: session session_1 \(agent agent_1, turn t1\)$/);
         expect(envRequests()).toEqual([]);
+        release();
 
         await machine(K1).revoke();
         expect(await statusOf(machine(K1).putEnvironment(work()))).toBe(403);
         // Revoked wins over what the machine last reported: not 409 for the busy one, not 404 for an unknown one.
         expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(403);
         expect(await statusOf(machine(K1).removeEnvironment(E2))).toBe(403);
+    });
+
+    it('removes an environment whose sessions are all idle (#394): they are closed ahead of the request, a queued open still refuses', async () => {
+        const S1 = 'session_1' as SessionId;
+        const S2 = 'session_2' as SessionId;
+        const S3 = 'session_3' as SessionId;
+        const record = (id: SessionId, environmentId: EnvironmentId) => app.as(owner).actor(Session, actorKey(WS, 'session', id)).open({ agentId: config.agentId, runtime: 'in-memory', environmentId, machineId: M1, config });
+        connect(K1, daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { max: 1, active: 0 } }, inMemoryEnvironment(M1, E2)], { tool: { name: 'hold', input: {} } }));
+        await online();
+        await record(S1, E1);
+        await record(S2, E2);
+        await record(S3, E1);
+        await machine(K1).openSession(S1, E1, openSpec);
+        await machine(K1).openSession(S2, E2, openSpec);
+        await until(async () => (await machine(K1).get()).activeSessions.filter((h) => h.status === 'open').length === 2, 'both opened');
+
+        // A session queued for the environment is work waiting to run there: refused, and named.
+        const release = holdTurns();
+        await app.as(owner).actor(Session, actorKey(WS, 'session', S1)).prompt('go', 't1');
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S1)?.running !== undefined, 'S1 running');
+        expect(await machine(K1).openSession(S3, E1, openSpec, { taskId: 'task_3' as never })).toBe('queued');
+        const refused = await machine(K1)
+            .removeEnvironment(E1)
+            .then(() => null)
+            .catch((e: unknown) => e as { status?: number; message?: string });
+        expect(refused?.status).toBe(409);
+        expect(refused?.message).toContain('running: session session_1 (agent agent_1, turn t1)');
+        expect(refused?.message).toContain('queued: session session_3 (agent agent_1, task task_3)');
+        await machine(K1).closeSession(S3);
+        release();
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S1)?.running === undefined, 'the turn to end');
+
+        // Only idle sessions left in E1: removable. The idle one is closed on the same socket, ahead of the request; E2's is untouched.
+        const { requestId } = await machine(K1).removeEnvironment(E1);
+        const kinds = sockets.frames(K1).map((f) => f.t);
+        expect(kinds.indexOf('session.close')).toBeLessThan(kinds.indexOf('env.request'));
+        expect(sockets.frames(K1).filter((f) => f.t === 'session.close')).toEqual([expect.objectContaining({ sessionId: S1 })]);
+        await settled(requestId);
+        expect(await machine(K1).envResult(requestId)).toMatchObject({ status: 'done', result: { environmentId: E1 } });
+        await until(async () => (await machine(K1).get()).environments.map((e) => e.id).join() === E2, 'E1 gone from the descriptors');
+        const m = await machine(K1).get();
+        expect(m.activeSessions.map((h) => h.sessionId)).toEqual([S2]);
+        // The queued open dropped earlier, then the idle session the removal closed.
+        expect(m.closures.map((c) => c.sessionId)).toEqual([S3, S1]);
     });
 
     it('checks removeEnvironment like fsRequest: revoked, then unknown environment, then offline', async () => {

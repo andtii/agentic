@@ -11,7 +11,8 @@ import type { RegistryGate } from '../registry/types.js';
 /**
  * Where a route stands:
  * - `waiting-offline`: the environment's machine is offline and the policy is `queue` — retried on its next `hello`.
- * - `waiting-capacity`: the machine queued the session — prompted when the daemon acknowledges it.
+ * - `waiting-capacity`: the environment has no free slot (#394) — the machine queued the session's open (prompted when
+ *   the daemon acknowledges it), or the session is open and its prompt waits for a turn to end there (`slotFreed`).
  * - `opening`: `session.open` went to the daemon — prompted on `session.opened`.
  * - `waiting-turn`: the session runs another route's turn and its runtime cannot take a message into it (#395) —
  *   nothing was sent; the task waits `{turn, sessionId, turnId}` and the route is prompted when that turn ends.
@@ -72,6 +73,12 @@ export interface Route {
     turnId?: string;
     /** The prompt joined a running turn (#395): `turnId` is another route's, and this task settles when it ends. */
     joined?: boolean;
+    /**
+     * How many times the machine refused this route's prompt `busy` (#394): the next one goes out under the command id
+     * `{turnId}#{attempt}`, since the Session answers a known command id with what it answered before — the turn id
+     * stays, so `follow` keeps waiting for the same `turn-end`.
+     */
+    attempt?: number;
     readonly createdAt: number;
     updatedAt: number;
 }

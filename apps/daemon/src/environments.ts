@@ -11,6 +11,9 @@
  *     "profileDir": "C:/Users/me/.claude-work", "cwdRoots": ["C:/src"], "concurrency": 2 }
  * ] }
  * ```
+ *
+ * `concurrency` is how many turns may run at once in the environment (default 1) — not how many sessions may be
+ * open: a chat member's session stays open between messages and costs nothing until it is prompted (#394).
  */
 
 import type { EnvironmentId, LocalEnvironment } from '@agentic/core';
@@ -41,6 +44,7 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
         if (!isText(row.runtime, 256)) errors.push(`${at}.runtime is required (e.g. "claude-code")`);
         if (row.profileDir !== undefined && !isText(row.profileDir)) errors.push(`${at}.profileDir must be a path`);
         if (!Array.isArray(row.cwdRoots) || row.cwdRoots.length === 0 || !row.cwdRoots.every((r) => isText(r))) errors.push(`${at}.cwdRoots must be a non-empty list of paths`);
+        // One turn at a time per environment unless the row says more: a second prompt waits, a second session does not (#394).
         const concurrency = row.concurrency ?? 1;
         if (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1) errors.push(`${at}.concurrency must be a whole number ≥ 1`);
         if (row.accountLabel !== undefined && !isText(row.accountLabel, 256)) errors.push(`${at}.accountLabel must be text`);

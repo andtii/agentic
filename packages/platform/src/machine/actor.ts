@@ -28,7 +28,7 @@ import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
-import { activeIn, advances, freeSlots, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneQuota, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneQuota, runningIn, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -247,6 +247,10 @@ interface RoutingClient {
     machineOnline(machineId: MachineId): Promise<void>;
     sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void>;
     sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void>;
+    /** A turn ended in the environment, or a session running one closed (#394): a slot is free for a route parked `waiting-capacity` there. */
+    slotFreed(machineId: MachineId, environmentId: EnvironmentId, why: string): Promise<void>;
+    /** The daemon answered a prompt with an error (#394): `busy` parks the route on capacity, anything else fails its task. */
+    promptRefused(sessionId: SessionId, turnId: string, code: string, message: string): Promise<void>;
 }
 
 /** Build the Machine actor definition over its ports. One call per app — the actor `type` is `'machine'`. */
@@ -388,6 +392,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 const hosted = s.activeSessions[sessionId];
                 const wasHosted = hosted !== undefined;
                 const taskId = hosted?.taskId ?? s.queued.find((q) => q.sessionId === sessionId)?.taskId;
+                // A session that held a slot (a turn running, or a prompt out) frees it by closing (#394).
+                const held = hosted !== undefined && runningIn(s, hosted.environmentId).some((h) => h.sessionId === sessionId);
                 delete s.activeSessions[sessionId];
                 const before = s.queued.length;
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
@@ -400,6 +406,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     await replied(sessionId, errorReply(p.command.commandId, 'closed', reason));
                 }
                 dequeue();
+                if (held) await notify((r) => r.slotFreed(machineId, hosted.environmentId, `session ${sessionId} closed while running a turn (${reason})`));
             }
 
             async function onHello(frame: DaemonFrameOf<'hello'>): Promise<void> {
@@ -480,11 +487,21 @@ export function defineMachineActor(ports: MachinePorts) {
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {
                 const h = ctx.state.activeSessions[frame.sessionId];
                 const wire = frame.frame;
+                let ended: string | undefined;
                 if (h) {
                     if (wire.kind === 'event' && advances(h.cursor, { epoch: wire.epoch, seq: wire.seq })) h.cursor = { epoch: wire.epoch, seq: wire.seq };
                     else if (wire.kind === 'gap') h.cursor = { epoch: wire.resumeAt.epoch, seq: wire.resumeAt.seq };
+                    // The turn is over: its slot is free (#394). Any `turn-end` — a session runs one turn at a time.
+                    if (wire.kind === 'event' && wire.event.type === 'turn-end' && h.running) {
+                        ended = h.running.turnId;
+                        delete h.running;
+                    }
                 }
                 await toSession(() => session(frame.sessionId)?.forwardFrames([wire]));
+                if (h && ended !== undefined) {
+                    dequeue();
+                    await notify((r) => r.slotFreed(machineId, h.environmentId, `turn ${ended} ended in session ${frame.sessionId}`));
+                }
             }
 
             async function onSessionReply(frame: DaemonFrameOf<'session.reply'>): Promise<void> {
@@ -492,8 +509,16 @@ export function defineMachineActor(ports: MachinePorts) {
                 const key = pendingKey(frame.sessionId, frame.reply.commandId);
                 const pending = s.pending[key];
                 delete s.pending[key];
-                await toSession(() => replied(frame.sessionId, frame.reply));
-                if (pending?.command.type === 'close' && frame.reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
+                const { reply } = frame;
+                const command = pending?.command;
+                // A prompt's ack starts the turn that holds the slot (#394); its error frees the pending one and is the router's to judge.
+                if (command?.type === 'prompt') {
+                    const h = s.activeSessions[frame.sessionId];
+                    if (h && reply.kind === 'ack' && !h.running) h.running = { turnId: reply.turnId ?? command.turnId, since: now() };
+                    if (reply.kind === 'error') await notify((r) => r.promptRefused(frame.sessionId, command.turnId, reply.code, reply.message));
+                }
+                await toSession(() => replied(frame.sessionId, reply));
+                if (pending?.command.type === 'close' && reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
             }
 
             function onToolCall(frame: DaemonFrameOf<'tool.call'>): void {
@@ -826,8 +851,10 @@ export function defineMachineActor(ports: MachinePorts) {
 
                 /**
                  * Host `sessionId` in `environmentId`: `session.open` goes out when
-                 * the environment has a free slot, otherwise the request queues
-                 * until one closes (EXE-09). Idempotent by session id.
+                 * the environment has a free slot — `concurrency.max` minus the
+                 * sessions running a turn (#394), never minus the sessions merely
+                 * open — otherwise the request queues until a turn ends there or a
+                 * running session closes (EXE-09). Idempotent by session id.
                  */
                 async openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: OpenSpec, options: OpenSessionOptions = {}): Promise<OpenSessionResult> {
                     const s = ctx.state;
@@ -952,8 +979,14 @@ export function defineMachineActor(ports: MachinePorts) {
                  * Ask the daemon to forget an environment; its profile
                  * directory stays on the machine. In `fsRequest`'s order: 403
                  * revoked, 404 when the machine does not report it, 503
-                 * `machine-offline`, then 409 `in-use` while this machine hosts
-                 * or queues a session in it (the daemon checks its own side too).
+                 * `machine-offline`, then 409 `in-use` while a turn runs there
+                 * or a session is queued for it — naming them (#394). An idle
+                 * hosted session does not block it: a chat member's session
+                 * lives for the chat's life, so it is closed here first
+                 * (`session.close`, ahead of the `env.request` on the same
+                 * socket — the daemon refuses removal while it hosts any) and
+                 * its chat re-opens a fresh one wherever the member runs next
+                 * (EXE-12).
                  */
                 async removeEnvironment(environmentId: EnvironmentId): Promise<EnvRequested> {
                     const s = ctx.state;
@@ -961,7 +994,17 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
                     if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
-                    if (activeIn(s, environmentId) > 0 || s.queued.some((q) => q.environmentId === environmentId)) throw new ServerFnError(409, `in-use: environment "${environmentId}" has sessions on machine "${machineId}"`);
+                    const promptOut = (sessionId: SessionId): string | undefined => {
+                        for (const p of Object.values(s.pending)) if (p.sessionId === sessionId && p.command.type === 'prompt') return p.command.turnId;
+                        return undefined;
+                    };
+                    const running = runningIn(s, environmentId).map((h) => `session ${h.sessionId} (agent ${h.agentId}, turn ${h.running?.turnId ?? promptOut(h.sessionId) ?? '?'})`);
+                    const queued = s.queued.filter((q) => q.environmentId === environmentId).map((q) => `session ${q.sessionId} (agent ${q.agentId}${q.taskId ? `, task ${q.taskId}` : ''})`);
+                    if (running.length || queued.length) {
+                        const what = [...(running.length ? [`running: ${running.join(', ')}`] : []), ...(queued.length ? [`queued: ${queued.join(', ')}`] : [])].join('; ');
+                        throw new ServerFnError(409, `in-use: environment "${environmentId}" on machine "${machineId}" has work in it — ${what}`);
+                    }
+                    for (const h of hostedIn(s, environmentId)) send({ v: V, t: 'session.close', sessionId: h.sessionId });
                     return envRequest({ op: 'remove', environmentId });
                 },
 
