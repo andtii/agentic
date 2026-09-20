@@ -370,7 +370,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 try {
                     projects = await as(Workspace, workspaceKey(workspaceId)).projects();
                 } catch (e) {
-                    return { error: { code: 'registry-unavailable', message: `the workspace could not be asked about project ${route.projectId}: ${e instanceof Error ? e.message : String(e)}`, recoverable: true } };
+                    return { error: { code: 'workspace-unavailable', message: `the workspace could not be asked about project ${route.projectId}: ${e instanceof Error ? e.message : String(e)}`, recoverable: true } };
                 }
                 const project = projects.find((p) => p.id === route.projectId);
                 if (!project) return { error: { code: PROJECT_MISSING_CODE, message: `project ${route.projectId} no longer exists`, recoverable: false } };
@@ -457,7 +457,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return;
                     case 'fallback-api': {
                         // NEW use of another runtime: its plugin answers for itself before the task leaves its environment (AC-13).
-                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`, connectorIds(route.config, (await projectOf(route)).project));
+                        // The project first (#332): one gone meanwhile fails the task here, before a fallback is gated or recorded.
+                        const { project, error: projectError } = await projectOf(route);
+                        if (projectError) {
+                            await fail(route, projectError);
+                            return;
+                        }
+                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`, connectorIds(route.config, project));
                         if (asked.error) {
                             await fail(route, asked.error);
                             return;

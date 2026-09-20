@@ -335,12 +335,16 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 if (projectId !== undefined && !(ctx.state.projects ?? []).some((p) => p.id === projectId)) throw new ServerFnError(400, `Workspace.createChat: no project ${String(projectId)} in this workspace`);
                 const chatId = createId('chat') as ChatId;
                 ctx.state.chats.push(chatId);
-                if (projectId !== undefined) ctx.state.lastProjectId = projectId;
                 await ctx.save();
                 const chat = ctx.actor(Chat, actorKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, 'chat', chatId));
                 const title = input.title?.trim();
                 if (title) await chat.rename(title);
-                if (projectId !== undefined) await chat.setProject(projectId);
+                if (projectId !== undefined) {
+                    await chat.setProject(projectId);
+                    // Noted only once the chat is in the project: a failed hop must not preselect a project no chat got.
+                    ctx.state.lastProjectId = projectId;
+                    await ctx.save();
+                }
                 return { chatId };
             },
 
