@@ -128,6 +128,14 @@ describe('sessions (#392): one row per member, bound by the session statuses', (
         expect(state.sessions).toEqual({ [A]: { sessionId: 'session_2', since: 12, seenSeq: 0 } });
     });
 
+    it('a late message from a replaced session leaves the new row’s watermark alone; the bound session’s moves it', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), started(A, 'session_2', 11)]);
+        applyChatEntry(state, agentMsg('late', A, 'session_1', 12)); // seq 5, the old session's final answer
+        expect(state.sessions).toEqual({ [A]: { sessionId: 'session_2', since: 11, seenSeq: 0 } });
+        applyChatEntry(state, agentMsg('fresh', A, 'session_2', 13)); // seq 6
+        expect(state.sessions).toEqual({ [A]: { sessionId: 'session_2', since: 11, seenSeq: 6 } });
+    });
+
     it('session-ended drops the row; another member’s row stays', () => {
         const state = replay([...joined, started(A, 'session_1', 10), started(B, 'session_2', 11), ended(A, 'session_1', 12)]);
         expect(state.sessions).toEqual({ [B]: { sessionId: 'session_2', since: 11, seenSeq: 0 } });

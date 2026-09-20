@@ -122,9 +122,10 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
         case 'msg': {
             indexFiles(state, entry, seq);
             // The member's own final answer (#392): everything after it is what its engine has not seen.
+            // Only the BOUND session's message moves it — a late answer from a replaced session is not what the new one saw.
             if (entry.author.kind === 'agent') {
                 const row = state.sessions[entry.author.agentId];
-                if (row) state.sessions[entry.author.agentId] = { ...row, seenSeq: seq };
+                if (row && entry.author.sessionId === row.sessionId) state.sessions[entry.author.agentId] = { ...row, seenSeq: seq };
             }
             // The note `setWorkdir` writes (#190): the member's folder for this chat, or none.
             const member = entry.workdir ? state.members[entry.workdir.agentId] : undefined;
