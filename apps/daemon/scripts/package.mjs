@@ -7,13 +7,18 @@
  * closure copied into a plain `node_modules/` (the `@agentic/*` workspace
  * packages as their built `dist/`, the Claude Code SDK with the native CLI
  * for THIS platform), `install.ps1` / `uninstall.ps1` (Windows scheduled
- * task), the `scripts/` they call and a README. Node ≥ 22.12 on the target
- * machine is the only prerequisite; nothing is fetched at install time.
+ * task), `install.sh` / `uninstall.sh` (launchd agent on macOS, systemd user
+ * unit on Linux), the `scripts/` they call and a README. Node ≥ 22.12 on the
+ * target machine is the only prerequisite; nothing is fetched at install time.
+ * The one-line installers the platform serves (`/install.ps1`, `/install.sh`)
+ * download this zip from the `daemon-latest` GitHub release and run its
+ * install script (`.github/workflows/daemon-release.yml`).
  *
  * Run `pnpm build` at the repo root first — the zip is assembled from `dist/`
  * directories and refuses to run without them.
  *
- * Usage: node scripts/package.mjs [--out <dir>]
+ * Usage: node scripts/package.mjs [--out <dir>] [--unversioned]
+ *   --unversioned  name the zip `agentic-daemon-<os>-<arch>.zip` (the release asset name the installers fetch)
  * See `docs/runbook.md` → "Daemon on a Windows machine".
  */
 
@@ -27,8 +32,14 @@ const DAEMON_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Files of the daemon package itself that ship, relative to `apps/daemon`. */
 const DAEMON_FILES = ['bin', 'dist', 'CHANGELOG.md'];
 /** The zip root: what a user sees first. `scripts/package/README.md` becomes the root `README.md`. */
-const ROOT_FILES = { 'install.ps1': 'scripts/package/install.ps1', 'uninstall.ps1': 'scripts/package/uninstall.ps1', 'README.md': 'scripts/package/README.md' };
-const SCRIPT_FILES = ['scripts/install-service.ps1', 'scripts/uninstall-service.ps1'];
+const ROOT_FILES = {
+    'install.ps1': 'scripts/package/install.ps1',
+    'uninstall.ps1': 'scripts/package/uninstall.ps1',
+    'install.sh': 'scripts/package/install.sh',
+    'uninstall.sh': 'scripts/package/uninstall.sh',
+    'README.md': 'scripts/package/README.md'
+};
+const SCRIPT_FILES = ['scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh'];
 /** In a workspace package only the built output ships; everything else stays in the repo. */
 const WORKSPACE_PACKAGE_FILES = ['package.json', 'dist', 'README.md', 'CHANGELOG.md', 'LICENSE'];
 const SKIP_DIRS = new Set(['node_modules', '.git']);
@@ -135,7 +146,7 @@ export function resolveClosure(rootDir) {
 
 /**
  * Assemble the zip.
- * @param {{ outDir?: string; log?: (line: string) => void }} [options]
+ * @param {{ outDir?: string; unversioned?: boolean; log?: (line: string) => void }} [options]
  * @returns {{ zipFile: string; version: string; entries: number; bytes: number; packages: number }}
  */
 export function packageDaemon(options = {}) {
@@ -178,12 +189,15 @@ export function packageDaemon(options = {}) {
     };
 
     const outDir = resolve(options.outDir ?? join(DAEMON_DIR, 'release'));
-    const zipFile = join(outDir, `agentic-daemon-${version}-${process.platform}-${process.arch}.zip`);
+    const zipFile = join(outDir, options.unversioned ? `agentic-daemon-${process.platform}-${process.arch}.zip` : `agentic-daemon-${version}-${process.platform}-${process.arch}.zip`);
     const entries = function* () {
         yield { name: 'package.json', data: Buffer.from(`${JSON.stringify(shipped, null, 2)}\n`, 'utf8') };
         for (const [name, abs] of files) {
-            const mode = name.startsWith('bin/') ? 0o755 : (statSync(abs).mode & 0o111) ? 0o755 : 0o644;
-            yield { name, data: readFileSync(abs), mode };
+            // Shell scripts are executable whatever the checkout says (a Windows checkout keeps no exec bit).
+            const mode = name.startsWith('bin/') || name.endsWith('.sh') ? 0o755 : (statSync(abs).mode & 0o111) ? 0o755 : 0o644;
+            // ...and LF-only: `sh` chokes on the CR a Windows checkout adds.
+            const data = name.endsWith('.sh') ? Buffer.from(readFileSync(abs, 'utf8').replace(/\r\n/g, '\n'), 'utf8') : readFileSync(abs);
+            yield { name, data, mode };
         }
     };
     const result = writeZip(zipFile, entries());
@@ -194,10 +208,12 @@ export function packageDaemon(options = {}) {
 /** @param {readonly string[]} argv */
 function main(argv) {
     let outDir;
+    let unversioned = false;
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--out' && argv[i + 1]) outDir = argv[++i];
+        else if (argv[i] === '--unversioned') unversioned = true;
         else if (argv[i] === '--help' || argv[i] === '-h') {
-            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>]\n');
+            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned]\n');
             return 0;
         } else {
             process.stderr.write(`package: unknown argument ${argv[i]}\n`);
@@ -205,7 +221,7 @@ function main(argv) {
         }
     }
     try {
-        packageDaemon(outDir ? { outDir } : {});
+        packageDaemon({ ...(outDir ? { outDir } : {}), unversioned });
         return 0;
     } catch (e) {
         process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);

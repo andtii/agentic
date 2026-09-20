@@ -145,7 +145,10 @@ export const pairing = {
     code: 'K7Q2MX',
     /** Seconds left on the code when the page opens; the countdown starts at 10:00. */
     expiresIn: 521,
-    install: 'npm i -g agentic-daemon',
+    install: [
+        { os: 'Windows', command: "$env:AGENTIC_URL='https://agentic.example'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='laptop'; irm 'https://agentic.example/install.ps1' | iex" },
+        { os: 'macOS / Linux', command: "curl -fsSL 'https://agentic.example/install.sh' | AGENTIC_URL='https://agentic.example' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='laptop' sh" }
+    ],
     grants: [
         'The machine can accept work for this workspace and report results. Runtime logins stay on the machine. The platform only sees whether each account can authenticate.',
         'Revoke a machine at any time from its page.'
