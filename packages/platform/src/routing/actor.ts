@@ -399,8 +399,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 if (reply.kind === 'error') return reply;
                 // The turn the route is bound to: the one the ack names (local: the running turn on a steer, `serveSession`
                 // answers with its id), or — the daemon's ack comes later, this reply is `pending` — the turn the record runs,
-                // which is the id a steering runtime answers; a refusal the daemon sends after that stays on the Session's command.
-                route.turnId = (reply.kind === 'ack' ? reply.turnId : running?.turnId) ?? requested;
+                // which is the id a steering runtime answers, provided it still runs now that the prompt is out (one that
+                // ended in between left the prompt to start the route's own turn); a refusal the daemon sends after that
+                // stays on the Session's command.
+                const still = reply.kind === 'pending' && running ? (await session(sessionId).get()).running : undefined;
+                route.turnId = (reply.kind === 'ack' ? reply.turnId : still && still.turnId === running?.turnId ? still.turnId : undefined) ?? requested;
                 route.joined = route.turnId !== requested;
                 if (running) await activate(route, route.joined ? `joined running turn ${route.turnId}` : `turn ${running.turnId} ended before the prompt; started turn ${route.turnId}`, sessionId);
                 return { turnId: route.turnId };
