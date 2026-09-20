@@ -26,7 +26,7 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 - [ ] A fresh production deploy from `docs/runbook.md` §2 by someone other than the author reaches §2.7 step 5 (an agent answers in a chat) without reading anything else; every gap found is fixed in the runbook, not worked around.
 - [ ] The daemon installer built by `pnpm --filter @agentic/daemon package` installs on a clean Windows machine with only Node present (`docs/runbook.md` §5): `install.ps1 -Url … -Code …` pairs, `doctor` is green, the machine is online within a minute, `uninstall.ps1` removes the task.
 - [ ] `apps/web/wrangler.jsonc` top-level `vars.APP_ORIGIN` is the production origin (not `http://localhost:8787`) and the GitHub OAuth app's callback matches it.
-- [ ] `AGENTIC_DEV_LOGIN` is **not** set on production (`wrangler secret list` shows no such name; `POST /auth/dev-login` → 404).
+- [ ] `AGENTIC_DEV_LOGIN` is **not** set on production (`wrangler secret list` shows no such name; `POST /auth/dev-login` → the HTML shell, never JSON or a `set-cookie`; runbook §2.7).
 
 ### Secrets and data
 
