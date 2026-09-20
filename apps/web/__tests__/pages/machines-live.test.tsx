@@ -171,8 +171,9 @@ describe('/pair on the live pages', () => {
         expect(dom.querySelector<HTMLInputElement>('[data-pair-name] input')!.value).toBe('machine-1');
         // The commands carry the code, this origin and the name; the countdown runs from ten minutes.
         const wells = texts(dom.querySelectorAll('[data-command-well] code'));
-        expect(wells[0]).toBe(`powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${location.origin} -Code ${code()} -Name machine-1`);
-        expect(wells[1]).toBe(`agentic-daemon pair ${code()} --url ${location.origin} --name machine-1`);
+        expect(wells[0]).toBe(`$env:AGENTIC_URL='${location.origin}'; $env:AGENTIC_CODE='${code()}'; $env:AGENTIC_NAME='machine-1'; irm ${location.origin}/install.ps1 | iex`);
+        expect(wells[1]).toBe(`curl -fsSL ${location.origin}/install.sh | AGENTIC_URL='${location.origin}' AGENTIC_CODE='${code()}' AGENTIC_NAME='machine-1' sh`);
+        expect(wells[2]).toBe(`agentic-daemon pair ${code()} --url ${location.origin} --name machine-1`);
         expect(dom.querySelector('[data-code-status]')!.textContent).toContain('Waiting for the daemon');
         expect(dom.querySelector('[data-code-status]')!.textContent).toMatch(/09:5\d|10:00/);
 
@@ -186,7 +187,7 @@ describe('/pair on the live pages', () => {
         index = await ws.get();
         expect(index.machines.map((m) => [m.name, m.status])).toEqual([['machine-1', 'pending'], ['laptop', 'pending']]);
         expect(index.machines[1]!.pairing!.code).toBe(code());
-        expect(texts(dom.querySelectorAll('[data-command-well] code'))[1]).toContain('--name laptop');
+        expect(texts(dom.querySelectorAll('[data-command-well] code'))[2]).toContain('--name laptop');
 
         // The daemon redeems it (what `POST /auth/pair` does with the code): the page moves to the new machine.
         const newId = index.machines[1]!.id;
@@ -328,7 +329,10 @@ describe('the machine view model', () => {
 
     it('spells the pairing commands and the code’s remaining seconds', () => {
         expect(pairCommands('https://agentic.example', 'K7Q2MX', 'laptop')).toEqual({
-            install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic.example -Code K7Q2MX -Name laptop',
+            install: [
+                { os: 'Windows', command: "$env:AGENTIC_URL='https://agentic.example'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='laptop'; irm https://agentic.example/install.ps1 | iex" },
+                { os: 'macOS / Linux', command: "curl -fsSL https://agentic.example/install.sh | AGENTIC_URL='https://agentic.example' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='laptop' sh" }
+            ],
             pair: 'agentic-daemon pair K7Q2MX --url https://agentic.example --name laptop'
         });
         expect(pairCommands('', 'K7Q2MX', 'laptop').pair).toContain('--url "<platform url>"');

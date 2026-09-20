@@ -103,11 +103,17 @@ describe('installer', () => {
 
             const unpacked = join(dir, 'unpacked');
             const files = extractZip(result.zipFile, unpacked);
-            for (const f of ['README.md', 'install.ps1', 'uninstall.ps1', 'package.json', 'bin/agentic-daemon.mjs', 'dist/cli.js', 'scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'node_modules/@agentic/core/package.json', 'node_modules/@agentic/runtimes/dist/index.js', 'node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs']) {
+            for (const f of ['README.md', 'install.ps1', 'uninstall.ps1', 'install.sh', 'uninstall.sh', 'package.json', 'bin/agentic-daemon.mjs', 'dist/cli.js', 'scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh', 'node_modules/@agentic/core/package.json', 'node_modules/@agentic/runtimes/dist/index.js', 'node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs']) {
                 expect(files, f).toContain(f);
             }
             // Windows PowerShell 5.1 reads a BOM-less script as ANSI: a non-ASCII byte can become a smart quote and break the parse.
             for (const f of files.filter((f) => f.endsWith('.ps1'))) expect([...readFileSync(join(unpacked, f))].every((byte) => byte < 0x80), f).toBe(true);
+            // The shell scripts are executable in the zip whatever the checkout's mode bits (a Windows checkout has none), and LF-only for `sh`.
+            const modes = new Map(readZip(readFileSync(result.zipFile)).map((e) => [e.name, e.mode]));
+            for (const f of files.filter((f) => f.endsWith('.sh'))) {
+                expect(modes.get(f), f).toBe(0o755);
+                expect(readFileSync(join(unpacked, f), 'utf8').includes('\r'), f).toBe(false);
+            }
             expect(files.some((f) => f.startsWith('node_modules/@agentic/core/src/'))).toBe(false);
             expect(files.some((f) => f.startsWith('node_modules/vite/'))).toBe(false);
             const shipped = JSON.parse(readFileSync(join(unpacked, 'package.json'), 'utf8')) as { name: string; version: string; bin: Record<string, string>; devDependencies?: unknown; scripts?: unknown; dependencies: Record<string, string> };
@@ -128,6 +134,11 @@ describe('installer', () => {
             const doctor = run(['doctor']);
             expect(doctor.status).toBe(1);
             expect(doctor.stdout).toMatch(/not paired/);
+        }, 300_000);
+
+        it('--unversioned names the zip like the release asset the installers fetch', () => {
+            const result = packageDaemon({ outDir: dir, unversioned: true, log: () => {} });
+            expect(basename(result.zipFile)).toBe(`agentic-daemon-${process.platform}-${process.arch}.zip`);
         }, 300_000);
     });
 });

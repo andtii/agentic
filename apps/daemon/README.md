@@ -1,6 +1,6 @@
 # @agentic/daemon
 
-`agentic-daemon` — the machine daemon (architecture §5b). It pairs a machine to a workspace once, keeps one reconnecting WebSocket to the platform, reports the machine's execution environments, serves runtime sessions over that socket and bridges platform tool calls. Node ≥ 22.12, Windows first; it also runs on Linux and macOS.
+`agentic-daemon` — the machine daemon (architecture §5b). It pairs a machine to a workspace once, keeps one reconnecting WebSocket to the platform, reports the machine's execution environments, serves runtime sessions over that socket and bridges platform tool calls. Node ≥ 22.12 (the one-line installer downloads it when missing); Windows, macOS and Linux, each with a background service (#343).
 
 ## Use
 
@@ -74,23 +74,29 @@ The platform can ask this machine to add, change or remove an environment (`env.
 - The answer goes out after the `env` frame with the new descriptors. A failure that is the machine's own business (`environments.json` invalid, a write failed) is `io` with a message that names no local path; the details are in the daemon's log.
 - Signing a new environment in stays local: `agentic-daemon env login <id>`.
 
-### Installer zip (Windows)
+### Installer zip
 
 ```sh
 pnpm build                                   # at the repo root: the zip is assembled from dist/ directories
-pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip
+pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip  (--unversioned: the release asset name)
 ```
 
-`scripts/package.mjs` copies `bin/`, `dist/`, the production dependency closure into a plain `node_modules/` (workspace packages as their `dist/`; `@anthropic-ai/claude-agent-sdk`, `@github/copilot-sdk` and `@openai/codex`, each with the native binaries of the building platform, which makes the Windows zip about 330 MB; no declarations or source maps), the scheduled-task scripts and, at the zip root, `install.ps1`, `uninstall.ps1` and a README (`scripts/package/`). The zip needs only Node ≥ 22.12 on the target: `install.ps1 -Url <platform> -Code <pairing code>` checks Node, pairs, runs `doctor` and registers the task below. `scripts/lib/zip.mjs` is the dependency-free zip writer/reader; `__tests__/package.test.ts` builds the zip, unpacks it and runs `--version` and `doctor` on plain Node. Install, upgrade and uninstall steps: `docs/runbook.md` → "Daemon on a Windows machine".
+`scripts/package.mjs` copies `bin/`, `dist/`, the production dependency closure into a plain `node_modules/` (workspace packages as their `dist/`; `@anthropic-ai/claude-agent-sdk`, `@github/copilot-sdk` and `@openai/codex`, each with the native binaries of the building platform, which makes a zip about 330 MB; no declarations or source maps), the service scripts and, at the zip root, `install.ps1` / `uninstall.ps1` (Windows), `install.sh` / `uninstall.sh` (macOS, Linux; always `0755` and LF in the zip) and a README (`scripts/package/`). The zip needs only Node ≥ 22.12 on the target: the install script checks Node (`-NodePath` / `--node` for one that is not on PATH), pairs, runs `doctor` and registers the background service below. `scripts/lib/zip.mjs` is the dependency-free zip writer/reader; `__tests__/package.test.ts` builds the zip, unpacks it and runs `--version` and `doctor` on plain Node.
 
-### Run in the background (Windows)
+**Publishing (#343).** `.github/workflows/daemon-release.yml` builds the zip on Windows, macOS (arm64 and x64) and Linux (x64 and arm64) on every push to `main` that touches the daemon or a package, and uploads them as `agentic-daemon-<os>-<arch>.zip` to the rolling `daemon-latest` pre-release. The one-line installers the web app serves — `apps/web/public/install.ps1` and `install.sh`, printed with the pairing code on the Pair page — download that asset (or `AGENTIC_DAEMON_ZIP=<path or url>`), a portable Node from nodejs.org when the machine has none, unpack to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon` and run the zip's install script; re-running them without a code upgrades in place. Install, upgrade and uninstall steps: `docs/runbook.md` §5.
+
+### Run in the background
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # at logon, restarted on exit
+powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # Windows: a per-user Scheduled Task — at logon, restarted on exit
 powershell -ExecutionPolicy Bypass -File scripts\uninstall-service.ps1
 ```
+```sh
+sh scripts/install-service.sh [--node <path>]                            # macOS: a launchd agent (KeepAlive); Linux: a systemd user unit (Restart=always)
+sh scripts/uninstall-service.sh
+```
 
-This registers a per-user Scheduled Task, not a LocalSystem service: the token and each `CLAUDE_CONFIG_DIR` belong to the signed-in user. Output goes to `%LOCALAPPDATA%\agentic\logs\daemon.log`.
+Never a system service: the token and each `CLAUDE_CONFIG_DIR` belong to the signed-in user. Output goes to `daemon.log` under the state directory (`%LOCALAPPDATA%\agentic\logs`, `~/Library/Application Support/agentic/logs`, `~/.local/state/agentic/logs`).
 
 ## How it works
 

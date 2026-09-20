@@ -245,7 +245,7 @@ describe('/pair — --allow-root (#239)', () => {
         const dom = await mountLive('/pair', h);
         await until(() => dom.querySelector('[data-code-cell]') !== null, 'the code');
         const code = texts(dom.querySelectorAll('[data-code-cell]')).join('');
-        const pairLine = () => texts(dom.querySelectorAll('[data-command-well] code'))[1]!;
+        const pairLine = () => texts(dom.querySelectorAll('[data-command-well] code'))[2]!; // after the two install lines
         expect(pairLine()).not.toContain('--allow-root');
         type(dom, '[data-pair-allow-root] input', 'C:\\My Code');
         await until(() => pairLine().includes('--allow-root'), 'the flag');
@@ -266,9 +266,16 @@ describe('the machine setup model', () => {
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop');
         // A name with a space, and the placeholder URL before the page knows its origin, stay one argument each.
         expect(pairCommands('', 'K7Q2MX', 'my laptop')).toEqual({
-            install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url "<platform url>" -Code K7Q2MX -Name "my laptop"',
+            install: [
+                { os: 'Windows', command: "$env:AGENTIC_URL='<platform url>'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='my laptop'; irm <platform url>/install.ps1 | iex" },
+                { os: 'macOS / Linux', command: "curl -fsSL <platform url>/install.sh | AGENTIC_URL='<platform url>' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='my laptop' sh" }
+            ],
             pair: 'agentic-daemon pair K7Q2MX --url "<platform url>" --name "my laptop"'
         });
+        // A quote in a name cannot break out of either literal.
+        const quoted = pairCommands('https://a.example', 'K7Q2MX', "Andy's Mac").install;
+        expect(quoted[0]!.command).toContain("$env:AGENTIC_NAME='Andy''s Mac'");
+        expect(quoted[1]!.command).toContain("AGENTIC_NAME='Andy'\\''s Mac'");
     });
 
     it('reads the policy and the runtimes a machine can host', () => {

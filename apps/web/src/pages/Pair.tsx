@@ -4,6 +4,7 @@ import { Button, Icon, Label } from '@agentic/ui';
 import { pairing } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { LivePair } from './machines/LivePair';
+import type { InstallLine } from './machines/live';
 import { mmss } from './ops/format';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
@@ -16,7 +17,8 @@ export type PairViewProps =
     & Define.Prop<'code', string, true>
     /** Seconds left when the page opens. */
     & Define.Prop<'expiresIn', number, true>
-    & Define.Prop<'install', string, true>
+    /** The one-line installer per OS (#343): each its own well with Copy. */
+    & Define.Prop<'install', readonly InstallLine[], true>
     & Define.Prop<'grants', readonly string[], true>
     /** The step-2 command; `agentic-daemon pair <code>` unless given (the live page adds `--url` and `--name`). */
     & Define.Prop<'command', string>
@@ -92,11 +94,17 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
                             <span data-step-marker aria-hidden="true"><Icon name="check" size={14} /></span>
                             <div data-step-body>
                                 <h2 data-step-title>Install the daemon on the machine</h2>
-                                <div data-command-well>
-                                    <span data-command-prompt aria-hidden="true">&gt;</span>
-                                    <code>{props.install}</code>
-                                    <Button intent="default" onClick={() => copy(props.install)}>Copy</Button>
-                                </div>
+                                <p data-step-note>One line per OS — it downloads the daemon (and Node when the machine has none), pairs with the code below and keeps the daemon running in the background. Re-run it later to upgrade.</p>
+                                {props.install.map((line) => (
+                                    <div data-install-line>
+                                        <Label>{line.os}</Label>
+                                        <div data-command-well>
+                                            <span data-command-prompt aria-hidden="true">&gt;</span>
+                                            <code>{line.command}</code>
+                                            <Button intent="default" label={`Copy the ${line.os} install line`} onClick={() => copy(line.command)}>Copy</Button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </li>
                         <li data-pair-step data-phase="active">

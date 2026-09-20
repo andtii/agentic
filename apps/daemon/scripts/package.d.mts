@@ -1,6 +1,8 @@
 // Types for scripts/package.mjs (JS with JSDoc; this file keeps the test typed).
 export interface PackageOptions {
     readonly outDir?: string;
+    /** Name the zip `agentic-daemon-<os>-<arch>.zip` (no version): the release asset the installers fetch. */
+    readonly unversioned?: boolean;
     readonly log?: (line: string) => void;
 }
 export interface PackageResult {

@@ -1,6 +1,6 @@
 # Runbook — deploy, daemon install, smokes, operations
 
-Someone with a Cloudflare account, a GitHub account and a Windows machine can bring the platform up from this page (OPS-09, #52). It covers a fresh production deploy from zero, the preview environment, local runs, the daemon installer on a Windows machine, the demo 1 and demo 2 smokes, rollback and day-two operations, and — kept honest at the end — what is not wired yet.
+Someone with a Cloudflare account, a GitHub account and a Windows machine can bring the platform up from this page (OPS-09, #52). It covers a fresh production deploy from zero, the preview environment, local runs, the daemon installer on a Windows, macOS or Linux machine, the demo 1 and demo 2 smokes, rollback and day-two operations, and — kept honest at the end — what is not wired yet.
 
 The web app and every platform actor run as one Cloudflare Worker (`apps/web`) plus one Durable Object class, `ActorHost` (architecture §3). `wrangler.jsonc`'s `main` is `apps/web/worker.mjs`, a one-line façade that re-exports `default` and `ActorHost` from the built `dist/server/entry.cloudflare.js`: the app build's entry chunk also re-exports helpers its sibling chunks share, and workerd refuses a module Worker whose exports are not handlers or classes ("Incorrect type for map entry 'n'"), so the raw entry never starts (#129). Keep `main` on the façade.
 
@@ -10,7 +10,7 @@ The web app and every platform actor run as one Cloudflare Worker (`apps/web`) p
 - A Cloudflare account on **Workers Paid** (Durable Objects on SQLite storage and R2 need it). Note the account's `workers.dev` subdomain (dashboard → Workers & Pages → overview).
 - A GitHub account that can create an OAuth app (personal or in an org).
 - An Anthropic API key for the platform-managed `anthropic-api` runtime (console.anthropic.com → API keys). It is not a deployment secret: each workspace enters its own at `/plugins/anthropic-api` after signing in (#231).
-- For the daemon: a Windows 10/11 machine with Node ≥ 22.12 and at least one Claude Code account signed in per profile directory (`docs/multi-account.md`).
+- For the daemon: a Windows 10/11, macOS or Linux machine with at least one Claude Code account signed in per profile directory (`docs/multi-account.md`); Node is downloaded by the installer when missing (§5).
 
 Clone and install once:
 
@@ -189,29 +189,31 @@ GITHUB_CLIENT_ID=<optional: an OAuth app whose callback is http://localhost:8787
 GITHUB_CLIENT_SECRET=<its secret>
 ```
 
-## 5. Daemon on a Windows machine
+## 5. Daemon on a machine (Windows, macOS, Linux)
 
-The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs once, and keeps one outbound WebSocket to the platform. It ships as a self-contained zip; the machine needs nothing but Node.
+The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs once, and keeps one outbound WebSocket to the platform. It ships as a self-contained zip per OS and CPU, published by CI, and installs with one line from the Pair page; the machine needs nothing installed (#343).
 
-### 5.1 Build the installer
+### 5.1 Where the zip comes from
 
-On a Windows machine with the repo (the zip carries the Claude Code CLI for the platform it is built on — `win32-x64` when built on Windows):
+`.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` on every push to `main` that touches `apps/daemon` or `packages/` (Windows x64, macOS arm64 and x64, Linux x64 and arm64) and uploads them to the rolling **`daemon-latest`** pre-release on GitHub — https://github.com/andtii/agentic/releases/tag/daemon-latest. `workflow_dispatch` reruns it by hand. A tagged release attaches the same zips (`docs/release-checklist.md`).
+
+Building one locally (a zip carries the runtime CLIs of the platform it is built on):
 
 ```sh
 pnpm build
-pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-win32-x64.zip
+pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip (~330 MB; #326 trims it)
 ```
 
-`apps/daemon/scripts/package.mjs` copies the built daemon, the production dependency closure (the `@agentic/*` packages as their `dist/`, `@anthropic-ai/claude-agent-sdk` with the native `claude.exe`), `install.ps1`, `uninstall.ps1`, the scheduled-task scripts and a README into one zip (~115 MB, no declarations or source maps). `apps/daemon/__tests__/package.test.ts` unpacks it and runs `agentic-daemon --version` and `doctor` on plain Node, so a green CI means the zip is self-contained.
+`apps/daemon/scripts/package.mjs` copies the built daemon, the production dependency closure (the `@agentic/*` packages as their `dist/`, the runtime SDKs with their native CLIs), `install.ps1` / `uninstall.ps1`, `install.sh` / `uninstall.sh`, the service scripts and a README into one zip. `apps/daemon/__tests__/package.test.ts` unpacks it and runs `agentic-daemon --version` and `doctor` on plain Node, so a green CI means the zip is self-contained.
 
 ### 5.2 Get a pairing code
 
 Pairing codes come from `Workspace.registerMachinePending({ name })`: six characters, single use, valid 10 minutes; the daemon presents it to `POST /auth/pair` and receives the machine token.
 
-Signed in, open **Machines → Pair a machine** (`/pair`, #144). The page mints a code the moment it opens, under the name in its **Machine name** field (`machine-N` by default — change it and a fresh code is minted under the new name, so the platform's record and the daemon agree), and shows two ready-to-copy lines that carry the code, this origin and the name:
+Signed in, open **Machines → Pair a machine** (`/pair`, #144). The page mints a code the moment it opens, under the name in its **Machine name** field (`machine-N` by default — change it and a fresh code is minted under the new name, so the platform's record and the daemon agree), and shows, with the code, this origin and the name filled in:
 
-- step 1, the installer: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url <origin> -Code <code> -Name <name>` (§5.3);
-- step 2, by hand: `agentic-daemon pair <code> --url <origin> --name <name>`.
+- step 1, one install line per OS (§5.3);
+- step 2, the by-hand pair command: `agentic-daemon pair <code> --url <origin> --name <name>`.
 
 The countdown runs from 10:00; at zero **New code** mints another. The page watches the record: as soon as the daemon redeems the code it moves to the machine's page. Without the browser (a script, a headless box), the same call over the actor mount while signed in:
 
@@ -224,46 +226,59 @@ const r = await fetch('/_sigx/actor/Workspace/registerMachinePending', {
 console.log(await r.json());   // { machineId, pairingCode, expiresAt }
 ```
 
-### 5.3 Install
+### 5.3 Install — one line
 
-On the machine, as the user who owns the Claude Code accounts:
+On the machine, as the user who owns the Claude Code accounts, paste the line the Pair page shows for that OS (Copy button):
 
-1. Unpack the zip to a folder that stays put, e.g. `C:\agentic\daemon`.
-2. Add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `node bin\agentic-daemon.mjs env add --name Work --root C:\src\work [--concurrency 2] [--account me@work.example]` writes `%APPDATA%\agentic\environments.json` (atomically, owner-only) and gives the environment its own profile folder `%APPDATA%\agentic\profiles\<id>`; `env list` and `env rm <id>` do the rest. Sign each one in once: `node bin\agentic-daemon.mjs env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe`). This step can also come after step 3: a daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored. To let the Machine page add environments instead, allow the folders on the machine: `node bin\agentic-daemon.mjs policy allow-root C:\src` (off by default; the web never sees past those folders or into `%APPDATA%\agentic`; #238, `apps/daemon/README.md`).
-3. In PowerShell, from the folder:
+```powershell
+# Windows (PowerShell)
+$env:AGENTIC_URL='https://agentic-web.ekdahls.workers.dev'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<name>'; irm https://agentic-web.ekdahls.workers.dev/install.ps1 | iex
+```
+```sh
+# macOS / Linux
+curl -fsSL https://agentic-web.ekdahls.workers.dev/install.sh | AGENTIC_URL=https://agentic-web.ekdahls.workers.dev AGENTIC_CODE=<code> AGENTIC_NAME=<name> sh
+```
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic-web.<subdomain>.workers.dev -Code <pairing code>
-   ```
+The Worker serves the two bootstraps from `apps/web/public/` (`_headers` makes them `text/plain`). Each one: uses Node ≥ 22.12 from PATH or downloads a portable Node 22 from nodejs.org into the install root; downloads `agentic-daemon-<os>-<arch>.zip` from `daemon-latest`; stops a running daemon; unpacks to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon`; then runs the zip's own installer, which pairs with the code, runs `doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07) and registers the background service — on Windows the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user); on macOS the launchd agent `~/Library/LaunchAgents/agentic-daemon.plist` (KeepAlive); on Linux the systemd user unit `agentic-daemon.service` (`Restart=always`, `loginctl enable-linger` so it survives logout). Environment overrides: `AGENTIC_DAEMON_ZIP=<path or url>` installs that zip instead (a local build, §5.1), `AGENTIC_INSTALL_DIR` moves the install root, `AGENTIC_DAEMON_HOME` moves the daemon's data.
 
-   `install.ps1` checks Node ≥ 22.12, runs `agentic-daemon pair` (stores `%APPDATA%\agentic\credentials.json` owner-only), runs `agentic-daemon doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07), then registers the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user) and starts it.
+Within a minute the machine is `online` on **Machines** with its environments, and its page (`/machines/:id`) lists the daemon's doctor verdicts per environment (`Machine.get()` / `Machine.doctor()`; the MCP surface's `machines_list` and `environments_doctor`). An agent's Config tab now offers those environments as its default environment.
 
-4. Within a minute the machine is `online` on **Machines** with its environments, and its page (`/machines/:id`) lists the daemon's doctor verdicts per environment (`Machine.get()` / `Machine.doctor()`; the MCP surface's `machines_list` and `environments_doctor`). An agent's Config tab now offers those environments as its default environment.
+Then add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `agentic-daemon env add --name Work --root <folder> [--concurrency 2] [--account me@work.example]` (from the install folder: `node bin/agentic-daemon.mjs …`) writes `environments.json` atomically, owner-only, and gives the environment its own profile folder; `env list` and `env rm <id>` do the rest. Sign each one in once: `agentic-daemon env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules/@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude`). A daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored. To let the Machine page add environments instead, allow the folders on the machine: `agentic-daemon policy allow-root <folder>` (off by default; the web never sees past those folders or into the daemon's data folder; #238, `apps/daemon/README.md`).
 
-Already paired (upgrade, or `pair` run by hand)? `install.ps1` with no arguments.
+By hand instead (an unpacked zip, no bootstrap): `powershell -ExecutionPolicy Bypass -File install.ps1 -Url <origin> -Code <code> [-Name <name>] [-NodePath <node.exe>]` or `sh install.sh --url <origin> --code <code> [--name <name>] [--node <node>]` from the folder; already paired, no arguments.
 
 ### 5.4 Doctor, logs, restart
 
 ```powershell
-node bin\agentic-daemon.mjs doctor                                         # exit 1 on any error; the token is never printed
+# Windows
+node "$env:LOCALAPPDATA\agentic\daemon\bin\agentic-daemon.mjs" doctor       # exit 1 on any error; the token is never printed
 Get-ScheduledTask -TaskName agentic-daemon | Get-ScheduledTaskInfo         # LastRunTime, LastTaskResult
 Get-Content -Wait "$env:LOCALAPPDATA\agentic\logs\daemon.log"              # JSON lines; redacted of the token
 Stop-ScheduledTask -TaskName agentic-daemon; Start-ScheduledTask -TaskName agentic-daemon
 ```
+```sh
+# macOS
+node ~/.agentic/daemon/bin/agentic-daemon.mjs doctor
+launchctl print gui/$(id -u)/agentic-daemon | head
+tail -f ~/Library/Application\ Support/agentic/logs/daemon.log
+launchctl kickstart -k gui/$(id -u)/agentic-daemon
+# Linux
+systemctl --user status agentic-daemon; tail -f ~/.local/state/agentic/logs/daemon.log; systemctl --user restart agentic-daemon
+```
 
-| File | Where |
-|---|---|
-| `credentials.json` (machine token, owner-only ACL) | `%APPDATA%\agentic` |
-| `environments.json` | `%APPDATA%\agentic` |
-| session logs `{sessionId}.ndjson` (gapless replay after a reconnect) | `%LOCALAPPDATA%\agentic\sessions` |
-| `daemon.log` | `%LOCALAPPDATA%\agentic\logs` |
+| File | Windows | macOS | Linux |
+|---|---|---|---|
+| `credentials.json` (machine token, owner-only), `environments.json`, `profiles/` | `%APPDATA%\agentic` | `~/Library/Application Support/agentic` | `~/.config/agentic` |
+| session logs `{sessionId}.ndjson` (gapless replay after a reconnect) | `%LOCALAPPDATA%\agentic\sessions` | `~/Library/Application Support/agentic/sessions` | `~/.local/state/agentic/sessions` |
+| `daemon.log` | `%LOCALAPPDATA%\agentic\logs` | `~/Library/Application Support/agentic/logs` | `~/.local/state/agentic/logs` |
+| the install (the zip, and `node/` when downloaded) | `%LOCALAPPDATA%\agentic\daemon` | `~/.agentic/daemon` | `~/.agentic/daemon` |
 
-`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (`install-service.ps1` honours it).
+`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (the service scripts pass it on).
 
 ### 5.5 Upgrade and uninstall
 
-- **Upgrade:** unpack the new zip to a new folder, run its `install.ps1` with no arguments — the pairing is reused, the task is stopped, re-registered to the new folder and restarted — then delete the old folder.
-- **Uninstall:** `powershell -ExecutionPolicy Bypass -File uninstall.ps1` removes the task and keeps `%APPDATA%\agentic` and `%LOCALAPPDATA%\agentic`; delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
+- **Upgrade:** run the install line again without `AGENTIC_CODE` (the pairing is reused: the service is stopped, the folder replaced, the service re-registered and restarted). `daemon-latest` moves with `main`, so this is also how a machine follows a fix.
+- **Uninstall:** `powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\agentic\daemon\uninstall.ps1"` / `sh ~/.agentic/daemon/uninstall.sh` removes the service and keeps the data folders above; delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
 
 ## 6. Demo 1 smoke (`smoke:demo1`, #35)
 
@@ -284,7 +299,7 @@ Each run signs in as a fresh `dev_demo1-<stamp>` identity (set `DEMO1_USER` to r
 
 Demo 2 has no scripted runner yet (`smoke:demo2` is the open half of #38); the platform half — Machine socket, routing, session relay, approvals, cancel — is pinned offline by `apps/web/__tests__/workers/daemon.test.ts`, the acceptance scenarios AC-01/02/07 (`test:acceptance`, #51) and `daemonConformance`. The manual run, recorded:
 
-1. Deploy (§2 or §3) and install the daemon on a Windows machine (§5) with one environment, e.g. `env_work` on `C:/src/demo` — `doctor` green, the machine `online`.
+1. Deploy (§2 or §3) and install the daemon on a machine (§5) with one environment, e.g. `env_work` on `C:/src/demo` — `doctor` green, the machine `online`.
 2. Create an agent on the `claude-code` runtime with that environment as its default (`Agent.update({ execution: { runtime: 'claude-code', defaultEnvironmentId, offlinePolicy: 'queue', limits } }, reason)`; the agent form on the Agent page once §10 lands) and an approval rule for file writes (`docs/architecture.md` §7, #40).
 3. Start a direct chat and post a task that writes a file under the working root — e.g. "create hello.md with a greeting".
 4. On the machine: `daemon.log` shows `session.open` for `env_work`, then the session frames; on the platform the chat shows the session status and the tool call.
@@ -368,7 +383,6 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |
 | Second Worker for the Durable Object host, so UI deploys do not evict live sessions | one Worker; a deploy interrupts live sessions, which resume as "interrupted" | follow-up (architecture §3) |
-| macOS / Linux daemon install | the daemon runs there (`agentic-daemon run` in the foreground; `AGENTIC_DAEMON_HOME` for paths); no launchd / systemd unit and no zip for those platforms | decisions §2 |
 | Chat read state across devices | unread counts on the chat list are device-local: the chat's `seq` when this browser last had it open, in `localStorage` (`apps/web/src/pages/chat/read-marks.ts`); another device, or cleared site data, starts from the chat's present end | #157 |
 | Jump from a search hit to its message | "Search this chat" lists the hits (`Chat.search`, whole history) with who and when; the Thread's rows carry no DOM id, and a hit may be older than the entries the thread has loaded | follow-up on `@agentic/ui` Thread + "Load earlier" |
 | Revoking a session grant | session grants are listed, not revocable — they end with the session (`SessionInfo.grants`: the adapter holds them and offers no way to take one back); the session page lists them read-only and draws no Revoke | — (#154) |

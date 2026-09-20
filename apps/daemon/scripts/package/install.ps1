@@ -23,6 +23,9 @@
     Pair and run doctor only; do not register the background task.
 .PARAMETER TaskName
     The Scheduled Task name (default: agentic-daemon).
+.PARAMETER NodePath
+    The node.exe to run the daemon with (default: the `node` on PATH). The one-line installer passes the
+    portable Node it downloaded when the machine has none.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic.example -Code ABC234
@@ -35,7 +38,8 @@ param(
     [string] $Code,
     [string] $Name,
     [switch] $NoService,
-    [string] $TaskName = 'agentic-daemon'
+    [string] $TaskName = 'agentic-daemon',
+    [string] $NodePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,8 +49,8 @@ $bin = Join-Path $here 'bin\agentic-daemon.mjs'
 if (-not (Test-Path $bin)) { Fail "bin\agentic-daemon.mjs not found next to install.ps1 - run this script from the unpacked zip." }
 
 # 1. Node >= 22.12
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) { Fail "node is not on PATH. Install Node.js 22.12 or newer from https://nodejs.org and open a new terminal." }
+$node = if ($NodePath) { Get-Command $NodePath -ErrorAction SilentlyContinue } else { Get-Command node -ErrorAction SilentlyContinue }
+if (-not $node) { Fail "node is not on PATH. Install Node.js 22.12 or newer from https://nodejs.org and open a new terminal, or run the one-line installer from the platform's Pair page (it downloads Node)." }
 $nodeVersion = [Version]((& $node.Source --version).TrimStart('v'))
 if ($nodeVersion -lt [Version]'22.12.0') { Fail "Node.js $nodeVersion is too old: agentic-daemon needs 22.12 or newer." }
 $daemonVersion = (& $node.Source $bin --version)

@@ -1,0 +1,2 @@
+# Shell scripts run on macOS / Linux from a zip built on any OS: never CRLF.
+*.sh text eol=lf

@@ -833,6 +833,9 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-step-body] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
 [data-step-title] { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: 30px; }
 [data-step-hint] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-step-note] { margin: 0; font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-install-line] { display: flex; flex-direction: column; gap: var(--space-xs); }
+[data-install-line] [data-command-well] { font-size: var(--text-sm); }
 [data-command-well] { display: flex; align-items: center; gap: var(--space-md); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg); font-family: var(--font-mono); font-size: var(--text-md); }
 [data-command-well] > code { flex: 1 1 auto; background: none; padding: 0; overflow-wrap: anywhere; }
 [data-command-prompt] { color: var(--ag-text-dim); }

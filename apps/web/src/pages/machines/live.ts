@@ -166,11 +166,23 @@ export function environmentOptions(machines: readonly { readonly name: string; r
 
 /* ------------------------------------------------------------------ pairing */
 
-/** What the Pair page shows: the runbook's install line (§5.3, pairs too) and the by-hand pair command. */
+/** One line to paste on the machine: the one-line installer for that OS (#343) — downloads the daemon, pairs, runs it in the background. */
+export interface InstallLine {
+    /** What the well is labelled: `Windows`, `macOS / Linux`. */
+    readonly os: string;
+    readonly command: string;
+}
+
+/** What the Pair page shows: the one-line installer per OS (runbook §5) and the by-hand pair command. */
 export interface PairCommands {
-    readonly install: string;
+    readonly install: readonly InstallLine[];
     readonly pair: string;
 }
+
+/** A PowerShell single-quoted literal: only `'` needs care. */
+const psArg = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+/** A POSIX single-quoted literal. */
+const shArg = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
 /**
  * `allowRoot` is the folder the machine lets this page manage environments in
@@ -179,11 +191,15 @@ export interface PairCommands {
  */
 export function pairCommands(origin: string, code: string, name: string, allowRoot = ''): PairCommands {
     // Every value quoted when it needs it: a machine name may hold a space, and so does the placeholder URL.
-    const url = shellArg(origin || '<platform url>');
+    const base = origin || '<platform url>';
+    const url = shellArg(base);
     const machine = shellArg(name);
     const root = allowRoot.trim();
     return {
-        install: `powershell -ExecutionPolicy Bypass -File install.ps1 -Url ${url} -Code ${code} -Name ${machine}`,
+        install: [
+            { os: 'Windows', command: `$env:AGENTIC_URL=${psArg(base)}; $env:AGENTIC_CODE=${psArg(code)}; $env:AGENTIC_NAME=${psArg(name)}; irm ${base}/install.ps1 | iex` },
+            { os: 'macOS / Linux', command: `curl -fsSL ${base}/install.sh | AGENTIC_URL=${shArg(base)} AGENTIC_CODE=${shArg(code)} AGENTIC_NAME=${shArg(name)} sh` }
+        ],
         pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${root ? ` --allow-root ${shellArg(root)}` : ''}`
     };
 }
