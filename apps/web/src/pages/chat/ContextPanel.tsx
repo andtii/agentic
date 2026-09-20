@@ -1,8 +1,9 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import type { EnvironmentId, WorkdirRef } from '@agentic/core';
+import type { EnvironmentId, ProjectRecord, WorkdirRef } from '@agentic/core';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
+import { effectiveWorkdir } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
@@ -27,6 +28,8 @@ export type ContextPanelProps =
     & Define.Prop<'environments', readonly WorkdirEnvironment[]>
     /** The machine an environment belongs to — where the picker's folder requests go (live). */
     & Define.Prop<'machineOf', (environmentId: string) => string | undefined>
+    /** The chat's project (#333): a member without its own folder runs in the project's folder for its environment. */
+    & Define.Prop<'project', Pick<ProjectRecord, 'folders'>>
     /** A member's folder for this chat was picked, or cleared with `null`. */
     & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>;
 
@@ -59,6 +62,8 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     <ul data-members>
                         {props.chat.members.map((member) => {
                             const a = lookup(member.agentId);
+                            // The folder it runs in: its override for this chat, else the project's for its environment (#333).
+                            const folder = effectiveWorkdir(member, a.environmentId, props.project);
                             return (
                                 <li data-member>
                                     <AgentTile name={a.name} hue={a.hue} size={28} />
@@ -66,18 +71,20 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     <span data-member-role>{a.role}</span>
                                     <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     <EnvironmentLine tone="muted" {...a.environment} />
-                                    {props.environments ? <span data-member-quota><QuotaBadge {...memberQuota(a, member.workdir?.environmentId, props.environments)} /></span> : null}
+                                    {props.environments ? <span data-member-quota><QuotaBadge {...memberQuota(a, folder.ref?.environmentId, props.environments)} /></span> : null}
                                     <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
                                     {props.environments && a.environment.runtime !== 'anthropic-api' ? (
-                                        <span data-member-workdir>
+                                        <span data-member-workdir data-inherited={folder.inherited ? '' : undefined}>
                                             <WorkdirField
                                                 compact
-                                                value={member.workdir ?? null}
+                                                value={folder.ref}
                                                 environments={props.environments}
                                                 label={`Working folder for ${a.name}`}
                                                 onOpen={() => { st.pickFor = member.agentId; st.picking = true; }}
                                                 onClear={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}
                                             />
+                                            {folder.inherited ? <span data-member-workdir-from>from project</span> : null}
+                                            {member.workdir ? <button type="button" data-link-button data-member-workdir-clear onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}>Clear</button> : null}
                                         </span>
                                     ) : null}
                                 </li>
@@ -118,7 +125,8 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     <WorkdirPicker
                         model={() => st.picking}
                         title={st.pickFor ? `Working folder for ${lookup(st.pickFor).name}` : 'Working folder'}
-                        value={props.chat.members.find((m) => m.agentId === st.pickFor)?.workdir ?? null}
+                        // Opens on the folder in effect: the override, else the project's (#333).
+                        value={(() => { const m = props.chat.members.find((x) => x.agentId === st.pickFor); return m ? effectiveWorkdir(m, lookup(m.agentId).environmentId, props.project).ref : null; })()}
                         environments={props.environments}
                         {...(props.machineOf ? { machineOf: props.machineOf } : {})}
                         // A daemon agent's identity names its default environment there (`identityOf`); anything else is ignored.

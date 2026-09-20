@@ -8,7 +8,7 @@
  * replace the body of each loader with actor reads; the pages keep the
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
-import type { AuthStatus, CapabilityReport, EnvironmentId, MachineId, SessionId, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
+import type { AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
@@ -185,13 +185,54 @@ export interface MockChatSummary {
     /** An approval is open in this chat (amber pill on the row). */
     readonly waiting: boolean;
     readonly updatedAt: number;
+    /** The project the chat belongs to (#333, `Chat.setProject`); absent when it is in none. */
+    readonly projectId?: string;
 }
+
+// ---- projects (#333) ------------------------------------------------------
+
+const pid = (s: string): ProjectId => s as ProjectId;
+const eid = (s: string): EnvironmentId => s as EnvironmentId;
+
+/**
+ * The workspace's projects: "agentic" lives on two environments with the git
+ * feature on, "docs-site" on one. A chat in a project inherits the project's
+ * folder for each member's environment.
+ */
+export const PROJECTS: readonly ProjectRecord[] = [
+    {
+        id: pid('p_agentic'),
+        name: 'agentic',
+        description: 'The Unified Agent Platform monorepo.',
+        members: { agentIds: ['forge', 'lint', 'atlas'] as never[], coordinator: 'atlas' as never },
+        folders: { [eid('env_alien01_work')]: 'C:\\Dev\\agentic\\main', [eid('env_alien01_personal')]: 'C:\\Users\\andy\\src\\agentic' },
+        connectors: [{ id: 'github-mcp' }],
+        features: { 'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktreePerChat: true, instructions: 'Branch first; never work on main.' } },
+        createdAt: hoursAgo(72),
+        updatedAt: hoursAgo(2)
+    },
+    {
+        id: pid('p_docs'),
+        name: 'docs-site',
+        members: { agentIds: ['scout'] as never[], coordinator: null },
+        folders: { [eid('env_alien01_personal')]: 'C:\\Users\\andy\\src\\blog' },
+        connectors: [],
+        features: {},
+        createdAt: hoursAgo(48),
+        updatedAt: hoursAgo(48)
+    }
+];
+
+export const projectNamed = (id: string): ProjectRecord | undefined => PROJECTS.find((p) => p.id === id);
+
+/** The project the New chat picker preselects on mock data: the one used last. */
+export const LAST_PROJECT_ID: string = 'p_agentic';
 
 export const CHATS: readonly MockChatSummary[] = [
     { id: 'c1', title: 'Mobile pass #47', members: [{ agentId: 'atlas', status: 'waiting', coordinator: true, history: { access: 'all' } }, { agentId: 'forge', status: 'waiting', history: { access: 'all' } }, { agentId: 'lint', status: 'active', history: { access: 'from', at: minutesAgo(14) } }], lastLine: 'Forge is waiting for approval', unread: 1, waiting: true, updatedAt: minutesAgo(2) },
-    { id: 'c2', title: 'A2A landscape', members: [{ agentId: 'scout', status: 'waiting', history: { access: 'all' } }], lastLine: 'Scout asked a question', unread: 1, waiting: false, updatedAt: minutesAgo(18) },
+    { id: 'c2', title: 'A2A landscape', members: [{ agentId: 'scout', status: 'waiting', history: { access: 'all' } }], lastLine: 'Scout asked a question', unread: 1, waiting: false, updatedAt: minutesAgo(18), projectId: 'p_docs' },
     { id: 'c3', title: 'Atlas', members: [{ agentId: 'atlas', status: 'idle', coordinator: true, history: { access: 'all' } }], lastLine: 'Weekly summary interrupted', unread: 0, waiting: false, updatedAt: minutesAgo(18) },
-    { id: 'c4', title: 'Release checklist', members: [{ agentId: 'forge', status: 'idle', history: { access: 'all' } }, { agentId: 'lint', status: 'idle', history: { access: 'all' } }], lastLine: 'Lint: runbook section 3 reads fine now', unread: 0, waiting: false, updatedAt: hoursAgo(5) },
+    { id: 'c4', title: 'Release checklist', members: [{ agentId: 'forge', status: 'idle', history: { access: 'all' } }, { agentId: 'lint', status: 'idle', history: { access: 'all' } }], lastLine: 'Lint: runbook section 3 reads fine now', unread: 0, waiting: false, updatedAt: hoursAgo(5), projectId: 'p_agentic' },
     { id: 'c5', title: 'Field service event', members: [{ agentId: 'atlas', status: 'idle', coordinator: true, history: { access: 'all' } }], lastLine: 'Reminder set for 15:00', unread: 0, waiting: false, updatedAt: hoursAgo(27) },
     { id: 'c6', title: 'Empty chat', members: [{ agentId: 'scout', status: 'idle', history: { access: 'all' } }], lastLine: '', unread: 0, waiting: false, updatedAt: hoursAgo(30) }
 ];

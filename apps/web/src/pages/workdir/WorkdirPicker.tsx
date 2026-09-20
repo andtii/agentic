@@ -14,7 +14,7 @@ import { component, effect, onUnmounted, signal, type Define, type JSXElement } 
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { EnvironmentId, FsError, FsListResult, WorkdirRef } from '@agentic/core';
-import { WorkdirDialog, type WorkdirEnvironment, type WorkdirRecent, type WorkdirWorktreeRequest } from '@agentic/ui';
+import { WorkdirDialog, type WorkdirEnvironment, type WorkdirRecent, type WorkdirSelection, type WorkdirWorktreeRequest } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { dataMode } from '../../data-mode';
@@ -31,7 +31,8 @@ export type WorkdirPickerProps =
     & Define.Prop<'machineOf', (environmentId: string) => string | undefined>
     /** Open on this environment when the value names none (an agent's default environment). */
     & Define.Prop<'preferred', EnvironmentId | null>
-    & Define.Event<'select', WorkdirRef>
+    /** The folder, with its git badge when the listing carried one (#333). */
+    & Define.Event<'select', WorkdirSelection>
     & Define.Event<'cancel'>;
 
 interface PickerState {
@@ -55,7 +56,7 @@ interface Backend {
 }
 
 /** The dialog over one state and one backend; opening puts it on the value (or the preferred environment). */
-function pickerView(props: WorkdirPickerProps, emit: (e: 'select' | 'cancel', v?: WorkdirRef) => void, st: PickerState, backend: Backend) {
+function pickerView(props: WorkdirPickerProps, emit: (e: 'select' | 'cancel', v?: WorkdirSelection) => void, st: PickerState, backend: Backend) {
     const navigate = (to: { environmentId: EnvironmentId; path: string | null }): void => {
         st.environmentId = to.environmentId;
         st.path = to.path;
@@ -95,7 +96,7 @@ function pickerView(props: WorkdirPickerProps, emit: (e: 'select' | 'cancel', v?
             creating={st.creating}
             worktreeError={st.worktreeError}
             onNavigate={navigate}
-            onSelect={(ref: WorkdirRef) => emit('select', ref)}
+            onSelect={(ref: WorkdirSelection) => emit('select', ref)}
             onCreateWorktree={(request: WorkdirWorktreeRequest) => {
                 st.creating = true;
                 st.worktreeError = null;
@@ -239,7 +240,7 @@ export const WorkdirPicker = component<WorkdirPickerProps>(({ props, emit }) => 
         ...(props.title ? { title: props.title } : {}),
         ...(props.machineOf ? { machineOf: props.machineOf } : {}),
         preferred: props.preferred ?? null,
-        onSelect: (ref: WorkdirRef) => emit('select', ref),
+        onSelect: (ref: WorkdirSelection) => emit('select', ref),
         onCancel: () => emit('cancel')
     };
     return dataMode() === 'live' ? <LiveWorkdirPicker {...forward} /> : <MockWorkdirPicker {...forward} />;

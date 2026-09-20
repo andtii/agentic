@@ -15,13 +15,17 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, MachineId, NotificationPrefs, RetentionSettings, ScheduleId, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
-import { actorKey, createId, DEFAULT_WORKSPACE_SETTINGS } from '@agentic/core';
-import { defineActor, type ActorPolicy } from '@sigx/actors';
+import type { AgentId, ChatFileStore, ChatId, ConnectorRef, EnvironmentDescriptor, EnvironmentId, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, createId, DEFAULT_WORKSPACE_SETTINGS, pathWithin, PROJECTS_MAX } from '@agentic/core';
+import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
+import { recordAudit } from '../audit/port.js';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
+import { defineMachineActor, machineKey, type MachineView } from '../machine/index.js';
 import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
+import { Registry } from '../registry/actor.js';
+import { registryKey } from '../registry/key.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
 
@@ -76,6 +80,9 @@ export interface RecentWorkdir extends WorkdirRef {
 /** `recentWorkdirs` keeps at most this many, most recent first. */
 export const RECENT_WORKDIRS_MAX = 20;
 
+/** A project's name is one line of at most this many characters; `upsertProject` collapses whitespace and rejects the rest. */
+export const MAX_PROJECT_NAME_LENGTH = 120;
+
 export interface WorkspaceState {
     v: number;
     /** The owning user; the key's `{userId}` segment. */
@@ -90,6 +97,10 @@ export interface WorkspaceState {
     ops?: WorkspaceOps;
     /** Folders chosen for work lately (#190), most recent first, one per `{environmentId, path}`, at most `RECENT_WORKDIRS_MAX`; absent on older records. */
     recentWorkdirs?: RecentWorkdir[];
+    /** The workspace's projects (#330/#332), creation order, at most `PROJECTS_MAX`; absent on older records. */
+    projects?: ProjectRecord[];
+    /** The project last chosen for a chat (`createChat({ projectId })`, `noteProject`): what the New chat picker preselects. Absent until one is; cleared when that project is removed. */
+    lastProjectId?: ProjectId;
 }
 
 /** What `get` returns: the state, detached from the actor. */
@@ -101,6 +112,8 @@ export interface CreateAgentInput {
 
 export interface CreateChatInput {
     readonly title?: string;
+    /** The project the new chat belongs to (#332): written to the chat over a hop (`Chat.setProject`) after the index save, and noted as the last used. */
+    readonly projectId?: ProjectId;
 }
 
 export interface RegisterMachineInput {
@@ -156,6 +169,121 @@ function codesMatch(a: string, b: string): boolean {
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/**
+ * A Machine definition to hop with for the environment directory (`upsertProject`): the host resolves the target
+ * by `type`, so the app's `defineMachineActor` instance answers and this one's ports never run. Built lazily —
+ * `machine/actor.ts` imports this module, and a top-level call would hit the cycle before it settles.
+ */
+let machineRef: AnyActorDefinition | undefined;
+const machineRefDef = (): AnyActorDefinition => (machineRef ??= defineMachineActor({ socket: { send: () => false, close: () => undefined } }));
+
+interface MachineGetClient {
+    get(): Promise<MachineView>;
+}
+
+/** The daemon's path rules; one that never said is taken for Windows, the first platform (decision 2). */
+const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
+
+const bad = (message: string): never => {
+    throw new ServerFnError(400, `Workspace.upsertProject: ${message}`);
+};
+
+/**
+ * The `folders` of a project after `patch.folders` — `null` removes an entry — with every folder the patch sets
+ * checked against its environment's roots through the paired machines' reports (the same directory the router
+ * scans, `routing/locate.ts`): a folder no machine can run in is never stored.
+ */
+async function checkedFolders(ctx: ActorContext<WorkspaceState>, base: ProjectRecord['folders'] | undefined, patch: ProjectPatch['folders']): Promise<Record<string, string>> {
+    const folders: Record<string, string> = {};
+    for (const [environmentId, path] of Object.entries(base ?? {})) if (typeof path === 'string') folders[environmentId] = path;
+    if (patch === undefined) return folders;
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) bad('folders must be an object keyed by environment id');
+    const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+    let machines: MachineView[] | undefined;
+    const environment = async (environmentId: EnvironmentId): Promise<{ env: EnvironmentDescriptor; os: HostOs } | null> => {
+        if (!machines) {
+            machines = [];
+            for (const entry of ctx.state.machines) {
+                if (entry.status !== 'paired') continue;
+                try {
+                    machines.push(await (ctx.actor(machineRefDef(), machineKey(workspaceId, entry.id)) as unknown as MachineGetClient).get());
+                } catch {
+                    // A machine that cannot be read reports no environment.
+                }
+            }
+        }
+        for (const m of machines) {
+            const env = m.environments.find((e) => e.id === environmentId);
+            if (env) return { env, os: osOf(m) };
+        }
+        return null;
+    };
+    for (const [environmentId, path] of Object.entries(patch)) {
+        if (path === undefined) continue;
+        if (!environmentId.trim()) bad('an environment id is required for every folder');
+        if (path === null) {
+            delete folders[environmentId];
+            continue;
+        }
+        if (typeof path !== 'string' || !path.trim()) bad(`the folder for environment ${environmentId} must be a path`);
+        const folder = path.trim();
+        const found = await environment(environmentId as EnvironmentId);
+        if (!found) bad(`no machine of the workspace reports environment ${environmentId}`);
+        if (!pathWithin(folder, found!.env.cwdRoots, found!.os)) bad(`folder ${folder} is outside the roots of environment ${environmentId} (${found!.env.cwdRoots.join(', ') || 'none'})`);
+        folders[environmentId] = folder;
+    }
+    return folders;
+}
+
+/** `members` as stored: every agent of the workspace, the coordinator one of them or none. */
+function checkedMembers(state: WorkspaceState, members: ProjectMembers | undefined, base: ProjectMembers | undefined): ProjectMembers {
+    if (members === undefined) return base ?? { agentIds: [], coordinator: null };
+    if (members === null || typeof members !== 'object' || !Array.isArray(members.agentIds)) bad('members must be { agentIds, coordinator }');
+    const agentIds = [...new Set(members.agentIds)];
+    for (const id of agentIds) {
+        if (typeof id !== 'string' || !state.agents.includes(id)) bad(`${String(id)} is not an agent of this workspace`);
+    }
+    const coordinator = members.coordinator ?? null;
+    if (coordinator !== null && !agentIds.includes(coordinator)) bad(`the coordinator ${String(coordinator)} must be one of the members`);
+    return { agentIds, coordinator };
+}
+
+/** `connectors` as stored: refs with an id, one per id. */
+function checkedConnectors(connectors: readonly ConnectorRef[] | undefined, base: readonly ConnectorRef[] | undefined): ConnectorRef[] {
+    if (connectors === undefined) return [...(base ?? [])];
+    if (!Array.isArray(connectors)) bad('connectors must be an array');
+    const out: ConnectorRef[] = [];
+    for (const c of connectors) {
+        if (c === null || typeof c !== 'object' || typeof c.id !== 'string' || !c.id.trim()) bad('every connector needs an id');
+        if (!out.some((x) => x.id === c.id)) out.push({ id: c.id });
+    }
+    return out;
+}
+
+/** `features` after `patch.features` — `null` removes one — each settings object checked by the Registry (`checkProjectSettings`) over a hop. */
+async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectFeatures | undefined, patch: ProjectPatch['features']): Promise<Record<string, Record<string, unknown>>> {
+    const features: Record<string, Record<string, unknown>> = {};
+    for (const [id, settings] of Object.entries(base ?? {})) features[id] = { ...settings };
+    if (patch === undefined) return features;
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) bad('features must be an object keyed by plugin id');
+    const registry = ctx.actor(Registry, registryKey(ownerOfWorkspaceKey(ctx.key)));
+    for (const [id, settings] of Object.entries(patch)) {
+        if (!id.trim()) bad('a plugin id is required for every feature');
+        if (settings === null) {
+            delete features[id];
+            continue;
+        }
+        if (typeof settings !== 'object' || Array.isArray(settings)) bad(`the settings of feature ${id} must be an object`);
+        try {
+            await registry.checkProjectSettings(id, settings);
+        } catch (error) {
+            bad(`feature ${id}: ${errorText(error)}`);
+        }
+        features[id] = { ...settings };
+    }
+    return features;
+}
+
 export function defineWorkspace(options: WorkspaceOptions = {}) {
     // Resolved per call, not captured: tests replace `Date.now` after this module loaded.
     const now = options.now ?? (() => Date.now());
@@ -166,7 +294,8 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
         type: 'Workspace',
         authorize,
         persistence: 'explicit',
-        methodReentrancy: { get: 'always', recentWorkdirs: 'always' },
+        // `projects` interleaves: `Chat.setProject` reads it back over a hop inside `createChat`'s own turn.
+        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always' },
         state: (key): WorkspaceState => ({
             v: WORKSPACE_STATE_VERSION,
             owner: ownerOfWorkspaceKey(key),
@@ -195,16 +324,122 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
             /**
              * Records the id in the index and, when a title is given, writes it to
              * the Chat actor over a hop (#124) — the chat's own `rename` entry, so
-             * `Chat.get().title` carries it. The index entry is saved first: a
-             * hop that fails leaves an untitled chat, never an orphan title.
+             * `Chat.get().title` carries it; a project (#332) goes the same way
+             * (`Chat.setProject`, after the title) and is noted as the last used.
+             * The index entry is saved first: a hop that fails leaves an untitled,
+             * project-less chat, never an orphan. An unknown project is a 400
+             * before anything is written.
              */
             async createChat(input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
+                const projectId = input.projectId;
+                if (projectId !== undefined && !(ctx.state.projects ?? []).some((p) => p.id === projectId)) throw new ServerFnError(400, `Workspace.createChat: no project ${String(projectId)} in this workspace`);
                 const chatId = createId('chat') as ChatId;
                 ctx.state.chats.push(chatId);
                 await ctx.save();
+                const chat = ctx.actor(Chat, actorKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, 'chat', chatId));
                 const title = input.title?.trim();
-                if (title) await ctx.actor(Chat, actorKey(ownerOfWorkspaceKey(ctx.key) as WorkspaceId, 'chat', chatId)).rename(title);
+                if (title) await chat.rename(title);
+                if (projectId !== undefined) {
+                    await chat.setProject(projectId);
+                    // Noted only once the chat is in the project: a failed hop must not preselect a project no chat got.
+                    ctx.state.lastProjectId = projectId;
+                    await ctx.save();
+                }
                 return { chatId };
+            },
+
+            /** The workspace's projects (#332), creation order. Interleaves with writes. */
+            async projects(): Promise<readonly ProjectRecord[]> {
+                return ctx.snapshot(ctx.state.projects ?? []);
+            },
+
+            /**
+             * Create a project (no `id`; `name` required) or change one (#332), per the
+             * `ProjectPatch` contract: a `null` folder, feature or description removes it,
+             * fields left out are kept. Every folder the patch sets must be absolute and
+             * inside its environment's `cwdRoots` as a paired machine reports them — an
+             * environment nobody reports is refused; every member must be an agent of the
+             * workspace, the coordinator one of them; every feature's settings must pass
+             * its plugin's `projectSettings` (`Registry.checkProjectSettings`). 400 on any
+             * of these, 404 for an unknown `id`, 400 for the `PROJECTS_MAX + 1`th project.
+             * One save; recorded as `project.changed`.
+             */
+            async upsertProject(patch: ProjectPatch): Promise<ProjectRecord> {
+                if (patch === null || typeof patch !== 'object') bad('a patch is required');
+                const projects = ctx.state.projects ?? [];
+                let base: ProjectRecord | undefined;
+                if (patch.id !== undefined) {
+                    base = projects.find((p) => p.id === patch.id);
+                    if (!base) throw new ServerFnError(404, `Workspace.upsertProject: no project ${String(patch.id)} in this workspace`);
+                } else if (projects.length >= PROJECTS_MAX) {
+                    bad(`a workspace holds at most ${PROJECTS_MAX} projects`);
+                }
+                const name = patch.name !== undefined ? (typeof patch.name === 'string' ? patch.name.replace(/\s+/g, ' ').trim() : '') : base?.name;
+                if (!name) bad('a name is required');
+                if (name!.length > MAX_PROJECT_NAME_LENGTH) bad(`the name is longer than ${MAX_PROJECT_NAME_LENGTH} characters`);
+                let description = patch.description === null ? undefined : patch.description === undefined ? base?.description : typeof patch.description === 'string' ? patch.description.trim() : bad('the description must be text');
+                if (description === '') description = undefined;
+                const members = checkedMembers(ctx.state, patch.members, base?.members);
+                const connectors = checkedConnectors(patch.connectors, base?.connectors);
+                const folders = await checkedFolders(ctx, base?.folders, patch.folders);
+                const features = await checkedFeatures(ctx, base?.features, patch.features);
+                // The hops awaited: the record may have moved meanwhile (a concurrent remove, a `get` interleaving is read-only).
+                const current = ctx.state.projects ?? [];
+                if (base && !current.some((p) => p.id === base!.id)) throw new ServerFnError(404, `Workspace.upsertProject: project ${base.id} was removed meanwhile`);
+                const at = now();
+                const record: ProjectRecord = {
+                    id: base?.id ?? (createId('project') as ProjectId),
+                    name: name!,
+                    ...(description !== undefined ? { description } : {}),
+                    members,
+                    folders: folders as ProjectRecord['folders'],
+                    connectors,
+                    features,
+                    createdAt: base?.createdAt ?? at,
+                    updatedAt: at
+                };
+                ctx.state.projects = base ? current.map((p) => (p.id === record.id ? record : p)) : [...current, record];
+                await ctx.save();
+                await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
+                    key: `${ctx.key}:project:${record.id}:${at}`,
+                    kind: 'project.changed',
+                    at,
+                    by: `user:${ctx.state.owner}`,
+                    summary: `project ${record.name} (${record.id}) ${base ? 'updated' : 'created'}`,
+                    data: { projectId: record.id, name: record.name, op: base ? 'updated' : 'created' }
+                });
+                return ctx.snapshot(record);
+            },
+
+            /**
+             * Remove a project (#332): 404 when unknown; clears `lastProjectId` when it was
+             * this one. Chats keep pointing at the id — the router fails their tasks
+             * `project-missing` and the web shows a removed project (decisions 2026-09-20).
+             */
+            async removeProject(projectId: ProjectId): Promise<void> {
+                const projects = ctx.state.projects ?? [];
+                const removed = projects.find((p) => p.id === projectId);
+                if (!removed) throw new ServerFnError(404, `Workspace.removeProject: no project ${String(projectId)} in this workspace`);
+                ctx.state.projects = projects.filter((p) => p.id !== projectId);
+                if (ctx.state.lastProjectId === projectId) delete ctx.state.lastProjectId;
+                await ctx.save();
+                const at = now();
+                await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
+                    key: `${ctx.key}:project:${projectId}:${at}`,
+                    kind: 'project.changed',
+                    at,
+                    by: `user:${ctx.state.owner}`,
+                    summary: `project ${removed.name} (${projectId}) removed`,
+                    data: { projectId, name: removed.name, op: 'removed' }
+                });
+            },
+
+            /** Remember the project last used for a chat (#332) — `get().lastProjectId` — or forget it with `null`. 400 for an unknown id. */
+            async noteProject(projectId: ProjectId | null): Promise<void> {
+                if (projectId !== null && !(ctx.state.projects ?? []).some((p) => p.id === projectId)) throw new ServerFnError(400, `Workspace.noteProject: no project ${String(projectId)} in this workspace`);
+                if (projectId === null) delete ctx.state.lastProjectId;
+                else ctx.state.lastProjectId = projectId;
+                await ctx.save();
             },
 
             /** Allocates and indexes a schedule id; the caller then `create`s the Schedule actor under it. */

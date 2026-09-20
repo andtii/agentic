@@ -214,6 +214,18 @@ export function pnpmCommand(args, env = process.env) {
     return { file: 'pnpm', args, shell: true };
 }
 
+/**
+ * `wrangler dev`'s arguments. `APP_ORIGIN` in `wrangler.jsonc` is the
+ * production origin (runbook §2.1); locally it is the OAuth callback base and
+ * the OAuth issuer, so `--var` pins it to this port — the local GitHub app's
+ * callback stays `http://localhost:<port>/auth/callback`.
+ */
+export function wranglerDevArgs(port = DEFAULT_PORT) {
+    const args = ['dev', '--var', `APP_ORIGIN:http://localhost:${port}`];
+    if (port !== DEFAULT_PORT) args.push('--port', String(port));
+    return args;
+}
+
 /** wrangler's own bin under `apps/web`, run with this Node. */
 export function wranglerCommand(args, webDir = WEB_DIR) {
     const bin = path.join(webDir, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
@@ -324,9 +336,7 @@ export async function main(argv = process.argv.slice(2)) {
     log('');
     log(`Add your Anthropic key at ${anthropicKeyLink(flags.port)} (agents on the anthropic-api runtime fail no-api-key until then),`);
     log(`then open http://localhost:${flags.port}/agents. Ctrl+C stops it; after a source change run pnpm dev again (it rebuilds).`);
-    const args = ['dev'];
-    if (flags.port !== DEFAULT_PORT) args.push('--port', String(flags.port));
-    return run(wranglerCommand(args), { cwd: WEB_DIR });
+    return run(wranglerCommand(wranglerDevArgs(flags.port)), { cwd: WEB_DIR });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

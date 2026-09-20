@@ -32,10 +32,19 @@
  * other. `chat.post` turns `attachments` into file parts the same way, so an
  * agent can re-share only what it can see. Without a store there is no
  * `files` port.
+ *
+ * Projects (#334, COL-02/04): `projects.list` reads `Workspace.projects` as
+ * the workspace's user (the root actor admits its owner only, as the machine
+ * index for `usage_limits`); `current` and `set` go to the Chat under the
+ * agent's own principal, so `Chat.setProject` admits a member only (403 →
+ * `forbidden`), refuses an unknown project (400 → `invalid`) and records
+ * `chat.project-set` under the agent. Matching a project to the message is
+ * the model's job; the tool's own guard (a chat already in a project) runs
+ * in `@agentic/runtimes`.
  */
 
 import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
-import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, TaskReport } from '@agentic/runtimes';
+import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, ProjectSummary, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
 
@@ -294,9 +303,47 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
           }
         : undefined;
 
+    /** The Chat's own refusals as the codes a daemon (and the model) sees: a non-member is `forbidden`, an unknown project `invalid`. */
+    const asChatToolError = (tool: string, e: unknown): unknown => {
+        if (e instanceof ToolCallError) return e;
+        if (isServerFnError(e) && e.status === 403) return new ToolCallError('forbidden', `${tool}: ${e.message}`);
+        if (isServerFnError(e) && (e.status === 400 || e.status === 404)) return new ToolCallError('invalid', `${tool}: ${e.message}`);
+        return e;
+    };
+    const projects: PlatformPorts['projects'] = {
+        async list(): Promise<readonly ProjectSummary[]> {
+            const listed = await actor(Workspace, workspaceKey(workspaceId))
+                .with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) })
+                .projects();
+            return listed.map((p) => ({
+                id: p.id,
+                name: p.name,
+                ...(p.description !== undefined ? { description: p.description } : {}),
+                environments: Object.entries(p.folders).flatMap(([environmentId, folder]) => (typeof folder === 'string' ? [environmentId as EnvironmentId] : []))
+            }));
+        },
+        async current(chatId) {
+            try {
+                const summary = await as(Chat, agentChatKey(workspaceId, chatId)).get();
+                if (summary.projectId === undefined) return null;
+                return summary.project ?? { id: summary.projectId };
+            } catch (e) {
+                throw asChatToolError('projects', e);
+            }
+        },
+        async set(chatId, projectId) {
+            try {
+                await as(Chat, agentChatKey(workspaceId, chatId)).setProject(projectId);
+            } catch (e) {
+                throw asChatToolError('projects', e);
+            }
+        }
+    };
+
     return {
         ...(files ? { files } : {}),
         ...(usage ? { usage } : {}),
+        projects,
         memory: {
             search: async (query) => memory().query(query),
             remember: async (entry): Promise<MemoryEntry> =>
@@ -387,6 +434,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                         ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                         ...(spec.environmentId !== undefined ? { environmentId: spec.environmentId } : {}),
                         ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {}),
+                        ...(spec.projectId !== undefined ? { projectId: spec.projectId } : {}),
                         sessionId
                     });
                 } catch (e) {

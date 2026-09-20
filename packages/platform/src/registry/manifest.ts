@@ -1,9 +1,9 @@
 /** Manifest and permission-scope validation — a bad manifest never becomes durable state (PLG-01, PLG-04). */
 
-import type { PermissionScope, PluginKind, PluginManifest } from '@agentic/core';
+import { isProjectFeatureManifest, type PermissionScope, type PluginKind, type PluginManifest } from '@agentic/core';
 import { RegistryError } from './errors.js';
 
-export const PLUGIN_KINDS: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a'];
+export const PLUGIN_KINDS: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'project-feature'];
 
 /** Plugin ids, connector ids and secret names share one alphabet: letters, digits, `.`, `_`, `-`. */
 export const NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
@@ -53,6 +53,8 @@ export function assertPluginManifest(value: unknown): asserts value is PluginMan
         if (!scopeCovered(scopes, `secret:${name}`)) bad(`secret "${name}" needs a secret:${name} permission`);
     }
     if (!isRecord(m.compat) || typeof m.compat.platform !== 'string' || typeof m.compat.core !== 'string') bad('compat');
+    // A project feature (#332) declares the schema of what a project stores under `features[id]`.
+    if (m.kind === 'project-feature' && !isProjectFeatureManifest(value as PluginManifest)) bad('a project-feature manifest needs a projectSettings schema');
 }
 
 /** The scopes a manifest declares — the only ones that can ever be granted (PLG-04). */

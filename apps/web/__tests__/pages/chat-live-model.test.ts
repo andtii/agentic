@@ -1,6 +1,6 @@
 /** The live chat's pure view model (#34): entries → rows, summaries, composition, addressing, activation, the session wire adapter. */
 import { describe, it, expect } from 'vitest';
-import type { AgentId, ChatId, MessageId } from '@agentic/core';
+import type { AgentId, ChatId, MessageId, ProjectId } from '@agentic/core';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { createTranscript } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -161,6 +161,21 @@ describe('addressing and activation', () => {
         );
         expect(contracts[0]).not.toHaveProperty('workdir');
         expect(contracts[1]).toMatchObject({ environmentId: 'env_work', workdir: 'C:\\src\\app' });
+        for (const c of contracts) expect(c).not.toHaveProperty('projectId');
+
+        // The chat's project rides into every task (#333), beside a member's own folder when it has one.
+        expect(activationContract('a2' as AgentId, 'c1' as ChatId, 'm3' as MessageId, 'do it', [], lookup, undefined, [], 'p_1' as ProjectId)).toMatchObject({ projectId: 'p_1' });
+        expect(activationContract('a2' as AgentId, 'c1' as ChatId, 'm3' as MessageId, 'do it', [], lookup, workdir, [], 'p_1' as ProjectId)).toMatchObject({ projectId: 'p_1', environmentId: 'env_work', workdir: 'C:\\src\\app' });
+        const inProject: unknown[] = [];
+        await runActivation(
+            { post: async () => ({ messageId: 'm9' as MessageId, activated: ['a1' as AgentId, 'a2' as AgentId] }), createTask: async (_id, contract) => { inProject.push(contract); }, run: async () => undefined, newTaskId: () => 't' as never },
+            { chatId: 'c1' as ChatId, text: 'go', mentions: [], summary: { ...withFolder, projectId: 'p_1' as ProjectId }, entries, lookup }
+        );
+        expect(inProject[0]).toMatchObject({ projectId: 'p_1' });
+        expect(inProject[0]).not.toHaveProperty('workdir');
+        expect(inProject[1]).toMatchObject({ projectId: 'p_1', workdir: 'C:\\src\\app' });
+        expect(chatRow('c1', { ...withFolder, projectId: 'p_1' as ProjectId }, [], lookup).projectId).toBe('p_1');
+        expect(chatRow('c1', withFolder, [], lookup)).not.toHaveProperty('projectId');
 
         const note = { seq: 5, entry: { t: 'msg', id: 'm5' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'Working folder for a2 → C:\\src\\app on env_work' }], at: 5000, mentions: [], workdir: { agentId: 'a2' as AgentId, ref: workdir } } } as IndexedEntry;
         const cleared = { seq: 6, entry: { ...note.entry, id: 'm6', workdir: { agentId: 'a2', ref: null } } } as IndexedEntry;

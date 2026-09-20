@@ -35,11 +35,13 @@
  * the Registry on every request.
  */
 import { A2A_PEER_PREFIX, a2aPeerRuntime, a2aServerPlugin } from '@agentic/a2a';
+import type { ProjectFeaturePlugin } from '@agentic/core';
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
 import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInstanceRuntimes, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
+import { GIT_FEATURE_ID, gitFeatureManifest, gitFeaturePlugin } from '@agentic/plugins-git';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, CODEX_CLI_PLUGIN_ID, COPILOT_CLI_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, codexCliPlugin, copilotCliPlugin } from '@agentic/runtimes';
 
 /** The manifests the Registry lists for every workspace — enabled (Web Push and the A2A server excepted), with their declared scopes granted, until the owner changes them. */
@@ -51,6 +53,8 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     memoryDefaultPlugin,
     memoryFlatPlugin,
     learningDefaultPlugin,
+    // On, but it only acts on a project that switches it on (#335).
+    gitFeatureManifest,
     // Off until the owner sets a contact and generates keys on its page (#244).
     { manifest: webPushPlugin, enabledByDefault: false },
     { manifest: a2aServerPlugin, enabledByDefault: false }
@@ -98,3 +102,10 @@ export const learningCatalogue: Readonly<Record<string, LearningPluginImpl>> = {
 export const channelCatalogue: ChannelCatalogue = {
     [WEB_PUSH_PLUGIN_ID]: webPushChannelPlugin()
 };
+
+/**
+ * Project feature plugin id → its code half (#329): `detect` suggests the feature when a project folder is added,
+ * `beforeSession` / `instructions` run on the router (`defineRoutingActor({ projectFeatures })`). The git feature
+ * (#335, `@agentic/plugins-git`): a worktree per chat through the daemon's `worktree` op, and repo instructions.
+ */
+export const projectFeatureCatalogue: Readonly<Record<string, ProjectFeaturePlugin>> = { [GIT_FEATURE_ID]: gitFeaturePlugin };

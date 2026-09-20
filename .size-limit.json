@@ -13,5 +13,10 @@
     "name": "@agentic/ui css (control-room design system)",
     "path": "packages/ui/dist/ds/css/index.css",
     "limit": "23 KB"
+  },
+  {
+    "name": "@agentic/plugins-git",
+    "path": "packages/plugins-git/dist/index.js",
+    "limit": "2 KB"
   }
 ]

@@ -35,8 +35,9 @@
  * Every mutation ends in `ctx.save()` inside the turn (Workers eviction rule).
  */
 
-import { configDefaults, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type WorkspaceId } from '@agentic/core';
+import { configDefaults, isProjectFeatureManifest, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
 import type { AuditEventInput } from '../audit/events.js';
@@ -350,7 +351,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
         },
         persistence: 'explicit',
         reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 } },
-        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always' },
+        methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always', checkProjectSettings: 'always' },
         state: (): RegistryState => initialRegistryState(),
         methods: (ctx) => ({
             // -- plugins ------------------------------------------------------
@@ -382,6 +383,22 @@ export function defineRegistry(options: RegistryOptions = {}) {
             /** The gate other actors call before NEW use of a plugin; throws `PluginDisabledError` (AC-13). */
             async requireEnabled(id: string): Promise<void> {
                 if (!plugin(ctx, id).enabled) throw new PluginDisabledError(id, 'disabled');
+            },
+
+            /**
+             * Whether a project may store `settings` under `features[pluginId]` (#332): the plugin must exist, be
+             * enabled and be a project feature, and the settings — defaults filled in — must pass its
+             * `projectSettings` schema. A 400 says which; `Workspace.upsertProject` asks over a hop.
+             */
+            async checkProjectSettings(pluginId: string, settings: Readonly<Record<string, unknown>>): Promise<void> {
+                const p = current(ctx, pluginId);
+                if (!p) throw new ServerFnError(400, `[registry] no plugin "${pluginId}" is installed in this workspace`);
+                if (!p.enabled) throw new ServerFnError(400, `[registry] plugin "${pluginId}" is turned off; turn it on at /plugins/${pluginId}`);
+                if (!isProjectFeatureManifest(p.manifest)) throw new ServerFnError(400, `[registry] "${pluginId}" is a ${p.manifest.kind} plugin, not a project feature`);
+                if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) throw new ServerFnError(400, `[registry] the settings of "${pluginId}" must be an object`);
+                const own = Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined));
+                const checked = validateConfig(p.manifest.projectSettings, { ...configDefaults(p.manifest.projectSettings), ...own });
+                if (!checked.ok) throw new ServerFnError(400, `[registry] the settings of "${pluginId}" are invalid: ${checked.errors.map((e) => `${e.path || '.'}: ${e.message}`).join('; ')}`);
             },
 
             /**

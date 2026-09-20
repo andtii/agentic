@@ -7,7 +7,7 @@ The web app and every platform actor run as one Cloudflare Worker (`apps/web`) p
 ## 1. Prerequisites
 
 - Node ≥ 22.12 and pnpm 10 (`corepack enable`), Git.
-- A Cloudflare account on **Workers Paid** (Durable Objects on SQLite storage and R2 need it). Note the account's `workers.dev` subdomain (dashboard → Workers & Pages → overview).
+- A Cloudflare account. The first deploy (2026-09-20, #338) ran on the free plan — Durable Objects on SQLite storage and R2 are included; **Workers Paid** lifts the limits. Two one-time account steps, both only in the dashboard or the API: **enable R2** (dashboard → R2 Object Storage → Enable; until then every `wrangler r2` call fails `code: 10042`), and **register the `workers.dev` subdomain** — opening Workers & Pages in the dashboard creates one, or pick the name yourself: `curl -X PUT -H \"Authorization: Bearer <token>\" -H 'content-type: application/json' -d '{\"subdomain\":\"<name>\"}' https://api.cloudflare.com/client/v4/accounts/<account id>/workers/subdomain` (the OAuth token from `wrangler login` sits in `~/.wrangler/config/default.toml` — on Windows `%APPDATA%\xdg.config\.wrangler\config\default.toml`; the account id is in `wrangler whoami`). Without a subdomain a non-interactive `wrangler deploy` fails.
 - A GitHub account that can create an OAuth app (personal or in an org).
 - An Anthropic API key for the platform-managed `anthropic-api` runtime (console.anthropic.com → API keys). It is not a deployment secret: each workspace enters its own at `/plugins/anthropic-api` after signing in (#231).
 - For the daemon: a Windows 10/11, macOS or Linux machine with at least one Claude Code account signed in per profile directory (`docs/multi-account.md`); Node is downloaded by the installer when missing (§5).
@@ -21,6 +21,8 @@ pnpm build                       # every package; the app consumes them through 
 cd apps/web && pnpm exec wrangler login && cd ../..   # once per machine; opens the browser
 ```
 
+`wrangler login` stores one OAuth token per machine: `wrangler whoami` shows which account it is, `wrangler logout` first when it is the wrong one. A `secret put` before the first deploy creates the Worker as a draft, so secrets can go in before the code.
+
 ## 2. Fresh production deploy from zero
 
 Every step is idempotent; re-run any of them. Production is the top level of `apps/web/wrangler.jsonc` (worker `agentic-web`); preview is `env.preview` (§3).
@@ -29,7 +31,7 @@ Every step is idempotent; re-run any of them. Production is the top level of `ap
 
 The Worker answers on `https://agentic-web.<subdomain>.workers.dev` by default. To use your own domain add, at the top level of `wrangler.jsonc`, `"routes": [{ "pattern": "agentic.example", "custom_domain": true }]` for a zone on this account.
 
-Set the public origin in `wrangler.jsonc` → top-level `vars.APP_ORIGIN` (the checked-in value is `http://localhost:8787` for local runs — change it before the first deploy):
+Set the public origin in `wrangler.jsonc` → top-level `vars.APP_ORIGIN` (the checked-in value is the reference deployment's; local runs are unaffected — `pnpm dev` passes `--var APP_ORIGIN:http://localhost:<port>` to `wrangler dev`, §4):
 
 ```jsonc
 "vars": { "APP_ORIGIN": "https://agentic-web.<subdomain>.workers.dev" }
@@ -108,7 +110,7 @@ The first deploy prints the `workers.dev` URL and creates the Durable Object nam
 
 1. `curl -sI ${APP_ORIGIN}/` → `200`, the SSR shell.
 2. `curl -s ${APP_ORIGIN}/auth/me` → `401 {"error":"unauthorized"}`.
-3. `curl -s -X POST ${APP_ORIGIN}/auth/dev-login` → `404`, and `GET` the same (the route must not exist on production).
+3. `curl -s -X POST ${APP_ORIGIN}/auth/dev-login` → the SSR shell (`200`, `text/html`, no `set-cookie`), and `GET` the same: the route is not mounted, so the request falls through to the app, which answers every unknown path with the shell. Anything JSON, or a `set-cookie`, means `AGENTIC_DEV_LOGIN` is set on production — `wrangler secret delete AGENTIC_DEV_LOGIN`.
 4. Open `${APP_ORIGIN}/auth/login` in a browser → GitHub consent → back on `/` signed in. `GET /auth/me` now returns `{ principal: { kind: "user", userId: "gh_<id>", workspaceId: "…" } }`.
 5. `/plugins/anthropic-api` → paste your Anthropic key → Ready. Then Agents → **New agent** → a name and role → the config tab shows v1 on the `anthropic-api` runtime → **Start chat** → post a message → the answer streams in. That is demo 1 by hand; §6 scripts it. Without the key the post's task fails `no-api-key` and names that page.
 
@@ -139,6 +141,8 @@ pnpm --filter @agentic/web deploy:preview            # build + wrangler deploy -
 
 Smoke: `GET /` → 200; `GET /auth/me` → 401; `POST /auth/dev-login` with a wrong token → 403.
 
+The reference deployment (#338): account agentic@ekdahls.net, subdomain `ekdahls`, production at https://agentic-web.ekdahls.workers.dev, preview at https://agentic-web-preview.ekdahls.workers.dev (not deployed yet).
+
 ## 4. Local
 
 One command from the repo root (`pnpm install` done):
@@ -151,7 +155,7 @@ pnpm dev
 
 1. **Secrets.** If `apps/web/.dev.vars` is missing it is generated: a random `SESSION_SECRET` (48 chars), `WORKSPACE_KEK` (base64 of 32 bytes) and `AGENTIC_DEV_LOGIN` (32 chars). No Anthropic key (#231): once signed in, add yours at `http://localhost:8787/plugins/anthropic-api` — it is sealed in the workspace's Registry under this `WORKSPACE_KEK` and survives restarts; the log prints the link. An existing file is never touched — deleting it to regenerate draws a new `WORKSPACE_KEK`, and every key stored under the old one can no longer be opened (enter it again). A file from before #231 may still carry `ANTHROPIC_API_KEY`: it is ignored (the log says so) and the line can be deleted by hand. `apps/web/.dev.vars.example` documents every line; `.dev.vars` stays ignored.
 2. **Build.** `pnpm build` runs only when `apps/web/dist` is missing or older than any file under `apps/web/src` or `packages/*/src` (mtime check); `pnpm dev --rebuild` forces it. There is no hot reload of the Worker: after a source change, Ctrl+C and `pnpm dev` again.
-3. **Serve.** `wrangler dev` over `dist/` on http://localhost:8787 (Durable Objects and R2 simulated) in the foreground, after printing the one-click sign-in link:
+3. **Serve.** `wrangler dev --var APP_ORIGIN:http://localhost:<port>` over `dist/` on http://localhost:8787 (Durable Objects and R2 simulated; the `--var` overrides the production origin in `wrangler.jsonc` so a local GitHub app's callback stays on localhost) in the foreground, after printing the one-click sign-in link:
 
    ```
    [dev]     http://localhost:8787/auth/dev-login?token=<AGENTIC_DEV_LOGIN>
@@ -174,7 +178,7 @@ Flags: `--rebuild`, `--port <n>` (the link follows), `--mock`. Other local comma
 ```sh
 pnpm dev:mock                                # the Vite dev server on mock data, no actors (apps/web/server.mjs, port 3000)
 pnpm --filter @agentic/web test:workers      # the Worker + ActorHost inside workerd
-pnpm --filter @agentic/web preview           # wrangler dev alone, when dist/ and .dev.vars are already there
+pnpm --filter @agentic/web preview           # wrangler dev alone, when dist/ and .dev.vars are already there (APP_ORIGIN stays the production one — add `--var APP_ORIGIN:http://localhost:8787` for GitHub login)
 ```
 
 With your key set at `/plugins/anthropic-api`, "New agent" → Config → "Start chat" → a message streams an answer from the platform-managed session (the manual check). The scripted version is the demo 1 smoke against the local Worker started by `pnpm dev` (§6): `BASE_URL=http://localhost:8787 AGENTIC_DEV_LOGIN=<the value in .dev.vars> ANTHROPIC_API_KEY=<your key> pnpm --filter @agentic/web smoke:demo1` — the key comes from the shell running the smoke, which stores it in the fresh workspace.
@@ -246,6 +250,8 @@ Within a minute the machine is `online` on **Machines** with its environments, a
 Then add one environment per Claude Code account (`docs/multi-account.md`) — no JSON by hand (#235): `agentic-daemon env add --name Work --root <folder> [--concurrency 2] [--account me@work.example]` (from the install folder: `node bin/agentic-daemon.mjs …`) writes `environments.json` atomically, owner-only, and gives the environment its own profile folder; `env list` and `env rm <id>` do the rest. Sign each one in once: `agentic-daemon env login <id>` runs `claude /login` under that profile (without the `claude` CLI on `PATH`: `--claude node_modules/@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude`). A daemon with no environments connects and reports none, a running daemon watches `environments.json` and announces a change within a second, and environments that are not signed in are re-checked every 30 s — none of it takes a restart. A hand edit that does not validate is logged (`environments.json is invalid; keeping the running environments`) and ignored. To let the Machine page add environments instead, allow the folders on the machine: `agentic-daemon policy allow-root <folder>` (off by default; the web never sees past those folders or into the daemon's data folder; #238, `apps/daemon/README.md`).
 
 By hand instead (an unpacked zip, no bootstrap): `powershell -ExecutionPolicy Bypass -File install.ps1 -Url <origin> -Code <code> [-Name <name>] [-NodePath <node.exe>]` or `sh install.sh --url <origin> --code <code> [--name <name>] [--node <node>]` from the folder; already paired, no arguments.
+
+From a terminal inside a repo under one of the machine's working roots, `node bin\agentic-daemon.mjs open` (#336) prints and opens `https://<platform>/chats/new?env=…&path=…&origin=…`: New chat opens on that folder with the project whose git feature names the repo's origin preselected (the folder is saved as the project's on this environment the first time), or offers **Create project from this folder** / **Just this chat**. `--env <id>` picks the environment when the folder is under several; `--no-browser` only prints the link.
 
 ### 5.4 Doctor, logs, restart
 

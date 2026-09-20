@@ -6,7 +6,7 @@
  */
 import { component, signal, type Define } from 'sigx';
 import type { EnvironmentId, WorkdirRef } from '@agentic/core';
-import { WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
+import { WorkdirField, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
 import { WorkdirPicker } from './WorkdirPicker';
 
 export type WorkdirInputProps =
@@ -21,7 +21,8 @@ export type WorkdirInputProps =
     /** Hidden inputs `${name}.environmentId` / `${name}.path`, so the form posts before hydration. */
     & Define.Prop<'name', string>
     & Define.Prop<'disabled', boolean>
-    & Define.Event<'change', WorkdirRef | null>;
+    /** A pick carries the folder's git badge when the listing showed one (#333); Clear is `null`. */
+    & Define.Event<'change', WorkdirSelection | null>;
 
 export const WorkdirInput = component<WorkdirInputProps>(({ props, emit }) => {
     const st = signal({ open: false });
@@ -44,7 +45,7 @@ export const WorkdirInput = component<WorkdirInputProps>(({ props, emit }) => {
                 environments={props.environments}
                 {...(props.machineOf ? { machineOf: props.machineOf } : {})}
                 preferred={props.preferred ?? null}
-                onSelect={(ref: WorkdirRef) => { st.open = false; emit('change', ref); }}
+                onSelect={(ref: WorkdirSelection) => { st.open = false; emit('change', ref); }}
                 onCancel={() => { st.open = false; }}
             />
         </span>

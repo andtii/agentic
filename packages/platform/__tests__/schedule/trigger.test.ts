@@ -6,7 +6,7 @@
  * reaches the inbox from the entry's own alarm (AC-08 in process).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentId, EnvironmentId, Principal, ScheduleId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, EnvironmentId, Principal, ProjectId, ScheduleId, TaskId, WorkspaceId } from '@agentic/core';
 import { actor, type ActorClient, type AnyActorDefinition, type Host } from '@sigx/actors';
 import { defineActorApp, manualScheduler, memoryStorage } from '@sigx/actors/host';
 import { createTestServerFnContext, stubServerApp } from '@sigx/server/testing';
@@ -133,6 +133,15 @@ describe('deliverScheduleFired', () => {
     it('an agent entry with a workdir carries it into the task contract with its environment (#190)', async () => {
         await deliverScheduleFired(agentEntry({ environmentId: ENV, workdir: 'C:/src/app' }), hop);
         expect(await task(scheduledTaskId(SCH, AT)).get()).toMatchObject({ environmentId: ENV, workdir: 'C:/src/app' });
+    });
+
+    it('an agent entry with a projectId fires a task carrying it, queued for the router to place (#332)', async () => {
+        const outcome = await deliverScheduleFired(agentEntry({ projectId: 'project_1' as ProjectId }), hop);
+        expect(outcome).toMatchObject({ kind: 'task', status: 'queued' });
+        const view = await task(scheduledTaskId(SCH, AT)).get();
+        expect(view.projectId).toBe('project_1');
+        expect(view.environmentId).toBeUndefined();
+        expect(view.workdir).toBeUndefined();
     });
 
     it('the objective falls back to the title when the entry has no prompt', async () => {
