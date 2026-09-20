@@ -242,6 +242,33 @@ describe('capacity counts running turns, not open sessions (#394)', () => {
         expect((await hosted(m1)).map((h) => h.sessionId).sort()).toEqual([a.sessionId, b.sessionId].sort());
     });
 
+    it("a second message to the member whose own turn is running waits on that turn (#395), never on capacity: the turn it would join already holds the environment's one slot", async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const chatId = await room(cc);
+
+        const release = holdTurns();
+        const a = await message(chatId, cc, 'plan it', 't_cc');
+        await running('t_cc');
+        // The in-memory runtime cannot steer: the route parks on the running turn, not on the environment (whose slot that turn holds).
+        const again = await message(chatId, cc, 'and then', 't_cc2');
+        expect(again.sessionId).toBe(a.sessionId);
+        expect(again.status).toBe('waiting');
+        expect(again.wait).toEqual({ kind: 'turn', sessionId: a.sessionId, turnId: 't_cc:turn:1' });
+        expect((await routing().get()).routes.find((r) => r.taskId === 't_cc2')?.status).toBe('waiting-turn');
+
+        // The turn ends: the parked message goes out in the same session, through the capacity check, which now finds the slot free.
+        release();
+        await settled('t_cc');
+        await settled('t_cc2');
+        const t = await task('t_cc2').get();
+        expect(t.status).toBe('completed');
+        expect(edges(t)).toEqual(['queued>active', 'active>waiting', 'waiting>active', 'active>completed']);
+        expect(t.transitions[2]!.why).toBe('turn t_cc:turn:1 ended');
+        expect(frames(m1, 'session.command').filter((f) => f.sessionId === a.sessionId && (f.command as { type: string }).type === 'prompt')).toHaveLength(2);
+        expect((await hosted(m1)).map((h) => h.sessionId)).toEqual([a.sessionId]);
+    });
+
     it('an environment holding only idle chat sessions can be removed; while a turn runs there the refusal names it', async () => {
         const m1 = await pairMachine('laptop');
         const cc = await agent('agent_cc');
