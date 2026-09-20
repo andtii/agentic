@@ -19,7 +19,7 @@ import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInp
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import { ServerFnError } from '@sigx/server';
+import { isServerFnError, ServerFnError } from '@sigx/server';
 
 import { principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
@@ -471,8 +471,9 @@ export function defineMachineActor(ports: MachinePorts) {
             async function toSession(fn: () => Promise<void> | undefined): Promise<void> {
                 try {
                     await fn();
-                } catch {
-                    // The record said no; the frame is dropped, the socket stays.
+                } catch (e) {
+                    // Only the record's refusal (403): the frame is dropped, the socket stays. Anything else is a bug and surfaces.
+                    if (!(isServerFnError(e) && e.status === 403)) throw e;
                 }
             }
 
