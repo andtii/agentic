@@ -16,7 +16,7 @@
 import { defineTool, SchemaValidationError } from '@sigx/ai';
 import type { AgentToolContext } from '@sigx/ai-agent';
 import { z } from 'zod';
-import type { AgentId, ArtifactRef, EnvironmentId, TaskError, TaskId } from '@agentic/core';
+import type { AgentId, ArtifactRef, EnvironmentId, ProjectId, TaskError, TaskId } from '@agentic/core';
 import type { DelegateOutcome, TaskPort } from './ports.js';
 
 export const delegateInput = z.object({
@@ -33,7 +33,8 @@ export const delegateInput = z.object({
         .optional()
         .describe('Limits for the child; never wider than your own.'),
     environmentId: z.string().min(1).optional().describe('The environment the child runs in; default: the assignee’s own default, else yours. Usually leave it out.'),
-    workdir: z.string().min(1).optional().describe('The folder the child works in, absolute and inside the roots of `environmentId` (which it requires). Default: your folder when the child runs in your environment.')
+    workdir: z.string().min(1).optional().describe('The folder the child works in, absolute and inside the roots of `environmentId` (which it requires). Default: your folder when the child runs in your environment.'),
+    projectId: z.string().min(1).optional().describe('The project the child works in (a project id of this workspace). Default: your own project, when you work in one. Usually leave it out.')
 });
 
 /** What the model gets back: the child task's id and status, and its result flattened (COL-07). */
@@ -95,7 +96,8 @@ export function delegateTool(port: TaskPort) {
                     constraints: input.constraints ?? {},
                     ...(input.expected !== undefined ? { expected: input.expected } : {}),
                     ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
-                    ...(input.workdir !== undefined ? { workdir: input.workdir } : {})
+                    ...(input.workdir !== undefined ? { workdir: input.workdir } : {}),
+                    ...(input.projectId !== undefined ? { projectId: input.projectId as ProjectId } : {})
                 },
                 {
                     callId: ctx.toolCallId,

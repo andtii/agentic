@@ -115,6 +115,19 @@ describe('newScheduleSpec', () => {
         });
     });
 
+    it('an agent task in a project carries the project and neither the environment nor the folder (#333)', () => {
+        expect(newScheduleSpec(input({ kind: 'agent-task', agentId: 'agent_a', environmentId: 'env_1', workdir: 'C:\\x', projectId: 'p_1', prompt: 'Audit' }), 'UTC')).toEqual({
+            kind: 'agent-task',
+            title: 'Tea',
+            recurrence: { kind: 'cron', cron: '0 9 * * 1-5', tz: 'UTC' },
+            prompt: 'Audit',
+            agentId: 'agent_a',
+            projectId: 'p_1',
+            offlinePolicy: 'queue'
+        });
+        expect(newScheduleSpec(input({ kind: 'agent-task', agentId: 'agent_a', environmentId: 'env_1', workdir: 'C:\\x', projectId: '', prompt: 'Audit' }), 'UTC')).toMatchObject({ environmentId: 'env_1', workdir: 'C:\\x' });
+    });
+
     it('validates what the dialog asks for', () => {
         expect(validateNewSchedule(input({ title: ' ' }), 'UTC')).toEqual({ title: 'A title is required.' });
         expect(validateNewSchedule(input({ at: 'soon' }), 'UTC')).toEqual({ at: 'Pick a date and time.' });

@@ -6,7 +6,7 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isChatFilePart, isTerminal, parseChatFileUri, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MessageId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
+import { isChatFilePart, isTerminal, parseChatFileUri, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
@@ -227,7 +227,8 @@ export function chatRow(id: string, summary: ChatSummary, newest: readonly Index
         lastLine: last.line,
         unread: unreadOf(newest, seen),
         waiting: waiting.size > 0,
-        updatedAt: last.at
+        updatedAt: last.at,
+        ...(summary.projectId ? { projectId: summary.projectId } : {})
     };
 }
 
@@ -670,7 +671,7 @@ export const CONTEXT_WINDOW = 50;
  * inlined, other files noted for `chat_file_read`). The objective stays
  * text; a message of attachments alone reads as their placeholders.
  */
-export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef, attachments: readonly PromptPart[] = []): TaskContract {
+export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef, attachments: readonly PromptPart[] = [], projectId?: ProjectId): TaskContract {
     const messages = visible.filter((e): e is IndexedEntry & { entry: Extract<ChatEntry, { t: 'msg' }> } => e.entry.t === 'msg').slice(-CONTEXT_WINDOW);
     const lines = messages.map((e) => entryLine(e.entry, lookup));
     const context: PromptPart[] = lines.length ? [{ type: 'text', text: `Chat so far:\n${lines.join('\n')}` }] : [];
@@ -681,7 +682,8 @@ export function activationContract(agentId: AgentId, chatId: ChatId, messageId: 
         context.push(part);
     }
     const objective = text || attachments.map(partText).join(' ');
-    return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}) };
+    // The chat's project rides along (#333): the router resolves its folder for the environment unless the member has its own.
+    return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}), ...(projectId ? { projectId } : {}) };
 }
 
 /** The entries `agentId` may read: from its `historyFrom` on (CHT-04). */
@@ -727,7 +729,7 @@ export async function runActivation(ports: ActivationPorts, input: { chatId: Cha
     const tasks: { agentId: AgentId; taskId: TaskId }[] = [];
     for (const agentId of activated) {
         const taskId = ports.newTaskId();
-        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir, attachments);
+        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir, attachments, input.summary.projectId);
         await ports.createTask(taskId, contract, agentId);
         await ports.run(taskId);
         tasks.push({ agentId, taskId });

@@ -865,7 +865,9 @@ export function defineMachineActor(ports: MachinePorts) {
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-                    if (parsed.data.kind === 'worktree' && (ctx.principal as Principal | null)?.kind !== 'user') throw new ServerFnError(403, 'machine: only the owner may create a worktree');
+                    if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate') && (ctx.principal as Principal | null)?.kind !== 'user') {
+                        throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : 'locate checkouts'}`);
+                    }
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);

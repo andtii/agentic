@@ -19,6 +19,7 @@ import { useEnvironmentDirectory, type EnvironmentDirectory } from './environmen
 import { closeNewSchedule, newScheduleRequest } from './head';
 import { dstRuleFor, newScheduleSpec, SCHEDULES_COLS, scheduleRow, type NewScheduleInput } from './live';
 import { NewScheduleDialog } from './NewScheduleDialog';
+import { useProjects } from '../projects/live';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { OpsPage } from './OpsPage';
 
@@ -107,6 +108,8 @@ export const LiveSchedules = component(() => {
     const agents = useAgentDirectory(defs, viewer);
     const environments = useEnvironmentDirectory(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
+    // The "Project" option of an agent task (#333).
+    const projects = useProjects(defs, viewer);
     const index = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const st = signal({ busy: false, error: '' });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
@@ -157,6 +160,7 @@ export const LiveSchedules = component(() => {
                     environments={environments.all().map((e) => ({ value: e.id, label: e.label }))}
                     busy={st.busy}
                     workdirs={workdirs}
+                    projects={projects.list().map((p) => ({ value: p.id, label: p.name }))}
                     onCancel={closeNewSchedule}
                     onCreate={(input) => { void create(input); }}
                 />

@@ -1,7 +1,28 @@
-import { component, signal, type Define } from 'sigx';
-import { AgentTile, ConfirmDialog, EnvironmentLine, Icon, QuotaBadge, type WorkdirEnvironment } from '@agentic/ui';
+import { component, signal, watch, type Define } from 'sigx';
+import type { ProjectRecord } from '@agentic/core';
+import { ConfirmDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
-import { memberQuota } from './quota';
+import { MemberPicker } from './MemberPicker';
+import { projectForOrigin, type NewChatPrefill } from './new-chat-prefill';
+
+/** What the picker needs of a project: `ProjectRecord` fits. `features` names the repo (#336) when the project has the git feature. */
+export type NewChatProject = Pick<ProjectRecord, 'id' | 'name' | 'members' | 'folders' | 'connectors'> & { readonly features?: ProjectRecord['features'] };
+
+/** The folder the chat starts in (#336): saved on the project for its environment, or set on every member that runs there. */
+export interface NewChatWorkdir {
+    readonly environmentId: string;
+    readonly path: string;
+    /** `true`: record it as the picked project's folder on that environment (the project had none there). */
+    readonly saveToProject: boolean;
+}
+
+export interface NewChatCreate {
+    readonly agentIds: readonly string[];
+    readonly coordinator: string | null;
+    readonly projectId: string | null;
+    /** Only from a prefilled opening. */
+    readonly workdir?: NewChatWorkdir;
+}
 
 export type NewChatDialogProps =
     & Define.Model<boolean>
@@ -9,8 +30,16 @@ export type NewChatDialogProps =
     & Define.Prop<'agents', readonly AgentIdentity[], true>
     /** The workspace's environments with their accounts' limits (#315): each card shows where its agent runs and the headroom there. */
     & Define.Prop<'environments', readonly WorkdirEnvironment[]>
+    /** The workspace's projects (#333): the picker at the top; absent or empty, the dialog shows no picker. */
+    & Define.Prop<'projects', readonly NewChatProject[]>
+    /** The project used last (`Workspace.get().lastProjectId`): preselected when the dialog opens. */
+    & Define.Prop<'lastProjectId', string | null>
+    /** The folder the chat starts in (#336, `/chats/new?env=&path=&origin=`): its project preselected when the origin matches one. */
+    & Define.Prop<'prefill', NewChatPrefill>
     & Define.Prop<'busy', boolean>
-    & Define.Event<'create', { readonly agentIds: readonly string[]; readonly coordinator: string | null }>
+    & Define.Event<'create', NewChatCreate>
+    /** "Create project from this folder": the caller opens the project form prefilled with it. */
+    & Define.Event<'createProject', NewChatPrefill>
     & Define.Event<'cancel'>;
 
 /**
@@ -20,69 +49,171 @@ export type NewChatDialogProps =
  * several; a coordinator is optional (a single global assistant is not
  * required).
  *
- * Each card says where the agent runs (machine / runtime / account) and how
- * close that account is to its plan limits (#315), so the person choosing
- * who works can see which one has headroom. A card is a label over a
- * visually hidden checkbox, so the keyboard and a screen reader get a plain
- * checkbox; the coordinator is a radio on the picked cards.
+ * With projects (#333) the dialog opens on a project picker preselected from
+ * the last one used: picking a project fills the members and the coordinator
+ * from its roster (still editable) and says which connectors and folders a
+ * chat in it gets; "No project" keeps the plain flow.
+ *
+ * Opened from a folder (#336, `agentic-daemon open`): the project whose git
+ * feature names the folder's origin is preselected over the last used one,
+ * and when it has no folder on that environment yet a checked line offers to
+ * save this one. With no such project the folder is not in a project yet:
+ * "Just this chat" (the default) runs the chat's members there, "Create
+ * project from this folder" hands the folder to the project form.
  */
 export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => {
-    const st = signal({ picked: [] as string[], coordinator: '', attempted: false });
+    const projectOf = (id: string): NewChatProject | undefined => props.projects?.find((p) => p.id === id);
+    /**
+     * The project an opening starts on: the one the prefill's origin names — a repo no project names starts on none,
+     * never on the last used project's folder line — else the last used one, when the workspace still has it.
+     */
+    const openingProject = (): string => {
+        if (props.prefill?.origin) return projectForOrigin(props.projects ?? [], props.prefill.origin)?.id ?? '';
+        return props.lastProjectId && projectOf(props.lastProjectId) ? props.lastProjectId : '';
+    };
+    /** The roster a project names — the members the workspace still has, and the coordinator when it is one of them. */
+    const rosterOf = (id: string): { picked: string[]; coordinator: string } => {
+        const p = projectOf(id);
+        if (!p) return { picked: [], coordinator: '' };
+        const picked = p.members.agentIds.filter((a) => props.agents.some((x) => x.id === a));
+        return { picked, coordinator: p.members.coordinator && picked.includes(p.members.coordinator) ? p.members.coordinator : '' };
+    };
+    // Mounted open (the tests): already on the opening project and its roster.
+    const first = props.model?.value === true ? openingProject() : '';
+    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project' });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';
         if (on) st.attempted = false;
     };
     const nameOf = (id: string): string => props.agents.find((a) => a.id === id)?.name ?? id;
+    /** The roster of `id` — empty for "No project" — replaces what is picked. */
+    const applyRoster = (id: string): void => {
+        Object.assign(st, rosterOf(id));
+        st.attempted = false;
+    };
+    /** A person's pick in the select fills the roster from the project; "No project" keeps what is picked, editable. */
+    const applyProject = (id: string): void => {
+        if (projectOf(id)) applyRoster(id);
+    };
+    // Each opening starts afresh: on the opening project and the roster it names, or on nobody — a roster
+    // picked in an earlier opening never carries over. The same when the projects, the last id or the prefill land
+    // while the dialog is open. Not `immediate`: the initial state above covers the mount, and a watch callback that
+    // runs inside setup must not read `st` (it would become a dependency of the key).
+    let syncing = false;
+    watch(
+        () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}\n${props.prefill?.environmentId ?? ''}\n${props.prefill?.origin ?? ''}\n${props.prefill?.path ?? ''}` : ''),
+        (key, prev) => {
+            if (!key) return;
+            const opening = openingProject();
+            if (st.project !== opening) {
+                syncing = true;
+                st.project = opening;
+            }
+            // Opened (from closed): the roster restarts; landed while open: the project's roster takes over.
+            if (!prev || opening) applyRoster(opening);
+            if (!prev) {
+                st.saveFolder = true;
+                st.mode = 'chat';
+            }
+        }
+    );
+    // A person's pick in the select fills the roster; the opening sync already did.
+    watch(
+        () => st.project,
+        (id) => {
+            if (syncing) syncing = false;
+            else applyProject(id);
+        }
+    );
+    /** What the folder means for this chat, given the project in effect (#336). */
+    const workdirOf = (project: NewChatProject | undefined): NewChatWorkdir | undefined => {
+        const prefill = props.prefill;
+        if (!prefill) return undefined;
+        const has = project ? typeof project.folders[prefill.environmentId as keyof typeof project.folders] === 'string' : true;
+        return { environmentId: prefill.environmentId, path: prefill.path, saveToProject: !!project && !has && st.saveFolder };
+    };
     return () => {
         const group = st.picked.length > 1;
+        const project = projectOf(st.project);
+        const envLabel = (id: string): string => props.environments?.find((e) => e.id === id)?.label ?? id;
+        const folders = project ? Object.entries(project.folders).filter((e): e is [string, string] => typeof e[1] === 'string') : [];
+        const prefill = props.prefill;
+        const creatingProject = !!prefill && !project && st.mode === 'project';
+        const projectFolder = prefill && project ? project.folders[prefill.environmentId as keyof typeof project.folders] : undefined;
         return (
             <ConfirmDialog
                 model={props.model}
                 title="New chat"
                 description="Who is in it? Pick one agent for a direct chat, or several for a group. Each card shows where the agent runs and how much of that account’s plan is left."
-                confirmLabel={st.picked.length > 1 ? `Create chat with ${st.picked.length}` : 'Create chat'}
+                confirmLabel={creatingProject ? 'Create project' : st.picked.length > 1 ? `Create chat with ${st.picked.length}` : 'Create chat'}
                 danger={false}
                 busy={props.busy}
                 onConfirm={() => {
+                    if (creatingProject) {
+                        emit('createProject', prefill);
+                        return;
+                    }
                     // A chat needs at least one member (CHT-01): confirming with none picked keeps the dialog open.
                     if (!st.picked.length) {
                         st.attempted = true;
                         return;
                     }
-                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null });
+                    const workdir = workdirOf(project);
+                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null, projectId: st.project || null, ...(workdir ? { workdir } : {}) });
                 }}
                 onCancel={() => emit('cancel')}
             >
-                <fieldset data-new-chat-members data-new-chat-grid>
-                    <legend>Members</legend>
-                    {props.agents.length ? props.agents.map((a) => {
-                        const picked = st.picked.includes(a.id);
-                        return (
-                            <div key={a.id} data-new-chat-agent={a.id} data-picked={picked ? '' : undefined}>
-                                <label data-new-chat-pick>
-                                    <input data-visually-hidden type="checkbox" name="member" value={a.id} checked={picked} onChange={(e: Event) => toggle(a.id, (e.target as HTMLInputElement).checked)} />
-                                    <span data-new-chat-head>
-                                        <AgentTile name={a.name} hue={a.hue} size={32} />
-                                        <span data-new-chat-who>
-                                            <span data-new-chat-name>{a.name}</span>
-                                            {a.role ? <span data-member-role>{a.role}</span> : null}
-                                        </span>
-                                        <span data-new-chat-check aria-hidden="true">{picked ? <Icon name="check" size={12} /> : null}</span>
-                                    </span>
-                                    <EnvironmentLine tone="muted" {...a.environment} />
-                                    {props.environments ? <span data-new-chat-quota><QuotaBadge {...memberQuota(a, undefined, props.environments)} /></span> : null}
+                {props.projects?.length ? (
+                    <div data-new-chat-project>
+                        <SelectField
+                            model={() => st.project}
+                            name="chat-project"
+                            label="Project"
+                            options={[{ value: '', label: 'No project' }, ...props.projects.map((p) => ({ value: p.id, label: p.name }))]}
+                            description="A chat in a project starts with its members and runs in its folders."
+                        />
+                        {project ? (
+                            <p data-new-chat-project-line>
+                                {project.connectors.length ? `Connectors: ${project.connectors.map((c) => c.id).join(', ')}` : 'No connectors'}
+                                {' · '}
+                                {folders.length ? folders.map(([env, path]) => `${envLabel(env)}: ${path}`).join(' · ') : 'no folders yet'}
+                            </p>
+                        ) : null}
+                    </div>
+                ) : null}
+                {prefill ? (
+                    <div data-new-chat-prefill data-prefill-project={project ? project.id : undefined}>
+                        {project ? (
+                            typeof projectFolder === 'string' ? (
+                                <p data-new-chat-prefill-line>
+                                    {projectFolder === prefill.path
+                                        ? `Runs in ${prefill.path} on ${envLabel(prefill.environmentId)}, the project's folder there.`
+                                        : `Runs in ${prefill.path} on ${envLabel(prefill.environmentId)} (the project's folder there is ${projectFolder}).`}
+                                </p>
+                            ) : (
+                                <label data-new-chat-save-folder>
+                                    <input type="checkbox" name="chat-save-folder" checked={st.saveFolder} onChange={(e: Event) => { st.saveFolder = (e.target as HTMLInputElement).checked; }} />
+                                    <span>Save {prefill.path} as this project's folder on {envLabel(prefill.environmentId)}</span>
                                 </label>
-                                {picked && group ? (
-                                    <label data-new-chat-coordinator-pick>
-                                        <input type="radio" name="coordinator" value={a.id} checked={st.coordinator === a.id} onChange={() => { st.coordinator = a.id; }} />
-                                        <span>Coordinator</span>
-                                    </label>
-                                ) : null}
-                            </div>
-                        );
-                    }) : <p data-panel-note>No agents yet — create one under Agents first.</p>}
-                </fieldset>
+                            )
+                        ) : (
+                            <fieldset data-new-chat-prefill-choice>
+                                <legend>This folder is not in a project yet</legend>
+                                <p data-new-chat-prefill-line>{prefill.path} on {envLabel(prefill.environmentId)}</p>
+                                <label>
+                                    <input type="radio" name="chat-prefill-mode" value="chat" checked={st.mode === 'chat'} onChange={() => { st.mode = 'chat'; }} />
+                                    <span>Just this chat</span>
+                                </label>
+                                <label>
+                                    <input type="radio" name="chat-prefill-mode" value="project" checked={st.mode === 'project'} onChange={() => { st.mode = 'project'; }} />
+                                    <span>Create project from this folder</span>
+                                </label>
+                            </fieldset>
+                        )}
+                    </div>
+                ) : null}
+                <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
                 <p data-new-chat-summary aria-live="polite">
                     {!st.picked.length
                         ? (st.attempted ? <span data-new-chat-required role="alert">Pick at least one agent.</span> : 'Nobody picked yet.')

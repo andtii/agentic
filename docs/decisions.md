@@ -152,3 +152,7 @@ We use only the stable surface (`experimentalApi: false`). The types we use are 
 **Tools reach Codex over MCP, not `dynamicTools`.** The platform's tools and the agent's connectors are served on a loopback Streamable-HTTP MCP server per session, behind a bearer token. The thread's config names it as `mcp_servers.agentic` (`url`, `http_headers`). The app-server's `dynamicTools` would avoid the port, but it is experimental. Codex runs MCP tools without asking, so each tool call first goes through the session's policy before it runs. Permissions are `harness-filtered`: Codex decides which of its own commands and edits need an approval.
 
 Isolation is one `CODEX_HOME` per environment, with the daemon's `OPENAI_*` removed. The profile's own `config.toml` still applies inside that home, including any MCP servers configured there.
+
+## 2026-09-20 — a removed project leaves its chats pointing at it (#332)
+
+`Workspace.removeProject` does not walk the chats: a chat keeps its `projectId`, its summary shows the id without a name, and the web renders "removed project". The router does the same for a task: a `projectId` the Workspace no longer has fails the task `project-missing` (visible, `recoverable: false`) rather than guessing a folder from the chain below (EXE-12). Reasons: the chat's project is a note in its own log, so rewriting it would mean a write per chat on a rarely used path; and a task that ran "somewhere" because its project vanished would be the silent fallback the PRD forbids. A chat is moved on with `Chat.setProject(other | null)`.

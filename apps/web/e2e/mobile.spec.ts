@@ -10,7 +10,7 @@ import { test, expect, type Page } from '@playwright/test';
 const shell = (part: string) => `[data-scope="ai-shell"][data-part="${part}"]`;
 const drawerPanel = '[data-scope="drawer"][data-part="panel"]';
 
-const ROUTES = ['/', '/chats/c1', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage'];
+const ROUTES = ['/', '/chats/c1', '/projects', '/projects/new', '/projects/p_agentic', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage'];
 
 async function noHorizontalScroll(page: Page, path: string) {
     const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);

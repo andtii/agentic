@@ -6,7 +6,7 @@
  * Session, Machine and Routing reference each other.
  */
 
-import type { ChatFileStore, Principal, SessionId, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, Principal, ProjectFeaturePlugin, SessionId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
 import type { RuntimeCatalogue } from './factory.js';
@@ -42,6 +42,13 @@ export interface RoutingPorts {
      * model as a note (`hydrateChatFiles`).
      */
     readonly files?: ChatFileStore;
+    /**
+     * The project feature plugins this build ships, by plugin id (#332; the git plugin, #335). For a task in a
+     * project, `run` calls each enabled one's `beforeSession` after the folder is resolved and before the session
+     * opens, and merges every one's `instructions()` into the prompt's `## Project` section. An enabled feature
+     * with no plugin here is skipped. Default: none.
+     */
+    readonly projectFeatures?: Readonly<Record<string, ProjectFeaturePlugin>>;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /** Session id allocation for tests. Default `createId('session')`. */

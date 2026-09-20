@@ -9,7 +9,7 @@
  * actor admits its owner only) and driving the router (`Routing.run`, the
  * same principal the schedule trigger uses).
  */
-import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type MachineId, type Principal, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
 import {
     AgentActor,
@@ -258,6 +258,19 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     ...(input.offlinePolicy !== undefined ? { offlinePolicy: input.offlinePolicy } : {})
                 });
                 return { scheduleId: view.id, title: view.title, kind: view.kind, enabled: view.enabled, next: view.next };
+            }
+        },
+        projects: {
+            // The catalogue is the Workspace's (owner-only, read as the driver like the machine index); the chat decides the set under the client (#334).
+            list: async () =>
+                (await workspace().projects()).map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    ...(p.description !== undefined ? { description: p.description } : {}),
+                    environments: Object.entries(p.folders).flatMap(([environmentId, folder]) => (typeof folder === 'string' ? [environmentId as EnvironmentId] : []))
+                })),
+            setChatProject: async (chatId, projectId) => {
+                await as(Chat, agentChatKey(workspaceId, chatId)).setProject(projectId);
             }
         },
         usage: {

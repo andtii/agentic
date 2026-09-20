@@ -33,6 +33,7 @@ import {
     type MessageId,
     type PostResult,
     type Principal,
+    type ProjectId,
     type PromptPart,
     type SessionEvent,
     type SessionId,
@@ -41,7 +42,9 @@ import {
     type WorkspaceId
 } from '@agentic/core';
 import { ServerFnError } from '@sigx/server';
-import { sameWorkspace } from '../auth/index.js';
+import { recordAudit } from '../audit/port.js';
+import { sameWorkspace, workspaceKey } from '../auth/index.js';
+import { Workspace } from '../workspace/index.js';
 import { ChatPage, pageKey } from './page.js';
 import { appendEntry } from './persist.js';
 import { MAX_PENDING_UPLOADS, PAGE, PENDING_TTL_MS, WINDOW, applyChatEntry, entryMatches, initialChatState, memberIds, principalKey, visibleFrom, type ChatFileRow, type ChatState, type IndexedEntry } from './state.js';
@@ -118,6 +121,10 @@ export interface ChatSummary {
     readonly activeSessions: Readonly<Record<string, SessionId>>;
     /** The chat's title (#124), absent until `Workspace.createChat({ title })` or `rename` set one — the pages then title it by its members. */
     readonly title?: string;
+    /** The project the chat belongs to (#332, `setProject`); absent when it is in none. */
+    readonly projectId?: ProjectId;
+    /** `projectId` with the project's name, when the Workspace still has it — a removed project leaves `projectId` alone. */
+    readonly project?: { readonly id: ProjectId; readonly name: string };
 }
 
 /** A title is one line of at most this many characters; `rename` trims and rejects the rest. */
@@ -142,6 +149,20 @@ const userOrExternal = (principal: Principal | null): boolean => principal?.kind
 const chatsScope = (principal: Principal | null): boolean => principal !== null && hasScope(principal, 'chats');
 /** Machines never speak in a chat. */
 const notMachine = (principal: Principal | null): boolean => principal !== null && principal.kind !== 'machine';
+
+/** `by` on an audit record: who called. */
+const principalLabel = (principal: Principal): string => {
+    switch (principal.kind) {
+        case 'user':
+            return `user:${principal.userId}`;
+        case 'external':
+            return `external:${principal.clientId}`;
+        case 'agent':
+            return `agent:${principal.agentId}`;
+        case 'machine':
+            return `machine:${principal.machineId}`;
+    }
+};
 
 /** The `{chatId}` of a `{ws}:chat:{chatId}` key. */
 function chatIdOfKey(key: string): ChatId {
@@ -243,6 +264,22 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
     }
 }
 
+/**
+ * `get()`: the summary, copied before the first await. The project's name rides along while the Workspace
+ * still has the project (#332); a removed one — or a Workspace that cannot be read — leaves `projectId` alone.
+ */
+async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
+    const { seq, members, coordinator, activeSessions, title, projectId } = ctx.state;
+    const summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, activeSessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }) });
+    if (projectId === undefined) return summary;
+    try {
+        const project = (await ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId)).projects()).find((p) => p.id === projectId);
+        return project ? { ...summary, project: { id: project.id, name: project.name } } : summary;
+    } catch {
+        return summary;
+    }
+}
+
 /** Entries `[start, end)` oldest first — the window part copied synchronously, older ones read from pages. */
 async function readRange(ctx: ActorContext<ChatState>, start: number, end: number): Promise<IndexedEntry[]> {
     if (start >= end) return [];
@@ -298,6 +335,8 @@ export function defineChatActor(ports: ChatOptions = {}) {
             setCoordinator: [userOrExternal],
             rename: [userOrExternal],
             setWorkdir: [userOrExternal],
+            // Users, external clients and member agents; a non-member agent is refused inside the method (a policy sees no state).
+            setProject: [notMachine],
             registerUpload: [userOrExternal],
             fileAccess: [notMachine]
         },
@@ -411,6 +450,44 @@ export function defineChatActor(ports: ChatOptions = {}) {
             },
 
             /**
+             * Put the chat in a project (#332), or in none with `null`: the router reads the
+             * project's folder for each member's environment unless the member has its own
+             * (`setWorkdir`), and every session in it gets the project's connectors and
+             * feature plugins. Written as a visible note in the thread (a user message carrying
+             * `project`, activating nobody), so the fold keeps the last one. Users, external
+             * clients and member agents (a non-member agent is 403); an unknown project is 400.
+             * Idempotent. Recorded as `chat.project-set`.
+             */
+            async setProject(projectId: ProjectId | null): Promise<ChatSummary> {
+                const principal = principalOf(ctx);
+                if (!principal) throw new Error('Chat.setProject: no principal');
+                if (principal.kind === 'agent' && !ctx.state.members[principal.agentId]) throw new ServerFnError(403, `Chat.setProject: ${principal.agentId} is not a member of this chat`);
+                if (projectId !== null && (typeof projectId !== 'string' || !projectId.trim())) throw new ServerFnError(400, 'Chat.setProject: a project id or null is required');
+                const workspaceId = workspaceOfKey(ctx.key) as WorkspaceId;
+                let name: string | undefined;
+                if (projectId !== null) {
+                    const project = (await ctx.actor(Workspace, workspaceKey(workspaceId)).projects()).find((p) => p.id === projectId);
+                    if (!project) throw new ServerFnError(400, `Chat.setProject: no project ${projectId} in this workspace`);
+                    name = project.name;
+                }
+                if ((ctx.state.projectId ?? null) === projectId) return summaryOf(ctx);
+                const text = projectId === null ? 'Project cleared' : `Project → ${name}`;
+                await archive(ctx);
+                const at = Date.now();
+                await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at, mentions: [], project: { id: projectId } });
+                const chatId = chatIdOfKey(ctx.key);
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:project:${ctx.state.seq - 1}`,
+                    kind: 'chat.project-set',
+                    at,
+                    by: principalLabel(principal),
+                    summary: projectId === null ? `chat ${chatId} left its project` : `chat ${chatId} put in project ${name} (${projectId})`,
+                    data: { chatId, projectId, ...(name !== undefined ? { name } : {}) }
+                });
+                return summaryOf(ctx);
+            },
+
+            /**
              * Record an upload the web route stored (#203): pending, and readable by
              * its uploader only, until a `post` of theirs references it. Users and
              * external clients only; at most `MAX_PENDING_UPLOADS` per uploader,
@@ -461,8 +538,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             },
 
             async get(): Promise<ChatSummary> {
-                const { seq, members, coordinator, activeSessions, title } = ctx.state;
-                return ctx.snapshot({ seq, members, coordinator, activeSessions, ...(title === undefined ? {} : { title }) });
+                return summaryOf(ctx);
             },
 
             /**

@@ -107,7 +107,7 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
-import { channelCatalogue, learningCatalogue, memoryCatalogue, pluginCatalogue, runtimeCatalogue } from './plugins/catalogue';
+import { channelCatalogue, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 
@@ -219,7 +219,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         // A late answer to a detached `ask_user` (#285): posted in the chat, and the asker started again with it.
         answered: createAnswerFollowUp({ routing: () => Routing })
     });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles });
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, ...withFiles });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,

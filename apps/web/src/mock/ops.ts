@@ -10,6 +10,7 @@
 import type { AgentHue } from '@agentic/ui';
 import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
+import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
 
 export interface OpsAgent {
@@ -274,6 +275,8 @@ export const opsPlugins: readonly PluginView[] = [
         config: NOTHING_TO_SET,
         permissions: [{ scope: 'memory:read', reason: 'Finds earlier lessons before it writes a new one.' }, { scope: 'memory:write', reason: 'Writes lessons and task records to memory.' }]
     }), { active: true }),
+    // The real git project feature (#333, #335): the mock form and the live form render the same `projectSettings`.
+    builtin(gitFeatureManifest),
     builtin(manifest({
         id: 'a2a', version: '1.0.0', kind: 'a2a', name: 'A2A server',
         description: 'Expose chosen agents as A2A cards to remote A2A clients.',

@@ -18,7 +18,11 @@ export interface Crumb {
 export const CRUMBS: Record<string, { label: string; href: string }> = {
     home: { label: 'Home', href: '/' },
     chats: { label: 'Chats', href: '/chats' },
+    'chat-new': { label: 'Chats', href: '/chats' },
     chat: { label: 'Chats', href: '/chats' },
+    projects: { label: 'Projects', href: '/projects' },
+    'project-new': { label: 'Projects', href: '/projects' },
+    project: { label: 'Projects', href: '/projects' },
     agents: { label: 'Agents', href: '/agents' },
     agent: { label: 'Agents', href: '/agents' },
     tasks: { label: 'Tasks', href: '/tasks' },

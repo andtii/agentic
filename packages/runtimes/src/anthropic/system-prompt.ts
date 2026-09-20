@@ -33,6 +33,11 @@ export interface SystemPromptInput {
      * says what it cannot do instead of guessing at tools that are not there.
      */
     readonly unavailableConnectors?: readonly { readonly id: string; readonly reason: string }[];
+    /**
+     * The project's instructions (#332): what the enabled project feature plugins say about the project the task
+     * belongs to (`instructions()` merged with what `beforeSession` returned), rendered as a `## Project` section.
+     */
+    readonly project?: string;
 }
 
 const TOOL_GUIDE: Readonly<Record<string, string>> = {
@@ -119,6 +124,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
 
     const tools = input.tools ?? [];
     if (input.roster) sections.push(chatSection(input.roster, tools));
+    if (input.project?.trim()) sections.push(`## Project\n\n${input.project.trim()}`);
 
     if (tools.length) {
         const lines = tools.map((name) => (TOOL_GUIDE[name] ? `- ${name}: ${TOOL_GUIDE[name]}` : `- ${name}`));

@@ -1,4 +1,4 @@
-import { actorKey, DEFAULT_WORKSPACE_SETTINGS, type EnvironmentId, type MachineId, type Principal, type WorkspaceId } from '@agentic/core';
+import { actorKey, DEFAULT_WORKSPACE_SETTINGS, type EnvironmentId, type MachineId, type Principal, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
@@ -45,7 +45,12 @@ describe('Workspace authorization', () => {
                 c.removeMachine('machine_x' as MachineId),
                 c.updateSettings({ timeZone: 'Europe/Stockholm' }),
                 c.exportAll(),
-                c.deleteAll()
+                c.deleteAll(),
+                // Projects (#332): the owner's too — an agent reads them as the workspace user through the tool ports, never directly.
+                c.projects(),
+                c.upsertProject({ name: 'Agentic' }),
+                c.removeProject('project_x' as ProjectId),
+                c.noteProject(null)
             ];
         };
         for (const promise of calls(stranger)) expect(await statusOf(promise)).toBe(403);

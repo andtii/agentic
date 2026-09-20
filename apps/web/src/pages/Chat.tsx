@@ -2,10 +2,10 @@ import { component, signal } from 'sigx';
 import type { WorkdirRef } from '@agentic/core';
 import { Link, useRoute } from '@sigx/router';
 import { Drawer } from '@sigx/zero';
-import { Button, Composer, EmptyState, NOBODY_HINT, Thread, type Mention } from '@agentic/ui';
+import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type Mention } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId } from '../components/topbar';
-import { agentNamed, loadChat, loadChats, mentionedIn, resolveAddressing, type MockChatSummary } from '../mock/workspace';
+import { PROJECTS, agentNamed, loadChat, loadChats, mentionedIn, projectNamed, resolveAddressing, type MockChatSummary } from '../mock/workspace';
 import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
@@ -31,6 +31,8 @@ defineTopbar('chat', (route) => {
     const head = live ? (chatHead.value?.id === id ? chatHead.value : undefined) : loadChat(id)?.chat;
     const chat = head ? { title: head.title, members: head.members } : undefined;
     const lookup = head && 'identities' in head ? lookupOver(head.identities) : undefined;
+    // The project chip (#333): live from the chat's summary, mock from the sample workspace.
+    const project = !head ? undefined : 'identities' in head ? head.project : head.projectId ? projectNamed(head.projectId) : undefined;
     return {
         crumb: chat?.title,
         // The member tiles at 16 px plus the status summary — the app bar's sub-line.
@@ -38,6 +40,7 @@ defineTopbar('chat', (route) => {
             <>
                 <MemberTiles agentIds={chat.members.map((m) => m.agentId)} size={18} lookup={lookup} />
                 <span data-chat-summary>{memberSummary(chat)}</span>
+                {project ? <Link to={`/projects/${project.id}`} data-chat-project><Tag tone="live">{project.name}</Tag></Link> : null}
             </>
         ) : undefined,
         // Below 1280 the tasks button reveals the context panel; on the phone it is the one right slot.
@@ -95,9 +98,10 @@ export const Chat = component(() => {
             return { id: a.name, label: a.name, description: a.role };
         });
         const empty = v.transcript.messages.length === 0;
+        const project = v.chat.projectId ? projectNamed(v.chat.projectId) : undefined;
         return (
             <Page title={v.chat.title} page="chat" hideTitle flush>
-                <ChatList chats={chats} currentId={v.chat.id} />
+                <ChatList chats={chats} currentId={v.chat.id} projects={PROJECTS} />
                 <section data-chat-main aria-label="Conversation">
                     {empty
                         ? <div data-chat-empty><EmptyState variant="chat" /></div>
@@ -121,11 +125,11 @@ export const Chat = component(() => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} onSetWorkdir={setWorkdir} />
+                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} project={project} onSetWorkdir={setWorkdir} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} onSetWorkdir={setWorkdir} />
+                            <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} project={project} onSetWorkdir={setWorkdir} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

@@ -8,15 +8,18 @@
  * input as invalid, a non-agent principal as forbidden.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, type AgentId, type ChatId, type FrozenAgentConfig, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type FrozenAgentConfig, type Principal, type ProjectId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 
 import { agentMemoryScope } from '../../src/agent/index';
-import { mintAgentPrincipal } from '../../src/auth/index';
-import { Chat } from '../../src/chat/index';
+import { AuditActor, auditKey } from '../../src/audit/index';
+import { mintAgentPrincipal, workspaceKey } from '../../src/auth/index';
+import { Chat, ChatPage } from '../../src/chat/index';
 import { ToolCallError, type ToolCallPort } from '../../src/machine/index';
 import { Memory, memoryActorKey } from '../../src/memory/index';
+import { PairingDirectory } from '../../src/pairing/index';
 import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
 import { defineSessionActor, type AnswerFollowUp } from '../../src/session/index';
+import { Workspace } from '../../src/workspace/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
@@ -58,7 +61,7 @@ beforeEach(async () => {
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     port = createToolCallPort({ routing: () => Routing, sessions: () => Session });
     quickPort = createToolCallPort({ routing: () => Routing, sessions: () => Session, askQuickWaitMs: 20 });
-    app = testActorApp([Session, Routing, Memory, Chat]);
+    app = testActorApp([Session, Routing, Memory, Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
     await app.start();
     await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: AGENT, runtime: 'in-memory', chatId: CHAT, taskId: TASK, machineId: 'machine_1' as never, config });
 });
@@ -201,5 +204,58 @@ describe('createToolCallPort', () => {
         expect(await codeOf(call('shell', {}))).toBe('unsupported');
         expect(await codeOf(call('memory_search', { nope: 1 }))).toBe('invalid');
         expect(await codeOf(call('memory_search', { query: 'x' }, { kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never }))).toBe('forbidden');
+    });
+});
+
+describe('createToolCallPort: projects (#334)', () => {
+    // The Workspace at `ws:{userId}` is the owner's alone, and v1 pairs `workspaceId === userId`.
+    const ws = () => app.as(owner).actor(Workspace, workspaceKey(WS));
+    const chat = () => app.as(owner).actor(Chat, actorKey(WS, 'chat', CHAT));
+    const audits = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['chat.project-set'] })).events;
+
+    it('a member agent lists the projects (read as the workspace user) and sets the chat’s project through tool.call; the audit carries the agent', async () => {
+        const project = await ws().upsertProject({ name: 'Agentic', description: 'The agent platform' });
+        await ws().upsertProject({ name: 'Zero' });
+        await chat().addAgent(AGENT, 'all');
+        expect(await call('projects', { action: 'list' })).toEqual({
+            projects: [
+                { id: project.id, name: 'Agentic', description: 'The agent platform', environments: [] },
+                { id: expect.stringMatching(/^project_/), name: 'Zero', environments: [] }
+            ]
+        });
+        expect(await call('projects', { action: 'set', chatId: CHAT, projectId: project.id })).toEqual({ chatId: CHAT, projectId: project.id, previous: null });
+        expect(await chat().get()).toMatchObject({ projectId: project.id, project: { id: project.id, name: 'Agentic' } });
+        expect(await audits()).toMatchObject([{ by: `agent:${AGENT}`, data: { chatId: CHAT, projectId: project.id, name: 'Agentic' } }]);
+        // An unknown project is the chat's 400, as an invalid tool call; the chat is left as it was.
+        expect(await codeOf(call('projects', { action: 'set', chatId: CHAT, projectId: 'project_nope', force: true }))).toBe('invalid');
+        expect((await chat().get()).projectId).toBe(project.id);
+    });
+
+    it('a chat already in a project is left unchanged without force, and switched with it', async () => {
+        const agentic = await ws().upsertProject({ name: 'Agentic' });
+        const zero = await ws().upsertProject({ name: 'Zero' });
+        await chat().addAgent(AGENT, 'all');
+        await chat().setProject(agentic.id);
+        await expect(call('projects', { action: 'set', chatId: CHAT, projectId: zero.id })).rejects.toThrow(/already in project "Agentic"/);
+        await expect(call('projects', { action: 'set', chatId: CHAT, projectId: null })).rejects.toThrow(/already in project "Agentic"/);
+        expect((await chat().get()).projectId).toBe(agentic.id);
+        expect(await audits()).toHaveLength(1);
+        expect(await call('projects', { action: 'set', chatId: CHAT, projectId: zero.id, force: true })).toEqual({ chatId: CHAT, projectId: zero.id, previous: { id: agentic.id, name: 'Agentic' } });
+        expect((await chat().get()).projectId).toBe(zero.id);
+        expect((await audits()).map((e) => [e.by, (e.data as { projectId: ProjectId }).projectId])).toEqual([
+            [`agent:${AGENT}`, zero.id],
+            ['user:u1', agentic.id]
+        ]);
+    });
+
+    it('an agent that is not a member of the chat is refused as forbidden, and nothing is recorded', async () => {
+        const project = await ws().upsertProject({ name: 'Agentic' });
+        await chat().addAgent(AGENT, 'all');
+        const other = mintAgentPrincipal({ workspaceId: WS, agentId: OTHER, sessionId: 'session_2' as SessionId });
+        expect(await codeOf(call('projects', { action: 'set', chatId: CHAT, projectId: project.id }, other))).toBe('forbidden');
+        expect((await chat().get()).projectId).toBeUndefined();
+        expect(await audits()).toEqual([]);
+        // Listing needs no membership: the catalogue is the workspace's.
+        expect(((await call('projects', { action: 'list' }, other)) as { projects: unknown[] }).projects).toHaveLength(1);
     });
 });

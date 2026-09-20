@@ -1,5 +1,5 @@
 /** The reducer is pure over (state, entry): replaying entries rebuilds the same state, which is what `ctx.append` relies on. */
-import type { AgentId, ChatEntry, MessageId, Principal, SessionId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatEntry, MessageId, Principal, ProjectId, SessionId, WorkspaceId } from '@agentic/core';
 import { applyChatEntry, initialChatState, visibleFrom } from '../../src/chat/index.js';
 
 const WS = 'ws_1' as WorkspaceId;
@@ -49,6 +49,18 @@ describe('applyChatEntry', () => {
         expect(state.title).toBe('Release plan v2');
         expect(state.seq).toBe(10);
         expect(state.index.slice(-2)).toEqual([{ seq: 8, at: 9 }, { seq: 9, at: 10 }]);
+    });
+
+    it('a project note sets projectId, the last one wins, and null clears it (#332)', () => {
+        const note = (id: ProjectId | null, at: number): ChatEntry => ({ ...(msg(`p${at}`, at) as Extract<ChatEntry, { t: 'msg' }>), project: { id } });
+        expect(replay([...script]).projectId).toBeUndefined();
+        expect(replay([...script, note('project_1' as ProjectId, 10)]).projectId).toBe('project_1');
+        expect(replay([...script, note('project_1' as ProjectId, 10), note('project_2' as ProjectId, 11)]).projectId).toBe('project_2');
+        const cleared = replay([...script, note('project_1' as ProjectId, 10), note(null, 11)]);
+        expect(cleared.projectId).toBeUndefined();
+        expect('projectId' in cleared).toBe(false);
+        // A plain message leaves it alone.
+        expect(replay([...script, note('project_1' as ProjectId, 10), msg('m', 12)]).projectId).toBe('project_1');
     });
 
     it('from-now starts at the join entry itself', () => {

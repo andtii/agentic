@@ -204,6 +204,51 @@ input[data-visually-hidden] { position: absolute; inline-size: 1px; block-size: 
 [data-failure-uncertain] { margin: 0; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }
 [data-uncertain-note] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }
 [data-new-chat-members] > [data-chat-error] { padding: 0; }
+/* The project picker at the top of New chat (#333) and the project filter above the chat rows. */
+[data-new-chat-project] { display: flex; flex-direction: column; gap: var(--space-xs); margin: 0 0 var(--space-md); }
+[data-new-chat-project-line] { margin: 0; font-size: var(--text-xs); color: var(--ag-text-muted); overflow-wrap: anywhere; }
+[data-chat-project-filter] { display: flex; margin-block-start: var(--space-sm); }
+[data-chat-project-filter] > select { flex: 1 1 auto; min-inline-size: 0; min-block-size: var(--ag-input-h); padding: 0 var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-field); background: var(--color-base-100); color: inherit; font: inherit; }
+/* A member's effective folder (#333): the project's, marked; an override gets Clear. */
+[data-member-workdir] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+[data-member-workdir-from] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-chat-project] { text-decoration: none; }
+
+/* ---- projects (#333): the list and the form ---- */
+[data-page="projects"] { display: flex; flex-direction: column; gap: var(--space-lg); }
+[data-page="projects"] [data-page-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); }
+[data-page="projects"] [data-page-head] h1 { margin: 0; }
+[data-project-list] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+[data-page="projects"] .project-row { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-lg) var(--space-xl); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); color: var(--color-base-content); text-decoration: none; min-inline-size: 0; transition: border-color var(--duration-fast) var(--ease-standard); }
+[data-page="projects"] .project-row:hover { border-color: var(--ag-line-strong); }
+[data-page="projects"] .project-row:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-project-row-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); min-inline-size: 0; }
+[data-project-name] { font-weight: var(--weight-semibold); font-size: var(--text-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-project-description] { font-size: var(--text-sm); color: var(--ag-text-muted); overflow-wrap: anywhere; }
+[data-project-badges] { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; }
+[data-project-nofolder] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-project-form] { display: flex; flex-direction: column; gap: var(--space-2xl); max-inline-size: 960px; }
+[data-project-section] { display: flex; flex-direction: column; gap: var(--space-sm); min-inline-size: 0; }
+[data-project-hint] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-muted); }
+/* The member cards keep their dialog width rules; on the page they wrap in the section. */
+[data-project-form] [data-new-chat-grid] { max-block-size: none; overflow: visible; }
+[data-project-folders], [data-project-features] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+[data-project-folder] { display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); min-inline-size: 0; }
+[data-project-folder][data-mismatch] { border-color: color-mix(in oklab, var(--color-warning) 60%, transparent); }
+[data-project-folder] [data-scope="ag-workdir"] { max-inline-size: 100%; }
+[data-project-folder-meta] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+[data-project-folder-note] { font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-project-folder-warning] { margin: 0; font-size: var(--text-xs); color: var(--color-warning); overflow-wrap: anywhere; }
+[data-project-feature] { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); min-inline-size: 0; }
+[data-project-feature-head] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md); }
+[data-project-feature-description] { font-size: var(--text-sm); color: var(--ag-text-muted); flex: 1 1 240px; min-inline-size: 0; }
+[data-project-feature] [data-scope="ai-form"][data-part="root"] { max-inline-size: 640px; }
+[data-project-actions] { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+[data-project-error] { margin: 0; font-size: var(--text-sm); color: var(--color-error); overflow-wrap: anywhere; }
+[data-project-locate="matches"] { list-style: none; margin: 0 0 var(--space-md); padding: 0; display: flex; flex-direction: column; gap: var(--space-xs); max-block-size: 40vh; overflow-y: auto; }
+[data-project-match] { display: flex; align-items: center; gap: var(--space-sm); cursor: pointer; min-inline-size: 0; }
+[data-project-match-path] { font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; flex: 1 1 auto; min-inline-size: 0; }
+[data-project-locate="error"] { margin: 0 0 var(--space-md); color: var(--color-error); font-size: var(--text-sm); }
 
 
 /* ---- tasks / task (#88): fluid + 460, gap 28 ---- */
@@ -994,6 +1039,11 @@ code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
     [data-chat-empty] { padding: var(--space-lg); }
     [data-page="agents"] [data-agent-grid] { grid-template-columns: minmax(0, 1fr); }
     [data-page="agents"] [data-agent-card-stats] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    /* Projects (#333): one card column, the row head wraps, the folder chip and the feature form fit the width */
+    [data-project-form] [data-new-chat-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-project-row-head] { flex-wrap: wrap; }
+    [data-project-folder] [data-scope="ag-workdir"][data-part="root"] { flex-wrap: wrap; }
+    [data-project-actions] > [data-scope="button"] { flex: 1 1 auto; }
     [data-page="agent"] [data-agent-stats] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     [data-page="agent"] [data-agent-header] { flex-wrap: wrap; gap: var(--space-md); }
     [data-page="agent"] [data-agent-header] > [data-scope="stack"] { min-inline-size: 0; max-inline-size: 100%; }

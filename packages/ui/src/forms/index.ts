@@ -70,7 +70,7 @@ export type { MultiSelectOption, MultiSelectProps } from '../_zero-gaps/multi-se
 export { WorkdirField } from './workdir-field.js';
 export type { WorkdirFieldProps } from './workdir-field.js';
 export { WorkdirDialog, gitBadgeText } from './workdir-dialog.js';
-export type { WorkdirDialogProps } from './workdir-dialog.js';
+export type { WorkdirDialogProps, WorkdirSelection } from './workdir-dialog.js';
 export { WORKDIR_EMPTY, FS_ERROR_TEXT, workdirLabel, workdirCrumbs, middleTruncate, samePath, fsErrorText, toWorkdirEnvironment } from './workdir-model.js';
 export type { WorkdirEnvironment, WorkdirRecent, WorkdirWorktreeRequest, WorkdirCrumb } from './workdir-model.js';
 // `componentExportName(scope)` for the picker's `ag-*` scopes — the fragment contract.

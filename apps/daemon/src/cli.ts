@@ -2,6 +2,7 @@
  * `agentic-daemon pair <code> --url <platform> [--name <machine>] [--allow-root <dir>…]`
  * `agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]`
  * `agentic-daemon doctor`
+ * `agentic-daemon open [path] [--env <id>] [--no-browser]` (`open.ts`)
  * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
  * `agentic-daemon policy show | allow-root | deny-root | off` (`policy-cli.ts`)
  * `agentic-daemon --version` (also `version`)
@@ -23,6 +24,7 @@ import { watchEnvironments } from './env-store.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
 import { createLogger, redact, type Logger, type LogLevel } from './logger.js';
+import { openUrl, resolveOpen, type UrlOpener } from './open.js';
 import { pair, PairingError } from './pair.js';
 import { daemonPaths, type DaemonPaths } from './paths.js';
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
@@ -54,6 +56,10 @@ export interface CliContext {
     readonly reinspectMs?: number;
     /** `env login`'s sign-in process (tests). */
     readonly login?: LoginRunner;
+    /** `open`'s browser launcher (tests); default the OS opener (`openUrl`). */
+    readonly opener?: UrlOpener;
+    /** `open`'s default folder; default `process.cwd()`. */
+    readonly cwd?: string;
     readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -65,6 +71,9 @@ Usage:
   agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
                        (--quota-probe off: usage limits from running sessions only, no account probes)
   agentic-daemon doctor
+  agentic-daemon open [path] [--env <id>] [--no-browser]
+                       (start a chat in this folder: prints the link, opens the browser; --env picks
+                        the environment when the folder is under several; --no-browser only prints)
 ${ENV_USAGE}
 ${POLICY_USAGE}
   agentic-daemon --version
@@ -264,6 +273,47 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
+                return 0;
+            }
+            case 'open': {
+                const credentials = await loadCredentials(paths.credentialsFile);
+                if (!credentials) {
+                    err(`not paired — run \`agentic-daemon pair <code> --url <platform>\` first`);
+                    return 1;
+                }
+                secrets = credentialSecrets(credentials);
+                if (args.flags.env === true) {
+                    err(`--env needs an environment id\n\n${USAGE}`);
+                    return 2;
+                }
+                const loaded = await loadEnvironments(paths.environmentsFile);
+                if (!loaded.ok) {
+                    for (const e of loaded.errors) err(`environments.json is invalid: ${e}`);
+                    return 1;
+                }
+                // `open --no-browser <path>`: the parser reads the folder as the flag's value; it is the folder.
+                const noBrowser = args.flags['no-browser'];
+                const path = args.positional[0] ?? (typeof noBrowser === 'string' ? noBrowser : undefined);
+                const resolved = await resolveOpen({
+                    ...(path === undefined ? {} : { path }),
+                    ...(typeof args.flags.env === 'string' ? { env: args.flags.env } : {}),
+                    environments: loaded.environments,
+                    url: credentials.url,
+                    ...(context.platform ? { platform: context.platform } : {}),
+                    ...(context.cwd ? { cwd: context.cwd } : {})
+                });
+                if (!resolved.ok) {
+                    err(resolved.message);
+                    return resolved.exitCode;
+                }
+                // The link first, always: it is the answer on a headless box or when no browser opens.
+                out(resolved.url);
+                if (noBrowser !== undefined) return 0;
+                try {
+                    await (context.opener ?? ((url: string) => openUrl(url, context.platform ?? process.platform)))(resolved.url);
+                } catch (e) {
+                    err(`could not open a browser (${(e as Error).message}); open the link above`);
+                }
                 return 0;
             }
             case 'env':
