@@ -30,6 +30,9 @@ const CHAT = 'chat_1' as ChatId;
 const SESSION = 'session_1' as SessionId;
 const TASK = 'task_1' as TaskId;
 const principal = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION, taskId: TASK });
+/** The agent's other session, opened without a task, and the principal the Machine mints for it. */
+const TASKLESS_SESSION = 'session_3' as SessionId;
+const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: TASKLESS_SESSION });
 
 const config: FrozenAgentConfig = {
     agentId: AGENT,
@@ -64,10 +67,13 @@ beforeEach(async () => {
     app = testActorApp([Session, Routing, Memory, Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
     await app.start();
     await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: AGENT, runtime: 'in-memory', chatId: CHAT, taskId: TASK, machineId: 'machine_1' as never, config });
+    // A second, real daemon session of the same agent that works no task (#390): a chat session, say.
+    await app.as(owner).actor(Session, actorKey(WS, 'session', TASKLESS_SESSION)).open({ agentId: AGENT, runtime: 'in-memory', chatId: CHAT, machineId: 'machine_1' as never, config });
 });
 afterEach(() => app.stop());
 
-const call = (tool: string, input: unknown, as: Principal = principal, callId = 'call_1') => port.call({ callId, sessionId: SESSION, tool, input }, as);
+/** A `tool.call` as the Machine relays it: the frame's session and the principal's are the same session. */
+const call = (tool: string, input: unknown, as: Principal = principal, callId = 'call_1', sessionId: SessionId = SESSION) => port.call({ callId, sessionId, tool, input }, as);
 const until = async (check: () => Promise<boolean> | boolean, what: string, timeoutMs = 4_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs;
     while (!(await check())) {
@@ -110,9 +116,11 @@ describe('createToolCallPort', () => {
     it('task_report is kept by the router for the task the agent works', async () => {
         expect(await call('task_report', { status: 'progress', summary: 'halfway' })).toEqual({ ok: true, status: 'progress' });
         expect((await app.as(owner).actor(Routing, routingKey(WS)).get()).reports).toEqual({ [TASK]: { status: 'progress', summary: 'halfway' } });
-        // An agent without a task cannot report one.
-        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
-        expect(await codeOf(call('task_report', { status: 'done', summary: 'x' }, taskless))).toBe('unsupported');
+        // An agent whose session works no task cannot report one. The task is the SESSION's (its running turn's, else its
+        // spec's — #390), never the token's: a principal minted without one still reports for a session that has one.
+        expect(await codeOf(call('task_report', { status: 'done', summary: 'x' }, taskless, 'call_1', TASKLESS_SESSION))).toBe('unsupported');
+        const tokenless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+        expect(await call('task_report', { status: 'progress', summary: 'still halfway' }, tokenless)).toEqual({ ok: true, status: 'progress' });
     });
 
     it('ask_user raises one input request on the session (idempotent by call id); the answer from Session.respond is the tool result, a cancel a `cancelled` error (#122)', async () => {
@@ -199,8 +207,8 @@ describe('createToolCallPort', () => {
     });
 
     it('refuses what it does not serve, with the code the daemon reports', async () => {
-        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
-        expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }, taskless))).toBe('unsupported');
+        // A session that works no task (#390): the task is the session's, so a taskless token on a task session would still delegate.
+        expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }, taskless, 'call_1', TASKLESS_SESSION))).toBe('unsupported');
         expect(await codeOf(call('shell', {}))).toBe('unsupported');
         expect(await codeOf(call('memory_search', { nope: 1 }))).toBe('invalid');
         expect(await codeOf(call('memory_search', { query: 'x' }, { kind: 'machine', workspaceId: WS, machineId: 'machine_1' as never }))).toBe('forbidden');

@@ -10,7 +10,7 @@ The frame TYPES live in `@agentic/core` (`DaemonFrame<F, R>`, `PlatformFrame<C>`
 import type { DaemonFrame, PlatformFrame, HelloFrame, SessionFrameFrame } from '@agentic/daemon-protocol';
 ```
 
-`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong` · `fs.response` · `env.response` · `quota`.
+`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.ref` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong` · `fs.response` · `env.response` · `quota`.
 `PlatformFrame` (platform → daemon): `welcome` · `session.open` · `session.command` · `session.close` · `tool.result` · `ping` · `fs.request` · `env.request`.
 
 ## Validators
@@ -52,6 +52,7 @@ Refusals are checked in order and named: `too-large` (before parsing) · `not-js
 | `env` | `setEnvironments` → `env` with auth status per environment (EXE-06/08) — feature `env` |
 | `heartbeat` | heartbeats at the scripted interval; `active` lists open sessions (EXE-08) |
 | `session` | `session.open` → `session.opened`; `prompt` → `ack` → N gapless `event` frames ending in `turn-end`; `session.close` → `session.closed` |
+| `session-ref` | after the first prompt the daemon reports the runtime's own session id with `session.ref`, an id other than the placeholder `session.opened` carried (#388) — feature `session-ref` |
 | `reconnect-replay` | drop mid-turn, redial: `hello.resume` names the session, `welcome.wanted` drives a replay that starts right after the cursor — no duplicate, no hole (OPS-06) |
 | `gap` | a `wanted` cursor older than the daemon's log yields a `gap` frame, not silence (OPS-04) — feature `gap` |
 | `fs-list` | `fs.request` `list` of a working root names that root with no `parent` and only entries inside the roots; a sibling of the root answers `outside-roots` (OPS-01), an unknown environment `unknown-environment` — feature `fs` |

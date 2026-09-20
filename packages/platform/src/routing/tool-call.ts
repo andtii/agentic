@@ -13,11 +13,11 @@
  * and recorded nowhere.
  */
 
-import { CONNECTOR_CREDENTIALS_TOOL, type ChatFileStore, type ChatId, type Principal } from '@agentic/core';
+import { CONNECTOR_CREDENTIALS_TOOL, type ChatFileStore, type ChatId, type Principal, type TaskId } from '@agentic/core';
 import { isPlatformToolName, platformTools } from '@agentic/runtimes';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 
-import { asPrincipal, userPrincipal } from '../auth/index.js';
+import { asPrincipal, mintAgentPrincipal, userPrincipal } from '../auth/index.js';
 import { ToolCallError, type ToolCallPort } from '../machine/ports.js';
 import { registryKey } from '../registry/key.js';
 import type { ConnectorStatus, RegistryGate } from '../registry/types.js';
@@ -26,9 +26,9 @@ import { connectorCredentials, ConnectorCredentialsError } from './connectors.js
 import { registryCode } from './factory.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
-/** The slice of the Session actor the port reads (`defineSessionActor`). */
+/** The slice of the Session actor the port reads (`defineSessionActor`): the spec, and the running turn for its task (#390). */
 interface SessionSpecClient {
-    get(): Promise<{ readonly spec?: { readonly chatId?: ChatId; readonly plugins?: RegistryGate } }>;
+    get(): Promise<{ readonly spec?: { readonly chatId?: ChatId; readonly taskId?: TaskId; readonly plugins?: RegistryGate }; readonly running?: { readonly taskId?: TaskId } }>;
 }
 
 const MEMORY_TOOLS: readonly string[] = ['memory_search', 'memory_remember'];
@@ -97,16 +97,16 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
             if (principal.kind !== 'agent') throw new ToolCallError('forbidden', `tool.call runs under an agent principal, not ${principal.kind}`);
             if (input.tool === CONNECTOR_CREDENTIALS_TOOL) return credentials(input.input, principal as AgentPrincipal);
             if (!isPlatformToolName(input.tool)) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);
-            const agent = principal as AgentPrincipal;
-            let chatId: ChatId | undefined;
-            let memory: SessionMemory | undefined;
-            const memoryTool = MEMORY_TOOLS.includes(input.tool) && options.memory !== undefined;
-            if (input.tool === 'chat_post' || input.tool === 'ask_user' || memoryTool) {
-                const session = actor(options.sessions(), `${agent.workspaceId}:session:${agent.sessionId}`).with({ context: asPrincipal(agent) }) as unknown as SessionSpecClient;
-                const spec = (await session.get()).spec;
-                chatId = spec?.chatId;
-                if (memoryTool) memory = options.memory!(spec?.plugins);
-            }
+            const minted = principal as AgentPrincipal;
+            // One Session hop per call (#390): the Machine minted the principal from the task the session was OPENED for, but the
+            // turn owns the task — the running turn's (else the spec's) is what every tool below attributes to. The same read
+            // gives `chat_post` / `ask_user` their chat and the memory tools their gate.
+            const session = actor(options.sessions(), `${minted.workspaceId}:session:${minted.sessionId}`).with({ context: asPrincipal(minted) }) as unknown as SessionSpecClient;
+            const info = await session.get();
+            const taskId = info.running?.taskId ?? info.spec?.taskId;
+            const agent = taskId === minted.taskId ? minted : (mintAgentPrincipal({ workspaceId: minted.workspaceId, agentId: minted.agentId, sessionId: minted.sessionId, ...(taskId ? { taskId } : {}) }) as AgentPrincipal);
+            const chatId: ChatId | undefined = info.spec?.chatId;
+            const memory: SessionMemory | undefined = MEMORY_TOOLS.includes(input.tool) && options.memory !== undefined ? options.memory(info.spec?.plugins) : undefined;
             const ports = createActorToolPorts({
                 principal: agent,
                 ...(chatId ? { chatId } : {}),

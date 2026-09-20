@@ -14,7 +14,7 @@ describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, none skipped', () => {
-        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'fs-locate', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
+        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'session-ref', 'reconnect-replay', 'gap', 'fs-list', 'fs-locate', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
         expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
@@ -24,6 +24,7 @@ describe('daemonConformance × inMemoryHarness', () => {
         const bare = daemonConformance({ start: () => inMemoryHarness().start({ events: 3, heartbeatMs: 10 }) });
         expect(bare.filter((c) => c.skip).map((c) => [c.name, c.skip])).toEqual([
             ['env', 'the harness does not declare the "env" feature'],
+            ['session-ref', 'the harness does not declare the "session-ref" feature'],
             ['gap', 'the harness does not declare the "gap" feature'],
             ['fs-list', 'the harness does not declare the "fs" feature'],
             ['fs-locate', 'the harness does not declare the "fs" feature'],
@@ -84,6 +85,10 @@ describe('daemonConformance catches a broken daemon', () => {
     it('a daemon whose policy does not allow the web at all cannot claim the feature', async () => {
         const off = daemonConformance(inMemoryHarness({ policy: { webManaged: false, allowedRoots: [] } }), { timeoutMs: 500 }).find((c) => c.name === 'env-put')!;
         await expect(off.run()).rejects.toThrow(/hello\.policy says the web may manage environments/);
+    });
+
+    it('a daemon that reports the placeholder id as its own (#388)', async () => {
+        await expect(only('session-ref', { sameRef: true }).run()).rejects.toThrow(/not the placeholder session\.opened carried/);
     });
 
     it('a daemon that never announces environments', async () => {

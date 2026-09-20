@@ -49,7 +49,7 @@ import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/acto
 import { isServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey, agentMemoryScope } from '../agent/index.js';
-import { asPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
+import { asPrincipal, mintAgentPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import type { MachineView } from '../machine/actor.js';
 import { ToolCallError } from '../machine/ports.js';
@@ -90,6 +90,12 @@ export const ASK_QUICK_WAIT_MS = 25_000;
 export interface ActorToolPortsOptions {
     /** Whose tools these are — the session's agent principal (workspace, agent, session, task?). */
     readonly principal: AgentPrincipal;
+    /**
+     * The task the session works RIGHT NOW (#390), read per call — `SessionFactoryContext.currentTaskId` on the local
+     * path. A session serves many tasks, so `principal.taskId` (the task it opened with) is only the fallback when this
+     * answers none: `delegate`'s parent, `task_report`'s task, a memory's provenance and a post's task all come from here.
+     */
+    readonly taskId?: () => TaskId | undefined;
     /** The chat the session belongs to; without one `chat_post` is refused. */
     readonly chatId?: ChatId;
     /** The Routing actor definition, for `task_report` and `delegate`; without it both are refused. */
@@ -142,19 +148,28 @@ export { answerText };
 /** The tool ports of one agent session, bound to the actors. */
 export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPorts {
     const { principal, chatId } = options;
-    const { workspaceId, agentId, sessionId, taskId } = principal;
-    const as = <D extends AnyActorDefinition>(def: D, key: string): ActorClientWith<D> => actor(def, key).with({ context: asPrincipal(principal) }) as ActorClientWith<D>;
+    const { workspaceId, agentId, sessionId } = principal;
+    /**
+     * The principal AS OF THIS CALL (#390): the identity as minted, under the task the session works right now —
+     * `options.taskId()` when it answers, else the task the principal was minted with. Never destructured once:
+     * a session serves many tasks, and every hop, parent and provenance below must name the current one.
+     */
+    const principalNow = (): AgentPrincipal => {
+        const taskId = options.taskId?.() ?? principal.taskId;
+        return taskId === principal.taskId ? principal : (mintAgentPrincipal({ workspaceId, agentId, sessionId, ...(taskId ? { taskId } : {}) }) as AgentPrincipal);
+    };
+    const as = <D extends AnyActorDefinition>(def: D, key: string): ActorClientWith<D> => actor(def, key).with({ context: asPrincipal(principalNow()) }) as ActorClientWith<D>;
     const memory = (): Pick<MemoryStore, 'query' | 'put'> => {
         const access = options.memory;
         if (!access) return as(Memory, memoryActorKey(workspaceId, agentMemoryScope(agentId)));
         if ('off' in access) throw new ToolCallError('unsupported', access.off);
-        return access.open(agentMemoryScope(agentId), principal);
+        return access.open(agentMemoryScope(agentId), principalNow());
     };
     const task = (id: TaskId) => as(TaskActor, taskKey(workspaceId, id));
     const routing = (what: string): RoutingClient => {
         const def = options.routing?.();
         if (!def) throw new ToolCallError('unsupported', `${what}: the router is not wired on this deployment`);
-        return actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principal) }) as unknown as RoutingClient;
+        return actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principalNow()) }) as unknown as RoutingClient;
     };
 
     /** The decision on a platform-raised request, or `undefined` when the session closed or the turn was aborted before one came. */
@@ -213,6 +228,8 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
      * is stored, and what could not be started is said in `notActivated`.
      */
     async function activateMentions(chatId: ChatId, messageId: MessageId, post: ChatPost, addressed: readonly AgentId[]): Promise<Pick<ChatPostResult, 'activated' | 'notActivated'>> {
+        // The poster's task as of this post (#390): each mention's task is one level below it, in its environment.
+        const taskId = principalNow().taskId;
         // `addressed` is Chat.post's answer: the mentions that are members, less the poster. A mention it left out is said, not dropped.
         const mentioned = [...new Set(post.mentions)].filter((id) => id !== agentId);
         const targets = mentioned.filter((id) => addressed.includes(id));
@@ -222,7 +239,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         const skip = (reason: string) => ({ notActivated: [...notActivated, ...targets.map((id) => ({ agentId: id, reason }))] });
         const def = options.routing?.();
         if (!def) return skip('the router is not wired on this deployment');
-        const router = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principal) }) as unknown as RoutingClient;
+        const router = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(principalNow()) }) as unknown as RoutingClient;
         const poster = await as(AgentActor, agentKey(workspaceId, agentId)).get();
         const postingTask = taskId ? await task(taskId).get() : undefined;
         let depth: number;
@@ -347,11 +364,13 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         projects,
         memory: {
             search: async (query) => memory().query(query),
-            remember: async (entry): Promise<MemoryEntry> =>
-                memory().put({
+            remember: async (entry): Promise<MemoryEntry> => {
+                const { taskId } = principalNow();
+                return memory().put({
                     ...entry,
                     provenance: { ...entry.provenance, ...(sessionId ? { sessionId } : {}), ...(taskId ? { taskId } : {}) }
-                })
+                });
+            }
         },
         chat: {
             async post(post) {
@@ -364,6 +383,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                     attached.push(MODEL_IMAGE_TYPES.includes(file.mediaType) ? { type: 'image', mediaType: file.mediaType, url } : { type: 'file', mediaType: file.mediaType, name: file.name, url });
                 }
                 const input: string | PromptPart[] = attached.length === 0 ? post.text : [...(post.text ? [{ type: 'text' as const, text: post.text }] : []), ...attached];
+                const { taskId } = principalNow();
                 const result = await as(Chat, agentChatKey(workspaceId, chatId)).post(input, post.mentions, taskId ? { taskId } : {});
                 return { messageId: result.messageId, ...(await activateMentions(chatId, result.messageId, post, result.activated)) };
             },
@@ -407,6 +427,8 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         },
         task: {
             async delegate(spec: DelegateSpec, call: DelegateCall): Promise<DelegateOutcome> {
+                // The parent is the task of THIS turn (#390): on a reused session the task it opened with may be long settled.
+                const { taskId } = principalNow();
                 if (!taskId) throw new ToolCallError('unsupported', 'delegate: this session works no task');
                 const router = routing('delegate');
                 // Collaborator access (COL-10): the parent agent's config says who it may delegate to.
@@ -452,6 +474,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 return awaitChild(childId, call.signal);
             },
             async report(report) {
+                const { taskId } = principalNow();
                 if (!taskId) throw new ToolCallError('unsupported', 'task_report: this session works no task');
                 await routing('task_report').report(taskId, report);
             }
