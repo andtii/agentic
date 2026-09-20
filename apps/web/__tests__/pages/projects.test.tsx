@@ -116,14 +116,24 @@ describe('the project form (mock)', () => {
         const matches = mockFsLocate('env_alien01_personal', AGENTIC_ORIGIN);
         expect('matches' in matches && matches.matches.map((m) => m.path)).toEqual(['C:\\Users\\andy\\src\\agentic']);
         expect(texts([...popup.querySelectorAll('[data-project-match-path]')])).toEqual(['C:\\Users\\andy\\src\\agentic']);
-        const radio = popup.querySelector<HTMLInputElement>('input[name="project-locate-match"]')!;
-        radio.checked = true;
-        radio.dispatchEvent(new Event('change', { bubbles: true }));
-        await settle();
+        // The first match is in effect until another is picked: confirming without touching a radio uses it.
+        expect(popup.querySelector<HTMLInputElement>('input[name="project-locate-match"]')!.checked).toBe(true);
         buttonIn(popup, 'Use this folder').click();
         await settle();
         expect(text(row(dom, 'env_alien01_personal').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
         expect(dom.querySelector('[data-project-folder-warning]')).toBeNull();
+
+        // No match to use (here: the mock has no tree for the codex environment, an error): confirming keeps the dialog and its answer in view; Cancel closes it.
+        buttonIn(row(dom, 'env_alien01_codex'), 'Find').click();
+        await settle();
+        expect(openPopup().querySelector('[data-project-locate="error"]')).not.toBeNull();
+        buttonIn(openPopup(), 'Use this folder').click();
+        await settle();
+        expect(openPopup()).not.toBeNull();
+        expect(openPopup().querySelector('[data-project-locate="error"]')).not.toBeNull();
+        buttonIn(openPopup(), 'Cancel').click();
+        await settle();
+        expect(document.querySelector('[data-scope="dialog"][data-part="popup"][data-state="open"]')).toBeNull();
 
         // Another repo on the work row: both rows now disagree, and say so without blocking.
         await browse(dom, 'env_alien01_work', 'C:\\Dev', 'sigx');

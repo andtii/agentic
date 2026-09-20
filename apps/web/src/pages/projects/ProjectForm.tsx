@@ -104,10 +104,14 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         st.finding = null;
         props.locate.reset();
     };
+    /** The match in effect: the picked one, else the first (the radios show it checked). */
+    const matchInEffect = (): string => st.match || (props.locate.state.matches[0]?.path ?? '');
+    /** Confirm: fill the row with the match — while there is none (still searching, an error, nothing found) the dialog stays, its results in view. */
     const useMatch = (): void => {
         const env = st.finding;
-        const hit = props.locate.state.matches.find((m) => m.path === st.match);
-        if (env && hit) setFolder(env, { environmentId: env, path: hit.path, git: hit.git });
+        const hit = props.locate.state.matches.find((m) => m.path === matchInEffect());
+        if (!env || !hit) return;
+        setFolder(env, { environmentId: env, path: hit.path, git: hit.git });
         closeFind();
     };
     const save = (): void => {
@@ -252,7 +256,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                             {found.matches.map((m) => (
                                 <li>
                                     <label data-project-match>
-                                        <input type="radio" name="project-locate-match" value={m.path} checked={st.match === m.path} onChange={() => { st.match = m.path; }} />
+                                        <input type="radio" name="project-locate-match" value={m.path} checked={matchInEffect() === m.path} onChange={() => { st.match = m.path; }} />
                                         <span data-project-match-path>{m.path}</span>
                                         <Tag>{gitBadgeText(m.git)}</Tag>
                                     </label>

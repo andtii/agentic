@@ -53,28 +53,31 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         if (on) st.attempted = false;
     };
     const nameOf = (id: string): string => props.agents.find((a) => a.id === id)?.name ?? id;
-    /** A picked project fills the roster from its members (still editable). */
-    const applyProject = (id: string): void => {
-        if (!projectOf(id)) return;
+    /** The roster of `id` — empty for "No project" — replaces what is picked. */
+    const applyRoster = (id: string): void => {
         Object.assign(st, rosterOf(id));
-        if (st.picked.length) st.attempted = false;
+        st.attempted = false;
     };
-    // Each opening starts on the last used project and the roster it names — including when the projects or the
-    // last id land while the dialog is open. Not `immediate`: the initial state above covers the mount, and a
-    // watch callback that runs inside setup must not read `st` (it would become a dependency of the key).
+    /** A person's pick in the select fills the roster from the project; "No project" keeps what is picked, editable. */
+    const applyProject = (id: string): void => {
+        if (projectOf(id)) applyRoster(id);
+    };
+    // Each opening starts afresh: on the last used project and the roster it names, or on nobody — a roster
+    // picked in an earlier opening never carries over. The same when the projects or the last id land while the
+    // dialog is open. Not `immediate`: the initial state above covers the mount, and a watch callback that runs
+    // inside setup must not read `st` (it would become a dependency of the key).
     let syncing = false;
     watch(
         () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}` : ''),
-        (key) => {
+        (key, prev) => {
             if (!key) return;
             const last = lastProject();
-            if (st.project === last) {
-                applyProject(last);
-                return;
+            if (st.project !== last) {
+                syncing = true;
+                st.project = last;
             }
-            syncing = true;
-            st.project = last;
-            applyProject(last);
+            // Opened (from closed): the roster restarts; landed while open: the project's roster takes over.
+            if (!prev || last) applyRoster(last);
         }
     );
     // A person's pick in the select fills the roster; the opening sync already did.

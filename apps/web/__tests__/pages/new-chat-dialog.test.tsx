@@ -109,4 +109,26 @@ describe('New chat in a project (#333)', () => {
         await create();
         expect(created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null }]);
     });
+
+    it('each opening starts afresh: on the last used project’s roster, or on nobody when there is none', async () => {
+        const { picked, pick, model } = await open({ projects, lastProjectId: 'p1' });
+        await pick('forge');
+        expect(picked()).toEqual(['lint']);
+        model.value = false;
+        await tick();
+        model.value = true;
+        await tick();
+        expect(picked()).toEqual(['forge', 'lint']);
+    });
+
+    it('without projects, reopening starts on nobody too', async () => {
+        const { picked, pick, model } = await open();
+        await pick('atlas');
+        expect(picked()).toEqual(['atlas']);
+        model.value = false;
+        await tick();
+        model.value = true;
+        await tick();
+        expect(picked()).toEqual([]);
+    });
 });
