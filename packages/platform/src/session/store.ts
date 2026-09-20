@@ -45,7 +45,10 @@ export const TRANSCRIPT_BYTES = 1024 * 1024;
 const trimmed = (bytes: number): string => `[trimmed from the stored snapshot: ${Math.max(1, Math.round(bytes / 1024))} KB — the session's events keep it]`;
 const sizeOf = jsonBytes;
 
-/** Drop a part's bulk (tool output, content blocks, streaming argument text; reasoning text and provider data); the bytes saved. */
+/**
+ * Drop a part's bulk (tool output, content blocks, streaming argument text; reasoning text and provider data;
+ * an inlined image's or file's bytes, #391 — the part becomes a text note, since a marker is no base64); the bytes saved.
+ */
 function trimBulk(part: AgentPart): number {
     const before = sizeOf(part);
     if (part.type === 'tool') {
@@ -56,6 +59,13 @@ function trimBulk(part: AgentPart): number {
     } else if (part.type === 'reasoning') {
         if (part.text.length > 256) part.text = trimmed(utf8Bytes(part.text));
         delete part.providerData;
+    } else if ((part.type === 'image' || part.type === 'file') && part.data !== undefined && part.data.length > 256) {
+        // The part becomes exactly `{ type: 'text', text }`: nothing of the attachment (its bytes, url, media type, name, size, …) lingers.
+        // Rebuilt in place, since the passes run over views of the cloned transcript's own part objects.
+        const note = `[${part.type}${'filename' in part && part.filename ? ` ${part.filename}` : ''} ${part.mediaType}] ${trimmed(utf8Bytes(part.data))}`;
+        const p = part as unknown as Record<string, unknown>;
+        for (const key of Object.keys(p)) delete p[key];
+        Object.assign(p, { type: 'text', text: note });
     }
     return before - sizeOf(part);
 }

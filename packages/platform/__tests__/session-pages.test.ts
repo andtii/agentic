@@ -6,7 +6,7 @@
  * start and `events()` yield every event, gapless and replay-equal, before and
  * after an eviction.
  */
-import { actorKey, type AgentId, type FrozenAgentConfig, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, CHAT_FILE_INLINE_BUDGET, type AgentId, type FrozenAgentConfig, type TaskId, type WorkspaceId } from '@agentic/core';
 import { allowAll, createTranscript, reduceAgentEvent, type AgentEvent, type AgentTranscript, type EventCursor } from '@sigx/ai-agent';
 import { checkEventInvariants, checkReplayEquality, mockAgent, type MockAgent } from '@sigx/ai-agent/testing';
 
@@ -170,27 +170,89 @@ describe('Session event log paging (#198)', { timeout: 60_000 }, () => {
         expect(await session().resume()).toMatchObject({ kind: expect.stringMatching(/ack|accepted|ok/) });
     });
 
-    it('a record from before #198 — whole log in the window, no index — rolls down on its next append', () => {
+    it('a roll is idempotent: replayed twice, it drops nothing more', () => {
         const state = initialSessionState();
         state.opened = true;
         let seq = 0;
         const ev = (e: Record<string, unknown>): AgentEvent => ({ sessionId: 's', epoch: 1, seq: ++seq, ...e }) as AgentEvent;
-        state.events.push(ev({ type: 'turn-start', turnId: 't1', input: [] }), ev({ type: 'request', requestId: 'r1', kind: 'input', turnId: 't1' }));
-        for (let i = 0; i < 20; i++) state.events.push(ev({ type: 'part-delta', partId: 'p', delta: 'x'.repeat(1000), turnId: 't1' }));
-        state.head = { epoch: 1, seq };
-        delete state.windowBytes;
-        delete state.index;
-        applySessionEntry(state, { t: 'ev', ev: { sessionId: 's', epoch: 1, seq: seq + 1, type: 'part-delta', partId: 'p', delta: 'y', turnId: 't1' } as AgentEvent });
+        applySessionEntry(state, { t: 'ev', ev: ev({ type: 'turn-start', turnId: 't1', input: [] }) });
+        applySessionEntry(state, { t: 'ev', ev: ev({ type: 'request', requestId: 'r1', kind: 'input', turnId: 't1' }) });
+        for (let i = 0; i < 21; i++) applySessionEntry(state, { t: 'ev', ev: ev({ type: 'part-delta', partId: 'p', delta: 'x'.repeat(1000), turnId: 't1' }) });
         expect(state.windowBytes).toBeGreaterThan(20_000);
-        expect(state.index!.map((e) => e.type)).toEqual(['turn-start', 'request']);
         // A roll drops the oldest events and the index still answers for them.
         applySessionEntry(state, { t: 'roll', page: { page: 0, count: 10, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: 10 } } });
         expect(state.events).toHaveLength(13);
         expect(state.archived).toBe(10);
         expect(knownEvents(state).slice(0, 2).map((e) => e.type)).toEqual(['turn-start', 'request']);
-        // Replayed twice, a roll drops nothing more.
         applySessionEntry(state, { t: 'roll', page: { page: 0, count: 10, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: 10 } } });
         expect(state.events).toHaveLength(13);
+    });
+});
+
+describe('the record stays bounded over a long session (#391)', { timeout: 180_000 }, () => {
+    /** A prompt as the chat sends one: text plus an image inlined up to the budget. */
+    const image = { type: 'image', mediaType: 'image/png', data: 'A'.repeat(CHAT_FILE_INLINE_BUDGET) } as const;
+    const TURNS = 50;
+
+    it('50 turns each prompting with a 700 KB inlined image keep writing: the record and every page stay under the value limit, and the events, tail and fold still say everything', async () => {
+        await session().open(spec);
+        for (let i = 1; i <= TURNS; i++) {
+            const reply = await session().prompt([{ type: 'text', text: `turn ${i}` }, image], `t${i}`);
+            expect(reply.kind).toBe('ack');
+            await settled();
+        }
+
+        const { state, bytes } = await storedState();
+        const info = await session().get();
+        // The record: a window, an index without prompts, replied commands without inputs, a bounded transcript.
+        expect(bytes).toBeLessThan(2 * 1024 * 1024 - 256 * 1024);
+        expect(state.windowBytes).toBeLessThanOrEqual(WINDOW_BYTES);
+        const starts = state.index!.filter((e) => e.type === 'turn-start');
+        expect(starts).toHaveLength(TURNS);
+        for (const e of starts) {
+            expect('input' in e).toBe(false);
+            expect((e as { bytes: number }).bytes).toBeGreaterThan(CHAT_FILE_INLINE_BUDGET);
+        }
+        expect(Object.keys(state.commands)).toHaveLength(TURNS);
+        for (const c of Object.values(state.commands)) {
+            expect(c).toMatchObject({ type: 'prompt', reply: { kind: 'ack' } });
+            expect(c.command).toBeUndefined();
+        }
+        for (const p of state.pages!) {
+            const page = await app.storage.load('session-page', sessionPageKey(KEY, p.page));
+            expect(jsonBytes(page!.state)).toBeLessThan(2 * 1024 * 1024 - 256 * 1024);
+        }
+
+        // Nothing was lost: every turn's prompt, image included, is still read back across the pages.
+        const all = await session().events();
+        expect(all).toHaveLength(info.eventCount);
+        checkEventInvariants(all, { fromStart: true });
+        const allStarts = all.filter((e) => e.type === 'turn-start');
+        expect(allStarts).toHaveLength(TURNS);
+        for (const e of allStarts) expect(e.type === 'turn-start' && e.input[1]).toEqual(image);
+        const tailed = await collectTail(session().tail({ epoch: 0, seq: 0 }), info.head);
+        expect(tailed).toEqual(all);
+        const t = createTranscript('x');
+        for (const ev of all) reduceAgentEvent(t, ev);
+        const answers = t.messages.filter((m) => m.role === 'assistant').map((m) => m.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''));
+        expect(answers).toEqual(Array.from({ length: TURNS }, (_, i) => `echo: turn ${i + 1}`));
+        // The stored snapshot folded the same turns; only its old images gave way to notes.
+        const stored = (await session().transcript())!;
+        expect(stored.messages.map((m) => m.id)).toEqual(t.messages.map((m) => m.id));
+        expect(jsonBytes(stored)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    });
+
+    it('a replied command is still idempotent by its id after its input was dropped', async () => {
+        await session().open(spec);
+        const first = await session().prompt([{ type: 'text', text: 'hello' }, image], 't1');
+        await settled();
+        const { state } = await storedState();
+        expect(state.commands.t1).toMatchObject({ commandId: 't1', type: 'prompt', reply: first });
+        expect(state.commands.t1!.command).toBeUndefined();
+        const before = (await session().get()).eventCount;
+        // The retry, with another input even: the remembered reply, and no second turn.
+        expect(await session().prompt('something else', 't1')).toEqual(first);
+        expect((await session().get()).eventCount).toBe(before);
     });
 });
 
@@ -247,6 +309,18 @@ describe('boundTranscript (#198)', () => {
         expect(b.messages.map((m) => (m.parts[2] as { text: string }).text)).toEqual(t.messages.map((_, i) => `answer ${i}`));
         // The input: the original, never the caller's object.
         expect((t.messages[0]!.parts[1] as { output?: unknown }).output).toBe('o'.repeat(60_000));
+    });
+
+    it('an old inlined image becomes exactly a text note — nothing of the attachment lingers (#391)', () => {
+        const t = createTranscript('s');
+        for (let i = 0; i < 3; i++) {
+            t.messages.push({ id: `u${i}`, role: 'user', turnId: `t${i}`, parts: [{ type: 'text', text: `turn ${i}` }, { type: 'image', mediaType: 'image/png', data: 'A'.repeat(600_000), name: 'shot.png', size: 450_000 } as never] });
+            t.messages.push({ id: `a${i}`, role: 'assistant', turnId: `t${i}`, parts: [{ type: 'text', id: `x${i}`, text: `answer ${i}` }] });
+        }
+        const b = boundTranscript(t);
+        expect(JSON.stringify(b).length).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+        expect(b.messages[0]!.parts[1]).toEqual({ type: 'text', text: expect.stringMatching(/^\[image image\/png\] \[trimmed from the stored snapshot: \d+ KB/) });
+        expect(Object.keys(b.messages[0]!.parts[1]!)).toEqual(['type', 'text']);
     });
 
     it('is a guarantee: one message alone past the budget is trimmed too, largest parts first', () => {

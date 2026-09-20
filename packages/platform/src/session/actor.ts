@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -291,6 +291,42 @@ export function defineSessionActor(ports: SessionPorts) {
         return out;
     }
 
+    /** The whole event at `at` (#391): from the window, else read out of the one page that holds it; `undefined` when neither does. */
+    async function eventAt(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Pick<SessionState, 'pages' | 'events'>, at: EventCursor): Promise<AgentEvent | undefined> {
+        const same = (e: EventCursor) => e.epoch === at.epoch && e.seq === at.seq;
+        const inWindow = s.events.find(same);
+        if (inWindow) return inWindow;
+        // `p.first <= at <= p.last`: the first is not after it, and it is not after the last.
+        const page = (s.pages ?? []).find((p) => !cursorAfter(at, p.first) && !cursorAfter(p.last, at));
+        if (!page) return undefined;
+        return (await c.actor(SessionPage, sessionPageKey(c.key, page.page)).read()).find(same);
+    }
+
+    /**
+     * The interrupted turn `end` closed, with the input its `turn-start` carried: from the window (`cutTurnOf`), else
+     * the page that holds the start — the index remembers only where it is (#391).
+     */
+    async function cutTurn(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: SessionState, end: AgentEvent): Promise<{ readonly turnId: string; readonly input: readonly PromptPart[] } | null> {
+        const inWindow = cutTurnOf(s.events, end);
+        if (inWindow) return inWindow;
+        const turnId = end.turnId;
+        if (turnId === undefined) return null;
+        const indexed = findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId);
+        if (!indexed) return null;
+        const start = 'input' in indexed ? indexed : await eventAt(c, s, indexed);
+        return start?.type === 'turn-start' ? { turnId, input: start.input } : null;
+    }
+
+    /** `requestRecordOf` over the events it reads (#391) — the request, the call it asks about, its decision — never the whole log. */
+    function requestRecordIn(s: SessionState, requestId: string, transcript?: AgentTranscript): RequestRecord | null {
+        const found = requestById(s, requestId);
+        if (!found) return null;
+        const callId = found.request.callId;
+        const call = callId === undefined ? undefined : findEvent(s, (e) => e.type === 'tool-call' && e.callId === callId);
+        const events: AgentEvent[] = [found.request, ...(call ? [call as AgentEvent] : []), ...(found.resolved ? [found.resolved] : [])];
+        return requestRecordOf(events, requestId, transcript);
+    }
+
     async function appendEvent(c: ActorContext<SessionState>, ev: AgentEvent): Promise<void> {
         if (!cursorAfter(c.state.head, ev)) return;
         await appendEntry(c, { t: 'ev', ev } satisfies SessionEntry);
@@ -323,8 +359,8 @@ export function defineSessionActor(ports: SessionPorts) {
             });
             return;
         }
-        const request = knownEvents(c.state).find((e) => e.type === 'request' && e.requestId === ev.requestId);
-        if (!request || request.type !== 'request') return;
+        const request = requestById(c.state, ev.requestId)?.request;
+        if (!request) return;
         await publishChat(c, { kind: 'status', status: 'request-resolved', ref: requestRef(request) });
         const ref: NotificationRef = { kind: 'session', sessionId: parsed.sessionId, requestId: ev.requestId };
         await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.ackRef(ref));
@@ -395,7 +431,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const spec = s.spec;
         const parsed = parseSessionKey(key);
         if (!ports.answered || !spec?.chatId || !parsed) return null;
-        const record = requestRecordOf(knownEvents(s), answer.requestId);
+        const record = requestRecordIn(s, answer.requestId);
         if (!record?.resolved || record.resolved.outcome !== 'input') return null;
         const choices = record.request.options?.map((o) => o.label);
         const taskId = currentTaskId(s);
@@ -433,7 +469,8 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
             corrections: c.snapshot(s.corrections ?? []),
-            grants: sessionGrantsOf(knownEvents(s))
+            // The whole set, genuinely: every grant of the session — the index's stripped turn-starts are no events and say nothing about one.
+            grants: sessionGrantsOf(knownEvents(s).filter(isWholeEvent))
         };
     }
 
@@ -522,7 +559,7 @@ export function defineSessionActor(ports: SessionPorts) {
      * because `running` is gone once its `turn-end` folded. Failure is
      * recorded, never thrown.
      */
-    async function learnFromTurn(c: ActorContext<SessionState>, turnId: string, text: string, taskId: TaskId | undefined): Promise<void> {
+    async function learnFromTurn(c: ActorContext<SessionState>, turnId: string, text: string, taskId: TaskId | undefined, transcript: AgentTranscript): Promise<void> {
         const learning = ports.learning;
         const s = c.state;
         const spec = s.spec;
@@ -532,12 +569,14 @@ export function defineSessionActor(ports: SessionPorts) {
         // Learning or memory turned off (#242): the outcome is not recorded, and nothing is written.
         if (!learning || !learner || 'off' in learner || !spec || !taskId || !parsed || !principal) return;
         const { plugin, memory } = learner;
-        const end = knownEvents(s).findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
+        const end = findEvent(s, (e) => e.type === 'turn-end' && e.turnId === turnId);
         if (!end || end.type !== 'turn-end' || isInterruptedTurnEnd(end)) return;
         const status = turnStatusOf(end.stopReason);
         const result: TaskResult = { ...(text ? { text } : {}), artifacts: [], verified: false };
-        const start = knownEvents(s).find((e) => e.type === 'turn-start' && e.turnId === turnId);
-        const objective = spec.objective?.trim() || (start?.type === 'turn-start' ? lastUserText(start.input) : '');
+        // The prompt: from the turn's start while the window holds it, else from the turn's user message in the transcript just folded (#391).
+        const start = findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId);
+        const input = start?.type === 'turn-start' && 'input' in start ? start.input : transcript.messages.find((m) => m.role === 'user' && m.turnId === turnId)?.parts.filter((p) => p.type === 'text');
+        const objective = spec.objective?.trim() || lastUserText(input);
         let record: LearningRecord = { turnId, at: now(), status, verification: 'none', written: 0, parked: 0 };
         try {
             const verdict = await learning.verify?.({ taskId, agentId: spec.agentId, turnId, status, result });
@@ -683,7 +722,7 @@ export function defineSessionActor(ports: SessionPorts) {
         if (live) s.ref = structuredClone(live.session.ref);
         const text = finalText(transcript, turnId);
         if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(taskId ? { taskId } : {}) });
-        await learnFromTurn(c, turnId, text, taskId);
+        await learnFromTurn(c, turnId, text, taskId, transcript);
         await c.save();
     }
 
@@ -703,7 +742,7 @@ export function defineSessionActor(ports: SessionPorts) {
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
         const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, epoch, seq: ++seq });
         const before = await snapshotTranscript(c);
-        if (!knownEvents(s).some((e) => e.turnId === turnId && e.type === 'turn-start')) await emit({ type: 'turn-start', turnId, input });
+        if (!findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId)) await emit({ type: 'turn-start', turnId, input });
         for (const m of before.messages) {
             if (m.turnId !== turnId) continue;
             for (const p of m.parts) {
@@ -927,13 +966,14 @@ export function defineSessionActor(ports: SessionPorts) {
                         if (!live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
                     }
                     // The last interruption's resume, already sent: the remembered reply, whatever ran since (OPS-06).
-                    const known = knownEvents(s);
-                    const lastCut = known.findLast(isInterruptedTurnEnd);
-                    const previous = lastCut && cutTurnOf(known, lastCut);
+                    const lastCut = findEvent(s, (e) => e.type === 'turn-end' && isInterruptedTurnEnd(e));
+                    const previous = lastCut ? await cutTurn(ctx, s, lastCut as AgentEvent) : null;
                     if (previous && s.commands[commandId ?? resumeCommandId(previous.turnId)]) {
                         return dispatch({ v: V, commandId: commandId ?? resumeCommandId(previous.turnId), type: 'prompt', turnId: resumeTurnId(previous.turnId), input: ctx.snapshot(previous.input) });
                     }
-                    const cut = interruptedTurn(known);
+                    // Resumable: the log's last turn is that cut one and nothing has started since — its start read out of a page when the turn streamed past the window.
+                    const last = findEvent(s, (e) => e.type === 'turn-end' || e.type === 'turn-start');
+                    const cut = interruptedTurn(s.events) ?? (previous && last === lastCut ? previous : null);
                     if (!cut) return errorReply(commandId ?? newCommandId('resume'), 'invalid', `session "${ctx.key}" has no interrupted turn to resume`);
                     return dispatch({ v: V, commandId: commandId ?? resumeCommandId(cut.turnId), type: 'prompt', turnId: resumeTurnId(cut.turnId), input: ctx.snapshot(cut.input) });
                 },
@@ -942,7 +982,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 respond(requestId: string, decision: Decision, commandId: string = `respond:${requestId}`): Promise<SessionCommandResult> {
                     if (decision.type === 'input') {
                         // A question form takes answers keyed by question: a bare string would reach the runtime as "no answer".
-                        const schema = requestRecordOf(knownEvents(ctx.state), requestId)?.request.schema;
+                        const schema = requestById(ctx.state, requestId)?.request.schema;
                         decision = { ...decision, answers: shapeAnswers(schema, decision.answers) };
                     }
                     return dispatch({ v: V, commandId, type: 'respond', requestId, decision });
@@ -999,7 +1039,7 @@ export function defineSessionActor(ports: SessionPorts) {
                     if (!s.opened || !s.spec) throw new ServerFnError(409, `session "${ctx.key}" is not open`);
                     if (s.status === 'closed') throw new ServerFnError(409, `session "${ctx.key}" is closed`);
                     const requestId = platformRequestId(input.callId);
-                    if (!knownEvents(s).some((e) => e.type === 'request' && e.requestId === requestId)) {
+                    if (!requestById(s, requestId)) {
                         // The local driver may lag the runtime: fold what the runtime already emitted (the call itself) so the question lands after it.
                         const live = lives.get(ctx.key);
                         if (live) await drainBuffered(ctx, live, false);
@@ -1014,8 +1054,8 @@ export function defineSessionActor(ports: SessionPorts) {
                             ...(input.options ? { options: input.options } : {})
                         });
                     }
-                    const resolved = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
-                    return { requestId, ...(resolved ? { resolved: ctx.snapshot(resolved as RequestResolvedEvent) } : {}) };
+                    const resolved = requestById(s, requestId)?.resolved;
+                    return { requestId, ...(resolved ? { resolved: ctx.snapshot(resolved) } : {}) };
                 },
 
                 /**
@@ -1026,8 +1066,8 @@ export function defineSessionActor(ports: SessionPorts) {
                 async detachInput(requestId: string): Promise<DetachedInput> {
                     const s = ctx.state;
                     if (!s.platformRequests?.includes(requestId)) throw new ServerFnError(404, `session "${ctx.key}" raised no request "${requestId}"`);
-                    const resolved = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
-                    if (resolved) return { resolved: ctx.snapshot(resolved as RequestResolvedEvent) };
+                    const resolved = requestById(s, requestId)?.resolved;
+                    if (resolved) return { resolved: ctx.snapshot(resolved) };
                     if (!s.detachedRequests?.includes(requestId)) await appendEntry(ctx, set({ detachedRequests: [...(s.detachedRequests ?? []), requestId] }));
                     return {};
                 },
@@ -1035,14 +1075,15 @@ export function defineSessionActor(ports: SessionPorts) {
                 /** One request with its call input and, once decided, the decision — what an approval card renders (CHT-09). A live read. */
                 request(requestId: string): SessionRequestView | null {
                     const s = ctx.state;
-                    const record = requestRecordOf(knownEvents(s), requestId, s.transcript);
+                    const record = requestRecordIn(s, requestId, s.transcript);
                     return record ? requestView(ctx, ctx.snapshot(record)) : null;
                 },
 
                 /** Every request of the session, oldest first; `openOnly` keeps the ones still waiting for a person. A live read. */
                 requests(options: { readonly openOnly?: boolean } = {}): SessionRequestView[] {
                     const s = ctx.state;
-                    const all = requestRecordsOf(knownEvents(s), s.transcript);
+                    // The whole set, genuinely: every request of the session.
+                    const all = requestRecordsOf(knownEvents(s).filter(isWholeEvent), s.transcript);
                     return ctx.snapshot(options.openOnly ? all.filter((r) => !r.resolved) : all).map((r) => requestView(ctx, r));
                 },
 
@@ -1116,7 +1157,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 async commandReplied(replied: WireReply): Promise<void> {
                     assertHostingMachine();
                     const known = ctx.state.commands[replied.commandId];
-                    if (!known || known.reply) return;
+                    if (!known || known.reply || !known.command) return;
                     await recordReply(ctx.snapshot(known.command), replied, known.taskId);
                 },
 
@@ -1150,9 +1191,9 @@ export function defineSessionActor(ports: SessionPorts) {
             /** The decision on `requestId` — yielded once it is in the log (at once when it already is); ends without one when the session closes first. */
             async *resolution(requestId: string): AsyncIterable<RequestResolvedEvent> {
                 for await (const s of ctx.changes({ initial: true, throttleMs: CHANGE_THROTTLE_MS })) {
-                    const ev = knownEvents(s).find((e) => e.type === 'request-resolved' && e.requestId === requestId);
+                    const ev = requestById(s, requestId)?.resolved;
                     if (ev) {
-                        yield ev as RequestResolvedEvent;
+                        yield ev;
                         return;
                     }
                     if (s.status === 'closed') return;
