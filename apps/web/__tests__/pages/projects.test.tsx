@@ -80,6 +80,29 @@ describe('/projects (mock)', () => {
     });
 });
 
+describe('/projects/new from a folder (#336)', () => {
+    it('opens on the name, the folder row with the origin as its badge, and Find on the other rows', async () => {
+        const path = 'C:\\Dev\\agentic\\branches\\x';
+        const dom = await mountRoute(`/projects/new?name=agentic&env=env_alien01_work&path=${encodeURIComponent(path)}&origin=${encodeURIComponent(AGENTIC_ORIGIN)}`);
+        expect(page(dom, 'project')).not.toBeNull();
+        expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
+        expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('x');
+        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toContain('repo');
+        expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
+        expect(text(row(dom, 'env_nuclab_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('No folder on this environment');
+    });
+
+    it('a name alone, or a folder without an origin, prefill just that', async () => {
+        const named = await mountRoute('/projects/new?name=blog');
+        expect(named.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('blog');
+        expect([...named.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
+        const plain = await mountRoute(`/projects/new?env=env_alien01_work&path=${encodeURIComponent('C:\\notes')}`);
+        expect(plain.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('');
+        expect(text(row(plain, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('notes');
+        expect([...plain.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
+    });
+});
+
 describe('the project form (mock)', () => {
     async function mountForm(extra: { catalogue?: Readonly<Record<string, ProjectFeaturePlugin>> } = {}) {
         const saved: ProjectPatch[] = [];

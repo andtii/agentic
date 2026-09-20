@@ -11,7 +11,7 @@ import { LinkButton } from './ops/LinkButton';
 import { projectHead } from './projects/head';
 import { LiveProject, LiveProjects } from './projects/LiveProjects';
 import { mockLocate } from './projects/locate';
-import { connectorOptionsOf, featureManifestsOf } from './projects/model';
+import { connectorOptionsOf, featureManifestsOf, projectPrefillOf, type ProjectDraft } from './projects/model';
 import { ProjectForm } from './projects/ProjectForm';
 import { ProjectsView } from './projects/ProjectsView';
 import { mockWorkdirEnvironments } from './workdir/environments';
@@ -36,7 +36,7 @@ export const Projects = component(() => {
 });
 
 /** The form on mock data: the sample agents, environments, plugins and folders; a save only navigates. */
-const MockProjectForm = component<{ project?: ProjectRecord }>(({ props }) => {
+const MockProjectForm = component<{ project?: ProjectRecord; initial?: Partial<ProjectDraft> }>(({ props }) => {
     const router = useRouter();
     const locate = mockLocate();
     const st = signal({ error: '' });
@@ -44,6 +44,7 @@ const MockProjectForm = component<{ project?: ProjectRecord }>(({ props }) => {
     return () => (
         <ProjectForm
             {...(props.project ? { project: props.project } : {})}
+            {...(props.initial ? { initial: props.initial } : {})}
             agents={AGENTS}
             environments={mockWorkdirEnvironments.list()}
             machineOf={mockWorkdirEnvironments.machineOf}
@@ -58,12 +59,16 @@ const MockProjectForm = component<{ project?: ProjectRecord }>(({ props }) => {
     );
 });
 
-/** `/projects/new`. */
+/** `/projects/new`, prefilled from `?name=&env=&path=&origin=` when New chat sent a folder here (#336). */
 export const NewProject = component(() => {
     useHead({ title: 'New project' });
-    return () => (dataMode() === 'live' ? <LiveProject /> : (
+    const route = useRoute();
+    // Read once: the query is the request the form opens on.
+    const initial = projectPrefillOf(route.query);
+    const prefill = initial ? { initial } : {};
+    return () => (dataMode() === 'live' ? <LiveProject {...prefill} /> : (
         <Page title="New project" page="project">
-            <MockProjectForm />
+            <MockProjectForm {...prefill} />
         </Page>
     ));
 });

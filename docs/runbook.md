@@ -242,6 +242,8 @@ On the machine, as the user who owns the Claude Code accounts:
 
 Already paired (upgrade, or `pair` run by hand)? `install.ps1` with no arguments.
 
+From a terminal inside a repo under one of the machine's working roots, `node bin\agentic-daemon.mjs open` (#336) prints and opens `https://<platform>/chats/new?env=…&path=…&origin=…`: New chat opens on that folder with the project whose git feature names the repo's origin preselected (the folder is saved as the project's on this environment the first time), or offers **Create project from this folder** / **Just this chat**. `--env <id>` picks the environment when the folder is under several; `--no-browser` only prints the link.
+
 ### 5.4 Doctor, logs, restart
 
 ```powershell
