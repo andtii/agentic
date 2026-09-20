@@ -85,7 +85,7 @@ const NOBODY: ReadonlySet<string> = new Set();
 export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] || working.has(agentId) ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : summary.sessions[agentId] || working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {})

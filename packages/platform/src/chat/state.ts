@@ -52,6 +52,26 @@ export interface PendingUpload {
     readonly at: number;
 }
 
+/**
+ * The execution session bound to one agent member of this chat (#392, CHT-11):
+ * one live session per (chat, agent), so the router finds it instead of
+ * minting a new one. Created by a `session-started` status entry carrying a
+ * `ref`, replaced by a later one, dropped by `session-ended` or by the
+ * member's removal.
+ */
+export interface ChatSessionRow {
+    readonly sessionId: SessionId;
+    /** `at` of the `session-started` entry that created the row. */
+    readonly since: number;
+    /**
+     * The watermark: `seq` of the last `msg` this member authored, so every
+     * entry after it is what its engine has not seen. `0` until it has
+     * answered once in this session — the router then sends from the
+     * member's `historyFrom`. Only the member's own messages move it.
+     */
+    readonly seenSeq: number;
+}
+
 /** Most uploads one principal may hold pending in one chat. */
 export const MAX_PENDING_UPLOADS = 50;
 /** A pending upload older than this is forgotten; the store's orphan sweep (`sweepOrphans`) must use at least this age. */
@@ -70,8 +90,8 @@ export interface ChatState {
     /** Agent members keyed by `AgentId`. */
     members: Record<string, ChatMember>;
     coordinator: AgentId | null;
-    /** Sessions currently open for this chat, keyed by `AgentId`. */
-    activeSessions: Record<string, SessionId>;
+    /** The session bound to each agent member, keyed by `AgentId` (#392): absent while the member has none. */
+    sessions: Record<string, ChatSessionRow>;
     /** The title the last `rename` entry set (#124); absent until one is. Records written before it existed have none. */
     title?: string;
     /** The project the last `project` note put the chat in (#332, `Chat.setProject`); absent until one does, or after one clears it. */
@@ -86,13 +106,13 @@ export interface ChatState {
 }
 
 export function initialChatState(): ChatState {
-    return { v: 1, seq: 0, windowFrom: 0, window: [], index: [], members: {}, coordinator: null, activeSessions: {} };
+    return { v: 1, seq: 0, windowFrom: 0, window: [], index: [], members: {}, coordinator: null, sessions: {} };
 }
 
 /**
  * Fold one entry into the state in place. Membership, coordinator and
- * active-session bookkeeping are all derived here, so replaying the
- * entries always rebuilds the same state.
+ * session bookkeeping — the binding and its watermark — are all derived
+ * here, so replaying the entries always rebuilds the same state.
  */
 export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
     const seq = state.seq++;
@@ -101,6 +121,11 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
     switch (entry.t) {
         case 'msg': {
             indexFiles(state, entry, seq);
+            // The member's own final answer (#392): everything after it is what its engine has not seen.
+            if (entry.author.kind === 'agent') {
+                const row = state.sessions[entry.author.agentId];
+                if (row) state.sessions[entry.author.agentId] = { ...row, seenSeq: seq };
+            }
             // The note `setWorkdir` writes (#190): the member's folder for this chat, or none.
             const member = entry.workdir ? state.members[entry.workdir.agentId] : undefined;
             if (entry.workdir && member) {
@@ -120,7 +145,7 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
                 state.members[entry.agentId] = { since: entry.at, historyFrom: entry.historyAccess === 'all' ? 0 : seq };
             } else {
                 delete state.members[entry.agentId];
-                delete state.activeSessions[entry.agentId];
+                delete state.sessions[entry.agentId];
                 if (state.coordinator === entry.agentId) state.coordinator = null;
             }
             return;
@@ -131,8 +156,9 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             state.title = entry.title;
             return;
         case 'status':
-            if (entry.kind === 'session-started' && entry.ref) state.activeSessions[entry.agentId] = entry.ref as SessionId;
-            else if (entry.kind === 'session-ended') delete state.activeSessions[entry.agentId];
+            // The binding (#392): a start with a ref creates or replaces the member's row, an end drops it.
+            if (entry.kind === 'session-started' && entry.ref) state.sessions[entry.agentId] = { sessionId: entry.ref as SessionId, since: entry.at, seenSeq: 0 };
+            else if (entry.kind === 'session-ended') delete state.sessions[entry.agentId];
             return;
         default:
             return;

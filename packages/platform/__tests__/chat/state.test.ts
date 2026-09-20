@@ -7,6 +7,15 @@ const A = 'agent_a' as AgentId;
 const B = 'agent_b' as AgentId;
 
 const msg = (id: string, at: number): ChatEntry => ({ t: 'msg', id: id as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: id }], at, mentions: [] });
+const agentMsg = (id: string, agentId: AgentId, sessionId: string, at: number): ChatEntry => ({
+    t: 'msg',
+    id: id as MessageId,
+    author: { kind: 'agent', agentId, sessionId: sessionId as SessionId },
+    parts: [{ type: 'text', text: id }],
+    at,
+    mentions: [],
+    sessionId: sessionId as SessionId
+});
 
 const script: readonly ChatEntry[] = [
     msg('m0', 1),
@@ -33,7 +42,7 @@ describe('applyChatEntry', () => {
         expect(state.index).toEqual(script.map((e, seq) => ({ seq, at: e.at })));
         expect(state.members).toEqual({ [A]: { since: 2, historyFrom: 0 } });
         expect(state.coordinator).toBeNull();
-        expect(state.activeSessions).toEqual({});
+        expect(state.sessions).toEqual({});
     });
 
     it('is deterministic: the same entries fold to the same state', () => {
@@ -70,7 +79,87 @@ describe('applyChatEntry', () => {
         applyChatEntry(state, { t: 'coordinator', agentId: B, at: 4 });
         expect(state.coordinator).toBe(B);
         applyChatEntry(state, { t: 'status', agentId: B, kind: 'session-started', ref: 'session_9', at: 5 });
-        expect(state.activeSessions).toEqual({ [B]: 'session_9' as SessionId });
+        expect(state.sessions).toEqual({ [B]: { sessionId: 'session_9' as SessionId, since: 5, seenSeq: 0 } });
+    });
+});
+
+describe('sessions (#392): one row per member, bound by the session statuses', () => {
+    const joined = script.slice(0, 3);
+    const started = (agentId: AgentId, ref: string, at: number): ChatEntry => ({ t: 'status', agentId, kind: 'session-started', ref, at });
+    const ended = (agentId: AgentId, ref: string, at: number): ChatEntry => ({ t: 'status', agentId, kind: 'session-ended', ref, at });
+
+    it('session-started builds a row with the entry `at` as `since` and nothing seen yet', () => {
+        const state = replay([...joined, started(A, 'session_1', 10)]);
+        expect(state.sessions).toEqual({ [A]: { sessionId: 'session_1', since: 10, seenSeq: 0 } });
+    });
+
+    it('a session-started without a ref binds nothing', () => {
+        const state = replay([...joined, { t: 'status', agentId: A, kind: 'session-started', at: 10 }]);
+        expect(state.sessions).toEqual({});
+    });
+
+    it('seenSeq advances on that member’s own message and not on another member’s or a user’s', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), started(B, 'session_2', 11)]);
+        // seq 0..2 joined, 3 and 4 the session starts.
+        applyChatEntry(state, msg('u1', 12)); // seq 5, a user
+        expect(state.sessions[A]!.seenSeq).toBe(0);
+        expect(state.sessions[B]!.seenSeq).toBe(0);
+        applyChatEntry(state, agentMsg('a1', A, 'session_1', 13)); // seq 6, A's own answer
+        expect(state.sessions[A]!.seenSeq).toBe(6);
+        expect(state.sessions[B]!.seenSeq).toBe(0);
+        applyChatEntry(state, agentMsg('b1', B, 'session_2', 14)); // seq 7, B's — A is untouched
+        expect(state.sessions[A]!.seenSeq).toBe(6);
+        expect(state.sessions[B]!.seenSeq).toBe(7);
+        applyChatEntry(state, msg('u2', 15)); // seq 8
+        applyChatEntry(state, agentMsg('a2', A, 'session_1', 16)); // seq 9
+        expect(state.sessions).toEqual({
+            [A]: { sessionId: 'session_1', since: 10, seenSeq: 9 },
+            [B]: { sessionId: 'session_2', since: 11, seenSeq: 7 }
+        });
+    });
+
+    it('a message from an agent without a row moves nothing', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), agentMsg('b1', B, 'session_x', 11)]);
+        expect(state.sessions).toEqual({ [A]: { sessionId: 'session_1', since: 10, seenSeq: 0 } });
+    });
+
+    it('a second session-started for the same member replaces the row: new id, new since, nothing seen', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), agentMsg('a1', A, 'session_1', 11), started(A, 'session_2', 12)]);
+        expect(state.sessions).toEqual({ [A]: { sessionId: 'session_2', since: 12, seenSeq: 0 } });
+    });
+
+    it('session-ended drops the row; another member’s row stays', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), started(B, 'session_2', 11), ended(A, 'session_1', 12)]);
+        expect(state.sessions).toEqual({ [B]: { sessionId: 'session_2', since: 11, seenSeq: 0 } });
+        applyChatEntry(state, ended(A, 'session_1', 13)); // ending an unbound member is a no-op
+        expect(state.sessions).toEqual({ [B]: { sessionId: 'session_2', since: 11, seenSeq: 0 } });
+    });
+
+    it('removing a member drops its row', () => {
+        const state = replay([...joined, started(A, 'session_1', 10), started(B, 'session_2', 11), { t: 'member', op: 'remove', agentId: A, historyAccess: 'all', at: 12 }]);
+        expect(state.sessions).toEqual({ [B]: { sessionId: 'session_2', since: 11, seenSeq: 0 } });
+    });
+
+    it('a replay of the entry log rebuilds exactly the same rows', () => {
+        const log: readonly ChatEntry[] = [
+            ...joined,
+            started(A, 'session_1', 10),
+            agentMsg('a1', A, 'session_1', 11),
+            started(B, 'session_2', 12),
+            msg('u1', 13),
+            agentMsg('b1', B, 'session_2', 14),
+            agentMsg('a2', A, 'session_1', 15),
+            ended(B, 'session_2', 16),
+            started(B, 'session_3', 17)
+        ];
+        const live = initialChatState();
+        for (const entry of log) applyChatEntry(live, entry);
+        expect(live.sessions).toEqual({
+            [A]: { sessionId: 'session_1', since: 10, seenSeq: 8 },
+            [B]: { sessionId: 'session_3', since: 17, seenSeq: 0 }
+        });
+        expect(replay(log).sessions).toEqual(live.sessions);
+        expect(replay(log)).toEqual(live);
     });
 });
 

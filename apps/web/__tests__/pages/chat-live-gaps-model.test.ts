@@ -57,7 +57,7 @@ describe('chatTasks', () => {
     });
 
     it("a member working a delegated task of this chat reads active; settled, queued or other chats' work does not (#258)", () => {
-        const summary = { seq: 1, members: { a1: { since: 0, historyFrom: 0 }, a2: { since: 0, historyFrom: 0 }, a3: { since: 0, historyFrom: 0 } }, coordinator: 'a1', activeSessions: { a1: 's1' } } as unknown as ChatSummary;
+        const summary = { seq: 1, members: { a1: { since: 0, historyFrom: 0 }, a2: { since: 0, historyFrom: 0 }, a3: { since: 0, historyFrom: 0 } }, coordinator: 'a1', sessions: { a1: { sessionId: 's1', since: 0, seenSeq: 0 } } } as unknown as ChatSummary;
         const tree = [
             row('root', { chatId: 'c1' as never, status: 'waiting', createdAt: 1 }),
             row('kid', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a2' as AgentId, createdAt: 2 }),
@@ -94,7 +94,7 @@ describe('detachedQuestions (#285)', () => {
 });
 
 describe('open requests, waiting and unread', () => {
-    const summary: ChatSummary = { seq: 6, members: { a1: { since: 1, historyFrom: 0 }, a2: { since: 1, historyFrom: 0 } }, coordinator: 'a1' as AgentId, activeSessions: { a1: 's1' as never, a2: 's2' as never } };
+    const summary: ChatSummary = { seq: 6, members: { a1: { since: 1, historyFrom: 0 }, a2: { since: 1, historyFrom: 0 } }, coordinator: 'a1' as AgentId, sessions: { a1: { sessionId: 's1' as never, since: 1, seenSeq: 0 }, a2: { sessionId: 's2' as never, since: 1, seenSeq: 0 } } };
     const entries = [msg(0, 'user', 'push it'), request(1, 'a2', 'request', 'approval:r1'), request(2, 'a1', 'request', 'input:r2'), request(3, 'a1', 'request-resolved', 'input:r2'), msg(4, 'a1', 'thanks'), msg(5, 'a2', 'waiting on you')];
 
     it('pairs a request with its resolution by ref', () => {
