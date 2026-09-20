@@ -92,6 +92,32 @@ export function scriptedDriver(script: ConformanceScript): ScriptedDriver {
     };
 }
 
+/**
+ * `scriptedDriver` whose runtime names its session on the first prompt, the way a CLI reports its own id with the first
+ * stream event (#389): `session.opened` carries the placeholder (the platform's id), `ref` reads `<id>.run` from then on.
+ */
+export function namingDriver(script: ConformanceScript): ScriptedDriver {
+    const base = scriptedDriver(script);
+    return {
+        ...base,
+        async open(env, spec, ctx) {
+            const { session: inner, capabilities } = await base.open(env, spec, ctx);
+            let named = false;
+            const session: AgentSession = {
+                ...inner,
+                get ref() {
+                    return { agent: 'scripted', v: 1, id: named ? `${ctx.sessionId}.run` : ctx.sessionId };
+                },
+                prompt(input, options) {
+                    named = true;
+                    return inner.prompt(input, options);
+                }
+            };
+            return { session, capabilities };
+        }
+    };
+}
+
 export const MOCK_REPORT: CapabilityReport = { ...SCRIPTED_REPORT, runtime: 'mock', supported: ['prompt', 'cancel', 'close', 'configure'], unsupported: [] };
 
 /** Any `@sigx/ai-agent` `Agent` (e.g. `mockAgent`) as a driver: one agent per runtime, sessions opened with the spec. */

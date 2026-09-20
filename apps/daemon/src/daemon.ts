@@ -57,7 +57,7 @@ import {
 } from '@agentic/core';
 import { decodePlatformFrame, encodeFrame, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
 import { sessionPolicyOf } from '@agentic/runtimes';
-import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy } from '@sigx/ai-agent';
+import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy, type SessionRef } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, type ServedSession } from '@sigx/ai-agent/wire';
 import { reconnectingConnection, type BackoffOptions, type Connection, type Socket } from './connection.js';
 import type { SecureWriteOptions } from './credentials.js';
@@ -146,12 +146,26 @@ interface LiveSession {
     readonly session: AgentSession;
     readonly served: ServedSession;
     readonly capabilities: CapabilityReport;
+    /**
+     * The ref the platform last heard — `session.opened`'s, then each `session.ref` (#389). A runtime names its session
+     * on its own terms (a CLI with its first stream event), so `session.ref` goes out only when the identity moved on.
+     */
+    sentRef: SessionRef;
     /** The last frame this daemon handed to a socket. */
     lastSent: Cursor;
     /** The last event shown to the quota monitor: a replay after a reconnect is not news. */
     tapped: Cursor;
     pump: AbortController | undefined;
 }
+
+/**
+ * Whether two refs name the same runtime session (#389): by `id` and, for a harness that stamps generations, `data.epoch`
+ * — never by reference, since an adapter's `ref` may be a getter that builds a fresh object per read.
+ */
+export function sameRefIdentity(a: SessionRef, b: SessionRef): boolean {
+    return a.id === b.id && refEpoch(a) === refEpoch(b);
+}
+const refEpoch = (ref: SessionRef): unknown => (typeof ref.data === 'object' && ref.data !== null ? (ref.data as { epoch?: unknown }).epoch : undefined);
 
 interface PendingTool {
     readonly frame: Extract<DaemonFrame, { readonly t: 'tool.call' }>;
@@ -418,6 +432,17 @@ export function createDaemon(options: DaemonOptions): Daemon {
         s.pump = undefined;
     }
 
+    /**
+     * The runtime named (or renamed) its session since the platform last heard: `session.ref` (#389). Read after every
+     * frame the pump sends — the Claude Code adapter's `ref` is a live getter that takes the CLI's id with the first
+     * stream event — and never tied to `turn-end`: a turn that errors before it ends still named the session.
+     */
+    function reportRef(s: LiveSession): void {
+        const ref = s.session.ref;
+        if (sameRefIdentity(ref, s.sentRef)) return;
+        if (send({ v: V, t: 'session.ref', sessionId: s.id, ref })) s.sentRef = ref;
+    }
+
     function startPump(s: LiveSession, from: Cursor): void {
         stopPump(s);
         const controller = new AbortController();
@@ -425,6 +450,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
         void (async () => {
             let last = from;
             try {
+                // A pump starts on `welcome`: after a reconnect this is where a ref learned while the socket was down goes out.
+                reportRef(s);
                 for await (const frame of s.served.events(from, { signal: controller.signal })) {
                     if (controller.signal.aborted) return;
                     // `session.opened` already told the platform what the wire hello would.
@@ -442,6 +469,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                     } else if (frame.kind === 'gap') last = frame.resumeAt;
                     if (!send({ v: V, t: 'session.frame', sessionId: s.id, frame })) return;
                     s.lastSent = last;
+                    reportRef(s);
                 }
             } catch (e) {
                 if (!controller.signal.aborted) logger.warn('session: event stream failed', { session: s.id, error: e });
@@ -482,10 +510,13 @@ export function createDaemon(options: DaemonOptions): Daemon {
             }
             // Logged under the platform's session id: the runtime names its sessions its own way.
             const served = serveSession(opened.session, { agentId: spec.agentId, capabilities: agentCapabilitiesOf(opened.capabilities), eventLog: log.forSession(sessionId) });
-            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, lastSent: served.head, tapped: served.head, pump: undefined };
+            // `session.opened` carries whatever the runtime calls the session before its first prompt — a placeholder for a CLI.
+            // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
+            const ref = opened.session.ref;
+            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, sentRef: ref, lastSent: served.head, tapped: served.head, pump: undefined };
             sessions.set(sessionId, live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime });
-            send({ v: V, t: 'session.opened', sessionId, ref: opened.session.ref, capabilities: opened.capabilities, head: served.head });
+            send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: served.head });
             if (welcomed) startPump(live, served.head);
         } catch (e) {
             refuse(`the runtime could not open a session: ${(e as Error).message}`);

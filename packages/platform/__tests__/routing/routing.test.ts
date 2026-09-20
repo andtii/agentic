@@ -214,6 +214,8 @@ describe('daemon runtime (EXE-09)', () => {
         const info = await session(t.sessionId!).get();
         expect(info.spec).toMatchObject({ runtime: 'in-memory', environmentId: E1, machineId: m1 });
         expect(info.mode).toBe('remote');
+        // The record's ref is the id the runtime reported with its first turn (`session.ref`, #389), not the placeholder `session.opened` carried.
+        expect(info.ref).toEqual({ agent: 'in-memory', v: 1, id: `${t.sessionId}.run` });
         expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'tool.result')).toMatchObject({ output: { ok: true, status: 'done' } });
         // The daemon compiles the session policy from what travels in session.open (#121): the agent's rules and its grants, in config order.
         expect(sockets.frames(machineKey(WS, m1)).find((f) => f.t === 'session.open')).toMatchObject({ spec: { policy: { rules: [{ id: 'ask-destructive', match: { categories: ['destructive'] }, outcome: 'ask' }], grants: [{ name: 'task_report' }, { name: 'memory_search' }] } } });

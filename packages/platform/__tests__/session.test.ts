@@ -122,6 +122,7 @@ describe('Session authorization', () => {
         expect(await statusOf(app.as(userPrincipal('u2')).actor(Session, KEY).get())).toBe(403);
         expect(await statusOf(app.as(null).actor(Session, KEY).get())).toBe(401);
         expect(await statusOf(session().forwardFrames([]))).toBe(403);
+        expect(await statusOf(session().noteRef({ agent: 'mock', v: 1, id: 'r' }))).toBe(403);
         const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['tasks'] };
         expect(await statusOf(app.as(external).actor(Session, KEY).get())).toBe(403);
     });
@@ -129,19 +130,23 @@ describe('Session authorization', () => {
     it('lets only the hosting machine of a remote session forward frames and replies', async () => {
         const asMachine = app.as(machine).actor(Session, KEY);
         const reply = { v: 1, kind: 'ack', commandId: 'x' } as const;
+        const ref = { agent: 'claude-code', v: 1, id: 'real' };
         // Not opened, then opened locally: no machine hosts it.
         expect(await statusOf(asMachine.forwardFrames([]))).toBe(403);
         await session().open(spec);
         expect(await statusOf(asMachine.forwardFrames([]))).toBe(403);
         expect(await statusOf(asMachine.commandReplied(reply))).toBe(403);
+        expect(await statusOf(asMachine.noteRef(ref))).toBe(403);
 
         const REMOTE_KEY = actorKey(WS, 'session', 'session_2');
         await app.as(owner).actor(Session, REMOTE_KEY).open({ ...spec, runtime: 'claude-code', machineId: 'machine_1' as MachineId });
         expect(await statusOf(app.as(machine).actor(Session, REMOTE_KEY).forwardFrames([]))).toBeUndefined();
         expect(await statusOf(app.as(machine).actor(Session, REMOTE_KEY).commandReplied(reply))).toBeUndefined();
+        expect(await statusOf(app.as(machine).actor(Session, REMOTE_KEY).noteRef(ref))).toBeUndefined();
         const other: Principal = { kind: 'machine', workspaceId: WS, machineId: 'machine_2' as MachineId };
         expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).forwardFrames([]))).toBe(403);
         expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).commandReplied(reply))).toBe(403);
+        expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).noteRef(ref))).toBe(403);
     });
 });
 
@@ -379,7 +384,8 @@ describe('Session on the daemon path', () => {
         await forward();
         const info = await session().get();
         expect(info.running).toBeUndefined();
-        expect(info.ref?.id).toBe(upstream.id);
+        // The wire hello's `sessionRef` is not recorded (#389): a remote record keeps only a ref the daemon reported with `noteRef`.
+        expect(info.ref).toBeUndefined();
         expect(info.capabilities).toEqual(agent.capabilities);
         const events = await session().events();
         checkEventInvariants(events, { fromStart: true });
@@ -396,6 +402,34 @@ describe('Session on the daemon path', () => {
         await served.close();
         await upstream.close();
         await pump;
+    });
+
+    it('keeps only the ref the daemon reports: noteRef records a new identity once and an unchanged one writes nothing (#389)', async () => {
+        await session().open(remote);
+        const asMachine = app.as(machine).actor(Session, KEY);
+        // The wire hello carries the placeholder the open reported — recorded as capabilities, never as the ref.
+        const placeholder = { agent: 'claude-code', v: 1, id: 'cc_placeholder' };
+        await asMachine.forwardFrames([{ v: 1, kind: 'hello', agentId: AGENT, sessionId: 'session_1', sessionRef: placeholder, capabilities: agent.capabilities, head: { epoch: 0, seq: 0 } } as WireFrame]);
+        expect((await session().get()).ref).toBeUndefined();
+
+        const writes = () => [...app.saves, ...app.appends].filter((w) => w.type === 'session').length;
+        const real = { agent: 'claude-code', v: 1, id: 'sess-real', data: { cwd: '/work', epoch: 1 } };
+        await asMachine.noteRef(real);
+        expect((await session().get()).ref).toEqual(real);
+        const written = writes();
+        // The same identity (id and data.epoch) again, whatever else the ref carries: no entry.
+        await asMachine.noteRef({ ...real, data: { cwd: '/elsewhere', epoch: 1 } });
+        expect((await session().get()).ref).toEqual(real);
+        expect(writes()).toBe(written);
+        // A new id replaces it; so does a new epoch under the same id.
+        const renamed = { ...real, id: 'sess-real-2' };
+        await asMachine.noteRef(renamed);
+        expect((await session().get()).ref).toEqual(renamed);
+        expect(writes()).toBe(written + 1);
+        const regenerated = { ...renamed, data: { cwd: '/work', epoch: 2 } };
+        await asMachine.noteRef(regenerated);
+        expect((await session().get()).ref).toEqual(regenerated);
+        expect(writes()).toBe(written + 2);
     });
 
     it('refuses a command it has nowhere to send', async () => {

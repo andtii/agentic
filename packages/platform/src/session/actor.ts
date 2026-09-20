@@ -27,7 +27,7 @@
 import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
-import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type UnstampedEvent } from '@sigx/ai-agent';
+import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type SessionRef, type UnstampedEvent } from '@sigx/ai-agent';
 import { serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireCommand, type WireFrame, type WireOutputSpec, type WireReply } from '@sigx/ai-agent/wire';
 
 import { auditPort } from '../audit/port.js';
@@ -184,6 +184,12 @@ const internalPolicy: ActorPolicy = (principal: Principal | null) => principal?.
 const correctorPolicy: ActorPolicy = (principal: Principal | null) => principal !== null && principal.kind !== 'machine';
 /** `raiseInput`: only the agent working THIS session (the tool port runs under its principal, on both paths). */
 const ownAgentPolicy: ActorPolicy = (principal: Principal | null, _rq, op) => principal?.kind === 'agent' && !!op.resource && parseSessionKey(op.resource.key)?.sessionId === principal.sessionId;
+
+/** Whether two refs name the same runtime session (#389): by `id` and, for a harness that stamps generations, `data.epoch` — never by reference. */
+function sameRefIdentity(a: SessionRef, b: SessionRef): boolean {
+    return a.id === b.id && refEpoch(a) === refEpoch(b);
+}
+const refEpoch = (ref: SessionRef): unknown => (typeof ref.data === 'object' && ref.data !== null ? (ref.data as { epoch?: unknown }).epoch : undefined);
 
 /** A platform request nobody's tool call waits on (#285): detached by its call, or its session closed. */
 function isDetached(s: SessionState, requestId: string): boolean {
@@ -722,7 +728,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, noteRef: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
@@ -1084,7 +1090,9 @@ export function defineSessionActor(ports: SessionPorts) {
                     for (const frame of frames) {
                         switch (frame.kind) {
                             case 'hello':
-                                await appendEntry(ctx, set({ mode: 'remote', ref: frame.sessionRef, capabilities: frame.capabilities, ...(s.status === 'disconnected' ? { status: 'idle' as const } : {}) }));
+                                // Not `frame.sessionRef`: the open carries whatever the runtime called the session before its first prompt,
+                                // a placeholder for a CLI. The record's ref comes from `noteRef` alone on this path (#389).
+                                await appendEntry(ctx, set({ mode: 'remote', capabilities: frame.capabilities, ...(s.status === 'disconnected' ? { status: 'idle' as const } : {}) }));
                                 break;
                             case 'event': {
                                 // Read before the fold: a `turn-end` drops `running`, and the turn's task goes with it (#390).
@@ -1110,6 +1118,18 @@ export function defineSessionActor(ports: SessionPorts) {
                     const known = ctx.state.commands[replied.commandId];
                     if (!known || known.reply) return;
                     await recordReply(ctx.snapshot(known.command), replied, known.taskId);
+                },
+
+                /**
+                 * Daemon path (internal): the runtime's own id for this session (#389), reported by the daemon once the runtime
+                 * names it and on every change. The only ref a remote record holds — the open's is a placeholder, so the `hello`
+                 * above records none — and the one a re-open resumes from. The same identity (id, `data.epoch`) writes nothing.
+                 */
+                async noteRef(ref: SessionRef): Promise<void> {
+                    assertHostingMachine();
+                    const s = ctx.state;
+                    if (s.ref && sameRefIdentity(s.ref, ref)) return;
+                    await appendEntry(ctx, set({ ref: ctx.snapshot(ref) }));
                 }
             };
         },

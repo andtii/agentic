@@ -301,16 +301,22 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         expect(await machine(K1).openSession(S1, E1, openSpec)).toBe('opened');
         expect(await machine(K1).openSession(S1, E1, openSpec)).toBe('opened'); // idempotent
         await until(async () => (await machine(K1).get()).activeSessions[0]?.status === 'open', 'session.opened');
-        // The Session learned its ref and capabilities from the synthesized wire hello.
+        // The Session learned its capabilities from the synthesized wire hello — not its ref: `session.opened` carries a
+        // placeholder, and the record keeps only a ref the daemon reported with `session.ref` (#389).
         const info = await session(S1).get();
         expect(info.mode).toBe('remote');
-        expect(info.ref).toEqual({ agent: 'in-memory', v: 1, id: S1 });
+        expect(info.ref).toBeUndefined();
         expect(info.capabilities?.resume).toBe('local');
+        // A `session.ref` for a session this machine does not host is ignored, not an error.
+        expect(await machine(K1, asMachine(M1)).socketMessage(JSON.stringify({ v: 1, t: 'session.ref', sessionId: S2, ref: { agent: 'in-memory', v: 1, id: 'nobody' } }))).toMatchObject({ ok: true });
+        expect((await session(S2).get()).ref).toBeUndefined();
 
         const pending = await session(S1).prompt('hello', 't1');
         expect(pending).toMatchObject({ kind: 'pending', commandId: 't1' });
         await until(async () => (await session(S1).get()).running?.turnId === 't1', 'the prompt ack');
         await until(async () => !(await session(S1).get()).running, 'the turn to end');
+        // The runtime named the session with its first turn: the daemon's `session.ref` reached the record through the machine.
+        expect((await session(S1).get()).ref).toEqual({ agent: 'in-memory', v: 1, id: `${S1}.run` });
         const events = await session(S1).events();
         expect(events.map((e) => e.type)).toEqual(['part-delta', 'part-delta', 'turn-end']);
         expect((await session(S1).get()).transcriptAt).toEqual({ epoch: 0, seq: 3 });

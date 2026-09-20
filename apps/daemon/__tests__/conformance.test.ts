@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { createDaemon } from '../src/daemon';
 import { writeEnvironments } from '../src/env-store';
 import { ndjsonEventLog } from '../src/event-log';
-import { scriptedDriver } from './helpers/drivers';
+import { namingDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE } from './helpers/relay';
 
 const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
@@ -24,7 +24,8 @@ const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
 const KNOWN_ORIGIN = 'https://github.com/andtii/agentic.git';
 
 const harness: DaemonConformanceHarness = {
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
+    // `session-ref` (#389): the scripted runtime names its session on the first prompt, so the daemon's `session.ref` is proven here too.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref'],
     knownOrigin: KNOWN_ORIGIN,
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
@@ -35,7 +36,7 @@ const harness: DaemonConformanceHarness = {
         await writeFile(join(dir, 'work', 'agentic', '.git', 'config'), `[remote "origin"]\n\turl = ${KNOWN_ORIGIN}\n`);
         const work = await realpath(join(dir, 'work'));
         const relay = await startRelay();
-        const driver = scriptedDriver(script);
+        const driver = namingDriver(script);
         const log = ndjsonEventLog(join(paths.stateDir, 'sessions'));
         const environments: LocalEnvironment[] = [{ id: 'env_scripted' as EnvironmentId, name: 'scripted', runtime: 'scripted', cwdRoots: [work], concurrency: 4 }];
         const secure = { run: async () => ({ code: 0, stderr: '' }) };

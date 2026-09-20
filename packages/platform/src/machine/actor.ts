@@ -239,6 +239,7 @@ export function toAgentCapabilities(report: CapabilityReport): AgentCapabilities
 interface SessionClient {
     forwardFrames(frames: readonly WireFrame[]): Promise<void>;
     commandReplied(reply: WireReply): Promise<void>;
+    noteRef(ref: SessionRef): Promise<void>;
 }
 
 /** The Routing actor's machine-facing entry points (`defineRoutingActor`). */
@@ -445,11 +446,20 @@ export function defineMachineActor(ports: MachinePorts) {
                 h.ref = frame.ref;
                 h.capabilities = frame.capabilities;
                 if (!h.cursor || advances(h.cursor, frame.head)) h.cursor = { epoch: frame.head.epoch, seq: frame.head.seq };
-                // The daemon's pump skips the wire `hello`; this is where the Session learns its ref and capabilities.
+                // The daemon's pump skips the wire `hello`; this is where the Session learns its capabilities. The ref it carries is
+                // whatever the runtime called the session before its first prompt — the Session ignores it (#389, `onSessionRef`).
                 const hello: WireFrame = { v: W, kind: 'hello', agentId: h.agentId, sessionId: frame.sessionId, sessionRef: frame.ref as SessionRef, capabilities: toAgentCapabilities(frame.capabilities), head: frame.head };
                 await session(frame.sessionId)?.forwardFrames([hello]);
                 // The session can take commands now: the router prompts the task that was waiting for this (a queued one included).
                 await notify((r) => r.sessionOpened(frame.sessionId, h.taskId));
+            }
+
+            /** The runtime's own id for a hosted session (#389), once it names it and on every change: the only ref the record resumes from. */
+            async function onSessionRef(frame: DaemonFrameOf<'session.ref'>): Promise<void> {
+                const h = ctx.state.activeSessions[frame.sessionId];
+                if (!h) return; // not ours: nothing to bind it to
+                h.ref = frame.ref;
+                await session(frame.sessionId)?.noteRef(frame.ref as SessionRef);
             }
 
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {
@@ -617,6 +627,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return;
                     case 'session.opened':
                         return onSessionOpened(frame);
+                    case 'session.ref':
+                        return onSessionRef(frame);
                     case 'session.frame':
                         return onSessionFrame(frame);
                     case 'session.reply':
