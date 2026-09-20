@@ -295,25 +295,34 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     const { peer, hello } = await handshake(daemon);
                     const opened = await open(peer, hello, daemon, S1);
                     const placeholder = sessionRef.parse(opened.ref);
-                    await prompt(peer, S1, 1);
-                    // The runtime names the session somewhere in its first turn — with the first stream event, like a CLI — so the
-                    // ref may come before, between or after the turn's frames; the turn itself must still be whole.
+                    // The prompt is sent by hand, not through `prompt()`: that helper passes over unsolicited frames while it waits for
+                    // the ack, and here the one frame the case is about may come before it. The runtime names the session somewhere
+                    // in its first turn — with the first stream event, like a CLI — so the ref may come before the ack, between or
+                    // after the turn's frames; the turn itself must still be whole.
+                    const commandId = 'cmd_ref';
+                    peer.send({ v: V, t: 'session.command', sessionId: S1, command: { v: WIRE_PROTOCOL_VERSION, commandId, type: 'prompt', turnId: 'turn_ref', input: [{ type: 'text', text: 'Prompt 1.' }] } });
+                    let acked = false;
                     let named: SessionRefFrame | undefined;
                     const turn: EventFrame[] = [];
                     let last = opened.head;
                     const deadline = Date.now() + timeoutMs;
-                    while (!named || turn[turn.length - 1]?.event.type !== 'turn-end') {
-                        const frame = await peer.next(named ? 'the rest of the first turn' : 'session.ref', Math.max(1, deadline - Date.now()));
+                    while (!acked || !named || turn[turn.length - 1]?.event.type !== 'turn-end') {
+                        const frame = await peer.next(!acked ? 'the prompt ack' : named ? 'the rest of the first turn' : 'session.ref', Math.max(1, deadline - Date.now()));
                         if (frame.t === 'session.ref') {
                             assertEqual(frame.sessionId, S1, 'session.ref.sessionId');
                             named = frame;
+                        } else if (frame.t === 'session.reply') {
+                            assertEqual(frame.sessionId, S1, 'session.reply.sessionId');
+                            assertEqual(frame.reply.commandId, commandId, 'session.reply answers the command it was sent');
+                            assert(frame.reply.kind === 'ack', `the prompt was acknowledged, not refused (${frame.reply.kind === 'error' ? frame.reply.message : ''})`);
+                            acked = true;
                         } else if (frame.t === 'session.frame') {
                             assertEqual(frame.sessionId, S1, 'session.frame.sessionId');
                             if (frame.frame.kind !== 'event') continue;
                             assertFollows(frame.frame, last, 'the first turn');
                             last = cursorOf(frame.frame);
                             turn.push(frame.frame);
-                        } else if (!UNSOLICITED.includes(frame.t)) fail(`expected session.ref or a session.frame, got ${frame.t}`);
+                        } else if (!UNSOLICITED.includes(frame.t)) fail(`expected the prompt ack, session.ref or a session.frame, got ${frame.t}`);
                     }
                     const reported = sessionRef.parse(named.ref);
                     assertEqual(reported.agent, placeholder.agent, 'session.ref names the same runtime as session.opened');
