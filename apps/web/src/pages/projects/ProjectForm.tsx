@@ -9,18 +9,20 @@
  * a row whose checkout is of another repo warns and never blocks.
  */
 import { component, signal, watch, type Define } from 'sigx';
-import type { EnvironmentId, ProjectFeatureManifest, ProjectFeaturePlugin, ProjectPatch, ProjectRecord } from '@agentic/core';
+import type { EnvironmentId, FsGitInfo, ProjectFeatureManifest, ProjectFeaturePlugin, ProjectPatch, ProjectRecord } from '@agentic/core';
 import { Button, ChipInput, ConfirmDialog, Label, SchemaForm, Switch, Tag, TextField, TextareaField, gitBadgeText, type SchemaFormApi, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
 import { projectFeatureCatalogue } from '../../plugins/catalogue';
 import { MemberPicker } from '../chat/MemberPicker';
 import type { AgentIdentity } from '../chat/live';
 import { WorkdirInput } from '../workdir/WorkdirInput';
 import type { LocateBackend } from './locate';
-import { detectedFeatures, originMismatch, originOf, projectDraftOf, projectPatchOf, validateProjectDraft, withOrigin, type ProjectDraft, type ProjectErrors } from './model';
+import { detectedFeatures, originMismatch, originOf, projectDraftOf, projectPatchOf, validateProjectDraft, withOrigin, type ProjectDraft, type ProjectErrors, type ProjectFolderDraft } from './model';
 
 export type ProjectFormProps =
     /** The project being edited; absent on the New project page. */
     & Define.Prop<'project', ProjectRecord>
+    /** What a new project opens on (#336, `projectPrefillOf`): a name and a folder row with its badge, as if picked. */
+    & Define.Prop<'initial', Partial<ProjectDraft>>
     & Define.Prop<'agents', readonly AgentIdentity[], true>
     /** Every daemon environment: one folder row each; the quota badges on the member cards. */
     & Define.Prop<'environments', readonly WorkdirEnvironment[], true>
@@ -42,6 +44,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const onOf = (features: Readonly<Record<string, unknown>>): Record<string, boolean> => Object.fromEntries(Object.keys(features).map((id) => [id, true]));
     const st = signal<ProjectDraft & { attempted: boolean; finding: EnvironmentId | null; match: string; detected: Record<string, string[]>; removing: boolean; featureError: string; on: Record<string, boolean> }>({
         ...projectDraftOf(props.project),
+        ...(props.project ? {} : props.initial ?? {}),
         on: onOf(props.project?.features ?? {}),
         attempted: false,
         finding: null,
@@ -62,6 +65,8 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const features = (): readonly ProjectFeatureManifest[] => props.features ?? [];
     const origin = (): string | undefined => originOf(st.folders);
     const enabled = (id: string): boolean => Object.hasOwn(st.features, id);
+    /** A row's badge; a prefilled one (#336) carries the origin and no HEAD, so it is the kind alone, not "detached". */
+    const badgeText = (git: FsGitInfo): string => (git.branch || git.head ? gitBadgeText(git) : git.kind);
 
     const prefillOrigins = (): void => {
         const o = origin();
@@ -76,23 +81,32 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         st.on = { ...st.on, [m.id]: on };
         st.featureError = '';
     };
+    /** The features a folder's badge suggests, applied: a project with no feature yet takes the suggestion; one that has chosen keeps its choice. */
+    const suggest = (environmentId: EnvironmentId, row: ProjectFolderDraft): void => {
+        const found = row.git ? detectedFeatures(catalogue(), { path: row.path, git: row.git }) : [];
+        st.detected = { ...st.detected, [environmentId]: found };
+        if (found.length && !Object.keys(st.features).length) for (const id of found) { const m = features().find((f) => f.id === id); if (m) toggleFeature(m, true); }
+    };
     const setFolder = (environmentId: EnvironmentId, pick: WorkdirSelection | null): void => {
         const next = { ...st.folders };
-        const detected = { ...st.detected };
         if (pick) {
             next[environmentId] = { path: pick.path, ...(pick.git ? { git: pick.git } : {}) };
-            const found = pick.git ? detectedFeatures(catalogue(), { path: pick.path, git: pick.git }) : [];
-            detected[environmentId] = found;
-            // A project with no feature yet takes the suggestion; one that has chosen keeps its choice.
-            if (found.length && !Object.keys(st.features).length) for (const id of found) { const m = features().find((f) => f.id === id); if (m) toggleFeature(m, true); }
+            st.folders = next;
+            suggest(environmentId, next[environmentId]!);
         } else {
+            const detected = { ...st.detected };
             delete next[environmentId];
             delete detected[environmentId];
+            st.folders = next;
+            st.detected = detected;
         }
-        st.folders = next;
-        st.detected = detected;
         prefillOrigins();
     };
+    // A prefilled folder (#336) counts as picked: its badge suggests the features and its origin fills their settings.
+    if (!props.project) {
+        for (const [id, row] of Object.entries(props.initial?.folders ?? {})) suggest(id as EnvironmentId, row);
+        prefillOrigins();
+    }
     const find = (environmentId: EnvironmentId): void => {
         const o = origin();
         if (!o) return;
@@ -191,7 +205,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                             onChange={(pick) => setFolder(env.id, pick)}
                                         />
                                         <span data-project-folder-meta>
-                                            {row?.git ? <Tag>{gitBadgeText(row.git)}</Tag> : null}
+                                            {row?.git ? <Tag>{badgeText(row.git)}</Tag> : null}
                                             {detected.map((id) => <Tag tone="live">{features().find((f) => f.id === id)?.name ?? id}</Tag>)}
                                             {!row && o ? <Button intent="default" icon="search" disabled={!!props.busy || !!env.unavailable} onClick={() => find(env.id)}>Find</Button> : null}
                                             {!row && o && env.unavailable ? <span data-project-folder-note>{env.unavailable}</span> : null}

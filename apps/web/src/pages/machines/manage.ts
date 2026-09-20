@@ -4,7 +4,8 @@
  * `removeEnvironment` (#237), the commands the page hands the user for the
  * two steps that stay on the machine — turning web management on
  * (`agentic-daemon policy allow-root`, #238) and signing an account in
- * (`agentic-daemon env login`, #235) — and how a refusal reads.
+ * (`agentic-daemon env login`, #235) — the long form for a daemon installed
+ * before the installer wrote a launcher (#354) — and how a refusal reads.
  *
  * The daemon's machine-local policy is the authority (decisions 2026-09-19
  * (c)): the check here only saves a round trip for a folder that is plainly
@@ -50,6 +51,30 @@ export const loginCommand = (environmentId: string): string => `agentic-daemon e
 
 /** Turns web management on for one folder, on the machine (#238). */
 export const allowRootCommand = (folder?: string): string => `agentic-daemon policy allow-root ${folder ? shellArg(folder) : '<folder>'}`;
+
+/**
+ * Where the one-line installer puts the daemon on each OS
+ * (`apps/web/public/install.sh`, `install.ps1`), spelled for the shell the
+ * page's own install line uses: PowerShell on Windows, where `%LOCALAPPDATA%`
+ * would not expand.
+ */
+export const daemonHome: Record<HostOs, string> = {
+    windows: '$env:LOCALAPPDATA\\agentic\\daemon',
+    darwin: '~/.agentic/daemon',
+    linux: '~/.agentic/daemon'
+};
+
+/**
+ * The same command without the `agentic-daemon` launcher: what to run when the
+ * command is not found, which is every machine installed before #354. The
+ * Windows form is quoted whatever it holds — `"$env:…"` expands in PowerShell,
+ * and `&` in front is not needed while the line starts with a bare `node`.
+ */
+export function fallbackCommand(command: string, os: HostOs): string {
+    const args = command.startsWith('agentic-daemon ') ? command.slice('agentic-daemon '.length) : command;
+    if (os === 'windows') return `node "${daemonHome.windows}\\bin\\agentic-daemon.mjs" ${args}`;
+    return `node ${shellArg(`${daemonHome[os]}/bin/agentic-daemon.mjs`)} ${args}`;
+}
 
 /** An account that cannot run work until someone signs it in on the machine. */
 export const needsLogin = (env: EnvironmentDescriptor): boolean => env.account.authStatus === 'missing' || env.account.authStatus === 'expired';

@@ -44,6 +44,24 @@ export function projectDraftOf(project?: ProjectRecord): ProjectDraft {
     };
 }
 
+/**
+ * `/projects/new?name=&env=&path=&origin=` (#336, "Create project from this folder"): what the form opens on — the
+ * name, and one folder row with the origin as its badge, so Find on the other rows and `detect` work at once.
+ * `undefined` without a usable query; a name alone is just the name.
+ */
+export function projectPrefillOf(query: Readonly<Record<string, string | readonly string[] | undefined>>): Partial<ProjectDraft> | undefined {
+    const one = (value: string | readonly string[] | undefined): string | undefined => {
+        const text = Array.isArray(value) ? value[0] : value;
+        return typeof text === 'string' && text.trim() ? text : undefined;
+    };
+    const name = one(query['name']);
+    const env = one(query['env']);
+    const path = one(query['path']);
+    const origin = one(query['origin']);
+    if (!env || !path) return name ? { name } : undefined;
+    return { ...(name ? { name } : {}), folders: { [env]: { path, ...(origin ? { git: { kind: 'repo', origin } } : {}) } } };
+}
+
 export function validateProjectDraft(draft: Pick<ProjectDraft, 'name'>): ProjectErrors {
     return draft.name.trim() ? {} : { name: 'A name is required.' };
 }

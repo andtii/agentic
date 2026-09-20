@@ -1,0 +1,86 @@
+name: Daemon release
+
+# Builds the daemon installer zip on every OS the one-line installers serve
+# (apps/web/public/install.ps1, install.sh) and uploads them to the rolling
+# `daemon-latest` pre-release, so a machine always installs the current main.
+# Assets are named without a version (agentic-daemon-<os>-<arch>.zip; the
+# version is inside: `agentic-daemon --version`). A tagged release attaches
+# the same zips by hand (docs/release-checklist.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/daemon/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/daemon-release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: daemon-release
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package
+        run: node scripts/package.mjs --unversioned
+        working-directory: apps/daemon
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agentic-daemon-${{ matrix.os }}
+          path: apps/daemon/release/agentic-daemon-*.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: List
+        run: ls -la release
+
+      # The pre-release exists once; every run replaces its assets and moves the tag to this commit.
+      - name: Upload to the daemon-latest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view daemon-latest >/dev/null 2>&1; then
+            gh release create daemon-latest --prerelease --title "Daemon (latest main)" \
+              --notes "Rolling build of the machine daemon from main — what the one-line installers on the Pair page fetch. Not a versioned release." \
+              --target "$GITHUB_SHA"
+          fi
+          gh release upload daemon-latest release/agentic-daemon-*.zip --clobber
+          gh release edit daemon-latest --notes "Rolling build of the machine daemon from main — what the one-line installers on the Pair page fetch. Not a versioned release. Built from $GITHUB_SHA."

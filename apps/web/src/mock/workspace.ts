@@ -207,7 +207,7 @@ export const PROJECTS: readonly ProjectRecord[] = [
         members: { agentIds: ['forge', 'lint', 'atlas'] as never[], coordinator: 'atlas' as never },
         folders: { [eid('env_alien01_work')]: 'C:\\Dev\\agentic\\main', [eid('env_alien01_personal')]: 'C:\\Users\\andy\\src\\agentic' },
         connectors: [{ id: 'github-mcp' }],
-        features: { 'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktrees: true } },
+        features: { 'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktreePerChat: true, instructions: 'Branch first; never work on main.' } },
         createdAt: hoursAgo(72),
         updatedAt: hoursAgo(2)
     },

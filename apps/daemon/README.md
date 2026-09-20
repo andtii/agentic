@@ -1,6 +1,6 @@
 # @agentic/daemon
 
-`agentic-daemon` — the machine daemon (architecture §5b). It pairs a machine to a workspace once, keeps one reconnecting WebSocket to the platform, reports the machine's execution environments, serves runtime sessions over that socket and bridges platform tool calls. Node ≥ 22.12, Windows first; it also runs on Linux and macOS.
+`agentic-daemon` — the machine daemon (architecture §5b). It pairs a machine to a workspace once, keeps one reconnecting WebSocket to the platform, reports the machine's execution environments, serves runtime sessions over that socket and bridges platform tool calls. Node ≥ 22.12 (the one-line installer downloads it when missing); Windows, macOS and Linux, each with a background service (#343).
 
 ## Use
 
@@ -11,6 +11,8 @@ agentic-daemon env login env_work
 agentic-daemon policy show | allow-root <dir> | deny-root <dir> | off
 agentic-daemon doctor
 agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
+agentic-daemon open [path] [--env <id>] [--no-browser]
+agentic-daemon launcher install | remove | show
 ```
 
 - **env add | list | rm | login** edit `environments.json` so nobody writes it by hand (`src/env-store.ts`, `src/env-cli.ts`). `add` takes `--name` and one or more `--root`, plus `--runtime` (default `claude-code`; it must be one this daemon has a driver for), `--id` (default `env_<name>`), `--concurrency`, `--account`, `--profile-dir`; with `--id <id> --replace` it changes an environment in place, keeping its profile. Each environment gets its own profile directory, `<config dir>/profiles/<id>`, and a directory another environment already uses is refused — two environments never share an account. The file is written atomically (temp + rename) and owner-only, like the credentials. `rm <id>` leaves the profile directory, which holds the sign-in. `login <id>` runs the runtime's own sign-in with that profile and the parent's account variables removed, the same rule sessions are opened under:
@@ -19,9 +21,11 @@ agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
   - Codex runs `codex login` with `CODEX_HOME`, removing `OPENAI_*`. It uses the Codex CLI the daemon ships.
 
   `--cli <path>` names another CLI; `--claude <path>` still works for Claude Code.
+- **launcher install | remove | show** (#354) writes the `agentic-daemon` command itself: a launcher (`~/.agentic/bin/agentic-daemon`, `%LOCALAPPDATA%\agentic\bin\agentic-daemon.cmd`) that hard-codes the Node and the install folder the install resolved, so it runs where no Node is on `PATH`. The install scripts call it, and it makes the command reachable in the least invasive way that works: its folder already on `PATH` → nothing; `~/.local/bin` or `~/bin` on `PATH` → a symlink; otherwise a fenced block in the shell profile `$SHELL` names, or the **user** `PATH` on Windows (through `[Environment]::SetEnvironmentVariable`, never `setx`). `--no-profile` writes the launcher and changes no `PATH`; `--node` / `--entry` / `--bin-dir` override what is otherwise taken from the running process. Every step is idempotent, and it takes a new terminal. `show` prints where it is, what it runs and what to add to `PATH`; `remove` (the uninstall scripts call it) takes the launcher, the symlink and the profile block or `PATH` entry back out.
 - **pair** presents the 6-character code from the Machines page to `POST /auth/pair` and stores the machine token. Case, spaces and dashes in the code are ignored. Each `--allow-root <dir>` (repeatable) lets the web add environments inside `<dir>` (below); every folder is checked before the code is spent.
 - **policy show | allow-root | deny-root | off** edit `policy.json`, the machine-local policy for web-managed environments (#238, below). Only on the machine: nothing the platform sends can change it.
 - **doctor** checks the pairing, `environments.json`, a driver per runtime, the working roots, and whatever each runtime driver checks (profile isolation, auth per profile — EXE-07). Exit 1 on any error; having no environments yet is a warning. The token is never printed.
+- **open** (#336) starts a chat from the repo you stand in: it resolves `path` (default: the current directory) against every environment's working roots with the same check folder requests use (lexically, then with links resolved), reads the repo's `origin` from its git config (a worktree's through its `commondir`), prints `https://<platform>/chats/new?env=<id>&path=<folder>[&origin=<url>]` and opens it in the browser (`start` / `open` / `xdg-open`). The web prefills New chat with that folder and the project whose git feature names that origin, or offers to create one. Outside every root: exit 1 with the roots listed; under the roots of several environments: exit 2 until `--env <id>` picks one; `--no-browser` only prints the link (a headless box). No daemon frame is involved and the daemon need not be running — only paired, with `environments.json` in place.
 - **run** connects and serves until SIGINT / SIGTERM. Logs are JSON lines on stderr; `--verbose` adds debug lines. A missing `environments.json` is zero environments — the machine connects and reports none. While running, the daemon watches the config directory: an `env add` / `env rm` or a hand edit is re-read once it settles (250 ms) and announced with an `env` frame, no restart; an edit that does not validate is logged and ignored, the running environments stay. Environments that are not signed in are inspected again every 30 s (`DaemonOptions.reinspectMs`), so a sign-in shows up on the platform by itself.
 - **Usage limits** (#271): the daemon reports each environment's provider limits as `quota` frames: what `claude` → `/usage` shows, Copilot's monthly premium requests, and Codex's 5-hour and weekly windows. Two sources feed them:
   - **Passive:** every rate-limit event in a live session updates the window it names at once.
@@ -74,23 +78,29 @@ The platform can ask this machine to add, change or remove an environment (`env.
 - The answer goes out after the `env` frame with the new descriptors. A failure that is the machine's own business (`environments.json` invalid, a write failed) is `io` with a message that names no local path; the details are in the daemon's log.
 - Signing a new environment in stays local: `agentic-daemon env login <id>`.
 
-### Installer zip (Windows)
+### Installer zip
 
 ```sh
 pnpm build                                   # at the repo root: the zip is assembled from dist/ directories
-pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip
+pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip  (--unversioned: the release asset name)
 ```
 
-`scripts/package.mjs` copies `bin/`, `dist/`, the production dependency closure into a plain `node_modules/` (workspace packages as their `dist/`; `@anthropic-ai/claude-agent-sdk`, `@github/copilot-sdk` and `@openai/codex`, each with the native binaries of the building platform, which makes the Windows zip about 330 MB; no declarations or source maps), the scheduled-task scripts and, at the zip root, `install.ps1`, `uninstall.ps1` and a README (`scripts/package/`). The zip needs only Node ≥ 22.12 on the target: `install.ps1 -Url <platform> -Code <pairing code>` checks Node, pairs, runs `doctor` and registers the task below. `scripts/lib/zip.mjs` is the dependency-free zip writer/reader; `__tests__/package.test.ts` builds the zip, unpacks it and runs `--version` and `doctor` on plain Node. Install, upgrade and uninstall steps: `docs/runbook.md` → "Daemon on a Windows machine".
+`scripts/package.mjs` copies `bin/`, `dist/`, the production dependency closure into a plain `node_modules/` (workspace packages as their `dist/`; `@anthropic-ai/claude-agent-sdk`, `@github/copilot-sdk` and `@openai/codex`, each with the native binaries of the building platform, which makes a zip about 330 MB; no declarations or source maps), the service scripts and, at the zip root, `install.ps1` / `uninstall.ps1` (Windows), `install.sh` / `uninstall.sh` (macOS, Linux; always `0755` and LF in the zip) and a README (`scripts/package/`). The zip needs only Node ≥ 22.12 on the target: the install script checks Node (`-NodePath` / `--node` for one that is not on PATH), pairs, runs `doctor` and registers the background service below. `scripts/lib/zip.mjs` is the dependency-free zip writer/reader; `__tests__/package.test.ts` builds the zip, unpacks it and runs `--version` and `doctor` on plain Node.
 
-### Run in the background (Windows)
+**Publishing (#343).** `.github/workflows/daemon-release.yml` builds the zip on Windows, macOS (arm64 and x64) and Linux (x64 and arm64) on every push to `main` that touches the daemon or a package, and uploads them as `agentic-daemon-<os>-<arch>.zip` to the rolling `daemon-latest` pre-release. The one-line installers the web app serves — `apps/web/public/install.ps1` and `install.sh`, printed with the pairing code on the Pair page — download that asset (or `AGENTIC_DAEMON_ZIP=<path or url>`), a portable Node from nodejs.org when the machine has none, unpack to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon` and run the zip's install script; re-running them without a code upgrades in place. Install, upgrade and uninstall steps: `docs/runbook.md` §5.
+
+### Run in the background
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # at logon, restarted on exit
+powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # Windows: a per-user Scheduled Task — at logon, restarted on exit
 powershell -ExecutionPolicy Bypass -File scripts\uninstall-service.ps1
 ```
+```sh
+sh scripts/install-service.sh [--node <path>]                            # macOS: a launchd agent (KeepAlive); Linux: a systemd user unit (Restart=always)
+sh scripts/uninstall-service.sh
+```
 
-This registers a per-user Scheduled Task, not a LocalSystem service: the token and each `CLAUDE_CONFIG_DIR` belong to the signed-in user. Output goes to `%LOCALAPPDATA%\agentic\logs\daemon.log`.
+Never a system service: the token and each `CLAUDE_CONFIG_DIR` belong to the signed-in user. Output goes to `daemon.log` under the state directory (`%LOCALAPPDATA%\agentic\logs`, `~/Library/Application Support/agentic/logs`, `~/.local/state/agentic/logs`).
 
 ## How it works
 

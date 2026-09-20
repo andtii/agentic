@@ -12,7 +12,7 @@ import { DAEMON_PROTOCOL_VERSION } from '@agentic/daemon-protocol';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
 import { Workspace, defineMachineActor, machineKey, workspaceKey } from '@agentic/platform';
 import { machineHead } from '../../src/pages/machines/head';
-import { allowRootCommand, callFailure, draftOf, failureField, failureText, inputOf, isAbsoluteRoot, isWithin, loginCommand, policyState, rootsOf, runtimesOf, shellArg, validateDraft, withRoot } from '../../src/pages/machines/manage';
+import { allowRootCommand, callFailure, draftOf, fallbackCommand, failureField, failureText, inputOf, isAbsoluteRoot, isWithin, loginCommand, policyState, rootsOf, runtimesOf, shellArg, validateDraft, withRoot } from '../../src/pages/machines/manage';
 import { pairCommands } from '../../src/pages/machines/live';
 import { HISTORY_KIND_FILTERS, refOf, toneOf } from '../../src/pages/history/live';
 import { WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
@@ -245,7 +245,7 @@ describe('/pair — --allow-root (#239)', () => {
         const dom = await mountLive('/pair', h);
         await until(() => dom.querySelector('[data-code-cell]') !== null, 'the code');
         const code = texts(dom.querySelectorAll('[data-code-cell]')).join('');
-        const pairLine = () => texts(dom.querySelectorAll('[data-command-well] code'))[1]!;
+        const pairLine = () => texts(dom.querySelectorAll('[data-command-well] code'))[2]!; // after the two install lines
         expect(pairLine()).not.toContain('--allow-root');
         type(dom, '[data-pair-allow-root] input', 'C:\\My Code');
         await until(() => pairLine().includes('--allow-root'), 'the flag');
@@ -261,14 +261,26 @@ describe('the machine setup model', () => {
         expect(loginCommand('env_work')).toBe('agentic-daemon env login env_work');
         expect(allowRootCommand('C:\\Dev')).toBe('agentic-daemon policy allow-root C:\\Dev');
         expect(allowRootCommand()).toBe('agentic-daemon policy allow-root <folder>');
+        // Without the launcher (#354): the daemon is where the one-line installer put it, run through node.
+        expect(fallbackCommand(allowRootCommand('/home/me/src'), 'linux')).toBe('node ~/.agentic/daemon/bin/agentic-daemon.mjs policy allow-root /home/me/src');
+        expect(fallbackCommand(loginCommand('env_work'), 'darwin')).toBe('node ~/.agentic/daemon/bin/agentic-daemon.mjs env login env_work');
+        // The Windows line is pasted into PowerShell (the OS whose install line the page prints is PowerShell), where %LOCALAPPDATA% does not expand.
+        expect(fallbackCommand(allowRootCommand('C:\\My Code'), 'windows')).toBe('node "$env:LOCALAPPDATA\\agentic\\daemon\\bin\\agentic-daemon.mjs" policy allow-root "C:\\My Code"');
         expect(shellArg('C:\\My Code')).toBe('"C:\\My Code"');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop', ' /home/me/src ').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop --allow-root /home/me/src');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop');
         // A name with a space, and the placeholder URL before the page knows its origin, stay one argument each.
         expect(pairCommands('', 'K7Q2MX', 'my laptop')).toEqual({
-            install: 'powershell -ExecutionPolicy Bypass -File install.ps1 -Url "<platform url>" -Code K7Q2MX -Name "my laptop"',
+            install: [
+                { os: 'Windows', command: "$env:AGENTIC_URL='<platform url>'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='my laptop'; irm '<platform url>/install.ps1' | iex" },
+                { os: 'macOS / Linux', command: "curl -fsSL '<platform url>/install.sh' | AGENTIC_URL='<platform url>' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='my laptop' sh" }
+            ],
             pair: 'agentic-daemon pair K7Q2MX --url "<platform url>" --name "my laptop"'
         });
+        // A quote in a name cannot break out of either literal.
+        const quoted = pairCommands('https://a.example', 'K7Q2MX', "Andy's Mac").install;
+        expect(quoted[0]!.command).toContain("$env:AGENTIC_NAME='Andy''s Mac'");
+        expect(quoted[1]!.command).toContain("AGENTIC_NAME='Andy'\\''s Mac'");
     });
 
     it('reads the policy and the runtimes a machine can host', () => {

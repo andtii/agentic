@@ -24,7 +24,7 @@
     "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ActorHost"] }],
     "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agentic-artifacts" }],
     "vars": {
-        "APP_ORIGIN": "http://localhost:8787"
+        "APP_ORIGIN": "https://agentic-web.ekdahls.workers.dev"
     },
     // Secrets (`wrangler secret put <NAME>`; `.dev.vars` locally), never vars:
     //   SESSION_SECRET        ≥ 32 chars — sessions, OAuth transients, agent tokens
@@ -45,7 +45,7 @@
             },
             "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agentic-artifacts-preview" }],
             "vars": {
-                "APP_ORIGIN": "https://agentic-web-preview.workers.dev"
+                "APP_ORIGIN": "https://agentic-web-preview.ekdahls.workers.dev"
             }
         }
     }
