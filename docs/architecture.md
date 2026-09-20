@@ -155,6 +155,7 @@ The daemon runs one `claudeCode({ settingSources: [], env: { CLAUDE_CONFIG_DIR: 
 ```
 daemon → platform: hello {machineId, daemonVersion, os, environments[], capabilities[], resume: {sessionId → cursor}, policy?}
                    env {environments[], policy?} · heartbeat · session.opened {sessionId, ref, capabilities, head}
+                   session.ref {sessionId, ref}   (#388: the runtime's own id, once it names the session and on every change — the only ref a record resumes from)
                    session.frame {sessionId, frame: WireFrame} · session.reply {sessionId, reply} · session.closed {sessionId, reason}
                    tool.call {callId, sessionId, tool, input} · pong
                    fs.response {requestId, exactly one of result: FsResult | error: {code, message}}
