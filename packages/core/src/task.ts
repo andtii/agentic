@@ -16,7 +16,12 @@ export type WaitReason =
     | { readonly kind: 'capacity'; readonly environmentId: EnvironmentId; readonly position: number }
     | { readonly kind: 'budget'; readonly limit: keyof Limits }
     /** A project feature plugin's `beforeSession` threw (#339): parked with its message, never a silent fallback (EXE-12). */
-    | { readonly kind: 'project-feature'; readonly pluginId: string; readonly message: string };
+    | { readonly kind: 'project-feature'; readonly pluginId: string; readonly message: string }
+    /**
+     * The task's session runs another task's turn (#395; CHT-09): the message is steered into that turn when the
+     * runtime can take it — the wait resolves at once, `joined running turn …` — else it is sent when `turnId` ends.
+     */
+    | { readonly kind: 'turn'; readonly sessionId: SessionId; readonly turnId: string };
 
 /** Where a task came from (COL-04 "originating agent or task"). */
 export type TaskOrigin =
