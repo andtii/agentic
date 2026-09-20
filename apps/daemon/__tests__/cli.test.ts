@@ -3,7 +3,7 @@ import type { EnvironmentId } from '@agentic/core';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import { main, parseArgs } from '../src/cli';
 import { quoteArg } from '../src/env-cli';
 import type { DaemonDriver } from '../src/daemon';
@@ -236,7 +236,8 @@ describe('cli', () => {
         await mkdir(home, { recursive: true });
         // HOME decides the folders `launcher` touches: the real home is never reached from a test.
         const ctx = () => ({ paths: paths(), platform: 'linux' as const, env: { PATH: '/usr/bin', SHELL: '/bin/zsh', HOME: home }, ...io() });
-        const file = join(home, '.agentic', 'bin', 'agentic-daemon');
+        // The command is planned for `platform: 'linux'`, so its path is posix even when the test runs on Windows.
+        const file = posix.join(home, '.agentic', 'bin', 'agentic-daemon');
 
         expect(await main(['launcher', 'install', '--node', '/opt/node', '--entry', '/opt/daemon/bin/agentic-daemon.mjs', '--no-profile'], ctx())).toBe(0);
         expect(await readFile(file, 'utf8')).toContain('exec "/opt/node" "/opt/daemon/bin/agentic-daemon.mjs" "$@"');
