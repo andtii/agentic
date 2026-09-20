@@ -52,6 +52,8 @@ export interface InMemoryFaults {
     readonly removeInUse?: boolean;
     /** Manage environments whatever the policy says. */
     readonly ignorePolicy?: boolean;
+    /** Report the placeholder id `session.opened` carried as the runtime's own (#388). */
+    readonly sameRef?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -141,6 +143,8 @@ interface FakeSession {
     log: Extract<WireFrame, { readonly kind: 'event' }>[];
     closed: boolean;
     busy: boolean;
+    /** The runtime has reported its own id for the session (`session.ref`, #388). */
+    named: boolean;
 }
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -247,7 +251,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 this.emit({ v: V, t: 'pong', at: Date.now() });
                 return;
             case 'session.open': {
-                const session: FakeSession = { id: frame.sessionId, environmentId: frame.environmentId, epoch: 0, seq: 0, log: [], closed: false, busy: false };
+                const session: FakeSession = { id: frame.sessionId, environmentId: frame.environmentId, epoch: 0, seq: 0, log: [], closed: false, busy: false, named: false };
                 this.sessions.set(frame.sessionId, session);
                 const ref: SessionRef = { agent: 'in-memory', v: 1, id: frame.sessionId };
                 this.emit({ v: V, t: 'session.opened', sessionId: frame.sessionId, ref, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: session.epoch, seq: session.seq } });
@@ -382,6 +386,13 @@ export class InMemoryDaemon implements ConformanceDaemon {
     private async turn(session: FakeSession, turnId: string): Promise<void> {
         session.busy = true;
         try {
+            if (!session.named) {
+                // The runtime names the session with its first turn (#388), the way a CLI reports its id with the first stream
+                // event: `session.opened` carried a placeholder, this is the id a resume needs.
+                session.named = true;
+                const id = this.options.faults?.sameRef ? session.id : `${session.id}.run`;
+                this.emit({ v: V, t: 'session.ref', sessionId: session.id, ref: { agent: 'in-memory', v: 1, id } satisfies SessionRef });
+            }
             if (this.script.tool) {
                 const callId = `call_${++this.calls}`;
                 const result = new Promise<{ output?: unknown; error?: unknown }>((resolve) => this.pendingTools.set(callId, resolve));
@@ -423,7 +434,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         start: (script) => new InMemoryDaemon(script, options)
     };

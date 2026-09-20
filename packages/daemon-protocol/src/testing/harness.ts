@@ -25,13 +25,14 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref';
 
 export interface DaemonConformanceHarness {
     /**
      * `'env'`: `setEnvironments`; `'gap'`: `truncateLog`; `'raw'`: `PlatformSeat.sendRaw`; `'fs'`: the daemon answers `fs.request` (#187);
      * `'env-manage'`: the daemon answers `env.request` (#236), starts with a policy that has `webManaged` on and at least one allowed root
-     * that exists, and implements `setPolicy`.
+     * that exists, and implements `setPolicy`; `'session-ref'`: the daemon reports the runtime's own id for a session with
+     * `session.ref` once the runtime names it (#388), an id other than the placeholder `session.opened` carried.
      */
     readonly features?: readonly ConformanceFeature[];
     /**

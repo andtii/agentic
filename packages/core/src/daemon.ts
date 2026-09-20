@@ -120,6 +120,12 @@ export type DaemonFrame<F = unknown, R = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env'; readonly environments: readonly EnvironmentDescriptor[]; readonly policy?: MachinePolicy }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'heartbeat'; readonly at: number; readonly active: readonly SessionId[] }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.opened'; readonly sessionId: SessionId; readonly ref: unknown; readonly capabilities: CapabilityReport; readonly head: Cursor }
+    /**
+     * The runtime's own id for a session (#388): sent as soon as the runtime names it and again whenever that name changes.
+     * `session.opened` cannot carry it — it goes out before the first prompt, when a harness has only a placeholder — so a
+     * record resumes from this ref, never from the one the open carried. Opaque to the platform, like `OpenSpec.resume`.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.ref'; readonly sessionId: SessionId; readonly ref: unknown }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.frame'; readonly sessionId: SessionId; readonly frame: F }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.reply'; readonly sessionId: SessionId; readonly reply: R }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.closed'; readonly sessionId: SessionId; readonly reason: string }
@@ -150,5 +156,5 @@ export type PlatformFrame<C = unknown> =
      */
     | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.request'; readonly requestId: string } & EnvOp);
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota'] as const;
 export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request'] as const;
