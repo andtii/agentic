@@ -483,6 +483,9 @@ export function defineMachineActor(ports: MachinePorts) {
                     result({ error: { code: 'unsupported', message: 'platform tools are not wired on this deployment' } });
                     return;
                 }
+                // Identity only: `h.taskId` is the task the session was OPENED for, fixed at `openSession`, and a session serves many
+                // tasks (#390). The port (`routing/tool-call.ts`) reads the running turn's task (else the spec's) from the Session
+                // per call and rebuilds the principal with it; what is minted here names who calls, never which task.
                 const principal = mintAgentPrincipal({ workspaceId, agentId: h.agentId as AgentId, sessionId: frame.sessionId, ...(h.taskId ? { taskId: h.taskId } : {}) });
                 // Detached on purpose: a tool may take minutes and must not hold the socket's turn. Nothing here touches state.
                 void tools

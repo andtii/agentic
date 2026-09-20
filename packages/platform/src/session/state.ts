@@ -16,7 +16,7 @@
  * the window.
  */
 
-import type { Correction, Principal, SessionId, TaskOutcome, WorkspaceId } from '@agentic/core';
+import type { Correction, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, PromptPart, SessionRef } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
@@ -64,19 +64,29 @@ export type SessionStatus = 'idle' | 'running' | 'awaiting' | 'closed' | 'error'
 /** `local`: the actor drives an in-process `AgentSession`; `remote`: a daemon does and forwards frames. */
 export type SessionMode = 'local' | 'remote';
 
-/** The turn in flight — what a restarted driver reads to know a turn was cut short. */
+/**
+ * The turn in flight — what a restarted driver reads to know a turn was cut short.
+ * The turn, not the session, is what a task owns (#390): `taskId` is the task this
+ * turn works, from the prompt that started it, else the task the session opened with.
+ */
 export interface RunningTurn {
     readonly turnId: string;
     readonly commandId: string;
     readonly input: readonly PromptPart[];
     readonly startedAt: number;
+    readonly taskId?: TaskId;
 }
 
-/** One command by its idempotency key: what was sent and, once known, the reply. */
+/**
+ * One command by its idempotency key: what was sent and, once known, the reply. `taskId` is
+ * record-level — the task a prompt was sent for (#390) — never part of the `WireCommand` itself,
+ * so a daemon's ack (`commandReplied`) starts the turn under the right task.
+ */
 export interface CommandRecord {
     readonly command: WireCommand;
     readonly at: number;
     readonly reply?: WireReply;
+    readonly taskId?: TaskId;
 }
 
 export interface SessionState {
@@ -142,9 +152,9 @@ export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode'
 export type SessionEntry =
     | { readonly t: 'ev'; readonly ev: AgentEvent }
     | { readonly t: 'set'; readonly patch: SessionPatch }
-    /** A command sent to a daemon whose reply is still out. */
-    | { readonly t: 'command'; readonly command: WireCommand; readonly at: number }
-    | { readonly t: 'reply'; readonly command: WireCommand; readonly reply: WireReply; readonly at: number }
+    /** A command sent to a daemon whose reply is still out; `taskId` is the task a prompt is sent for (#390). */
+    | { readonly t: 'command'; readonly command: WireCommand; readonly at: number; readonly taskId?: TaskId }
+    | { readonly t: 'reply'; readonly command: WireCommand; readonly reply: WireReply; readonly at: number; readonly taskId?: TaskId }
     /** The oldest `page.count` events of the window are stored in page `page.page`: drop them from the record. */
     | { readonly t: 'roll'; readonly page: SessionPageMeta };
 
@@ -181,12 +191,13 @@ export function applySessionEntry(state: SessionState, entry: SessionEntry): voi
             }
             return;
         case 'command':
-            if (!state.commands[entry.command.commandId]) remember(state, entry.command.commandId, { command: entry.command, at: entry.at });
+            if (!state.commands[entry.command.commandId]) remember(state, entry.command.commandId, { command: entry.command, at: entry.at, ...(entry.taskId ? { taskId: entry.taskId } : {}) });
             return;
         case 'reply': {
             const id = entry.command.commandId;
             const known = state.commands[id];
-            remember(state, id, { command: entry.command, at: known?.at ?? entry.at, reply: entry.reply });
+            const taskId = entry.taskId ?? known?.taskId;
+            remember(state, id, { command: entry.command, at: known?.at ?? entry.at, reply: entry.reply, ...(taskId ? { taskId } : {}) });
             return;
         }
         case 'roll': {
@@ -271,6 +282,16 @@ export function knownEvents(state: Pick<SessionState, 'events' | 'index'>): Agen
     const first = state.events[0];
     const older = (state.index ?? []).filter((e) => !first || cursorAfter(e, first));
     return [...older, ...state.events];
+}
+
+/**
+ * The task the session works RIGHT NOW (#390): the running turn's, else the one it opened with. A session
+ * serves many tasks over its life (§7), so everything attributed to a task — the minted principal, a
+ * `delegate` parent, a `task_report`, a Ledger row, an audit row, a memory's provenance — reads this,
+ * never `spec.taskId` alone.
+ */
+export function currentTaskId(s: Pick<SessionState, 'running' | 'spec'>): TaskId | undefined {
+    return s.running?.taskId ?? s.spec?.taskId;
 }
 
 function remember(state: SessionState, id: string, record: CommandRecord): void {

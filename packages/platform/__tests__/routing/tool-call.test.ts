@@ -110,9 +110,12 @@ describe('createToolCallPort', () => {
     it('task_report is kept by the router for the task the agent works', async () => {
         expect(await call('task_report', { status: 'progress', summary: 'halfway' })).toEqual({ ok: true, status: 'progress' });
         expect((await app.as(owner).actor(Routing, routingKey(WS)).get()).reports).toEqual({ [TASK]: { status: 'progress', summary: 'halfway' } });
-        // An agent without a task cannot report one.
-        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+        // An agent whose session works no task cannot report one. The task is the SESSION's (its running turn's, else its
+        // spec's — #390), never the token's: a principal minted without one still reports for a session that has one.
+        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: 'session_none' as SessionId });
         expect(await codeOf(call('task_report', { status: 'done', summary: 'x' }, taskless))).toBe('unsupported');
+        const tokenless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+        expect(await call('task_report', { status: 'progress', summary: 'still halfway' }, tokenless)).toEqual({ ok: true, status: 'progress' });
     });
 
     it('ask_user raises one input request on the session (idempotent by call id); the answer from Session.respond is the tool result, a cancel a `cancelled` error (#122)', async () => {
@@ -199,7 +202,8 @@ describe('createToolCallPort', () => {
     });
 
     it('refuses what it does not serve, with the code the daemon reports', async () => {
-        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+        // A session that works no task (#390): the task is the session's, so a taskless token on a task session would still delegate.
+        const taskless = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: 'session_none' as SessionId });
         expect(await codeOf(call('delegate', { assignee: OTHER, objective: 'x' }, taskless))).toBe('unsupported');
         expect(await codeOf(call('shell', {}))).toBe('unsupported');
         expect(await codeOf(call('memory_search', { nope: 1 }))).toBe('invalid');

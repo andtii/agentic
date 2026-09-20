@@ -11,6 +11,14 @@
  *   caller hands the identity in explicitly —
  *   `actor(Def, key).with({ context: asPrincipal(principal) })` — and the
  *   pipeline seeds it through `setPrincipal` without running `authenticate`.
+ *
+ * The task is NOT read from the token alone (#390). A sealed principal lives
+ * `AGENT_TOKEN_TTL_MS` and a session serves many tasks over that time, so the
+ * `taskId` it carries is only the task the session OPENED with. The
+ * authoritative one is the running turn's, `Session.running.taskId` (else
+ * `spec.taskId`), resolved per call: in `routing/tool-call.ts` for a daemon's
+ * `tool.call`, and through `SessionFactoryContext.currentTaskId` for the
+ * in-process ports.
  */
 import type { Principal } from '@agentic/core';
 import { setPrincipal } from '@sigx/server/server';
