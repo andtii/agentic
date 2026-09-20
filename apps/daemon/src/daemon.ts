@@ -19,9 +19,10 @@
  *   #121): the daemon compiles it with the same `sessionPolicy` a local
  *   session runs under and hands the `Policy` to the driver, so a harness
  *   asks the platform only what the agent's rules say to ask.
- * - `fs.request` lists folders or adds a git worktree inside the named
- *   environment's `cwdRoots` (`./fs.ts`, #188) and is answered by
- *   `fs.response`; `session.open` passes the same symlink-aware root check.
+ * - `fs.request` lists folders, adds a git worktree or locates the checkouts
+ *   of a repo's origin inside the named environment's `cwdRoots` (`./fs.ts`,
+ *   #188, #331) and is answered by `fs.response`; `session.open` passes the
+ *   same symlink-aware root check.
  * - `env.request` adds, changes or removes an environment when — and only
  *   inside the folders — the machine-local policy allows (`./env-manage.ts`,
  *   #238); the answer is `env.response` plus the `env` frame it caused.

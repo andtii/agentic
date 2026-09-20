@@ -4,7 +4,8 @@
  * env, heartbeat, session open/opened, a stream of session frames, a
  * reconnect that replays from the platform's `wanted` cursors without a
  * gap or a duplicate (OPS-04, OPS-06), a tool round trip, folder
- * browsing that never leaves the environment's `cwdRoots` (#187), and
+ * browsing that never leaves the environment's `cwdRoots` (#187), a
+ * `locate` of an origin's checkouts under those roots (#331), and
  * environments managed from the platform only inside the machine-local
  * policy (#236). No test-runner
  * import: consumers wire the cases into theirs, e.g.
@@ -16,7 +17,7 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HelloFrame, PlatformFrame, SessionFrameFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
@@ -47,7 +48,7 @@ const V = DAEMON_PROTOCOL_VERSION;
 /** Frames a daemon may push at any time after `hello`: liveness, and an environment's provider limits (#261). */
 const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota'];
 /** Cases that need an optional harness feature. */
-const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage' };
+const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'fs-locate': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage' };
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
 
@@ -360,6 +361,40 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                         assertEqual(refused.error?.code, 'outside-roots', 'a folder outside the working roots is refused, not listed (OPS-01)');
                     }
                     const unknown = await ask('fs_unknown', 'env_conformance_unknown', root);
+                    assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
+                })
+        },
+        {
+            name: 'fs-locate',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const env = hello.environments.find((e) => e.id === daemon.environmentId)!;
+                    const ask = async (requestId: string, environmentId: string, origin: string) => {
+                        peer.send({ v: V, t: 'fs.request', requestId, environmentId, op: { kind: 'locate', origin } });
+                        const response = await peer.expect('fs.response');
+                        assertEqual(response.requestId, requestId, 'fs.response answers the request it was sent');
+                        return response;
+                    };
+
+                    const nobody = 'https://example.invalid/nobody/nothing';
+                    const none = await ask('fs_locate_none', env.id, nobody);
+                    assert(none.result?.kind === 'locate', `locating an origin yields a locate result (${none.error?.code ?? ''} ${none.error?.message ?? ''})`);
+                    assertEqual(none.result.origin, nobody, 'the result names the origin it was asked for');
+                    assertEqual(none.result.matches, [], 'an origin nobody has is found nowhere');
+                    assertEqual(none.result.truncated, false, 'an empty answer is not truncated');
+
+                    const known = harness.knownOrigin;
+                    if (known !== undefined) {
+                        const found = await ask('fs_locate_known', env.id, known);
+                        assert(found.result?.kind === 'locate', `locating a known origin yields a locate result (${found.error?.code ?? ''} ${found.error?.message ?? ''})`);
+                        assert(found.result.matches.length > 0, `the harness's known origin ${known} is found under the working roots`);
+                        for (const m of found.result.matches) {
+                            assert(pathWithin(m.path, env.cwdRoots, hello.os), `located checkout ${m.path} is inside the working roots (OPS-01)`);
+                            assert(m.git.origin !== undefined && sameOrigin(m.git.origin, known), `located checkout ${m.path} carries the origin it was matched by`);
+                        }
+                    }
+                    const unknown = await ask('fs_locate_unknown', 'env_conformance_unknown', nobody);
                     assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
                 })
         },

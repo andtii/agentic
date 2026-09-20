@@ -54,6 +54,8 @@ Refusals are checked in order and named: `too-large` (before parsing) · `not-js
 | `session` | `session.open` → `session.opened`; `prompt` → `ack` → N gapless `event` frames ending in `turn-end`; `session.close` → `session.closed` |
 | `reconnect-replay` | drop mid-turn, redial: `hello.resume` names the session, `welcome.wanted` drives a replay that starts right after the cursor — no duplicate, no hole (OPS-06) |
 | `gap` | a `wanted` cursor older than the daemon's log yields a `gap` frame, not silence (OPS-04) — feature `gap` |
+| `fs-list` | `fs.request` `list` of a working root names that root with no `parent` and only entries inside the roots; a sibling of the root answers `outside-roots` (OPS-01), an unknown environment `unknown-environment` — feature `fs` |
+| `fs-locate` | `fs.request` `locate` of an origin nobody has answers an empty, untruncated `locate` result naming that origin; with the harness's `knownOrigin` every match lies inside the roots and carries the same origin (`sameOrigin`, #331); an unknown environment answers `unknown-environment` — feature `fs` |
 | `env-put` | `env.request` `put` creates an environment inside `hello.policy.allowedRoots` and announces it with `env`; with an `id` it changes that one; a root outside the allowed roots answers `outside-allowed-roots`, an unknown runtime `unknown-runtime` (OPS-01) — feature `env-manage` |
 | `env-remove` | `remove` refuses `in-use` while a session runs there, removes an idle environment, answers `unknown-environment` for one it does not have — feature `env-manage` |
 | `env-policy` | a policy turned off on the machine (`setPolicy`) is announced with `env`, and every `env.request` then answers `policy-disabled` — feature `env-manage` |
@@ -65,6 +67,6 @@ import { daemonConformance, inMemoryHarness } from '@agentic/daemon-protocol/tes
 for (const c of daemonConformance(inMemoryHarness())) it.skipIf(!!c.skip)(c.name, c.run);
 ```
 
-A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` behind `features`). `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side — and its `faults` option breaks it on purpose so a test can check the suite notices.
+A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` behind `features`); an optional `knownOrigin` names a remote URL with a checkout under the suite environment's roots so `fs-locate` proves a match. `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side — its `repos` option fakes git checkouts (badged in listings, found by `locate`; the first with an `origin` becomes `knownOrigin`), and its `faults` option breaks it on purpose so a test can check the suite notices.
 
 Design: `docs/architecture.md`. What may move into the sigx estate later: `docs/promotion.md`.

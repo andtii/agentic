@@ -34,6 +34,11 @@ export interface DaemonConformanceHarness {
      * that exists, and implements `setPolicy`.
      */
     readonly features?: readonly ConformanceFeature[];
+    /**
+     * Feature `'fs'`, optional: a remote URL of which at least one checkout lies under the suite environment's `cwdRoots`,
+     * so `fs-locate` can prove a match (#331). Without it the case only checks the shape of an empty answer.
+     */
+    readonly knownOrigin?: string;
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;
 }
