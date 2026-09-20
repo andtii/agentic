@@ -11,11 +11,15 @@
 # background service that keeps the daemon running — a launchd agent on macOS, a systemd user unit
 # on Linux.
 #
+# It also installs the `agentic-daemon` command itself (~/.agentic/bin/agentic-daemon, linked into a folder
+# on your PATH or added to your shell profile), so the commands the Machine page prints can be pasted.
+#
 # Re-run without AGENTIC_CODE to upgrade an already paired machine (the service is stopped, the folder
 # replaced, the service re-registered). Environment overrides:
 #   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release
 #   AGENTIC_INSTALL_DIR  the install root (default ~/.agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
+#   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching any PATH
 #
 # Source: apps/web/public/install.sh in https://github.com/andtii/agentic (docs/runbook.md section 5).
 set -eu
@@ -107,4 +111,5 @@ step "installing"
 set -- --node "$node"
 [ -z "${AGENTIC_CODE:-}" ] || set -- "$@" --url "$AGENTIC_URL" --code "$AGENTIC_CODE"
 [ -z "${AGENTIC_NAME:-}" ] || set -- "$@" --name "$AGENTIC_NAME"
+[ -z "${AGENTIC_NO_PATH:-}" ] || set -- "$@" --no-path
 sh "$daemon_dir/install.sh" "$@"

@@ -4,6 +4,8 @@ The machine daemon of the agentic platform. It pairs this machine to your worksp
 
 This folder is self-contained: the daemon (`bin/`, `dist/`), every dependency (`node_modules/`, including the runtime CLIs the sessions run on) and the install scripts. Nothing is downloaded at install time.
 
+Installing also writes the **`agentic-daemon` command** and puts it on your `PATH` for a new terminal, so every command below can be pasted as written. Where it went, and what to add by hand if the folder is not on `PATH`: `agentic-daemon launcher show`. From an unpacked zip before the install has run, the long form always works: `node bin/agentic-daemon.mjs <command>` (`node bin\agentic-daemon.mjs` on Windows).
+
 ## The short way
 
 The platform's **Machines → Pair a machine** page prints one line per OS that does everything below for you — downloads this zip (and Node, when the machine has none), pairs with the code on the page and keeps the daemon running in the background. Paste it into a terminal and skip to "Environments". The rest of this file is the by-hand route and the reference.
@@ -28,37 +30,39 @@ The platform's **Machines → Pair a machine** page prints one line per OS that 
    sh install.sh --url https://<your platform> --code <pairing code> [--name <machine name>]
    ```
 
-   This checks Node, pairs (`credentials.json`, owner-only), runs `doctor`, and registers the background service: a **per-user Scheduled Task** on Windows, a **launchd agent** on macOS (`~/Library/LaunchAgents/agentic-daemon.plist`), a **systemd user unit** on Linux (`~/.config/systemd/user/agentic-daemon.service`) — each named `agentic-daemon`, started at login, restarted if it exits. Within a minute the machine is online on the platform's Machines page.
+   This checks Node, writes the `agentic-daemon` command (`--no-path` / `-NoPath` writes it without touching any `PATH`), pairs (`credentials.json`, owner-only), runs `doctor`, and registers the background service: a **per-user Scheduled Task** on Windows, a **launchd agent** on macOS (`~/Library/LaunchAgents/agentic-daemon.plist`), a **systemd user unit** on Linux (`~/.config/systemd/user/agentic-daemon.service`) — each named `agentic-daemon`, started at login, restarted if it exits. Within a minute the machine is online on the platform's Machines page.
 
 Already paired (upgrade, or you ran `pair` yourself)? Run the install script with no arguments.
 
 ## Environments
 
-Add one environment per Claude Code account you want the platform to use — `node bin/agentic-daemon.mjs env add --name Work --root <folder>`, then `env login <id>` (see below). Before or after pairing: a daemon with no environments still connects, and a running daemon watches `environments.json` and reports a change within a second, no restart.
+Add one environment per Claude Code account you want the platform to use — `agentic-daemon env add --name Work --root <folder>`, then `env login <id>` (see below). Before or after pairing: a daemon with no environments still connects, and a running daemon watches `environments.json` and reports a change within a second, no restart.
 
 ## Commands
 
 ```sh
-node bin/agentic-daemon.mjs pair <code> --url https://<platform> [--name <machine name>]
-node bin/agentic-daemon.mjs doctor      # pairing, environments.json, drivers, profile isolation, sign-in per profile
-node bin/agentic-daemon.mjs env add --name <name> --root <dir> [--root <dir>…] [--concurrency <n>] [--account <label>] [--id <id>] [--profile-dir <dir>]
-node bin/agentic-daemon.mjs env list
-node bin/agentic-daemon.mjs env rm <id>         # the profile folder (the sign-in) stays on disk
-node bin/agentic-daemon.mjs env login <id> [--claude <path to the claude CLI>]
-node bin/agentic-daemon.mjs run         # foreground, logs on stderr (--verbose for debug lines)
-node bin/agentic-daemon.mjs --version
+agentic-daemon pair <code> --url https://<platform> [--name <machine name>]
+agentic-daemon doctor      # pairing, environments.json, drivers, profile isolation, sign-in per profile
+agentic-daemon env add --name <name> --root <dir> [--root <dir>…] [--concurrency <n>] [--account <label>] [--id <id>] [--profile-dir <dir>]
+agentic-daemon env list
+agentic-daemon env rm <id>         # the profile folder (the sign-in) stays on disk
+agentic-daemon env login <id> [--claude <path to the claude CLI>]
+agentic-daemon open [path]         # start a chat in this folder
+agentic-daemon run         # foreground, logs on stderr (--verbose for debug lines)
+agentic-daemon launcher show | install | remove   # the `agentic-daemon` command itself
+agentic-daemon --version
 ```
 
-(`bin\agentic-daemon.mjs` on Windows.)
+(`command not found`? The install has not run, or it predates the launcher: use `node bin/agentic-daemon.mjs <command>` from this folder — `bin\agentic-daemon.mjs` on Windows — or re-run the install script.)
 
 ## Letting the web add environments (optional)
 
 By default the platform cannot add, change or remove this machine's environments. To let the Machine page do it inside chosen folders only, allow them here, on the machine (never from the web):
 
 ```sh
-node bin/agentic-daemon.mjs policy allow-root <folder>
-node bin/agentic-daemon.mjs policy show
-node bin/agentic-daemon.mjs policy off
+agentic-daemon policy allow-root <folder>
+agentic-daemon policy show
+agentic-daemon policy off
 ```
 
 (or `pair … --allow-root <folder>`). A running daemon picks the change up without a restart. The web can then only use folders inside the allowed ones: never a network share, never the daemon's own folder (which holds the token and the sign-ins), and a link or junction that leads out does not count as inside. New environments still need a sign-in on the machine: `env login <id>`.
@@ -76,7 +80,7 @@ node bin/agentic-daemon.mjs policy off
 }
 ```
 
-- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `node bin/agentic-daemon.mjs env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; without the `claude` CLI on `PATH`, add `--claude node_modules/@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude` (`claude.exe` on Windows). A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the copy in this folder.
+- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `agentic-daemon env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; without the `claude` CLI on `PATH`, add `--claude node_modules/@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude` (`claude.exe` on Windows). A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the copy in this folder.
 - `cwdRoots`: the folders sessions may run in. A session outside them is refused.
 - `concurrency` (default 1): sessions at once on that account.
 
@@ -127,11 +131,12 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1      # Windows
 sh uninstall.sh                                             # macOS / Linux
 ```
 
-Removes the service and keeps the pairing, environments and logs (the folders above) — delete them by hand if wanted, and **revoke the machine on the platform** (its page's Revoke card) so its token stops working.
+Removes the service and the `agentic-daemon` command, and keeps the pairing, environments and logs (the folders above) — delete them by hand if wanted, and **revoke the machine on the platform** (its page's Revoke card) so its token stops working.
 
 ## Troubleshooting
 
-- `not paired` — run the install script with `-Url … -Code …` / `--url … --code …`, or `node bin/agentic-daemon.mjs pair …`. A code is single use and expires after 10 minutes; mint a new one on the Pair page.
+- `agentic-daemon: command not found` — the install script writes it and puts it on `PATH`, but only for a **new** terminal; a daemon installed before that has none at all. Run `node bin/agentic-daemon.mjs …` from this folder, or re-run the install script. `agentic-daemon launcher show` (long form: `node bin/agentic-daemon.mjs launcher show`) says where it is and what to add to `PATH`.
+- `not paired` — run the install script with `-Url … -Code …` / `--url … --code …`, or `agentic-daemon pair …`. A code is single use and expires after 10 minutes; mint a new one on the Pair page.
 - `pairing failed: the code is not valid` — expired, used, or the URL is not the platform origin (no path, `https://`).
 - The machine stays offline — `daemon.log` shows the dial and the refusal reason; a revoked token retries forever at the backoff ceiling (30 s): re-pair.
 - `doctor` says `shared-config-dir` — two environments point at the same `profileDir`; give each account its own.

@@ -11,7 +11,7 @@ import { machineHead } from './machines/head';
 import { LiveMachine } from './machines/LiveMachine';
 import { SessionsTable } from './machines/SessionsTable';
 import type { DefaultForAgent } from './machines/live';
-import { allowRootCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
+import { allowRootCommand, fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar, routeId } from '../components/topbar';
@@ -107,7 +107,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit }) => {
                     {login ? (
                         <div data-env-login>
                             <span data-env-login-text>Sign {env.account.label} in on {m.name}:</span>
-                            <CommandWell command={loginCommand(env.id)} />
+                            <CommandWell command={loginCommand(env.id)} fallback={fallbackCommand(loginCommand(env.id), m.os)} />
                         </div>
                     ) : null}
                     {manageable ? (
@@ -148,7 +148,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit }) => {
                                     ? `The daemon on ${m.name} does not say whether this page may manage its environments. Update agentic-daemon there, then allow the folder agents may work in:`
                                     : `${m.name} does not let this page manage its environments. To add them here, allow the folder agents may work in — on the machine:`}
                             </p>
-                            <CommandWell command={allowRootCommand(likelyRoot(props.environments))} />
+                            <CommandWell command={allowRootCommand(likelyRoot(props.environments))} fallback={fallbackCommand(allowRootCommand(likelyRoot(props.environments)), m.os)} />
                             <p data-card-text>Only a command on the machine can widen what the web may reach. The page picks the change up when the daemon reports it.</p>
                         </div>
                     ) : null}
