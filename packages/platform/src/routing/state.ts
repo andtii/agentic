@@ -13,11 +13,13 @@ import type { RegistryGate } from '../registry/types.js';
  * - `waiting-offline`: the environment's machine is offline and the policy is `queue` — retried on its next `hello`.
  * - `waiting-capacity`: the machine queued the session — prompted when the daemon acknowledges it.
  * - `opening`: `session.open` went to the daemon — prompted on `session.opened`.
+ * - `waiting-turn`: the session runs another route's turn and its runtime cannot take a message into it (#395) —
+ *   nothing was sent; the task waits `{turn, sessionId, turnId}` and the route is prompted when that turn ends.
  * - `running`: the prompt is out; `follow` settles the task at the turn's end.
  * - `interrupted`: the turn was cut short by an eviction (OPS-05) — the task waits `{input, resume:{turnId}}`
  *   for a person's `resume`, which re-prompts the session and puts the route back to `running`.
  */
-export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'running' | 'interrupted';
+export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'waiting-turn' | 'running' | 'interrupted';
 
 export interface Route {
     readonly taskId: TaskId;
@@ -63,8 +65,13 @@ export interface Route {
     /** The session's head as `open()` returned it at placement: `follow` tails from here, never from the start of a log that outlives the turn. */
     head?: { readonly epoch: number; readonly seq: number };
     status: RouteStatus;
-    /** The turn `follow` waits for. */
+    /**
+     * The turn `follow` waits for: the route's own `{taskId}:turn:1`, or — when the prompt steered into a turn
+     * already running on the session (#395, `joined`) — that turn's id, shared with the route that started it.
+     */
     turnId?: string;
+    /** The prompt joined a running turn (#395): `turnId` is another route's, and this task settles when it ends. */
+    joined?: boolean;
     readonly createdAt: number;
     updatedAt: number;
 }
