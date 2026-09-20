@@ -1,11 +1,11 @@
-/** `fs.request` against real temp trees (#188): listing, the root checks, git badges and `git worktree add`. */
+/** `fs.request` against real temp trees (#188, #331): listing, the root checks, git badges with their origin, `locate` and `git worktree add`. */
 // @vitest-environment node
-import { FS_LIST_MAX_ENTRIES, type EnvironmentId, type FsListResult, type FsOp, type LocalEnvironment } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, type EnvironmentId, type FsListResult, type FsLocateResult, type FsOp, type LocalEnvironment } from '@agentic/core';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { answerFsRequest, checkWithinRoots, gitInfo, type FsOutcome } from '../src/fs';
+import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, type FsOptions, type FsOutcome } from '../src/fs';
 
 const hasGit = spawnSync('git', ['--version'], { windowsHide: true }).status === 0;
 /** A directory link: a junction on Windows (no privilege needed), a symlink elsewhere. */
@@ -28,13 +28,28 @@ afterEach(async () => {
     await rm(base, { recursive: true, force: true });
 });
 
-const ask = (op: FsOp, environmentId = 'env_a'): Promise<FsOutcome> => answerFsRequest(environments, environmentId, op);
+const ask = (op: FsOp, environmentId = 'env_a', options?: FsOptions): Promise<FsOutcome> => answerFsRequest(environments, environmentId, op, options);
 async function listing(path: string): Promise<FsListResult> {
     const outcome = await ask({ kind: 'list', path });
     if (!('result' in outcome) || outcome.result.kind !== 'list') throw new Error(`expected a listing, got ${JSON.stringify(outcome)}`);
     return outcome.result;
 }
+async function located(origin: string, depth?: number, options?: FsOptions): Promise<FsLocateResult> {
+    const outcome = await ask({ kind: 'locate', origin, ...(depth === undefined ? {} : { depth }) }, 'env_a', options);
+    if (!('result' in outcome) || outcome.result.kind !== 'locate') throw new Error(`expected a locate result, got ${JSON.stringify(outcome)}`);
+    return outcome.result;
+}
 const errorOf = (outcome: FsOutcome) => ('error' in outcome ? outcome.error.code : undefined);
+
+const ORIGIN = 'git@github.com:andtii/agentic.git';
+const config = (origin: string | null, before = '') => `[core]\n\trepositoryformatversion = 0\n\tbare = false\n${before}${origin === null ? '' : `[remote "origin"]\n\turl = ${origin}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n`}[branch "main"]\n\tremote = origin\n`;
+/** A hand-written repo: `.git/HEAD` on `main` and a config naming `origin` (`null`: none). */
+async function repoAt(dir: string, origin: string | null = ORIGIN, extra = ''): Promise<string> {
+    await mkdir(join(dir, '.git'), { recursive: true });
+    await writeFile(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(join(dir, '.git', 'config'), config(origin, extra));
+    return dir;
+}
 
 describe('fs list', () => {
     it('lists subfolders only, sorted case-insensitively, without hidden folders and node_modules', async () => {
@@ -129,6 +144,128 @@ describe('fs git badges (files only)', () => {
         await mkdir(join(root, 'w'));
         await writeFile(join(root, 'w', '.git'), 'gitdir: ../r/.git/worktrees/w\n');
         expect(await gitInfo(join(root, 'w'))).toEqual({ kind: 'worktree', branch: 'rel' });
+    });
+
+    it('carries the origin URL from the config of a repo, and of a worktree through its commondir (#331)', async () => {
+        const repo = await repoAt(join(root, 'repo'));
+        await mkdir(join(repo, '.git', 'worktrees', 'wt'), { recursive: true });
+        await writeFile(join(repo, '.git', 'worktrees', 'wt', 'HEAD'), 'ref: refs/heads/feature/x\n');
+        await writeFile(join(repo, '.git', 'worktrees', 'wt', 'commondir'), '../..\n');
+        await mkdir(join(root, 'wt'));
+        await writeFile(join(root, 'wt', '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'wt')}\n`);
+        expect(await gitInfo(repo)).toEqual({ kind: 'repo', branch: 'main', origin: ORIGIN });
+        expect(await gitInfo(join(root, 'wt'))).toEqual({ kind: 'worktree', branch: 'feature/x', origin: ORIGIN });
+        expect((await listing(root)).entries.map((e) => [e.name, e.git?.origin])).toEqual([
+            ['repo', ORIGIN],
+            ['wt', ORIGIN]
+        ]);
+        expect((await listing(repo)).git).toEqual({ kind: 'repo', branch: 'main', origin: ORIGIN });
+    });
+
+    it('leaves origin out without an origin remote, and picks origin among other remotes', async () => {
+        expect(await gitInfo(await repoAt(join(root, 'none'), null))).toEqual({ kind: 'repo', branch: 'main' });
+        const upstreamFirst = await repoAt(join(root, 'two'), 'https://github.com/andtii/agentic.git', '[remote "upstream"]\n\turl = https://github.com/sigx/agentic.git\n');
+        expect((await gitInfo(upstreamFirst))?.origin).toBe('https://github.com/andtii/agentic.git');
+        const onlyUpstream = await repoAt(join(root, 'up'), null, '[remote "upstream"]\n\turl = https://github.com/sigx/agentic.git\n');
+        expect((await gitInfo(onlyUpstream))?.origin).toBeUndefined();
+        // A worktree whose gitdir has no commondir reads the config beside its HEAD.
+        await mkdir(join(root, 'r2', '.git', 'worktrees', 'w'), { recursive: true });
+        await writeFile(join(root, 'r2', '.git', 'worktrees', 'w', 'HEAD'), 'ref: refs/heads/w\n');
+        await writeFile(join(root, 'r2', '.git', 'worktrees', 'w', 'config'), config(ORIGIN));
+        await mkdir(join(root, 'w2'));
+        await writeFile(join(root, 'w2', '.git'), 'gitdir: ../r2/.git/worktrees/w\n');
+        expect(await gitInfo(join(root, 'w2'))).toEqual({ kind: 'worktree', branch: 'w', origin: ORIGIN });
+    });
+
+    it('originUrl reads only the origin section, skipping comments and blank lines', () => {
+        expect(originUrl('[Remote "origin"]\n\t; comment\n\t# comment\n\n\turl = a\n\turl = b\n')).toBe('a');
+        expect(originUrl('[remote "origin"]\n[remote "other"]\n\turl = b\n')).toBeUndefined();
+        expect(originUrl('[remote "Origin"]\n\turl = b\n')).toBeUndefined();
+        expect(originUrl('[remote]\n\turl = b\n[remote "origin"]\n\tURL=  c  \n')).toBe('c');
+        expect(originUrl('[remote "origin"]\n\turl =\n')).toBeUndefined();
+        expect(originUrl('')).toBeUndefined();
+    });
+});
+
+describe('fs locate (#331)', () => {
+    it('finds every checkout of the origin under the roots, roots first and shallowest first, and nothing outside', async () => {
+        await repoAt(join(root, 'a'), 'https://GitHub.com/andtii/agentic.git');
+        await repoAt(join(root, 'deep', 'x', 'b'), 'git@github.com:andtii/agentic');
+        await repoAt(join(root, 'other'), 'https://github.com/andtii/other.git');
+        await repoAt(join(root, 'p', 'q', 'r', 's'));
+        await repoAt(join(root, 'node_modules', 'm'));
+        await repoAt(join(root, '.hidden', 'h'));
+        await repoAt(join(outside, 'escaped'));
+        await link(outside, join(root, 'escape'));
+        const result = await located(ORIGIN);
+        expect(result).toEqual({
+            kind: 'locate',
+            origin: ORIGIN,
+            matches: [
+                { path: join(root, 'a'), git: { kind: 'repo', branch: 'main', origin: 'https://GitHub.com/andtii/agentic.git' } },
+                { path: join(root, 'deep', 'x', 'b'), git: { kind: 'repo', branch: 'main', origin: 'git@github.com:andtii/agentic' } }
+            ],
+            truncated: false
+        });
+        expect((await located('https://github.com/andtii/other')).matches.map((m) => m.path)).toEqual([join(root, 'other')]);
+        expect((await located('https://github.com/nobody/nothing')).matches).toEqual([]);
+    });
+
+    it('honours depth, capped at 3; a checkout at the root itself is depth 0', async () => {
+        await repoAt(root);
+        await repoAt(join(root, 'a'));
+        await repoAt(join(root, 'deep', 'x', 'b'));
+        await repoAt(join(root, 'p', 'q', 'r', 's'));
+        const paths = async (depth?: number) => (await located(ORIGIN, depth)).matches.map((m) => m.path);
+        expect(await paths(0)).toEqual([root]);
+        expect(await paths(1)).toEqual([root, join(root, 'a')]);
+        expect(await paths(99)).toEqual([root, join(root, 'a'), join(root, 'deep', 'x', 'b')]);
+        expect(await paths()).toEqual(await paths(3));
+    });
+
+    it('reports a folder once under its own name when a link beside it points there, and never walks a root twice', async () => {
+        await repoAt(join(root, 'real'));
+        await link(join(root, 'real'), join(root, 'aaa-alias'));
+        await link(root, join(root, 'self'));
+        expect((await located(ORIGIN)).matches.map((m) => m.path)).toEqual([join(root, 'real')]);
+        // A link that is the only way to a checkout is followed and reported by its own name.
+        await mkdir(join(root, 'nested', 'deep', 'far'), { recursive: true });
+        await repoAt(join(root, 'nested', 'deep', 'far', 'z'));
+        await link(join(root, 'nested', 'deep', 'far', 'z'), join(root, 'via'));
+        expect((await located(ORIGIN)).matches.map((m) => m.path)).toEqual([join(root, 'real'), join(root, 'via')]);
+    });
+
+    it(`stops at ${FS_LOCATE_MAX_MATCHES} matches and says so`, async () => {
+        await Promise.all(Array.from({ length: FS_LOCATE_MAX_MATCHES + 1 }, (_, i) => repoAt(join(root, `c${String(i).padStart(2, '0')}`))));
+        const result = await located(ORIGIN);
+        expect(result.matches).toHaveLength(FS_LOCATE_MAX_MATCHES);
+        expect(result.truncated).toBe(true);
+        await rm(join(root, 'c20'), { recursive: true });
+        expect((await located(ORIGIN)).truncated).toBe(false);
+    });
+
+    it('walks the roots in order, skips a root missing on disk, and refuses an unknown environment', async () => {
+        const second = join(base, 'second');
+        await repoAt(join(second, 'z'));
+        await repoAt(join(root, 'a'));
+        environments = [{ ...environments[0]!, cwdRoots: [join(base, 'missing'), second, root] }];
+        expect((await located(ORIGIN)).matches.map((m) => m.path)).toEqual([join(second, 'z'), join(root, 'a')]);
+        expect(errorOf(await ask({ kind: 'locate', origin: ORIGIN }, 'env_nope'))).toBe('unknown-environment');
+    });
+
+    it('logs the origin rather than a path, and compares roots case-insensitively on Windows only', async () => {
+        await repoAt(join(root, 'a'));
+        const lines: unknown[] = [];
+        const logger = { debug: (msg: string, data?: unknown) => lines.push([msg, data]), info() {}, warn() {}, error() {} };
+        expect((await located(ORIGIN, undefined, { logger })).matches).toHaveLength(1);
+        expect(lines).toEqual([['fs: request', { environment: 'env_a', op: 'locate', origin: ORIGIN }]]);
+        if (process.platform === 'win32') {
+            environments = [{ ...environments[0]!, cwdRoots: [root.toUpperCase()] }];
+            expect((await located(ORIGIN, undefined, { platform: 'win32' })).matches.map((m) => m.path)).toEqual([join(root.toUpperCase(), 'a')]);
+        } else {
+            environments = [{ ...environments[0]!, cwdRoots: [root.toUpperCase()] }];
+            expect((await located(ORIGIN, undefined, { platform: 'linux' })).matches).toEqual([]);
+        }
     });
 });
 

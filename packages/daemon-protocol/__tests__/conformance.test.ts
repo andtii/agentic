@@ -1,13 +1,20 @@
 /** The conformance suite passes against the in-memory pair — and fails against a daemon broken on purpose. */
 
 import type { ConformanceCase } from '../src/testing/index';
-import { ConformanceError, daemonConformance, inMemoryHarness, type InMemoryFaults } from '../src/testing/index';
+import { ConformanceError, daemonConformance, inMemoryEnvironment, inMemoryHarness, type InMemoryFaults } from '../src/testing/index';
+
+/** Two checkouts of one origin (spelled two ways) in the fake tree, plus one of another repo, so `fs-locate` proves a match (#331). */
+const REPOS = [
+    { path: '/work/agentic', git: { kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/agentic.git' } },
+    { path: '/work/branches/agentic-x', git: { kind: 'worktree', branch: 'x', origin: 'git@github.com:andtii/agentic' } },
+    { path: '/work/other', git: { kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/other.git' } }
+] as const;
 
 describe('daemonConformance × inMemoryHarness', () => {
-    const cases = daemonConformance(inMemoryHarness(), { timeoutMs: 2_000 });
+    const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, none skipped', () => {
-        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
+        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'reconnect-replay', 'gap', 'fs-list', 'fs-locate', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
         expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
@@ -19,6 +26,7 @@ describe('daemonConformance × inMemoryHarness', () => {
             ['env', 'the harness does not declare the "env" feature'],
             ['gap', 'the harness does not declare the "gap" feature'],
             ['fs-list', 'the harness does not declare the "fs" feature'],
+            ['fs-locate', 'the harness does not declare the "fs" feature'],
             ['env-put', 'the harness does not declare the "env-manage" feature'],
             ['env-remove', 'the harness does not declare the "env-manage" feature'],
             ['env-policy', 'the harness does not declare the "env-manage" feature']
@@ -49,6 +57,16 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that lists folders outside its working roots (OPS-01)', async () => {
         await expect(only('fs-list', { browseAnywhere: true }).run()).rejects.toThrow(/a folder outside the working roots is refused/);
+    });
+
+    it('a daemon that locates checkouts outside its working roots (OPS-01)', async () => {
+        const stray = daemonConformance(inMemoryHarness({ repos: [{ path: '/elsewhere/agentic', git: { kind: 'repo', origin: REPOS[0].git.origin } }], faults: { locateAnywhere: true } }), { timeoutMs: 500 }).find((c) => c.name === 'fs-locate')!;
+        await expect(stray.run()).rejects.toThrow(/located checkout \/elsewhere\/agentic is inside the working roots/);
+    });
+
+    it('a daemon that finds nothing of an origin it holds', async () => {
+        const blind = daemonConformance(inMemoryHarness({ repos: [{ path: '/work/agentic', git: { kind: 'repo', origin: REPOS[0].git.origin } }], environments: [{ ...inMemoryEnvironment(), cwdRoots: ['/other'] }] }), { timeoutMs: 500 }).find((c) => c.name === 'fs-locate')!;
+        await expect(blind.run()).rejects.toThrow(/is found under the working roots/);
     });
 
     it('a daemon that takes working roots outside the allowed roots (OPS-01)', async () => {
