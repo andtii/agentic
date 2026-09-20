@@ -5,7 +5,7 @@ import { loadChat, loadSession, loadTask } from '../src/mock/workspace';
 
 /** The route skeleton docs/architecture.md §10 and issue #23 require. */
 const REQUIRED = [
-    '/', '/chats', '/chats/:id', '/projects', '/projects/new', '/projects/:id', '/agents', '/agents/:id', '/tasks', '/tasks/:id', '/sessions/:id',
+    '/', '/chats', '/chats/new', '/chats/:id', '/projects', '/projects/new', '/projects/:id', '/agents', '/agents/:id', '/tasks', '/tasks/:id', '/sessions/:id',
     '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair', '/history', '/usage'
 ];
 
@@ -40,6 +40,20 @@ describe('route skeleton', () => {
         expect(CRUMBS['project-new']!.href).toBe('/projects');
         expect(CRUMBS.project!.href).toBe('/projects');
         expect(routes.findIndex(r => r.path === '/projects/new')).toBeLessThan(routes.findIndex(r => r.path === '/projects/:id'));
+        // The deep link (#336) crumbs to the list too, and is declared before `/chats/:id`.
+        expect(CRUMBS['chat-new']!.href).toBe('/chats');
+        expect(routes.findIndex(r => r.path === '/chats/new')).toBeLessThan(routes.findIndex(r => r.path === '/chats/:id'));
+    });
+
+    it('resolves /chats/new as the New chat entry with its query, not a chat id (#336)', async () => {
+        const router = createServerRouter('/chats/new?env=env_work&path=C%3A%5CDev%5Cagentic&origin=git%40github.com%3Aandtii%2Fagentic.git');
+        await router.isReady();
+        expect(router.currentRoute.name).toBe('chat-new');
+        expect(router.currentRoute.query).toEqual({ env: 'env_work', path: 'C:\\Dev\\agentic', origin: 'git@github.com:andtii/agentic.git' });
+        const chat = createServerRouter('/chats/c1');
+        await chat.isReady();
+        expect(chat.currentRoute.name).toBe('chat');
+        expect(chat.currentRoute.params.id).toBe('c1');
     });
 
     it('resolves /projects/new as the New project route, not a project id (#333)', async () => {
