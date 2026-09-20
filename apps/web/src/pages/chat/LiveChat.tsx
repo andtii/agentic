@@ -14,6 +14,10 @@
  * `Chat.search` and a dialog over `rename` / `setCoordinator` /
  * `removeAgent`, and having the chat open moves this device's read marker.
  *
+ * #399: "New session" on a member (the context panel, in the drawer on a
+ * phone) is `Routing.endSession` after a confirmation; the chat's binding
+ * drops with it, so its feed closes and the next message opens a fresh one.
+ *
  * #207: files the composer takes (pick, paste, drop) are shrunk when they are
  * photos (`prepareImage`), uploaded to `POST /files/chats/:chatId` and shown
  * as chips; a send posts the text and the ready chips' `agentic-file:` parts
@@ -84,7 +88,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const projects = useProjects(defs, viewer);
     const time = (at: number): string => zoneFormat(zone()).time(at);
 
-    const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false });
+    const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false, resetting: false });
     const transcript = signal(chatTranscript('chat'));
     const authors = signal<{ value: Record<string, MessageAuthor> }>({ value: {} });
     const feeds = signal<{ list: FeedHandle[] }>({ list: [] });
@@ -294,6 +298,21 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         }
     };
 
+    /** "New session" for a member (#399): the router ends its session — the running turn with it — and purges the record; the next message opens a fresh one. */
+    const resetSession = async (agentId: string): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws || st.resetting) return;
+        st.resetting = true;
+        st.error = '';
+        try {
+            await actor(defs.Routing, routingKeyOf(ws)).endSession(props.id as ChatId, agentId as AgentId, 'new session from the chat');
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.resetting = false;
+        }
+    };
+
     /** "Chat settings": members leave first (a leaving coordinator takes the role with it), then the coordinator, then the title. */
     const saveSettings = async (change: ChatSettingsChange): Promise<void> => {
         const k = key();
@@ -419,11 +438,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

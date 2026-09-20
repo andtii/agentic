@@ -31,7 +31,9 @@ export type ContextPanelProps =
     /** The chat's project (#333): a member without its own folder runs in the project's folder for its environment. */
     & Define.Prop<'project', Pick<ProjectRecord, 'folders'>>
     /** A member's folder for this chat was picked, or cleared with `null`. */
-    & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>;
+    & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>
+    /** "New session" confirmed for a member (#399): its session ends and the next message opens a fresh one; the chat's history stays. */
+    & Define.Event<'resetSession', { readonly agentId: string }>;
 
 const historyLine = (member: MockChatSummary['members'][number], time: TimeText): string => {
     const base = member.history.access === 'all' ? 'sees all history' : `Added ${time(member.history.at)} · sees history from then`;
@@ -40,11 +42,13 @@ const historyLine = (member: MockChatSummary['members'][number], time: TimeText)
 
 /**
  * The chat's right column: members with status, environment and history
- * access, the tasks in this chat, "Stop task chain", and the memory privacy
- * note (MEM-11). The add-agent dialog asks for history access (CHT-04).
+ * access — each with "New session" (#399), confirmed before the member's
+ * session is ended — the tasks in this chat, "Stop task chain", and the
+ * memory privacy note (MEM-11). The add-agent dialog asks for history
+ * access (CHT-04).
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
-    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '' });
+    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '' });
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
         const lookup = props.lookup ?? agentNamed;
@@ -52,6 +56,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
         const picked = candidates.find((c) => c.id === st.pick) ?? candidates[0];
         // What a stop would reach: a settled task is listed in the tree, never in the dialog.
         const running = stoppable(props.tasks);
+        const resetting = st.resetFor ? lookup(st.resetFor).name : '';
         return (
             <aside data-chat-context aria-label="Members and tasks">
                 <section data-context-section aria-label="Members">
@@ -87,6 +92,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                             {member.workdir ? <button type="button" data-link-button data-member-workdir-clear onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}>Clear</button> : null}
                                         </span>
                                     ) : null}
+                                    <button type="button" data-link-button data-member-reset aria-label={`New session for ${a.name}`} onClick={() => { st.resetFor = member.agentId; }}>New session</button>
                                 </li>
                             );
                         })}
@@ -160,6 +166,14 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                         <label><input type="radio" name="history-access" value="from" checked={st.access === 'from'} onChange={() => { st.access = 'from'; }} /> From now</label>
                     </fieldset>
                 </ConfirmDialog>
+                <ConfirmDialog
+                    model={() => st.resetFor !== ''}
+                    title={resetting ? `Start a new session for ${resetting}?` : 'Start a new session?'}
+                    description={`${resetting || 'The agent'} forgets this conversation: its session ends and the next message opens a fresh one. Work it is doing right now stops. The chat's history stays.`}
+                    confirmLabel="New session"
+                    onConfirm={() => { const agentId = st.resetFor; st.resetFor = ''; if (agentId) emit('resetSession', { agentId }); }}
+                    onCancel={() => { st.resetFor = ''; }}
+                />
                 <ConfirmDialog
                     model={() => st.stopChain}
                     title="Stop the task chain?"

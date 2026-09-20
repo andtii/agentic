@@ -61,6 +61,8 @@ export interface SessionInfo {
     readonly running?: SessionState['running'];
     readonly openRequests: readonly string[];
     readonly eventCount: number;
+    /** How many `SessionPage` records hold the log's older slices (`{key}:p0` … `{key}:p{pages-1}`, #198) — what a delete of the session must reach (#399). */
+    readonly pages: number;
     /** The cursor the transcript snapshot stands at. */
     readonly transcriptAt?: EventCursor;
     readonly gap?: SessionState['gap'];
@@ -462,6 +464,7 @@ export function defineSessionActor(ports: SessionPorts) {
             head: { epoch: s.head.epoch, seq: s.head.seq },
             openRequests: [...s.openRequests],
             eventCount: (s.archived ?? 0) + s.events.length,
+            pages: s.pages?.length ?? 0,
             ...(s.spec ? { spec: c.snapshot(s.spec) } : {}),
             ...(s.mode ? { mode: s.mode } : {}),
             ...(s.ref ? { ref: c.snapshot(s.ref) } : {}),

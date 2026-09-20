@@ -113,9 +113,11 @@ describe('AC-06: the user disconnects mid-turn and returns', () => {
         // The user returns in a fresh tab (a phone, a laptop — the same page): everything is there, from the actors.
         const second = await openTab(`/chats/${chatId}`);
         await until(() => bodies(second.dom).includes('abcdefghij'), 'the finished answer in the new tab');
-        // The user reads as "You" on the platform (#152); "Andii" is the mock workspace's person.
-        expect(names(second.dom).slice(0, 3)).toEqual(['You', 'Atlas', 'Atlas']);
-        expect(bodies(second.dom).slice(0, 3)).toEqual(['what is up', 'started a session', 'abcdefghij']);
+        // The user reads as "You" on the platform (#152); "Andii" is the mock workspace's person. The session
+        // bookkeeping between the message and the answer is no row (#399).
+        expect(names(second.dom).slice(0, 2)).toEqual(['You', 'Atlas']);
+        expect(bodies(second.dom).slice(0, 2)).toEqual(['what is up', 'abcdefghij']);
+        expect(bodies(second.dom)).not.toContain('started a session');
         expect(second.dom.querySelector('[data-scope="ai-composer"] textarea')).not.toBeNull();
         // The record agrees with the page: the history holds the message, the status rows and the bound answer.
         const entries = (await chat.history(null, 50)).entries;

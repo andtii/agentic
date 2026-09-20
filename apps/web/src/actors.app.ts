@@ -219,7 +219,10 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         // A late answer to a detached `ask_user` (#285): posted in the chat, and the asker started again with it.
         answered: createAnswerFollowUp({ routing: () => Routing })
     });
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, ...withFiles });
+    const sink = ports.sink ?? defaultPorts.sink;
+    const store = ports.store ?? defaultPorts.store;
+    // "New session" (#399): the router ends a chat member's session and purges its record and pages through the same store `deleteAll` uses.
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, ...withFiles, ...(store ? { store } : {}) });
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,
@@ -241,10 +244,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
                     .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
             }
         });
-    const sink = ports.sink ?? defaultPorts.sink;
-    const store = ports.store ?? defaultPorts.store;
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
-    const Chat = defineChatActor(withFiles);
+    // Removing a member ends its session through the router (#399, architecture §6).
+    const Chat = defineChatActor({ ...withFiles, routing: () => Routing });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
     return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }

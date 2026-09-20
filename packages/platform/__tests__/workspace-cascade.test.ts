@@ -4,8 +4,11 @@
  * `WorkspaceStore` and finally itself — nothing of the workspace is left in
  * storage.
  */
-import type { AgentId, PluginManifest, WorkspaceId } from '@agentic/core';
+import type { AgentId, PluginManifest, TaskId, WorkspaceId } from '@agentic/core';
+import { allowAll } from '@sigx/ai-agent';
+import { mockAgent } from '@sigx/ai-agent/testing';
 import { AgentActor, agentKey } from '../src/agent/index';
+import { defineSessionActor, SESSION_PAGE_TYPE, SessionPage, sessionPageKey, type SessionFactory } from '../src/session/index';
 import { generateWorkspaceKek, importWorkspaceKek, workspaceKey, workspaceOfActorKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
 import { FlatMemory, Memory, memoryActorKey } from '../src/memory/index';
@@ -47,6 +50,8 @@ async function until(check: () => Promise<boolean> | boolean, what: string, time
 let app: TestActorApp;
 let files: Map<string, string>;
 let purged: ActorRecordRef[];
+/** Whether the store can enumerate the workspace: off, only what the index and the chats' bindings reach is purged (#399). */
+let listing = true;
 
 const sink: ArtifactSink = {
     async put(path, body) {
@@ -70,7 +75,7 @@ const store: WorkspaceStore = {
         if (record) await app.storage.clear(ref.type, ref.key, record.etag);
     },
     async list() {
-        return savedRefs();
+        return listing ? savedRefs() : [];
     }
 };
 
@@ -79,11 +84,23 @@ const fileStore = memoryFileStore();
 
 const Workspace = defineWorkspace({ sink, store, files: fileStore });
 
+/** About 700 KB streamed in 1 KB deltas: past `WINDOW_BYTES`, so a session's log rolls a page out of its record (#198). */
+const BIG = 'y'.repeat(700_000);
+const model = mockAgent({ respond: (input) => (input.some((p) => p.type === 'text' && p.text === 'big') ? [{ text: BIG, chunkSize: 1000 }] : [{ text: 'echo' }]) });
+const factory: SessionFactory = async (runtime, c) => {
+    if (runtime !== 'anthropic-api') return null;
+    const session = await model.session({ policy: allowAll, signal: c.signal });
+    return { session, agentId: model.id, capabilities: model.capabilities };
+};
+/** A Session a chat may bind (#399): opened with a `chatId`, so its `session-started` creates the chat's row. */
+const Session = defineSessionActor({ factory });
+
 beforeEach(() => {
     files = new Map();
     purged = [];
+    listing = true;
     fileStore.deleted.length = 0;
-    app = testActorApp([Workspace, AgentActor, Memory, FlatMemory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory], { storage: recordingStorage() });
+    app = testActorApp([Workspace, AgentActor, Memory, FlatMemory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory, Session, SessionPage], { storage: recordingStorage() });
     return app.start();
 });
 afterEach(() => app.stop());
@@ -211,5 +228,40 @@ describe('Workspace.deleteAll', () => {
         expect((await app.as(owner).actor(AgentActor, agentKey(WS, agentId as AgentId)).get()).configVersion).toBe(0);
         expect((await app.storage.load('Workspace', KEY)) satisfies { state: unknown } | null).toBeNull();
         void (undefined as unknown as WorkspaceState);
+    });
+
+    it('reaches a chat’s live session and every one of its pages through the binding, with no listing to help (#399)', async () => {
+        const { agentId, chatId } = await populate();
+        const chat = app.as(owner).actor(Chat, `${WS}:chat:${chatId}`);
+        const sessionKey = `${WS}:session:s_live`;
+        const session = app.as(owner).actor(Session, sessionKey);
+        const config = await app.as(owner).actor(AgentActor, agentKey(WS, agentId)).snapshotForSession();
+        // The member's live session: opened for this chat, its first turn streaming past the window so the log has a page.
+        await session.open({ agentId, runtime: 'anthropic-api', chatId, taskId: 't_1' as TaskId, config, objective: 'big', context: [], tools: [] });
+        await until(async () => (await chat.get()).sessions[agentId]?.sessionId === 's_live', 'the binding');
+        await session.prompt([{ type: 'text', text: 'big' }], 't_1:turn:1');
+        await until(async () => {
+            const info = await session.get();
+            return info.pages >= 1 && info.status === 'idle';
+        }, 'the turn to end with a page rolled out', 20_000);
+        const pages = (await session.get()).pages;
+        expect(await app.storage.load('session', sessionKey)).not.toBeNull();
+        for (let p = 0; p < pages; p++) expect(await app.storage.load(SESSION_PAGE_TYPE, sessionPageKey(sessionKey, p))).not.toBeNull();
+
+        // Nothing but the index and the bindings: a Durable Object namespace cannot be listed either.
+        listing = false;
+        await ws().deleteAll();
+        await until(async () => (await app.storage.load('Workspace', KEY)) === null, 'the delete');
+
+        const purgedKeys = purged.map((r) => `${r.type} ${r.key}`);
+        expect(purgedKeys).toContain(`session ${sessionKey}`);
+        for (let p = 0; p < pages; p++) expect(purgedKeys).toContain(`${SESSION_PAGE_TYPE} ${sessionPageKey(sessionKey, p)}`);
+        // The pages go before their record, and the record before its chat.
+        expect(purgedKeys.indexOf(`session ${sessionKey}`)).toBeGreaterThan(purgedKeys.indexOf(`${SESSION_PAGE_TYPE} ${sessionPageKey(sessionKey, 0)}`));
+        expect(purgedKeys.indexOf(`Chat ${WS}:chat:${chatId}`)).toBeGreaterThan(purgedKeys.indexOf(`session ${sessionKey}`));
+        expect(await app.storage.load('session', sessionKey)).toBeNull();
+        for (let p = 0; p < pages; p++) expect(await app.storage.load(SESSION_PAGE_TYPE, sessionPageKey(sessionKey, p))).toBeNull();
+        // Every record ever written for the workspace is gone, the session's included.
+        for (const ref of savedRefs()) expect(await app.storage.load(ref.type, ref.key), `${ref.type} ${ref.key}`).toBeNull();
     });
 });

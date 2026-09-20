@@ -9,6 +9,7 @@
 import type { ChatFileStore, Principal, ProjectFeaturePlugin, SessionId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
+import type { WorkspaceStore } from '../workspace/ports.js';
 import type { RuntimeCatalogue } from './factory.js';
 
 export interface RoutingPorts {
@@ -49,6 +50,12 @@ export interface RoutingPorts {
      * with no plugin here is skipped. Default: none.
      */
     readonly projectFeatures?: Readonly<Record<string, ProjectFeaturePlugin>>;
+    /**
+     * How `endSession` (#399, OPS-10) deletes the ended session's record and its pages — the same store
+     * `Workspace.deleteAll` purges through (`WorkspaceOptions.store`; each actor's own Durable Object in the web
+     * app). Absent: the ended session is closed and unbound but its record and pages stay in storage.
+     */
+    readonly store?: WorkspaceStore;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /** Session id allocation for tests. Default `createId('session')`. */

@@ -19,7 +19,7 @@ import { createFetchHandler } from '@sigx/actors/server';
 import { stubServerApp } from '@sigx/server/testing';
 import { mockAgent, type MockAgent, type MockAgentOptions } from '@sigx/ai-agent/testing';
 import type { AgentId, Principal, WorkspaceId } from '@agentic/core';
-import { AgentActor, AuditActor, Chat, ChatPage, FlatMemory, LedgerActor, Memory, PairingDirectory, TaskActor, TaskIndex, Workspace, agentKey, createToolCallPort, defineInbox, defineMachineActor, defineRegistry, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type MachineSocketPort, type SessionFactory } from '@agentic/platform';
+import { AgentActor, AuditActor, ChatPage, FlatMemory, LedgerActor, Memory, PairingDirectory, TaskActor, TaskIndex, Workspace, agentKey, createToolCallPort, defineChatActor, defineInbox, defineMachineActor, defineRegistry, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type MachineSocketPort, type SessionFactory, type WorkspaceStore } from '@agentic/platform';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../../packages/platform/src/testing/index';
 import { clientDefs } from '../../src/actors/client';
 import { useActorDefs, useViewer } from '../../src/actors/defs';
@@ -70,14 +70,18 @@ export interface LiveOptions {
     readonly actors?: readonly AnyActorDefinition[];
     /** Host timers over the quiet defaults — a fast `reminderTickMs` when a test lets a schedule fire (#145). */
     readonly defaults?: Partial<HostDefaults>;
+    /** How the router purges an ended session's record and pages (#399, `RoutingPorts.store`); absent, "New session" closes and unbinds only. */
+    readonly store?: WorkspaceStore;
 }
 
 /** Start the host, the wire and the stubbed identity. `agentScript` is the mock runtime every session runs. */
 export async function startLive(agentScript: MockAgentOptions = { respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] }, options: LiveOptions = {}): Promise<LiveHarness> {
     const Inbox = defineInbox({ channels: [] });
     const Session = defineSessionActor({ factory: options.factory ?? localFactory(mockAgent(agentScript)), inbox: () => Inbox });
-    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    const Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, ...(options.store ? { store: options.store } : {}) });
     const Machine = defineMachineActor({ socket: noSockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
+    // As the app registers it (#399): a removal ends the member's session through the router.
+    const Chat = defineChatActor({ routing: () => Routing });
     const extra = options.actors ?? [];
     const typeOf = (d: AnyActorDefinition): string => (d as { type: string }).type;
     const base = [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, Routing, Machine, PairingDirectory, Inbox, Memory, FlatMemory, LedgerActor, AuditActor, defineRegistry()].filter((d) => !extra.some((e) => typeOf(e) === typeOf(d)));
