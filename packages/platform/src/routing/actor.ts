@@ -242,6 +242,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const wakers = new Map<string, () => void>();
     /** The definition itself, once built: the follower re-enters through it (`turnEnded`, a method turn of its own). */
     let self: AnyActorDefinition | undefined;
+    /**
+     * Routes (`{key}:{taskId}`) whose turn will never start (#394: the daemon refused the prompt): `followOne` is tailing for
+     * a `turn-end` that never comes, and leaves when the task settles instead of cancelling the session and waiting on.
+     */
+    const abandoned = new Set<string>();
 
     const definition = defineActor({
         type: ROUTING_TYPE,
@@ -1078,13 +1083,16 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  */
                 async slotFreed(machineId: MachineId, environmentId: EnvironmentId, why: string): Promise<void> {
                     const s = ctx.state;
-                    for (const route of Object.values(s.routes)) {
-                        if (route.status !== 'waiting-capacity' || route.machineId !== machineId || route.environmentId !== environmentId || !route.sessionId) continue;
-                        const m = await machine(machineId).get();
+                    const parked = Object.values(s.routes).filter((r) => r.status === 'waiting-capacity' && r.machineId === machineId && r.environmentId === environmentId && r.sessionId !== undefined);
+                    if (!parked.length) return;
+                    // One read; refreshed only after a prompt went out, since that is what takes a slot.
+                    let m = await machine(machineId).get();
+                    for (const route of parked) {
                         if (!m.activeSessions.some((h) => h.sessionId === route.sessionId && h.status === 'open')) continue;
                         if (freeSlots(m, environmentId) <= 0) break;
-                        await activate(route, `${why}; a slot freed in environment ${environmentId}`, route.sessionId);
+                        await activate(route, `${why}; a slot freed in environment ${environmentId}`, route.sessionId!);
                         await prompt(route);
+                        m = await machine(machineId).get();
                     }
                     await ctx.save();
                 },
@@ -1101,7 +1109,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (code === 'busy' && route.machineId) {
                         route.attempt = (route.attempt ?? 0) + 1;
                         await parkOnCapacity(route, await machine(route.machineId).get());
-                    } else await fail(route, { code: `prompt-${code}`, message, recoverable: code === 'busy' });
+                    } else {
+                        // No turn will start: the follower tailing for this turn is told so before the task settles, and ends with it.
+                        abandoned.add(`${ctx.key}:${route.taskId}`);
+                        await fail(route, { code: `prompt-${code}`, message, recoverable: code === 'busy' });
+                    }
                     await ctx.save();
                 },
 
@@ -1222,6 +1234,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (early) {
                             settledEarly = never;
                             settledOutside = true;
+                            // Failed because its prompt was refused (#394): no turn runs, nothing to cancel, nothing to wait for.
+                            if (abandoned.delete(`${ctx.key}:${route.taskId}`)) return;
                             // A turn this route joined (#395) is another task's: it runs on, and this task hears `sessionStopped` at its end.
                             if (early.status !== 'completed' && !route.joined) await sessionClient.cancel().catch(() => undefined);
                             continue;
