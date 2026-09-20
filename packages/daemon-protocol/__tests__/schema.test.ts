@@ -34,6 +34,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         invalid: { v: V, t: 'session.opened', sessionId: 's1', ref: { agent: 'fake', v: 1, id: 's1' }, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: 0 } },
         path: 'head.seq'
     },
+    'session.ref': {
+        valid: { v: V, t: 'session.ref', sessionId: 's1' as never, ref: { agent: 'claude-code', v: 1, id: 'a1b2c3', data: { cwd: '/work', epoch: 0 } } },
+        invalid: { v: V, t: 'session.ref', sessionId: 's1' },
+        path: 'ref'
+    },
     'session.frame': {
         valid: { v: V, t: 'session.frame', sessionId: 's1' as never, frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } } },
         invalid: { v: V, t: 'session.frame', sessionId: 's1', frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x' } } },
@@ -110,6 +115,18 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
 };
 
 describe('daemon frame schemas', () => {
+    it('session.ref needs both the session and the ref (#388)', () => {
+        const ref = { agent: 'claude-code', v: 1, id: 'a1b2c3' };
+        expect(daemonFrameSchemas['session.ref'].safeParse({ v: V, t: 'session.ref', sessionId: 's1', ref }).success).toBe(true);
+        const noSession = daemonFrameSchemas['session.ref'].safeParse({ v: V, t: 'session.ref', ref });
+        expect(noSession.success).toBe(false);
+        if (!noSession.success) expect(noSession.error.issues.map((i) => i.path.join('.'))).toContain('sessionId');
+        const noRef = daemonFrameSchemas['session.ref'].safeParse({ v: V, t: 'session.ref', sessionId: 's1' });
+        expect(noRef.success).toBe(false);
+        if (!noRef.success) expect(noRef.error.issues.map((i) => i.path.join('.'))).toContain('ref');
+        expect(daemonFrameSchemas['session.ref'].safeParse({ v: V, t: 'session.ref', sessionId: 's1', ref: { agent: 'claude-code', v: 1 } }).success).toBe(false);
+    });
+
     it('cover every kind core declares', () => {
         expect(Object.keys(daemonFrameSchemas).sort()).toEqual([...DAEMON_FRAME_TYPES].sort());
         expect(Object.keys(platformFrameSchemas).sort()).toEqual([...PLATFORM_FRAME_TYPES].sort());
