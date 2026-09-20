@@ -66,7 +66,7 @@ if ($Code) {
     & $node.Source $bin @args_
     if ($LASTEXITCODE -ne 0) { Fail "pairing failed (exit $LASTEXITCODE)." }
 } elseif (-not (Test-Path $credentials)) {
-    Fail "This machine is not paired ($credentials is missing). Get a code (README.md > Get a pairing code) and run again with -Url <platform> -Code <code>."
+    Fail "This machine is not paired ($credentials is missing). Get a code from the platform (Machines > Pair a machine) and run again with -Url <platform> -Code <code>."
 } else {
     Write-Host "already paired ($credentials)"
 }

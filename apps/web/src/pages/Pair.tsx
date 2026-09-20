@@ -96,7 +96,7 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
                                 <h2 data-step-title>Install the daemon on the machine</h2>
                                 <p data-step-note>One line per OS — it downloads the daemon (and Node when the machine has none), pairs with the code below and keeps the daemon running in the background. Re-run it later to upgrade.</p>
                                 {props.install.map((line) => (
-                                    <div data-install-line>
+                                    <div data-install-line key={line.os}>
                                         <Label>{line.os}</Label>
                                         <div data-command-well>
                                             <span data-command-prompt aria-hidden="true">&gt;</span>

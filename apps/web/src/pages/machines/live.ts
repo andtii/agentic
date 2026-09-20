@@ -197,8 +197,8 @@ export function pairCommands(origin: string, code: string, name: string, allowRo
     const root = allowRoot.trim();
     return {
         install: [
-            { os: 'Windows', command: `$env:AGENTIC_URL=${psArg(base)}; $env:AGENTIC_CODE=${psArg(code)}; $env:AGENTIC_NAME=${psArg(name)}; irm ${base}/install.ps1 | iex` },
-            { os: 'macOS / Linux', command: `curl -fsSL ${base}/install.sh | AGENTIC_URL=${shArg(base)} AGENTIC_CODE=${shArg(code)} AGENTIC_NAME=${shArg(name)} sh` }
+            { os: 'Windows', command: `$env:AGENTIC_URL=${psArg(base)}; $env:AGENTIC_CODE=${psArg(code)}; $env:AGENTIC_NAME=${psArg(name)}; irm ${psArg(`${base}/install.ps1`)} | iex` },
+            { os: 'macOS / Linux', command: `curl -fsSL ${shArg(`${base}/install.sh`)} | AGENTIC_URL=${shArg(base)} AGENTIC_CODE=${shArg(code)} AGENTIC_NAME=${shArg(name)} sh` }
         ],
         pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${root ? ` --allow-root ${shellArg(root)}` : ''}`
     };

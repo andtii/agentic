@@ -1,7 +1,7 @@
 # agentic-daemon one-line installer for Windows. The platform serves this file at /install.ps1;
 # the Pair page prints the line to run, with this machine's pairing code:
 #
-#   $env:AGENTIC_URL='<platform origin>'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<machine name>'; irm <platform origin>/install.ps1 | iex
+#   $env:AGENTIC_URL='<platform origin>'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<machine name>'; irm '<platform origin>/install.ps1' | iex
 #
 # It needs nothing installed: Node.js 22.12+ on PATH is used when present, otherwise a portable Node
 # is downloaded from nodejs.org into the install folder. Then it downloads the daemon zip

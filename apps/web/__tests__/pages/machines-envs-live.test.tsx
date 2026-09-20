@@ -267,8 +267,8 @@ describe('the machine setup model', () => {
         // A name with a space, and the placeholder URL before the page knows its origin, stay one argument each.
         expect(pairCommands('', 'K7Q2MX', 'my laptop')).toEqual({
             install: [
-                { os: 'Windows', command: "$env:AGENTIC_URL='<platform url>'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='my laptop'; irm <platform url>/install.ps1 | iex" },
-                { os: 'macOS / Linux', command: "curl -fsSL <platform url>/install.sh | AGENTIC_URL='<platform url>' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='my laptop' sh" }
+                { os: 'Windows', command: "$env:AGENTIC_URL='<platform url>'; $env:AGENTIC_CODE='K7Q2MX'; $env:AGENTIC_NAME='my laptop'; irm '<platform url>/install.ps1' | iex" },
+                { os: 'macOS / Linux', command: "curl -fsSL '<platform url>/install.sh' | AGENTIC_URL='<platform url>' AGENTIC_CODE='K7Q2MX' AGENTIC_NAME='my laptop' sh" }
             ],
             pair: 'agentic-daemon pair K7Q2MX --url "<platform url>" --name "my laptop"'
         });

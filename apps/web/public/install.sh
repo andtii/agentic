@@ -2,9 +2,9 @@
 # agentic-daemon one-line installer for macOS and Linux. The platform serves this file at /install.sh;
 # the Pair page prints the line to run, with this machine's pairing code:
 #
-#   curl -fsSL <platform origin>/install.sh | AGENTIC_URL=<platform origin> AGENTIC_CODE=<code> AGENTIC_NAME=<machine name> sh
+#   curl -fsSL '<platform origin>/install.sh' | AGENTIC_URL=<platform origin> AGENTIC_CODE=<code> AGENTIC_NAME=<machine name> sh
 #
-# It needs nothing installed beyond curl and unzip: Node.js 22.12+ on PATH is used when present,
+# It needs nothing installed beyond curl, unzip and tar: Node.js 22.12+ on PATH is used when present,
 # otherwise a portable Node is downloaded from nodejs.org into the install folder. Then it downloads
 # the daemon zip (agentic-daemon-<os>-<arch>.zip from the daemon-latest GitHub release), unpacks it
 # to ~/.agentic/daemon and runs the zip's install.sh: pair (when AGENTIC_CODE is set), doctor, and the
@@ -38,6 +38,7 @@ case "$(uname -m)" in
 esac
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v unzip >/dev/null 2>&1 || fail "unzip is required (Linux: apt install unzip / dnf install unzip)"
+command -v tar >/dev/null 2>&1 || fail "tar is required"
 [ -z "${AGENTIC_CODE:-}" ] || [ -n "${AGENTIC_URL:-}" ] || fail "AGENTIC_CODE needs AGENTIC_URL (the platform origin)"
 
 root=${AGENTIC_INSTALL_DIR:-"$HOME/.agentic"}

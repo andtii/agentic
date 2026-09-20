@@ -56,7 +56,7 @@ if [ -n "$code" ]; then
     [ -n "$url" ] || fail "--code needs --url <platform origin>."
     if [ -n "$name" ]; then "$node" "$bin" pair "$code" --url "$url" --name "$name"; else "$node" "$bin" pair "$code" --url "$url"; fi
 elif [ ! -f "$credentials" ]; then
-    fail "This machine is not paired ($credentials is missing). Get a code (README.md > Get a pairing code) and run again with --url <platform> --code <code>."
+    fail "This machine is not paired ($credentials is missing). Get a code from the platform (Machines > Pair a machine) and run again with --url <platform> --code <code>."
 else
     echo "already paired ($credentials)"
 fi

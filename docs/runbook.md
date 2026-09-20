@@ -236,11 +236,11 @@ On the machine, as the user who owns the Claude Code accounts, paste the line th
 
 ```powershell
 # Windows (PowerShell)
-$env:AGENTIC_URL='https://agentic-web.ekdahls.workers.dev'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<name>'; irm https://agentic-web.ekdahls.workers.dev/install.ps1 | iex
+$env:AGENTIC_URL='https://agentic-web.ekdahls.workers.dev'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<name>'; irm 'https://agentic-web.ekdahls.workers.dev/install.ps1' | iex
 ```
 ```sh
 # macOS / Linux
-curl -fsSL https://agentic-web.ekdahls.workers.dev/install.sh | AGENTIC_URL=https://agentic-web.ekdahls.workers.dev AGENTIC_CODE=<code> AGENTIC_NAME=<name> sh
+curl -fsSL 'https://agentic-web.ekdahls.workers.dev/install.sh' | AGENTIC_URL=https://agentic-web.ekdahls.workers.dev AGENTIC_CODE=<code> AGENTIC_NAME=<name> sh
 ```
 
 The Worker serves the two bootstraps from `apps/web/public/` (`_headers` makes them `text/plain`). Each one: uses Node ≥ 22.12 from PATH or downloads a portable Node 22 from nodejs.org into the install root; downloads `agentic-daemon-<os>-<arch>.zip` from `daemon-latest`; stops a running daemon; unpacks to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon`; then runs the zip's own installer, which pairs with the code, runs `doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07) and registers the background service — on Windows the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user); on macOS the launchd agent `~/Library/LaunchAgents/agentic-daemon.plist` (KeepAlive); on Linux the systemd user unit `agentic-daemon.service` (`Restart=always`, `loginctl enable-linger` so it survives logout). Environment overrides: `AGENTIC_DAEMON_ZIP=<path or url>` installs that zip instead (a local build, §5.1), `AGENTIC_INSTALL_DIR` moves the install root, `AGENTIC_DAEMON_HOME` moves the daemon's data.
