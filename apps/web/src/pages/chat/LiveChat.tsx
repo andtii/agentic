@@ -86,11 +86,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const session = (sessionId: string): SessionActorClient => actor(defs.Session, sessionKeyOf(viewer.workspaceId!, sessionId)) as unknown as SessionActorClient;
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
 
-    // The feeds follow `activeSessions`: opened on the client only (a server render tails nothing), closed when a session leaves the chat or the page unmounts.
+    // The feeds follow `sessions` (#392): opened on the client only (a server render tails nothing), closed when a session leaves the chat or the page unmounts.
     onMounted(() => {
         const stop = effect(() => {
-            const active = summary.value?.activeSessions ?? {};
-            const wanted = new Map(Object.entries(active).map(([agentId, sessionId]) => [sessionId as string, agentId]));
+            const bound = summary.value?.sessions ?? {};
+            const wanted = new Map(Object.entries(bound).map(([agentId, row]) => [row.sessionId as string, agentId]));
             const keep = feeds.list.filter((f) => wanted.has(f.sessionId));
             for (const f of feeds.list) if (!wanted.has(f.sessionId)) f.disconnect();
             for (const [sessionId, agentId] of wanted) {

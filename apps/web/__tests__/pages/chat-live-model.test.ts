@@ -31,7 +31,7 @@ const atlas: AgentIdentity = { id: 'a1', name: 'Atlas', role: 'Assistant', hue: 
 const forge: AgentIdentity = { id: 'a2', name: 'Forge', role: 'Builder', hue: 2, environment: { machine: 'alien01', runtime: 'claude-code', account: 'work' }, configVersion: 1 };
 const lookup = lookupOver({ a1: atlas, a2: forge });
 
-const summary: ChatSummary = { seq: 4, members: { a1: { since: 1000, historyFrom: 0 }, a2: { since: 3000, historyFrom: 2 } }, coordinator: 'a1' as AgentId, activeSessions: { a1: 's9' as never } };
+const summary: ChatSummary = { seq: 4, members: { a1: { since: 1000, historyFrom: 0 }, a2: { since: 3000, historyFrom: 2 } }, coordinator: 'a1' as AgentId, sessions: { a1: { sessionId: 's9' as never, since: 1000, seenSeq: 0 } } };
 const entries: IndexedEntry[] = [
     { seq: 0, entry: { t: 'member', op: 'add', agentId: 'a1' as AgentId, historyAccess: 'all', at: 1000 } },
     { seq: 1, entry: { t: 'msg', id: 'm1' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'hi @Atlas' }], at: 2000, mentions: ['a1' as AgentId] } },
@@ -214,7 +214,7 @@ describe('attachments (#207)', () => {
         { seq: 1, entry: { t: 'msg', id: 'm1' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'see' }, { type: 'image', mediaType: 'image/png', url: shot }, { type: 'file', mediaType: 'text/csv', name: 'data.csv', url: csv }], at: 2000, mentions: [] } },
         { seq: 2, entry: { t: 'msg', id: 'm2' as MessageId, author: { kind: 'agent', agentId: 'a1' as AgentId, sessionId: 's9' as never }, parts: [{ type: 'text', text: 'again' }, { type: 'image', mediaType: 'image/png', url: shot }, { type: 'image', mediaType: 'image/png', data: 'iVBO' }], at: 3000, mentions: [] } }
     ];
-    const allSummary: ChatSummary = { seq: 2, members: { a1: { since: 1000, historyFrom: 0 } }, coordinator: null, activeSessions: {} };
+    const allSummary: ChatSummary = { seq: 2, members: { a1: { since: 1000, historyFrom: 0 } }, coordinator: null, sessions: {} };
 
     it('entryLine renders attachments as named placeholders with their uri', () => {
         expect(entryLine(withFiles[1]!.entry, lookup)).toBe(`You: see [image ${shot}] [file "data.csv" ${csv}]`);

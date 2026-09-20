@@ -189,7 +189,7 @@ describe('persistence', () => {
 });
 
 describe('session events (CHT-11)', () => {
-    it('folds status and final messages into entries and tracks active sessions; typing is not durable', async () => {
+    it('folds status and final messages into entries and binds the member’s session (#392); typing is not durable', async () => {
         const chat = chatAs(user);
         await chat.addAgent(A);
         const sessionId = 'session_1' as SessionId;
@@ -197,7 +197,8 @@ describe('session events (CHT-11)', () => {
 
         let report = await app.host.publish(sessionEvents(chatKey()), { kind: 'status', agentId: A, sessionId, status: 'session-started', at });
         expect(report).toMatchObject({ delivered: 1, failures: [] });
-        expect((await chat.get()).activeSessions).toEqual({ [A]: sessionId });
+        // The row: the session id, when the status entry said it began, and nothing seen yet.
+        expect((await chat.get()).sessions).toEqual({ [A]: { sessionId, since: at, seenSeq: 0 } });
 
         await app.host.publish(sessionEvents(chatKey()), { kind: 'status', agentId: A, sessionId, status: 'typing', at });
         await app.host.publish(sessionEvents(chatKey()), {
@@ -208,9 +209,11 @@ describe('session events (CHT-11)', () => {
             mentions: [B],
             at
         });
+        // The member's own final message is seq 2 (member, status, msg): the watermark moves to it.
+        expect((await chat.get()).sessions).toEqual({ [A]: { sessionId, since: at, seenSeq: 2 } });
         report = await app.host.publish(sessionEvents(chatKey()), { kind: 'status', agentId: A, sessionId, status: 'session-ended', at });
         expect(report.delivered).toBe(1);
-        expect((await chat.get()).activeSessions).toEqual({});
+        expect((await chat.get()).sessions).toEqual({});
 
         const { entries } = await chat.history();
         expect(entries.map((e) => e.entry.t)).toEqual(['member', 'status', 'msg', 'status']);
@@ -247,7 +250,7 @@ describe('session events (CHT-11)', () => {
         expect(report.failures).toHaveLength(1);
         expect(report.failures[0]!.message).toMatch(/malformed session event/);
         expect((await chatAs(user).history()).entries).toHaveLength(before);
-        expect((await chatAs(user).get()).activeSessions).toEqual({});
+        expect((await chatAs(user).get()).sessions).toEqual({});
     });
 });
 

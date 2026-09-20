@@ -36,7 +36,6 @@ import {
     type ProjectId,
     type PromptPart,
     type SessionEvent,
-    type SessionId,
     type TaskId,
     type WorkdirRef,
     type WorkspaceId
@@ -47,7 +46,7 @@ import { sameWorkspace, workspaceKey } from '../auth/index.js';
 import { Workspace } from '../workspace/index.js';
 import { ChatPage, pageKey } from './page.js';
 import { appendEntry } from './persist.js';
-import { MAX_PENDING_UPLOADS, PAGE, PENDING_TTL_MS, WINDOW, applyChatEntry, entryMatches, initialChatState, memberIds, principalKey, visibleFrom, type ChatFileRow, type ChatState, type IndexedEntry } from './state.js';
+import { MAX_PENDING_UPLOADS, PAGE, PENDING_TTL_MS, WINDOW, applyChatEntry, entryMatches, initialChatState, memberIds, principalKey, visibleFrom, type ChatFileRow, type ChatSessionRow, type ChatState, type IndexedEntry } from './state.js';
 
 /** The topic a Session publishes on for its chat; the Chat actor subscribes under its own key. */
 export const sessionEvents = (chatKey: string): Topic<SessionEvent> => topic<SessionEvent>(SESSION_EVENTS_TOPIC, chatKey);
@@ -118,7 +117,8 @@ export interface ChatSummary {
     readonly seq: number;
     readonly members: Readonly<Record<string, ChatMember>>;
     readonly coordinator: AgentId | null;
-    readonly activeSessions: Readonly<Record<string, SessionId>>;
+    /** The session bound to each agent member (#392): its id, when it began, and the seq of that member's last message. */
+    readonly sessions: Readonly<Record<string, ChatSessionRow>>;
     /** The chat's title (#124), absent until `Workspace.createChat({ title })` or `rename` set one — the pages then title it by its members. */
     readonly title?: string;
     /** The project the chat belongs to (#332, `setProject`); absent when it is in none. */
@@ -269,8 +269,8 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
  * still has the project (#332); a removed one — or a Workspace that cannot be read — leaves `projectId` alone.
  */
 async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
-    const { seq, members, coordinator, activeSessions, title, projectId } = ctx.state;
-    const summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, activeSessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }) });
+    const { seq, members, coordinator, sessions, title, projectId } = ctx.state;
+    const summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }) });
     if (projectId === undefined) return summary;
     try {
         const project = (await ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId)).projects()).find((p) => p.id === projectId);

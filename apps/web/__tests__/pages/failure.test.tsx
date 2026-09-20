@@ -324,8 +324,8 @@ describe('the chat page (live): a failure where the answer would have been, neve
         // Mid-turn: the tool call is in the session log; evict the session object.
         let sessionId = '';
         await until(async () => {
-            const s = (await chat.get()).activeSessions;
-            sessionId = Object.values(s)[0] ?? '';
+            const s = (await chat.get()).sessions;
+            sessionId = Object.values(s)[0]?.sessionId ?? '';
             return sessionId !== '';
         }, 'the session');
         const session = h.app.as(owner).actor(h.Session, actorKey(WS, 'session', sessionId));

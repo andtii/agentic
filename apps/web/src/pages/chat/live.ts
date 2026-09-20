@@ -80,12 +80,12 @@ const NOBODY: ReadonlySet<string> = new Set();
  * it reads WAITING, ahead of its session being active. A member reads
  * ACTIVE while the chat runs a session for it, or while it works a task of
  * this chat's tree (`working`, #258) — a delegated child runs outside the
- * chat, so it never shows in `activeSessions`.
+ * chat, so it never shows in `sessions`.
  */
 export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : summary.activeSessions[agentId] || working.has(agentId) ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : summary.sessions[agentId] || working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {})
