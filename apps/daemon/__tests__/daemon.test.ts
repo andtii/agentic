@@ -3,7 +3,7 @@ import type { ApprovalRule, CapabilityReport, EnvironmentId, LocalEnvironment, O
 import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
 import { decodeDaemonFrame, DAEMON_PROTOCOL_VERSION as V, type DaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
 import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentCapabilitiesOf, createDaemon, follows, type Daemon, type DaemonDriver } from '../src/daemon';
@@ -200,6 +200,22 @@ describe('daemon', () => {
         expect(listed.result?.kind === 'list' && listed.result.entries.map((e) => e.name)).toEqual(['A', 'b']);
         seat.send({ v: V, t: 'fs.request', requestId: 'fs_2', environmentId: 'env_nope', op: { kind: 'list', path: root } });
         expect(await expectFrame(seat, 'fs.response')).toMatchObject({ requestId: 'fs_2', error: { code: 'unknown-environment' } });
+    });
+
+    it('answers a locate with the checkouts of the origin under the roots (#331)', async () => {
+        const root = join(dir, 'root');
+        await mkdir(join(root, 'agentic', '.git'), { recursive: true });
+        await writeFile(join(root, 'agentic', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+        await writeFile(join(root, 'agentic', '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/andtii/agentic.git\n');
+        const { seat } = await start([env('env_a', { cwdRoots: [root] })]);
+        seat.send({ v: V, t: 'fs.request', requestId: 'fs_3', environmentId: 'env_a', op: { kind: 'locate', origin: 'git@github.com:andtii/agentic' } });
+        const found = await expectFrame(seat, 'fs.response');
+        expect(found).toEqual({
+            v: V,
+            t: 'fs.response',
+            requestId: 'fs_3',
+            result: { kind: 'locate', origin: 'git@github.com:andtii/agentic', matches: [{ path: join(root, 'agentic'), git: { kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/agentic.git' } }], truncated: false }
+        });
     });
 
     it('a command for a session it does not run is answered, not dropped', async () => {

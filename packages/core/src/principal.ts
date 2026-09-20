@@ -4,7 +4,7 @@ import type { AgentId, MachineId, SessionId, TaskId, WorkspaceId } from './ids.j
 import { workspaceOfKey } from './ids.js';
 
 /** Tool families an external client may be granted (the MCP orchestration surface). */
-export type Scope = 'machines' | 'environments' | 'agents' | 'sessions' | 'tasks' | 'chats' | 'memory' | 'schedules' | 'usage';
+export type Scope = 'machines' | 'environments' | 'agents' | 'sessions' | 'tasks' | 'chats' | 'memory' | 'schedules' | 'usage' | 'projects';
 
 export type Principal =
     | { readonly kind: 'user'; readonly userId: string; readonly workspaceId: WorkspaceId }

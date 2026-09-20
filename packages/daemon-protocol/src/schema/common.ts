@@ -1,6 +1,6 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import { FS_LIST_MAX_ENTRIES } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
 import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
@@ -136,19 +136,28 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     resume: z.unknown().optional()
 });
 
-/** What `fs.request` asks (#185): list one folder, or add a git worktree. Paths are bounded text; the daemon decides what they mean. */
+/**
+ * What `fs.request` asks (#185, #331): list one folder, add a git worktree, or locate every checkout of an origin under
+ * the roots. Paths are bounded text; the daemon decides what they mean.
+ */
 export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1) }),
-    z.object({ kind: z.literal('worktree'), repo: text.min(1), branch: name, base: name.optional(), path: text.min(1) })
+    z.object({ kind: z.literal('worktree'), repo: text.min(1), branch: name, base: name.optional(), path: text.min(1) }),
+    z.object({ kind: z.literal('locate'), origin: text.min(1), depth: nonNegativeInt.optional() })
 ]);
 
-const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.optional(), head: name.optional() });
+/** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name — absent rather than empty. */
+const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.optional(), head: name.optional(), origin: text.min(1).optional() });
 const fsEntry = z.object({ name: text.min(1), path: text.min(1), git: fsGitInfo.optional() });
 
-/** What `fs.response` answers: a listing of at most `FS_LIST_MAX_ENTRIES` folders, or the worktree that was added. */
+/**
+ * What `fs.response` answers: a listing of at most `FS_LIST_MAX_ENTRIES` folders, the worktree that was added, or at most
+ * `FS_LOCATE_MAX_MATCHES` checkouts of an origin.
+ */
 export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1), parent: text.min(1).optional(), git: fsGitInfo.optional(), entries: z.array(fsEntry).max(FS_LIST_MAX_ENTRIES), truncated: z.boolean() }),
-    z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name })
+    z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name }),
+    z.object({ kind: z.literal('locate'), origin: text.min(1), matches: z.array(z.object({ path: text.min(1), git: fsGitInfo })).max(FS_LOCATE_MAX_MATCHES), truncated: z.boolean() })
 ]);
 
 export const fsError: z.ZodType<FsError> = z.object({

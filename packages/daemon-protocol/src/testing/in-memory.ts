@@ -10,14 +10,21 @@
 
 import {
     DAEMON_PROTOCOL_VERSION,
+    FS_LIST_MAX_ENTRIES,
+    FS_LOCATE_MAX_DEPTH,
+    FS_LOCATE_MAX_MATCHES,
     normalizePath,
     pathWithin,
+    sameOrigin,
     type CapabilityReport,
     type Cursor,
     type EnvError,
     type EnvironmentDescriptor,
     type EnvironmentId,
     type EnvResult,
+    type FsGitInfo,
+    type FsOp,
+    type FsResult,
     type MachineId,
     type MachinePolicy,
     type SessionId
@@ -37,6 +44,8 @@ export interface InMemoryFaults {
     readonly silentEnv?: boolean;
     /** List any folder asked for, inside the working roots or not. */
     readonly browseAnywhere?: boolean;
+    /** Report a located checkout wherever it is, inside the working roots or not. */
+    readonly locateAnywhere?: boolean;
     /** Accept an environment whose working roots are outside the allowed roots. */
     readonly acceptAnyRoot?: boolean;
     /** Remove an environment that still has running sessions. */
@@ -50,6 +59,11 @@ export interface InMemoryHarnessOptions {
     readonly environments?: readonly EnvironmentDescriptor[];
     /** The machine-local policy it starts with. Default: web-managed, inside `/work`. */
     readonly policy?: MachinePolicy;
+    /**
+     * The git checkouts in its otherwise empty tree (#331), by absolute POSIX path: a listing of a folder shows the ones
+     * directly below it (and badges the folder itself), and `locate` finds the ones whose `git.origin` matches.
+     */
+    readonly repos?: readonly { readonly path: string; readonly git: FsGitInfo }[];
     readonly faults?: InMemoryFaults;
 }
 
@@ -266,16 +280,22 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 return;
             }
             case 'fs.request': {
-                // An empty tree: every folder inside the roots exists and has no subfolders; worktrees are not faked.
+                // A tree holding only `repos`: every folder inside the roots exists; worktrees are not faked.
                 const answer = (r: Pick<Extract<DaemonFrame, { t: 'fs.response' }>, 'result' | 'error'>) => this.emit({ v: V, t: 'fs.response', requestId: frame.requestId, ...r });
                 const env = this.environments.find((e) => e.id === frame.environmentId);
                 if (!env) return answer({ error: { code: 'unknown-environment', message: `no environment ${frame.environmentId}` } });
-                if (frame.op.kind !== 'list') return answer({ error: { code: 'unsupported', message: 'the in-memory daemon does not create worktrees' } });
+                if (frame.op.kind === 'locate') return answer({ result: this.locate(env, frame.op) });
+                if (frame.op.kind !== 'list') return answer({ error: { code: 'unsupported', message: `the in-memory daemon does not answer ${frame.op.kind}` } });
                 const path = normalizePath(frame.op.path, 'linux');
                 if (!path || (!this.options.faults?.browseAnywhere && !pathWithin(path, env.cwdRoots, 'linux'))) return answer({ error: { code: 'outside-roots', message: `${frame.op.path} is outside the working roots` } });
                 const isRoot = env.cwdRoots.some((r) => normalizePath(r, 'linux') === path);
                 const parent = isRoot ? undefined : normalizePath(`${path}/..`, 'linux')!;
-                return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), entries: [], truncated: false } });
+                const own = this.repos().find((r) => r.path === path);
+                const below = this.repos()
+                    .filter((r) => r.path !== path && normalizePath(`${r.path}/..`, 'linux') === path)
+                    .map((r) => ({ name: r.path.slice(r.path.lastIndexOf('/') + 1), path: r.path, git: r.git }));
+                const entries = below.slice(0, FS_LIST_MAX_ENTRIES);
+                return answer({ result: { kind: 'list', path, ...(parent ? { parent } : {}), ...(own ? { git: own.git } : {}), entries, truncated: below.length > entries.length } });
             }
             case 'env.request': {
                 const outcome = this.manage(frame);
@@ -317,6 +337,37 @@ export class InMemoryDaemon implements ConformanceDaemon {
         };
         this.environments = existing ? this.environments.map((e) => (e.id === next.id ? next : e)) : [...this.environments, next];
         return { result: { environmentId: next.id } };
+    }
+
+    /** The faked checkouts with their paths normalized; one with a relative path is dropped. */
+    private repos(): { readonly path: string; readonly git: FsGitInfo }[] {
+        const out: { path: string; git: FsGitInfo }[] = [];
+        for (const r of this.options.repos ?? []) {
+            const path = normalizePath(r.path, 'linux');
+            if (path) out.push({ path, git: r.git });
+        }
+        return out;
+    }
+
+    /** `locate` over the faked checkouts: same origin, inside the roots, at most `depth` levels below the root that holds it — roots first, shallowest first. */
+    private locate(env: EnvironmentDescriptor, op: Extract<FsOp, { kind: 'locate' }>): FsResult {
+        const depth = Math.min(op.depth ?? FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_DEPTH);
+        const roots = env.cwdRoots.map((r) => normalizePath(r, 'linux')).filter((r): r is string => r !== null);
+        const levels = (p: string) => p.split('/').filter(Boolean).length;
+        const found: { rootIndex: number; below: number; path: string; git: FsGitInfo }[] = [];
+        for (const r of this.repos()) {
+            if (r.git.origin === undefined || !sameOrigin(r.git.origin, op.origin)) continue;
+            const rootIndex = roots.findIndex((root) => pathWithin(r.path, [root], 'linux'));
+            if (rootIndex < 0) {
+                if (this.options.faults?.locateAnywhere) found.push({ rootIndex: roots.length, below: 0, path: r.path, git: r.git });
+                continue;
+            }
+            const below = levels(r.path) - levels(roots[rootIndex]!);
+            if (below <= depth) found.push({ rootIndex, below, path: r.path, git: r.git });
+        }
+        found.sort((a, b) => a.rootIndex - b.rootIndex || a.below - b.below || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+        const matches = found.slice(0, FS_LOCATE_MAX_MATCHES).map(({ path, git }) => ({ path, git }));
+        return { kind: 'locate', origin: op.origin, matches, truncated: found.length > matches.length };
     }
 
     private active(): SessionId[] {
@@ -370,8 +421,10 @@ export class InMemoryDaemon implements ConformanceDaemon {
 
 /** A conformance harness over the fake daemon; also usable directly to exercise a platform implementation. */
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
+    const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
         features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
+        ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         start: (script) => new InMemoryDaemon(script, options)
     };
 }
