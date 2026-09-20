@@ -36,6 +36,8 @@ export interface PlatformAgentDeps {
     readonly tools?: readonly AnyTool[];
     /** Connectors the agent names that this session runs without, and why (#240); the prompt says so. */
     readonly unavailableConnectors?: SystemPromptInput['unavailableConnectors'];
+    /** The project's instructions (#332), the prompt's `## Project` section. */
+    readonly project?: string;
 }
 
 export interface PlatformModelAgent {
@@ -63,7 +65,8 @@ export function createPlatformModelAgent(config: FrozenAgentConfig, deps: Platfo
         ...(deps.skills ? { skills: deps.skills } : {}),
         ...(deps.memories ? { memories: deps.memories } : {}),
         ...(deps.roster ? { roster: deps.roster } : {}),
-        ...(deps.unavailableConnectors?.length ? { unavailableConnectors: deps.unavailableConnectors } : {})
+        ...(deps.unavailableConnectors?.length ? { unavailableConnectors: deps.unavailableConnectors } : {}),
+        ...(deps.project ? { project: deps.project } : {})
     });
     const limits = config.execution.limits;
     const agent = modelAgent({

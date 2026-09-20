@@ -387,6 +387,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                         ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                         ...(spec.environmentId !== undefined ? { environmentId: spec.environmentId } : {}),
                         ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {}),
+                        ...(spec.projectId !== undefined ? { projectId: spec.projectId } : {}),
                         sessionId
                     });
                 } catch (e) {

@@ -187,6 +187,7 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                     store: c.transcripts,
                     ...(c.spec.memories?.length ? { memories: c.spec.memories } : {}),
                     ...(c.spec.roster ? { roster: c.spec.roster } : {}),
+                    ...(c.spec.projectInstructions ? { project: c.spec.projectInstructions } : {}),
                     ...(connectors.tools.length ? { tools: connectors.tools } : {}),
                     ...(connectors.unavailable.length ? { unavailableConnectors: connectors.unavailable } : {})
                 });

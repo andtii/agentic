@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActorStorage, Host } from '@sigx/actors';
 import { defineActorApp, manualScheduler, memoryStorage, type ManualScheduler } from '@sigx/actors/host';
-import type { AgentId, EnvironmentId } from '@agentic/core';
+import type { AgentId, EnvironmentId, ProjectId } from '@agentic/core';
 import { defineScheduleActor, FIRE, type ScheduleFired, type ScheduleLogEntry, type TriggerPort } from '../../src/schedule/index';
 
 const TZ = 'Europe/Stockholm';
@@ -383,5 +383,41 @@ describe('Schedule working folder (#190)', () => {
         const cleared = await client.update({ workdir: null });
         expect(cleared.workdir).toBeUndefined();
         expect('workdir' in cleared).toBe(false);
+    });
+});
+
+describe('Schedule project (#332)', () => {
+    const ENV = 'env_laptop' as EnvironmentId;
+    const PROJECT = 'project_1' as ProjectId;
+
+    it('carries its projectId into the firing, refuses one beside an environment or a folder, and clears it with null', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const r = await rig();
+        const client = r.host.actor(r.Schedule, KEY);
+        const base = { kind: 'agent-task', title: 'digest', recurrence: { kind: 'at', at: T('2026-09-17T10:05:00Z') }, agentId: 'agent_a' as AgentId } as const;
+        // A project says where the work lives: never beside an environment or a folder.
+        await expect(client.create({ ...base, projectId: PROJECT, environmentId: ENV })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, projectId: PROJECT, environmentId: ENV, workdir: 'C:/src/app' })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, projectId: '  ' as ProjectId })).rejects.toMatchObject({ status: 400 });
+        const created = await client.create({ ...base, projectId: PROJECT });
+        expect(created.projectId).toBe(PROJECT);
+        expect(created.environmentId).toBeUndefined();
+        await r.runTo(T('2026-09-17T10:05:00Z'));
+        expect(r.trigger.events).toHaveLength(1);
+        expect(r.trigger.events[0]).toMatchObject({ projectId: PROJECT });
+        expect('environmentId' in r.trigger.events[0]!).toBe(false);
+
+        // A patch is checked against what stays: an environment beside the kept project is refused; clearing the project first lets it in.
+        await expect(client.update({ environmentId: ENV })).rejects.toMatchObject({ status: 400 });
+        const cleared = await client.update({ projectId: null, environmentId: ENV, workdir: 'C:/src/app' });
+        expect(cleared.projectId).toBeUndefined();
+        expect('projectId' in cleared).toBe(false);
+        expect(cleared).toMatchObject({ environmentId: ENV, workdir: 'C:/src/app' });
+        // Back to a project: the environment and the folder go together with `null`.
+        await expect(client.update({ projectId: PROJECT })).rejects.toMatchObject({ status: 400 });
+        const back = await client.update({ projectId: PROJECT, environmentId: null, workdir: null });
+        expect(back.projectId).toBe(PROJECT);
+        expect('environmentId' in back).toBe(false);
+        expect('workdir' in back).toBe(false);
     });
 });

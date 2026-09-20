@@ -117,6 +117,7 @@ function toView(s: TaskState): TaskView {
         ...(s.expected !== undefined ? { expected: s.expected } : {}),
         ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
         ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
+        ...(s.projectId !== undefined ? { projectId: s.projectId } : {}),
         ...(s.resumeFrom !== undefined ? { resumeFrom: s.resumeFrom } : {}),
         depth: s.depth,
         ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),
@@ -379,7 +380,9 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                     constraints,
                     ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                     ...((spec.environmentId ?? s.environmentId) !== undefined ? { environmentId: spec.environmentId ?? s.environmentId } : {}),
-                    ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {})
+                    ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {}),
+                    // The child works in the parent's project unless the spec names its own (#332), as with the environment.
+                    ...((spec.projectId ?? s.projectId) !== undefined ? { projectId: spec.projectId ?? s.projectId } : {})
                 };
                 const owner = spec.owner ?? s.assignee;
                 await childClient(id).create(contract, { owner, depth, parentId: s.id, configVersion: s.configVersion });

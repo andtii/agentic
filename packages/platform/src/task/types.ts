@@ -5,6 +5,7 @@ import type {
     EnvironmentId,
     JsonSchemaObject,
     Limits,
+    ProjectId,
     PromptPart,
     SessionId,
     TaskContract,
@@ -42,6 +43,8 @@ export interface DelegateSpec {
     readonly environmentId?: EnvironmentId;
     /** The child's folder (#190), within the roots of its environment (`environmentId`, else the parent's). Absent: the router picks — the parent's folder when the child lands in the parent's environment. */
     readonly workdir?: string;
+    /** The child's project (#332). Absent: the parent's, when it has one. */
+    readonly projectId?: ProjectId;
     /** The delegating session; defaults to the parent's own. */
     readonly sessionId?: SessionId;
     /** Defaults to the parent's assignee. */
@@ -139,6 +142,8 @@ export interface TaskState {
     environmentId?: EnvironmentId;
     /** The folder the task's session runs in (#190); only with `environmentId`. */
     workdir?: string;
+    /** The project the task belongs to (#330/#332): the router resolves its folder for the environment when `workdir` is absent. */
+    projectId?: ProjectId;
     /** The earlier session whose engine conversation this task continues (#285). */
     resumeFrom?: SessionId;
     owner: AgentId;

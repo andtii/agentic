@@ -10,11 +10,12 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AgentId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
     'approval.resolved',
+    'chat.project-set',
     'delegation.created',
     'environment.chosen',
     'environment.put',
@@ -28,6 +29,7 @@ export const AUDIT_KINDS = [
     'plugin.disabled',
     'plugin.granted',
     'plugin.activated',
+    'project.changed',
     'secret.opened',
     'workdir.worktree-created'
 ] as const;
@@ -210,10 +212,26 @@ export interface EnvironmentRemovedData {
     readonly outcome: 'ok' | EnvErrorCode;
 }
 
+/** `Chat.setProject` moved a chat into a project, or out of one with `null` (#332). `by` is the caller. */
+export interface ChatProjectSetData {
+    readonly chatId: ChatId;
+    readonly projectId: ProjectId | null;
+    /** The project's name when it was set. */
+    readonly name?: string;
+}
+
+/** `Workspace.upsertProject` / `removeProject` changed the workspace's projects (#332). `by` is the owner. */
+export interface ProjectChangedData {
+    readonly projectId: ProjectId;
+    readonly name: string;
+    readonly op: 'created' | 'updated' | 'removed';
+}
+
 /** The per-kind payload. */
 export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
     readonly 'approval.resolved': ApprovalResolvedData;
+    readonly 'chat.project-set': ChatProjectSetData;
     readonly 'delegation.created': DelegationCreatedData;
     readonly 'environment.chosen': EnvironmentChosenData;
     readonly 'environment.put': EnvironmentPutData;
@@ -227,6 +245,7 @@ export interface AuditDataByKind {
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
     readonly 'plugin.activated': PluginActivatedData;
+    readonly 'project.changed': ProjectChangedData;
     readonly 'secret.opened': SecretOpenedData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
 }
