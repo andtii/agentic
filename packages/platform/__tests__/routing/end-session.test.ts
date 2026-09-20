@@ -294,7 +294,7 @@ describe('New session — anthropic-api', () => {
         expect((await messages(chatId)).length).toBe(2);
     });
 
-    it('a member with no session answers null; an agent principal is refused and changes nothing', async () => {
+    it('a member with no session answers null; an agent principal is refused; a session id that is not the member’s is refused — nothing changes', async () => {
         const atlas = await agent('agent_atlas', { runtime: 'anthropic-api' }, 'Atlas');
         const bob = await agent('agent_bob', { runtime: 'anthropic-api' }, 'Bob');
         const chatId = await room(atlas, bob);
@@ -303,14 +303,25 @@ describe('New session — anthropic-api', () => {
         await settled('t1');
         const sid = first.sessionId!;
         await bound(chatId, atlas, sid);
+        const other = await message(chatId, bob, 'hi bob', 't2');
+        await settled('t2');
+        const bobSid = other.sessionId!;
+        await bound(chatId, bob, bobSid);
 
         // An agent must not wipe its own — or another member's — conversation.
         const asAtlas = mintAgentPrincipal({ workspaceId: WS, agentId: atlas, sessionId: sid as SessionId });
         expect(await statusOf(app.as(asAtlas).actor(Routing, routingKey(WS)).endSession(chatId, atlas, 'no'))).toBe(403);
         expect(await statusOf(app.as(asAtlas).actor(Routing, routingKey(WS)).endSession(chatId, bob, 'no'))).toBe(403);
+        // A named session is never taken on trust: with the binding there it must be that one; without, the record must name this member and chat.
+        expect(await statusOf(routing().endSession(chatId, atlas, 'no', bobSid as SessionId))).toBe(409);
+        await chat(chatId).removeAgent(bob);
+        await until(async () => (await session(bobSid).get()).opened === false, "bob's record to be purged by the removal");
+        expect(await statusOf(routing().endSession(chatId, bob, 'no', sid as SessionId))).toBe(409);
+        // A session that is already gone is nothing to end.
+        expect(await routing().endSession(chatId, bob, 'again', bobSid as SessionId)).toBeNull();
         expect((await session(sid).get()).status).not.toBe('closed');
         expect((await chat(chatId).get()).sessions[atlas]?.sessionId).toBe(sid);
-        expect(purged).toEqual([]);
+        expect(purgedKeys()).toEqual([`${Session.type} ${sessionKey(bobSid)}`]);
     });
 });
 

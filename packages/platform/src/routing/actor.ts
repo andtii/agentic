@@ -163,6 +163,9 @@ export const PROJECT_MISSING_CODE = 'project-missing';
 /** The `TaskError` a task fails with when its session is ended under it (#399): "New session", or the member's removal. Recoverable — the next message opens a fresh one. */
 export const SESSION_RESET_CODE = 'session-reset';
 
+/** How many of an ended session's pages `endSession` purges at once (#399): a long session has many, and one turn should not wait on them one by one. */
+const PURGE_BATCH = 8;
+
 /** `Routing.get()`. */
 export interface RoutingView {
     readonly key: string;
@@ -1195,28 +1198,41 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  * of its pages are purged through the `store` port, so nothing of the conversation is left behind.
                  * The next message opens a fresh session that knows none of it; the chat's own history is untouched.
                  * Returns the id ended, or `null` when the member had no session. A user or an external client only.
+                 * A `sessionId` is never taken on trust: with the binding still there it must be that session (409
+                 * otherwise), and without one the record itself must name this chat and member — so no caller can
+                 * end another chat's or another member's session through here.
                  */
                 async endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<SessionId | null> {
-                    const bound =
-                        sessionId ??
-                        (await chat(chatId)
-                            .get()
-                            .then((summary) => summary.sessions[agentId]?.sessionId, () => undefined));
+                    const row = await chat(chatId)
+                        .get()
+                        .then((summary) => summary.sessions[agentId]?.sessionId, () => undefined);
+                    if (sessionId !== undefined && row !== undefined && row !== sessionId) {
+                        throw new ServerFnError(409, `routing: session ${sessionId} is not the session chat ${chatId} binds to ${agentId} (${row})`);
+                    }
+                    const bound = row ?? sessionId;
                     if (!bound) return null;
+                    const client = session(bound);
+                    // The record first: what vouches for a session the binding no longer names, and the page count — a closed record keeps its pages, a purged one says nothing.
+                    const info = await client.get().catch(() => undefined);
+                    if (row === undefined) {
+                        if (!info?.opened) return null;
+                        if (info.spec?.chatId !== chatId || info.spec.agentId !== agentId) throw new ServerFnError(409, `routing: session ${bound} is not ${agentId}'s session in chat ${chatId}`);
+                    }
                     const why = `session ${bound} of ${agentId} in chat ${chatId} was ended: ${reason}`;
                     for (const route of Object.values(ctx.state.routes)) {
                         if (route.sessionId !== bound) continue;
                         await fail(route, { code: SESSION_RESET_CODE, message: why, recoverable: true });
                     }
                     await ctx.save();
-                    const client = session(bound);
-                    // The page count first: a closed record keeps its pages, a purged one says nothing.
-                    const pages = await client.get().then((info) => info.pages, () => 0);
                     const acknowledged = await client.close().then((reply) => reply.kind === 'ack', () => false);
                     if (!acknowledged) await tellChatEnded(ctx, workspaceId, chatId, agentId, bound, now);
                     if (ports.store) {
                         const key = `${workspaceId}:session:${bound}`;
-                        for (let page = 0; page < pages; page++) await ports.store.purge({ type: SESSION_PAGE_TYPE, key: sessionPageKey(key, page) });
+                        const pages = info?.pages ?? 0;
+                        // The pages in bounded batches (a long session has many), every one of them before the record.
+                        for (let from = 0; from < pages; from += PURGE_BATCH) {
+                            await Promise.all(Array.from({ length: Math.min(PURGE_BATCH, pages - from) }, (_, i) => ports.store!.purge({ type: SESSION_PAGE_TYPE, key: sessionPageKey(key, from + i) })));
+                        }
                         await ports.store.purge({ type: ports.sessions().type, key });
                     }
                     return bound;
