@@ -8,7 +8,7 @@
 import type { AgentId, MachineId, Principal, Scope, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { fromBase64Url, fromUtf8, toBase64Url, utf8 } from './encoding.js';
 
-const SCOPES: readonly Scope[] = ['machines', 'environments', 'agents', 'sessions', 'tasks', 'chats', 'memory', 'schedules', 'usage'];
+const SCOPES: readonly Scope[] = ['machines', 'environments', 'agents', 'sessions', 'tasks', 'chats', 'memory', 'schedules', 'usage', 'projects'];
 
 const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
