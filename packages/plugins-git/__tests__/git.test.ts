@@ -129,6 +129,9 @@ describe('branch names', () => {
         expect(hostOsOfPath('C:\\Dev\\agentic\\main')).toBe('windows');
         expect(hostOsOfPath('c:/dev/agentic')).toBe('windows');
         expect(hostOsOfPath('\\\\server\\share\\repo')).toBe('windows');
+        // A UNC share written with forward slashes, as core's `parse` / `suggestWorktreePath` also read it.
+        expect(hostOsOfPath('//server/share/repo')).toBe('windows');
+        expect(suggestWorktreePath('//server/share/repo', 'chat/x', hostOsOfPath('//server/share/repo'))).toBe('\\\\server\\share\\repo-worktrees\\chat-x');
         expect(hostOsOfPath('/home/me/agentic')).toBe('linux');
         expect(hostOsOfPath('/Users/me/agentic')).toBe('linux');
     });

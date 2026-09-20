@@ -74,9 +74,12 @@ export function identityOf(folder: ProjectFolderInfo): string | undefined {
     return folder.git?.origin;
 }
 
-/** The OS a path's shape says it belongs to: a drive or UNC prefix is Windows, anything else POSIX. */
+/**
+ * The OS a path's shape says it belongs to: a drive prefix or a UNC share (`\\server\share`, or `//server/share`
+ * as core's `parse` also reads it) is Windows, anything else POSIX (a POSIX path never starts with `//`).
+ */
 export function hostOsOfPath(path: string): HostOs {
-    return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\') ? 'windows' : 'linux';
+    return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\') || /^\/\/[^/]+\//.test(path) ? 'windows' : 'linux';
 }
 
 /**
