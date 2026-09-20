@@ -74,9 +74,11 @@ describe('session feeds', () => {
     });
 
     it("a feed opened after a turn follows from that turn's end (#398): it replays nothing of the session's past, and the next turn streams into it", async () => {
-        const { sessionId, session, agentId, chatId, chat } = await startTurn();
-        await until(async () => (await session.get()).status === 'idle', 'the first turn to finish', 3_000);
+        const { sessionId, session, agentId, chatId, chat, taskId: firstTask } = await startTurn();
+        // The task settles after the session goes idle (the router reads the turn's end); a second message before that is refused as busy.
+        await until(async () => (await h.app.as(owner).actor(TaskActor, taskKey(WS, firstTask)).get()).status === 'completed', 'the first task to settle', 5_000);
         const info = await session.get();
+        expect(info.status).toBe('idle');
         expect(info.transcriptAt).toBeDefined();
         expect(info.transcriptAt).not.toEqual({ epoch: 0, seq: 0 });
         // What the feed asks the actor to tail from.
