@@ -45,6 +45,7 @@ describe('cli', () => {
         expect(await main(['pair', 'ABC234'], { paths: paths(), ...io() })).toBe(2);
         expect(await main(['launch'], { paths: paths(), ...io() })).toBe(2);
         expect(await main(['help'], { paths: paths(), ...io() })).toBe(0);
+        expect(out.at(-1)).toContain('agentic-daemon open [path] [--env <id>] [--no-browser]');
     });
 
     it('a failed pairing says why and saves nothing', async () => {

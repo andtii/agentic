@@ -20,7 +20,7 @@ import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { projectHead } from './head';
 import { useProjects } from './live';
 import { useLiveLocate } from './locate';
-import { connectorOptionsOf, featureManifestsOf } from './model';
+import { connectorOptionsOf, featureManifestsOf, type ProjectDraft } from './model';
 import { ProjectForm } from './ProjectForm';
 import { ProjectsView } from './ProjectsView';
 
@@ -47,8 +47,8 @@ export const LiveProjects = component(() => {
     };
 });
 
-/** The form page, live: `id` absent on New project. Reads everything the form needs and writes through the Workspace. */
-export const LiveProject = component<{ id?: string }>(({ props }) => {
+/** The form page, live: `id` absent on New project (`initial`: what it opens on, #336). Reads everything the form needs and writes through the Workspace. */
+export const LiveProject = component<{ id?: string; initial?: Partial<ProjectDraft> }>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
@@ -115,6 +115,7 @@ export const LiveProject = component<{ id?: string }>(({ props }) => {
                 {props.id && !p ? <p data-panel-note>Loading…</p> : (
                     <ProjectForm
                         {...(p ? { project: p } : {})}
+                        {...(props.initial ? { initial: props.initial } : {})}
                         agents={directory.all()}
                         environments={workdirs.list()}
                         machineOf={workdirs.machineOf}
