@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, type DetachedAnswer, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, initialSessionState, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -294,7 +294,9 @@ export function defineSessionActor(ports: SessionPorts) {
         const parsed = parseSessionKey(c.key);
         if (!spec || !parsed) return;
         const key = `${c.key}:${ev.epoch}:${ev.seq}`;
-        const common = { at: now(), agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) };
+        // The running turn's task, not the one the session opened with (#390): a request is the turn's.
+        const taskId = currentTaskId(c.state);
+        const common = { at: now(), agentId: spec.agentId, sessionId: parsed.sessionId, ...(taskId ? { taskId } : {}) };
         if (ev.type === 'request') {
             await publishChat(c, { kind: 'status', status: 'request', ref: requestRef(ev) });
             await notifyInbox(c, parsed.workspaceId, (inbox) => inbox.push(requestNotification(spec.config.name || spec.agentId, parsed.sessionId, ev)));
@@ -366,12 +368,13 @@ export function defineSessionActor(ports: SessionPorts) {
         const parsed = parseSessionKey(c.key);
         const rules = spec?.config.approvalPolicy ?? [];
         const rule = (record.resolved?.ruleId && rules.find((r) => r.id === record.resolved!.ruleId)) || (record.request.kind === 'permission' ? ruleFor(rules, policyRequestOf(record)) : undefined);
+        const taskId = currentTaskId(c.state);
         return {
             ...record,
             sessionId: parsed?.sessionId ?? (c.key as SessionId),
             agentId: spec?.agentId ?? ('' as AgentId),
             ...(spec?.chatId ? { chatId: spec.chatId } : {}),
-            ...(spec?.taskId ? { taskId: spec.taskId } : {}),
+            ...(taskId ? { taskId } : {}),
             ...(rule ? { rule: describeRule(rule) } : {}),
             ...(spec?.config.name ? { agentName: spec.config.name } : {}),
             detached: !record.resolved && isDetached(c.state, record.request.requestId)
@@ -389,12 +392,13 @@ export function defineSessionActor(ports: SessionPorts) {
         const record = requestRecordOf(knownEvents(s), answer.requestId);
         if (!record?.resolved || record.resolved.outcome !== 'input') return null;
         const choices = record.request.options?.map((o) => o.label);
+        const taskId = currentTaskId(s);
         return {
             workspaceId: parsed.workspaceId,
             sessionId: parsed.sessionId,
             agentId: spec.agentId,
             chatId: spec.chatId,
-            ...(spec.taskId ? { taskId: spec.taskId } : {}),
+            ...(taskId ? { taskId } : {}),
             ...(spec.environmentId ? { environmentId: spec.environmentId } : {}),
             requestId: answer.requestId,
             question: record.request.message ?? '',
@@ -427,12 +431,16 @@ export function defineSessionActor(ports: SessionPorts) {
         };
     }
 
-    /** The principal the session's memory and learning run as (MEM-11): the agent, whoever opened the session. */
-    function agentPrincipal(c: ActorContext<SessionState>): Principal | null {
+    /**
+     * The principal the session's memory and learning run as (MEM-11): the agent, whoever opened the session,
+     * under the task it works right now (#390) — a caller that already knows the turn's task (a turn end,
+     * after `running` is gone) passes it.
+     */
+    function agentPrincipal(c: ActorContext<SessionState>, taskId: TaskId | undefined = currentTaskId(c.state)): Principal | null {
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
         if (!spec || !parsed) return null;
-        return mintAgentPrincipal({ workspaceId: parsed.workspaceId, agentId: spec.agentId, sessionId: parsed.sessionId, ...(spec.taskId ? { taskId: spec.taskId } : {}) });
+        return mintAgentPrincipal({ workspaceId: parsed.workspaceId, agentId: spec.agentId, sessionId: parsed.sessionId, ...(taskId ? { taskId } : {}) });
     }
 
     /**
@@ -472,7 +480,7 @@ export function defineSessionActor(ports: SessionPorts) {
      * objective and tags when it is a factory — and the active memory plugin's store it writes to. `{ off }` says why
      * there is none: learning or memory turned off, or no learning plugin configured.
      */
-    function learnerFor(c: ActorContext<SessionState>, learning: LearningPorts): { readonly plugin: LearningPlugin; readonly memory: MemoryOpener } | { readonly off: string } {
+    function learnerFor(c: ActorContext<SessionState>, learning: LearningPorts, taskId: TaskId | undefined = currentTaskId(c.state)): { readonly plugin: LearningPlugin; readonly memory: MemoryOpener } | { readonly off: string } {
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
         if (!spec || !parsed) return { off: `session "${c.key}" is not open` };
@@ -484,7 +492,7 @@ export function defineSessionActor(ports: SessionPorts) {
             workspaceId: parsed.workspaceId,
             agentId: spec.agentId,
             sessionId: parsed.sessionId,
-            ...(spec.taskId ? { taskId: spec.taskId } : {}),
+            ...(taskId ? { taskId } : {}),
             ...(spec.objective ? { objective: spec.objective } : {}),
             ...(spec.tags ? { tags: spec.tags } : {})
         });
@@ -503,18 +511,20 @@ export function defineSessionActor(ports: SessionPorts) {
      * result with text is a CLAIM unless `verify` says otherwise (LRN-03) —
      * goes to `onTaskEnd`; memory proposals are applied by the plugin,
      * instruction proposals parked. Runs only for a task session's regular
-     * turn end: an interrupted turn is not an outcome, and a session without a
-     * task has no task to record. Failure is recorded, never thrown.
+     * turn end: an interrupted turn is not an outcome, and a turn without a
+     * task has no task to record. `taskId` is the TURN's task (#390), handed in
+     * because `running` is gone once its `turn-end` folded. Failure is
+     * recorded, never thrown.
      */
-    async function learnFromTurn(c: ActorContext<SessionState>, turnId: string, text: string): Promise<void> {
+    async function learnFromTurn(c: ActorContext<SessionState>, turnId: string, text: string, taskId: TaskId | undefined): Promise<void> {
         const learning = ports.learning;
         const s = c.state;
         const spec = s.spec;
         const parsed = parseSessionKey(c.key);
-        const principal = agentPrincipal(c);
-        const learner = learning && learnerFor(c, learning);
+        const principal = agentPrincipal(c, taskId);
+        const learner = learning && learnerFor(c, learning, taskId);
         // Learning or memory turned off (#242): the outcome is not recorded, and nothing is written.
-        if (!learning || !learner || 'off' in learner || !spec?.taskId || !parsed || !principal) return;
+        if (!learning || !learner || 'off' in learner || !spec || !taskId || !parsed || !principal) return;
         const { plugin, memory } = learner;
         const end = knownEvents(s).findLast((e) => e.type === 'turn-end' && e.turnId === turnId);
         if (!end || end.type !== 'turn-end' || isInterruptedTurnEnd(end)) return;
@@ -524,12 +534,12 @@ export function defineSessionActor(ports: SessionPorts) {
         const objective = spec.objective?.trim() || (start?.type === 'turn-start' ? lastUserText(start.input) : '');
         let record: LearningRecord = { turnId, at: now(), status, verification: 'none', written: 0, parked: 0 };
         try {
-            const verdict = await learning.verify?.({ taskId: spec.taskId, agentId: spec.agentId, turnId, status, result });
-            const outcome = taskOutcomeOf({ taskId: spec.taskId, agentId: spec.agentId, objective, tags: spec.tags ?? [], status, result, ...(verdict ? { verdict } : {}) });
+            const verdict = await learning.verify?.({ taskId, agentId: spec.agentId, turnId, status, result });
+            const outcome = taskOutcomeOf({ taskId, agentId: spec.agentId, objective, tags: spec.tags ?? [], status, result, ...(verdict ? { verdict } : {}) });
             record = { ...record, verification: outcome.verification };
             const proposals = await plugin.onTaskEnd(outcome, memory(agentMemoryScope(spec.agentId), principal));
             const instructions = instructionProposals(proposals);
-            await park(c, learning, instructions, { kind: 'task-end', sessionId: parsed.sessionId, taskId: spec.taskId }, principal);
+            await park(c, learning, instructions, { kind: 'task-end', sessionId: parsed.sessionId, taskId }, principal);
             record = { ...record, written: proposals.length - instructions.length, parked: instructions.length };
         } catch (error) {
             record = { ...record, error: error instanceof Error ? error.message : String(error) };
@@ -574,7 +584,7 @@ export function defineSessionActor(ports: SessionPorts) {
      * `configure()`) without waiting for more. `record: false` folds without booking usage — for a
      * drain mid-turn, where the driver still sees every event and books it exactly once.
      */
-    async function drainBuffered(c: ActorContext<SessionState>, live: Live, record = true): Promise<void> {
+    async function drainBuffered(c: ActorContext<SessionState>, live: Live, record = true, taskId: TaskId | undefined = currentTaskId(c.state)): Promise<void> {
         let source: AsyncIterable<AgentEvent>;
         try {
             source = live.session.subscribe({ epoch: c.state.head.epoch, seq: c.state.head.seq });
@@ -588,7 +598,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 const next = await Promise.race([it.next(), tick()]);
                 if (!next || next.done) return;
                 await appendEvent(c, next.value);
-                if (record) await recordUsage(c, next.value); // the turn is over: the books get the row, the verdict has nothing left to stop
+                if (record) await recordUsage(c, next.value, taskId); // the turn is over: the books get the row, the verdict has nothing left to stop
             }
         } finally {
             await it.return?.();
@@ -602,12 +612,13 @@ export function defineSessionActor(ports: SessionPorts) {
      * verdict. Session-scoped events are cumulative totals and never counted.
      * The books never fail a turn: a recorder that throws is a `null` verdict.
      */
-    async function recordUsage(c: ActorContext<SessionState>, ev: AgentEvent): Promise<UsageVerdict | null> {
+    async function recordUsage(c: ActorContext<SessionState>, ev: AgentEvent, taskId: TaskId | undefined = currentTaskId(c.state)): Promise<UsageVerdict | null> {
         if (ev.type !== 'usage' || ev.scope !== 'turn' || !ports.usage) return null;
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
         if (!spec || !parsed) return null;
-        const at = { sessionId: parsed.sessionId, ...(spec.taskId !== undefined ? { taskId: spec.taskId } : {}), at: now() };
+        // Billed to the TURN's task (#390, OPS-08): a session that has moved on never charges the task it opened with.
+        const at = { sessionId: parsed.sessionId, ...(taskId !== undefined ? { taskId } : {}), at: now() };
         const live = lives.get(c.key);
         try {
             // `@sigx/ai` leaves the counters optional (and an adapter may omit `usage`); a ledger row always carries both.
@@ -652,17 +663,21 @@ export function defineSessionActor(ports: SessionPorts) {
         return ev;
     }
 
-    /** Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. */
-    async function finishTurn(c: ActorContext<SessionState>, turnId: string): Promise<void> {
+    /**
+     * Turn end, both paths: snapshot the transcript, refresh the ref, tell the chat, compact. `taskId` is the
+     * turn's task as `running` carried it (#390) — the caller reads it before the `turn-end` folds, since the
+     * fold drops `running`; the chat message, the learning and any usage still buffered are attributed to it.
+     */
+    async function finishTurn(c: ActorContext<SessionState>, turnId: string, taskId: TaskId | undefined): Promise<void> {
         const s = c.state;
         const live = lives.get(c.key);
-        if (live) await drainBuffered(c, live);
+        if (live) await drainBuffered(c, live, true, taskId);
         const transcript = await snapshotTranscript(c);
         s.transcript = boundTranscript(transcript);
         if (live) s.ref = structuredClone(live.session.ref);
         const text = finalText(transcript, turnId);
-        if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(s.spec?.taskId ? { taskId: s.spec.taskId } : {}) });
-        await learnFromTurn(c, turnId, text);
+        if (text) await publishChat(c, { kind: 'message', parts: [{ type: 'text', text }], ...(taskId ? { taskId } : {}) });
+        await learnFromTurn(c, turnId, text, taskId);
         await c.save();
     }
 
@@ -676,6 +691,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const run = s.running;
         if (!run || run.turnId !== turnId) return;
         const input = c.snapshot(run.input);
+        const taskId = run.taskId;
         const sessionId = sessionIdOf(c);
         const epoch = Math.max(1, s.head.epoch);
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
@@ -699,7 +715,7 @@ export function defineSessionActor(ports: SessionPorts) {
         // The session settles before the turn closes, so the `turn-end` is the last word — what a resumer reads first.
         if (s.status !== 'closed') await emit({ type: 'state', value: 'idle' });
         await emit({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE } });
-        await finishTurn(c, turnId);
+        await finishTurn(c, turnId, taskId);
         await publishChat(c, { kind: 'status', status: 'task', ref: `interrupted:${turnId}` });
     }
 
@@ -741,7 +757,9 @@ export function defineSessionActor(ports: SessionPorts) {
                     spec,
                     ...(resume ? { resume } : {}),
                     signal: ctx.abortSignal,
-                    transcripts: createTranscriptStore(ctx)
+                    transcripts: createTranscriptStore(ctx),
+                    // Read per tool call, never once at open: the session serves many tasks (#390).
+                    currentTaskId: () => currentTaskId(ctx.state)
                 });
                 if (!opened) {
                     await appendEntry(ctx, set({ mode: 'remote' }));
@@ -757,16 +775,20 @@ export function defineSessionActor(ports: SessionPorts) {
             const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: V, kind: 'error', commandId, code, message });
             const pending = (commandId: string): SessionCommandResult => ({ v: V, kind: 'pending', commandId });
 
-            /** Apply a reply: remember it, start the driver on a prompt ack, settle on a close ack. */
-            async function recordReply(command: WireCommand, replied: WireReply): Promise<void> {
+            /**
+             * Apply a reply: remember it, start the driver on a prompt ack, settle on a close ack. `taskId` is the
+             * task the prompt was sent for (#390) — the turn it starts is that task's; without one, the session's own.
+             */
+            async function recordReply(command: WireCommand, replied: WireReply, taskId?: TaskId): Promise<void> {
                 const s = ctx.state;
                 const at = now();
                 if (command.type === 'prompt' && replied.kind === 'ack') {
                     const turnId = replied.turnId ?? command.turnId;
                     // A steered prompt joined the running turn: nothing new to drive.
                     const starts = !s.running;
-                    if (starts) await appendEntry(ctx, set({ running: { turnId, commandId: command.commandId, input: command.input, startedAt: at }, status: 'running' }));
-                    await appendEntry(ctx, { t: 'reply', command, reply: replied, at } satisfies SessionEntry);
+                    const task = taskId ?? s.spec?.taskId;
+                    if (starts) await appendEntry(ctx, set({ running: { turnId, commandId: command.commandId, input: command.input, startedAt: at, ...(task ? { taskId: task } : {}) }, status: 'running' }));
+                    await appendEntry(ctx, { t: 'reply', command, reply: replied, at, ...(taskId ? { taskId } : {}) } satisfies SessionEntry);
                     if (starts && s.mode === 'local') {
                         lives.get(ctx.key)?.turns.add(turnId);
                         await ctx.tasks.start('drive', { turnId });
@@ -830,8 +852,8 @@ export function defineSessionActor(ports: SessionPorts) {
                 return ack;
             }
 
-            /** Idempotent by `commandId`: a known command answers with what it answered before, or `pending`. */
-            async function dispatch(command: WireCommand): Promise<SessionCommandResult> {
+            /** Idempotent by `commandId`: a known command answers with what it answered before, or `pending`. `taskId`: the task a prompt is sent for (#390). */
+            async function dispatch(command: WireCommand, taskId?: TaskId): Promise<SessionCommandResult> {
                 const s = ctx.state;
                 const known = s.commands[command.commandId];
                 if (known) return known.reply ? ctx.snapshot(known.reply) : pending(command.commandId);
@@ -844,14 +866,15 @@ export function defineSessionActor(ports: SessionPorts) {
                 if (s.running && s.mode === 'local' && !live?.turns.has(s.running.turnId)) await finishInterrupted(ctx, s.running.turnId);
                 if (live) {
                     const replied = await live.served.handleCommand(command, ctx.principal);
-                    await recordReply(command, replied);
+                    await recordReply(command, replied, taskId);
                     return structuredClone(replied);
                 }
                 const machineId = s.spec?.machineId;
                 if (!machineId || !ports.commands || !parsed) {
                     return errorReply(command.commandId, 'unsupported', `session "${ctx.key}" has no live runtime session and no machine to send "${command.type}" to`);
                 }
-                await appendEntry(ctx, { t: 'command', command, at: now() } satisfies SessionEntry);
+                // The task rides on the record, not on the wire: the daemon's ack (`commandReplied`) starts the turn under it.
+                await appendEntry(ctx, { t: 'command', command, at: now(), ...(taskId ? { taskId } : {}) } satisfies SessionEntry);
                 await ports.commands.send({ workspaceId: parsed.workspaceId, machineId, sessionId: parsed.sessionId }, command);
                 return pending(command.commandId);
             }
@@ -872,9 +895,14 @@ export function defineSessionActor(ports: SessionPorts) {
                     return info(ctx);
                 },
 
-                /** Run a turn. `commandId` defaults to `turnId`, so a retried prompt executes once (OPS-06). */
-                prompt(input: PromptInput, turnId: string, output?: WireOutputSpec, commandId: string = turnId): Promise<SessionCommandResult> {
-                    return dispatch({ v: V, commandId, type: 'prompt', turnId, input: toPromptParts(input), ...(output ? { output } : {}) });
+                /**
+                 * Run a turn. `commandId` defaults to `turnId`, so a retried prompt executes once (OPS-06).
+                 * `opts.taskId` is the task this turn works (#390): the router passes the route's task, so a
+                 * session serving many tasks attributes the turn — its principal, its `delegate` parent, its
+                 * Ledger rows — to that one; without it the turn is the task the session opened with.
+                 */
+                prompt(input: PromptInput, turnId: string, output?: WireOutputSpec, commandId: string = turnId, opts?: { readonly taskId?: TaskId }): Promise<SessionCommandResult> {
+                    return dispatch({ v: V, commandId, type: 'prompt', turnId, input: toPromptParts(input), ...(output ? { output } : {}) }, opts?.taskId);
                 },
 
                 /**
@@ -1042,7 +1070,8 @@ export function defineSessionActor(ports: SessionPorts) {
                     });
                     const proposals = await plugin.onCorrection(correction, memory(agentMemoryScope(s.spec.agentId), principal));
                     const instructions = instructionProposals(proposals);
-                    await park(ctx, learning, instructions, { kind: 'correction', sessionId: parsed.sessionId, messageId, ...(s.spec.taskId ? { taskId: s.spec.taskId } : {}) }, principal);
+                    const taskId = currentTaskId(s);
+                    await park(ctx, learning, instructions, { kind: 'correction', sessionId: parsed.sessionId, messageId, ...(taskId ? { taskId } : {}) }, principal);
                     const record: CorrectionRecord = { messageId, what: correction.what, by: correction.by, at: correction.at, written: proposals.length - instructions.length, parked: instructions.length };
                     await appendEntry(ctx, set({ corrections: [...(s.corrections ?? []), record] }));
                     return { correction, proposals: ctx.snapshot(proposals), parked: instructions.length };
@@ -1058,12 +1087,14 @@ export function defineSessionActor(ports: SessionPorts) {
                                 await appendEntry(ctx, set({ mode: 'remote', ref: frame.sessionRef, capabilities: frame.capabilities, ...(s.status === 'disconnected' ? { status: 'idle' as const } : {}) }));
                                 break;
                             case 'event': {
+                                // Read before the fold: a `turn-end` drops `running`, and the turn's task goes with it (#390).
                                 const runningTurn = s.running?.turnId;
+                                const runningTask = s.running?.taskId;
                                 await appendEvent(ctx, frame.event);
-                                const verdict = await recordUsage(ctx, frame.event);
+                                const verdict = await recordUsage(ctx, frame.event, runningTask ?? currentTaskId(s));
                                 // Over budget on the daemon path: the cancel travels the CommandSink like any other command.
                                 if (verdict && !verdict.ok && s.running) await dispatch({ v: V, commandId: newCommandId('cancel'), type: 'cancel' });
-                                if (frame.event.type === 'turn-end' && runningTurn !== undefined && runningTurn === frame.event.turnId) await finishTurn(ctx, runningTurn);
+                                if (frame.event.type === 'turn-end' && runningTurn !== undefined && runningTurn === frame.event.turnId) await finishTurn(ctx, runningTurn, runningTask ?? s.spec?.taskId);
                                 break;
                             }
                             case 'gap':
@@ -1078,7 +1109,7 @@ export function defineSessionActor(ports: SessionPorts) {
                     assertHostingMachine();
                     const known = ctx.state.commands[replied.commandId];
                     if (!known || known.reply) return;
-                    await recordReply(ctx.snapshot(known.command), replied);
+                    await recordReply(ctx.snapshot(known.command), replied, known.taskId);
                 }
             };
         },
@@ -1144,6 +1175,8 @@ export function defineSessionActor(ports: SessionPorts) {
                 const { turnId } = input;
                 const snap = ctx.snapshot();
                 if (!snap.running || snap.running.turnId !== turnId) return;
+                // The turn's task, read while `running` still holds it (#390): its `turn-end` drops it before `finishTurn`.
+                const taskId = snap.running.taskId ?? snap.spec?.taskId;
                 const live = lives.get(ctx.key);
                 if (!live || !live.turns.has(turnId)) {
                     await ctx.turn((c) => finishInterrupted(c, turnId));
@@ -1170,7 +1203,7 @@ export function defineSessionActor(ports: SessionPorts) {
                         if (signal.aborted || next.done) return;
                         const ev = next.value;
                         await ctx.turn((c) => appendEvent(c, ev));
-                        const verdict = await ctx.turn((c) => recordUsage(c, ev));
+                        const verdict = await ctx.turn((c) => recordUsage(c, ev, taskId));
                         // Over budget: the task has already failed itself; the turn stops here and no child starts (COL-11, OPS-08).
                         if (verdict && !verdict.ok && !signal.aborted) await ctx.turn((c) => cancelLocal(c, live, verdict.error));
                         if (ev.type === 'turn-end' && ev.turnId === turnId) {
@@ -1186,7 +1219,7 @@ export function defineSessionActor(ports: SessionPorts) {
                 } finally {
                     await it.return?.();
                 }
-                if (ended) await ctx.turn((c) => finishTurn(c, turnId));
+                if (ended) await ctx.turn((c) => finishTurn(c, turnId, taskId));
             }
         })
     });

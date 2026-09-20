@@ -152,9 +152,11 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
     return {
         host: 'local',
         async open(c, plugin) {
+            // The identity is minted once; the task is read per tool call (#390): the session serves many tasks over its life.
             const principal = mintAgentPrincipal({ workspaceId: c.workspaceId, agentId: c.spec.agentId, sessionId: c.sessionId, ...(c.spec.taskId ? { taskId: c.spec.taskId } : {}) }) as AgentPrincipal;
             const ports = createActorToolPorts({
                 principal,
+                taskId: c.currentTaskId,
                 ...(c.spec.chatId ? { chatId: c.spec.chatId } : {}),
                 routing: options.routing,
                 ...(options.sessions ? { sessions: options.sessions } : {}),

@@ -95,6 +95,12 @@ export interface SessionFactoryContext {
     readonly signal: AbortSignal;
     /** Transcript snapshots over the actor's state, for `modelAgent({ store })`. */
     readonly transcripts: TranscriptStore;
+    /**
+     * The task the session works right now (#390): the running turn's, else `spec.taskId`. A session serves many
+     * tasks over its life, so a factory hands it to its tool ports (`createActorToolPorts({ taskId })`) instead of
+     * reading `spec.taskId` once at open.
+     */
+    readonly currentTaskId: () => TaskId | undefined;
 }
 
 /** A runtime session the actor drives in-process. */
