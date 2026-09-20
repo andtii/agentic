@@ -7,7 +7,7 @@ type Discriminant<T, K extends keyof T> = T[K];
 describe('contract type tests', () => {
     it('task status and wait reasons are closed unions', () => {
         expectTypeOf<TaskStatus>().toEqualTypeOf<'queued' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled'>();
-        expectTypeOf<Discriminant<WaitReason, 'kind'>>().toEqualTypeOf<'approval' | 'input' | 'environment-offline' | 'child' | 'capacity' | 'budget' | 'project-feature'>();
+        expectTypeOf<Discriminant<WaitReason, 'kind'>>().toEqualTypeOf<'approval' | 'input' | 'environment-offline' | 'child' | 'capacity' | 'budget' | 'project-feature' | 'turn'>();
         expectTypeOf<Discriminant<TaskOrigin, 'kind'>>().toEqualTypeOf<'user' | 'agent' | 'schedule' | 'trigger' | 'external'>();
     });
     it('chat entries and principals are discriminated', () => {
