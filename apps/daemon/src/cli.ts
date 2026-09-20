@@ -4,6 +4,7 @@
  * `agentic-daemon doctor`
  * `agentic-daemon open [path] [--env <id>] [--no-browser]` (`open.ts`)
  * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
+ * `agentic-daemon launcher install | remove | show` (`launcher.ts`)
  * `agentic-daemon policy show | allow-root | deny-root | off` (`policy-cli.ts`)
  * `agentic-daemon --version` (also `version`)
  *
@@ -12,6 +13,7 @@
  * a real profile directory or a real process exit.
  */
 
+import { stat } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import type { QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
@@ -23,6 +25,7 @@ import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.j
 import { watchEnvironments } from './env-store.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
+import { describeLauncher, installLauncher, launcherPlan, removeLauncher, type LauncherContext } from './launcher.js';
 import { createLogger, redact, type Logger, type LogLevel } from './logger.js';
 import { openUrl, resolveOpen, type UrlOpener } from './open.js';
 import { pair, PairingError } from './pair.js';
@@ -63,6 +66,12 @@ export interface CliContext {
     readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
+const LAUNCHER_USAGE = `  agentic-daemon launcher install [--node <path>] [--bin-dir <dir>] [--no-profile]
+                       (the \`agentic-daemon\` command itself: written by the installer, on PATH for a new shell;
+                        --no-profile writes it but changes no shell profile or user PATH)
+  agentic-daemon launcher remove
+  agentic-daemon launcher show`;
+
 const USAGE = `agentic-daemon ${DAEMON_VERSION}
 
 Usage:
@@ -76,6 +85,7 @@ Usage:
                         the environment when the folder is under several; --no-browser only prints)
 ${ENV_USAGE}
 ${POLICY_USAGE}
+${LAUNCHER_USAGE}
   agentic-daemon --version
 `;
 
@@ -328,6 +338,39 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 });
             case 'policy':
                 return await policyCommand(args.positional[0], args.positional.slice(1), { paths, out, err, secure, ...(context.platform ? { platform: context.platform } : {}) });
+            case 'launcher': {
+                const sub = args.positional[0];
+                const launcher: LauncherContext = {
+                    ...(context.platform ? { platform: context.platform } : {}),
+                    ...(context.env ? { env: context.env } : {}),
+                    ...(typeof args.flags.node === 'string' ? { node: args.flags.node } : {}),
+                    ...(typeof args.flags.entry === 'string' ? { entry: args.flags.entry } : {}),
+                    ...(typeof args.flags['bin-dir'] === 'string' ? { binDir: args.flags['bin-dir'] } : {}),
+                    ...(args.flags['no-profile'] ? { profile: false } : {}),
+                    ...(context.run ? { run: context.run } : {})
+                };
+                switch (sub) {
+                    case 'install': {
+                        const result = await installLauncher(launcher);
+                        for (const note of result.notes) out(note);
+                        return 0;
+                    }
+                    case 'remove': {
+                        const result = await removeLauncher(launcher);
+                        for (const note of result.notes) out(note);
+                        return 0;
+                    }
+                    case 'show': {
+                        const plan = launcherPlan(launcher);
+                        const exists = async (file: string): Promise<boolean> => await stat(file).then(() => true, () => false);
+                        out(describeLauncher(plan, { installed: await exists(plan.file), ...(plan.link ? { linked: await exists(plan.link) } : {}) }));
+                        return 0;
+                    }
+                    default:
+                        err(`${sub ? `unknown launcher command "${sub}"` : 'launcher needs a command'}\n\n${LAUNCHER_USAGE}`);
+                        return 2;
+                }
+            }
             case 'doctor': {
                 const report = await runDoctor({ paths, drivers });
                 out(formatDoctorReport(report));

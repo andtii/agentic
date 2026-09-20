@@ -11,8 +11,11 @@
 # The daemon runs as a launchd agent (macOS) or a systemd user unit (Linux), never as root: the
 # machine token and every Claude Code profile belong to the signed-in user.
 #
+# It also writes the `agentic-daemon` command itself (a launcher that hard-codes the Node below and this
+# folder) and puts it on PATH for a new shell — `--no-path` writes it but changes no PATH.
+#
 # Usage: sh install.sh [--url <platform origin> --code <pairing code>] [--name <machine name>]
-#                      [--node <path to node>] [--no-service] [--service-name <name>]
+#                      [--node <path to node>] [--no-service] [--no-path] [--service-name <name>]
 #   sh install.sh --url https://agentic.example --code ABC234
 #   sh install.sh                                   # already paired: doctor + service only
 set -eu
@@ -22,7 +25,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 bin="$here/bin/agentic-daemon.mjs"
 [ -f "$bin" ] || fail "bin/agentic-daemon.mjs not found next to install.sh - run this script from the unpacked zip."
 
-url=""; code=""; name=""; node=""; no_service=""; service_name=agentic-daemon
+url=""; code=""; name=""; node=""; no_service=""; no_path=""; service_name=agentic-daemon
 while [ $# -gt 0 ]; do
     case "$1" in
         --url) url=$2; shift 2 ;;
@@ -30,6 +33,7 @@ while [ $# -gt 0 ]; do
         --name) name=$2; shift 2 ;;
         --node) node=$2; shift 2 ;;
         --no-service) no_service=1; shift ;;
+        --no-path) no_path=1; shift ;;
         --service-name) service_name=$2; shift 2 ;;
         *) fail "install.sh: unknown argument $1" ;;
     esac
@@ -46,7 +50,16 @@ if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt
 fi
 echo "$("$node" "$bin" --version) on Node $node_version ($here)"
 
-# 2. Pair (or check the machine is paired)
+# 2. The `agentic-daemon` command (#354). First, so it exists even if pairing fails: the launcher runs
+# THIS node and THIS folder, so it works on a machine whose only Node is the portable one the one-line
+# installer downloaded. Not fatal - the long form below always works.
+if [ -n "$no_path" ]; then
+    "$node" "$bin" launcher install --no-profile || echo "warning: could not write the agentic-daemon command; run \"$node\" \"$bin\" instead" >&2
+else
+    "$node" "$bin" launcher install || echo "warning: could not write the agentic-daemon command; run \"$node\" \"$bin\" instead" >&2
+fi
+
+# 3. Pair (or check the machine is paired)
 case "$(uname -s)" in
     Darwin) home=${AGENTIC_DAEMON_HOME:-"$HOME/Library/Application Support/agentic"} ;;
     *) home=${AGENTIC_DAEMON_HOME:-"${XDG_CONFIG_HOME:-$HOME/.config}/agentic"} ;;
@@ -61,10 +74,10 @@ else
     echo "already paired ($credentials)"
 fi
 
-# 3. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
+# 4. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
 "$node" "$bin" doctor || echo "warning: doctor found problems (see above). The daemon still starts; sessions on a failing environment are refused until it passes: node bin/agentic-daemon.mjs doctor" >&2
 
-# 4. Background service
+# 5. Background service
 if [ -n "$no_service" ]; then
     echo "Skipping the background service (--no-service). Run in the foreground with: \"$node\" \"$bin\" run"
     exit 0
@@ -83,3 +96,7 @@ case "$(uname -s)" in
         ;;
 esac
 echo "  uninstall: sh \"$here/uninstall.sh\""
+echo ""
+echo "The \`agentic-daemon\` command is installed. In a NEW terminal:"
+echo "  agentic-daemon doctor          # pairing, environments, sign-ins"
+echo "  agentic-daemon policy allow-root <folder>   # let the web add environments inside <folder>"

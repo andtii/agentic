@@ -7,13 +7,15 @@
 # is downloaded from nodejs.org into the install folder. Then it downloads the daemon zip
 # (agentic-daemon-win32-x64.zip from the daemon-latest GitHub release), unpacks it to
 # %LOCALAPPDATA%\agentic\daemon and runs the zip's install.ps1: pair (when AGENTIC_CODE is set),
-# doctor, and the per-user Scheduled Task that keeps the daemon running.
+# doctor, the `agentic-daemon` command (on the user PATH) and the per-user Scheduled Task that keeps
+# the daemon running.
 #
 # Re-run without AGENTIC_CODE to upgrade an already paired machine (the task is stopped, the folder
 # replaced, the task re-registered). Environment overrides:
 #   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release
 #   AGENTIC_INSTALL_DIR  the install root (default %LOCALAPPDATA%\agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
+#   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching your user PATH
 #
 # Source: apps/web/public/install.ps1 in https://github.com/andtii/agentic (docs/runbook.md section 5).
 
@@ -96,5 +98,6 @@ if ($zip -like "$downloads\*") { Remove-Item -Force $zip }
 $params = @{ NodePath = $nodeExe }   # a hashtable: an array splat would bind these by position
 if ($env:AGENTIC_CODE) { $params.Url = $env:AGENTIC_URL; $params.Code = $env:AGENTIC_CODE }
 if ($env:AGENTIC_NAME) { $params.Name = $env:AGENTIC_NAME }
+if ($env:AGENTIC_NO_PATH) { $params.NoPath = $true }
 Step 'installing'
 & (Join-Path $daemonDir 'install.ps1') @params

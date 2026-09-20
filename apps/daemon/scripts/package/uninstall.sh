@@ -16,6 +16,17 @@ while [ $# -gt 0 ]; do
     esac
 done
 sh "$here/scripts/uninstall-service.sh" --name "$service_name"
+
+# The `agentic-daemon` command (#354): the launcher, its link and the PATH line the install added.
+# Node is needed to run it; a machine that has none keeps the files (they point at a folder that is going).
+node=${AGENTIC_NODE:-}
+if [ -z "$node" ]; then node=$(command -v node || true); fi
+if [ -z "$node" ] && [ -x "$HOME/.agentic/node/bin/node" ]; then node="$HOME/.agentic/node/bin/node"; fi
+if [ -n "$node" ] && [ -f "$here/bin/agentic-daemon.mjs" ]; then
+    "$node" "$here/bin/agentic-daemon.mjs" launcher remove || echo "note: could not remove the agentic-daemon command; delete ~/.agentic/bin/agentic-daemon by hand." >&2
+else
+    echo "note: no Node found, so the agentic-daemon command was left behind; delete ~/.agentic/bin/agentic-daemon by hand." >&2
+fi
 case "$(uname -s)" in
     Darwin) echo "Kept: ${AGENTIC_DAEMON_HOME:-$HOME/Library/Application Support/agentic} (pairing, environments, session logs, daemon.log)." ;;
     *) echo "Kept: ${AGENTIC_DAEMON_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/agentic} (pairing, environments) and ${AGENTIC_DAEMON_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/agentic} (session logs, daemon.log)." ;;

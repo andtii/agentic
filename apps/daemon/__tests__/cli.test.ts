@@ -230,6 +230,28 @@ describe('cli', () => {
         }
     });
 
+    // #354: the `agentic-daemon` command itself, written by the installer.
+    it('launcher install | show | remove', async () => {
+        const home = join(dir, 'home');
+        await mkdir(home, { recursive: true });
+        // HOME decides the folders `launcher` touches: the real home is never reached from a test.
+        const ctx = () => ({ paths: paths(), platform: 'linux' as const, env: { PATH: '/usr/bin', SHELL: '/bin/zsh', HOME: home }, ...io() });
+        const file = join(home, '.agentic', 'bin', 'agentic-daemon');
+
+        expect(await main(['launcher', 'install', '--node', '/opt/node', '--entry', '/opt/daemon/bin/agentic-daemon.mjs', '--no-profile'], ctx())).toBe(0);
+        expect(await readFile(file, 'utf8')).toContain('exec "/opt/node" "/opt/daemon/bin/agentic-daemon.mjs" "$@"');
+        expect(out.join('\n')).toContain(file);
+
+        out = [];
+        expect(await main(['launcher', 'show', '--node', '/opt/node', '--entry', '/opt/daemon/bin/agentic-daemon.mjs'], ctx())).toBe(0);
+        expect(out.join('\n')).toContain('runs: /opt/node /opt/daemon/bin/agentic-daemon.mjs');
+
+        expect(await main(['launcher', 'remove'], ctx())).toBe(0);
+        await expect(readFile(file, 'utf8')).rejects.toThrow();
+        expect(await main(['launcher'], ctx())).toBe(2);
+        expect(await main(['launcher', 'nope'], ctx())).toBe(2);
+    });
+
     // #238: the policy is edited on the machine and nowhere else.
     it('policy show | allow-root | deny-root | off', async () => {
         const ctx = () => ({ paths: paths(), ...secure, ...io() });

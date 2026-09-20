@@ -13,6 +13,9 @@
     The daemon runs as a per-user Scheduled Task (see scripts\install-service.ps1), not a LocalSystem
     service: the machine token and every Claude Code profile belong to the signed-in user.
 
+    It also writes the `agentic-daemon` command itself (%LOCALAPPDATA%\agentic\bin\agentic-daemon.cmd)
+    and adds that folder to the user PATH, so a new terminal can run it.
+
 .PARAMETER Url
     The platform origin, e.g. https://agentic.example. Required with -Code.
 .PARAMETER Code
@@ -21,6 +24,8 @@
     The machine name shown on the platform (default: this computer's name).
 .PARAMETER NoService
     Pair and run doctor only; do not register the background task.
+.PARAMETER NoPath
+    Write the `agentic-daemon` command but leave the user PATH alone.
 .PARAMETER TaskName
     The Scheduled Task name (default: agentic-daemon).
 .PARAMETER NodePath
@@ -38,6 +43,7 @@ param(
     [string] $Code,
     [string] $Name,
     [switch] $NoService,
+    [switch] $NoPath,
     [string] $TaskName = 'agentic-daemon',
     [string] $NodePath
 )
@@ -56,7 +62,15 @@ if ($nodeVersion -lt [Version]'22.12.0') { Fail "Node.js $nodeVersion is too old
 $daemonVersion = (& $node.Source $bin --version)
 Write-Host "$daemonVersion on Node $nodeVersion ($here)"
 
-# 2. Pair (or check the machine is paired)
+# 2. The `agentic-daemon` command (#354). First, so it exists even if pairing fails: the launcher runs
+# THIS node.exe and THIS folder, so it works on a machine whose only Node is the portable one the
+# one-line installer downloaded. Not fatal - the long form below always works.
+$launcherArgs = @('launcher', 'install')
+if ($NoPath) { $launcherArgs += '--no-profile' }
+& $node.Source $bin @launcherArgs
+if ($LASTEXITCODE -ne 0) { Write-Warning "could not write the agentic-daemon command; run ``& '$($node.Source)' '$bin'`` instead." }
+
+# 3. Pair (or check the machine is paired)
 $home_ = if ($env:AGENTIC_DAEMON_HOME) { $env:AGENTIC_DAEMON_HOME } else { Join-Path $env:APPDATA 'agentic' }
 $credentials = Join-Path $home_ 'credentials.json'
 if ($Code) {
@@ -71,13 +85,13 @@ if ($Code) {
     Write-Host "already paired ($credentials)"
 }
 
-# 3. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
+# 4. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
 & $node.Source $bin doctor
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "doctor found problems (see above). The daemon still starts; sessions on a failing environment are refused until it passes: node bin\agentic-daemon.mjs doctor"
 }
 
-# 4. Background task
+# 5. Background task
 if ($NoService) {
     Write-Host "Skipping the background task (-NoService). Run in the foreground with: node bin\agentic-daemon.mjs run"
     return
@@ -89,3 +103,7 @@ Write-Host "Installed. The machine shows as online on the platform within a minu
 Write-Host "  status:    Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo"
 Write-Host "  logs:      Get-Content -Wait `"$log`""
 Write-Host "  uninstall: powershell -ExecutionPolicy Bypass -File `"$(Join-Path $here 'uninstall.ps1')`""
+Write-Host ""
+Write-Host "The ``agentic-daemon`` command is installed. In a NEW terminal:"
+Write-Host "  agentic-daemon doctor                       # pairing, environments, sign-ins"
+Write-Host "  agentic-daemon policy allow-root <folder>   # let the web add environments inside <folder>"
