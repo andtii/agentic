@@ -15,7 +15,8 @@ const SCOPE_SET: Readonly<Record<Scope, true>> = {
     chats: true,
     memory: true,
     schedules: true,
-    usage: true
+    usage: true,
+    projects: true
 };
 
 export const ALL_SCOPES: readonly Scope[] = Object.keys(SCOPE_SET) as Scope[];
