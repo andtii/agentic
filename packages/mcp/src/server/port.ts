@@ -8,7 +8,7 @@
  * The shapes are deliberately plain (JSON-serializable, no branded ids on
  * the wire beyond strings) — they are what an external client sees.
  */
-import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, UsageLimits, UsageLimitsQuery, WaitReason } from '@agentic/core';
+import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, ProjectId, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, UsageLimits, UsageLimitsQuery, WaitReason } from '@agentic/core';
 
 export type ExternalPrincipal = Extract<Principal, { kind: 'external' }>;
 
@@ -157,6 +157,15 @@ export interface ScheduleSummary {
     readonly next: number | null;
 }
 
+/** A project as an external client sees it (#334): the catalogue entry, with the environments it has a folder on. */
+export interface ProjectSummary {
+    readonly id: ProjectId;
+    readonly name: string;
+    readonly description?: string;
+    /** The environments the project has a folder on (`Object.keys(ProjectRecord.folders)`). */
+    readonly environments: readonly EnvironmentId[];
+}
+
 /** The port, one per authenticated request. */
 export interface PlatformPort {
     readonly machines: {
@@ -205,6 +214,12 @@ export interface PlatformPort {
     };
     readonly schedules: {
         create(input: CreateScheduleInput): Promise<ScheduleSummary>;
+    };
+    readonly projects: {
+        /** The workspace's projects (#334, `Workspace.projects`, read as the workspace's user like the machine index). */
+        list(): Promise<readonly ProjectSummary[]>;
+        /** `Chat.setProject` under this client: put the chat in a project, or in none with `null`; an unknown project is a 400. */
+        setChatProject(chatId: ChatId, projectId: ProjectId | null): Promise<void>;
     };
     readonly usage: {
         /** Every account's provider limits as its machine last reported them (#272, OPS-07): machines → environments → `Machine.quota`. */

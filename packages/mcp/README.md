@@ -70,9 +70,10 @@ const mcp = createPlatformMcpHandler({ authenticate: (request) => oauth.verify(r
   | `agents` | `agents_list`, `agents_get(agentId)` | readOnly |
   | `sessions` | `sessions_open(agentId, machineId, environmentId, cwd?, objective?)`, `sessions_prompt(sessionId, text)`, `sessions_respond(sessionId, requestId, decision)`, `sessions_cancel(sessionId)`, `sessions_tail(sessionId, from?, limit?)` | open/prompt/respond write, cancel destructive, tail readOnly |
   | `tasks` | `tasks_create(agentId, objective, environmentId?, context?, constraints?)`, `tasks_get`, `tasks_tree`, `tasks_cancel`, `tasks_delegate(taskId, agentId, objective, context?, constraints?, environmentId?, callId?)` | get/tree readOnly, cancel destructive |
-  | `chats` | `chats_post(chatId, text, mentions?)`, `chats_history(chatId, cursor?, limit?)`, `chats_file_get(chatId, fileId)` | history, file_get readOnly |
+  | `chats` | `chats_post(chatId, text, mentions?)`, `chats_history(chatId, cursor?, limit?)`, `chats_file_get(chatId, fileId)`, `chats_set_project(chatId, projectId \| null)` (#334: `Chat.setProject` under the client — the chat is what changes, so the `chats` scope gates it; an unknown project is an error) | history, file_get readOnly; set_project write |
   | `memory` | `memory_search(scope, …)`, `memory_remember(scope, kind, text, …)` | search readOnly |
   | `schedules` | `schedules_create(title, kind, recurrence, agentId?, environmentId?, prompt?, offlinePolicy?)` | write |
+  | `projects` | `projects_list`: the workspace's projects as `ProjectSummary { id, name, description?, environments }` (the environments with a folder), #334 | readOnly |
   | `usage` | `usage_limits(machineId?, runtime?)`: every account's provider limits (`UsageLimits`: per account its snapshot's windows with `utilization`, `status`, `resetsAt`, plus `ageMs`), #272 | readOnly |
 
   `tools/list` carries the hints as MCP `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`), merged by the handler until the harness emits them itself (signalxjs/ai#37). Machine selection is explicit in every call that opens execution (EXE-12): `sessions_open` needs the machine AND the environment, and the app's port refuses a machine that does not report the environment. `sessions_tail` returns a bounded page (default 100, max 500) with a `next` cursor and `truncated`.

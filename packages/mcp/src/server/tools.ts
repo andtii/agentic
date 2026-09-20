@@ -27,6 +27,7 @@ import {
     type EnvironmentId,
     type MachineId,
     type MemoryScope,
+    type ProjectId,
     type Scope,
     type SessionId,
     type TaskId,
@@ -374,6 +375,19 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             annotations: READ,
             run: (input) => getChatFile(port, options.files, principal.workspaceId, input.chatId as ChatId, input.fileId)
         }),
+        // `chats_` rather than `chat_`/`projects_`: the family before the first `_` is the scope that gates the tool, and
+        // the chat is what changes (#334) — a client with `chats` may set it without listing the projects.
+        tool({
+            name: 'chats_set_project',
+            scope: 'chats',
+            description: 'Put a chat in a project (a project id from projects_list), or in none with `projectId: null`: the sessions of its members then run in the project’s folder on their environment and get its connectors. An unknown project is an error. Idempotent.',
+            input: z.object({ chatId: id('The chat id.'), projectId: z.string().min(1).nullable().describe('The project id, or null to leave the project.') }),
+            annotations: WRITE,
+            run: async (input) => {
+                await port.projects.setChatProject(input.chatId as ChatId, input.projectId as ProjectId | null);
+                return { chatId: input.chatId, projectId: input.projectId };
+            }
+        }),
 
         // ---- memory ---------------------------------------------------------------------
         tool({
@@ -451,6 +465,16 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                     ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
                     ...(input.offlinePolicy !== undefined ? { offlinePolicy: input.offlinePolicy } : {})
                 })
+        }),
+
+        // ---- projects -------------------------------------------------------------------
+        tool({
+            name: 'projects_list',
+            scope: 'projects',
+            description: 'List the workspace’s projects: id, name, description and the environments each one has a folder on. A chat is put in one with chats_set_project.',
+            input: z.object({}),
+            annotations: READ,
+            run: () => port.projects.list()
         })
     ];
 }
@@ -458,5 +482,5 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
 /** The scope a tool name belongs to — `<family>_<op>`. */
 export function scopeOfTool(name: string): Scope | null {
     const family = name.split('_')[0];
-    return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' || family === 'usage' ? family : null;
+    return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' || family === 'usage' || family === 'projects' ? family : null;
 }

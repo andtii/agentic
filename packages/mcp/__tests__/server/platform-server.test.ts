@@ -12,7 +12,7 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { describe, expect, it } from 'vitest';
-import type { AgentId, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, ProjectId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { createOAuthServer, memoryOAuthStore, type OAuthUser } from '@agentic/platform';
 import { CHAT_FILE_BYTES_UNAVAILABLE, PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
 
@@ -68,6 +68,9 @@ function fakePlatform() {
     const fileAccess: { chatId: string; fileId: string; principal: ExternalPrincipal }[] = [];
     const prompts: { sessionId: string; text: string }[] = [];
     const delegated: DelegateTaskInput[] = [];
+    /** Each chat's project (#334), as `chats_set_project` leaves it; `project_agentic` is the only registered project. */
+    const chatProjects: Record<string, string | null> = {};
+    const projectSets: { chatId: string; projectId: string | null; principal: ExternalPrincipal }[] = [];
     const port = (principal: ExternalPrincipal): PlatformPort => ({
         machines: { list: async () => [{ machineId: ENV.machineId, name: 'laptop', online: true, os: 'windows', environments: [ENV] }] },
         environments: {
@@ -146,6 +149,14 @@ function fakePlatform() {
             remember: async (_scope, entry) => ({ ...entry, id: 'mem_1', provenance: { ...entry.provenance, at: 1 } })
         },
         schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) },
+        projects: {
+            list: async () => [{ id: 'project_agentic' as ProjectId, name: 'Agentic', description: 'The agent platform', environments: [ENV.id] }],
+            setChatProject: async (chatId, projectId) => {
+                if (projectId !== null && projectId !== 'project_agentic') throw new Error(`Chat.setProject: no project ${projectId} in this workspace`);
+                projectSets.push({ chatId, projectId, principal });
+                chatProjects[chatId] = projectId;
+            }
+        },
         usage: {
             limits: async (query) => ({
                 accounts: [
@@ -171,7 +182,7 @@ function fakePlatform() {
             })
         }
     });
-    return { port, opened, prompts, delegated, fileAccess };
+    return { port, opened, prompts, delegated, fileAccess, chatProjects, projectSets };
 }
 
 /** The Worker, in process: OAuth routes + the MCP mount, sessions by a `session=<userId>` cookie. */
@@ -311,9 +322,11 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
                 'chats_post',
                 'chats_history',
                 'chats_file_get',
+                'chats_set_project',
                 'memory_search',
                 'memory_remember',
                 'schedules_create',
+                'projects_list',
                 'usage_limits'
             ].sort()
         );
@@ -442,6 +455,63 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
         await expect(tools.find((t) => t.name === 'memory_remember')!.run({ scope: 'agent:agent_ada', kind: 'fact', text: 'x' }, ctx)).rejects.toThrow(/"memory" scope/);
         // Bad arguments are a validation error, not a port call.
         await expect(tools.find((t) => t.name === 'agents_get')!.run({}, ctx)).rejects.toThrow(/Invalid arguments/);
+    });
+});
+
+describe('platform MCP server: projects (#334)', () => {
+    it('projects_list lists the catalogue under the projects scope; chats_set_project sets and clears a chat’s project under chats, and an unknown project is an error', async () => {
+        const s = server();
+        const { client } = await connect(s, ['projects', 'chats']);
+        const listed = await client.callTool({ name: 'projects_list', arguments: {} });
+        expect(listed.isError).toBeFalsy();
+        expect(JSON.parse((listed.content as { text: string }[])[0]!.text)).toEqual([{ id: 'project_agentic', name: 'Agentic', description: 'The agent platform', environments: ['env_laptop'] }]);
+
+        const set = await client.callTool({ name: 'chats_set_project', arguments: { chatId: 'chat_1', projectId: 'project_agentic' } });
+        expect(set.isError).toBeFalsy();
+        expect(set.structuredContent).toEqual({ chatId: 'chat_1', projectId: 'project_agentic' });
+        expect(s.platform.chatProjects).toEqual({ chat_1: 'project_agentic' });
+        const cleared = await client.callTool({ name: 'chats_set_project', arguments: { chatId: 'chat_1', projectId: null } });
+        expect(cleared.isError).toBeFalsy();
+        expect(s.platform.chatProjects).toEqual({ chat_1: null });
+        expect(s.platform.projectSets.map((p) => [p.chatId, p.projectId, p.principal.clientId])).toEqual([
+            ['chat_1', 'project_agentic', expect.stringMatching(/^oac_/)],
+            ['chat_1', null, expect.stringMatching(/^oac_/)]
+        ]);
+
+        const unknown = await client.callTool({ name: 'chats_set_project', arguments: { chatId: 'chat_1', projectId: 'project_nope' } });
+        expect(unknown.isError).toBe(true);
+        expect((unknown.content as { text: string }[])[0]!.text).toContain('no project project_nope');
+        expect(s.platform.projectSets).toHaveLength(2);
+        // An empty id is bad input, refused before the port.
+        const empty = await client.callTool({ name: 'chats_set_project', arguments: { chatId: 'chat_1', projectId: '' } });
+        expect(empty.isError).toBe(true);
+        expect(s.platform.projectSets).toHaveLength(2);
+
+        const { tools } = await client.listTools();
+        const byName = new Map(tools.map((t) => [t.name, t]));
+        expect(byName.get('projects_list')!.annotations).toEqual({ readOnlyHint: true, idempotentHint: true });
+        expect(byName.get('chats_set_project')!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false });
+        expect(byName.get('chats_set_project')!.inputSchema.required).toEqual(expect.arrayContaining(['chatId', 'projectId']));
+        expect(client.getInstructions()).toContain('chats_set_project');
+        await client.close();
+    });
+
+    it('is gated per family: projects_list needs "projects", chats_set_project needs "chats" — each refused before the port', async () => {
+        const ctx = { signal: new AbortController().signal, toolCallId: 'c1' };
+        const chatsOnly: ExternalPrincipal = { kind: 'external', workspaceId: 'gh_1' as WorkspaceId, clientId: 'oac_x', scopes: ['chats'] };
+        const platform = fakePlatform();
+        const tools = platformTools(platform.port(chatsOnly), chatsOnly);
+        await expect(tools.find((t) => t.name === 'projects_list')!.run({}, ctx)).rejects.toThrow(/"projects" scope/);
+        await expect(tools.find((t) => t.name === 'chats_set_project')!.run({ chatId: 'chat_1', projectId: 'project_agentic' }, ctx)).resolves.toEqual({ chatId: 'chat_1', projectId: 'project_agentic' });
+
+        const projectsOnly: ExternalPrincipal = { ...chatsOnly, scopes: ['projects'] };
+        const narrowed = platformTools(platform.port(projectsOnly), projectsOnly);
+        await expect(narrowed.find((t) => t.name === 'chats_set_project')!.run({ chatId: 'chat_1', projectId: null }, ctx)).rejects.toThrow(/"chats" scope/);
+        await expect(narrowed.find((t) => t.name === 'projects_list')!.run({}, ctx)).resolves.toEqual([expect.objectContaining({ id: 'project_agentic' })]);
+        expect(platform.projectSets).toHaveLength(1);
+
+        expect(scopeOfTool('projects_list')).toBe('projects');
+        expect(scopeOfTool('chats_set_project')).toBe('chats');
     });
 });
 
