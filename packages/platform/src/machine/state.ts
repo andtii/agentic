@@ -28,6 +28,11 @@ export interface HostedSession {
     cursor?: Cursor;
     ref?: unknown;
     capabilities?: CapabilityReport;
+    /**
+     * The turn in flight (#394): set by a prompt's ack (`onSessionReply`), cleared by the turn's `turn-end`
+     * (`onSessionFrame`) or the session's closure. What capacity counts — with the prompts still pending, see `runningIn`.
+     */
+    running?: { readonly turnId: string; readonly since: number };
 }
 
 /** An `openSession` waiting for capacity in its environment (EXE-09). */
@@ -169,18 +174,39 @@ export function parseMachineKey(key: string): { workspaceId: WorkspaceId; machin
     return { workspaceId: parts[0] as WorkspaceId, machineId: parts[2] as MachineId };
 }
 
-/** Sessions hosted in `environmentId`, opening or open. */
-export function activeIn(state: MachineState, environmentId: EnvironmentId | string): number {
-    let n = 0;
-    for (const s of Object.values(state.activeSessions)) if (s.environmentId === environmentId) n++;
-    return n;
+/** What capacity is judged on (#394): the state, or a `MachineView` (the same fields as arrays). */
+export interface CapacityView {
+    readonly environments: readonly EnvironmentDescriptor[];
+    readonly activeSessions: Readonly<Record<string, HostedSession>> | readonly HostedSession[];
+    readonly pending: Readonly<Record<string, PendingCommand>> | readonly PendingCommand[];
 }
 
-/** Free slots in an environment as the daemon last described it; `0` for an unknown environment. */
-export function freeSlots(state: MachineState, environmentId: EnvironmentId | string): number {
-    const env = state.environments.find((e) => e.id === environmentId);
+/**
+ * The hosted sessions in `environmentId` that hold a slot (#394): running a turn, or with a `prompt` whose reply is
+ * still out — the slot is taken when the prompt leaves, not when its ack lands, so two prompts sent back to back never
+ * share one. An open, idle session holds none.
+ */
+export function runningIn(view: CapacityView, environmentId: EnvironmentId | string): HostedSession[] {
+    const prompted = new Set<string>();
+    for (const p of Object.values(view.pending)) if (p.command.type === 'prompt') prompted.add(p.sessionId);
+    return Object.values(view.activeSessions).filter((s) => s.environmentId === environmentId && (s.running !== undefined || prompted.has(s.sessionId)));
+}
+
+/** Sessions hosted in `environmentId`, opening or open — whatever they run. */
+export function hostedIn(view: Pick<CapacityView, 'activeSessions'>, environmentId: EnvironmentId | string): HostedSession[] {
+    return Object.values(view.activeSessions).filter((s) => s.environmentId === environmentId);
+}
+
+/** How many slots `environmentId` has taken: sessions running a turn (`runningIn`), never sessions merely open (#394). */
+export function activeIn(view: CapacityView, environmentId: EnvironmentId | string): number {
+    return runningIn(view, environmentId).length;
+}
+
+/** Free slots in an environment as the daemon last described it — `concurrency.max` minus the turns running; `0` for an unknown environment. */
+export function freeSlots(view: CapacityView, environmentId: EnvironmentId | string): number {
+    const env = view.environments.find((e) => e.id === environmentId);
     if (!env) return 0;
-    return Math.max(0, env.concurrency.max - activeIn(state, environmentId));
+    return Math.max(0, env.concurrency.max - activeIn(view, environmentId));
 }
 
 /** `true` when `at` is strictly after `cursor` (or there is no cursor). */

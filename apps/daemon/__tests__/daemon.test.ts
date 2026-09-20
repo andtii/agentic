@@ -151,7 +151,7 @@ describe('daemon', () => {
         expect(await daemon.reinspect()).toBe(false);
     });
 
-    it('refuses unknown environments, a cwd outside cwdRoots and work beyond concurrency — with a reason', async () => {
+    it('refuses unknown environments and a cwd outside cwdRoots — with a reason; an open session never counts against concurrency (#394)', async () => {
         const { seat } = await start([env('env_a')]);
         open(seat, 'session_1', 'env_nope');
         expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/unknown environment/);
@@ -160,11 +160,67 @@ describe('daemon', () => {
         await mkdir(join(dir, 'sub'));
         open(seat, 'session_3', 'env_a', join(dir, 'sub'));
         expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_3');
+        // Concurrency 1, one session open and idle: a second conversation opens — the budget is turns, not sessions.
         open(seat, 'session_4', 'env_a');
-        expect((await expectFrame(seat, 'session.closed')).reason).toMatch(/at capacity/);
+        expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_4');
         // Opening the same session again is idempotent.
         open(seat, 'session_3', 'env_a');
         expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('session_3');
+    });
+
+    it('capacity counts running turns (#394): at capacity an open is refused and a prompt is answered busy; the turn ending frees the slot, the session stays', async () => {
+        let release!: () => void;
+        const held = new Promise<void>((r) => (release = r));
+        const holding = mockAgent({
+            respond: async () => {
+                await held;
+                return [{ text: 'done' }];
+            }
+        });
+        const { seat, hello } = await start([env('env_mock', { runtime: 'mock', concurrency: 1 })], [agentDriver('mock', holding)]);
+        expect(hello.environments[0]!.concurrency).toEqual({ max: 1, active: 0 });
+        /** The reply to `commandId`, whatever frames of a running turn interleave with it. */
+        const replyFor = async (commandId: string) => {
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'session.reply' && frame.reply.commandId === commandId) return frame.reply;
+            }
+        };
+        const closedFor = async (sessionId: string) => {
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'session.closed' && frame.sessionId === sessionId) return frame;
+            }
+        };
+        const prompt = (sessionId: string, n: number) => seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+
+        open(seat, 's1', 'env_mock');
+        expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s1');
+        open(seat, 's2', 'env_mock');
+        expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s2');
+
+        // s1 takes the one slot.
+        prompt('s1', 1);
+        expect(await replyFor('c1')).toMatchObject({ kind: 'ack' });
+        // A prompt on s2 is the environment's admission to refuse, not the runtime's: `busy`, naming the capacity.
+        prompt('s2', 2);
+        const busy = await replyFor('c2');
+        expect(busy).toMatchObject({ kind: 'error', code: 'busy' });
+        expect(busy.kind === 'error' && busy.message).toMatch(/env_mock is at capacity \(1\): 1 turn running/);
+        // And a third conversation cannot open while the slot is taken.
+        open(seat, 's3', 'env_mock');
+        expect((await closedFor('s3')).reason).toMatch(/at capacity \(1\): 1 turn running/);
+        expect([...daemons[0]!.activeSessions].sort()).toEqual(['s1', 's2']);
+
+        // The turn ends: s1 stays open, and the slot is s2's for the asking.
+        release();
+        for (;;) {
+            const frame = await next(seat);
+            if (frame.t === 'session.frame' && frame.sessionId === 's1' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') break;
+        }
+        prompt('s2', 3);
+        expect(await replyFor('c3')).toMatchObject({ kind: 'ack' });
+        expect([...daemons[0]!.activeSessions].sort()).toEqual(['s1', 's2']);
     });
 
     it('refuses a session cwd that is missing or that a symlink / junction leads out of the roots (#188)', async () => {

@@ -60,7 +60,7 @@ What `env add` writes; the shape, for reading or a hand edit:
 }
 ```
 
-`profileDir` becomes the runtime's per-account config dir (`CLAUDE_CONFIG_DIR`) and never leaves the machine. `concurrency` defaults to 1. A session whose `cwd` is outside `cwdRoots` (after symlinks are resolved), does not exist, or would exceed `concurrency`, is refused with a reason. `cwdRoots` are also the only folders the platform can browse (below).
+`profileDir` becomes the runtime's per-account config dir (`CLAUDE_CONFIG_DIR`) and never leaves the machine. `concurrency` defaults to 1 and bounds how many **turns** run at once in the environment, not how many sessions are open (#394): a chat member's session stays open between messages and costs nothing until it is prompted. A session whose `cwd` is outside `cwdRoots` (after symlinks are resolved) or does not exist is refused with a reason, and so is opening one while `concurrency` turns are already running; a prompt that would exceed it is answered with the wire `busy` error, and the platform parks the task until a turn ends here. Removing an environment from the web is refused while any session is hosted in it (the platform closes idle ones first). `cwdRoots` are also the only folders the platform can browse (below).
 
 ### Environments from the web: `policy.json` (#238)
 
