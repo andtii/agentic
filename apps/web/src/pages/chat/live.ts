@@ -306,16 +306,32 @@ export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Se
  * from `Chat.history(cursor)` as the reader scrolls up. Both are merged here
  * by `seq` — the log is append-only, so a seq never changes hands — and the
  * kept list stays contiguous from the oldest page read to the newest entry,
- * so nothing the live page slides past is lost. Returns `kept` itself when
- * the page adds nothing, so an effect over it does not re-run for a re-read.
+ * so nothing the live page slides past is lost. Both lists are oldest first
+ * (`Chat.history` reads them so, and this keeps them so), so the merge is one
+ * pass. Returns `kept` itself when the page adds nothing, so an effect over
+ * it does not re-run for a re-read.
  */
 export function keepEntries(kept: readonly IndexedEntry[], page: readonly IndexedEntry[]): readonly IndexedEntry[] {
     if (!page.length) return kept;
     if (!kept.length) return page;
-    const have = new Set(kept.map((e) => e.seq));
-    const fresh = page.filter((e) => !have.has(e.seq));
-    if (!fresh.length) return kept;
-    return [...kept, ...fresh].sort((a, b) => a.seq - b.seq);
+    const out: IndexedEntry[] = [];
+    let i = 0;
+    let j = 0;
+    let fresh = 0;
+    while (i < kept.length || j < page.length) {
+        const a = kept[i];
+        const b = page[j];
+        if (a !== undefined && (b === undefined || a.seq <= b.seq)) {
+            out.push(a);
+            i++;
+            if (b !== undefined && a.seq === b.seq) j++;
+        } else {
+            out.push(b!);
+            j++;
+            fresh++;
+        }
+    }
+    return fresh ? out : kept;
 }
 
 /** The tasks "Stop task chain" would stop: everything in the panel that has not settled. */

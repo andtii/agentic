@@ -172,7 +172,7 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
             return;
         }
         if (!arrived) return;
-        if (before) root.scrollTop += root.scrollHeight - before;
+        if (before !== undefined) root.scrollTop += root.scrollHeight - before;
         askedTop = false;
     });
 
