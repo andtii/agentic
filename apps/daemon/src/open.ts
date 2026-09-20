@@ -12,7 +12,6 @@
 import type { FsGitInfo, LocalEnvironment } from '@agentic/core';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { quoteArg } from './env-cli.js';
 import { checkWithinRoots, gitInfo } from './fs.js';
 import { normalizePlatformUrl } from './pair.js';
 
@@ -77,11 +76,22 @@ export async function resolveOpen(input: OpenInput): Promise<OpenResolution> {
 /** Runs the OS opener detached; resolves once it has handed the URL over, rejects when it cannot start or exits non-zero. */
 export type UrlOpener = (url: string) => Promise<void>;
 
-/** `start` on Windows (through cmd, quoted as `env-cli.ts` quotes), `open` on macOS, `xdg-open` elsewhere. */
+/**
+ * How the OS opens a URL: one `cmd` line on Windows (`start ""`: the first quoted argument is the window title, so
+ * the URL is never taken for one; the URL is always quoted, since `&` between query parameters would otherwise be a
+ * command separator — and a `"` inside it, which an encoded link never has, is escaped as `env-cli.ts` escapes),
+ * `open` on macOS, `xdg-open` elsewhere.
+ */
+export function openCommand(url: string, platform: NodeJS.Platform): { readonly shell: true; readonly line: string } | { readonly shell: false; readonly command: string; readonly args: readonly string[] } {
+    if (platform === 'win32') return { shell: true, line: `cmd /c start "" "${url.replace(/"/g, '\\"')}"` };
+    return { shell: false, command: platform === 'darwin' ? 'open' : 'xdg-open', args: [url] };
+}
+
+/** Runs `openCommand`; resolves once the opener has handed the URL over, rejects when it cannot start or exits non-zero. */
 export function openUrl(url: string, platform: NodeJS.Platform = process.platform): Promise<void> {
     return new Promise((done, reject) => {
-        // `start ""`: the first quoted argument is the window title, so the URL is never taken for one.
-        const child = platform === 'win32' ? spawn(`cmd /c start "" ${quoteArg(url)}`, { shell: true, stdio: 'ignore', windowsHide: true }) : spawn(platform === 'darwin' ? 'open' : 'xdg-open', [url], { stdio: 'ignore' });
+        const how = openCommand(url, platform);
+        const child = how.shell ? spawn(how.line, { shell: true, stdio: 'ignore', windowsHide: true }) : spawn(how.command, [...how.args], { stdio: 'ignore' });
         child.on('error', reject);
         child.on('close', (code) => (code === 0 ? done() : reject(new Error(`the opener exited ${code}`))));
     });

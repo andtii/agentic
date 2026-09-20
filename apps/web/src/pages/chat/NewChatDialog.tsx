@@ -102,7 +102,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     // runs inside setup must not read `st` (it would become a dependency of the key).
     let syncing = false;
     watch(
-        () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}\n${props.prefill?.origin ?? ''}\n${props.prefill?.path ?? ''}` : ''),
+        () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}\n${props.prefill?.environmentId ?? ''}\n${props.prefill?.origin ?? ''}\n${props.prefill?.path ?? ''}` : ''),
         (key, prev) => {
             if (!key) return;
             const opening = openingProject();

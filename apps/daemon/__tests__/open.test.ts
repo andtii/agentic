@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../src/cli';
-import { openLink, resolveOpen } from '../src/open';
+import { openCommand, openLink, resolveOpen } from '../src/open';
 import { daemonPaths } from '../src/paths';
 
 const ORIGIN = 'git@github.com:andtii/agentic.git';
@@ -172,6 +172,14 @@ describe('resolveOpen / openLink', () => {
         const swapped = repo.toUpperCase();
         const win = await resolveOpen({ path: swapped, environments: environments(), url: URL_BASE, platform: 'win32', gitInfo: async () => undefined });
         expect(win).toMatchObject({ ok: true, environmentId: 'env_work', path: swapped });
+    });
+
+    it('opens through `start` with the URL always quoted on Windows (an `&` is a cmd separator), `open` on macOS, `xdg-open` elsewhere', () => {
+        const url = 'https://agentic.example/chats/new?env=env_work&path=C%3A%5CDev&origin=x';
+        expect(openCommand(url, 'win32')).toEqual({ shell: true, line: `cmd /c start "" "${url}"` });
+        expect(openCommand('https://a/?q="x"', 'win32')).toEqual({ shell: true, line: 'cmd /c start "" "https://a/?q=\\"x\\""' });
+        expect(openCommand(url, 'darwin')).toEqual({ shell: false, command: 'open', args: [url] });
+        expect(openCommand(url, 'linux')).toEqual({ shell: false, command: 'xdg-open', args: [url] });
     });
 
     it('a relative path resolves against the given cwd', async () => {
