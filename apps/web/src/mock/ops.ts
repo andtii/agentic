@@ -8,8 +8,9 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, ProjectFeatureManifest, QuotaSnapshot, QuotaWindow, ScheduleId } from '@agentic/core';
+import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
+import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
 
 export interface OpsAgent {
@@ -206,22 +207,6 @@ const builtin = (m: PluginManifest, more: Partial<Pick<PluginView, 'enabled' | '
 
 const NOTHING_TO_SET = { type: 'object', properties: {}, additionalProperties: false } as const;
 
-/** A project feature (#333): its per-project settings render from `projectSettings` on the project form. */
-const GIT_FEATURE: ProjectFeatureManifest = {
-    id: 'agentic.feature.git', version: '0.1.0', kind: 'project-feature', name: 'Git',
-    description: 'Knows the repo behind a project: its origin, and whether sessions may open worktrees.',
-    capabilities: [], config: NOTHING_TO_SET, permissions: [], compat: FIRST_PARTY,
-    projectSettings: {
-        type: 'object',
-        properties: {
-            origin: { type: 'string', format: 'uri', title: 'Origin', description: 'The remote every checkout of this project shares.' },
-            worktrees: { type: 'boolean', title: 'Worktrees', description: 'Let a session open a branch in its own worktree.', default: true },
-            defaultBranch: { type: 'string', title: 'Default branch', default: 'main' }
-        },
-        additionalProperties: false
-    }
-};
-
 /**
  * The Registry's `overview().plugins` of the mock workspace (#233): the
  * plugins a build ships, under their real ids, plus a connector the
@@ -290,7 +275,8 @@ export const opsPlugins: readonly PluginView[] = [
         config: NOTHING_TO_SET,
         permissions: [{ scope: 'memory:read', reason: 'Finds earlier lessons before it writes a new one.' }, { scope: 'memory:write', reason: 'Writes lessons and task records to memory.' }]
     }), { active: true }),
-    builtin(GIT_FEATURE),
+    // The real git project feature (#333, #335): the mock form and the live form render the same `projectSettings`.
+    builtin(gitFeatureManifest),
     builtin(manifest({
         id: 'a2a', version: '1.0.0', kind: 'a2a', name: 'A2A server',
         description: 'Expose chosen agents as A2A cards to remote A2A clients.',
