@@ -71,7 +71,8 @@ describe('/projects (mock)', () => {
         expect(feature.hasAttribute('data-on')).toBe(true);
         expect(feature.querySelector('[data-form="schema"]')).not.toBeNull();
         expect(feature.querySelector<HTMLInputElement>('input[name="feature-agentic.feature.git.origin"]')!.value).toBe(AGENTIC_ORIGIN);
-        expect(feature.querySelector('input[name="feature-agentic.feature.git.origin"]')!.getAttribute('type')).toBe('url');
+        // A plain text field: an origin is whatever git wrote (`git@host:path` is no URL), so the schema declares no `format` (#335).
+        expect(feature.querySelector('input[name="feature-agentic.feature.git.origin"]')!.getAttribute('type')).toBe('text');
         expect(feature.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
         // One folder row per daemon environment, the stored ones filled.
         expect([...dom.querySelectorAll('[data-project-folder]')].map((r) => r.getAttribute('data-project-folder'))).toEqual(mockWorkdirEnvironments.list().map((e) => e.id));
@@ -128,7 +129,8 @@ describe('the project form (mock)', () => {
         expect([...dom.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
         await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
         expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toEqual(['repo · main']);
+        // The build's git feature (#335) detects the badge and suggests itself on the row.
+        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
         // Now every empty row offers Find; the offline machine's row says why it cannot.
         expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
         expect(row(dom, 'env_nuclab_work').querySelector<HTMLButtonElement>('button[disabled]')).not.toBeNull();
@@ -195,8 +197,8 @@ describe('the project form (mock)', () => {
         radio.checked = true;
         radio.dispatchEvent(new Event('change', { bubbles: true }));
         await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
-        dom.querySelector<HTMLInputElement>('[data-project-feature="agentic.feature.git"] input[role="switch"]')!.click();
-        await settle();
+        // The badge switched the build's git feature on (detect, #335) with the origin prefilled: nothing to click.
+        expect(dom.querySelector<HTMLInputElement>('[data-project-feature="agentic.feature.git"] input[role="switch"]')!.checked).toBe(true);
         buttonIn(dom, 'Create project').click();
         await settle();
         expect(saved).toEqual([{

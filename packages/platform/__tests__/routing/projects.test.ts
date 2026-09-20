@@ -9,12 +9,15 @@
  * instructions land in the prompt's `## Project` section, a throw parks the
  * task `waiting { project-feature }` and a later `run` tries again. A project
  * the Workspace no longer has fails the task `project-missing`. Same
- * in-process host as `workdir.test.ts`.
+ * in-process host as `workdir.test.ts`. The last block runs the real git
+ * feature (#335, `@agentic/plugins-git`) through it: a worktree per chat on
+ * every machine, reused by the next task, parked when the daemon cannot.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, type AgentId, type ChatId, type EnvironmentId, type FsOp, type MachineId, type OfflinePolicy, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, actorKey, type AgentId, type ChatId, type DaemonFrame, type EnvironmentId, type FsError, type FsOp, type FsResult, type MachineId, type OfflinePolicy, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { mcpConnectorSetup } from '@agentic/mcp';
+import { GIT_FEATURE_ID, gitBranchFor, gitFeatureManifest, gitFeaturePlugin } from '@agentic/plugins-git';
 import { anthropicApiPlugin, claudeCodePlugin } from '@agentic/runtimes';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
@@ -37,6 +40,8 @@ const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
 const E1 = 'env_1' as EnvironmentId;
 const E2 = 'env_2' as EnvironmentId;
+/** A second machine's environment (root `/home/b`), for the git feature's two-machine case. */
+const E3 = 'env_3' as EnvironmentId;
 const asMachine = (id: MachineId): Principal => ({ kind: 'machine', workspaceId: WS, machineId: id });
 /** The in-memory environment's runtime, as a runtime plugin the Registry lists — its sessions run on a machine. */
 const IN_MEMORY_PLUGIN = { ...claudeCodePlugin, id: 'in-memory', name: 'In-memory' };
@@ -59,13 +64,27 @@ const git: ProjectFeatureManifest = {
 };
 const other: ProjectFeatureManifest = { ...git, id: OTHER, name: 'Other', projectSettings: { type: 'object' } };
 
+type WorktreeOp = Extract<FsOp, { kind: 'worktree' }>;
+
 class FakeSockets implements MachineSocketPort {
     readonly seats = new Map<string, PlatformSeat>();
     readonly sent = new Map<string, string[]>();
     connected = new Set<string>();
+    /** How a daemon frame reaches the Machine actor of `key`, set by `connect()`. */
+    readonly daemons = new Map<string, (frame: DaemonFrame) => Promise<void>>();
+    /** Set per test: answers `fs.request` `worktree` in the daemon's place (the in-memory daemon fakes no worktrees). */
+    worktree?: (environmentId: string, op: WorktreeOp) => { result: FsResult } | { error: FsError };
+    readonly worktreeRequests: { key: string; environmentId: string; op: WorktreeOp }[] = [];
     send(key: string, text: string): boolean {
         if (!this.connected.has(key)) return false;
         (this.sent.get(key) ?? this.sent.set(key, []).get(key)!).push(text);
+        const frame = JSON.parse(text) as { t: string; requestId: string; environmentId: string; op: FsOp };
+        if (frame.t === 'fs.request' && frame.op.kind === 'worktree' && this.worktree) {
+            this.worktreeRequests.push({ key, environmentId: frame.environmentId, op: frame.op });
+            const answer = this.worktree(frame.environmentId, frame.op);
+            void Promise.resolve().then(() => this.daemons.get(key)?.({ v: DAEMON_PROTOCOL_VERSION, t: 'fs.response', requestId: frame.requestId, ...answer }));
+            return true;
+        }
         this.seats.get(key)?.send(JSON.parse(text));
         return true;
     }
@@ -120,7 +139,7 @@ let audit: ReturnType<typeof capturingAuditPort>;
 let Session: ReturnType<typeof defineSessionActor>;
 let Machine: ReturnType<typeof defineMachineActor>;
 let Routing: ReturnType<typeof defineRoutingActor>;
-const Registry = defineRegistry({ kek: () => importWorkspaceKek(generateWorkspaceKek()), catalogue: [IN_MEMORY_PLUGIN, anthropicApiPlugin, git, other] });
+const Registry = defineRegistry({ kek: () => importWorkspaceKek(generateWorkspaceKek()), catalogue: [IN_MEMORY_PLUGIN, anthropicApiPlugin, git, other, gitFeatureManifest] });
 const daemons: InMemoryDaemon[] = [];
 beforeEach(async () => {
     hook = undefined;
@@ -129,7 +148,7 @@ beforeEach(async () => {
     audit = capturingAuditPort();
     const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
     Session = defineSessionActor({ factory: localFactory(), commands: sink });
-    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry: () => Registry, runtimes, audit, projectFeatures: { [GIT]: feature } });
+    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry: () => Registry, runtimes, audit, projectFeatures: { [GIT]: feature, [GIT_FEATURE_ID]: gitFeaturePlugin } });
     Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
     app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory, Chat, ChatPage, Registry, AuditActor]);
     await app.start();
@@ -159,14 +178,17 @@ async function createTask(id: string, assignee: AgentId, extra: Partial<TaskCont
     return task(id).create({ objective: 'do the thing', origin: { kind: 'external', clientId: 'c1' }, assignee, context: [], constraints: {}, ...extra }, { owner: assignee });
 }
 
-/** A paired machine reporting E1 (roots `/work`, `/scratch`) and E2 (root `/other`); `connect` dials its daemon. */
-async function pairMachine(): Promise<{ machineId: MachineId; d: InMemoryDaemon; connect(): PlatformSeat }> {
+type Reporting = readonly { readonly id: EnvironmentId; readonly cwdRoots: readonly string[] }[];
+const LAPTOP: Reporting = [
+    { id: E1, cwdRoots: ['/work', '/scratch'] },
+    { id: E2, cwdRoots: ['/other'] }
+];
+
+/** A paired machine reporting E1 (roots `/work`, `/scratch`) and E2 (root `/other`) unless told otherwise; `connect` dials its daemon. */
+async function pairMachine(reporting: Reporting = LAPTOP): Promise<{ machineId: MachineId; d: InMemoryDaemon; connect(): PlatformSeat }> {
     const { machineId, pairingCode } = await workspace().registerMachinePending({ name: 'laptop' });
     await machine(machineId).pair(pairingCode, { name: 'laptop' });
-    const environments = [
-        { ...inMemoryEnvironment(machineId, E1), cwdRoots: ['/work', '/scratch'] },
-        { ...inMemoryEnvironment(machineId, E2), cwdRoots: ['/other'] }
-    ];
+    const environments = reporting.map((e) => ({ ...inMemoryEnvironment(machineId, e.id), cwdRoots: [...e.cwdRoots] }));
     const d = inMemoryHarness({ machineId, environments }).start({ events: 2, heartbeatMs: 600_000 }) as InMemoryDaemon;
     daemons.push(d);
     const connect = (): PlatformSeat => {
@@ -176,6 +198,9 @@ async function pairMachine(): Promise<{ machineId: MachineId; d: InMemoryDaemon;
         sockets.seats.set(key, seat);
         sockets.connected.add(key);
         const asDaemon = machine(ids.machineId, asMachine(ids.machineId));
+        sockets.daemons.set(key, async (frame) => {
+            await asDaemon.socketMessage(JSON.stringify(frame));
+        });
         void (async () => {
             try {
                 for (;;) await asDaemon.socketMessage((await seat.next()) as string);
@@ -193,8 +218,8 @@ async function pairMachine(): Promise<{ machineId: MachineId; d: InMemoryDaemon;
     return { machineId, d, connect };
 }
 
-async function onlineMachine(): Promise<MachineId> {
-    const m = await pairMachine();
+async function onlineMachine(reporting?: Reporting): Promise<MachineId> {
+    const m = await pairMachine(reporting);
     m.connect();
     await until(async () => (await machine(m.machineId).get()).online, 'the machine to come online');
     return m.machineId;
@@ -407,5 +432,103 @@ describe('project feature plugins (#332)', () => {
         const spec = (await session(t.sessionId!).get()).spec!;
         expect(spec.cwd).toBeUndefined();
         expect(spec.projectInstructions).toBe('Work on the Agentic repo; the base branch is main.');
+    });
+});
+
+describe('the git feature (#335)', () => {
+    const chatOrigin = (chatId: ChatId, n: number) => ({ kind: 'user', chatId, messageId: `msg_${n}` as never }) as const;
+    const slugOf = (branch: string) => branch.replace('/', '-');
+    const made = (_environmentId: string, op: WorktreeOp): { result: FsResult } => ({ result: { kind: 'worktree', path: op.path, branch: op.branch } });
+
+    it('two members on two machines in one chat each get a worktree beside their own checkout with one branch name; the spec opens there and the prompt names the branch', async () => {
+        const m1 = await onlineMachine();
+        const m2 = await onlineMachine([{ id: E3, cwdRoots: ['/home/b'] }]);
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const b = await agent('agent_b', { runtime: 'in-memory', defaultEnvironmentId: E3 });
+        const projectId = await project({ folders: { [E3]: '/home/b/agentic' }, features: { [GIT_FEATURE_ID]: { worktreePerChat: true, base: 'develop', instructions: 'Branch first; never work on main.' } } });
+        const { chatId } = await workspace().createChat({ projectId });
+        const branch = gitBranchFor(chatId);
+        expect(branch).toMatch(/^chat\/[a-z0-9_-]{8}$/);
+        sockets.worktree = made;
+        await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId });
+        await createTask('t2', b, { origin: chatOrigin(chatId, 2), projectId });
+        await routing().run('t1' as TaskId);
+        await routing().run('t2' as TaskId);
+        await Promise.all([settled('t1'), settled('t2')]);
+        expect((await task('t1').get()).status).toBe('completed');
+        expect((await task('t2').get()).status).toBe('completed');
+        // One `worktree` op per environment, each to its own machine's daemon, the same branch from the project's base.
+        expect(sockets.worktreeRequests).toEqual([
+            { key: machineKey(WS, m1), environmentId: E1, op: { kind: 'worktree', repo: '/work/agentic', branch, base: 'develop', path: `/work/agentic-worktrees/${slugOf(branch)}` } },
+            { key: machineKey(WS, m2), environmentId: E3, op: { kind: 'worktree', repo: '/home/b/agentic', branch, base: 'develop', path: `/home/b/agentic-worktrees/${slugOf(branch)}` } }
+        ]);
+        for (const [machineId, taskId, cwd] of [
+            [m1, 't1', `/work/agentic-worktrees/${slugOf(branch)}`],
+            [m2, 't2', `/home/b/agentic-worktrees/${slugOf(branch)}`]
+        ] as const) {
+            const { sent, record } = await openOf(machineId, taskId);
+            expect(sent?.cwd).toBe(cwd);
+            expect(record).toBe(cwd);
+            expect(sent?.system).toContain('## Project');
+            expect(sent?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
+            expect(sent?.system).toContain('Branch first; never work on main.');
+        }
+        // The route still records the project's folder; the worktree is the plugin's replacement.
+        expect(chosenFor('t1')).toMatchObject({ data: { environmentId: E1, cwd: '/work/agentic' } });
+        expect(chosenFor('t2')).toMatchObject({ data: { environmentId: E3, cwd: '/home/b/agentic' } });
+    });
+
+    it('a second task in the same chat reuses the worktree: the daemon answers branch-exists and the session opens at the same path, no park', async () => {
+        const m1 = await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const projectId = await project({ features: { [GIT_FEATURE_ID]: { worktreePerChat: true } } });
+        const { chatId } = await workspace().createChat({ projectId });
+        const branch = gitBranchFor(chatId);
+        const cwd = `/work/agentic-worktrees/${slugOf(branch)}`;
+        const branches = new Set<string>();
+        sockets.worktree = (environmentId, op) => {
+            if (branches.has(op.branch)) return { error: { code: 'branch-exists', message: `a branch named '${op.branch}' already exists` } };
+            branches.add(op.branch);
+            return made(environmentId, op);
+        };
+        await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId });
+        await createTask('t2', a, { origin: chatOrigin(chatId, 2), projectId });
+        expect((await routing().run('t1' as TaskId)).status).not.toBe('waiting');
+        expect((await routing().run('t2' as TaskId)).status).not.toBe('waiting');
+        await Promise.all([settled('t1'), settled('t2')]);
+        expect((await task('t1').get()).status).toBe('completed');
+        expect((await task('t2').get()).status).toBe('completed');
+        expect(sockets.worktreeRequests.map((r) => r.op)).toEqual([
+            { kind: 'worktree', repo: '/work/agentic', branch, path: cwd },
+            { kind: 'worktree', repo: '/work/agentic', branch, path: cwd }
+        ]);
+        expect((await openOf(m1, 't1')).sent?.cwd).toBe(cwd);
+        expect((await openOf(m1, 't2')).sent?.cwd).toBe(cwd);
+        expect((await openOf(m1, 't2')).sent?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
+    });
+
+    it("a daemon that cannot make the worktree parks the task waiting { project-feature } with the daemon's message; a task from no chat opens in the project's folder", async () => {
+        const m1 = await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const projectId = await project({ features: { [GIT_FEATURE_ID]: { worktreePerChat: true, instructions: 'Branch first.' } } });
+        const { chatId } = await workspace().createChat({ projectId });
+        // The in-memory daemon answers `worktree` as unsupported: the plugin throws with that message.
+        await createTask('t1', a, { origin: chatOrigin(chatId, 1), projectId });
+        const parked = await routing().run('t1' as TaskId);
+        expect(parked.status).toBe('waiting');
+        expect(parked.wait).toEqual({ kind: 'project-feature', pluginId: GIT_FEATURE_ID, message: 'git worktree unsupported: the in-memory daemon does not answer worktree' });
+        expect(parked.sessionId).toBeUndefined();
+        expect(sockets.opens(machineKey(WS, m1))).toEqual({});
+        // No chat: nothing to name a branch after, so no worktree and no daemon round trip; the instructions still apply.
+        await createTask('t2', a, { projectId });
+        await routing().run('t2' as TaskId);
+        await settled('t2');
+        expect((await task('t2').get()).status).toBe('completed');
+        expect(sockets.worktreeRequests).toEqual([]);
+        const { sent } = await openOf(m1, 't2');
+        expect(sent?.cwd).toBe('/work/agentic');
+        expect(sent?.system).toContain('## Project');
+        expect(sent?.system).toContain('Branch first.');
+        expect(sent?.system).not.toContain('This chat works on branch');
     });
 });

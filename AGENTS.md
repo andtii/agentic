@@ -125,6 +125,7 @@ Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost
 | `packages/runtimes` | `@agentic/runtimes` | runtime adapters (`anthropic-api` via `modelAgent`, `claude-code` daemon driver) and platform tools |
 | `packages/memory` | `@agentic/memory` | default MemoryPlugin + `memoryConformance` |
 | `packages/learning` | `@agentic/learning` | default LearningPlugin |
+| `packages/plugins-git` | `@agentic/plugins-git` | git project feature plugin: detect, origin identity, instructions, worktree per chat |
 | `packages/daemon-protocol` | `@agentic/daemon-protocol` | envelope validators + `daemonConformance` |
 | `packages/ui` | `@agentic/ui` | zero fragment (`ai-*` scopes), layout shell, streaming markdown |
 | `packages/mcp` | `@agentic/mcp` | MCP client + platform MCP server (orchestration surface) |
