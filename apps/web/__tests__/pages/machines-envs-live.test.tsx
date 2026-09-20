@@ -264,7 +264,8 @@ describe('the machine setup model', () => {
         // Without the launcher (#354): the daemon is where the one-line installer put it, run through node.
         expect(fallbackCommand(allowRootCommand('/home/me/src'), 'linux')).toBe('node ~/.agentic/daemon/bin/agentic-daemon.mjs policy allow-root /home/me/src');
         expect(fallbackCommand(loginCommand('env_work'), 'darwin')).toBe('node ~/.agentic/daemon/bin/agentic-daemon.mjs env login env_work');
-        expect(fallbackCommand(allowRootCommand('C:\\My Code'), 'windows')).toBe('node %LOCALAPPDATA%\\agentic\\daemon\\bin\\agentic-daemon.mjs policy allow-root "C:\\My Code"');
+        // The Windows line is pasted into PowerShell (the OS whose install line the page prints is PowerShell), where %LOCALAPPDATA% does not expand.
+        expect(fallbackCommand(allowRootCommand('C:\\My Code'), 'windows')).toBe('node "$env:LOCALAPPDATA\\agentic\\daemon\\bin\\agentic-daemon.mjs" policy allow-root "C:\\My Code"');
         expect(shellArg('C:\\My Code')).toBe('"C:\\My Code"');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop', ' /home/me/src ').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop --allow-root /home/me/src');
         expect(pairCommands('https://a.example', 'K7Q2MX', 'laptop').pair).toBe('agentic-daemon pair K7Q2MX --url https://a.example --name laptop');

@@ -66,9 +66,10 @@ export interface CliContext {
     readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
-const LAUNCHER_USAGE = `  agentic-daemon launcher install [--node <path>] [--bin-dir <dir>] [--no-profile]
-                       (the \`agentic-daemon\` command itself: written by the installer, on PATH for a new shell;
-                        --no-profile writes it but changes no shell profile or user PATH)
+const LAUNCHER_USAGE = `  agentic-daemon launcher install [--node <path>] [--entry <path>] [--bin-dir <dir>] [--no-profile]
+                       (the \`agentic-daemon\` command itself: written by the installer, on PATH for a new shell.
+                        --node / --entry override the Node and the bin/agentic-daemon.mjs it runs, both taken
+                        from this process otherwise; --no-profile writes it but changes no shell profile or user PATH)
   agentic-daemon launcher remove
   agentic-daemon launcher show`;
 

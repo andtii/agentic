@@ -52,21 +52,28 @@ export const loginCommand = (environmentId: string): string => `agentic-daemon e
 /** Turns web management on for one folder, on the machine (#238). */
 export const allowRootCommand = (folder?: string): string => `agentic-daemon policy allow-root ${folder ? shellArg(folder) : '<folder>'}`;
 
-/** Where the one-line installer puts the daemon on each OS (`apps/web/public/install.sh`, `install.ps1`). */
+/**
+ * Where the one-line installer puts the daemon on each OS
+ * (`apps/web/public/install.sh`, `install.ps1`), spelled for the shell the
+ * page's own install line uses: PowerShell on Windows, where `%LOCALAPPDATA%`
+ * would not expand.
+ */
 export const daemonHome: Record<HostOs, string> = {
-    windows: '%LOCALAPPDATA%\\agentic\\daemon',
+    windows: '$env:LOCALAPPDATA\\agentic\\daemon',
     darwin: '~/.agentic/daemon',
     linux: '~/.agentic/daemon'
 };
 
 /**
  * The same command without the `agentic-daemon` launcher: what to run when the
- * command is not found, which is every machine installed before #354.
+ * command is not found, which is every machine installed before #354. The
+ * Windows form is quoted whatever it holds — `"$env:…"` expands in PowerShell,
+ * and `&` in front is not needed while the line starts with a bare `node`.
  */
 export function fallbackCommand(command: string, os: HostOs): string {
     const args = command.startsWith('agentic-daemon ') ? command.slice('agentic-daemon '.length) : command;
-    const entry = os === 'windows' ? `${daemonHome.windows}\\bin\\agentic-daemon.mjs` : `${daemonHome[os]}/bin/agentic-daemon.mjs`;
-    return `node ${shellArg(entry)} ${args}`;
+    if (os === 'windows') return `node "${daemonHome.windows}\\bin\\agentic-daemon.mjs" ${args}`;
+    return `node ${shellArg(`${daemonHome[os]}/bin/agentic-daemon.mjs`)} ${args}`;
 }
 
 /** An account that cannot run work until someone signs it in on the machine. */

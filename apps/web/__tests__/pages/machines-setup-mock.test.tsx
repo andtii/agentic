@@ -23,7 +23,7 @@ describe('/machines/:id on mock data (#239)', () => {
         expect(text(root.querySelector('[data-env-policy] [data-command-well] code'))).toBe('agentic-daemon policy allow-root C:\\work');
         // The command is not on PATH on a machine installed before #354: the long form is one disclosure away.
         expect(text(root.querySelector('[data-env-policy] [data-command-fallback] [data-command-well] code'))).toBe(
-            'node %LOCALAPPDATA%\\agentic\\daemon\\bin\\agentic-daemon.mjs policy allow-root C:\\work'
+            'node "$env:LOCALAPPDATA\\agentic\\daemon\\bin\\agentic-daemon.mjs" policy allow-root C:\\work'
         );
         expect(root.querySelector('[data-env-actions]')).toBeNull();
         expect([...root.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Add environment')).toBe(false);
