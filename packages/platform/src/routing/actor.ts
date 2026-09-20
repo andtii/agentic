@@ -48,7 +48,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -58,7 +58,7 @@ import { AgentActor, agentKey } from '../agent/index.js';
 import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
 import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
-import { machineKey, type MachineView, type OpenSessionResult } from '../machine/index.js';
+import { machineKey, type FsResultView, type MachineView, type OpenSessionResult } from '../machine/index.js';
 import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
@@ -67,6 +67,7 @@ import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
 import { daemonConnectors } from './connectors.js';
 import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
+import { machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, type LocatedEnvironment } from './locate.js';
@@ -114,7 +115,12 @@ interface SessionClient {
 interface MachineClient {
     get(): Promise<MachineView>;
     openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: OpenSpec, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
+    fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<{ readonly requestId: string }>;
+    fsResult(requestId: string): Promise<FsResultView>;
 }
+
+/** The `TaskError` a task in a project the Workspace no longer has fails with (#332): visible, never a guessed folder. */
+export const PROJECT_MISSING_CODE = 'project-missing';
 
 /** `Routing.get()`. */
 export interface RoutingView {
@@ -145,8 +151,8 @@ function finalText(transcript: AgentTranscript | undefined, turnId: string): str
 /** The machine's path rules (`hello.os`); a daemon that never said is taken for Windows, the first platform (decision 2). */
 const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 
-/** The connectors an agent names, for `gate()` to answer for (#240). */
-const connectorIds = (config: Pick<FrozenAgentConfig, 'connectors'>): readonly string[] => config.connectors.map((c) => c.id);
+/** The connectors an agent names — and its task's project adds (#332) — for `gate()` to answer for (#240), one per id. */
+const connectorIds = (config: Pick<FrozenAgentConfig, 'connectors'>, project?: Pick<ProjectRecord, 'connectors'>): readonly string[] => [...new Set([...config.connectors.map((c) => c.id), ...(project?.connectors.map((c) => c.id) ?? [])])];
 
 /** The slice of the Registry actor the router asks (`defineRegistry`). */
 interface RegistryClient {
@@ -174,6 +180,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const newSessionId = ports.newSessionId ?? ((): SessionId => createId('session') as SessionId);
     const driverOf = ports.driver ?? ((ws: WorkspaceId): Principal => userPrincipal(ws, ws));
     const audit = ports.audit ?? auditPort();
+    const projectFeatures = ports.projectFeatures ?? {};
     /** Per activation (by actor key): what `prompt` pokes so the `follow` supervisor rescans the routes. */
     const wakers = new Map<string, () => void>();
 
@@ -345,15 +352,65 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         ...(summary.title ? { title: summary.title } : {}),
                         self: route.agentId,
                         ...(summary.coordinator ? { coordinator: summary.coordinator } : {}),
-                        members
+                        members,
+                        ...(summary.project ? { project: summary.project } : {})
                     };
                 } catch {
                     return undefined;
                 }
             }
 
+            /**
+             * The task's project as the Workspace has it now (#332): read at `run` and again at every placement, so a
+             * project removed meanwhile fails the task `project-missing` rather than running in a folder nobody chose.
+             */
+            async function projectOf(route: Pick<Route, 'projectId'>): Promise<{ project?: ProjectRecord; error?: TaskError }> {
+                if (!route.projectId) return {};
+                let projects: readonly ProjectRecord[];
+                try {
+                    projects = await as(Workspace, workspaceKey(workspaceId)).projects();
+                } catch (e) {
+                    return { error: { code: 'registry-unavailable', message: `the workspace could not be asked about project ${route.projectId}: ${e instanceof Error ? e.message : String(e)}`, recoverable: true } };
+                }
+                const project = projects.find((p) => p.id === route.projectId);
+                if (!project) return { error: { code: PROJECT_MISSING_CODE, message: `project ${route.projectId} no longer exists`, recoverable: false } };
+                return { project: ctx.snapshot(project) };
+            }
+
+            /**
+             * The project's feature plugins for this placement (#332): `beforeSession` over the environment's daemon
+             * (`fs`), and every plugin's `instructions()`. `undefined` when the placement goes on — with the folder and
+             * instructions to use — else the route was failed or parked here and the caller returns.
+             */
+            async function projectHooks(route: Route, fs: 'daemon' | 'local'): Promise<{ cwd?: string; instructions?: string } | undefined> {
+                const { project, error } = await projectOf(route);
+                if (error) {
+                    await fail(route, error);
+                    return undefined;
+                }
+                if (!project) return {};
+                const outcome: FeatureHooksOutcome = await runFeatureHooks({
+                    project,
+                    plugins: projectFeatures,
+                    taskId: route.taskId,
+                    ...(route.chatId ? { chatId: route.chatId } : {}),
+                    ...(route.environmentId ? { environmentId: route.environmentId } : {}),
+                    ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
+                    fs: fs === 'daemon' && route.machineId && route.environmentId ? machineFs(machine(route.machineId), route.environmentId, { now }) : noDaemonFs
+                });
+                if (!outcome.ok) {
+                    // The plugin said why; the task waits with its words, and the next `run` starts the hooks over (EXE-12: never a silent fallback).
+                    await park(route, { kind: 'project-feature', pluginId: outcome.pluginId, message: outcome.message }, `project feature ${outcome.pluginId}: ${outcome.message}`);
+                    return undefined;
+                }
+                return { ...(outcome.cwd !== undefined ? { cwd: outcome.cwd } : {}), ...(outcome.instructions !== undefined ? { instructions: outcome.instructions } : {}) };
+            }
+
             /** Open a local Session (a runtime hosted in this process — `anthropic-api`) for the route and prompt it. */
             async function placeLocal(route: Route, why: string, t?: TaskView): Promise<void> {
+                // The project's plugins first (#332): a platform-hosted runtime runs in no folder, so only their instructions apply here.
+                const hooks = await projectHooks(route, 'local');
+                if (!hooks) return;
                 const sessionId = (route.sessionId ??= newSessionId());
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
@@ -365,7 +422,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     config: ctx.snapshot(withDefaultModel(route.config, route.plugins)),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     tools: grantedToolNames(route),
-                    ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {})
+                    ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
+                    ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {})
                 };
                 try {
                     await session(sessionId).open(spec);
@@ -399,7 +457,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return;
                     case 'fallback-api': {
                         // NEW use of another runtime: its plugin answers for itself before the task leaves its environment (AC-13).
-                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`, connectorIds(route.config));
+                        const asked = await gate(FALLBACK_RUNTIME, `fallback-api: ${where} is offline`, connectorIds(route.config, (await projectOf(route)).project));
                         if (asked.error) {
                             await fail(route, asked.error);
                             return;
@@ -465,6 +523,17 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await offline(route, m);
                     return;
                 }
+                // The project's feature plugins (#332), with the folder final and the daemon there to ask: a plugin may move the
+                // session into a folder of its own (a worktree), checked against the same roots before anything opens.
+                const hooks = await projectHooks(route, 'daemon');
+                if (!hooks) return;
+                if (hooks.cwd !== undefined && hooks.cwd !== route.cwd) {
+                    if (!pathWithin(hooks.cwd, env.cwdRoots, osOf(m))) {
+                        await fail(route, { code: 'workdir-outside-roots', message: `folder ${hooks.cwd} (from a project feature plugin) is outside the roots of environment ${environmentId} on machine ${machineId} (${env.cwdRoots.join(', ') || 'none'})`, recoverable: false });
+                        return;
+                    }
+                    route.cwd = hooks.cwd;
+                }
                 const sessionId = (route.sessionId ??= newSessionId());
                 const opening = await work(route, t);
                 const tools = grantedToolNames(route);
@@ -483,9 +552,10 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     config: ctx.snapshot(effective),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
-                    // The same prompt the API path builds (identity, role, instructions, skills, the chat, the tools);
+                    ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {}),
+                    // The same prompt the API path builds (identity, role, instructions, skills, the chat, the project, the tools);
                     // `open` appends the memory block. The daemon's runtime appends it to its own preset.
-                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
+                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(hooks.instructions ? { project: hooks.instructions } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
                     tools
                 };
                 // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
@@ -591,6 +661,14 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (isTerminal(t.status)) {
                             drop(taskId);
                             await ctx.save();
+                            return t;
+                        }
+                        // Parked by a project feature plugin (#332): the placement runs again from the hooks, on the same route (EXE-12).
+                        if (t.status === 'waiting' && t.wait?.kind === 'project-feature' && existing.sessionId === undefined) {
+                            if (existing.environmentId) await placeRemote(existing);
+                            else await placeLocal(existing, 'started after a project feature plugin let it through');
+                            await ctx.save();
+                            return task(taskId).get();
                         }
                         return t;
                     }
@@ -615,11 +693,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         const parentRules = parent ? parent.config.approvalPolicy : (await agent(t.origin.agentId).get()).config.approvalPolicy;
                         constraints = [...(parent?.constraints ?? []), ...parentRules];
                     }
+                    // The task's project (#332), read once here: gone from the Workspace → the task fails, visibly (EXE-12); its connectors join the gate.
+                    const { project, error: projectError } = await projectOf(t);
                     // The plugin behind the runtime, asked once and before anything is written (§9, AC-13); the answer rides on the route and the spec.
-                    const gated = await gate(runtime, undefined, connectorIds(config));
+                    const gated = projectError ? {} : await gate(runtime, undefined, connectorIds(config, project));
                     const host = hostOf(runtime);
-                    const refused: TaskError | undefined = gated.error ?? (host === undefined ? { code: UNKNOWN_RUNTIME_CODE, message: `agent ${t.assignee} runs on "${runtime}", which this build does not have`, recoverable: false } : undefined);
-                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), createdAt: at, updatedAt: at };
+                    const refused: TaskError | undefined = projectError ?? gated.error ?? (host === undefined ? { code: UNKNOWN_RUNTIME_CODE, message: `agent ${t.assignee} runs on "${runtime}", which this build does not have`, recoverable: false } : undefined);
+                    const base = { taskId, agentId: t.assignee, ...(chatId ? { chatId } : {}), runtime, policy: config.execution.offlinePolicy, config, ...(constraints ? { constraints } : {}), ...(gated.plugins ? { plugins: gated.plugins } : {}), ...(t.projectId ? { projectId: t.projectId } : {}), createdAt: at, updatedAt: at };
                     if (refused) {
                         // No route was written; `fail` tells the task's chat where the answer would have been (#128).
                         await fail({ ...base, status: 'opening' }, refused);
@@ -661,16 +741,20 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return task(taskId).get();
                     }
                     const envFrom = t.environmentId ? "the task's own" : config.execution.defaultEnvironmentId ? "the agent's default" : named ? "the delegating task's" : "the workspace's default";
-                    // The folder, once (#190, EXE-12): the task's own, a delegating parent's in the same environment, the agent's
-                    // default in its default environment, else the environment's first root — which needs the machine's report.
+                    // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment, a delegating
+                    // parent's in the same environment, the agent's default in its default environment, else the environment's
+                    // first root — which needs the machine's report.
+                    const projectFolder = project ? projectFolderFor(project, environmentId) : undefined;
                     const asked: { cwd: string; from: string } | undefined =
                         t.workdir !== undefined
                             ? { cwd: t.workdir, from: "the task's own" }
-                            : parent?.cwd !== undefined && parent.environmentId === environmentId
-                              ? { cwd: parent.cwd, from: "the delegating task's" }
-                              : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId
-                                ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
-                                : undefined;
+                            : projectFolder !== undefined
+                              ? { cwd: projectFolder, from: "the project's folder" }
+                              : parent?.cwd !== undefined && parent.environmentId === environmentId
+                                ? { cwd: parent.cwd, from: "the delegating task's" }
+                                : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId
+                                  ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
+                                  : undefined;
                     const located = await locate(environmentId);
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
                     const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
@@ -679,7 +763,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (t.workdir !== undefined) await noteWorkdir({ environmentId, path: t.workdir });
                     // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
                     // reports yet is "offline" under the agent's policy — `queue` waits for the machine that will (AST-05).
-                    s.routes[taskId] = { ...base, environmentId, ...(cwd !== undefined ? { cwd } : {}), status: 'opening' };
+                    s.routes[taskId] = { ...base, environmentId, ...(cwd !== undefined ? { cwd } : {}), ...(projectFolder !== undefined ? { projectFolder } : {}), status: 'opening' };
                     await placeRemote(s.routes[taskId]!, undefined, t, located);
                     await ctx.save();
                     return task(taskId).get();

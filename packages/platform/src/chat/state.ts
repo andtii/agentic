@@ -9,7 +9,7 @@
  * `applyEntry` hook of `ctx.append`.
  */
 
-import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MessageId, type Principal, type SessionId } from '@agentic/core';
+import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
 
 /** Entries kept in state before the oldest page is archived. */
 export const WINDOW = 200;
@@ -74,6 +74,8 @@ export interface ChatState {
     activeSessions: Record<string, SessionId>;
     /** The title the last `rename` entry set (#124); absent until one is. Records written before it existed have none. */
     title?: string;
+    /** The project the last `project` note put the chat in (#332, `Chat.setProject`); absent until one does, or after one clears it. */
+    projectId?: ProjectId;
     /**
      * Every file ever posted, keyed by file id (#203). Kept in the actor's own state, never in the
      * window, so it outlives archiving. Absent until the first file is posted.
@@ -104,6 +106,11 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             if (entry.workdir && member) {
                 const { workdir: _old, ...rest } = member;
                 state.members[entry.workdir.agentId] = entry.workdir.ref ? { ...rest, workdir: entry.workdir.ref } : rest;
+            }
+            // The note `setProject` writes (#332): the chat's project from here on, or none.
+            if (entry.project) {
+                if (entry.project.id === null) delete state.projectId;
+                else state.projectId = entry.project.id;
             }
             return;
         }

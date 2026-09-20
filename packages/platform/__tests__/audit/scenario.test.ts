@@ -251,7 +251,8 @@ describe('the audit trail of a scripted scenario', () => {
         // A worktree needs a daemon that adds one: `workdir.worktree-created` is covered by the Machine tests (#189).
         // `plugin.activated` needs a second plugin of a single-slot kind: covered by the Registry catalogue tests (#229).
         // `environment.put` / `environment.removed` need a daemon that answers `env.request`: covered by the Machine tests (#237).
-        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed'>, number> = {
+        // `chat.project-set` / `project.changed` are covered by the Chat and Workspace tests (#332).
+        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed' | 'chat.project-set' | 'project.changed'>, number> = {
             'config.versioned': 3, // agent_api v1, agent_cc v1, agent_api v2 (the accepted proposal)
             'environment.chosen': 3, // t1 (api), t3 (E1), t3 fallback
             'task.transition': 9, // t1 ×4, t2 ×2, t3 ×3

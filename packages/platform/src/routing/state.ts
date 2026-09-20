@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, RuntimeId, SessionId, TaskId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import type { RegistryGate } from '../registry/types.js';
 
@@ -30,12 +30,17 @@ export interface Route {
     /** The machine that reported `environmentId` — bound once a machine reports it, never rebound. */
     machineId?: MachineId;
     /**
-     * The folder the session runs in (#190), resolved once (EXE-12): the task's `workdir`, a delegating parent's
-     * folder in the same environment, the agent's `defaultWorkdir` in its default environment, else the
-     * environment's first `cwdRoots` entry — the last filled in at placement when no machine reported the
-     * environment at `run`. Always within the roots (`pathWithin`) before a session opens.
+     * The folder the session runs in (#190, #332), resolved once (EXE-12): the task's `workdir`, the project's
+     * folder for the environment, a delegating parent's folder in the same environment, the agent's
+     * `defaultWorkdir` in its default environment, else the environment's first `cwdRoots` entry — the last filled
+     * in at placement when no machine reported the environment at `run`. A project feature plugin's `beforeSession`
+     * may replace it at placement (a worktree, say). Always within the roots (`pathWithin`) before a session opens.
      */
     cwd?: string;
+    /** The project the task belongs to (#332), from its contract; the record is read from the Workspace at `run` and at every placement. */
+    readonly projectId?: ProjectId;
+    /** `projectFolderFor(project, environmentId)` as resolved at `run` (EXE-12): the project's folder on this environment, when it has one. */
+    readonly projectFolder?: string;
     readonly policy: OfflinePolicy;
     /** The configuration the session runs with (AGT-06/07), taken once at `run`. */
     readonly config: FrozenAgentConfig;

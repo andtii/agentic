@@ -67,6 +67,12 @@ export interface SessionOpenSpec {
     /** The chat the session works in (CHT-07), filled by the router for a chat-originated task: the prompt's chat section. */
     readonly roster?: ChatRoster;
     /**
+     * What the task's project says to every session in it (#332): the enabled project feature plugins' `instructions()`
+     * and what their `beforeSession` returned, joined by blank lines. Rendered as the prompt's `## Project` section on
+     * both paths — already inside `system` on the daemon path, handed to the API factory on the local one.
+     */
+    readonly projectInstructions?: string;
+    /**
      * What `Registry.gate()` answered when the router placed the task (§9): the runtime plugin with its config, the
      * active memory and learning plugins, the enabled channels. Recorded so nothing downstream asks the Registry again.
      * Absent when the router has no Registry, and on a session the router did not open.

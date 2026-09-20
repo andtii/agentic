@@ -3,7 +3,7 @@
  * fires. Task creation and Inbox delivery are integration issues; the actor
  * only knows this port (AST-03: nothing here needs a browser or a chat).
  */
-import type { AgentId, EnvironmentId, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { AgentId, EnvironmentId, ProjectId, ScheduleId, WorkspaceId } from '@agentic/core';
 import type { ActorClient, AnyActorDefinition } from '@sigx/actors';
 
 export type ScheduleKind = 'reminder' | 'recurring' | 'agent-task';
@@ -32,6 +32,8 @@ export interface ScheduleFired {
     readonly environmentId?: EnvironmentId;
     /** The folder the fired task runs in (#190); only with `environmentId`. */
     readonly workdir?: string;
+    /** The project the fired task belongs to (#332); never with `environmentId` or `workdir`. */
+    readonly projectId?: ProjectId;
     readonly prompt?: string;
     readonly offlinePolicy: OfflinePolicy;
 }

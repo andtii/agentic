@@ -3,9 +3,13 @@
  * per member (CHT-04, MEM-11), bounded writes, the session-events fold
  * (CHT-11) and the authorization chain (architecture §9).
  */
-import type { AgentId, ChatEntry, EnvironmentId, MachineId, Principal, Scope, SessionId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatEntry, EnvironmentId, MachineId, Principal, ProjectId, Scope, SessionId, WorkspaceId } from '@agentic/core';
+import { AuditActor, auditKey } from '../../src/audit/index.js';
+import { workspaceKey } from '../../src/auth/index.js';
 import { Chat, ChatPage, MAX_TITLE_LENGTH, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
-import { statusOf, type TestActorApp } from '../../src/testing/index.js';
+import { PairingDirectory } from '../../src/pairing/index.js';
+import { statusOf, testActorApp, userPrincipal as testUser, type TestActorApp } from '../../src/testing/index.js';
+import { Workspace } from '../../src/workspace/index.js';
 import { A, B, C, WS, agent, chatKey, countingStorage, startChatApp, user } from './helpers.js';
 
 let app: TestActorApp;
@@ -269,6 +273,79 @@ describe('authorization (§9)', () => {
 
     it('the page actors are not wire-callable', async () => {
         expect(await statusOf(app.as(user).actor(ChatPage, pageKey(chatKey(), 0)).read())).toBe(403);
+    });
+});
+
+describe('project (#332)', () => {
+    // The Workspace at `ws:{userId}` is the owner's alone, and v1 pairs `workspaceId === userId`: its owner here is the workspace itself.
+    const wsOwner = testUser(WS);
+    const ws = () => app.as(wsOwner).actor(Workspace, workspaceKey(WS));
+    const auditEvents = async () => (await app.as(wsOwner).actor(AuditActor, auditKey(WS)).list({ kinds: ['chat.project-set'] })).events;
+    const projectOf = (e: { data: unknown }) => (e.data as { projectId: ProjectId | null }).projectId;
+
+    beforeEach(async () => {
+        await app.stop();
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
+        await app.start();
+    });
+
+    it('setProject writes a visible note that activates nobody, folds into the summary with the name, and survives a restart', async () => {
+        const project = await ws().upsertProject({ name: 'Agentic' });
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        const summary = await chat.setProject(project.id);
+        expect(summary).toMatchObject({ projectId: project.id, project: { id: project.id, name: 'Agentic' } });
+        expect(await chat.get()).toMatchObject({ projectId: project.id, project: { id: project.id, name: 'Agentic' } });
+        const { entries } = await chat.history();
+        const note = entries.at(-1)!.entry;
+        expect(note).toMatchObject({ t: 'msg', author: { kind: 'user' }, mentions: [], project: { id: project.id } });
+        expect(text(note)).toBe('Project → Agentic');
+        // Idempotent: the same project again writes nothing.
+        await chat.setProject(project.id);
+        expect((await chat.history()).entries).toHaveLength(entries.length);
+        // Recorded once, under the caller.
+        expect(await auditEvents()).toMatchObject([{ by: 'user:u1', data: { chatId: 'c1', projectId: project.id, name: 'Agentic' } }]);
+
+        const before = await chat.get();
+        const { storage } = app;
+        await app.stop();
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor], { storage });
+        await app.start();
+        expect(await chatAs(user).get()).toEqual(before);
+    });
+
+    it('null clears it with a note of its own; a removed project leaves projectId without a name', async () => {
+        const project = await ws().upsertProject({ name: 'Agentic' });
+        const chat = chatAs(user);
+        await chat.setProject(project.id);
+        const cleared = await chat.setProject(null);
+        expect(cleared.projectId).toBeUndefined();
+        expect('projectId' in cleared).toBe(false);
+        expect(text((await chat.history()).entries.at(-1)!.entry)).toBe('Project cleared');
+        // Newest first.
+        expect((await auditEvents()).map(projectOf)).toEqual([null, project.id]);
+
+        await chat.setProject(project.id);
+        await ws().removeProject(project.id);
+        const summary = await chat.get();
+        expect(summary.projectId).toBe(project.id);
+        expect(summary.project).toBeUndefined();
+    });
+
+    it('refuses an unknown project (400); member agents and external clients may set it, a non-member agent may not (403)', async () => {
+        const project = await ws().upsertProject({ name: 'Agentic' });
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        expect(await statusOf(chat.setProject('project_nope' as ProjectId))).toBe(400);
+        expect(await statusOf(chat.setProject('  ' as ProjectId))).toBe(400);
+        expect(await statusOf(chatAs(agent(B)).setProject(project.id))).toBe(403);
+        expect((await chat.get()).projectId).toBeUndefined();
+        await expect(chatAs(agent(A)).setProject(project.id)).resolves.toMatchObject({ projectId: project.id });
+        const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'cli', scopes: ['chats'] };
+        await expect(chatAs(external).setProject(null)).resolves.not.toHaveProperty('projectId');
+        const machine: Principal = { kind: 'machine', workspaceId: WS, machineId: 'machine_1' as MachineId };
+        expect(await statusOf(chatAs(machine).setProject(project.id))).toBe(403);
+        expect((await auditEvents()).map((e) => e.by)).toEqual(['external:cli', `agent:${A}`]);
     });
 });
 
