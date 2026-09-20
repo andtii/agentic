@@ -1,6 +1,6 @@
 /** Every frame kind: one valid frame parses, one invalid frame is refused with a field-level issue. */
 
-import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, PLATFORM_FRAME_TYPES } from '@agentic/core';
+import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, PLATFORM_FRAME_TYPES } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameType, PlatformFrame, PlatformFrameType } from '../src/index';
 import { LIMITS, daemonFrame, daemonFrameSchemas, platformFrame, platformFrameSchemas } from '../src/index';
@@ -52,7 +52,15 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
             v: V,
             t: 'fs.response',
             requestId: 'fs_1',
-            result: { kind: 'list', path: '/work', entries: [{ name: 'app', path: '/work/app', git: { kind: 'repo', branch: 'main' } }, { name: 'wt', path: '/work/wt', git: { kind: 'worktree', head: 'abc1234' } }], truncated: false }
+            result: {
+                kind: 'list',
+                path: '/work',
+                entries: [
+                    { name: 'app', path: '/work/app', git: { kind: 'repo', branch: 'main', origin: 'git@github.com:andtii/agentic.git' } },
+                    { name: 'wt', path: '/work/wt', git: { kind: 'worktree', head: 'abc1234' } }
+                ],
+                truncated: false
+            }
         },
         invalid: { v: V, t: 'fs.response', requestId: 'fs_1', result: { kind: 'worktree', path: '/work/b', branch: 'b' }, error: { code: 'exists', message: 'taken' } },
         path: 'error'
@@ -244,6 +252,11 @@ describe('daemon frame schemas', () => {
         expect(response({ result: listing(FS_LIST_MAX_ENTRIES) }).success).toBe(true);
         expect(response({ result: listing(FS_LIST_MAX_ENTRIES + 1) }).success).toBe(false);
         expect(response({ result: { kind: 'worktree', path: '/work/b', branch: 'feat/b' } }).success).toBe(true);
+        const located = (n: number) => ({ kind: 'locate', origin: 'https://github.com/andtii/agentic.git', matches: Array.from({ length: n }, (_, i) => ({ path: `/work/r${i}`, git: { kind: 'repo', branch: 'main', origin: 'https://github.com/andtii/agentic.git' } })), truncated: n === FS_LOCATE_MAX_MATCHES });
+        expect(response({ result: located(0) }).success).toBe(true);
+        expect(response({ result: located(FS_LOCATE_MAX_MATCHES) }).success).toBe(true);
+        expect(response({ result: located(FS_LOCATE_MAX_MATCHES + 1) }).success).toBe(false);
+        expect(response({ result: { kind: 'locate', origin: '', matches: [], truncated: false } }).success).toBe(false);
         expect(response({ error: { code: 'outside-roots', message: 'no' } }).success).toBe(true);
         expect(response({ error: { code: 'teapot', message: 'no' } }).success).toBe(false);
         const neither = response({});
@@ -251,6 +264,20 @@ describe('daemon frame schemas', () => {
         expect(neither.error?.issues[0]?.path).toEqual(['result']);
         expect(daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', error: { code: 'internal', message: 'x' } }).success).toBe(false);
         expect(platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'delete', path: '/work' } }).success).toBe(false);
+    });
+
+    it('fs.request locate names an origin, with an optional depth (#331)', () => {
+        const request = (op: Record<string, unknown>) => platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op });
+        const locate = { kind: 'locate', origin: 'git@github.com:andtii/agentic.git' };
+        expect(request(locate)).toMatchObject({ success: true, data: { op: locate } });
+        expect(request({ ...locate, depth: 2 }).success).toBe(true);
+        expect(request({ ...locate, depth: 1.5 }).success).toBe(false);
+        expect(request({ ...locate, depth: -1 }).success).toBe(false);
+        const missing = request({ kind: 'locate' });
+        expect(missing.success).toBe(false);
+        if (!missing.success) expect(missing.error.issues.map((i) => i.path.join('.'))).toContain('op.origin');
+        expect(request({ kind: 'locate', origin: '' }).success).toBe(false);
+        expect(request({ kind: 'locate', origin: 'x'.repeat(LIMITS.text + 1) }).success).toBe(false);
     });
 
     it('refuse the wrong protocol version at the schema level too', () => {

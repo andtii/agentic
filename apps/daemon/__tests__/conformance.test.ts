@@ -2,7 +2,7 @@
 // @vitest-environment node
 import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, MachinePolicy, SessionId } from '@agentic/core';
 import { daemonConformance, type ConformanceDaemon, type DaemonConformanceHarness } from '@agentic/daemon-protocol/testing';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDaemon } from '../src/daemon';
@@ -20,13 +20,19 @@ const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
     accountLabel: d.account.label
 });
 
+/** One hand-written checkout of this origin under the work root, so `fs-locate` proves a match (#331). */
+const KNOWN_ORIGIN = 'https://github.com/andtii/agentic.git';
+
 const harness: DaemonConformanceHarness = {
     features: ['env', 'gap', 'raw', 'fs', 'env-manage'],
+    knownOrigin: KNOWN_ORIGIN,
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
         // The machine's own folders beside the one its owner allowed (#238): configuration, state, and the work.
         const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), environmentsFile: join(dir, 'config', 'environments.json') };
-        await mkdir(join(dir, 'work'), { recursive: true });
+        await mkdir(join(dir, 'work', 'agentic', '.git'), { recursive: true });
+        await writeFile(join(dir, 'work', 'agentic', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+        await writeFile(join(dir, 'work', 'agentic', '.git', 'config'), `[remote "origin"]\n\turl = ${KNOWN_ORIGIN}\n`);
         const work = await realpath(join(dir, 'work'));
         const relay = await startRelay();
         const driver = scriptedDriver(script);
