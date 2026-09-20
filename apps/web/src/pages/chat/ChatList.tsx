@@ -11,6 +11,8 @@ export type ChatListProps =
     & Define.Prop<'wide', boolean>
     /** Who an agent id is; the mock workspace's `agentNamed` by default, the live directory on the wired pages (#34). */
     & Define.Prop<'lookup', AgentLookup>
+    /** The workspace's projects (#333): a filter above the rows; absent or empty, no filter. */
+    & Define.Prop<'projects', readonly { readonly id: string; readonly name: string }[]>
     /** The "+" button: opens the new-chat dialog. */
     & Define.Event<'newChat'>;
 
@@ -31,10 +33,11 @@ export const MemberTiles = component<{ agentIds: readonly string[]; size?: 18 | 
 });
 
 /** The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search keeps all. */
-export function matchingChats(chats: readonly MockChatSummary[], q: string): readonly MockChatSummary[] {
+export function matchingChats(chats: readonly MockChatSummary[], q: string, projectId: string = ''): readonly MockChatSummary[] {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!words.length) return chats;
-    return chats.filter((c) => {
+    const inProject = projectId ? chats.filter((c) => c.projectId === projectId) : chats;
+    if (!words.length) return inProject;
+    return inProject.filter((c) => {
         const text = `${c.title}\n${c.lastLine}`.toLowerCase();
         return words.every((w) => text.includes(w));
     });
@@ -47,7 +50,7 @@ export function matchingChats(chats: readonly MockChatSummary[], q: string): rea
  * and last line as you type.
  */
 export const ChatList = component<ChatListProps>(({ props, emit }) => {
-    const st = signal({ q: '' });
+    const st = signal({ q: '', project: '' });
     return () => (
     <nav data-chat-list data-wide={props.wide ? '' : undefined} aria-label="Chats">
         <div data-chat-search>
@@ -55,8 +58,17 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
             <input id="chat-search" type="search" placeholder="Search chats" data-scope="input" data-part="input" value={st.q} onInput={(e: Event) => { st.q = (e.target as HTMLInputElement).value; }} />
             <Button intent="icon" icon="plus" label="New chat" onClick={() => emit('newChat')} />
         </div>
+        {props.projects?.length ? (
+            <div data-chat-project-filter>
+                <label data-visually-hidden for="chat-project-filter">Project</label>
+                <select id="chat-project-filter" data-scope="select" data-part="select" value={st.project} onChange={(e: Event) => { st.project = (e.target as HTMLSelectElement).value; }}>
+                    <option value="">All projects</option>
+                    {props.projects.map((p) => <option value={p.id}>{p.name}</option>)}
+                </select>
+            </div>
+        ) : null}
         <ul data-chat-rows>
-            {matchingChats(props.chats, st.q).map((chat) => (
+            {matchingChats(props.chats, st.q, st.project).map((chat) => (
                 <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined}>
                     <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined}>
                         <span data-chat-row-head>

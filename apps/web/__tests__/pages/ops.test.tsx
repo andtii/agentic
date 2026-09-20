@@ -134,7 +134,8 @@ describe('/plugins', () => {
     it('renders a card per plugin by kind, with readiness, granted scopes, dependents and the link to its page', async () => {
         const root = await mountAt('/plugins', <PluginsView plugins={opsPlugins} />);
         expect(root.querySelectorAll('[data-scope="ag-plugin-card"][data-part="root"]').length).toBe(opsPlugins.length);
-        expect([...root.querySelectorAll('[data-plugin-group]')].map(g => g.getAttribute('data-plugin-group'))).toEqual(['runtime:harness', 'runtime:model', 'connector', 'memory', 'learning', 'a2a']);
+        // The mock project feature (#333) groups under its own kind.
+        expect([...root.querySelectorAll('[data-plugin-group]')].map(g => g.getAttribute('data-plugin-group'))).toEqual(['runtime:harness', 'runtime:model', 'connector', 'memory', 'learning', 'a2a', 'project-feature']);
 
         const claude = card(root, 'claude-code');
         expect(claude.getAttribute('aria-label')).toBe('Claude Code');

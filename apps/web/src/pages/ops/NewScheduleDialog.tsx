@@ -14,6 +14,8 @@ export type NewScheduleDialogProps =
     & Define.Prop<'busy', boolean>
     /** Where an agent task's folder can be picked (#193); absent, the dialog asks for none. */
     & Define.Prop<'workdirs', WorkdirEnvironments>
+    /** The workspace's projects (#333): a third, exclusive way to say where an agent task runs; absent or empty, no option. */
+    & Define.Prop<'projects', readonly { value: string; label: string }[]>
     & Define.Event<'create', NewScheduleInput>
     & Define.Event<'cancel'>;
 
@@ -23,20 +25,33 @@ const KINDS: readonly { value: ScheduleKind; label: string }[] = [
     { value: 'agent-task', label: 'Agent task' }
 ];
 
+/** Where an agent task runs: in a project (its folder per environment), or on an environment with an optional folder. */
+type PlaceMode = 'environment' | 'project';
+
 /**
  * "New schedule" (AST-02): a reminder at a wall time on the workspace clock,
  * or a cron recurrence — plain to the inbox, or an agent task with a prompt
- * and an optional environment (AST-05). Confirming with a field missing
- * keeps the dialog open with the field marked.
+ * and an optional environment (AST-05), a folder in it (#193), or a project
+ * instead of both (#333: a project says where the work lives, so choosing
+ * one clears and disables the environment and the folder). Confirming with
+ * a field missing keeps the dialog open with the field marked.
  */
 export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emit }) => {
-    const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', prompt: '', attempted: false });
-    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, workdir: st.workdir, prompt: st.prompt });
-    // A folder belongs to its environment: choosing another one in the select drops it.
-    let picking = false;
-    watch(() => st.environmentId, () => { if (picking) picking = false; else st.workdir = ''; });
+    const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean; mode: PlaceMode; sync: 'none' | 'folder' }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', projectId: '', prompt: '', attempted: false, mode: 'environment', sync: 'none' });
+    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, workdir: st.workdir, projectId: st.projectId, prompt: st.prompt });
+    // A folder belongs to its environment: choosing another one in the select drops it — unless the folder picker itself set the environment (`sync`).
+    watch(() => st.environmentId, () => { if (st.sync === 'folder') st.sync = 'none'; else st.workdir = ''; });
+    // A project is exclusive with the environment and the folder (the actor refuses both): picking one clears them and the fields disable.
+    watch(() => st.projectId, (id) => {
+        st.mode = id ? 'project' : 'environment';
+        if (id) {
+            st.environmentId = '';
+            st.workdir = '';
+        }
+    });
     return () => {
         const errors: NewScheduleErrors = st.attempted ? validateNewSchedule(input(), props.timeZone) : {};
+        const inProject = st.mode === 'project';
         return (
             <ConfirmDialog
                 model={props.model}
@@ -61,7 +76,10 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
                     {st.kind === 'agent-task' ? (
                         <>
                             <SelectField model={() => st.agentId} name="schedule-agent" label="Agent" options={props.agents} placeholder="Pick an agent" required error={errors.agentId} />
-                            <SelectField model={() => st.environmentId} name="schedule-environment" label="Environment" options={[{ value: '', label: 'platform (no machine needed)' }, ...props.environments]} description="An offline machine queues the task until it returns." />
+                            {props.projects?.length ? (
+                                <SelectField model={() => st.projectId} name="schedule-project" label="Project" options={[{ value: '', label: 'No project' }, ...props.projects]} description="In a project, each run works in the project's folder on the environment it lands on." />
+                            ) : null}
+                            <SelectField model={() => st.environmentId} name="schedule-environment" label="Environment" options={[{ value: '', label: 'platform (no machine needed)' }, ...props.environments]} disabled={inProject} description={inProject ? 'The project says where the work lives.' : 'An offline machine queues the task until it returns.'} />
                             {props.workdirs ? (
                                 <WorkdirInput
                                     value={st.workdir && st.environmentId ? { environmentId: st.environmentId as EnvironmentId, path: st.workdir } : null}
@@ -69,11 +87,12 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
                                     machineOf={props.workdirs.machineOf}
                                     preferred={(st.environmentId || null) as EnvironmentId | null}
                                     label="Working folder"
-                                    description="Where each run works. Empty: the environment's first working root."
+                                    description={inProject ? "The project's folder for the environment." : "Where each run works. Empty: the environment's first working root."}
                                     name="schedule-workdir"
+                                    disabled={inProject}
                                     onChange={(ref) => {
                                         if (ref && ref.environmentId !== st.environmentId) {
-                                            picking = true;
+                                            st.sync = 'folder';
                                             st.environmentId = ref.environmentId;
                                         }
                                         st.workdir = ref?.path ?? '';

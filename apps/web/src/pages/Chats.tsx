@@ -3,7 +3,7 @@ import { Button } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
-import { AGENTS, loadChats } from '../mock/workspace';
+import { AGENTS, LAST_PROJECT_ID, PROJECTS, loadChats } from '../mock/workspace';
 import { ChatList } from './chat/ChatList';
 import { closeNewChat, newChatRequest, openNewChat } from './chat/head';
 import { LiveChats } from './chat/LiveChats';
@@ -20,8 +20,8 @@ export const Chats = component(() => {
     const chats = loadChats();
     return () => (dataMode() === 'live' ? <LiveChats /> : (
         <Page title="Chats" page="chats" hideTitle>
-            <ChatList chats={chats} wide />
-            <NewChatDialog model={() => newChatRequest.open} agents={AGENTS} environments={mockWorkdirEnvironments.list()} onCancel={closeNewChat} onCreate={closeNewChat} />
+            <ChatList chats={chats} wide projects={PROJECTS} />
+            <NewChatDialog model={() => newChatRequest.open} agents={AGENTS} environments={mockWorkdirEnvironments.list()} projects={PROJECTS} lastProjectId={LAST_PROJECT_ID} onCancel={closeNewChat} onCreate={closeNewChat} />
         </Page>
     ));
 });

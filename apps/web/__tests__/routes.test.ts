@@ -5,7 +5,7 @@ import { loadChat, loadSession, loadTask } from '../src/mock/workspace';
 
 /** The route skeleton docs/architecture.md §10 and issue #23 require. */
 const REQUIRED = [
-    '/', '/chats', '/chats/:id', '/agents', '/agents/:id', '/tasks', '/tasks/:id', '/sessions/:id',
+    '/', '/chats', '/chats/:id', '/projects', '/projects/new', '/projects/:id', '/agents', '/agents/:id', '/tasks', '/tasks/:id', '/sessions/:id',
     '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair', '/history', '/usage'
 ];
 
@@ -24,7 +24,7 @@ describe('route skeleton', () => {
     it('groups the nav as Primary and Workspace, with the Home badge counting what needs a person', () => {
         const groups = NAV_GROUPS();
         expect(groups.map(g => g.label)).toEqual(['Primary', 'Workspace']);
-        expect(groups[0]!.items.map(i => i.href)).toEqual(['/', '/chats', '/agents', '/machines', '/schedules']);
+        expect(groups[0]!.items.map(i => i.href)).toEqual(['/', '/chats', '/projects', '/agents', '/machines', '/schedules']);
         expect(groups[1]!.items.map(i => i.href)).toEqual(['/history', '/usage', '/plugins', '/settings']);
         expect(groups[0]!.items[0]!.badge).toBe(needsYouCount());
         // The shell passes the count it reads from "Needs you" (#151); nothing open draws no badge.
@@ -36,6 +36,20 @@ describe('route skeleton', () => {
     it('has a breadcrumb root for every named route, and the task crumb leads to the tasks list', () => {
         for (const r of routes) expect(CRUMBS[String(r.name)], String(r.name)).toBeDefined();
         expect(CRUMBS.task!.href).toBe('/tasks');
+        // The project pages crumb to the list (#333); `/projects/new` is declared before `/projects/:id`, so "new" is never an id.
+        expect(CRUMBS['project-new']!.href).toBe('/projects');
+        expect(CRUMBS.project!.href).toBe('/projects');
+        expect(routes.findIndex(r => r.path === '/projects/new')).toBeLessThan(routes.findIndex(r => r.path === '/projects/:id'));
+    });
+
+    it('resolves /projects/new as the New project route, not a project id (#333)', async () => {
+        const router = createServerRouter('/projects/new');
+        await router.isReady();
+        expect(router.currentRoute.name).toBe('project-new');
+        const edit = createServerRouter('/projects/p_agentic');
+        await edit.isReady();
+        expect(edit.currentRoute.name).toBe('project');
+        expect(edit.currentRoute.params.id).toBe('p_agentic');
     });
 
     it('serves History and Usage as real pages (#90)', async () => {

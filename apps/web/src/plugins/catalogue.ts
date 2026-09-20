@@ -35,6 +35,7 @@
  * the Registry on every request.
  */
 import { A2A_PEER_PREFIX, a2aPeerRuntime, a2aServerPlugin } from '@agentic/a2a';
+import type { ProjectFeaturePlugin } from '@agentic/core';
 import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
 import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInstanceRuntimes, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
@@ -98,3 +99,9 @@ export const learningCatalogue: Readonly<Record<string, LearningPluginImpl>> = {
 export const channelCatalogue: ChannelCatalogue = {
     [WEB_PUSH_PLUGIN_ID]: webPushChannelPlugin()
 };
+
+/**
+ * Project feature plugin id → its code half (#329): `detect` suggests the feature when a project folder is added,
+ * `beforeSession` / `instructions` run on the router. Empty until the git feature lands (#335).
+ */
+export const projectFeatureCatalogue: Readonly<Record<string, ProjectFeaturePlugin>> = {};

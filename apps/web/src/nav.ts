@@ -19,6 +19,7 @@ export const NAV_GROUPS = (badge: number = needsYouCount()): readonly NavGroup[]
         items: [
             { href: '/', label: 'Home', icon: 'home', badge },
             { href: '/chats', label: 'Chats', icon: 'chats' },
+            { href: '/projects', label: 'Projects', icon: 'folder' },
             { href: '/agents', label: 'Agents', icon: 'agents' },
             { href: '/machines', label: 'Machines', icon: 'machines' },
             { href: '/schedules', label: 'Schedules', icon: 'schedules' }

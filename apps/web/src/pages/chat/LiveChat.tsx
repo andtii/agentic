@@ -45,6 +45,7 @@ import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, d
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
+import { useProjects } from '../projects/live';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { previewable, readyParts, uploadChatFile, uploaded, type Upload } from './uploads';
 
@@ -70,6 +71,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const inbox = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
     const zone = useWorkspaceZone(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
+    // The chat's project (#333): its folder per environment is what a member without an override runs in.
+    const projects = useProjects(defs, viewer);
     const time = (at: number): string => zoneFormat(zone()).time(at);
 
     const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false });
@@ -120,7 +123,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const s = summary.value;
         const members = s ? membersOf(s, waitingAgents(history.value?.entries ?? []), workingAgents(index.value ?? [], props.id)) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
-        chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities };
+        chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities, ...(s?.project ? { project: s.project } : {}) };
     });
     onUnmounted(stopHead);
 
@@ -269,11 +272,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         closeChatSettings();
     });
 
-    const createChat = async (agentIds: readonly string[], coordinator: string | null): Promise<void> => {
+    const createChat = async (agentIds: readonly string[], coordinator: string | null, projectId: string | null): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) return;
         try {
-            const chatId = await createChatWith(defs, ws, agentIds, coordinator);
+            const chatId = await createChatWith(defs, ws, agentIds, coordinator, projectId);
             closeNewChat();
             await router.push(`/chats/${chatId}`);
         } catch (e) {
@@ -301,7 +304,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const members = s ? membersOf(s, waiting, workingAgents(index.value ?? [], props.id)) : [];
         const last = lastOf(entries, directory.lookup);
         // The open chat as a summary: nothing in it is unread — it is on screen.
-        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at };
+        const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at, ...(s?.projectId ? { projectId: s.projectId } : {}) };
+        const project = projects.byId(s?.projectId);
         const addressing = resolveAddressing(members, mentionsIn(st.draft, members, directory.lookup), directory.lookup);
         const mentions: Mention[] = members.map((m) => {
             const a = directory.lookup(m.agentId);
@@ -364,16 +368,16 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
                 {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} busy={st.saving} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
-                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator); }} />
+                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId); }} />
             </Page>
         );
     };
