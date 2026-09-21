@@ -19,6 +19,7 @@ import { buildStamp, protocolVersion, releaseTagFrom, stampFor } from '../script
 import { extractZip, readZip, writeZip } from '../scripts/lib/zip.mjs';
 import { packageDaemon, resolveClosure } from '../scripts/package.mjs';
 import { DAEMON_PROTOCOL_VERSION, type ReleaseManifest } from '@agentic/core';
+import { SUPERVISOR_VERSION } from '../scripts/supervise.mjs';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const built = existsSync(join(DAEMON_DIR, 'dist', 'cli.js')) && existsSync(join(DAEMON_DIR, '../../packages/runtimes/dist/index.js'));
@@ -192,7 +193,7 @@ describe('installer', () => {
 
             const unpacked = join(dir, 'unpacked');
             const files = extractZip(result.zipFile, unpacked);
-            for (const f of ['README.md', 'install.ps1', 'uninstall.ps1', 'install.sh', 'uninstall.sh', 'package.json', 'bin/agentic-daemon.mjs', 'dist/cli.js', 'scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh', 'node_modules/@agentic/core/package.json', 'node_modules/@agentic/runtimes/dist/index.js', 'node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs']) {
+            for (const f of ['README.md', 'install.ps1', 'uninstall.ps1', 'install.sh', 'uninstall.sh', 'package.json', 'bin/agentic-daemon.mjs', 'dist/cli.js', 'scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh', 'scripts/supervise.mjs', 'node_modules/@agentic/core/package.json', 'node_modules/@agentic/runtimes/dist/index.js', 'node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs']) {
                 expect(files, f).toContain(f);
             }
             // Windows PowerShell 5.1 reads a BOM-less script as ANSI: a non-ASCII byte can become a smart quote and break the parse.
@@ -219,6 +220,11 @@ describe('installer', () => {
             expect(version.stderr).toBe('');
             expect(version.status).toBe(0);
             expect(version.stdout.trim()).toBe(`agentic-daemon ${stamp.version} (${stamp.commit}, protocol ${DAEMON_PROTOCOL_VERSION}, ${stamp.channel})`);
+
+            // The supervisor (#362) runs on its own: node builtins only, from a folder with no node_modules.
+            const supervisor = spawnSync(process.execPath, [join(unpacked, 'scripts', 'supervise.mjs'), '--version'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH ?? '' } });
+            expect(supervisor.status, supervisor.stderr).toBe(0);
+            expect(supervisor.stdout.trim()).toBe(`agentic-supervisor ${SUPERVISOR_VERSION}`);
 
             // `doctor` on an unpaired home: the whole closure loads (drivers, runtimes, the SDK), the verdict is "not paired".
             const doctor = run(['doctor']);

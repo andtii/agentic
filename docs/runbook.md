@@ -285,6 +285,7 @@ From a terminal inside a repo under one of the machine's working roots, `agentic
 node "$env:LOCALAPPDATA\agentic\daemon\bin\agentic-daemon.mjs" doctor       # exit 1 on any error; the token is never printed
 Get-ScheduledTask -TaskName agentic-daemon | Get-ScheduledTaskInfo         # LastRunTime, LastTaskResult
 Get-Content -Wait "$env:LOCALAPPDATA\agentic\logs\daemon.log"              # JSON lines; redacted of the token
+Get-Content "$env:LOCALAPPDATA\agentic\state\supervisor.log" -Tail 20       # every daemon exit, restart, update, rollback
 Stop-ScheduledTask -TaskName agentic-daemon; Start-ScheduledTask -TaskName agentic-daemon
 ```
 ```sh
@@ -295,7 +296,21 @@ tail -f ~/Library/Application\ Support/agentic/logs/daemon.log
 launchctl kickstart -k gui/$(id -u)/agentic-daemon
 # Linux
 systemctl --user status agentic-daemon; tail -f ~/.local/state/agentic/logs/daemon.log; systemctl --user restart agentic-daemon
+# both
+tail -20 ~/.agentic/state/supervisor.log
 ```
+
+**The supervisor (#362).** The service does not run the daemon directly: it runs `node <root>/supervisor/supervise.mjs --root <root>` (`<root>` is the install root below; `apps/daemon/scripts/supervise.mjs`, copied out of the daemon folder at install so an update never replaces it). One long-running task / agent / unit is the supervisor; the daemon is its child. On a daemon exit:
+
+- `0` (the daemon was stopped) → the supervisor stops too; launchd `KeepAlive` and systemd `Restart=always` start it again after 60 s, the Windows task ends until the next logon or `Start-ScheduledTask`.
+- `75` → apply the staged update: `daemon.staged` becomes `daemon`, the old one is kept as `daemon.prev` (no staged folder: a plain restart). Staging the update is the update client's job, not the supervisor's.
+- anything else (a crash, `not paired`, a bad `environments.json`) → restart after 1 s, doubling to 60 s, back to 1 s after 5 minutes up. Killing the daemon process is the quick check: it is back within the backoff.
+
+A swapped-in version must write `state/ready` (after its first `welcome` from the platform) within 90 s and must not exit twice within 2 minutes. Otherwise the supervisor **rolls back**: `daemon` → `daemon.failed` (deleted), `daemon.prev` → `daemon`, and writes `state/update-failed.json` `{ from, to, at, reason }` (`not-ready`, `crashed`, or `swap-failed: …` when a folder could not be renamed). To read a rollback: `update-failed.json` names the versions and why; `supervisor.log` has the timeline (`applying the staged update`, `daemon exited` with code and uptime, `rolling back`); `daemon.log` has the failed version's own lines up to its `daemon: exiting`.
+
+Every exit of `run` logs one `daemon: exiting` line with `reason` — `signal`, `stop`, `update`, `uncaught`, `unhandled-rejection`, `config` (not paired, a bad flag or file) or `error` — and `code`; an uncaught exception or unhandled rejection also logs its stack and exits 1 (#353). No such line before an exit means the process was killed from outside; `state/supervisor.json` still records it as `lastExit { at, code, signal }` next to `restarts`, and the daemon logs that file and `update-failed.json` as `supervisor state` when it starts. On Windows `Stop-ScheduledTask` ends the supervisor without a signal, so a stop there is abrupt (the platform treats it like a dropped connection).
+
+Machines installed before the supervisor ran `node bin/agentic-daemon.mjs run` directly (through `cmd.exe` on Windows); re-running the install line (5.5) or `scripts/install-service.*` replaces that action with the supervisor.
 
 | File | Windows | macOS | Linux |
 |---|---|---|---|
@@ -303,8 +318,10 @@ systemctl --user status agentic-daemon; tail -f ~/.local/state/agentic/logs/daem
 | session logs `{sessionId}.ndjson` (gapless replay after a reconnect) | `%LOCALAPPDATA%\agentic\sessions` | `~/Library/Application Support/agentic/sessions` | `~/.local/state/agentic/sessions` |
 | `daemon.log` | `%LOCALAPPDATA%\agentic\logs` | `~/Library/Application Support/agentic/logs` | `~/.local/state/agentic/logs` |
 | the install (the zip, and `node/` when downloaded) | `%LOCALAPPDATA%\agentic\daemon` | `~/.agentic/daemon` | `~/.agentic/daemon` |
+| the supervisor (`supervise.mjs`) | `%LOCALAPPDATA%\agentic\supervisor` | `~/.agentic/supervisor` | `~/.agentic/supervisor` |
+| supervisor state: `ready`, `supervisor.json`, `update-failed.json`, `supervisor.log` | `%LOCALAPPDATA%\agentic\state` | `~/.agentic/state` | `~/.agentic/state` |
 
-`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (the service scripts pass it on).
+`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (the service scripts pass it on). `AGENTIC_INSTALL_DIR=<dir>` moves the install root (`daemon/`, `node/`, `bin/`, `supervisor/`, `state/`); the supervisor passes it to the daemon it runs.
 
 ### 5.5 Upgrade and uninstall
 

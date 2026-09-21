@@ -136,6 +136,8 @@ export interface DaemonOptions {
      * to a `history.request` (and to a reconnect's `wanted` cursor) — never silence.
      */
     readonly retention?: Partial<RetentionPolicy>;
+    /** Called after every `welcome` from the platform (the CLI writes the supervisor's `ready` marker on the first, #362). */
+    readonly onWelcome?: () => void;
 }
 
 export interface Daemon {
@@ -460,6 +462,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             heartbeat = setInterval(() => send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] }), heartbeatMs);
         }
         quota.welcomed();
+        options.onWelcome?.();
     }
 
     // ---------------------------------------------------------------- sessions

@@ -92,15 +92,17 @@ pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-d
 ### Run in the background
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # Windows: a per-user Scheduled Task — at logon, restarted on exit
+powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1     # Windows: a per-user Scheduled Task — at logon, under the supervisor
 powershell -ExecutionPolicy Bypass -File scripts\uninstall-service.ps1
 ```
 ```sh
-sh scripts/install-service.sh [--node <path>]                            # macOS: a launchd agent (KeepAlive); Linux: a systemd user unit (Restart=always)
+sh scripts/install-service.sh [--node <path>]                            # macOS: a launchd agent (KeepAlive); Linux: a systemd user unit (Restart=always); both run the supervisor
 sh scripts/uninstall-service.sh
 ```
 
 Never a system service: the token and each `CLAUDE_CONFIG_DIR` belong to the signed-in user. Output goes to `daemon.log` under the state directory (`%LOCALAPPDATA%\agentic\logs`, `~/Library/Application Support/agentic/logs`, `~/.local/state/agentic/logs`).
+
+The service runs the **supervisor** (`scripts/supervise.mjs`, #362), copied to `<install root>/supervisor/` (`%LOCALAPPDATA%\agentic`, `~/.agentic`, or `AGENTIC_INSTALL_DIR`) so an update of `<root>/daemon` never replaces it. It runs `agentic-daemon run` and on its exit: `0` → stops; `75` → swaps a staged update in (`daemon.staged` → `daemon`, the old one kept as `daemon.prev`); anything else → restarts after a backoff (1 s doubling to 60 s). A swapped-in version that does not write `state/ready` (after its first `welcome`) within 90 s, or exits twice within 2 minutes, is rolled back and `state/update-failed.json` says why. `state/supervisor.json` holds `restarts` and `lastExit`; `state/supervisor.log` every exit, restart and swap. `run` logs `daemon: exiting { reason, code }` on every exit (`signal`, `stop`, `update`, `uncaught`, `unhandled-rejection`, `config`, `error`). Re-running `install-service.*` on an older install replaces its `node bin/agentic-daemon.mjs run` action. `docs/runbook.md` §5.4 has how to read a rollback.
 
 ## How it works
 
