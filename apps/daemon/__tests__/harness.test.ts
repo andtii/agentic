@@ -91,6 +91,10 @@ describe('harness store', () => {
         expect(await code(store().stage('other', good.target))).toBe('invalid-package');
         expect(await code(store().stage('fake', { ...good.target, version: '9.9.9' }))).toBe('invalid-package');
         expect(await code(store().stage('fake', (await publish('fake', '1.3.0', { manifest: { platform: 'plan9-mips' } })).target))).toBe('invalid-package');
+        // An executable named outside the package, the Windows way or the POSIX way.
+        for (const [version, binary] of [['1.4.0', 'C:/Windows/notepad.exe'], ['1.5.0', 'node_modules\\..\\..\\x'], ['1.6.0', 'node_modules/./x']] as const) {
+            expect(await code(store().stage('fake', (await publish('fake', version, { manifest: { binary } })).target)), binary).toBe('invalid-package');
+        }
         expect(await code(store().stage('../up', good.target))).toBe('invalid');
         // Outside tests a harness comes over https: only, like an update.
         expect(await code(harnessStore({ root, bundled: false }).stage('fake', good.target))).toBe('invalid');
@@ -107,6 +111,8 @@ describe('harness store', () => {
         const v1 = await publish('fake', '1.0.0');
         await store().stage('fake', v1.target);
         expect(store().state('fake').status).toBe('ready');
+        // The install root carried to a machine of another platform.
+        expect(harnessStore({ root, bundled: false, platform: 'plan9-mips' }).state('fake')).toMatchObject({ status: 'broken', problem: expect.stringMatching(/is built for .*, this machine is plan9-mips$/) });
         await rm(join(root, 'fake', '1.0.0', ...v1.binary.split('/')));
         expect(store().state('fake')).toMatchObject({ status: 'broken', problem: expect.stringMatching(/missing/) });
         await writeFile(join(root, 'fake', 'current.json'), 'not json');

@@ -238,7 +238,8 @@ export function parseHarnessManifest(value: unknown): HarnessPackageManifest | s
     if (typeof runtime !== 'string' || !isRuntimeId(runtime)) return 'manifest.json names no runtime';
     if (typeof version !== 'string' || !isHarnessVersion(version)) return 'manifest.json names no version';
     if (typeof platform !== 'string') return 'manifest.json names no platform';
-    if (typeof binary !== 'string' || binary.startsWith('/') || binary.split('/').some((p) => p === '..' || p === '')) return 'manifest.json names no executable inside the package';
+    // Relative, `/`-separated, and nothing a Windows path could read as a drive, a root or a separator.
+    if (typeof binary !== 'string' || binary.startsWith('/') || /[\\:]/.test(binary) || binary.split('/').some((p) => p === '..' || p === '.' || p === '')) return 'manifest.json names no executable inside the package';
     if (!Array.isArray(packages) || !packages.every((p) => typeof p === 'string')) return 'manifest.json lists no packages';
     if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) return 'manifest.json has no tree digest';
     return { runtime, version, platform, binary, packages: packages as string[], sha256 };
@@ -283,6 +284,16 @@ export async function treeHashOf(dir: string): Promise<string> {
     return tree.digest('hex');
 }
 
+/** What one harness package may unpack to: several times the largest (Codex, ~390 MB), far below what would exhaust a machine. */
+export const MAX_UNPACKED_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** `binary` of a package's manifest under `dir`, or `undefined` when it would resolve outside it. */
+function binaryIn(dir: string, binary: string): string | undefined {
+    const root = resolve(dir);
+    const path = resolve(root, ...binary.split('/'));
+    return path.startsWith(root + sep) ? path : undefined;
+}
+
 const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
@@ -304,6 +315,8 @@ export async function extractZipFile(file: string, dir: string): Promise<number>
     if (eocd < 0) throw new HarnessError('invalid-package', 'the download is not a zip');
     const root = resolve(dir);
     const count = buf.readUInt16LE(eocd + 10);
+    // Every entry inflates to no more than it declares, and all of them together to no more than MAX_UNPACKED_BYTES.
+    let unpacked = 0;
     let pos = buf.readUInt32LE(eocd + 16);
     for (let n = 0; n < count; n++) {
         if (buf.readUInt32LE(pos) !== CENTRAL) throw new HarnessError('invalid-package', 'the zip has a broken central directory');
@@ -326,7 +339,14 @@ export async function extractZipFile(file: string, dir: string): Promise<number>
         if (buf.readUInt32LE(local) !== LOCAL) throw new HarnessError('invalid-package', `the zip entry ${name} has no local header`);
         const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
         const data = buf.subarray(start, start + compressed);
-        const raw = method === 0 ? data : method === 8 ? inflateRawSync(data) : undefined;
+        unpacked += size;
+        if (unpacked > MAX_UNPACKED_BYTES) throw new HarnessError('invalid-package', `the zip unpacks to more than ${MAX_UNPACKED_BYTES} bytes`);
+        let raw: Buffer | undefined;
+        try {
+            raw = method === 0 ? data : method === 8 ? inflateRawSync(data, { maxOutputLength: Math.max(1, size) }) : undefined;
+        } catch (e) {
+            throw new HarnessError('invalid-package', `the zip entry ${name} does not inflate to its size: ${(e as Error).message}`);
+        }
         if (!raw) throw new HarnessError('invalid-package', `the zip entry ${name} uses method ${method}`);
         if (raw.length !== size) throw new HarnessError('invalid-package', `the zip entry ${name} is truncated`);
         await mkdir(dirname(target), { recursive: true });
@@ -385,8 +405,10 @@ export function harnessStore(options: HarnessStoreOptions): HarnessStore {
         const manifest = readManifestSync(dir);
         if (typeof manifest === 'string') return broken(manifest);
         if (manifest.runtime !== runtime || manifest.version !== current.version) return broken(`${dir} holds ${manifest.runtime} ${manifest.version}`);
-        const binary = join(dir, ...manifest.binary.split('/'));
-        if (!existsSync(binary)) return broken(`${binary} is missing`);
+        // An install root carried to another machine: its executables are not this platform's.
+        if (manifest.platform !== platform) return broken(`${dir} is built for ${manifest.platform}, this machine is ${platform}`);
+        const binary = binaryIn(dir, manifest.binary);
+        if (!binary || !existsSync(binary)) return broken(`${join(dir, ...manifest.binary.split('/'))} is missing`);
         return { status: 'ready', location: { runtime, version: current.version, dir, binary, source: 'store', installedAt: current.installedAt } };
     };
 
@@ -431,7 +453,8 @@ export function harnessStore(options: HarnessStoreOptions): HarnessStore {
                 if (manifest.version !== asset.version) throw new HarnessError('invalid-package', `the package is ${manifest.version}, the release names ${asset.version}`);
                 if (manifest.platform !== platform) throw new HarnessError('invalid-package', `the package is for ${manifest.platform}, this machine is ${platform}`);
                 if ((await treeHashOf(staging)) !== manifest.sha256) throw new HarnessError('checksum', 'the unpacked files do not match the package manifest');
-                if (!existsSync(join(staging, ...manifest.binary.split('/')))) throw new HarnessError('invalid-package', `the package has no ${manifest.binary}`);
+                const binary = binaryIn(staging, manifest.binary);
+                if (!binary || !existsSync(binary)) throw new HarnessError('invalid-package', `the package has no ${manifest.binary}`);
                 // A leftover of the same version (never the current one: that returned above, or it is broken).
                 await rm(dir, { recursive: true, force: true });
                 await rename(staging, dir);
