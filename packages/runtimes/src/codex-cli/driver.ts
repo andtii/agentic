@@ -88,6 +88,10 @@ export function codexCliDriver(options: CodexCliDriverOptions = {}): CodexCliDri
         if (connection.pid === undefined) return connection;
         const pid = connection.pid;
         serverPids.set(env.id, pid);
+        // The app-server may go on its own (a crash): its pid is forgotten with the peer, not only on our close.
+        void connection.peer.closed.then(() => {
+            if (serverPids.get(env.id) === pid) serverPids.delete(env.id);
+        });
         return {
             ...connection,
             close: async () => {
