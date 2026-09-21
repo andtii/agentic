@@ -9,7 +9,7 @@
  * (`methodReentrancy`) and copy what they need before their first `await`.
  */
 
-import { defineActor, topic, type ActorContext, type Topic, type TopicEvent } from '@sigx/actors';
+import { defineActor, topic, type ActorContext, type AnyActorDefinition, type Topic, type TopicEvent } from '@sigx/actors';
 import {
     CHAT_FILE_MAX_BYTES,
     CHAT_FILE_SCHEME,
@@ -36,6 +36,7 @@ import {
     type ProjectId,
     type PromptPart,
     type SessionEvent,
+    type SessionId,
     type TaskId,
     type WorkdirRef,
     type WorkspaceId
@@ -43,6 +44,7 @@ import {
 import { ServerFnError } from '@sigx/server';
 import { recordAudit } from '../audit/port.js';
 import { sameWorkspace, workspaceKey } from '../auth/index.js';
+import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import { ChatPage, pageKey } from './page.js';
 import { appendEntry } from './persist.js';
@@ -136,6 +138,11 @@ const MAX_LIMIT = 200;
 const clampLimit = (limit: number): number => Math.min(MAX_LIMIT, Math.max(1, Math.floor(limit) || DEFAULT_LIMIT));
 
 const principalOf = (ctx: ActorContext<ChatState>): Principal | null => (ctx.principal as Principal | null | undefined) ?? null;
+
+/** The slice of the Routing actor a removal reaches (`defineRoutingActor`, #399), one-way. */
+interface RoutingClient {
+    endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<void>;
+}
 
 /** Users and external clients post as the workspace user; an agent posts as itself. */
 const authorOf = (principal: Principal): Author =>
@@ -315,12 +322,20 @@ export interface ChatOptions {
      * sweep keeps it. Absent: `registerUpload` and a `post` of a pending upload answer 501 — a host without a store takes no uploads.
      */
     readonly files?: ChatFileStore;
+    /**
+     * The Routing actor definition (`defineRoutingActor`), as a thunk like
+     * `MachinePorts.routing`. When set, `removeAgent` tells the router — one-way,
+     * as the caller — to end the session the chat bound to the leaving member
+     * (`Routing.endSession`, #399), so removal ends the agent's session for
+     * that chat (§6). Absent: the binding is dropped and the session lives on.
+     */
+    readonly routing?: () => AnyActorDefinition;
 }
 
 /**
  * Build the Chat actor over its ports. `Chat` is the definition without a
- * file store; an app with one registers `defineChatActor({ files })` in
- * its place (the actor type is `'Chat'` either way, so every `actor(Chat, …)`
+ * file store or a router; an app with them registers `defineChatActor({ files, routing })`
+ * in its place (the actor type is `'Chat'` either way, so every `actor(Chat, …)`
  * client reaches the registered one).
  */
 export function defineChatActor(ports: ChatOptions = {}) {
@@ -393,12 +408,24 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 return ctx.snapshot(ctx.state.members[agentId]!);
             },
 
-            /** Remove an agent; also drops its active session and, if it was the coordinator, the coordinator. */
+            /**
+             * Remove an agent: the entry drops its membership, its session binding and, if it was the coordinator,
+             * the coordinator. The session itself is ended by the router (#399, `ChatOptions.routing`) — told one-way
+             * with the id the binding held, since the entry has just dropped it, and after the entry so a fresh
+             * activation can never rebind the leaving member.
+             */
             async removeAgent(agentId: AgentId): Promise<boolean> {
                 const member = ctx.state.members[agentId];
                 if (!member) return false;
+                const bound = ctx.state.sessions[agentId]?.sessionId;
                 await archive(ctx);
                 await appendEntry(ctx, { t: 'member', op: 'remove', agentId, historyAccess: member.historyFrom === 0 ? 'all' : 'from-now', at: Date.now() });
+                const routing = bound !== undefined ? ports.routing?.() : undefined;
+                if (routing && bound !== undefined) {
+                    const chatId = chatIdOfKey(ctx.key);
+                    const router = ctx.actor(routing, routingKey(workspaceOfKey(ctx.key) as WorkspaceId)).with({ oneWay: true }) as unknown as RoutingClient;
+                    await router.endSession(chatId, agentId, `${agentId} was removed from chat ${chatId}`, bound).catch(() => undefined);
+                }
                 return true;
             },
 
@@ -600,6 +627,10 @@ export function defineChatActor(ports: ChatOptions = {}) {
                         // A failure names its task and says why (OPS-04); `parseSessionEvent` checked both.
                         await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: 'task-failed', ref: e.ref as TaskId, error: e.error!, at: e.at });
                     } else {
+                        // The binding names the member's live session (#392): the end of any other — a replaced session's late
+                        // ack, a second word of the same end (#399) — is no news for this chat and is not written, so it can
+                        // never drop the row of the session that took its place.
+                        if (e.status === 'session-ended' && ctx.state.sessions[e.agentId]?.sessionId !== e.sessionId) return;
                         await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
                     }
                 } else {

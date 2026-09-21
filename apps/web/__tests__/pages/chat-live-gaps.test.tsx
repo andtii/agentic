@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { AgentId, MessageId, TaskId } from '@agentic/core';
-import { AgentActor, Chat, TaskActor, Workspace, agentKey, taskKey, workspaceKey } from '@agentic/platform';
+import { AgentActor, Chat, TaskActor, Workspace, agentKey, taskKey, workspaceKey, type ActorRecordRef, type WorkspaceStore } from '@agentic/platform';
 import { chatKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { chatHead, chatSearchRequest, chatSettingsRequest, openChatSettings, toggleChatSearch } from '../../src/pages/chat/head';
@@ -15,14 +15,28 @@ import { buttonNamed, setText } from './helpers';
 import { USER, WS, mountLive, owner, startLive, texts, until, type LiveHarness } from './live-harness';
 
 let h: LiveHarness;
+/** What "New session" purges (#399): the app-level store over the harness storage — deactivate, then clear the record. */
+let purged: ActorRecordRef[];
+const store: WorkspaceStore = {
+    async purge(ref) {
+        purged.push(ref);
+        await h.app.host.deactivate(ref);
+        const record = await h.app.storage.load(ref.type, ref.key);
+        if (record) await h.app.storage.clear(ref.type, ref.key, record.etag);
+    }
+};
 beforeEach(async () => {
-    h = await startLive({
-        respond: (input) => {
-            const text = input.map((p) => (p.type === 'text' ? p.text : '')).join('');
-            if (text.startsWith('push')) return [{ tool: { name: 'push', category: 'destructive', input: { cmd: 'git push' }, output: 'ok', permissionKey: 'push:origin' } }, { text: 'pushed' }];
-            return [{ text: `echo: ${text}` }];
-        }
-    });
+    purged = [];
+    h = await startLive(
+        {
+            respond: (input) => {
+                const text = input.map((p) => (p.type === 'text' ? p.text : '')).join('');
+                if (text.startsWith('push')) return [{ tool: { name: 'push', category: 'destructive', input: { cmd: 'git push' }, output: 'ok', permissionKey: 'push:origin' } }, { text: 'pushed' }];
+                return [{ text: `echo: ${text}` }];
+            }
+        },
+        { store }
+    );
 });
 afterEach(async () => {
     await h.stop();
@@ -225,6 +239,41 @@ describe('search and settings (live)', () => {
         await until(() => texts(panel(dom).querySelectorAll('[data-member-name]')).join() === 'Forge', 'the panel to follow');
         expect(texts(panel(dom).querySelectorAll('[data-member-history]'))).toEqual(['Coordinator · sees all history']);
     });
+});
+
+describe('New session (live, #399)', () => {
+    it('ends the member’s session from the panel after a confirmation: the binding drops, the record goes, the thread narrates none of it, and the next message opens a fresh session', async () => {
+        const { chatId, chat, atlas } = await seedChat();
+        const { task } = await runTask(chatId, atlas, 'hello');
+        await until(async () => (await task.get()).status === 'completed', 'the first answer');
+        const sid = (await task.get()).sessionId!;
+        await until(async () => (await chat.get()).sessions[atlas]?.sessionId === sid, 'the binding');
+        const dom = await mountLive(`/chats/${chatId}`, h);
+        await until(() => panel(dom).querySelectorAll('[data-member-reset]').length === 2, 'the members, each with New session');
+        await until(() => texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]')).includes('echo: hello'), 'the answer in the thread');
+        // The thread shows the answer and no session bookkeeping around it.
+        expect(texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]'))).toEqual(['echo: hello']);
+
+        panel(dom).querySelector<HTMLButtonElement>('[data-member-reset][aria-label="New session for Atlas"]')!.click();
+        // The open one among the panel's dialogs, all in the DOM closed from the start (signalxjs/zero#102).
+        await until(() => [...document.querySelectorAll<HTMLDialogElement>('dialog')].some((d) => (d.open || d.hasAttribute('open')) && d.textContent?.includes('Start a new session for Atlas?') === true), 'the confirm dialog');
+        [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'New session' && !b.hasAttribute('data-member-reset'))!.click();
+
+        await until(async () => (await chat.get()).sessions[atlas] === undefined, 'the binding to drop');
+        await until(async () => (await h.app.storage.load('session', `${USER}:session:${sid}`)) === null, 'the record to go');
+        expect(purged.map((r) => `${r.type} ${r.key}`)).toEqual([`session ${USER}:session:${sid}`]);
+        expect(dom.querySelector('[data-chat-error]')?.textContent ?? '').toBe('');
+        // Still no session rows, and the answer is still there: the chat's history is untouched.
+        expect(texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]'))).toEqual(['echo: hello']);
+
+        // The next message runs in a fresh session; the chat keeps both answers.
+        const { task: next } = await runTask(chatId, atlas, 'again');
+        await until(async () => (await next.get()).status === 'completed', 'the second answer');
+        expect((await next.get()).sessionId).not.toBe(sid);
+        await until(async () => (await chat.get()).sessions[atlas]?.sessionId === (await next.get()).sessionId, 'the fresh binding');
+        await until(() => texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]')).length === 2, 'the second answer in the thread');
+        expect(texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]'))).toEqual(['echo: hello', 'echo: again']);
+    }, 20_000);
 });
 
 describe('the chat list search box', () => {

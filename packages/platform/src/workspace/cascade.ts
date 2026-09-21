@@ -14,13 +14,17 @@
  *
  * Delete: every child record the index and `store.list` know is purged
  * through the `WorkspaceStore` port, children first, the Workspace record
- * last (`clearState`). What is outside the platform's reach is listed in
- * `docs/retention.md`. Chat attachments (#203) go first, a chat at a time,
- * through the `ChatFileStore` (`deleteChat`), while the index still names
- * the chats — a retry after a failure finds them again.
+ * last (`clearState`). A chat's live sessions are reached through its
+ * binding (`ChatSummary.sessions`, #399): each session record and every one
+ * of its pages (`SessionInfo.pages`) is purged with the chat, so a deleted
+ * workspace leaves no session behind even on a storage that cannot list.
+ * What is outside the platform's reach is listed in `docs/retention.md`.
+ * Chat attachments (#203) go first, a chat at a time, through the
+ * `ChatFileStore` (`deleteChat`), while the index still names the chats — a
+ * retry after a failure finds them again.
  */
 
-import type { AgentId, ChatFileStore, ChatId, MemoryScope, Principal, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, MemoryScope, Principal, ScheduleId, SessionId, WorkspaceId } from '@agentic/core';
 import { actor, type ActorTaskContext, type AnyActorDefinition } from '@sigx/actors';
 import { AgentActor, agentKey } from '../agent/index.js';
 import { asPrincipal } from '../auth/index.js';
@@ -30,7 +34,7 @@ import { FlatMemory, Memory, memoryActorKey } from '../memory/index.js';
 import { Inbox, inboxKey } from '../notify/index.js';
 import { Registry, registryKey } from '../registry/index.js';
 import { defineScheduleActor } from '../schedule/index.js';
-import { defineSessionActor } from '../session/index.js';
+import { defineSessionActor, SESSION_PAGE_TYPE, sessionPageKey } from '../session/index.js';
 import { TaskActor } from '../task/index.js';
 import type { ActorRecordRef, ArtifactSink, WorkspaceStore } from './ports.js';
 import type { WorkspaceState } from './index.js';
@@ -244,12 +248,27 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
     for (const id of snap.chats) {
         const key = `${ws}:chat:${id as ChatId}`;
         let seq = 0;
+        let sessions: readonly SessionId[] = [];
         try {
-            seq = (await as(Chat, key).get()).seq;
+            const summary = await as(Chat, key).get();
+            seq = summary.seq;
+            sessions = Object.values(summary.sessions).map((row) => row.sessionId);
         } catch {
             // Unreadable chat: purge the record and page 0 anyway.
         }
         for (let page = 0; page <= Math.floor(seq / PAGE); page++) add('ChatPage', pageKey(key, page));
+        // The chat's live sessions (#399): the record and its pages, which nothing else indexes.
+        for (const sessionId of sessions) {
+            const sessionKey = `${ws}:session:${sessionId}`;
+            let pages = 0;
+            try {
+                pages = (await as(SessionRef, sessionKey).get()).pages;
+            } catch {
+                // Unreadable session: purge the record anyway; its pages, if any, are unreachable without it.
+            }
+            for (let page = 0; page < pages; page++) add(SESSION_PAGE_TYPE, sessionPageKey(sessionKey, page));
+            add(SessionRef.type, sessionKey);
+        }
         add(Chat.type, key);
     }
     for (const id of snap.schedules) add('Schedule', `${ws}:schedule:${id as ScheduleId}`);

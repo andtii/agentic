@@ -1,6 +1,6 @@
 /** The live chat's pure view model (#34): entries → rows, summaries, composition, addressing, activation, the session wire adapter. */
 import { describe, it, expect } from 'vitest';
-import type { AgentId, ChatId, MessageId, ProjectId } from '@agentic/core';
+import type { AgentId, ChatId, MessageId, ProjectId, TaskId } from '@agentic/core';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { createTranscript } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -75,17 +75,22 @@ describe('members and rows', () => {
 });
 
 describe('the transcript', () => {
-    it('turns messages and status entries into attributed rows, membership into none', () => {
-        const t = entryTranscript(entries, lookup, 'Andii');
+    it('turns messages and status entries into attributed rows — the session bookkeeping into none (#399), membership into none', () => {
+        const ended: IndexedEntry = { seq: 5, entry: { t: 'status', agentId: 'a1' as AgentId, kind: 'session-ended', ref: 's9', at: 4500 } };
+        const failed: IndexedEntry = { seq: 6, entry: { t: 'status', agentId: 'a1' as AgentId, kind: 'task-failed', ref: 't1' as TaskId, error: { code: 'turn-error', message: 'boom', recoverable: false }, at: 5000 } };
+        const t = entryTranscript([...entries, ended, failed], lookup, 'Andii');
+        // A session begins once per member and ends when someone means it to: neither is a row.
         expect(t.messages.map((m) => [m.id, m.role, m.actor ?? m.author])).toEqual([
             ['m1', 'user', 'Andii'],
-            ['status:3', 'assistant', 'a1'],
-            ['m2', 'assistant', 'a1']
+            ['m2', 'assistant', 'a1'],
+            ['status:6', 'assistant', 'a1']
         ]);
-        expect(t.messages[1]!.parts).toEqual([{ type: 'text', id: 'status:3:0', text: '*started a session*' }]);
-        expect(t.messages[2]!.parts.map((p) => (p as { text: string }).text)).toEqual(['hello', '[image]']);
+        expect(t.messages[1]!.parts.map((p) => (p as { text: string }).text)).toEqual(['hello', '[image]']);
+        expect(t.messages[2]!.parts).toEqual([{ type: 'text', id: 'status:6:0', text: '*could not finish: turn-error — boom*' }]);
         expect(t.authors.m1).toMatchObject({ name: 'Andii', person: true, time: { dateTime: new Date(2000).toISOString() } });
         expect(t.authors.m2).toMatchObject({ name: 'Atlas', hue: 1, environment: atlas.environment });
+        expect(t.authors['status:3']).toBeUndefined();
+        expect(t.authors['status:5']).toBeUndefined();
     });
 
     it('takes a session’s assistant rows only while it is mid-turn, and composes state and requests in place', () => {
@@ -101,7 +106,7 @@ describe('the transcript', () => {
         expect(inFlightMessages(session).map((m) => m.id)).toEqual(['x']);
         const target = chatTranscript('chat');
         const authors = composeTranscript(target, entryTranscript(entries, lookup), [{ sessionId: 's9', agentId: 'a1', transcript: session }], lookup);
-        expect(target.messages.map((m) => m.id)).toEqual(['m1', 'status:3', 'm2', 'x']);
+        expect(target.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'x']);
         expect(target.state).toBe('running');
         expect(Object.keys(target.requests)).toEqual(['r1']);
         expect(authors.x).toMatchObject({ name: 'Atlas', hue: 1 });
@@ -110,7 +115,7 @@ describe('the transcript', () => {
         expect(target.state).toBe('awaiting');
         session.state = 'idle';
         composeTranscript(target, entryTranscript(entries, lookup), [{ sessionId: 's9', agentId: 'a1', transcript: session }], lookup);
-        expect(target.messages.map((m) => m.id)).toEqual(['m1', 'status:3', 'm2']);
+        expect(target.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
         expect(target.state).toBe('idle');
     });
 });
@@ -274,7 +279,7 @@ describe('the session wire over the actor', () => {
         const sent: string[] = [];
         const reply = (commandId: string): WireReply => ({ v: WIRE_PROTOCOL_VERSION, kind: 'ack', commandId });
         const client: SessionActorClient = {
-            get: async () => ({ key: 'u1:session:s1', opened: true, spec: { agentId: 'a1' as AgentId, runtime: 'anthropic-api', config: {} as never }, status: 'running', head: { epoch: 1, seq: 2 }, openRequests: [], eventCount: 2, corrections: [], grants: [] }),
+            get: async () => ({ key: 'u1:session:s1', opened: true, spec: { agentId: 'a1' as AgentId, runtime: 'anthropic-api', config: {} as never }, status: 'running', head: { epoch: 1, seq: 2 }, openRequests: [], eventCount: 2, pages: 0, corrections: [], grants: [] }),
             prompt: async (input, turnId, _output, commandId) => (sent.push(`prompt ${turnId} ${commandId} ${JSON.stringify(input)}`), reply(commandId!)),
             respond: async (requestId, decision, commandId) => (sent.push(`respond ${requestId} ${(decision as { outcome: string }).outcome} ${commandId}`), { v: 1, kind: 'pending' as const, commandId: commandId! }),
             cancel: async (agentId, commandId) => (sent.push(`cancel ${agentId ?? '-'} ${commandId}`), reply(commandId!)),

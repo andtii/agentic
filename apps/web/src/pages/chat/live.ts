@@ -123,7 +123,8 @@ export function entryLine(entry: ChatEntry, lookup: AgentLookup): string {
             return `${who}: ${text}`;
         }
         case 'status':
-            return `${lookup(entry.agentId).name} ${statusText(entry)}`;
+            // A list row still names the bookkeeping the thread leaves out (#399): `lastOf` prefers a message over it.
+            return `${lookup(entry.agentId).name} ${statusText(entry) ?? (entry.kind === 'session-started' ? 'started a session' : 'ended its session')}`;
         case 'member':
             return `${lookup(entry.agentId).name} ${entry.op === 'add' ? 'joined' : 'left'}`;
         case 'coordinator':
@@ -399,12 +400,16 @@ function threadPart(p: PromptPart, id: string): AgentPart {
     return { type: 'text', id, text: partText(p) };
 }
 
-function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string {
+/**
+ * What a status entry says in the thread — `null` for the session bookkeeping (#399): a session begins once per
+ * member and ends when someone means it to, so `session-started` / `session-ended` maintain the chat's binding and
+ * are never narrated as rows.
+ */
+function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string | null {
     switch (entry.kind) {
         case 'session-started':
-            return 'started a session';
         case 'session-ended':
-            return 'ended its session';
+            return null;
         case 'typing':
             return 'is typing';
         case 'task':
@@ -429,9 +434,10 @@ export interface EntryTranscript {
 /**
  * Chat entries → thread rows. A `msg` is a user or assistant message; a
  * `status` entry is an assistant row of the responsible agent (CHT-02)
- * with the status in italics; membership and coordinator entries are not
- * rows (the members panel shows them). The live page passes who the user
- * reads as ("You") and its workspace's clock face.
+ * with the status in italics — except the session bookkeeping (#399), which
+ * is no row; membership and coordinator entries are not rows either (the
+ * members panel shows them). The live page passes who the user reads as
+ * ("You") and its workspace's clock face.
  */
 export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentLookup, userName: string = USER.name, time: TimeText = formatTime): EntryTranscript {
     const timeOf = (at: number): MessageAuthor['time'] => ({ text: time(at), dateTime: new Date(at).toISOString() });
@@ -454,9 +460,11 @@ export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentL
                 authors[entry.id] = { name: a.name, hue: a.hue, environment: a.environment, time: timeOf(entry.at) };
             }
         } else if (entry.t === 'status') {
+            const text = statusText(entry);
+            if (text === null) continue;
             const a = lookup(entry.agentId);
             const id = `status:${seq}`;
-            messages.push({ id, role: 'assistant', actor: a.id, parts: [{ type: 'text', id: `${id}:0`, text: `*${statusText(entry)}*` }] });
+            messages.push({ id, role: 'assistant', actor: a.id, parts: [{ type: 'text', id: `${id}:0`, text: `*${text}*` }] });
             authors[id] = { name: a.name, hue: a.hue, environment: a.environment, time: timeOf(entry.at) };
         }
     }

@@ -60,6 +60,11 @@
  *   settles with it, beside the task that started it; a runtime that cannot
  *   parks the route `waiting-turn` — nothing sent — and `follow` prompts it
  *   (`turnEnded`) when that turn ends.
+ * - a chat member's session ends when someone means it to (`endSession`, #399; CHT-04,
+ *   OPS-10): "New session" from the chat, or the member's removal (`Chat.removeAgent`
+ *   through its routing port). The routes on it fail `session-reset`, the Session is
+ *   closed, the binding dropped, and the record and its pages purged through
+ *   `RoutingPorts.store`. A person's call, never an agent's.
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -78,7 +83,7 @@ import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
 import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { freeSlots, machineKey, runningIn, type FsResultView, type MachineView, type OpenSessionResult } from '../machine/index.js';
-import { isInterruptedTurnEnd, resumeTurnId, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
+import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, sessionPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
@@ -118,6 +123,20 @@ async function tellChat(c: ActorContext<RoutingState>, workspaceId: WorkspaceId,
     }
 }
 
+/**
+ * A session ended on purpose (#399): "New session" from the chat, or the member's removal. Told to the chat once
+ * for every route the ended session was working — the driver publishes it as the session would, so the chat's
+ * binding is dropped even when the runtime never acknowledged the close (an offline machine).
+ */
+async function tellChatEnded(c: ActorContext<RoutingState>, workspaceId: WorkspaceId, chatId: ChatId, agentId: AgentId, sessionId: SessionId, now: () => number = Date.now): Promise<void> {
+    const payload: SessionEvent = { kind: 'status', agentId, sessionId, status: 'session-ended', at: now() };
+    try {
+        await c.publish(topic<SessionEvent>(SESSION_EVENTS_TOPIC, actorKey(workspaceId, 'chat', chatId)), payload);
+    } catch {
+        // A chat that cannot be reached never fails the reset.
+    }
+}
+
 /** The slice of the Session actor the router drives (`defineSessionActor`). */
 interface SessionClient {
     open(spec: SessionOpenSpec): Promise<SessionInfo>;
@@ -141,6 +160,12 @@ interface MachineClient {
 /** The `TaskError` a task in a project the Workspace no longer has fails with (#332): visible, never a guessed folder. */
 export const PROJECT_MISSING_CODE = 'project-missing';
 
+/** The `TaskError` a task fails with when its session is ended under it (#399): "New session", or the member's removal. Recoverable — the next message opens a fresh one. */
+export const SESSION_RESET_CODE = 'session-reset';
+
+/** How many of an ended session's pages `endSession` purges at once (#399): a long session has many, and one turn should not wait on them one by one. */
+const PURGE_BATCH = 8;
+
 /** `Routing.get()`. */
 export interface RoutingView {
     readonly key: string;
@@ -155,6 +180,8 @@ const taskDriver: ActorPolicy = (principal: Principal | null) => !!principal && 
 const machineOnly: ActorPolicy = (principal: Principal | null) => principal?.kind === 'machine';
 /** `report(taskId, …)`: an agent working a task (its principal carries the task id; the method checks it is THAT task). */
 const ownTask: ActorPolicy = (principal: Principal | null) => principal?.kind === 'agent' && principal.taskId !== undefined;
+/** `endSession`: a person, or an external client acting for one — never an agent, which must not wipe its own or another's conversation (#399). */
+const userOrExternal: ActorPolicy = (principal: Principal | null) => principal?.kind === 'user' || principal?.kind === 'external';
 
 /** The final assistant text of one turn (sub-agent output stays nested under its call). */
 function finalText(transcript: AgentTranscript | undefined, turnId: string): string {
@@ -251,7 +278,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, machineOnline: machineOnly, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, machineOnline: machineOnly, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
         state: (): RoutingState => initialRoutingState(),
         methods: (ctx) => {
             const ids = parseRoutingKey(ctx.key);
@@ -1158,6 +1185,57 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ctx.state.reports[taskId] = filed;
                     for (const r of Object.values(ctx.state.routes)) if (sharesTurn(r)) ctx.state.reports[r.taskId] = filed;
                     await ctx.save();
+                },
+
+                /**
+                 * "New session" (#399; CHT-04, OPS-10): end the session the chat binds to `agentId` — or `sessionId`,
+                 * when the caller already holds it (a removal drops the binding with the member, so the chat passes
+                 * the row it had) — and forget it. In order: every route on the session fails `session-reset`
+                 * (recoverable; a running turn is cancelled the way any task settled from outside is, COL-12); the
+                 * Session is closed — its runtime session disposed, or the daemon told `close` when a machine hosts
+                 * it — and the chat's binding dropped by `session-ended`, published here when the close did not do it
+                 * (a daemon's ack is still out, or the record could not be reached); then the record and every one
+                 * of its pages are purged through the `store` port, so nothing of the conversation is left behind.
+                 * The next message opens a fresh session that knows none of it; the chat's own history is untouched.
+                 * Returns the id ended, or `null` when the member had no session. A user or an external client only.
+                 * A `sessionId` is never taken on trust: with the binding still there it must be that session (409
+                 * otherwise), and without one the record itself must name this chat and member — so no caller can
+                 * end another chat's or another member's session through here.
+                 */
+                async endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<SessionId | null> {
+                    const row = await chat(chatId)
+                        .get()
+                        .then((summary) => summary.sessions[agentId]?.sessionId, () => undefined);
+                    if (sessionId !== undefined && row !== undefined && row !== sessionId) {
+                        throw new ServerFnError(409, `routing: session ${sessionId} is not the session chat ${chatId} binds to ${agentId} (${row})`);
+                    }
+                    const bound = row ?? sessionId;
+                    if (!bound) return null;
+                    const client = session(bound);
+                    // The record first: what vouches for a session the binding no longer names, and the page count — a closed record keeps its pages, a purged one says nothing.
+                    const info = await client.get().catch(() => undefined);
+                    if (row === undefined) {
+                        if (!info?.opened) return null;
+                        if (info.spec?.chatId !== chatId || info.spec.agentId !== agentId) throw new ServerFnError(409, `routing: session ${bound} is not ${agentId}'s session in chat ${chatId}`);
+                    }
+                    const why = `session ${bound} of ${agentId} in chat ${chatId} was ended: ${reason}`;
+                    for (const route of Object.values(ctx.state.routes)) {
+                        if (route.sessionId !== bound) continue;
+                        await fail(route, { code: SESSION_RESET_CODE, message: why, recoverable: true });
+                    }
+                    await ctx.save();
+                    const acknowledged = await client.close().then((reply) => reply.kind === 'ack', () => false);
+                    if (!acknowledged) await tellChatEnded(ctx, workspaceId, chatId, agentId, bound, now);
+                    if (ports.store) {
+                        const key = `${workspaceId}:session:${bound}`;
+                        const pages = info?.pages ?? 0;
+                        // The pages in bounded batches (a long session has many), every one of them before the record.
+                        for (let from = 0; from < pages; from += PURGE_BATCH) {
+                            await Promise.all(Array.from({ length: Math.min(PURGE_BATCH, pages - from) }, (_, i) => ports.store!.purge({ type: SESSION_PAGE_TYPE, key: sessionPageKey(key, from + i) })));
+                        }
+                        await ports.store.purge({ type: ports.sessions().type, key });
+                    }
+                    return bound;
                 },
 
                 get(): RoutingView {
