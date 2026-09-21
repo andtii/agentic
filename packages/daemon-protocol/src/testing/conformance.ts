@@ -55,7 +55,7 @@ const V = DAEMON_PROTOCOL_VERSION;
  * Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), a runtime naming
  * its session (#388), and the harnesses when the daemon finds they changed (#359).
  */
-const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref', 'harnesses'];
+const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref', 'session.title', 'harnesses'];
 /** Cases that need an optional harness feature. */
 const NEEDS: Record<string, ConformanceFeature> = {
     env: 'env',

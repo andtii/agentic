@@ -349,8 +349,8 @@ export const opsPlugins: readonly PluginView[] = [
         id: 'anthropic-api', version: '0.1.0', kind: 'runtime', name: 'Anthropic API', capabilities: ['platform-hosted', 'model'],
         description: 'Agents run on the platform against the Anthropic API with your own key.',
         config: { type: 'object', properties: { defaultModel: { type: 'string', title: 'Default model', description: 'The model an agent runs on when its own config names none.', enum: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'], default: 'claude-opus-5' } }, additionalProperties: false },
-        secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session.', required: true }],
-        permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts.' }]
+        secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session or to title a chat.', required: true }],
+        permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts, and once or twice per chat to title it.' }]
     }), { config: { defaultModel: 'claude-opus-5' } }),
     builtin(manifest({
         id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],

@@ -41,17 +41,14 @@ export function validateStartTask(input: StartTaskInput): StartTaskErrors {
     return errors;
 }
 
-/** A chat title from the objective: its first line, at most 60 characters. */
-export function titleOf(objective: string): string {
-    const line = objective.trim().split('\n')[0]!.trim();
-    return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
-}
-
-/** Open the chat, set the folder, post the objective; resolves to the chat and the task it started. */
+/**
+ * Open the chat, set the folder, post the objective; resolves to the chat and the task it started. The chat is not
+ * named here: the objective's post titles it by its first line (#460), a generated title a runtime may improve on.
+ */
 export async function startTaskWith(defs: ActorDefs, ws: string, input: StartTaskInput, lookup: AgentLookup): Promise<{ readonly chatId: string; readonly taskId: string | null }> {
     const agentId = input.agentId as AgentId;
     const objective = input.objective.trim();
-    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({ title: titleOf(objective), ...(input.machineId ? { machineId: input.machineId as MachineId } : {}) });
+    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat(input.machineId ? { machineId: input.machineId as MachineId } : {});
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     await chat.addAgent(agentId, 'all');
     await chat.setCoordinator(agentId);

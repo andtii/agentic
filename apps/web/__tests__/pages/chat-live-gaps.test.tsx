@@ -288,7 +288,7 @@ describe('the chat list search box', () => {
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 1, 'one row');
         expect(texts(dom.querySelectorAll('[data-chat-title]'))).toEqual(['Lunch']);
         setText(dom.querySelector<HTMLInputElement>('#chat-search')!, 'DRAWERS');
-        await until(() => texts(dom.querySelectorAll('[data-chat-title]')).join() === 'Atlas, Forge', 'the match on the last line');
+        await until(() => texts(dom.querySelectorAll('[data-chat-title]')).join() === 'about drawers', 'the match on the title and the last line');
         setText(dom.querySelector<HTMLInputElement>('#chat-search')!, '');
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'both rows back');
     });

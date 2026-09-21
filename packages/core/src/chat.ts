@@ -91,8 +91,20 @@ export type ChatEntry =
           readonly at: number;
       }
     | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number }
-    /** The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one. */
-    | { readonly t: 'rename'; readonly title: string; readonly at: number };
+    /**
+     * The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one.
+     * `auto` says the title was generated, not chosen (#460): from the first user message (`heuristic`), by the platform's
+     * own model call (`model`), or reported by the runtime of `sessionId` (`runtime`). Absent: a person set it, and no
+     * generated title replaces it.
+     */
+    | { readonly t: 'rename'; readonly title: string; readonly at: number; readonly auto?: AutoTitle };
+
+/** Where a generated chat title came from (#460). */
+export interface AutoTitle {
+    readonly source: 'heuristic' | 'model' | 'runtime';
+    /** With `runtime`: the session whose runtime titled the conversation. */
+    readonly sessionId?: SessionId;
+}
 
 export interface ChatMember {
     readonly since: number;
@@ -150,6 +162,14 @@ export type SessionEvent =
           readonly taskId?: TaskId;
           readonly parts: readonly PromptPart[];
           readonly mentions?: readonly AgentId[];
+          readonly at: number;
+      }
+    /** The runtime titled the conversation (#460): the chat takes it unless a person named the chat. */
+    | {
+          readonly kind: 'title';
+          readonly agentId: AgentId;
+          readonly sessionId: SessionId;
+          readonly title: string;
           readonly at: number;
       };
 

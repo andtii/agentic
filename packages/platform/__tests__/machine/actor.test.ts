@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actorKey, type EnvironmentId, type FrozenAgentConfig, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
+import { actorKey, SESSION_EVENTS_TOPIC, type EnvironmentId, type FrozenAgentConfig, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type SessionEvent, type SessionId, type WorkspaceId } from '@agentic/core';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { defineActor } from '@sigx/actors';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
@@ -1040,9 +1040,19 @@ describe('Machine offline and closed sessions (#366)', () => {
         const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
         Session = defineSessionActor({ factory: () => null, commands: sink });
         Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, heartbeatWindowMs: 90_000, commandTimeoutMs: 120_000 });
-        app = testActorApp([Machine, Session, Workspace, PairingDirectory, AuditActor, Routing], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
+        heardByChat = [];
+        const ChatStub = defineActor({
+            type: 'chat-stub',
+            allowAnonymous: true,
+            state: () => ({}),
+            methods: () => ({}),
+            subscriptions: { [SESSION_EVENTS_TOPIC]: (_ctx, event) => void heardByChat.push(event.payload as SessionEvent) }
+        });
+        app = testActorApp([Machine, Session, Workspace, PairingDirectory, AuditActor, Routing, ChatStub], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
         await app.start();
     });
+    /** What the sessions told their chats. */
+    let heardByChat: SessionEvent[];
 
     /** A daemon the test speaks for itself: its hello, then whatever frames the test sends. */
     async function rawDaemon() {
@@ -1053,12 +1063,23 @@ describe('Machine offline and closed sessions (#366)', () => {
     }
 
     /** `S1` opened on the raw daemon and named `real` by its runtime. */
-    async function opened(asDaemon: Awaited<ReturnType<typeof rawDaemon>>) {
-        await session().open(sessionSpec);
+    async function opened(asDaemon: Awaited<ReturnType<typeof rawDaemon>>, spec: SessionOpenSpec = sessionSpec) {
+        await session().open(spec);
         await machine(K1).openSession(S1, E1, openSpec);
         await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.opened', sessionId: S1, ref: { agent: 'in-memory', v: 1, id: S1 }, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: 0, seq: 0 } }));
         await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.ref', sessionId: S1, ref: { agent: 'in-memory', v: 1, id: 'real' } }));
     }
+
+    it("hands the runtime's title for a hosted session to its record, which tells the chat (#460); one for a session it does not host is ignored", async () => {
+        const asDaemon = await rawDaemon();
+        await opened(asDaemon, { ...sessionSpec, chatId: 'chat_1' as never });
+        expect(await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.title', sessionId: S1, title: 'Chat list titles' }))).toMatchObject({ ok: true });
+        await until(() => heardByChat.some((e) => e.kind === 'title'), 'the chat to hear the title');
+        expect(heardByChat.at(-1)).toMatchObject({ kind: 'title', sessionId: S1, title: 'Chat list titles' });
+        const count = heardByChat.length;
+        expect(await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.title', sessionId: 'session_9', title: 'Nobody' }))).toMatchObject({ ok: true });
+        expect(heardByChat).toHaveLength(count);
+    });
 
     it('tells the router it went offline: at once when the socket closes, and past the heartbeat window when the daemon falls silent', async () => {
         const { seat } = connect(K1, daemon(M1));

@@ -22,6 +22,8 @@ export interface ConformanceScript {
     readonly tool?: { readonly name: string; readonly input: unknown };
     /** Heartbeat interval the daemon must use once welcomed. */
     readonly heartbeatMs: number;
+    /** The runtime's title for every conversation (#460): sent as `session.title` after a session's first turn. Absent: the runtime titles nothing. */
+    readonly title?: string;
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */

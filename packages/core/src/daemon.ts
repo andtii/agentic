@@ -222,6 +222,12 @@ export type DaemonFrame<F = unknown, R = unknown> =
      * record resumes from this ref, never from the one the open carried. Opaque to the platform, like `OpenSpec.resume`.
      */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.ref'; readonly sessionId: SessionId; readonly ref: unknown }
+    /**
+     * The runtime's own title for a session's conversation (#460): sent once the runtime titles it and again whenever
+     * that title changes — read from the driver after every turn (`OpenedRuntimeSession.title`). A runtime that keeps no
+     * title never sends it; the platform then titles the chat itself.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.title'; readonly sessionId: SessionId; readonly title: string }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.frame'; readonly sessionId: SessionId; readonly frame: F }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.reply'; readonly sessionId: SessionId; readonly reply: R }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.closed'; readonly sessionId: SessionId; readonly reason: string; readonly code?: SessionClosedCode }
@@ -274,5 +280,5 @@ export type PlatformFrame<C = unknown> =
     /** Install, update or remove a runtime harness (#359; the `harness` feature); progress comes back as `harness.status`. */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.request'; readonly requestId: string; readonly op: 'install' | 'update' | 'remove'; readonly runtime: RuntimeId; readonly target?: ReleaseAsset; readonly mode: 'drain' | 'now' };
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.title', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
 export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request', 'update.request', 'update.cancel', 'harness.request'] as const;

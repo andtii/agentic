@@ -47,6 +47,7 @@ const env = z.object({ v, t: z.literal('env'), environments, policy: machinePoli
 const heartbeat = z.object({ v, t: z.literal('heartbeat'), at: nonNegativeInt, active: z.array(sessionId).max(LIMITS.list) });
 const sessionOpened = z.object({ v, t: z.literal('session.opened'), sessionId, ref: sessionRef, capabilities: capabilityReport, head: cursor });
 const sessionNamed = z.object({ v, t: z.literal('session.ref'), sessionId, ref: sessionRef });
+const sessionTitled = z.object({ v, t: z.literal('session.title'), sessionId, title: text.min(1) });
 const sessionFrame = z.object({ v, t: z.literal('session.frame'), sessionId, frame: wireFrame });
 const sessionReply = z.object({ v, t: z.literal('session.reply'), sessionId, reply: wireReply });
 const sessionClosed = z.object({
@@ -100,6 +101,7 @@ export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
 export const heartbeatFrame: z.ZodType<DaemonFrameOf<'heartbeat'>> = heartbeat;
 export const sessionOpenedFrame: z.ZodType<DaemonFrameOf<'session.opened'>> = sessionOpened;
 export const sessionRefFrame: z.ZodType<DaemonFrameOf<'session.ref'>> = sessionNamed;
+export const sessionTitleFrame: z.ZodType<DaemonFrameOf<'session.title'>> = sessionTitled;
 export const sessionFrameFrame: z.ZodType<DaemonFrameOf<'session.frame'>> = sessionFrame;
 export const sessionReplyFrame: z.ZodType<DaemonFrameOf<'session.reply'>> = sessionReply;
 export const sessionClosedFrame: z.ZodType<DaemonFrameOf<'session.closed'>> = sessionClosed;
@@ -120,6 +122,7 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     heartbeat: heartbeatFrame,
     'session.opened': sessionOpenedFrame,
     'session.ref': sessionRefFrame,
+    'session.title': sessionTitleFrame,
     'session.frame': sessionFrameFrame,
     'session.reply': sessionReplyFrame,
     'session.closed': sessionClosedFrame,
@@ -134,4 +137,4 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     harnesses: harnessesFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse, updateStatus, harnessStatus, harnesses]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionTitled, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse, updateStatus, harnessStatus, harnesses]);

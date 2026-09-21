@@ -11,7 +11,7 @@ import { harnessMissingDriver } from '../src/drivers';
 import { harnessStore } from '../src/harness';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
-import { agentDriver, namingDriver, scriptedDriver } from './helpers/drivers';
+import { agentDriver, namingDriver, scriptedDriver, titlingDriver } from './helpers/drivers';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
@@ -770,6 +770,38 @@ describe('daemon', () => {
         expect(first.order.indexOf('session.ref')).toBeLessThan(first.order.indexOf('event:turn-end'));
         // The same identity again is not news.
         expect((await turn(2)).refs).toEqual([]);
+    });
+
+    it("reports the runtime's title for the conversation: session.title after the turn that brought it, once more when it moves on, again after a re-probe (#460)", { timeout: 15_000 }, async () => {
+        // Probes: after turn 1 nothing (the CLI's background call is still running), the re-probe finds one; after turn 2 and its
+        // re-probe the same; after turn 3 a new one.
+        const driver = titlingDriver({ events: 3, heartbeatMs: 1_000 }, [undefined, 'Greeting Ada', 'Greeting Ada', 'Greeting Ada', 'Ada, greeted thrice']);
+        const { seat } = await start([env('env_a')], [driver], undefined, { titleRecheckMs: 30 });
+        open(seat, 'session_1', 'env_a');
+        await expectFrame(seat, 'session.opened');
+        expect(driver.probes).toEqual([]); // a fresh session is not asked before its first turn
+        /** One turn, then whatever the daemon says up to the second heartbeat (≥ 1 s) after its `turn-end`. */
+        const turn = async (n: number) => {
+            seat.send({ v: V, t: 'session.command', sessionId: 'session_1' as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+            const titles: string[] = [];
+            let ended = false;
+            let beats = 0;
+            while (beats < 2) {
+                const frame = await next(seat);
+                if (frame.t === 'heartbeat' && ended) beats++;
+                if (frame.t === 'session.title') titles.push(frame.title);
+                if (frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') ended = true;
+            }
+            return titles;
+        };
+        // Turn 1: the probe finds nothing; the re-probe (30 ms later) does.
+        expect(await turn(1)).toEqual(['Greeting Ada']);
+        expect(driver.probes).toEqual([1, 1]);
+        // Turn 2: the same title is not news (the re-probe after it reads the same and says nothing).
+        expect(await turn(2)).toEqual([]);
+        expect(driver.probes).toEqual([1, 1, 2, 2]);
+        // Turn 3: it moved on.
+        expect(await turn(3)).toEqual(['Ada, greeted thrice']);
     });
 
     it('bridges platform tools as tool.call; an unanswered call times out', async () => {

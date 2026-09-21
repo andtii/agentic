@@ -63,6 +63,26 @@ describe('copilotCliDriver.open', () => {
         expect(clients[0]!.stopped).toBe(1);
     });
 
+    it("keeps the CLI's title for the conversation from session.title_changed, the newest one, a turn running or not (#460)", async () => {
+        let prompts = 0;
+        const script: CopilotScript = async (api) => {
+            if (++prompts === 1) api.emit('session.title_changed', { title: '  Greeting   Ada ' });
+            api.say('Hello!');
+            api.idle();
+            // Retitled after the turn ended — ephemeral, but the session remembers the newest.
+            if (prompts === 2) api.emit('session.title_changed', { title: 'Ada, greeted twice' });
+        };
+        const { driver } = harness({ script });
+        const opened = await driver.open(envA, spec(), ctx());
+        expect(await opened.title!()).toBeUndefined();
+        await collect(opened.session.prompt('hi'));
+        expect(await opened.title!()).toBe('Greeting Ada');
+        await collect(opened.session.prompt('more'));
+        expect(await opened.title!()).toBe('Ada, greeted twice');
+        await opened.session.close();
+        await driver.dispose();
+    });
+
     it('refuses a folder outside the environment and another runtime\'s environment', async () => {
         const { driver } = harness();
         await expect(driver.open(envA, spec({ cwd: 'C:\\Windows' }), ctx())).rejects.toThrow('outside the cwdRoots');

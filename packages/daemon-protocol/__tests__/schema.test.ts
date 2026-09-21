@@ -58,6 +58,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         invalid: { v: V, t: 'session.ref', sessionId: 's1' },
         path: 'ref'
     },
+    'session.title': {
+        valid: { v: V, t: 'session.title', sessionId: 's1' as never, title: 'Chat list auto-generated titles' },
+        invalid: { v: V, t: 'session.title', sessionId: 's1', title: '' },
+        path: 'title'
+    },
     'session.frame': {
         valid: { v: V, t: 'session.frame', sessionId: 's1' as never, frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } } },
         invalid: { v: V, t: 'session.frame', sessionId: 's1', frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x' } } },
