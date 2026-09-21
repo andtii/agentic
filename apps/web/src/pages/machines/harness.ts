@@ -57,7 +57,15 @@ export interface HarnessSource {
 
 const core = (v: string): number[] => v.split(/[-+]/)[0]!.split('.').map((n) => Number.parseInt(n, 10) || 0);
 
-/** Whether `a` is a newer version than `b`: dotted numbers first, then a release beats its prerelease. */
+const prerelease = (v: string): string[] | null => {
+    const at = v.split('+')[0]!.indexOf('-');
+    return at < 0 ? null : v.split('+')[0]!.slice(at + 1).split('.');
+};
+
+/**
+ * Whether `a` is a newer version than `b`, in semver precedence: dotted numbers first, then a release beats its
+ * prerelease, then prerelease identifiers left to right — numeric ones numerically and below alphanumeric ones.
+ */
 export function newerThan(a: string, b: string): boolean {
     const x = core(a);
     const y = core(b);
@@ -65,10 +73,21 @@ export function newerThan(a: string, b: string): boolean {
         const d = (x[i] ?? 0) - (y[i] ?? 0);
         if (d) return d > 0;
     }
-    const pa = a.includes('-');
-    const pb = b.includes('-');
-    if (pa !== pb) return pb;
-    return a > b;
+    const pa = prerelease(a);
+    const pb = prerelease(b);
+    if (!pa || !pb) return !pa && !!pb;
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const p = pa[i];
+        const q = pb[i];
+        if (p === undefined || q === undefined) return q === undefined;
+        if (p === q) continue;
+        const np = /^\d+$/.test(p);
+        const nq = /^\d+$/.test(q);
+        if (np && nq) return Number(p) > Number(q);
+        if (np !== nq) return nq;
+        return p > q;
+    }
+    return false;
 }
 
 /** The runtimes the daemon reports, in the order it reports them, with what the release offers and who uses each. */

@@ -40,10 +40,13 @@ export const LiveHarnessCard = component<LiveHarnessCardProps>(({ props }) => {
     const clearTimer = (): void => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
     onUnmounted(clearTimer);
     // The request settles once the daemon reports a phase for it, or it has ended.
+    // A report after the timer fired takes the "slow" line back.
     const stopFollow = effect(() => {
         const r = answer.value;
-        if (!st.waiting || !r || r.requestId !== st.requestId) return;
+        if (!r || r.requestId !== st.requestId) return;
         if (r.status === 'pending' && !r.phase) return;
+        if (st.failure?.text === HARNESS_SLOW) st.failure = null;
+        if (!st.waiting) return;
         st.waiting = false;
         clearTimer();
     });

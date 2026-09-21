@@ -1762,11 +1762,12 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     const op = input?.op;
                     if (op !== 'install' && op !== 'update' && op !== 'remove') throw new ServerFnError(400, 'machine: op must be "install", "update" or "remove"');
-                    const runtime = input.runtime;
-                    if (typeof runtime !== 'string' || !runtime.trim()) throw new ServerFnError(400, 'machine: a runtime is required');
+                    const runtime = (typeof input.runtime === 'string' ? input.runtime.trim() : '') as RuntimeId;
+                    if (!runtime) throw new ServerFnError(400, 'machine: a runtime is required');
                     const mode = input.mode ?? 'drain';
                     if (mode !== 'drain' && mode !== 'now') throw new ServerFnError(400, 'machine: mode must be "drain" or "now"');
-                    if (input.version !== undefined && (typeof input.version !== 'string' || !input.version)) throw new ServerFnError(400, 'machine: version must be a non-empty string');
+                    const asked = typeof input.version === 'string' ? input.version.trim() : input.version;
+                    if (asked !== undefined && (typeof asked !== 'string' || !asked)) throw new ServerFnError(400, 'machine: version must be a non-empty string');
                     if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
                     if (!s.build || !s.features?.includes('harness')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that cannot manage harnesses: reinstall once`);
                     // One at a time: the daemon runs them in order, and the machine holds one drain.
@@ -1786,7 +1787,7 @@ export function defineMachineActor(ports: MachinePorts) {
                         const dir = await lifecycle.directory();
                         if (!dir) throw new ServerFnError(503, `machine: no release directory to install the ${runtime} harness from`);
                         const { channel } = effectiveUpdates(s.update);
-                        const version = input.version ?? dir.channels[channel]?.harnesses?.[runtime]?.version;
+                        const version = asked ?? dir.channels[channel]?.harnesses?.[runtime]?.version;
                         const shipped = [dir.channels[channel], dir.channels[channel === 'stable' ? 'latest' : 'stable']].map((m) => m?.harnesses?.[runtime]).find((h) => h !== undefined && h.version === version);
                         if (!shipped) throw new ServerFnError(400, `machine: no release ships ${runtime}${version ? ` ${version}` : ` on the ${channel} channel`}`);
                         const asset = shipped.assets[s.build.platform];

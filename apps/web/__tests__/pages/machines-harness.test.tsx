@@ -64,6 +64,13 @@ describe('the harness model (#370)', () => {
         expect(newerThan('2.0.0', '2.0.0')).toBe(false);
         expect(newerThan('2.0.0', '2.0.0-beta.1')).toBe(true);
         expect(newerThan('1.9.0', '2.0.0')).toBe(false);
+        // Prerelease identifiers in semver precedence: numeric ones numerically, below alphanumeric ones, a longer set above its prefix.
+        expect(newerThan('2.0.0-beta.10', '2.0.0-beta.2')).toBe(true);
+        expect(newerThan('2.0.0-beta.2', '2.0.0-beta.10')).toBe(false);
+        expect(newerThan('2.0.0-alpha', '2.0.0-1')).toBe(true);
+        expect(newerThan('2.0.0-beta.1', '2.0.0-beta')).toBe(true);
+        expect(newerThan('2.0.0-rc.1', '2.0.0-beta.9')).toBe(true);
+        expect(newerThan('2.0.0-beta.1', '2.0.0-beta.1')).toBe(false);
         const [cc, codex, copilot] = harnessRows(source());
         expect(versionLine(cc!)).toBe('2.0.0 · 2.1.0 available');
         expect(versionLine(codex!)).toBe('0.46.0');

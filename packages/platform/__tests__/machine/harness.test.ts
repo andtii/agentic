@@ -191,6 +191,8 @@ describe('requestHarness (#370)', () => {
         await hello();
         expect(await statusOf(machine().requestHarness({ op: 'upgrade' as never, runtime: 'copilot-cli' }))).toBe(400);
         expect(await statusOf(machine().requestHarness({ op: 'install', runtime: '' }))).toBe(400);
+        expect(await statusOf(machine().requestHarness({ op: 'install', runtime: '   ' }))).toBe(400);
+        expect(await statusOf(machine().requestHarness({ op: 'install', runtime: 'copilot-cli', version: '  ' }))).toBe(400);
         expect(await statusOf(machine().requestHarness({ op: 'install', runtime: 'copilot-cli', mode: 'later' as never }))).toBe(400);
         expect(await statusOf(machine().requestHarness({ op: 'install', runtime: 'copilot-cli', version: '9.9.9' }))).toBe(400);
         expect(await statusOf(machine().requestHarness({ op: 'install', runtime: 'gemini-cli' }))).toBe(400);
@@ -247,7 +249,8 @@ describe('requestHarness (#370)', () => {
 
     it('install of a missing harness names the target; a failed phase records the error and ends the drain', async () => {
         await hello();
-        const { requestId } = await machine().requestHarness({ op: 'install', runtime: 'copilot-cli', mode: 'now' });
+        // The runtime and version are taken trimmed.
+        const { requestId } = await machine().requestHarness({ op: 'install', runtime: ' copilot-cli ', version: ' 1.0.14 ', mode: 'now' });
         expect(sockets.frames('harness.request')[0]).toMatchObject({ op: 'install', runtime: 'copilot-cli', mode: 'now', target: { version: '1.0.14' } });
         await status(requestId, 'failed', { error: { code: 'checksum', message: 'the download does not match its sha256' } });
         expect(await machine().harnessResult(requestId)).toMatchObject({ status: 'error', phase: 'failed', error: { code: 'checksum' } });
