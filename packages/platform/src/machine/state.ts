@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -251,6 +251,14 @@ export interface MachineState {
      * Absent on a record saved before #268.
      */
     quota?: Record<string, QuotaSnapshot>;
+    /**
+     * What the machine's sessions cost it, as the daemon last reported (`telemetry` frames, #400): a full snapshot each
+     * time, its sessions and environments pruned with the hosted ones; kept while the machine is offline (readers judge
+     * staleness from `observedAt`). Absent until the daemon reports one.
+     */
+    telemetry?: MachineTelemetry;
+    /** The resource warnings told to the Inbox (#400), by `telemetryWarningKey` → when: one re-arms once its value clears (`telemetryWarningCleared`). */
+    telemetryWarned?: Record<string, number>;
     /** The most recent closures, newest last (capped). */
     closures: SessionClosure[];
     /** Daemon messages refused by the protocol codec since pairing. */
@@ -385,6 +393,21 @@ export function advances(cursor: Cursor | undefined, at: Cursor): boolean {
  */
 export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = true): void {
     prune(fs, at, room, FS_RESULT_TTL_MS, MAX_FS_REQUESTS);
+}
+
+/** Drop the telemetry of sessions the machine no longer hosts and of environments it no longer reports, and the warnings told for them. */
+export function pruneTelemetry(s: MachineState): void {
+    const t = s.telemetry;
+    if (t) {
+        // Own keys only: a session id off the wire is any bounded string, `toString` included.
+        const sessions = Object.fromEntries(Object.entries(t.sessions).filter(([id]) => Object.hasOwn(s.activeSessions, id)));
+        const environments = Object.fromEntries(Object.entries(t.environments).filter(([id]) => s.environments.some((e) => e.id === id)));
+        s.telemetry = { ...t, sessions, environments };
+    }
+    if (s.telemetryWarned) {
+        for (const key of Object.keys(s.telemetryWarned)) if (key.startsWith('session:') && !Object.hasOwn(s.activeSessions, key.slice('session:'.length))) delete s.telemetryWarned[key];
+        if (Object.keys(s.telemetryWarned).length === 0) delete s.telemetryWarned;
+    }
 }
 
 /** Drop the quota snapshots of environments the machine no longer reports. */

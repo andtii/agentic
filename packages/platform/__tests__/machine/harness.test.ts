@@ -152,6 +152,51 @@ const advance = async (ms: number) => {
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
+describe('resource pressure (#400)', () => {
+    const GiB = 2 ** 30;
+    const sample = (rss: number) => ({ cpu: 0.1, rss, processes: 2 });
+    const telemetry = (sessions: Record<string, unknown>, memoryUsed = 8 * GiB) =>
+        daemon().socketMessage(JSON.stringify({ v: 1, t: 'telemetry', snapshot: { observedAt: Date.now(), intervalMs: 30_000, cpus: 8, machine: { cpu: 0.3, memoryUsed, memoryTotal: 32 * GiB }, daemon: sample(80_000_000), environments: {}, sessions, availability: 'reported' } }));
+    const pressure = async () => (await inbox()).filter((n) => n.kind === 'resource-pressure');
+
+    it('tells the Inbox once when a session crosses its memory limit, and again only after it cleared', async () => {
+        await hello();
+        expect(await machine().openSession('sess_codex' as SessionId, CX, { agentId: 'agent_1', cwd: '/work', system: '', tools: [] })).toBe('opened');
+        await telemetry({ sess_codex: sample(1.5 * GiB) });
+        expect(await pressure()).toEqual([]);
+        await telemetry({ sess_codex: sample(3 * GiB) });
+        await until(async () => (await pressure()).length === 1, 'the resource-pressure row');
+        expect((await pressure())[0]).toMatchObject({ kind: 'resource-pressure', title: 'A session on machine_1 holds 3.0 GB', ref: { kind: 'session', sessionId: 'sess_codex' } });
+        expect((await pressure())[0]!.body).toContain("Agent agent_1's session");
+        // Still over, and hovering just under: nothing new.
+        await telemetry({ sess_codex: sample(3.5 * GiB) });
+        await telemetry({ sess_codex: sample(1.9 * GiB) });
+        await advance(TICK);
+        expect(await pressure()).toHaveLength(1);
+        // Cleared (under 80 % of the limit), then over again: news.
+        await telemetry({ sess_codex: sample(1 * GiB) });
+        await telemetry({ sess_codex: sample(2.5 * GiB) });
+        await until(async () => (await pressure()).length === 2, 'the second resource-pressure row');
+        // A session that is gone re-arms too.
+        await daemon().socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: 'sess_codex', reason: 'done' }));
+        expect(((await app.storage.load('machine', K1))!.state as { telemetryWarned?: unknown }).telemetryWarned).toBeUndefined();
+    });
+
+    it('tells the Inbox once when the machine crosses its memory limit', async () => {
+        await hello();
+        await telemetry({}, 30 * GiB);
+        await until(async () => (await pressure()).length === 1, 'the machine resource-pressure row');
+        expect((await pressure())[0]).toMatchObject({ title: 'machine_1 is at 94 % memory', ref: { kind: 'machine', machineId: M1 } });
+        expect((await pressure())[0]!.body).toContain('30.0 GB of 32.0 GB in use');
+        await telemetry({}, 31 * GiB);
+        await advance(TICK);
+        expect(await pressure()).toHaveLength(1);
+        await telemetry({}, 20 * GiB);
+        await telemetry({}, 30 * GiB);
+        await until(async () => (await pressure()).length === 2, 'the second machine row');
+    });
+});
+
 describe('the harnesses a machine reports, against the release (#370)', () => {
     it('stores hello.harnesses, compares them with the channel release for the platform, and tells the Inbox once per runtime and version', async () => {
         await hello();
