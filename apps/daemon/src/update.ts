@@ -437,6 +437,8 @@ export function createUpdateClient(host: UpdateHost, options: UpdateClientOption
         },
         request(frame) {
             if (job) return refuse(frame.requestId, 'busy', `an update is already running (${job.requestId}, ${job.phase ?? 'starting'})`);
+            // A restart from the web (#355) is #481's: until it lands, this build says so rather than restarting for nothing.
+            if (frame.target === 'restart') return refuse(frame.requestId, 'unsupported', 'this daemon does not restart on request yet');
             const j: Job = { requestId: frame.requestId, local: false, phase: undefined, abort: new AbortController(), wake: undefined, staged: false };
             job = j;
             logger.info('update: requested', { requestId: frame.requestId, target: frame.target === 'previous' ? 'previous' : frame.target.version, mode: frame.mode });

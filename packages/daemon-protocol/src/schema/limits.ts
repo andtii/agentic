@@ -17,5 +17,11 @@ export const LIMITS = {
     /** Harnesses a daemon reports, and optional features it declares (#360). */
     harnesses: 16,
     /** How long an `update.request` may drain before it restarts anyway: a day (#360). */
-    drainTimeoutMs: 24 * 60 * 60 * 1000
+    drainTimeoutMs: 24 * 60 * 60 * 1000,
+    /** Folders a policy names (#355; core's `POLICY_MAX_ROOTS`). */
+    policyRoots: 32,
+    /** Lines a `log.request` may ask for and a `log.response` carry (#355; core's `DAEMON_LOG_MAX_LINES`). */
+    logLines: 500,
+    /** Characters a `login.answer` may carry (#355; core's `LOGIN_ANSWER_MAX_CHARS`). */
+    loginAnswer: 2048
 } as const;

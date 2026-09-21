@@ -3,8 +3,8 @@
 import { DAEMON_PROTOCOL_VERSION, type DaemonFeature } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
-import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, machineId, machinePolicy, machineTelemetry, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
-import { DAEMON_FEATURES, HARNESS_PHASES, SESSION_CLOSED_CODES, UPDATE_PHASES } from '../lifecycle.js';
+import { capabilityReport, cursor, cursors, daemonLogError, daemonLogResult, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, loginAction, loginError, machineId, machinePolicy, machinePolicyError, machinePolicyResult, machineTelemetry, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
+import { DAEMON_FEATURES, HARNESS_PHASES, LOGIN_PHASES, SESSION_CLOSED_CODES, UPDATE_PHASES } from '../lifecycle.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireEventFrame, wireFrame, wireReply } from './wire.js';
 
@@ -96,6 +96,19 @@ const harnessStatus = z
     .object({ v, t: z.literal('harness.status'), requestId: name, phase: z.enum(HARNESS_PHASES), error: lifecycleError.optional() })
     .refine(failedHasError, { message: 'harness.status carries an error exactly when it failed', path: ['error'] });
 const harnesses = z.object({ v, t: z.literal('harnesses'), harnesses: harnessReports });
+/** #355: the policy, log and login answers — result or error, never both, never neither; a login's `action` and `error` come with their phase. */
+const policyResponse = z
+    .object({ v, t: z.literal('policy.response'), requestId: name, result: machinePolicyResult.optional(), error: machinePolicyError.optional() })
+    .refine((f) => f.result === undefined || f.error === undefined, { message: 'policy.response carries result or error, not both', path: ['error'] })
+    .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'policy.response carries result or error', path: ['result'] });
+const logResponse = z
+    .object({ v, t: z.literal('log.response'), requestId: name, result: daemonLogResult.optional(), error: daemonLogError.optional() })
+    .refine((f) => f.result === undefined || f.error === undefined, { message: 'log.response carries result or error, not both', path: ['error'] })
+    .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'log.response carries result or error', path: ['result'] });
+const loginStatus = z
+    .object({ v, t: z.literal('login.status'), requestId: name, environmentId, phase: z.enum(LOGIN_PHASES), action: loginAction.optional(), error: loginError.optional() })
+    .refine(failedHasError, { message: 'login.status carries an error exactly when it failed', path: ['error'] })
+    .refine((f) => (f.phase === 'action') === (f.action !== undefined), { message: 'login.status carries an action exactly in the action phase', path: ['action'] });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
 export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
@@ -116,6 +129,9 @@ export const historyResponseFrame: z.ZodType<DaemonFrameOf<'history.response'>> 
 export const updateStatusFrame: z.ZodType<DaemonFrameOf<'update.status'>> = updateStatus;
 export const harnessStatusFrame: z.ZodType<DaemonFrameOf<'harness.status'>> = harnessStatus;
 export const harnessesFrame: z.ZodType<DaemonFrameOf<'harnesses'>> = harnesses;
+export const policyResponseFrame: z.ZodType<DaemonFrameOf<'policy.response'>> = policyResponse;
+export const logResponseFrame: z.ZodType<DaemonFrameOf<'log.response'>> = logResponse;
+export const loginStatusFrame: z.ZodType<DaemonFrameOf<'login.status'>> = loginStatus;
 
 /** Every daemon frame kind by its `t`. */
 export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
@@ -137,7 +153,10 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     'history.response': historyResponseFrame,
     'update.status': updateStatusFrame,
     'harness.status': harnessStatusFrame,
-    harnesses: harnessesFrame
+    harnesses: harnessesFrame,
+    'policy.response': policyResponseFrame,
+    'log.response': logResponseFrame,
+    'login.status': loginStatusFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionTitled, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, telemetry, historyResponse, updateStatus, harnessStatus, harnesses]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionTitled, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, telemetry, historyResponse, updateStatus, harnessStatus, harnesses, policyResponse, logResponse, loginStatus]);

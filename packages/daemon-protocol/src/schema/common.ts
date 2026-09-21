@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, DaemonLogError, DaemonLogResult, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, LoginAction, LoginError, MachineId, MachineListing, MachinePolicy, MachinePolicyError, MachinePolicyInput, MachinePolicyResult, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
 import { LIMITS } from './limits.js';
@@ -72,7 +72,8 @@ export const environmentInput: z.ZodType<EnvironmentInput> = z.strictObject({
     runtime: name,
     cwdRoots: z.array(text.min(1)).min(1).max(LIMITS.list),
     concurrency: z.number().int().min(1).optional(),
-    accountLabel: text.optional()
+    accountLabel: text.optional(),
+    allowBypassPermissions: z.boolean().optional()
 });
 
 export const envResult: z.ZodType<EnvResult> = z.object({ environmentId });
@@ -82,8 +83,49 @@ export const envError: z.ZodType<EnvError> = z.object({
     message: text
 });
 
-/** The machine-local policy a daemon reports in `hello` / `env`. */
-export const machinePolicy: z.ZodType<MachinePolicy> = z.object({ webManaged: z.boolean(), allowedRoots: z.array(text.min(1)).max(LIMITS.list) });
+/** The policy a daemon reports in `hello` / `env`; `source`, `locked` and `requested` are #355's and optional, so a daemon predating them still parses. */
+export const machinePolicy: z.ZodType<MachinePolicy> = z.object({
+    webManaged: z.boolean(),
+    allowedRoots: z.array(text.min(1)).max(LIMITS.list),
+    source: z.enum(['local', 'web']).optional(),
+    locked: z.boolean().optional(),
+    requested: z.array(text.min(1)).max(LIMITS.policyRoots).optional()
+});
+
+/** What the platform asks a policy to be (#355): at most `LIMITS.policyRoots` non-empty folders; empty turns web management off. */
+export const machinePolicyInput: z.ZodType<MachinePolicyInput> = z.strictObject({ allowedRoots: z.array(text.min(1)).max(LIMITS.policyRoots) });
+
+export const machinePolicyError: z.ZodType<MachinePolicyError> = z.object({
+    code: z.enum(['policy-locked', 'invalid', 'not-found', 'not-a-directory', 'remote-path', 'protected', 'io', 'timeout', 'unsupported']),
+    message: text
+});
+
+/** A folder listing for the policy picker (#355): folders only, no git badges, at most `FS_LIST_MAX_ENTRIES`; `path` is empty for the machine's roots. */
+export const machineListing: z.ZodType<MachineListing> = z.object({
+    path: text,
+    parent: text.min(1).optional(),
+    entries: z.array(z.object({ name: text.min(1), path: text.min(1) })).max(FS_LIST_MAX_ENTRIES),
+    truncated: z.boolean()
+});
+
+/** What `policy.response` carries as its result: the policy as applied, or a listing — one or the other. */
+export const machinePolicyResult: z.ZodType<MachinePolicyResult> = z.union([
+    z.object({ policy: machinePolicy, listing: z.undefined().optional() }),
+    z.object({ listing: machineListing, policy: z.undefined().optional() })
+]) as z.ZodType<MachinePolicyResult>;
+
+/** The tail of the daemon's log (#355): at most `LIMITS.logLines` lines, each bounded text. */
+export const daemonLogResult: z.ZodType<DaemonLogResult> = z.object({ lines: z.array(text).max(LIMITS.logLines), truncated: z.boolean() });
+export const daemonLogError: z.ZodType<DaemonLogError> = z.object({ code: z.enum(['no-log', 'io', 'timeout', 'unsupported']), message: text });
+
+/** What a relayed sign-in asks the person to do (#355). */
+export const loginAction: z.ZodType<LoginAction> = z.object({
+    kind: z.enum(['open-url', 'device-code']),
+    url: text.min(1),
+    code: name.optional(),
+    expectsPaste: z.boolean()
+});
+export const loginError: z.ZodType<LoginError> = z.object({ code: z.enum(['busy', 'unknown-environment', 'unsupported', 'cancelled', 'timeout', 'failed']), message: text });
 
 export const capabilityReport: z.ZodType<CapabilityReport> = z.object({
     runtime: name,

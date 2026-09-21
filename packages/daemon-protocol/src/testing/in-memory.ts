@@ -8,8 +8,12 @@
  * (drain, cancel, restart) and installs harnesses without downloading
  * anything (#360). `restart()` loses its live sessions but keeps their logs;
  * a `wanted` session it lost is closed with code `restart`, and a re-open
- * from `spec.resume` continues the log on the next epoch (#363). `faults`
- * breaks it on purpose so a test can check that the suite notices.
+ * from `spec.resume` continues the log on the next epoch (#363). It takes its
+ * policy from the web (`policy.request`, #355) — `~` expanded to a fake home,
+ * the daemon's own folder refused, `lock()` refusing everything — tails a
+ * scripted log, relays a scripted sign-in, and restarts on
+ * `update.request { target: 'restart' }` without a download. `faults` breaks
+ * it on purpose so a test can check that the suite notices.
  */
 
 import {
@@ -24,6 +28,8 @@ import {
     type CapabilityReport,
     type Cursor,
     type DaemonBuild,
+    type DaemonLogError,
+    type DaemonLogResult,
     type EnvError,
     type EnvironmentDescriptor,
     type EnvironmentId,
@@ -34,8 +40,12 @@ import {
     type HarnessPhase,
     type HarnessReport,
     type LifecycleError,
+    type LoginAction,
     type MachineId,
+    type MachineListing,
     type MachinePolicy,
+    type MachinePolicyError,
+    type MachinePolicyResult,
     type ReleaseAsset,
     type RuntimeId,
     type SessionClosedCode,
@@ -44,7 +54,7 @@ import {
 } from '@agentic/core';
 import type { AgentEvent, SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, cursorBefore, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, EnvRequestFrame, HarnessRequestFrame, HistoryRequestFrame, PlatformFrame, UpdateRequestFrame } from '../frames.js';
+import type { DaemonFrame, EnvRequestFrame, HarnessRequestFrame, HistoryRequestFrame, LoginRequestFrame, PlatformFrame, PolicyRequestFrame, UpdateRequestFrame } from '../frames.js';
 import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
 import { drainingReply } from '../lifecycle.js';
 import { LIMITS } from '../schema/limits.js';
@@ -81,6 +91,20 @@ export interface InMemoryFaults {
     readonly ignoreResume?: boolean;
     /** Close a wanted session lost to a restart without a code (#363). */
     readonly uncodedRestart?: boolean;
+    /** Apply a `policy.request` although the policy is locked (#355). */
+    readonly ignoreLock?: boolean;
+    /** Let a web-set policy reach into the daemon's own folder (#355). */
+    readonly allowOwnFolder?: boolean;
+    /** Answer a `policy.request { op: 'set' }` without announcing the new policy with `env` (#355). */
+    readonly silentPolicy?: boolean;
+    /** List the daemon's own folder when browsing (#355). */
+    readonly browseOwnFolder?: boolean;
+    /** Answer a `log.request` with more lines than were asked for (#355). */
+    readonly overflowLog?: boolean;
+    /** Keep going after `login.cancel` (#355). */
+    readonly ignoreLoginCancel?: boolean;
+    /** Report a restart as a real update: `downloading` and `staged` phases, and `session.closed { code: 'update' }` (#355). */
+    readonly restartAsUpdate?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -95,7 +119,18 @@ export interface InMemoryHarnessOptions {
     readonly repos?: readonly { readonly path: string; readonly git: FsGitInfo }[];
     /** How many characters each streamed `part-delta` carries (default: the event's number and a space) — a platform test that needs a session to page out sets it. */
     readonly deltaChars?: number;
+    /** The lines its log holds for `log.request` (#355); absent → the daemon has no log file and answers `no-log`. */
+    readonly log?: readonly string[];
+    /** The scripted sign-in a `login.request` relays (#355); absent → the runtime has no relay and the daemon answers `unsupported`. */
+    readonly login?: InMemoryLogin;
     readonly faults?: InMemoryFaults;
+}
+
+/** A scripted sign-in (#355): what the person is shown, and — when a paste is expected — the text that completes it. */
+export interface InMemoryLogin {
+    readonly action: LoginAction;
+    /** With `action.expectsPaste`: the `login.answer.text` that signs the environment in; anything else fails the login. */
+    readonly accepts?: string;
 }
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -104,6 +139,14 @@ const W = WIRE_PROTOCOL_VERSION;
 export const IN_MEMORY_MACHINE = 'machine_inmemory' as MachineId;
 export const IN_MEMORY_ENVIRONMENT = 'env_inmemory' as EnvironmentId;
 export const IN_MEMORY_POLICY: MachinePolicy = { webManaged: true, allowedRoots: ['/work'] };
+/** The fake's user home, what `~` in a web-set policy expands to (#355). */
+export const IN_MEMORY_HOME = '/home/fake';
+/** The fake daemon's own folder — never an allowed root, never listed (#355). */
+export const IN_MEMORY_OWN_DIR = '/home/fake/.config/agentic';
+/** Everything the fake's disk holds besides `repos` (#355): the folders `browse` lists. */
+export const IN_MEMORY_FOLDERS: readonly string[] = ['/work', '/work/app', '/home', IN_MEMORY_HOME, `${IN_MEMORY_HOME}/src`, `${IN_MEMORY_HOME}/.hidden`, IN_MEMORY_OWN_DIR, '/tmp'];
+/** The sign-in the fake relays by default (#355): a device code, no paste. */
+export const IN_MEMORY_LOGIN: InMemoryLogin = { action: { kind: 'device-code', url: 'https://login.example.test/device', code: 'FAKE-1234', expectsPaste: false } };
 
 export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     runtime: 'in-memory',
@@ -200,6 +243,8 @@ interface FakeUpdate {
     readonly requestId: string;
     phase: UpdatePhase;
     timer?: ReturnType<typeof setTimeout>;
+    /** `target: 'restart'` (#355): the sessions close with code `restart`, not `update`. */
+    restart?: boolean;
 }
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -224,6 +269,10 @@ export class InMemoryDaemon implements ConformanceDaemon {
     private harnesses: readonly HarnessReport[] = IN_MEMORY_HARNESSES;
     /** The self-update in flight. */
     private update: FakeUpdate | undefined;
+    /** `lock()`: the policy is local-only until `unlock()` (#355). */
+    private locked = false;
+    /** The relayed sign-in in flight (#355): one per environment. */
+    private readonly logins = new Map<string, { readonly requestId: string; timer?: ReturnType<typeof setTimeout> }>();
     /** Malformed messages seen — a daemon counts and moves on. */
     rejected = 0;
 
@@ -252,9 +301,9 @@ export class InMemoryDaemon implements ConformanceDaemon {
             environments: this.environments,
             capabilities: [IN_MEMORY_CAPABILITIES],
             resume,
-            policy: this.policy,
+            policy: this.reportedPolicy(),
             build: IN_MEMORY_BUILD,
-            features: ['update', 'harness'],
+            features: ['update', 'harness', 'policy', 'log', 'login'],
             harnesses: this.harnesses
         });
         return {
@@ -270,12 +319,25 @@ export class InMemoryDaemon implements ConformanceDaemon {
 
     setEnvironments(environments: readonly EnvironmentDescriptor[]): void {
         this.environments = environments;
-        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments, policy: this.policy });
+        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments, policy: this.reportedPolicy() });
     }
 
+    /** The owner's command on the machine: the policy as given, `source: 'local'`, and no `requested` (that is the web's). */
     setPolicy(policy: MachinePolicy): void {
-        this.policy = policy;
-        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments: this.environments, policy });
+        this.policy = { webManaged: policy.webManaged, allowedRoots: policy.allowedRoots, source: 'local' };
+        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments: this.environments, policy: this.reportedPolicy() });
+    }
+
+    /** `agentic-daemon policy lock` / `unlock` (#355): announced with `env` like any policy change. */
+    lock(locked = true): void {
+        this.locked = locked;
+        if (!this.options.faults?.silentEnv) this.emit({ v: V, t: 'env', environments: this.environments, policy: this.reportedPolicy() });
+    }
+
+    /** The policy as `hello` / `env` carry it: `source`, `requested` and `locked` only when set — a policy nobody touched reads as it always did. */
+    private reportedPolicy(): MachinePolicy {
+        const p = this.policy;
+        return { webManaged: p.webManaged, allowedRoots: p.allowedRoots, ...(p.source ? { source: p.source } : {}), ...(p.requested ? { requested: p.requested } : {}), ...(this.locked ? { locked: true } : {}) };
     }
 
     truncateLog(sessionId: SessionId, keepFrom: Cursor): void {
@@ -286,6 +348,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
     stop(): void {
         if (this.update?.timer !== undefined) clearTimeout(this.update.timer);
         this.update = undefined;
+        for (const l of this.logins.values()) if (l.timer !== undefined) clearTimeout(l.timer);
+        this.logins.clear();
         this.disconnect();
         for (const resolve of this.pendingTools.values()) resolve({ error: { code: 'closed', message: 'daemon stopped' } });
         this.pendingTools.clear();
@@ -428,7 +492,127 @@ export class InMemoryDaemon implements ConformanceDaemon {
             case 'harness.request':
                 void this.changeHarness(frame);
                 return;
+            case 'policy.request': {
+                const outcome = this.policyRequest(frame);
+                // A set is announced first, like an environment change: whoever reads the answer already has the policy it is about.
+                if ('result' in outcome && outcome.result.policy && !this.options.faults?.silentPolicy) this.emit({ v: V, t: 'env', environments: this.environments, policy: this.reportedPolicy() });
+                this.emit({ v: V, t: 'policy.response', requestId: frame.requestId, ...outcome });
+                return;
+            }
+            case 'log.request':
+                this.emit({ v: V, t: 'log.response', requestId: frame.requestId, ...this.logTail(frame.lines) });
+                return;
+            case 'login.request':
+                void this.login(frame);
+                return;
+            case 'login.answer': {
+                const login = [...this.logins.entries()].find(([, l]) => l.requestId === frame.requestId);
+                if (!login) return;
+                const [environmentId] = login;
+                const script = this.options.login ?? IN_MEMORY_LOGIN;
+                if (!script.action.expectsPaste) return;
+                if (script.accepts !== undefined && frame.text !== script.accepts) return this.endLogin(environmentId, frame.requestId, { code: 'failed', message: 'the runtime refused the code' });
+                this.endLogin(environmentId, frame.requestId);
+                return;
+            }
+            case 'login.cancel': {
+                if (this.options.faults?.ignoreLoginCancel) return;
+                const login = [...this.logins.entries()].find(([, l]) => l.requestId === frame.requestId);
+                if (login) this.endLogin(login[0], frame.requestId, { code: 'cancelled', message: 'the sign-in was cancelled' });
+                return;
+            }
         }
+    }
+
+    /**
+     * `policy.request` (#355): `set` replaces the policy after each root passed what `agentic-daemon policy allow-root` checks —
+     * absolute (or `~`, expanded to the fake home), an existing folder, outside the daemon's own — and is refused whole
+     * otherwise, or `policy-locked` while locked; `browse` lists a folder's subfolders (the roots without a path), never
+     * the daemon's own folder, never a dot-folder.
+     */
+    private policyRequest(frame: PolicyRequestFrame): { result: MachinePolicyResult } | { error: MachinePolicyError } {
+        const faults = this.options.faults;
+        const refuse = (code: MachinePolicyError['code'], message: string) => ({ error: { code, message } });
+        if (frame.op === 'browse') {
+            const path = frame.path === undefined ? undefined : normalizePath(frame.path, 'linux');
+            if (frame.path !== undefined && path === null) return refuse('invalid', `${frame.path} is not an absolute path`);
+            if (path && !this.folders().includes(path)) return refuse('not-found', `${frame.path} does not exist`);
+            const own = normalizePath(IN_MEMORY_OWN_DIR, 'linux')!;
+            const below = path === undefined ? ['/'] : this.folders().filter((f) => f !== path && normalizePath(`${f}/..`, 'linux') === path);
+            const entries = below
+                .filter((f) => faults?.browseOwnFolder || !pathWithin(f, [own], 'linux'))
+                .filter((f) => !f.slice(f.lastIndexOf('/') + 1).startsWith('.'))
+                .map((f) => ({ name: f === '/' ? '/' : f.slice(f.lastIndexOf('/') + 1), path: f }));
+            const listing: MachineListing = { path: path ?? '', ...(path && path !== '/' ? { parent: normalizePath(`${path}/..`, 'linux')! } : {}), entries: entries.slice(0, FS_LIST_MAX_ENTRIES), truncated: entries.length > FS_LIST_MAX_ENTRIES };
+            return { result: { listing } };
+        }
+        if (this.locked && !faults?.ignoreLock) return refuse('policy-locked', 'the policy is locked on this machine; run agentic-daemon policy unlock there');
+        const roots: string[] = [];
+        for (const requested of frame.policy.allowedRoots) {
+            const expanded = /^~([\\/].*)?$/.test(requested) ? `${IN_MEMORY_HOME}${requested.slice(1).replace(/\\/g, '/')}` : requested;
+            const root = normalizePath(expanded, 'linux');
+            if (!root) return refuse('invalid', `${requested} is not an absolute path`);
+            if (requested.startsWith('//') || requested.startsWith('\\\\')) return refuse('remote-path', `${requested} is a network path`);
+            if (!this.folders().includes(root)) return refuse('not-found', `${requested} does not exist`);
+            if (!faults?.allowOwnFolder && pathWithin(root, [normalizePath(IN_MEMORY_OWN_DIR, 'linux')!], 'linux')) return refuse('protected', `${requested} is inside the daemon's own folder`);
+            if (!roots.includes(root)) roots.push(root);
+        }
+        this.policy = { webManaged: roots.length > 0, allowedRoots: roots, source: 'web', requested: [...frame.policy.allowedRoots] };
+        return { result: { policy: this.reportedPolicy() } };
+    }
+
+    /** Every folder the fake's disk holds: the fixed tree and every faked checkout, with all their parents. */
+    private folders(): string[] {
+        const out = new Set<string>(['/']);
+        for (const path of [...IN_MEMORY_FOLDERS, ...this.repos().map((r) => r.path)]) {
+            let at = normalizePath(path, 'linux')!;
+            while (at && at !== '/') {
+                out.add(at);
+                at = normalizePath(`${at}/..`, 'linux')!;
+            }
+        }
+        return [...out];
+    }
+
+    /** `log.request` (#355): the last `lines` of the scripted log, `truncated` when there were more; `no-log` without one. */
+    private logTail(lines: number): { result: DaemonLogResult } | { error: DaemonLogError } {
+        const log = this.options.log;
+        if (!log) return { error: { code: 'no-log', message: 'the daemon runs without a log file' } };
+        const kept = this.options.faults?.overflowLog ? [...log] : log.slice(Math.max(0, log.length - lines));
+        return { result: { lines: kept, truncated: kept.length < log.length } };
+    }
+
+    /**
+     * `login.request` (#355): the scripted sign-in, one per environment at a time — `started`, the `action`, `waiting`, then
+     * `done` on its own for a device code (one tick) or once the expected paste arrives; `failed` on cancel or a wrong paste.
+     * `done` re-inspects the environment: its account is `ok` and an `env` frame says so.
+     */
+    private async login(frame: LoginRequestFrame): Promise<void> {
+        const status = (phase: 'started' | 'action' | 'waiting' | 'done' | 'failed', extra: { action?: LoginAction; error?: { code: 'busy' | 'unknown-environment' | 'unsupported' | 'cancelled' | 'timeout' | 'failed'; message: string } } = {}) => this.emit({ v: V, t: 'login.status', requestId: frame.requestId, environmentId: frame.environmentId, phase, ...extra });
+        if (!this.environments.some((e) => e.id === frame.environmentId)) return status('failed', { error: { code: 'unknown-environment', message: `no environment ${frame.environmentId}` } });
+        if (this.logins.has(frame.environmentId)) return status('failed', { error: { code: 'busy', message: `a sign-in is already running for ${frame.environmentId}` } });
+        const login = { requestId: frame.requestId } as { readonly requestId: string; timer?: ReturnType<typeof setTimeout> };
+        this.logins.set(frame.environmentId, login);
+        const script = this.options.login ?? IN_MEMORY_LOGIN;
+        status('started');
+        await tick();
+        if (this.logins.get(frame.environmentId) !== login) return;
+        status('action', { action: script.action });
+        await tick();
+        if (this.logins.get(frame.environmentId) !== login) return;
+        status('waiting');
+        if (!script.action.expectsPaste) login.timer = setTimeout(() => this.endLogin(frame.environmentId, frame.requestId), 0);
+    }
+
+    private endLogin(environmentId: string, requestId: string, error?: { code: 'busy' | 'unknown-environment' | 'unsupported' | 'cancelled' | 'timeout' | 'failed'; message: string }): void {
+        const login = this.logins.get(environmentId);
+        if (!login || login.requestId !== requestId) return;
+        if (login.timer !== undefined) clearTimeout(login.timer);
+        this.logins.delete(environmentId);
+        if (error) return this.emit({ v: V, t: 'login.status', requestId, environmentId: environmentId as EnvironmentId, phase: 'failed', error });
+        this.emit({ v: V, t: 'login.status', requestId, environmentId: environmentId as EnvironmentId, phase: 'done' });
+        // Re-inspected: the account is signed in now, and the environments say so.
+        this.setEnvironments(this.environments.map((e) => (e.id === environmentId ? { ...e, account: { ...e.account, authStatus: 'ok', identity: e.account.identity ?? `${e.account.label}@example.test` } } : e)));
     }
 
     /**
@@ -441,11 +625,14 @@ export class InMemoryDaemon implements ConformanceDaemon {
         const update: FakeUpdate = { requestId: frame.requestId, phase: 'staged' };
         this.update = update;
         const { target } = frame;
-        const steps: readonly UpdatePhase[] = target === 'previous' ? ['staged'] : ['downloading', 'verifying', 'staged'];
+        // A restart (#355) stages nothing: straight to the drain — unless the fault reports it like a download.
+        const restart = target === 'restart' && !this.options.faults?.restartAsUpdate;
+        const steps: readonly UpdatePhase[] = restart ? [] : target === 'previous' || target === 'restart' ? ['staged'] : ['downloading', 'verifying', 'staged'];
+        update.restart = target === 'restart';
         for (const phase of steps) {
             if (this.update !== update) return;
             update.phase = phase;
-            status(phase, phase === 'downloading' && target !== 'previous' ? { progress: { bytes: target.bytes, total: target.bytes } } : {});
+            status(phase, phase === 'downloading' && typeof target !== 'string' ? { progress: { bytes: target.bytes, total: target.bytes } } : {});
             await tick();
         }
         if (this.update !== update) return;
@@ -468,7 +655,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
         if (update.timer !== undefined) clearTimeout(update.timer);
         update.phase = 'restarting';
         this.emit({ v: V, t: 'update.status', requestId: update.requestId, phase: 'restarting' });
-        for (const s of this.sessions.values()) if (!s.closed) this.close(s, 'the daemon is restarting for an update', 'update');
+        const code: SessionClosedCode = update.restart && !this.options.faults?.restartAsUpdate ? 'restart' : 'update';
+        for (const s of this.sessions.values()) if (!s.closed) this.close(s, code === 'restart' ? 'the daemon is restarting' : 'the daemon is restarting for an update', code);
         this.update = undefined;
     }
 
@@ -648,10 +836,14 @@ export class InMemoryDaemon implements ConformanceDaemon {
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness'],
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness', 'policy', ...(options.log ? (['log'] as const) : []), 'login', 'restart'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         updateTarget: IN_MEMORY_RELEASE,
         harnessTarget: IN_MEMORY_HARNESS_TARGET,
+        protectedFolder: IN_MEMORY_OWN_DIR,
+        ...(options.log ? { logLines: options.log.length } : {}),
+        loginAction: (options.login ?? IN_MEMORY_LOGIN).action,
+        ...(options.login?.accepts !== undefined ? { loginAnswer: options.login.accepts } : {}),
         start: (script) => new InMemoryDaemon(script, options)
     };
 }

@@ -11,7 +11,10 @@ const REPOS = [
 ] as const;
 
 describe('daemonConformance × inMemoryHarness', () => {
-    const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
+    /** A log of twelve lines (so `log-tail` can ask for fewer) and a sign-in that expects a paste (so `login-relay` sends one). */
+    const LOG = Array.from({ length: 12 }, (_, i) => `{"level":"info","msg":"line ${i + 1}"}`);
+    const LOGIN = { action: { kind: 'open-url', url: 'https://login.example.test/authorize?state=x', expectsPaste: true }, accepts: 'code#x' } as const;
+    const cases = daemonConformance(inMemoryHarness({ repos: REPOS, log: LOG, login: LOGIN }), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, and the fake runs them all', () => {
         expect(cases.map((c) => c.name)).toEqual([
@@ -35,6 +38,12 @@ describe('daemonConformance × inMemoryHarness', () => {
             'update-cancel',
             'harness-install',
             'harness-remove-in-use',
+            'policy-set',
+            'policy-locked',
+            'policy-browse',
+            'log-tail',
+            'login-relay',
+            'restart',
             'history'
         ]);
         expect(cases.filter((c) => c.skip)).toEqual([]);
@@ -59,6 +68,12 @@ describe('daemonConformance × inMemoryHarness', () => {
             ['update-cancel', 'the harness does not declare the "update" feature'],
             ['harness-install', 'the harness does not declare the "harness" feature'],
             ['harness-remove-in-use', 'the harness does not declare the "harness" feature'],
+            ['policy-set', 'the harness does not declare the "policy" feature'],
+            ['policy-locked', 'the harness does not declare the "policy" feature'],
+            ['policy-browse', 'the harness does not declare the "policy" feature'],
+            ['log-tail', 'the harness does not declare the "log" feature'],
+            ['login-relay', 'the harness does not declare the "login" feature'],
+            ['restart', 'the harness does not declare the "restart" feature'],
             ['history', 'the harness does not declare the "history" feature']
         ]);
     });
@@ -134,6 +149,37 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that removes a harness an environment uses (#360)', async () => {
         await expect(only('harness-remove-in-use', { removeHarnessInUse: true }).run()).rejects.toThrow(/a harness an environment uses is not removed/);
+    });
+
+    // #355: the machine managed from the web.
+    it('a daemon that applies a web policy although its owner locked it', async () => {
+        await expect(only('policy-locked', { ignoreLock: true }).run()).rejects.toThrow(/while locked, a set from the web is refused policy-locked/);
+    });
+
+    it("a daemon that lets a web policy reach into its own folder (OPS-01)", async () => {
+        await expect(only('policy-set', { allowOwnFolder: true }).run()).rejects.toThrow(/a root inside the daemon's own folders is refused protected/);
+    });
+
+    it('a daemon that applies a web policy without announcing it', async () => {
+        await expect(only('policy-set', { silentPolicy: true }).run()).rejects.toThrow(/timed out after 500 ms waiting for env/);
+    });
+
+    it("a daemon that lists its own folder when browsing", async () => {
+        await expect(only('policy-browse', { browseOwnFolder: true }).run()).rejects.toThrow(/the daemon's own folder is not listed beside its siblings/);
+    });
+
+    it('a daemon that answers more log lines than were asked for', async () => {
+        const chatty = daemonConformance(inMemoryHarness({ log: ['a', 'b', 'c'], faults: { overflowLog: true } }), { timeoutMs: 500 }).find((c) => c.name === 'log-tail')!;
+        await expect(chatty.run()).rejects.toThrow(/exactly as many lines as were asked for/);
+    });
+
+    it('a daemon that goes on signing in after the web cancelled', async () => {
+        const stubborn = daemonConformance(inMemoryHarness({ login: { action: { kind: 'open-url', url: 'https://x.test/a', expectsPaste: true }, accepts: 'ok' }, faults: { ignoreLoginCancel: true } }), { timeoutMs: 500 }).find((c) => c.name === 'login-relay')!;
+        await expect(stubborn.run()).rejects.toThrow(/timed out after 500 ms waiting for login.status \{ failed cancelled \}/);
+    });
+
+    it('a daemon that treats a restart like an update: downloads, and closes sessions with code update', async () => {
+        await expect(only('restart', { restartAsUpdate: true }).run()).rejects.toThrow(/a restart downloads and stages nothing/);
     });
 
     it('a harness that claims "update" without naming a target to update to', async () => {

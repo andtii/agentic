@@ -7,7 +7,17 @@ import { workspaceOfKey } from './ids.js';
 export type Scope = 'machines' | 'environments' | 'agents' | 'sessions' | 'tasks' | 'chats' | 'memory' | 'schedules' | 'usage' | 'projects';
 
 export type Principal =
-    | { readonly kind: 'user'; readonly userId: string; readonly workspaceId: WorkspaceId }
+    | {
+          readonly kind: 'user';
+          readonly userId: string;
+          readonly workspaceId: WorkspaceId;
+          /**
+           * Until when (ms epoch) the session is elevated (#355): the user re-confirmed through the login provider a few
+           * minutes ago, so a security-sensitive machine change may go through. Set by the platform's `authenticate` from
+           * the elevation cookie when it names this user; absent otherwise, and never on a bearer request.
+           */
+          readonly elevatedUntil?: number;
+      }
     | { readonly kind: 'machine'; readonly workspaceId: WorkspaceId; readonly machineId: MachineId }
     | { readonly kind: 'agent'; readonly workspaceId: WorkspaceId; readonly agentId: AgentId; readonly sessionId: SessionId; readonly taskId?: TaskId }
     | { readonly kind: 'external'; readonly workspaceId: WorkspaceId; readonly clientId: string; readonly scopes: readonly Scope[] };

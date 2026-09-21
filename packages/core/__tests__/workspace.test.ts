@@ -26,6 +26,6 @@ describe('WorkspaceSettings', () => {
     });
 
     it('keeps the Inbox notification kinds', () => {
-        expect(NOTIFICATION_KINDS).toEqual(['reminder', 'task-done', 'task-failed', 'approval', 'input', 'update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available', 'resource-pressure']);
+        expect(NOTIFICATION_KINDS).toEqual(['reminder', 'task-done', 'task-failed', 'approval', 'input', 'update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available', 'resource-pressure', 'machine-security']);
     });
 });

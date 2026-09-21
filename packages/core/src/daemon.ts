@@ -9,7 +9,7 @@
  */
 
 import type { HarnessPhase, HarnessReport, ReleaseAsset, UpdatePhase } from './release.js';
-import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, MachineTelemetry, QuotaSnapshot, RuntimeId, SessionId, ToolGrant } from './index.js';
+import type { ApprovalRule, CapabilityReport, DaemonLogError, DaemonLogResult, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, LoginAction, LoginError, LoginPhase, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, QuotaSnapshot, RuntimeId, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -25,9 +25,11 @@ export interface DaemonBuild {
 
 /**
  * Optional frame families a daemon answers (#359). The platform sends `update.*` / `harness.*` only to a daemon whose
- * `hello.features` lists the feature; an older daemon drops a frame it cannot decode and keeps the socket.
+ * `hello.features` lists the feature; an older daemon drops a frame it cannot decode and keeps the socket. `policy`
+ * (`policy.request`, #355), `log` (`log.request`) and `login` (`login.*`) follow the same rule; a restart from the web
+ * is an `update.request { target: 'restart' }` and rides `update`.
  */
-export type DaemonFeature = 'update' | 'harness';
+export type DaemonFeature = 'update' | 'harness' | 'policy' | 'log' | 'login';
 
 /**
  * Why the host ended a session (#359), beside the human `reason`: the reason is for people, the code for the platform,
@@ -212,7 +214,7 @@ export type DaemonFrame<F = unknown, R = unknown> =
           readonly lastUpdate?: DaemonUpdateOutcome;
           readonly harnesses?: readonly HarnessReport[];
       }
-    /** The environments changed — and, when it is carried, the policy too (it is edited on the machine while the daemon runs). */
+    /** The environments changed — and, when it is carried, the policy too (a `policy.request` applied, or a command on the machine). */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env'; readonly environments: readonly EnvironmentDescriptor[]; readonly policy?: MachinePolicy }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'heartbeat'; readonly at: number; readonly active: readonly SessionId[] }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.opened'; readonly sessionId: SessionId; readonly ref: unknown; readonly capabilities: CapabilityReport; readonly head: Cursor }
@@ -254,7 +256,20 @@ export type DaemonFrame<F = unknown, R = unknown> =
     /** Progress of a `harness.request` (#359). */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.status'; readonly requestId: string; readonly phase: HarnessPhase; readonly error?: LifecycleError }
     /** The harnesses changed (#359): pushed unsolicited, after a harness request or when the daemon finds a change. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harnesses'; readonly harnesses: readonly HarnessReport[] };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harnesses'; readonly harnesses: readonly HarnessReport[] }
+    /**
+     * The answer to `policy.request` (#355; the `policy` feature): exactly one of `result` / `error`. A `set` result comes
+     * with an `env` frame carrying the policy as applied, before or after it; a `browse` result is the listing.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'policy.response'; readonly requestId: string; readonly result?: MachinePolicyResult; readonly error?: MachinePolicyError }
+    /** The answer to `log.request` (#355; the `log` feature): exactly one of `result` / `error`. Every line is redacted before it leaves the machine. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'log.response'; readonly requestId: string; readonly result?: DaemonLogResult; readonly error?: DaemonLogError }
+    /**
+     * Progress of a `login.request` (#355; the `login` feature): `action` comes with the `action` phase, `error` with
+     * `failed` and only then. `done` means the runtime signed the environment in; an `env` frame with its new
+     * `authStatus` follows once the daemon has re-inspected it.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'login.status'; readonly requestId: string; readonly environmentId: EnvironmentId; readonly phase: LoginPhase; readonly action?: LoginAction; readonly error?: LoginError };
 
 export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>>; readonly platform?: PlatformInfo }
@@ -277,13 +292,32 @@ export type PlatformFrame<C = unknown> =
      */
     | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.request'; readonly requestId: string; readonly sessionId: SessionId } & HistoryRange)
     /**
-     * Update the daemon itself (#359; the `update` feature): to a release asset, or back to the `previous` build. `drain`
-     * lets running turns end, for at most `drainTimeoutMs`; `now` does not wait. Progress comes back as `update.status`.
+     * Update the daemon itself (#359; the `update` feature): to a release asset, back to the `previous` build, or — `restart`
+     * (#355) — the same build again: nothing is downloaded or staged, the daemon drains and exits for its supervisor to
+     * relaunch it. `drain` lets running turns end, for at most `drainTimeoutMs`; `now` does not wait. Progress comes back
+     * as `update.status` (a restart reports no `downloading` / `verifying` / `staged` phase).
      */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.request'; readonly requestId: string; readonly target: ReleaseAsset | 'previous'; readonly mode: 'drain' | 'now'; readonly drainTimeoutMs: number }
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.request'; readonly requestId: string; readonly target: ReleaseAsset | 'previous' | 'restart'; readonly mode: 'drain' | 'now'; readonly drainTimeoutMs: number }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.cancel'; readonly requestId: string }
     /** Install, update or remove a runtime harness (#359; the `harness` feature); progress comes back as `harness.status`. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.request'; readonly requestId: string; readonly op: 'install' | 'update' | 'remove'; readonly runtime: RuntimeId; readonly target?: ReleaseAsset; readonly mode: 'drain' | 'now' };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.request'; readonly requestId: string; readonly op: 'install' | 'update' | 'remove'; readonly runtime: RuntimeId; readonly target?: ReleaseAsset; readonly mode: 'drain' | 'now' }
+    /**
+     * Set the machine's policy for web-managed environments, or browse its folders to pick one (#355; the `policy`
+     * feature; decisions 2026-09-22). Owner-only on the platform, elevated; the daemon still refuses its own folders and
+     * anything that is not a local folder, and everything when its owner locked the policy. Answered by `policy.response`.
+     */
+    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'policy.request'; readonly requestId: string } & MachinePolicyOp)
+    /** The last `lines` lines of the daemon's own log (#355; the `log` feature), for the Machine page; answered by `log.response`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'log.request'; readonly requestId: string; readonly lines: number }
+    /**
+     * Sign an environment's account in from the web (#355; the `login` feature): the daemon runs the runtime's own login
+     * for that environment's profile and reports `login.status`. One login per environment at a time.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'login.request'; readonly requestId: string; readonly environmentId: EnvironmentId }
+    /** What the person pasted back for a login that `expectsPaste` (#355): handed to the runtime once, never stored or logged. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'login.answer'; readonly requestId: string; readonly text: string }
+    /** Abandon a login in flight (#355): the daemon ends the runtime's login and answers `failed { cancelled }`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'login.cancel'; readonly requestId: string };
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.title', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'telemetry', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
-export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request', 'update.request', 'update.cancel', 'harness.request'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.title', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'telemetry', 'history.response', 'update.status', 'harness.status', 'harnesses', 'policy.response', 'log.response', 'login.status'] as const;
+export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request', 'update.request', 'update.cancel', 'harness.request', 'policy.request', 'log.request', 'login.request', 'login.answer', 'login.cancel'] as const;

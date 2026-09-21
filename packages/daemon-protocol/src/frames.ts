@@ -38,6 +38,9 @@ export type HistoryResponseFrame = DaemonFrameOf<'history.response'>;
 export type UpdateStatusFrame = DaemonFrameOf<'update.status'>;
 export type HarnessStatusFrame = DaemonFrameOf<'harness.status'>;
 export type HarnessesFrame = DaemonFrameOf<'harnesses'>;
+export type PolicyResponseFrame = DaemonFrameOf<'policy.response'>;
+export type LogResponseFrame = DaemonFrameOf<'log.response'>;
+export type LoginStatusFrame = DaemonFrameOf<'login.status'>;
 
 export type WelcomeFrame = PlatformFrameOf<'welcome'>;
 export type SessionOpenFrame = PlatformFrameOf<'session.open'>;
@@ -51,6 +54,11 @@ export type HistoryRequestFrame = PlatformFrameOf<'history.request'>;
 export type UpdateRequestFrame = PlatformFrameOf<'update.request'>;
 export type UpdateCancelFrame = PlatformFrameOf<'update.cancel'>;
 export type HarnessRequestFrame = PlatformFrameOf<'harness.request'>;
+export type PolicyRequestFrame = PlatformFrameOf<'policy.request'>;
+export type LogRequestFrame = PlatformFrameOf<'log.request'>;
+export type LoginRequestFrame = PlatformFrameOf<'login.request'>;
+export type LoginAnswerFrame = PlatformFrameOf<'login.answer'>;
+export type LoginCancelFrame = PlatformFrameOf<'login.cancel'>;
 
 /** Either direction. */
 export type AnyFrame = DaemonFrame | PlatformFrame;

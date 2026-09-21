@@ -10,8 +10,10 @@
  * policy (#236), the runtime's own session id reported once it is known (#388), and a session's history answered
  * from the daemon's own log — a range it no longer holds as a named gap (#397), and the lifecycle (#360): the build a
  * daemon reports, a session it lost across a restart re-opened from its ref, an update that drains running turns and
- * can be cancelled, and harnesses installed but never removed from under an environment. No test-runner
- * import: consumers wire the cases into theirs, e.g.
+ * can be cancelled, and harnesses installed but never removed from under an environment; and the machine managed from
+ * the web (#355): a policy set by the platform with `~` expanded on the machine and the daemon's own folders refused,
+ * a lock on the machine that wins, a folder listing for the picker, the log's tail, a relayed sign-in, and a restart
+ * that downloads nothing. No test-runner import: consumers wire the cases into theirs, e.g.
  *
  * ```ts
  * for (const c of daemonConformance(inMemoryHarness())) {
@@ -20,11 +22,11 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type PlatformInfo, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, normalizePath, pathWithin, policyConverged, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type MachinePolicyOp, type PlatformInfo, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HarnessesFrame, HarnessStatusFrame, HelloFrame, PlatformFrame, SessionClosedFrame, SessionFrameFrame, SessionRefFrame, UpdateStatusFrame } from '../frames.js';
+import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HarnessesFrame, HarnessStatusFrame, HelloFrame, LoginStatusFrame, PlatformFrame, PolicyResponseFrame, SessionClosedFrame, SessionFrameFrame, SessionRefFrame, UpdateStatusFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
-import { HARNESS_PHASES, isDrainingReply, UPDATE_PHASES } from '../lifecycle.js';
+import { HARNESS_PHASES, isDrainingReply, LOGIN_PHASES, UPDATE_PHASES } from '../lifecycle.js';
 import { isVersion } from '../release.js';
 import { LIMITS } from '../schema/limits.js';
 import { sessionRef } from '../schema/wire.js';
@@ -72,7 +74,13 @@ const NEEDS: Record<string, ConformanceFeature> = {
     'update-drain': 'update',
     'update-cancel': 'update',
     'harness-install': 'harness',
-    'harness-remove-in-use': 'harness'
+    'harness-remove-in-use': 'harness',
+    'policy-set': 'policy',
+    'policy-locked': 'policy',
+    'policy-browse': 'policy',
+    'log-tail': 'log',
+    'login-relay': 'login',
+    restart: 'restart'
 };
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
@@ -292,6 +300,22 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
             else if (!UNSOLICITED.includes(frame.t)) fail(`expected an env.response or env frame, got ${frame.t}`);
         }
         assertEqual(response.requestId, requestId, 'env.response answers the request it was sent');
+        return { response, announced };
+    };
+
+    /** Send one `policy.request` and take its answer, plus — for a `set` that was applied — the `env` frame announcing the policy, before or after it. */
+    const policy = async (peer: Peer, requestId: string, op: MachinePolicyOp) => {
+        peer.send({ v: V, t: 'policy.request', requestId, ...op });
+        let response: PolicyResponseFrame | undefined;
+        let announced: EnvFrame | undefined;
+        const deadline = Date.now() + timeoutMs;
+        while (!response || (response.result?.policy && !announced)) {
+            const frame = await peer.next(response ? 'env' : 'policy.response', Math.max(1, deadline - Date.now()));
+            if (frame.t === 'policy.response') response = frame;
+            else if (frame.t === 'env') announced = frame;
+            else if (!UNSOLICITED.includes(frame.t)) fail(`expected a policy.response or env frame, got ${frame.t}`);
+        }
+        assertEqual(response.requestId, requestId, 'policy.response answers the request it was sent');
         return { response, announced };
     };
 
@@ -653,7 +677,8 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     const { root, runtime } = managed(hello, daemon);
                     await daemon.setPolicy!({ webManaged: false, allowedRoots: [] });
                     const env = await peer.expect('env');
-                    assertEqual(env.policy, { webManaged: false, allowedRoots: [] }, 'a policy changed on the machine is announced with env');
+                    assertEqual({ webManaged: env.policy?.webManaged, allowedRoots: env.policy?.allowedRoots }, { webManaged: false, allowedRoots: [] }, 'a policy changed on the machine is announced with env');
+                    assert(env.policy?.source !== 'web', 'a policy set on the machine does not read as the web\'s');
 
                     const put = await manage(peer, 'env_off_put', { op: 'put', environment: { name: 'policy off', runtime, cwdRoots: [root] } });
                     assertEqual(put.response.error?.code, 'policy-disabled', 'with the policy off nothing is created');
@@ -826,6 +851,249 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     // The session on it still runs.
                     await prompt(peer, S1, 1);
                     assertTurn(await peer.events(S1, events, opened.head, 'a turn after the refused removal'), 'a turn after the refused removal');
+                })
+        },
+        {
+            name: 'policy-set',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    assert(hello.features?.includes('policy') === true, 'hello.features lists policy (the harness declared "policy")');
+                    const before = hello.policy?.allowedRoots ?? [];
+                    const root = before[0];
+                    assert(root !== undefined, 'hello.policy names at least one allowed root to keep');
+
+                    // `~` is expanded on the machine: what comes back is a real folder, and `requested` is what was asked.
+                    const desired = ['~', root];
+                    const set = await policy(peer, 'policy_set', { op: 'set', policy: { allowedRoots: desired } });
+                    const applied = set.response.result?.policy;
+                    assert(applied !== undefined, `the policy was applied, not refused (${set.response.error?.code ?? ''}: ${set.response.error?.message ?? ''})`);
+                    assertEqual(applied.webManaged, true, 'a policy with roots is web-managed');
+                    assertEqual(applied.source, 'web', 'a policy the web set says so');
+                    assertEqual([...(applied.requested ?? [])].sort(), [...desired].sort(), 'the policy echoes the roots as they were asked for');
+                    assert(!applied.allowedRoots.includes('~') && applied.allowedRoots.some((r) => r !== root), 'the machine expanded ~ to a real folder, and reported it');
+                    assert(applied.allowedRoots.every((r) => !r.startsWith('~')), 'no allowed root is a ~ form');
+                    assert(policyConverged(desired, applied, hello.os), 'the platform reads the applied policy as converged');
+                    assert(policyConverged(desired, set.announced!.policy, hello.os), 'the env frame that came with it carries the same policy');
+
+                    // A root the machine must refuse — the daemon's own folder — refuses the whole request and changes nothing.
+                    if (harness.protectedFolder !== undefined) {
+                        const own = await policy(peer, 'policy_own', { op: 'set', policy: { allowedRoots: [root, harness.protectedFolder] } });
+                        assertEqual(own.response.error?.code, 'protected', "a root inside the daemon's own folders is refused protected");
+                        assertEqual(own.announced, undefined, 'nothing is announced for a refused set');
+                    }
+                    const missing = await policy(peer, 'policy_missing', { op: 'set', policy: { allowedRoots: [root, `${root}/conformance-no-such-folder-${Date.now()}`] } });
+                    assertEqual(missing.response.error?.code, 'not-found', 'a folder that does not exist refuses the request');
+                    const relative = await policy(peer, 'policy_relative', { op: 'set', policy: { allowedRoots: ['src'] } });
+                    assertEqual(relative.response.error?.code, 'invalid', 'a relative root refuses the request');
+
+                    // Empty turns web management off, and says so.
+                    const off = await policy(peer, 'policy_off', { op: 'set', policy: { allowedRoots: [] } });
+                    assertEqual(off.response.result?.policy?.webManaged, false, 'an empty policy turns web management off');
+                    assertEqual(off.response.result?.policy?.allowedRoots, [], 'an empty policy has no roots');
+                    assert(policyConverged([], off.response.result?.policy, hello.os), 'an empty policy converges on an empty desired set');
+
+                    // And back, so the daemon under test is left as it was found.
+                    const back = await policy(peer, 'policy_back', { op: 'set', policy: { allowedRoots: before } });
+                    assertEqual(back.response.result?.policy?.allowedRoots, before, 'the roots are back to what the daemon started with');
+                })
+        },
+        {
+            name: 'policy-locked',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    assert(daemon.lock !== undefined, 'the daemon implements lock (the harness declared "policy")');
+                    const roots = hello.policy?.allowedRoots ?? [];
+                    await daemon.lock(true);
+                    const locked = await peer.expect('env');
+                    assertEqual(locked.policy?.locked, true, 'a lock on the machine is announced with env');
+                    assertEqual(locked.policy?.allowedRoots, roots, 'a lock changes no root');
+
+                    const refused = await policy(peer, 'policy_locked_set', { op: 'set', policy: { allowedRoots: ['~'] } });
+                    assertEqual(refused.response.error?.code, 'policy-locked', 'while locked, a set from the web is refused policy-locked');
+                    assertEqual(refused.announced, undefined, 'nothing is announced for a refused set');
+                    const listing = await policy(peer, 'policy_locked_browse', { op: 'browse' });
+                    assert(listing.response.result?.listing !== undefined || listing.response.error?.code === 'policy-locked', 'browsing while locked is either answered or refused policy-locked, never anything else');
+
+                    await daemon.lock(false);
+                    const unlocked = await peer.expect('env');
+                    assert(unlocked.policy?.locked !== true, 'an unlock is announced with env');
+                    const set = await policy(peer, 'policy_unlocked_set', { op: 'set', policy: { allowedRoots: roots } });
+                    assert(set.response.result?.policy !== undefined, `after the unlock a set is applied again (${set.response.error?.code ?? ''})`);
+                })
+        },
+        {
+            name: 'policy-browse',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const roots = await policy(peer, 'browse_roots', { op: 'browse' });
+                    const top = roots.response.result?.listing;
+                    assert(top !== undefined, `the machine's roots are listed (${roots.response.error?.code ?? ''}: ${roots.response.error?.message ?? ''})`);
+                    assertEqual(top.path, '', 'the roots listing has no path');
+                    assertEqual(top.parent, undefined, 'the roots listing has no parent');
+                    assert(top.entries.length > 0, 'a machine has at least one root');
+                    assert(top.entries.length <= FS_LIST_MAX_ENTRIES && top.entries.every((e) => e.name.length > 0 && e.path.length > 0), 'every entry has a name and a path');
+
+                    // Walk into the first allowed root: a real folder lists its subfolders, none of them hidden, and names its parent.
+                    const root = hello.policy?.allowedRoots[0];
+                    assert(root !== undefined, 'hello.policy names an allowed root to browse');
+                    const inside = await policy(peer, 'browse_root', { op: 'browse', path: root });
+                    const listing = inside.response.result?.listing;
+                    assert(listing !== undefined, `an allowed root is browsable (${inside.response.error?.code ?? ''}: ${inside.response.error?.message ?? ''})`);
+                    assertEqual(normalizePath(listing.path, hello.os), normalizePath(root, hello.os), 'the listing is of the folder that was asked for');
+                    for (const e of listing.entries) {
+                        assert(pathWithin(e.path, [root], hello.os), `${e.path} is below ${root}`);
+                        assert(!e.name.startsWith('.'), `a dot-folder (${e.name}) is not listed`);
+                    }
+                    // The daemon's own folder is never listed, not even from its parent.
+                    if (harness.protectedFolder !== undefined) {
+                        const parent = normalizePath(`${harness.protectedFolder}/..`, hello.os);
+                        assert(parent !== null, 'the protected folder is absolute');
+                        const around = await policy(peer, 'browse_around_own', { op: 'browse', path: parent });
+                        const entries = around.response.result?.listing?.entries ?? [];
+                        assert(!entries.some((e) => pathWithin(harness.protectedFolder!, [e.path], hello.os) && pathWithin(e.path, [harness.protectedFolder!], hello.os)), "the daemon's own folder is not listed beside its siblings");
+                    }
+
+                    const missing = await policy(peer, 'browse_missing', { op: 'browse', path: `${root}/conformance-no-such-folder-${Date.now()}` });
+                    assertEqual(missing.response.error?.code, 'not-found', 'a folder that does not exist is not-found');
+                    const relative = await policy(peer, 'browse_relative', { op: 'browse', path: 'src' });
+                    assertEqual(relative.response.error?.code, 'invalid', 'a relative path is invalid');
+                })
+        },
+        {
+            name: 'log-tail',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    assert(hello.features?.includes('log') === true, 'hello.features lists log (the harness declared "log")');
+                    const held = harness.logLines ?? 1;
+                    const ask = async (requestId: string, lines: number) => {
+                        peer.send({ v: V, t: 'log.request', requestId, lines });
+                        const answer = await peer.expect('log.response');
+                        assertEqual(answer.requestId, requestId, 'log.response answers the request it was sent');
+                        return answer;
+                    };
+                    const all = await ask('log_all', LIMITS.logLines);
+                    assert(all.result !== undefined, `the log is answered (${all.error?.code ?? ''}: ${all.error?.message ?? ''})`);
+                    assert(all.result.lines.length >= Math.min(held, LIMITS.logLines), `at least ${Math.min(held, LIMITS.logLines)} lines come back (the harness said the log holds ${held})`);
+                    assert(all.result.lines.length <= LIMITS.logLines, 'never more lines than the limit');
+                    if (held > 1) {
+                        const fewer = Math.max(1, Math.min(held - 1, LIMITS.logLines - 1));
+                        const some = await ask('log_some', fewer);
+                        assert(some.result !== undefined, 'a shorter tail is answered');
+                        assertEqual(some.result.lines.length, fewer, 'exactly as many lines as were asked for');
+                        assertEqual(some.result.truncated, true, 'a tail shorter than the log says so');
+                        assertEqual(some.result.lines, all.result.lines.slice(all.result.lines.length - fewer), 'the tail is the END of the log');
+                    }
+                })
+        },
+        {
+            name: 'login-relay',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    assert(hello.features?.includes('login') === true, 'hello.features lists login (the harness declared "login")');
+                    const expected = harness.loginAction;
+                    assert(expected !== undefined, 'the harness names the loginAction it will show (it declared "login")');
+                    const requestId = 'login_1';
+                    peer.send({ v: V, t: 'login.request', requestId, environmentId: daemon.environmentId });
+                    const phases: LoginStatusFrame['phase'][] = [];
+                    let action: LoginStatusFrame['action'];
+                    let answered = false;
+                    let env: EnvFrame | undefined;
+                    let last: LoginStatusFrame | undefined;
+                    let deadline = Date.now() + timeoutMs;
+                    while (!last || (last.phase !== 'done' && last.phase !== 'failed') || (last.phase === 'done' && !env)) {
+                        const frame = await peer.next(last?.phase === 'done' ? 'env' : 'login.status', Math.max(1, deadline - Date.now()));
+                        if (!UNSOLICITED.includes(frame.t)) deadline = Date.now() + timeoutMs;
+                        if (frame.t === 'login.status') {
+                            assertEqual(frame.requestId, requestId, 'login.status answers the request it was sent');
+                            assertEqual(frame.environmentId, daemon.environmentId, 'login.status names the environment');
+                            phases.push(frame.phase);
+                            last = frame;
+                            if (frame.phase === 'action') {
+                                action = frame.action;
+                                assertEqual(frame.action, expected, 'the action shown is what the harness said it would be');
+                                if (frame.action?.expectsPaste && !answered) {
+                                    assert(harness.loginAnswer !== undefined, 'an action that expects a paste needs the harness to name the loginAnswer');
+                                    answered = true;
+                                    peer.send({ v: V, t: 'login.answer', requestId, text: harness.loginAnswer });
+                                }
+                            }
+                        } else if (frame.t === 'env') env = frame;
+                        else if (!UNSOLICITED.includes(frame.t)) fail(`expected login.status (or the env after done), got ${frame.t}`);
+                    }
+                    assertPhases(phases, LOGIN_PHASES, 'login.status');
+                    assert(action !== undefined, 'the person was shown what to do');
+                    assertEqual(last.phase, 'done', `the sign-in ended done, not failed (${last.error?.code ?? ''}: ${last.error?.message ?? ''})`);
+                    const signedIn = env!.environments.find((e) => e.id === daemon.environmentId);
+                    assertEqual(signedIn?.account.authStatus, 'ok', 'after done, the environment reports its account signed in');
+
+                    // A second sign-in is cancelled from the web: it ends failed { cancelled }, and nothing else moves.
+                    const again = 'login_2';
+                    peer.send({ v: V, t: 'login.request', requestId: again, environmentId: daemon.environmentId });
+                    const started = await peer.expect('login.status', [...UNSOLICITED, 'env']);
+                    assertEqual([started.requestId, started.phase], [again, 'started'], 'a second sign-in starts');
+                    peer.send({ v: V, t: 'login.cancel', requestId: again });
+                    let ended: LoginStatusFrame | undefined;
+                    deadline = Date.now() + timeoutMs;
+                    while (!ended) {
+                        const frame = await peer.next('login.status { failed cancelled }', Math.max(1, deadline - Date.now()));
+                        if (frame.t === 'login.status' && frame.requestId === again && (frame.phase === 'done' || frame.phase === 'failed')) ended = frame;
+                        else if (frame.t !== 'login.status' && frame.t !== 'env' && !UNSOLICITED.includes(frame.t)) fail(`expected login.status, got ${frame.t}`);
+                    }
+                    assertEqual([ended.phase, ended.error?.code], ['failed', 'cancelled'], 'a cancelled sign-in ends failed { cancelled }');
+                    const unknown = 'login_3';
+                    peer.send({ v: V, t: 'login.request', requestId: unknown, environmentId: 'env_conformance_nobody' as EnvironmentDescriptor['id'] });
+                    const refused = await peer.expect('login.status', [...UNSOLICITED, 'env']);
+                    assertEqual([refused.requestId, refused.phase, refused.error?.code], [unknown, 'failed', 'unknown-environment'], 'a sign-in for an environment the machine does not have fails unknown-environment');
+                })
+        },
+        {
+            name: 'restart',
+            run: () =>
+                withDaemon({ ...script, tool: { name: 'echo', input: { x: 1 } } }, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    assert(hello.features?.includes('update') === true, 'hello.features lists update (a restart rides it)');
+                    const opened = await open(peer, hello, daemon, S1, ['echo']);
+                    await prompt(peer, S1, 1);
+                    const call = await peer.expect('tool.call');
+                    const requestId = 'restart_1';
+                    peer.send({ v: V, t: 'update.request', requestId, target: 'restart', mode: 'drain', drainTimeoutMs: 10 * timeoutMs });
+                    const phases: UpdateStatusFrame['phase'][] = [];
+                    let closed: SessionClosedFrame | undefined;
+                    let ended = false;
+                    let released = false;
+                    let last = opened.head;
+                    let deadline = Date.now() + timeoutMs;
+                    while (!phases.includes('restarting') || !closed) {
+                        const frame = await peer.next(phases.includes('restarting') ? 'session.closed { code: restart }' : 'update.status', Math.max(1, deadline - Date.now()));
+                        if (!UNSOLICITED.includes(frame.t)) deadline = Date.now() + timeoutMs;
+                        if (frame.t === 'update.status') {
+                            assertEqual(frame.requestId, requestId, 'update.status answers the request it was sent');
+                            assert(frame.phase !== 'failed', `the restart did not fail (${frame.error?.code ?? ''}: ${frame.error?.message ?? ''})`);
+                            assert(frame.phase !== 'downloading' && frame.phase !== 'verifying' && frame.phase !== 'staged', `a restart downloads and stages nothing (got ${frame.phase})`);
+                            if (frame.phase === 'restarting') assert(ended, 'a drain lets the running turn finish before the daemon restarts');
+                            if (frame.phase === 'draining' && !released) {
+                                released = true;
+                                peer.send({ v: V, t: 'tool.result', callId: call.callId, output: { x: 1 } });
+                            }
+                            phases.push(frame.phase);
+                        } else if (frame.t === 'session.frame') {
+                            assertEqual(frame.sessionId, S1, 'only the running session streams while draining');
+                            if (frame.frame.kind !== 'event') fail(`the running turn streams events, not a ${frame.frame.kind}`);
+                            assertFollows(frame.frame, last, 'the turn running through the drain');
+                            last = cursorOf(frame.frame);
+                            if (frame.frame.event.type === 'turn-end') ended = true;
+                        } else if (frame.t === 'session.closed') {
+                            assertEqual(frame.sessionId, S1, 'the live session is the one closed');
+                            assertEqual(frame.code, 'restart', 'a session closed for a restart says so, so the platform re-opens it without a version check');
+                            closed = frame;
+                        } else if (!UNSOLICITED.includes(frame.t)) fail(`expected update.status or the traffic of a draining daemon, got ${frame.t}`);
+                    }
+                    assertPhases(phases, UPDATE_PHASES, 'update.status');
                 })
         },
         {
