@@ -9,6 +9,7 @@ import type {
     PromptPart,
     SessionId,
     TaskContract,
+    MachineId,
     TaskError,
     TaskId,
     TaskOrigin,
@@ -41,6 +42,8 @@ export interface DelegateSpec {
     readonly constraints?: Limits;
     readonly expected?: string | JsonSchemaObject;
     readonly environmentId?: EnvironmentId;
+    /** The machine the child runs on (#414). Absent: the parent's — its task's, else its route's, where the router resolves the child's own account. */
+    readonly machineId?: MachineId;
     /** The child's folder (#190), within the roots of its environment (`environmentId`, else the parent's). Absent: the router picks — the parent's folder when the child lands in the parent's environment. */
     readonly workdir?: string;
     /** The child's project (#332). Absent: the parent's, when it has one. */
@@ -140,6 +143,8 @@ export interface TaskState {
     constraints: Limits;
     expected?: string | JsonSchemaObject;
     environmentId?: EnvironmentId;
+    /** The machine the task runs on (#414): the chat's, a delegating parent's or a schedule's. */
+    machineId?: MachineId;
     /** The folder the task's session runs in (#190); only with `environmentId`. */
     workdir?: string;
     /** The project the task belongs to (#330/#332): the router resolves its folder for the environment when `workdir` is absent. */

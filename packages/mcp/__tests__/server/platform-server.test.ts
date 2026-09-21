@@ -14,7 +14,7 @@ import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprot
 import { describe, expect, it } from 'vitest';
 import type { AgentId, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, ProjectId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { createOAuthServer, memoryOAuthStore, type OAuthUser } from '@agentic/platform';
-import { CHAT_FILE_BYTES_UNAVAILABLE, PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
+import { CHAT_FILE_BYTES_UNAVAILABLE, PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type CreateTaskInput, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
 
 const ORIGIN = 'https://app.test';
 const MCP_URL = `${ORIGIN}/_agentic/mcp`;
@@ -71,6 +71,9 @@ function fakePlatform() {
     /** Each chat's project (#334), as `chats_set_project` leaves it; `project_agentic` is the only registered project. */
     const chatProjects: Record<string, string | null> = {};
     const projectSets: { chatId: string; projectId: string | null; principal: ExternalPrincipal }[] = [];
+    /** Each chat's machine (#414), as `chats_set_machine` leaves it; `m_laptop` is the only paired machine. */
+    const chatMachines: Record<string, string | null> = {};
+    const created: CreateTaskInput[] = [];
     const port = (principal: ExternalPrincipal): PlatformPort => ({
         machines: { list: async () => [{ machineId: ENV.machineId, name: 'laptop', online: true, os: 'windows', environments: [ENV] }] },
         environments: {
@@ -112,7 +115,10 @@ function fakePlatform() {
             }
         },
         tasks: {
-            create: async (input) => ({ taskId: 'task_2' as TaskId, status: 'queued', assignee: input.agentId, owner: input.agentId, objective: input.objective, children: [] }),
+            create: async (input) => {
+                created.push(input);
+                return { taskId: 'task_2' as TaskId, status: 'queued', assignee: input.agentId, owner: input.agentId, objective: input.objective, children: [] };
+            },
             delegate: async (input) => {
                 delegated.push(input);
                 return { taskId: `${input.taskId}.${input.callId ?? 'auto'}` as TaskId, status: 'queued', assignee: input.agentId, owner: 'agent_ada' as AgentId, objective: input.objective, parentId: input.taskId, children: [] };
@@ -155,6 +161,10 @@ function fakePlatform() {
                 if (projectId !== null && projectId !== 'project_agentic') throw new Error(`Chat.setProject: no project ${projectId} in this workspace`);
                 projectSets.push({ chatId, projectId, principal });
                 chatProjects[chatId] = projectId;
+            },
+            setChatMachine: async (chatId, machineId) => {
+                if (machineId !== null && machineId !== ENV.machineId) throw new Error(`Chat.setMachine: no paired machine ${machineId} in this workspace`);
+                chatMachines[chatId] = machineId;
             }
         },
         usage: {
@@ -182,7 +192,7 @@ function fakePlatform() {
             })
         }
     });
-    return { port, opened, prompts, delegated, fileAccess, chatProjects, projectSets };
+    return { port, opened, prompts, delegated, created, fileAccess, chatProjects, projectSets, chatMachines };
 }
 
 /** The Worker, in process: OAuth routes + the MCP mount, sessions by a `session=<userId>` cookie. */
@@ -323,6 +333,7 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
                 'chats_history',
                 'chats_file_get',
                 'chats_set_project',
+                'chats_set_machine',
                 'memory_search',
                 'memory_remember',
                 'schedules_create',
@@ -420,6 +431,12 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
         expect(res.isError).toBeFalsy();
         expect(res.structuredContent).toMatchObject({ taskId: 'task_1.c1', parentId: 'task_1', status: 'queued', assignee: 'agent_ada' });
         expect(s.platform.delegated).toEqual([{ taskId: 'task_1', agentId: 'agent_ada', objective: 'review the diff', callId: 'c1', environmentId: 'env_laptop' }]);
+        // A machine rides through to the port on both (#414): the router resolves the assignee's account there.
+        await client.callTool({ name: 'tasks_delegate', arguments: { taskId: 'task_1', agentId: 'agent_ada', objective: 'again', callId: 'c2', machineId: 'm_laptop' } });
+        expect(s.platform.delegated[1]).toEqual({ taskId: 'task_1', agentId: 'agent_ada', objective: 'again', callId: 'c2', machineId: 'm_laptop' });
+        const made = await client.callTool({ name: 'tasks_create', arguments: { agentId: 'agent_ada', objective: 'run there', machineId: 'm_laptop' } });
+        expect(made.isError).toBeFalsy();
+        expect(s.platform.created).toEqual([{ agentId: 'agent_ada', objective: 'run there', machineId: 'm_laptop' }]);
 
         const doctor = await client.callTool({ name: 'environments_doctor', arguments: { machineId: 'm_laptop' } });
         expect(doctor.structuredContent).toMatchObject({ machineId: 'm_laptop', ok: true, unverified: [], environments: [{ environmentId: 'env_laptop', verdict: { ok: true } }] });
@@ -493,6 +510,26 @@ describe('platform MCP server: projects (#334)', () => {
         expect(byName.get('chats_set_project')!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
         expect(byName.get('chats_set_project')!.inputSchema.required).toEqual(expect.arrayContaining(['chatId', 'projectId']));
         expect(client.getInstructions()).toContain('chats_set_project');
+        await client.close();
+    });
+
+    it('chats_set_machine runs a chat on a paired machine or on none under chats; an unpaired machine is an error (#414)', async () => {
+        const s = server();
+        const { client } = await connect(s, ['chats']);
+        const set = await client.callTool({ name: 'chats_set_machine', arguments: { chatId: 'chat_1', machineId: 'm_laptop' } });
+        expect(set.isError).toBeFalsy();
+        expect(set.structuredContent).toEqual({ chatId: 'chat_1', machineId: 'm_laptop' });
+        expect(s.platform.chatMachines).toEqual({ chat_1: 'm_laptop' });
+        const cleared = await client.callTool({ name: 'chats_set_machine', arguments: { chatId: 'chat_1', machineId: null } });
+        expect(cleared.isError).toBeFalsy();
+        expect(s.platform.chatMachines).toEqual({ chat_1: null });
+        const unknown = await client.callTool({ name: 'chats_set_machine', arguments: { chatId: 'chat_1', machineId: 'm_other' } });
+        expect(unknown.isError).toBe(true);
+        expect((unknown.content as { text: string }[])[0]!.text).toContain('no paired machine m_other');
+        const { tools } = await client.listTools();
+        const byName = new Map(tools.map((t) => [t.name, t]));
+        expect(byName.get('chats_set_machine')!.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+        expect(client.getInstructions()).toContain('chats_set_machine');
         await client.close();
     });
 

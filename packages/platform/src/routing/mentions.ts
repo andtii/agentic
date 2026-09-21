@@ -7,7 +7,7 @@
  * may be activated and hands each task to the router.
  */
 
-import { isChatFilePart, type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MessageId, type PromptPart, type TaskContract } from '@agentic/core';
+import { isChatFilePart, type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MachineId, type MessageId, type PromptPart, type TaskContract } from '@agentic/core';
 
 import type { IndexedEntry } from '../chat/state.js';
 
@@ -46,6 +46,8 @@ export function mentionContract(input: {
     readonly entries: readonly IndexedEntry[];
     readonly nameOf: (id: AgentId) => string;
     readonly fallbackEnvironmentId?: EnvironmentId;
+    /** The chat's machine (#414, `ChatSummary.machineId`): the router resolves the member's account there unless its folder names an environment that machine reports. */
+    readonly machineId?: MachineId;
 }): TaskContract {
     const { member } = input;
     const messages = input.entries
@@ -70,6 +72,7 @@ export function mentionContract(input: {
         assignee: input.assignee,
         context,
         constraints: {},
-        ...where
+        ...where,
+        ...(input.machineId !== undefined ? { machineId: input.machineId } : {})
     };
 }

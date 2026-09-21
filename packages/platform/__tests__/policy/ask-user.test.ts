@@ -470,14 +470,19 @@ describe('a late answer no route can take: the follow-up task, retried and named
         return { sid, requestId: platformRequestId('ask_1') };
     }
 
-    it('with the asking task settled, the answer starts the asker again with a follow-up task in its live session', async () => {
+    it('with the asking task settled, the answer starts the asker again with a follow-up task in its live session, on the machine the chat names now (#414)', async () => {
         const { sid, requestId } = await askedThenCancelled('t_5');
+        // The chat moved to a machine meanwhile: the follow-up carries it, so the router judges the asker's environment against it.
+        const workspace = app.as(owner).actor(Workspace, workspaceKey(WS));
+        const { machineId, pairingCode } = await workspace.registerMachinePending({ name: 'pc' });
+        await workspace.claimPairing(pairingCode);
+        await chat().setMachine(machineId);
         expect((await session(sid).respond(requestId, { type: 'input', answers: 'tea' })).kind).toBe('ack');
         const follow = answerTaskId(sid, requestId);
         await until(() => exists(follow), 'the follow-up task');
         await settled(follow);
         const next = await task(follow).get();
-        expect(next).toMatchObject({ status: 'completed', owner: ADA, assignee: ADA, resumeFrom: sid, sessionId: sid, origin: { kind: 'user', chatId: CHAT } });
+        expect(next).toMatchObject({ status: 'completed', owner: ADA, assignee: ADA, resumeFrom: sid, sessionId: sid, origin: { kind: 'user', chatId: CHAT }, machineId });
         expect(next.result?.text).toBe('carrying on with tea');
         expect(await messages()).toContain('user: @Ada — re: “Tea or coffee?” → tea');
         expect((await session(sid).get()).status).not.toBe('closed');

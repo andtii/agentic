@@ -276,8 +276,9 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
             }
             try {
                 const assignee = await as(AgentActor, agentKey(workspaceId, target)).get();
-                const fallback = member.workdir || assignee.config.execution.defaultEnvironmentId ? undefined : await posterEnv();
-                const contract = mentionContract({ assignee: target, chatId, messageId, text: post.text, posterName: poster.config.name, member, entries, nameOf, ...(fallback ? { fallbackEnvironmentId: fallback } : {}) });
+                // The poster's environment is only for an assignee that names nothing of its own (#220) — an account-bound one resolves on the chat's machine (#414).
+                const fallback = member.workdir || assignee.config.execution.defaultEnvironmentId || assignee.config.execution.account ? undefined : await posterEnv();
+                const contract = mentionContract({ assignee: target, chatId, messageId, text: post.text, posterName: poster.config.name, member, entries, nameOf, ...(summary.machineId ? { machineId: summary.machineId } : {}), ...(fallback ? { fallbackEnvironmentId: fallback } : {}) });
                 const id = createId('task') as TaskId;
                 await task(id).create(contract, { owner: target, depth });
                 const view = await router.run(id);
@@ -456,6 +457,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                         constraints: spec.constraints,
                         ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                         ...(spec.environmentId !== undefined ? { environmentId: spec.environmentId } : {}),
+                        ...(spec.machineId !== undefined ? { machineId: spec.machineId } : {}),
                         ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {}),
                         ...(spec.projectId !== undefined ? { projectId: spec.projectId } : {}),
                         sessionId

@@ -6,7 +6,7 @@
  * reaches the inbox from the entry's own alarm (AC-08 in process).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentId, EnvironmentId, Principal, ProjectId, ScheduleId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, EnvironmentId, MachineId, Principal, ProjectId, ScheduleId, TaskId, WorkspaceId } from '@agentic/core';
 import { actor, type ActorClient, type AnyActorDefinition, type Host } from '@sigx/actors';
 import { defineActorApp, manualScheduler, memoryStorage } from '@sigx/actors/host';
 import { createTestServerFnContext, stubServerApp } from '@sigx/server/testing';
@@ -142,6 +142,12 @@ describe('deliverScheduleFired', () => {
         expect(view.projectId).toBe('project_1');
         expect(view.environmentId).toBeUndefined();
         expect(view.workdir).toBeUndefined();
+    });
+
+    it('an agent entry with a machineId fires a task carrying it, queued without asking the environment probe (#414)', async () => {
+        const outcome = await deliverScheduleFired(agentEntry({ machineId: 'machine_pc' as MachineId, projectId: 'project_1' as ProjectId }), hop);
+        expect(outcome).toMatchObject({ kind: 'task', status: 'queued' });
+        expect(await task(scheduledTaskId(SCH, AT)).get()).toMatchObject({ machineId: 'machine_pc', projectId: 'project_1' });
     });
 
     it('the objective falls back to the title when the entry has no prompt', async () => {

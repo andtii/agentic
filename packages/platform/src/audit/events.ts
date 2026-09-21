@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -117,8 +117,14 @@ export interface EnvironmentChosenData {
     readonly from?: { readonly runtime: RuntimeId; readonly environmentId?: EnvironmentId; readonly machineId?: MachineId };
     /** The folder the session runs in (#190) — absent on `anthropic-api`, or when no machine reported the environment yet (then the first root is taken at placement). */
     readonly cwd?: string;
-    /** A folder the task asked for that this runtime does not use: `anthropic-api` runs no local folder (#190). */
+    /** A folder the task asked for that this runtime does not use: `anthropic-api` runs no local folder (#190) — or that came with an environment the task's machine does not report (#414). */
     readonly ignoredWorkdir?: string;
+    /** The machine the environment was resolved on (#414), when the task named one or the environment was resolved through an account there. */
+    readonly machineId?: MachineId;
+    /** The account the environment was resolved by (#414, `accountKeyOf`), when it was. */
+    readonly account?: AccountKey;
+    /** An environment the task named that its machine does not report (#414): left aside for the account's environment there. */
+    readonly ignoredEnvironment?: EnvironmentId;
     readonly why: string;
 }
 

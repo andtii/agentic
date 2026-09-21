@@ -6,12 +6,14 @@
  * than the posting task, so agents mentioning each other stop at `maxDepth`.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MessageId, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MachineId, type MessageId, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 
 import { AgentActor, agentKey } from '../../src/agent/index';
-import { mintAgentPrincipal } from '../../src/auth/index';
+import { mintAgentPrincipal, workspaceKey } from '../../src/auth/index';
+import { PairingDirectory } from '../../src/pairing/index';
+import { Workspace } from '../../src/workspace/index';
 import { Chat, ChatPage } from '../../src/chat/index';
 import type { IndexedEntry } from '../../src/chat/state';
 import { createActorToolPorts, defineRoutingActor, type AgentPrincipal } from '../../src/routing/index';
@@ -55,6 +57,12 @@ describe('mentionContract', () => {
         expect(bare.environmentId).toBe('env_2');
         expect(bare).not.toHaveProperty('workdir');
     });
+
+    it("carries the chat's machine beside the folder (#414), and nothing when the chat names none", () => {
+        const member: ChatMember = { since: 0, historyFrom: 0, workdir: { environmentId: 'env_1' as EnvironmentId, path: '/work/app' } };
+        expect(mentionContract({ ...base, member, machineId: 'machine_pc' as MachineId })).toMatchObject({ environmentId: 'env_1', workdir: '/work/app', machineId: 'machine_pc' });
+        expect(mentionContract({ ...base, member })).not.toHaveProperty('machineId');
+    });
 });
 
 describe("chat_post mentions over the actors", () => {
@@ -80,7 +88,7 @@ describe("chat_post mentions over the actors", () => {
         prompts = [];
         const Session = defineSessionActor({ factory: factory() });
         Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
-        app = testActorApp([Routing, Session, TaskActor, AgentActor, Chat, ChatPage]);
+        app = testActorApp([Routing, Session, TaskActor, AgentActor, Chat, ChatPage, Workspace, PairingDirectory]);
         await app.start();
         for (const id of [ADA, BOB, CY]) {
             await app.as(owner).actor(AgentActor, agentKey(WS, id)).update({ name: id.slice(6), instructions: 'Be brief.', tools: [], approvalPolicy: [], execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } }, 'create');
@@ -123,6 +131,18 @@ describe("chat_post mentions over the actors", () => {
             await until(async () => (await task(taskId).get()).status === 'completed', `${agentId}'s task to complete`);
         }
         await until(async () => (await agentMessages(BOB)).includes('pong') && (await agentMessages(CY)).includes('pong'), 'both replies in the chat');
+    });
+
+    it("a mention's task carries the chat's machine (#414)", async () => {
+        const workspace = app.as(userPrincipal('u1')).actor(Workspace, workspaceKey(WS));
+        const { machineId, pairingCode } = await workspace.registerMachinePending({ name: 'pc' });
+        await workspace.claimPairing(pairingCode);
+        await chat().setMachine(machineId);
+        await posting();
+        const result = await ports().chat.post({ text: '@bob ping', mentions: [BOB] }, call);
+        const t = await task(result.activated![0]!.taskId).get();
+        expect(t.machineId).toBe(machineId);
+        await until(async () => (await task(t.id).get()).status === 'completed', "bob's task to complete");
     });
 
     it('a post without mentions wakes nobody — not the coordinator either', async () => {

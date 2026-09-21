@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, TaskId } from '@agentic/core';
+import type { AccountKey, AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import type { RegistryGate } from '../registry/types.js';
 
@@ -43,8 +43,12 @@ export interface Route {
     runtime: RuntimeId;
     /** Fixed at the first resolution; a route never changes environment (EXE-12). */
     readonly environmentId?: EnvironmentId;
-    /** The machine that reported `environmentId` — bound once a machine reports it, never rebound. */
+    /** The machine that reported `environmentId` — bound once a machine reports it (at `run` when the task named it, #414), never rebound. */
     machineId?: MachineId;
+    /** The machine the task asked for (#414: the chat's, a delegating parent's, a schedule's), for the record — `machineId` is where it landed. */
+    readonly requestedMachineId?: MachineId;
+    /** The account the environment was resolved by (#414, `accountKeyOf`): the agent's, or its pinned environment's; absent when the environment was named outright. */
+    readonly account?: AccountKey;
     /**
      * The folder the session runs in (#190, #332), resolved once (EXE-12): the task's `workdir`, the project's
      * folder for the environment, a delegating parent's folder in the same environment, the agent's

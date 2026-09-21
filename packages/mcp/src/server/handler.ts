@@ -43,7 +43,7 @@ export type PlatformMcpHandler = (request: Request) => Promise<Response>;
 
 export const PLATFORM_MCP_NAME = 'agentic';
 export const PLATFORM_MCP_INSTRUCTIONS =
-    'The agentic platform orchestration surface. Every daemon on every machine of the workspace is reachable here: list machines and environments, check each account’s provider usage limits (usage_limits), then open sessions on an explicitly chosen machine (sessions_open), prompt and follow them (sessions_prompt, sessions_tail), create and inspect tasks, post into chats and read their files, search memory, create schedules, list projects and set the project a chat belongs to (projects_list, chats_set_project). Tool families are gated by the OAuth scopes granted to this client; a tool reports "forbidden" with the scope it needs.';
+    'The agentic platform orchestration surface. Every daemon on every machine of the workspace is reachable here: list machines and environments, check each account’s provider usage limits (usage_limits), then open sessions on an explicitly chosen machine (sessions_open), prompt and follow them (sessions_prompt, sessions_tail), create and inspect tasks, post into chats and read their files, search memory, create schedules, list projects and set the project a chat belongs to (projects_list, chats_set_project), and the machine a chat runs on (chats_set_machine). Tool families are gated by the OAuth scopes granted to this client; a tool reports "forbidden" with the scope it needs.';
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
