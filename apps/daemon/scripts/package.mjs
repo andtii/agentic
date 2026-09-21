@@ -3,6 +3,7 @@
  * `pnpm --filter @agentic/daemon package` — the daemon installer zip.
  *
  * Produces `apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip`
+ * (`<version>` is the build stamp `dist/build.json` records: `scripts/lib/stamp.mjs`)
  * holding the built daemon (`bin/`, `dist/`), its production dependency
  * closure copied into a plain `node_modules/` (the `@agentic/*` workspace
  * packages as their built `dist/`, the Claude Code SDK with the native CLI
@@ -17,14 +18,17 @@
  * Run `pnpm build` at the repo root first — the zip is assembled from `dist/`
  * directories and refuses to run without them.
  *
- * Usage: node scripts/package.mjs [--out <dir>] [--unversioned]
+ * Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256]
  *   --unversioned  name the zip `agentic-daemon-<os>-<arch>.zip` (the release asset name the installers fetch)
+ *   --sha256       also write `<zip>.sha256` (`<hex>  <zip name>`) beside it, for the release manifest
  * See `docs/runbook.md` → "Daemon on a Windows machine".
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stampFor } from './lib/stamp.mjs';
 import { writeZip } from './lib/zip.mjs';
 
 const DAEMON_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -146,14 +150,16 @@ export function resolveClosure(rootDir) {
 
 /**
  * Assemble the zip.
- * @param {{ outDir?: string; unversioned?: boolean; log?: (line: string) => void }} [options]
- * @returns {{ zipFile: string; version: string; entries: number; bytes: number; packages: number }}
+ * @param {{ outDir?: string; unversioned?: boolean; sha256?: boolean; log?: (line: string) => void }} [options]
+ * @returns {{ zipFile: string; version: string; entries: number; bytes: number; packages: number; sha256?: string }}
  */
 export function packageDaemon(options = {}) {
     const log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     const pkg = readPackage(DAEMON_DIR);
-    const version = pkg.version;
     if (!existsSync(join(DAEMON_DIR, 'dist', 'cli.js'))) throw new Error('package: apps/daemon/dist is missing — run `pnpm build` at the repo root first');
+    // The version the build stamped into dist (a dist built before the stamp existed: this checkout's stamp).
+    const buildJson = join(DAEMON_DIR, 'dist', 'build.json');
+    const version = existsSync(buildJson) ? JSON.parse(readFileSync(buildJson, 'utf8')).version : stampFor(DAEMON_DIR).version;
 
     const closure = resolveClosure(DAEMON_DIR);
     for (const [target, source] of closure) {
@@ -202,18 +208,32 @@ export function packageDaemon(options = {}) {
     };
     const result = writeZip(zipFile, entries());
     log(`package: ${relative(process.cwd(), zipFile) || zipFile} — ${result.entries} files, ${(result.bytes / 1024 / 1024).toFixed(1)} MB, ${closure.size} packages`);
-    return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size };
+    if (!options.sha256) return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size };
+    // In chunks: the zip is hundreds of MB.
+    const hash = createHash('sha256');
+    const fd = openSync(zipFile, 'r');
+    try {
+        const chunk = Buffer.allocUnsafe(1 << 20);
+        for (let n; (n = readSync(fd, chunk, 0, chunk.length, null)) > 0; ) hash.update(chunk.subarray(0, n));
+    } finally {
+        closeSync(fd);
+    }
+    const sha256 = hash.digest('hex');
+    writeFileSync(`${zipFile}.sha256`, `${sha256}  ${basename(zipFile)}\n`);
+    return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size, sha256 };
 }
 
 /** @param {readonly string[]} argv */
 function main(argv) {
     let outDir;
     let unversioned = false;
+    let sha256 = false;
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--out' && argv[i + 1]) outDir = argv[++i];
         else if (argv[i] === '--unversioned') unversioned = true;
+        else if (argv[i] === '--sha256') sha256 = true;
         else if (argv[i] === '--help' || argv[i] === '-h') {
-            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned]\n');
+            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256]\n');
             return 0;
         } else {
             process.stderr.write(`package: unknown argument ${argv[i]}\n`);
@@ -221,7 +241,7 @@ function main(argv) {
         }
     }
     try {
-        packageDaemon({ ...(outDir ? { outDir } : {}), unversioned });
+        packageDaemon({ ...(outDir ? { outDir } : {}), unversioned, sha256 });
         return 0;
     } catch (e) {
         process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);

@@ -3,6 +3,8 @@ export interface PackageOptions {
     readonly outDir?: string;
     /** Name the zip `agentic-daemon-<os>-<arch>.zip` (no version): the release asset the installers fetch. */
     readonly unversioned?: boolean;
+    /** Also write `<zip>.sha256` (`<hex>  <zip name>`) beside the zip. */
+    readonly sha256?: boolean;
     readonly log?: (line: string) => void;
 }
 export interface PackageResult {
@@ -11,6 +13,8 @@ export interface PackageResult {
     readonly entries: number;
     readonly bytes: number;
     readonly packages: number;
+    /** The zip's sha256 (hex), with `sha256: true`. */
+    readonly sha256?: string;
 }
 export interface ClosureSource {
     readonly real: string;

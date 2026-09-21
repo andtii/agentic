@@ -10,6 +10,7 @@ import type { DaemonDriver } from '../src/daemon';
 import { loadEnvironments } from '../src/environments';
 import { daemonPaths } from '../src/paths';
 import { loadPolicy, POLICY_OFF } from '../src/policy';
+import { DAEMON_CHANNEL, DAEMON_COMMIT, DAEMON_VERSION, versionLine } from '../src/version';
 import { scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
@@ -38,6 +39,14 @@ describe('cli', () => {
 
     it('parses commands, positionals and flags', () => {
         expect(parseArgs(['pair', 'ABC234', '--url', 'https://x', '--name=box', '--verbose'])).toEqual({ command: 'pair', positional: ['ABC234'], flags: { url: 'https://x', name: 'box', verbose: true } });
+    });
+
+    it('--version and `version` print the version, commit, protocol and channel', async () => {
+        expect(await main(['--version'], { paths: paths(), ...io() })).toBe(0);
+        expect(await main(['version'], { paths: paths(), ...io() })).toBe(0);
+        // unstamped from source (vitest); a build stamps them (vite.config.ts, package.test.ts checks the zip)
+        expect(out).toEqual([`agentic-daemon ${DAEMON_VERSION} (${DAEMON_COMMIT}, protocol ${DAEMON_PROTOCOL_VERSION}, ${DAEMON_CHANNEL})`, versionLine()]);
+        expect(out[0]).toBe(`agentic-daemon 0.0.0-dev (unknown, protocol ${DAEMON_PROTOCOL_VERSION}, dev)`);
     });
 
     it('usage errors exit 2; help exits 0', async () => {

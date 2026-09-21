@@ -199,13 +199,36 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 
 ### 5.1 Where the zip comes from
 
-`.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` on every push to `main` that touches `apps/daemon` or `packages/` (Windows x64, macOS arm64 and x64, Linux x64 and arm64) and uploads them to the rolling **`daemon-latest`** pre-release on GitHub — https://github.com/andtii/agentic/releases/tag/daemon-latest. `workflow_dispatch` reruns it by hand. A tagged release attaches the same zips (`docs/release-checklist.md`).
+`.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` (Windows x64, macOS arm64 and x64, Linux x64 and arm64), each with a `<zip>.sha256` sidecar, and publishes them with a **`manifest.json`** (#361):
+
+```json
+{ "version": "0.1.0-main.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
+  "notesUrl": "https://github.com/andtii/agentic/releases/tag/daemon-latest",
+  "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.0-main.16c7d40" }, … },
+  "harnesses": {} }
+```
+
+Two channels:
+
+- **`latest`** — every push to `main` that touches `apps/daemon` or `packages/` (and `workflow_dispatch` without a `tag`) replaces the assets of the rolling **`daemon-latest`** pre-release (https://github.com/andtii/agentic/releases/tag/daemon-latest). The version is `<apps/daemon/package.json version>-main.<sha7>`.
+- **`stable`** — pushing a tag `daemon-v<semver>` creates the GitHub release `daemon-v<semver>` (notes from release-drafter's newest draft when there is one, else generated). The version is the tag's semver. The run then uploads the same `manifest.json` to the rolling **`daemon-stable`** pre-release (created on first use; its notes name the current stable version), whose asset urls point at the versioned release. A semver pre-release tag (`daemon-v0.2.0-rc.1`) becomes a GitHub pre-release and leaves `daemon-stable` alone: its manifest still says `stable`, but only `AGENTIC_VERSION=daemon-v0.2.0-rc.1` installs it.
+
+  Each channel's manifest is at a fixed URL — `releases/download/daemon-latest/manifest.json` and `releases/download/daemon-stable/manifest.json` — and the installers (and later the platform) read only those or a pinned `releases/download/daemon-v<semver>/manifest.json`. Nothing depends on GitHub's "latest release", which the app's release-drafter releases own.
+
+  ```sh
+  git tag daemon-v0.1.0 && git push origin daemon-v0.1.0
+  ```
+
+  Without pushing a tag, **Actions → Daemon release → Run workflow** with `tag: daemon-v0.1.0` builds that release from the chosen branch (the tag is created at the run's commit). A tag run has its own concurrency group, so a `main` push never cancels it; re-running an existing tag fails — delete the release (and its tag) first.
+
+The version is stamped at build time (`apps/daemon/scripts/lib/stamp.mjs`, read by `vite.config.ts`; `AGENTIC_DAEMON_TAG=daemon-v<semver>` stamps a release build locally): `agentic-daemon --version` prints `agentic-daemon <version> (<commit>, protocol <n>, <channel>)`, `hello.daemonVersion` carries the version, and `dist/build.json` records it for the packager. Bump `apps/daemon/package.json` only to move the `main` builds' base version; run from source (tests) the daemon reports `0.0.0-dev`, channel `dev`. The publish job checks every zip against its sidecar, uploads the zips, then writes the manifest with `node apps/daemon/scripts/lib/manifest.mjs --dir <folder> --tag <release tag> --repo andtii/agentic` and uploads it last.
 
 Building one locally (a zip carries the runtime CLIs of the platform it is built on):
 
 ```sh
 pnpm build
 pnpm --filter @agentic/daemon package        # → apps/daemon/release/agentic-daemon-<version>-<os>-<arch>.zip (~330 MB; #326 trims it)
+                                              #   --unversioned: agentic-daemon-<os>-<arch>.zip; --sha256: also <zip>.sha256
 ```
 
 `apps/daemon/scripts/package.mjs` copies the built daemon, the production dependency closure (the `@agentic/*` packages as their `dist/`, the runtime SDKs with their native CLIs), `install.ps1` / `uninstall.ps1`, `install.sh` / `uninstall.sh`, the service scripts and a README into one zip. `apps/daemon/__tests__/package.test.ts` unpacks it and runs `agentic-daemon --version` and `doctor` on plain Node, so a green CI means the zip is self-contained.
@@ -243,7 +266,7 @@ $env:AGENTIC_URL='https://agentic-web.ekdahls.workers.dev'; $env:AGENTIC_CODE='<
 curl -fsSL 'https://agentic-web.ekdahls.workers.dev/install.sh' | AGENTIC_URL=https://agentic-web.ekdahls.workers.dev AGENTIC_CODE=<code> AGENTIC_NAME=<name> sh
 ```
 
-The Worker serves the two bootstraps from `apps/web/public/` (`_headers` makes them `text/plain`). Each one: uses Node ≥ 22.12 from PATH or downloads a portable Node 22 from nodejs.org into the install root; downloads `agentic-daemon-<os>-<arch>.zip` from `daemon-latest`; stops a running daemon; unpacks to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon`; then runs the zip's own installer, which pairs with the code, runs `doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07), writes the `agentic-daemon` command (#354) and registers the background service — on Windows the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user); on macOS the launchd agent `~/Library/LaunchAgents/agentic-daemon.plist` (KeepAlive); on Linux the systemd user unit `agentic-daemon.service` (`Restart=always`, `loginctl enable-linger` so it survives logout). Environment overrides: `AGENTIC_DAEMON_ZIP=<path or url>` installs that zip instead (a local build, §5.1), `AGENTIC_INSTALL_DIR` moves the install root, `AGENTIC_DAEMON_HOME` moves the daemon's data, `AGENTIC_NO_PATH=1` writes the command without touching any `PATH`.
+The Worker serves the two bootstraps from `apps/web/public/` (`_headers` makes them `text/plain`). Each one: uses Node ≥ 22.12 from PATH or downloads a portable Node 22 from nodejs.org into the install root; reads the release manifest (§5.1) of `AGENTIC_CHANNEL` (`latest` or `stable`; the default is the `DEFAULT_CHANNEL` / `$DefaultChannel` constant at the top of each script, `latest` until the first stable release) or of the pinned `AGENTIC_VERSION=daemon-v<semver>`, downloads this machine's `<os>-<arch>` zip and refuses it, printing both hashes, unless its sha256 matches the manifest; stops a running daemon; unpacks to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon`; then runs the zip's own installer, which pairs with the code, runs `doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07), writes the `agentic-daemon` command (#354) and registers the background service — on Windows the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user); on macOS the launchd agent `~/Library/LaunchAgents/agentic-daemon.plist` (KeepAlive); on Linux the systemd user unit `agentic-daemon.service` (`Restart=always`, `loginctl enable-linger` so it survives logout). Environment overrides: `AGENTIC_DAEMON_ZIP=<path or url>` installs that zip instead (a local build, §5.1; no manifest, no hash check), `AGENTIC_RELEASES` reads the manifest from another releases URL (a fork, a test server), `AGENTIC_INSTALL_DIR` moves the install root, `AGENTIC_DAEMON_HOME` moves the daemon's data, `AGENTIC_NO_PATH=1` writes the command without touching any `PATH`.
 
 **The `agentic-daemon` command** (#354). The install writes a launcher — `~/.agentic/bin/agentic-daemon`, `%LOCALAPPDATA%\agentic\bin\agentic-daemon.cmd` — that hard-codes the Node it resolved and the install folder, so it runs on a machine whose only Node is the portable one the bootstrap downloaded. It is then made reachable in the least invasive way that works: its folder is already on `PATH` → nothing; `~/.local/bin` or `~/bin` is on `PATH` → a symlink there; otherwise a fenced `# >>> agentic-daemon >>>` block in `~/.zshrc` / `~/.bashrc` / `~/.config/fish/config.fish` / `~/.profile` (the shell `$SHELL` names), and on Windows the folder is added to the **user** `PATH` through `[Environment]::SetEnvironmentVariable` (never `setx`, which truncates a long `PATH`). Every step is idempotent, so re-running the installer repoints the launcher without a second `PATH` entry. **It takes a new terminal.** `agentic-daemon launcher show` says where it is and what it runs, `launcher install` / `launcher remove` do it by hand, and `uninstall.sh` / `uninstall.ps1` take it back out. A daemon installed before #354 has no command at all: run `node ~/.agentic/daemon/bin/agentic-daemon.mjs …` (PowerShell: `node "$env:LOCALAPPDATA\agentic\daemon\bin\agentic-daemon.mjs" …`) — which is what the Machine page's "command not found?" line shows — or re-run the installer from the Pair page.
 
