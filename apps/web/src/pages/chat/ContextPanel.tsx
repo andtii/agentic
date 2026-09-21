@@ -257,7 +257,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                         <div data-member-usage data-limit={limit ? '' : undefined}>
                                             <span data-member-quota>{rings && snapshot ? <QuotaRings snapshot={snapshot} {...(model ? { model } : {})} /> : <QuotaBadge {...quota} {...(model ? { model } : {})} />}</span>
                                             {/* Under the rings (#470): the limit that ran out on the left, Details on the right. */}
-                                            {limit || details ? <div data-member-usage-line>{limit ? <span data-member-limit>{limit}</span> : <span />}{details}</div> : null}
+                                            {limit || details ? <div data-member-usage-line>{limit ? <span data-member-limit title={limit}>{limit}</span> : <span aria-hidden="true" />}{details}</div> : null}
                                             {open && snapshot ? <div data-member-details><QuotaPanel snapshot={snapshot} zoneInHeader /></div> : null}
                                         </div>
                                     ) : null}
