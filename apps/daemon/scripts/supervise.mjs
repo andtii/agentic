@@ -131,6 +131,8 @@ export async function supervise(options) {
         try {
             appendFileSync(at.log, `${line}\n`);
         } catch {}
+        // Also on stderr on purpose: under launchd / systemd that is daemon.log, so a restart sits next to the
+        // daemon's own `daemon: exiting` line. state/supervisor.log is the durable copy (a Windows task has no stderr).
         process.stderr.write(`${line}\n`);
     };
 
@@ -189,7 +191,8 @@ export async function supervise(options) {
         say('stopping', { signal });
         wake?.();
         if (child && child.exitCode === null && child.signalCode === null) {
-            child.kill('SIGTERM');
+            // The daemon stops the same way on either; SIGBREAK (Windows only) has no meaning to it.
+            child.kill(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM');
             const kill = setTimeout(() => {
                 say('the daemon did not stop in time: killing it', { timeoutMs: t.stopTimeoutMs });
                 child?.kill('SIGKILL');
