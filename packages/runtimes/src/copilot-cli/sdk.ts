@@ -157,13 +157,19 @@ export interface CopilotClientInit {
     readonly baseDirectory?: string;
     readonly env: Record<string, string | undefined>;
     readonly logLevel?: 'none' | 'error' | 'warning' | 'info' | 'debug' | 'all';
+    /**
+     * The Copilot runtime executable (`copilot-runtime[.exe]` of a `@github/copilot-sdk-<os>-<arch>` package) to spawn
+     * over stdio (#369: the daemon's harness store). Default: the SDK's own, resolved beside it.
+     */
+    readonly cliPath?: string;
 }
 export type CreateCopilotClient = (init: CopilotClientInit) => CopilotClientLike | Promise<CopilotClientLike>;
 
 /** The real SDK, imported on first use. */
 export const loadCopilotClient: CreateCopilotClient = async (init) => {
-    const { CopilotClient } = await import('@github/copilot-sdk');
+    const { CopilotClient, RuntimeConnection } = await import('@github/copilot-sdk');
     return new CopilotClient({
+        ...(init.cliPath !== undefined ? { connection: RuntimeConnection.forStdio({ path: init.cliPath }) } : {}),
         ...(init.baseDirectory !== undefined ? { baseDirectory: init.baseDirectory } : {}),
         env: init.env,
         useLoggedInUser: true,

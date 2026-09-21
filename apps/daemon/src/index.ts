@@ -5,10 +5,10 @@
  */
 export { DAEMON_VERSION } from './version.js';
 export { main, parseArgs, type CliContext, type ParsedArgs } from './cli.js';
-export { createDaemon, withoutLocalPaths, agentCapabilitiesOf, follows, PlatformToolError, DEFAULT_LOG_MAX_BYTES, HISTORY_RESPONSE_BYTES, type Daemon, type DaemonDriver, type DaemonOptions } from './daemon.js';
+export { createDaemon, withoutLocalPaths, agentCapabilitiesOf, follows, PlatformToolError, DEFAULT_LOG_MAX_BYTES, HISTORY_RESPONSE_BYTES, HARNESS_DRAIN_TIMEOUT_MS, type Daemon, type DaemonDriver, type DaemonHarnesses, type DaemonOptions } from './daemon.js';
 export { answerFsRequest, checkWithinRoots, gitInfo, withinRoots, type FsOptions, type FsOutcome, type RootCheck } from './fs.js';
-export { builtinDrivers, isDisposable, type DisposableDriver } from './drivers.js';
-export { runDoctor, formatDoctorReport, type DoctorOptions } from './doctor.js';
+export { builtinDrivers, builtinRuntimes, harnessMissingDriver, isDisposable, type BuiltinRuntimes, type BuiltinRuntimesOptions, type DisposableDriver } from './drivers.js';
+export { runDoctor, formatDoctorReport, whichOnPath, type DoctorOptions } from './doctor.js';
 export { parseEnvironments, loadEnvironments, type EnvironmentsResult } from './environments.js';
 export {
     addEnvironment,
@@ -54,3 +54,29 @@ export { pair, normalizePlatformUrl, normalizePairingCode, daemonSocketUrl, Pair
 export { saveCredentials, loadCredentials, writeOwnerOnly, ownerOnlyAclArgs, credentialSecrets, runCommand, type Credentials, type CommandRunner, type CommandResult, type SecureWriteOptions } from './credentials.js';
 export { createLogger, redact, silentLogger, type Logger, type LoggerOptions, type LogLevel, type LogFields } from './logger.js';
 export { daemonPaths, type DaemonPaths, type PathContext } from './paths.js';
+export {
+    harnessStore,
+    harnessRoot,
+    bundledHarness,
+    sdkVersion,
+    treeHashOf,
+    extractZipFile,
+    parseHarnessManifest,
+    releaseManifestUrl,
+    fetchReleaseManifest,
+    harnessAsset,
+    HarnessError,
+    HarnessMissingError,
+    BUILTIN_HARNESSES,
+    DEFAULT_RELEASES,
+    type HarnessStore,
+    type HarnessStoreOptions,
+    type HarnessLocator,
+    type HarnessLocation,
+    type HarnessState,
+    type HarnessSpec,
+    type HarnessPackageManifest,
+    type StageOptions,
+    type StagedHarness
+} from './harness.js';
+export { harnessCommand, harnessManifestUrl, HARNESS_USAGE, type HarnessCommandContext } from './harness-cli.js';

@@ -53,6 +53,18 @@
  * - Updates (#364): `hello` carries the build, `features: ['update']` when an update client is configured, and what
  *   the supervisor recorded (`restarts`, `lastExit`, `lastUpdate`). `update.request` / `update.cancel` go to
  *   `./update.ts`; while it drains, a turn-starting `prompt` is answered `drainingReply` and `session.open` still works.
+ * - Harnesses (#369, `./harness.ts`): `hello` lists the installed ones (and the
+ *   `harness` feature), `harnesses` goes out after every change. `harness.request`
+ *   installs or updates one runtime — download, verify, stage, then drain only
+ *   that runtime: its turn-starting prompts are answered `draining` and new
+ *   sessions on it refused `draining` while its running turns finish (or at once
+ *   with `mode: 'now'`, or when the drain times out); its sessions are closed
+ *   with code `harness-update` through the stop path, `current.json` switched,
+ *   the driver disposed and rebuilt, the old version removed. The platform
+ *   re-opens the sessions from `spec.resume`. `remove` is refused `in-use` while
+ *   an environment runs on the runtime. A runtime without a harness keeps its
+ *   environments, reported `harness-missing`; opening a session on one is
+ *   refused with that code.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -72,6 +84,8 @@ import {
     type EnvironmentId,
     type EnvironmentInspection,
     type EnvironmentVerdict,
+    type HarnessPhase,
+    type LifecycleError,
     type LocalEnvironment,
     type MachineId,
     type MachinePolicy,
@@ -89,6 +103,7 @@ import type { SecureWriteOptions } from './credentials.js';
 import { answerEnvRequest } from './env-manage.js';
 import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
+import { HarnessError, type HarnessStore } from './harness.js';
 import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
@@ -157,7 +172,22 @@ export interface DaemonOptions {
     readonly lifecycle?: { readonly restarts?: number; readonly lastExit?: DaemonExit; readonly lastUpdate?: DaemonUpdateOutcome };
     /** `hello.build.platform` is `<platform>-<arch>`; default `process.arch`. */
     readonly arch?: string;
+    /** The harness store (#369): with it the daemon reports its harnesses and answers `harness.request` (feature `harness`). */
+    readonly harnesses?: DaemonHarnesses;
 }
+
+export interface DaemonHarnesses {
+    readonly store: HarnessStore;
+    /** `runtime`'s driver built again from where its harness is now (`builtinRuntimes().rebuild`); `undefined` drops the runtime. */
+    rebuild(runtime: string): DaemonDriver | undefined;
+    /** How long a `drain` waits for the runtime's running turns before closing its sessions anyway. Default 10 minutes. */
+    readonly drainTimeoutMs?: number;
+    /** How the store downloads (tests). Default the global `fetch`. */
+    readonly fetch?: typeof fetch;
+}
+
+/** How long a harness drain waits for running turns by default. */
+export const HARNESS_DRAIN_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Why the daemon stops (#363): each live session is closed with the matching `session.closed` code, so the platform knows
@@ -204,6 +234,8 @@ export class PlatformToolError extends Error {
 interface LiveSession {
     readonly id: SessionId;
     readonly environmentId: EnvironmentId;
+    /** The runtime it was opened on: what a harness change drains and closes by (#369). */
+    readonly runtime: string;
     readonly session: AgentSession;
     readonly served: ServedSession;
     readonly capabilities: CapabilityReport;
@@ -331,6 +363,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
     let rejected = 0;
     let connection: Connection | undefined;
     let stopped = false;
+    /** Runtimes whose harness is being changed (#369): no new turns and no new sessions on them, by what they wait for. */
+    const draining = new Map<string, string>();
+    /** Harness requests, one at a time and in order. */
+    let harnessWork: Promise<unknown> = Promise.resolve();
     const quota = createQuotaMonitor({
         sources: options.quota?.sources ?? [],
         send: (environmentId, snapshot) => welcomed && send({ v: V, t: 'quota', environmentId, snapshot }),
@@ -343,7 +379,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
         ...(options.quota?.refreshMs !== undefined ? { refreshMs: options.quota.refreshMs } : {})
     });
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
-    const features: DaemonFeature[] = updater ? ['update'] : [];
+    // The optional frame families this daemon answers (#359): each feature adds itself.
+    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : [])];
     const version = options.daemonVersion ?? DAEMON_VERSION;
     const build = { version, commit: DAEMON_COMMIT, protocol: V, channel: DAEMON_CHANNEL, platform: platformKey(platform, options.arch ?? process.arch) };
 
@@ -453,7 +490,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
             policy: announcedPolicy(),
             build,
             features,
-            ...options.lifecycle
+            ...options.lifecycle,
+            ...(options.harnesses ? { harnesses: options.harnesses.store.reports(drivers.keys()) } : {})
         });
     }
 
@@ -506,6 +544,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 return;
             case 'update.cancel':
                 updater?.cancel(frame.requestId);
+                return;
+            case 'harness.request':
+                void harnessRequest(frame);
                 return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
@@ -602,6 +643,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (!env) return refuse(`unknown environment ${environmentId}`);
         const driver = drivers.get(env.runtime);
         if (!driver) return refuse(`no driver for runtime ${env.runtime} on this machine`);
+        const drainingFor = draining.get(env.runtime);
+        if (drainingFor !== undefined) return refuse(drainingFor, 'draining');
         // Turns in flight, never sessions open (#394): a live chat session costs nothing until it is prompted.
         const running = runningOn(env.id);
         if (running >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running`);
@@ -617,6 +660,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
             try {
                 opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input), ...(policy ? { policy } : {}) });
             } catch (e) {
+                // No harness for the runtime (#369): named, so the platform can say what to install.
+                if ((e as { code?: unknown }).code === 'harness-missing') return refuse((e as Error).message, 'harness-missing');
                 // A runtime that cannot take the conversation back says so by code (#363); the platform then starts it fresh (#420).
                 if (spec.resume !== undefined) return refuse(`the runtime could not resume the session: ${(e as Error).message}`, 'resume-failed');
                 throw e;
@@ -631,7 +676,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
             const base = spec.resume !== undefined ? await reopenedBase(sessionId, ref) : served.head;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
             sessions.set(sessionId, live);
             watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });
@@ -772,6 +817,12 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 send({ v: V, t: 'session.reply', sessionId, reply: drainingReply(command.commandId) });
                 return;
             }
+            // The runtime's harness is being changed (#369): no new turn on it; the platform parks the prompt and sends it again.
+            const drainingFor = draining.get(s.runtime);
+            if (drainingFor !== undefined) {
+                send({ v: V, t: 'session.reply', sessionId, reply: drainingReply(command.commandId, drainingFor) });
+                return;
+            }
             const env = environments.find((e) => e.id === s.environmentId);
             const running = runningOn(s.environmentId);
             if (env && running >= env.concurrency) {
@@ -804,6 +855,95 @@ export function createDaemon(options: DaemonOptions): Daemon {
         await log.flush(sessionId);
         logger.info('session: closed', { session: sessionId, reason, ...(code ? { code } : {}) });
         send({ v: V, t: 'session.closed', sessionId, reason, ...(code ? { code } : {}) });
+    }
+
+    // ------------------------------------------------------------- harnesses
+
+    /**
+     * `harness.request` (#369), one at a time. `install` / `update`: the store downloads, verifies and unpacks the target
+     * beside the current version (`downloading`, `verifying`, `staged`); then only this runtime drains (`draining`) —
+     * `drain` waits for its running turns up to `drainTimeoutMs`, `now` does not — and `applying` closes its sessions with
+     * code `harness-update` (the same close as `stop`), disposes its driver, switches `current.json`, rebuilds the driver
+     * and removes the old version. `remove` is refused `in-use` while an environment runs on the runtime. Each change ends
+     * with `done` and a `harnesses` frame, or `failed` with a named error.
+     */
+    function harnessRequest(frame: PlatformFrameOf<'harness.request'>): Promise<void> {
+        const run = harnessWork.then(() => changeHarness(frame));
+        harnessWork = run.catch(() => undefined);
+        return run;
+    }
+
+    async function changeHarness(frame: PlatformFrameOf<'harness.request'>): Promise<void> {
+        const { requestId, runtime } = frame;
+        const status = (phase: HarnessPhase, error?: LifecycleError) => send({ v: V, t: 'harness.status', requestId, phase, ...(error ? { error } : {}) });
+        const fail = (code: string, message: string) => {
+            logger.warn('harness: request failed', { runtime, op: frame.op, code, message });
+            status('failed', { code, message });
+        };
+        const harness = options.harnesses;
+        if (!harness) return fail('unsupported', 'this daemon does not manage harnesses');
+        if (!drivers.has(runtime)) return fail('invalid', `this daemon has no driver for runtime ${runtime}`);
+        try {
+            if (frame.op === 'remove') {
+                const users = environments.filter((e) => e.runtime === runtime);
+                if (users.length > 0) return fail('in-use', `environment${users.length === 1 ? '' : 's'} ${users.map((e) => e.name).join(', ')} run${users.length === 1 ? 's' : ''} on ${runtime}; remove ${users.length === 1 ? 'it' : 'them'} first`);
+                if (harness.store.state(runtime).status !== 'broken' && harness.store.locate(runtime)?.source !== 'store') return fail('not-installed', `${runtime} has no harness installed in ${harness.store.root}`);
+                status('applying');
+                await swapDriver(runtime, () => harness.store.remove(runtime));
+            } else {
+                const { target } = frame;
+                if (!target) return fail('invalid', `${frame.op} names no target`);
+                const staged = await harness.store.stage(runtime, target, { onPhase: (phase) => status(phase), ...(harness.fetch ? { fetch: harness.fetch } : {}) });
+                if (!staged.already) {
+                    const detail = `the ${runtime} harness is being updated to ${staged.version}`;
+                    draining.set(runtime, detail);
+                    try {
+                        if (liveOn(runtime).length > 0) {
+                            status('draining');
+                            if (frame.mode === 'drain') await turnsEnded(runtime, harness.drainTimeoutMs ?? HARNESS_DRAIN_TIMEOUT_MS);
+                        }
+                        status('applying');
+                        const { reason, code } = STOP_CLOSES['harness-update'];
+                        for (const s of liveOn(runtime)) await closeSession(s.id, reason, code);
+                        await swapDriver(runtime, () => harness.store.activate(runtime, staged.version));
+                    } finally {
+                        draining.delete(runtime);
+                    }
+                    const leftovers = await harness.store.prune(runtime);
+                    if (leftovers.length) logger.warn('harness: old versions could not be removed', { runtime, leftovers });
+                }
+                logger.info('harness: installed', { runtime, version: staged.version, ...(staged.already ? { already: true } : {}) });
+            }
+        } catch (e) {
+            if (e instanceof HarnessError) return fail(e.code, e.message);
+            logger.error('harness: request failed', { runtime, error: e });
+            return fail('io', `the harness change failed: ${(e as Error).message}`);
+        }
+        status('done');
+        send({ v: V, t: 'harnesses', harnesses: harness.store.reports(drivers.keys()) });
+    }
+
+    /** Live sessions on `runtime`. */
+    const liveOn = (runtime: string): LiveSession[] => [...sessions.values()].filter((s) => s.runtime === runtime);
+
+    /** Until no turn runs on `runtime`, or `timeoutMs` passes. */
+    async function turnsEnded(runtime: string, timeoutMs: number): Promise<void> {
+        const deadline = Date.now() + timeoutMs;
+        while (!stopped && liveOn(runtime).some((s) => s.running) && Date.now() < deadline) await new Promise((r) => setTimeout(r, Math.min(100, Math.max(1, deadline - Date.now()))));
+    }
+
+    /** Dispose `runtime`'s driver, change the store, build the driver again and announce its environments when what they report changed. */
+    async function swapDriver(runtime: string, change: () => Promise<unknown>): Promise<void> {
+        const old = drivers.get(runtime) as (DaemonDriver & { dispose?: () => Promise<void> }) | undefined;
+        if (typeof old?.dispose === 'function') await old.dispose().catch((e: unknown) => logger.warn('harness: driver dispose failed', { runtime, error: e }));
+        try {
+            await change();
+        } finally {
+            const next = options.harnesses!.rebuild(runtime);
+            if (next) drivers.set(runtime, next);
+            else drivers.delete(runtime);
+            await serial(reinspect);
+        }
     }
 
     /**

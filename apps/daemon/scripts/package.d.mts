@@ -24,3 +24,28 @@ export interface ClosureSource {
 }
 export function packageDaemon(options?: PackageOptions): PackageResult;
 export function resolveClosure(rootDir: string): Map<string, ClosureSource>;
+export interface HarnessPackageOptions {
+    readonly runtime: string;
+    readonly outDir?: string;
+    /** Name the zip `harness-<runtime>-<os>-<arch>.zip` (no version): the release asset name. */
+    readonly unversioned?: boolean;
+    /** Also write `<zip>.sha256` and `<zip>.json` (its `manifest.json`) beside the zip. */
+    readonly sha256?: boolean;
+    readonly log?: (line: string) => void;
+}
+export interface HarnessPackageResult {
+    readonly zipFile: string;
+    readonly runtime: string;
+    /** The upstream version: the SDK's, which pins its native package to it. */
+    readonly version: string;
+    /** `<os>-<arch>`. */
+    readonly platform: string;
+    /** The executable, relative to the zip root. */
+    readonly binary: string;
+    readonly entries: number;
+    readonly bytes: number;
+    /** The tree's digest, `manifest.json`'s `sha256`. */
+    readonly tree: string;
+    readonly sha256?: string;
+}
+export function packageHarness(options: HarnessPackageOptions): HarnessPackageResult;

@@ -1,6 +1,6 @@
 /** `daemonConformance` against the real daemon: real WebSockets, NDJSON logs on disk, a scripted runtime. */
 // @vitest-environment node
-import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, MachinePolicy, SessionId } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, MachinePolicy, ReleaseAsset, RuntimeId, SessionId } from '@agentic/core';
 import { daemonConformance, type ConformanceDaemon, type DaemonConformanceHarness } from '@agentic/daemon-protocol/testing';
 import { mkdtempSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -9,8 +9,10 @@ import { join } from 'node:path';
 import { createDaemon, type Daemon } from '../src/daemon';
 import { writeEnvironments } from '../src/env-store';
 import { ndjsonEventLog, type NdjsonEventLog } from '../src/event-log';
+import { harnessStore } from '../src/harness';
 import { namingDriver } from './helpers/drivers';
 import { releaseZip } from './helpers/release';
+import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE } from './helpers/relay';
 
 const toLocal = (d: EnvironmentDescriptor): LocalEnvironment => ({
@@ -34,6 +36,19 @@ const release = releaseZip(releaseDir, '0.2.0');
 const UPDATE_TARGET = { url: 'https://github.com/andtii/agentic/releases/download/daemon-v0.2.0/agentic-daemon-conformance.zip', sha256: release.sha256, bytes: release.bytes.byteLength, version: '0.2.0' };
 const serveRelease: typeof fetch = async (input) => (String(input) === UPDATE_TARGET.url ? new Response(release.bytes) : new Response(null, { status: 404 }));
 afterAll(() => rm(releaseDir, { recursive: true, force: true }));
+/** The harness build `harness-install` installs (#369): a package for the scripted runtime, served at an `https:` URL through the daemon's `fetch`. */
+const releases = fakeReleases();
+let harnessTarget: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset } | undefined;
+let zips: string;
+beforeAll(async () => {
+    zips = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-zips-'));
+    const zip = await fakeHarnessZip(zips, 'scripted', '1.1.0');
+    releases.put('harness-scripted.zip', zip.bytes);
+    harnessTarget = { runtime: 'scripted', asset: zip.asset(releases.url('harness-scripted.zip')) };
+});
+afterAll(async () => {
+    await rm(zips, { recursive: true, force: true });
+});
 
 const harness: DaemonConformanceHarness = {
     // `session-ref` (#389): the scripted runtime names its session on the first prompt, so the daemon's `session.ref` is proven here too.
@@ -42,9 +57,13 @@ const harness: DaemonConformanceHarness = {
     // wanted session is answered from the NDJSON log with code `restart` and re-opened from `spec.resume` on the next epoch.
     // `build` / `update` (#364): `hello` carries the build and `features: ['update']`; the update client downloads `updateTarget`
     // into a temp install root, and its restart is `stop({ reason: 'update' })` — what `run` does before it exits 75.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update'],
+    // `harness` (#369): a real harness store under the daemon's dir; the install downloads through the injected `fetch`.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness'],
     updateTarget: UPDATE_TARGET,
     knownOrigin: KNOWN_ORIGIN,
+    get harnessTarget() {
+        return harnessTarget;
+    },
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
         // The machine's own folders beside the one its owner allowed (#238): configuration, state, and the work.
@@ -58,6 +77,7 @@ const harness: DaemonConformanceHarness = {
         let log: NdjsonEventLog;
         const environments: LocalEnvironment[] = [{ id: 'env_scripted' as EnvironmentId, name: 'scripted', runtime: 'scripted', cwdRoots: [work], concurrency: 4 }];
         const secure = { run: async () => ({ code: 0, stderr: '' }) };
+        const store = harnessStore({ root: join(dir, 'install', 'harnesses'), bundled: false });
         await writeEnvironments(paths.environmentsFile, environments, secure);
         const policy: MachinePolicy = { webManaged: true, allowedRoots: [work] };
         // A new process each time: a fresh log handle over the same files.
@@ -71,7 +91,8 @@ const harness: DaemonConformanceHarness = {
                 eventLog: (log = ndjsonEventLog(join(paths.stateDir, 'sessions'))),
                 heartbeatMs: script.heartbeatMs,
                 backoff: { initialMs: 5, maxMs: 20 },
-                update: { root: join(dir, 'install'), fetch: serveRelease, pollMs: 20, restart: (): Promise<void> => daemon.stop({ reason: 'update' }) }
+                update: { root: join(dir, 'install'), fetch: serveRelease, pollMs: 20, restart: (): Promise<void> => daemon.stop({ reason: 'update' }) },
+                harnesses: { store, fetch: releases.fetch, rebuild: () => driver }
             });
         let daemon = create();
         let started = false;

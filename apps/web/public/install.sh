@@ -8,9 +8,9 @@
 # otherwise a portable Node is downloaded from nodejs.org into the install folder. Then it reads the
 # release manifest of the channel (or pinned version) asked for, downloads this machine's daemon zip
 # (agentic-daemon-<os>-<arch>.zip) from that GitHub release, checks its sha256, unpacks it
-# to ~/.agentic/daemon and runs the zip's install.sh: pair (when AGENTIC_CODE is set), doctor, and the
-# background service that keeps the daemon running — a launchd agent on macOS, a systemd user unit
-# on Linux.
+# to ~/.agentic/daemon and runs the zip's install.sh: pair (when AGENTIC_CODE is set), the runtime
+# harnesses from the same release (~/.agentic/harnesses), doctor, and the background service that keeps
+# the daemon running — a launchd agent on macOS, a systemd user unit on Linux.
 #
 # It also installs the `agentic-daemon` command itself (~/.agentic/bin/agentic-daemon, linked into a folder
 # on your PATH or added to your shell profile), so the commands the Machine page prints can be pasted.
@@ -24,6 +24,8 @@
 #                        no sha256 check)
 #   AGENTIC_RELEASES     the GitHub releases URL the manifest is read from (default
 #                        https://github.com/andtii/agentic/releases): a fork, or a test server
+#   AGENTIC_HARNESSES    the runtime harnesses to install, comma-separated (default
+#                        claude-code,copilot-cli,codex-cli); none installs none
 #   AGENTIC_INSTALL_DIR  the install root (default ~/.agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
 #   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching any PATH
@@ -160,4 +162,7 @@ set -- --node "$node"
 [ -z "${AGENTIC_CODE:-}" ] || set -- "$@" --url "$AGENTIC_URL" --code "$AGENTIC_CODE"
 [ -z "${AGENTIC_NAME:-}" ] || set -- "$@" --name "$AGENTIC_NAME"
 [ -z "${AGENTIC_NO_PATH:-}" ] || set -- "$@" --no-path
+# The harnesses come from the manifest the daemon came from (with AGENTIC_DAEMON_ZIP: the daemon's own release).
+set -- "$@" --harness "${AGENTIC_HARNESSES:-claude-code,copilot-cli,codex-cli}"
+[ -z "${manifest_url:-}" ] || set -- "$@" --manifest "$manifest_url"
 sh "$daemon_dir/install.sh" "$@"

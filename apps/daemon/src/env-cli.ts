@@ -9,7 +9,9 @@
  * of these needs a restart. `login` runs the runtime's own sign-in with the
  * environment's profile (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, `CODEX_HOME`) and nothing
  * inherited that could pick another account — the same rule the driver opens
- * sessions under (#321).
+ * sessions under (#321). Claude Code and Codex sign in with the executable of
+ * the runtime's installed harness (#369) — the one sessions run — and `env add`
+ * says how to install a harness the runtime lacks.
  */
 
 import { spawn } from 'node:child_process';
@@ -21,6 +23,7 @@ import { copilotAccountEnv } from '@agentic/runtimes/copilot-cli';
 import type { SecureWriteOptions } from './credentials.js';
 import type { DaemonDriver } from './daemon.js';
 import { deleteEnvironment, EnvironmentStoreError, putEnvironment, readEnvironmentsForEdit } from './env-store.js';
+import type { HarnessLocator } from './harness.js';
 import type { DaemonPaths } from './paths.js';
 
 /** Runs an interactive sign-in attached to this terminal; resolves to its exit code. */
@@ -45,6 +48,8 @@ export interface EnvCommandContext {
     readonly secure: SecureWriteOptions;
     readonly login?: LoginRunner;
     readonly env?: Readonly<Record<string, string | undefined>>;
+    /** Where each runtime's harness is (#369): `login` runs its executable, `add` warns when there is none. */
+    readonly harnesses?: HarnessLocator;
 }
 
 /** Every value of a repeatable flag: `--root a --root=b`. */
@@ -99,12 +104,14 @@ export interface RuntimeSignIn {
     /** What goes before the sign-in arguments when `command` is the default (a launcher script). */
     readonly prefix?: readonly string[];
     readonly args: readonly string[];
+    /** The runtime's harness executable is its CLI (#369): with one installed, `login` runs it instead of `command`. */
+    readonly harness?: true;
     env(parent: Readonly<Record<string, string | undefined>>, profileDir: string | undefined): Record<string, string | undefined>;
 }
 
 /** The runtimes `env login` can sign in, by runtime id. */
 export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
-    'claude-code': { command: 'claude', args: ['/login'], env: loginEnv },
+    'claude-code': { command: 'claude', args: ['/login'], env: loginEnv, harness: true },
     'copilot-cli': { command: 'copilot', args: ['login'], env: (parent, profileDir) => withAccount(parent, copilotAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)) },
     'codex-cli': {
         ...(() => {
@@ -112,7 +119,8 @@ export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
             return launcher ? { command: process.execPath, prefix: [launcher] } : { command: 'codex' };
         })(),
         args: ['login'],
-        env: (parent, profileDir) => withAccount(parent, codexAccountEnv(profileDir === undefined ? {} : { profileDir }, parent))
+        env: (parent, profileDir) => withAccount(parent, codexAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)),
+        harness: true
     }
 };
 
@@ -167,6 +175,7 @@ ${ENV_USAGE}`);
                     if (!ok) c.err(`warning: working root ${root} is not a directory (yet)`);
                 }
                 c.out(`${flags.replace === true ? 'saved' : 'added'} environment ${environment.id} (${environment.name}, ${environment.runtime}); profile ${environment.profileDir ?? "(the runtime default)"}`);
+                if (c.harnesses && !c.harnesses.locate(environment.runtime)) c.err(`the ${environment.runtime} harness is not installed: sessions on this environment are refused until you run \`agentic-daemon harness install ${environment.runtime}\``);
                 if (SIGN_INS[environment.runtime]) c.out(`sign it in with: agentic-daemon env login ${environment.id}`);
                 return 0;
             }
@@ -204,7 +213,8 @@ ${ENV_USAGE}`);
                 }
                 // `--claude` is the flag's first name, kept for Claude Code.
                 const cli = text(flags.cli) ?? (environment.runtime === 'claude-code' ? text(flags.claude) : undefined);
-                const [command, args] = cli !== undefined ? [cli, signIn.args] : [signIn.command, [...(signIn.prefix ?? []), ...signIn.args]];
+                const harness = signIn.harness ? c.harnesses?.locate(environment.runtime) : undefined;
+                const [command, args] = cli !== undefined ? [cli, signIn.args] : harness ? [harness.binary, signIn.args] : [signIn.command, [...(signIn.prefix ?? []), ...signIn.args]];
                 const code = await (c.login ?? runLogin)(command, args, signIn.env(c.env ?? process.env, environment.profileDir));
                 if (code !== 0) {
                     c.err(`the sign-in exited ${code}`);
