@@ -15,10 +15,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { buildManifest, readSidecar } from '../scripts/lib/manifest.mjs';
-import { buildStamp, protocolVersion, releaseTagFrom, stampFor } from '../scripts/lib/stamp.mjs';
+import { buildStamp, commitTime, protocolVersion, releaseTagFrom, stampFor } from '../scripts/lib/stamp.mjs';
 import { extractZip, readZip, writeZip } from '../scripts/lib/zip.mjs';
 import { packageDaemon, resolveClosure } from '../scripts/package.mjs';
 import { DAEMON_PROTOCOL_VERSION, type ReleaseManifest } from '@agentic/core';
+import { compareVersions, isVersion } from '@agentic/daemon-protocol';
 import { SUPERVISOR_VERSION } from '../scripts/supervise.mjs';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
@@ -67,13 +68,27 @@ describe('zip', () => {
 });
 
 describe('build stamp', () => {
-    it('a daemon-v tag is its semver on channel stable; anything else is <package version>-main.<sha7> on latest', () => {
-        const commit = '0123456789abcdef0123456789abcdef01234567';
-        expect(buildStamp({ tag: 'daemon-v0.2.0', packageVersion: '0.1.0', commit })).toEqual({ version: '0.2.0', commit: '0123456', channel: 'stable', tag: 'daemon-v0.2.0' });
+    it('a daemon-v tag is its semver on channel stable; anything else is <package version>-main.<commit time>.<sha7> on latest', () => {
+        const commit = 'abcdef0123456789abcdef0123456789abcdef01';
+        expect(buildStamp({ tag: 'daemon-v0.2.0', packageVersion: '0.1.0', commit })).toEqual({ version: '0.2.0', commit: 'abcdef0', channel: 'stable', tag: 'daemon-v0.2.0' });
         expect(buildStamp({ tag: 'daemon-v0.0.1-rc.1', packageVersion: '0.1.0', commit }).version).toBe('0.0.1-rc.1');
-        expect(buildStamp({ packageVersion: '0.1.0', commit })).toEqual({ version: '0.1.0-main.0123456', commit: '0123456', channel: 'latest', tag: null });
+        expect(buildStamp({ packageVersion: '0.1.0', commit, committedAt: 1_790_000_000 })).toEqual({ version: '0.1.0-main.1790000000.abcdef0', commit: 'abcdef0', channel: 'latest', tag: null });
+        // No commit time (no git): 0, still a valid version below every timed build.
+        expect(buildStamp({ packageVersion: '0.1.0', commit }).version).toBe('0.1.0-main.0.abcdef0');
         expect(() => buildStamp({ tag: 'v0.2.0', packageVersion: '0.1.0', commit })).toThrow(/not a release tag/);
         expect(() => buildStamp({ tag: 'daemon-v1.2', packageVersion: '0.1.0', commit })).toThrow(/not a release tag/);
+    });
+
+    // #437: `-main.<sha7>` ordered by the sha's text; the commit time orders them by when they were made.
+    it('main builds order by commit time, below their release; every stamp is a valid semver version', () => {
+        const older = buildStamp({ packageVersion: '0.2.0', commit: 'ffffff0aaaa', committedAt: 1_790_000_000 }).version;
+        const newer = buildStamp({ packageVersion: '0.2.0', commit: '0000001bbbb', committedAt: 1_790_000_060 }).version;
+        expect(compareVersions(newer, older)).toBeGreaterThan(0);
+        expect(compareVersions('0.2.0', newer)).toBeGreaterThan(0);
+        expect(compareVersions(older, '0.1.9')).toBeGreaterThan(0);
+        // A sha7 of digits with a leading zero is no semver identifier: it is written g0123456.
+        expect(buildStamp({ packageVersion: '0.2.0', commit: '0123456789', committedAt: 1 }).version).toBe('0.2.0-main.1.g0123456');
+        for (const commit of ['0123456789', '1234567abc', 'abcdef0123', 'unknown']) for (const committedAt of [undefined, 0, 1_790_000_000]) expect(isVersion(buildStamp({ packageVersion: '0.2.0', commit, committedAt }).version), `${commit} ${committedAt}`).toBe(true);
     });
 
     it('reads the tag from AGENTIC_DAEMON_TAG, or a pushed daemon-v tag; a branch run has none', () => {
@@ -85,7 +100,12 @@ describe('build stamp', () => {
 
     it('stamps this checkout from package.json and GITHUB_SHA, and reads the protocol from core', () => {
         const pkg = JSON.parse(readFileSync(join(DAEMON_DIR, 'package.json'), 'utf8')) as { version: string };
-        expect(stampFor(DAEMON_DIR, { GITHUB_SHA: 'abcdef0123456789' })).toEqual({ version: `${pkg.version}-main.abcdef0`, commit: 'abcdef0', channel: 'latest', tag: null });
+        // A commit this checkout does not have has no time.
+        expect(stampFor(DAEMON_DIR, { GITHUB_SHA: 'abcdef0123456789' })).toEqual({ version: `${pkg.version}-main.0.abcdef0`, commit: 'abcdef0', channel: 'latest', tag: null });
+        const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: DAEMON_DIR, encoding: 'utf8' }).stdout.trim();
+        const time = commitTime(DAEMON_DIR, head);
+        expect(time).toBeGreaterThan(1_700_000_000);
+        expect(stampFor(DAEMON_DIR, { GITHUB_SHA: head }).version).toBe(buildStamp({ packageVersion: pkg.version, commit: head, committedAt: time }).version);
         expect(stampFor(DAEMON_DIR, { GITHUB_SHA: 'abcdef0123456789', AGENTIC_DAEMON_TAG: 'daemon-v9.9.9' }).version).toBe('9.9.9');
         expect(protocolVersion(resolve(DAEMON_DIR, '../..'))).toBe(DAEMON_PROTOCOL_VERSION);
     });
@@ -124,7 +144,7 @@ describe('release manifest', () => {
 
     it('reads versioned zip names too, and refuses a zip without a sidecar, a bad sidecar or an empty folder', async () => {
         expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/no agentic-daemon/);
-        await zip('agentic-daemon-0.1.0-main.0123456-win32-x64.zip', 'w');
+        await zip('agentic-daemon-0.1.0-main.1790000000.abc1234-win32-x64.zip', 'w');
         expect(Object.keys(buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 }).assets)).toEqual(['win32-x64']);
         await writeFile(join(dir, 'agentic-daemon-linux-x64.zip'), 'l');
         expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/ENOENT/);
@@ -187,7 +207,7 @@ describe('installer', () => {
             // the version the build stamped (dist/build.json), not a hand-edited twin of package.json
             const stamp = JSON.parse(readFileSync(join(DAEMON_DIR, 'dist', 'build.json'), 'utf8')) as { version: string; commit: string; channel: string };
             expect(result.version).toBe(stamp.version);
-            expect(stamp.version).toMatch(stamp.channel === 'stable' ? /^\d+\.\d+\.\d+/ : /^\d+\.\d+\.\d+-main\.([0-9a-f]{7}|unknown)$/);
+            expect(stamp.version).toMatch(stamp.channel === 'stable' ? /^\d+\.\d+\.\d+/ : /^\d+\.\d+\.\d+-main\.\d+\.(g?[0-9a-f]{7}|unknown)$/);
             expect(result.sha256).toBeUndefined();
             expect(lines[0]).toMatch(/^package: .*\.zip — \d+ files/);
 

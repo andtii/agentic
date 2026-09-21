@@ -1,6 +1,6 @@
 {
   "name": "@agentic/daemon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "agentic-daemon — the machine daemon: pairs a machine to a workspace, reports environments, relays runtime sessions and tool calls.",
   "type": "module",

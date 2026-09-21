@@ -33,7 +33,8 @@ function comparePrerelease(a: readonly string[], b: readonly string[]): number {
 
 /**
  * Order two versions by semver precedence: negative when `a` is older, 0 when they rank the same, positive when `a` is
- * newer. A build off `main` (`0.2.0-main.abc1234`) is a prerelease, so it orders below `0.2.0` and above `0.1.9`; build
+ * newer. A build off `main` (`0.2.0-main.<commit unix seconds>.<sha7>`, #437) is a prerelease, so it orders below `0.2.0`
+ * and above `0.1.9`, and two of them by their numeric commit time, never by the sha; build
  * metadata (`+…`) is ignored. A malformed version orders below every valid one (two malformed ones compare as strings,
  * so a sort stays stable).
  */

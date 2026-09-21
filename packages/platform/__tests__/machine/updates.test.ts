@@ -156,6 +156,17 @@ describe('the build against the releases (#365)', () => {
         expect(state.features).toEqual([]);
     });
 
+    // #437: main builds are `x.y.z-main.<commit time>.<sha7>`, so the channel compare follows the commit time, not the sha.
+    it('on latest, a main build older than the channel shows it available; a newer one does not, whatever the shas', async () => {
+        served = { ...served, [RELEASE_SOURCES.latest]: manifest('0.3.0-main.1790000000.0000abc', 'latest') };
+        await app.as(owner).actor(Releases, RELEASE_DIRECTORY_KEY).refresh();
+        await machine().setChannel('latest');
+        await hello({ build: build('0.3.0-main.1789999940.fffffff') });
+        expect((await machine().updateState()).available).toMatchObject({ version: '0.3.0-main.1790000000.0000abc' });
+        await hello({ build: build('0.3.0-main.1790000060.abcdef1') });
+        expect((await machine().updateState()).available).toBeUndefined();
+    });
+
     it('setChannel compares again, and the workspace default channel applies until the machine has its own', async () => {
         await app.as(owner).actor(Workspace, workspaceKey(WS)).updateSettings({ updates: { defaultChannel: 'latest' } });
         await hello();
