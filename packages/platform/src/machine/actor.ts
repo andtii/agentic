@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessReport, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -32,7 +32,7 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHistory, pruneQuota, runningIn, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneQuota, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -51,11 +51,13 @@ export const MACHINE_OFFLINE_CODE = 'machine-offline';
 const REMINDER_FLOOR_MS = 60_000;
 /** The liveness tick re-reads the release directory and the workspace's update settings at most this often (#365); `hello` always does. */
 export const UPDATE_COMPARE_EVERY_MS = 15 * 60_000;
+/** A harness request not answered `done` / `failed` within this fails `timeout` (#370): the daemon's drain (10 min) plus the download. */
+export const HARNESS_DEADLINE_MS = 30 * 60_000;
 
-/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment or history request. */
+/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment, history or harness request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending);
+    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
 }
 
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
@@ -207,6 +209,61 @@ export interface MachineView {
     readonly outdated?: boolean;
     /** An update is pending (#365): no new turn starts where it covers — `freeSlots` reads it. */
     readonly draining?: MachineDraining;
+    /** The harness builds the release on the machine's channel ships for its platform, by runtime (#370). */
+    readonly harnessesAvailable?: Readonly<Record<string, AvailableHarness>>;
+    /** The harness request in flight (#370), for a page that opens while it runs; `harnessResult` follows it. */
+    readonly harnessRequest?: HarnessResultView;
+}
+
+/** `requestHarness` (#370). */
+export interface HarnessRequestInput {
+    readonly op: HarnessOp;
+    readonly runtime: RuntimeId;
+    /** `install` / `update`: a version a release on the machine's channel (or the other one) ships; absent → the channel's. */
+    readonly version?: string;
+    /** `drain` (default) lets the runtime's running turns end first; `now` closes its sessions at once. */
+    readonly mode?: 'drain' | 'now';
+}
+
+/** `requestHarness` — the id `harnessResult` reads the request by. */
+export interface HarnessRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `harnessResult(requestId)` — one harness request as stored (#370): `pending` with the phase the daemon last reported,
+ * then `done`, or `error` with the daemon's code (`in-use`, `checksum`, `download-failed`, …), `timeout` past its
+ * deadline, or `interrupted` when the daemon said hello again before it finished.
+ */
+export interface HarnessResultView {
+    readonly requestId: string;
+    readonly op: HarnessOp;
+    readonly runtime: RuntimeId;
+    readonly mode: 'drain' | 'now';
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    readonly finishedAt?: number;
+    readonly from?: string;
+    readonly to?: string;
+    readonly phase?: HarnessPhase;
+    readonly error?: LifecycleError;
+}
+
+/** A stored harness request as `harnessResult` shows it — the caller snapshots it. */
+function harnessResultOf(r: HarnessRequestRecord): HarnessResultView {
+    return {
+        requestId: r.requestId,
+        op: r.op,
+        runtime: r.runtime,
+        mode: r.mode,
+        status: r.status,
+        requestedAt: r.requestedAt,
+        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+        ...(r.from !== undefined ? { from: r.from } : {}),
+        ...(r.to !== undefined ? { to: r.to } : {}),
+        ...(r.phase ? { phase: r.phase } : {}),
+        ...(r.error ? { error: r.error } : {})
+    };
 }
 
 /** `requestUpdate` (#365). */
@@ -391,8 +448,16 @@ export function defineMachineActor(ports: MachinePorts) {
             ...(rest.features ? { features: rest.features } : {}),
             ...(rest.harnesses ? { harnesses: rest.harnesses } : {}),
             ...(rest.outdated ? { outdated: true } : {}),
-            ...(rest.draining ? { draining: rest.draining } : {})
+            ...(rest.draining ? { draining: rest.draining } : {}),
+            ...(rest.harnessesAvailable ? { harnessesAvailable: rest.harnessesAvailable } : {}),
+            ...harnessPending(rest)
         };
+    }
+
+    /** The pending harness request, as `MachineView.harnessRequest` (#370). */
+    function harnessPending(s: MachineState): { harnessRequest?: HarnessResultView } {
+        const r = Object.values(s.harnessRequests ?? {}).find((x) => x.status === 'pending');
+        return r ? { harnessRequest: harnessResultOf(r) } : {};
     }
 
     /** `updateState()` (#365). */
@@ -494,6 +559,34 @@ export function defineMachineActor(ports: MachinePorts) {
             }
         }
 
+        /**
+         * The harness builds `manifest` ships for the build's platform, into `harnessesAvailable` (#370); a runtime whose
+         * installed version is older than the one shipped is told to the Inbox once per runtime and version.
+         */
+        async function compareHarnesses(manifest: ReleaseManifest | undefined): Promise<void> {
+            const s = c.state;
+            const platform = s.build?.platform;
+            if (!manifest || !platform) {
+                delete s.harnessesAvailable;
+                return;
+            }
+            const available: Record<string, AvailableHarness> = {};
+            for (const [runtime, shipped] of Object.entries(manifest.harnesses ?? {})) {
+                if (!shipped) continue;
+                const asset = shipped.assets[platform];
+                available[runtime] = { version: shipped.version, ...(asset ? { asset: c.snapshot(asset) } : {}) };
+            }
+            s.harnessesAvailable = available;
+            const notified = (s.harnessesNotified ??= {});
+            for (const report of s.harnesses ?? []) {
+                const offer = available[report.runtime];
+                const installed = report.installed?.version;
+                if (!offer?.asset || installed === undefined || compareVersions(offer.version, installed) <= 0 || notified[report.runtime] === offer.version) continue;
+                notified[report.runtime] = offer.version;
+                await inbox({ kind: 'harness-update-available', title: `${report.runtime} ${offer.version} is available for ${named()}`, body: `It has ${installed}.`, ref });
+            }
+        }
+
         /** `available` from the channel's manifest; a version newly seen is told to the Inbox once. `dir: null` changes nothing. */
         async function compare(dir: ReleasesView | null): Promise<void> {
             const s = c.state;
@@ -501,6 +594,7 @@ export function defineMachineActor(ports: MachinePorts) {
             u.comparedAt = now();
             if (!dir) return;
             const manifest = dir.channels[effectiveUpdates(u).channel];
+            await compareHarnesses(manifest);
             if (!s.build || !manifest || compareVersions(manifest.version, s.build.version) <= 0) {
                 delete u.available;
                 return;
@@ -556,6 +650,35 @@ export function defineMachineActor(ports: MachinePorts) {
                 await inbox({ kind: 'update-failed', title: `${named()} did not update to ${target}`, body: message, ref });
             }
             if (s.draining?.requestId === p.requestId) await endDrain(`the update of machine ${machineId} ${outcome === 'applied' ? 'landed' : `ended (${outcome})`}`);
+        }
+
+        /**
+         * A harness request ended (#370): the record closes — `done`, or `error` with the daemon's code, or `timeout` —
+         * `harness.changed` is audited once per outcome, and the drain it held ends.
+         */
+        async function harnessEnded(r: HarnessRequestRecord, outcome: 'done' | 'failed' | 'timeout', error?: LifecycleError): Promise<void> {
+            const at = now();
+            r.status = outcome === 'done' ? 'done' : 'error';
+            r.finishedAt = at;
+            if (outcome !== 'timeout') r.phase = outcome;
+            if (error) r.error = { code: error.code, message: error.message };
+            else delete r.error;
+            const message = error ? `${error.code}: ${error.message}` : undefined;
+            const change = r.op === 'remove' ? `removal of the ${r.runtime} harness` : `${r.op} of ${r.runtime} ${r.to ?? ''}`.trimEnd();
+            const summary = outcome === 'done'
+                ? r.op === 'remove'
+                    ? `${r.runtime} harness removed from machine ${named()}`
+                    : `${r.runtime} harness on machine ${named()} ${r.op === 'install' ? 'installed at' : `updated ${r.from ?? 'none'} →`} ${r.to ?? '?'}`
+                : `${change} on machine ${named()} ${outcome === 'timeout' ? 'timed out' : 'failed'}: ${message ?? outcome}`;
+            await recordAudit(c, workspaceId, {
+                key: `${c.key}:harness:${r.requestId}:${outcome}`,
+                kind: 'harness.changed',
+                at,
+                by: r.by,
+                summary,
+                data: { machineId, runtime: r.runtime, op: r.op, ...(r.from !== undefined ? { from: r.from } : {}), ...(r.to !== undefined ? { to: r.to } : {}), outcome, ...(message ? { error: message } : {}) }
+            });
+            if (c.state.draining?.requestId === r.requestId) await endDrain(`the ${r.runtime} harness change on machine ${machineId} ended (${outcome})`);
         }
 
         /** Send one `update.request` and hold it pending, with its drain. 503 when no socket takes it. */
@@ -631,6 +754,13 @@ export function defineMachineActor(ports: MachinePorts) {
                 await recordAudit(c, workspaceId, { key: `${c.key}:rollback:${reported.at}`, kind: 'machine.update-failed', at, by: byMachine, summary: `machine ${named()} did not update ${reported.from} → ${reported.to}: ${message}`, data: { machineId, from: reported.from, to: reported.to, error: message } });
                 await inbox({ kind: 'update-failed', title: `${named()} did not update to ${reported.to}`, body: message, ref });
             }
+            // A harness request the daemon did not finish before this hello is interrupted (#370); a late answer still lands.
+            for (const r of Object.values(s.harnessRequests ?? {})) {
+                if (r.status !== 'pending') continue;
+                r.status = 'error';
+                r.error = { code: 'interrupted', message: 'the daemon connected again before it finished the request' };
+                r.finishedAt = at;
+            }
             // Every `hello` ends a drain: a daemon that came back takes turns again.
             await endDrain(`machine ${machineId} said hello`);
             const dir = await directory();
@@ -667,7 +797,7 @@ export function defineMachineActor(ports: MachinePorts) {
             await autoUpdate();
         }
 
-        return { directory, readDefaults, compare, close, request, autoUpdate, onHello, releaseDrain, onStatus, tick };
+        return { directory, readDefaults, compare, close, request, autoUpdate, onHello, releaseDrain, onStatus, tick, harnessEnded };
     }
 
     return defineActor({
@@ -698,7 +828,10 @@ export function defineMachineActor(ports: MachinePorts) {
             cancelUpdate: owner,
             setUpdatePolicy: owner,
             setChannel: owner,
-            updateState: owner
+            updateState: owner,
+            // Owner only, and never a tool (#370): an agent must not change the runtimes a machine runs.
+            requestHarness: owner,
+            harnessResult: owner
         },
         state: (): MachineState => initialMachineState(),
         methods: (ctx) => {
@@ -1052,6 +1185,20 @@ export function defineMachineActor(ports: MachinePorts) {
                 }
             }
 
+            /**
+             * A harness request's progress (#370): the phase, and on `done` / `failed` the close (`harnessEnded`). Unknown
+             * or finished ids are ignored — except a record failed `timeout` / `interrupted`: a late end says what the daemon did.
+             */
+            async function onHarnessStatus(frame: DaemonFrameOf<'harness.status'>): Promise<void> {
+                const r = ctx.state.harnessRequests?.[frame.requestId];
+                if (!r || r.status === 'done') return;
+                const late = r.status === 'error';
+                if (late && r.error?.code !== 'timeout' && r.error?.code !== 'interrupted') return;
+                if (frame.phase === 'done') return lifecycle.harnessEnded(r, 'done');
+                if (frame.phase === 'failed') return lifecycle.harnessEnded(r, 'failed', frame.error ?? { code: 'io', message: 'the daemon reported the harness change failed' });
+                if (!late) r.phase = frame.phase;
+            }
+
             /** Fold an environment's provider limits in (#261): a stream snapshot replaces only the windows it carries. An environment the machine does not report is ignored. */
             function onQuota(frame: DaemonFrameOf<'quota'>): void {
                 const s = ctx.state;
@@ -1104,8 +1251,10 @@ export function defineMachineActor(ports: MachinePorts) {
                     case 'update.status':
                         return lifecycle.onStatus(frame);
                     case 'harness.status':
+                        return onHarnessStatus(frame);
                     case 'harnesses':
-                        // The harness issue's (#370).
+                        s.harnesses = ctx.snapshot(frame.harnesses) as HarnessReport[];
+                        s.lastSeen = now();
                         return;
                 }
             }
@@ -1515,6 +1664,8 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
                     if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
                     if (s.update?.pending) throw new ServerFnError(409, `machine "${machineId}" has an update pending (${s.update.pending.requestId})`);
+                    const harness = Object.values(s.harnessRequests ?? {}).find((r) => r.status === 'pending');
+                    if (harness) throw new ServerFnError(409, `machine "${machineId}" is changing its ${harness.runtime} harness (${harness.requestId})`);
                     if (!s.build || !s.features?.includes('update')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that cannot update itself: reinstall once`);
                     const mode = input.mode ?? 'drain';
                     if (mode !== 'drain' && mode !== 'now') throw new ServerFnError(400, 'machine: mode must be "drain" or "now"');
@@ -1593,6 +1744,75 @@ export function defineMachineActor(ports: MachinePorts) {
                 /** The machine's update record (#365) — a live read for the Machines page: channel, policy, what is available, pending and last, and what an update now would interrupt. */
                 updateState(): MachineUpdateView {
                     return updateView(ctx);
+                },
+
+                /**
+                 * Install, update or remove a runtime's harness on the machine (#370): `harness.request` goes out with the
+                 * build the release ships for the machine's platform, and while it is pending the machine drains that
+                 * runtime only — `freeSlots` is 0 in its environments, a session on another runtime still runs. The
+                 * daemon's `harness.status` frames move it (`harnessResult`, live); `done` / `failed` end it and the drain,
+                 * audited as `harness.changed`. OWNER ONLY, on no tool surface. 400 a malformed input, an unknown version,
+                 * a release without a build for the platform, or the version already installed; 403 revoked; 503 offline
+                 * or no release directory; 409 a daemon without the `harness` feature ("reinstall once"), a harness request
+                 * or a daemon update pending, `update` of a harness not installed, and `remove` `in-use` while an
+                 * environment runs on the runtime (the daemon checks too) or `not-installed`.
+                 */
+                async requestHarness(input: HarnessRequestInput): Promise<HarnessRequested> {
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    const op = input?.op;
+                    if (op !== 'install' && op !== 'update' && op !== 'remove') throw new ServerFnError(400, 'machine: op must be "install", "update" or "remove"');
+                    const runtime = input.runtime;
+                    if (typeof runtime !== 'string' || !runtime.trim()) throw new ServerFnError(400, 'machine: a runtime is required');
+                    const mode = input.mode ?? 'drain';
+                    if (mode !== 'drain' && mode !== 'now') throw new ServerFnError(400, 'machine: mode must be "drain" or "now"');
+                    if (input.version !== undefined && (typeof input.version !== 'string' || !input.version)) throw new ServerFnError(400, 'machine: version must be a non-empty string');
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    if (!s.build || !s.features?.includes('harness')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that cannot manage harnesses: reinstall once`);
+                    // One at a time: the daemon runs them in order, and the machine holds one drain.
+                    const running = Object.values(s.harnessRequests ?? {}).find((r) => r.status === 'pending');
+                    if (running) throw new ServerFnError(409, `machine "${machineId}" is already changing ${running.runtime === runtime ? 'this' : `its ${running.runtime}`} harness (${running.requestId})`);
+                    if (s.update?.pending) throw new ServerFnError(409, `machine "${machineId}" has a daemon update pending (${s.update.pending.requestId})`);
+                    const report = s.harnesses?.find((h) => h.runtime === runtime);
+                    const from = report?.installed?.version;
+                    let target: ReleaseAsset | undefined;
+                    let to: string | undefined;
+                    if (op === 'remove') {
+                        const users = s.environments.filter((e) => e.runtime === runtime);
+                        if (users.length) throw new ServerFnError(409, `in-use: environment${users.length === 1 ? '' : 's'} ${users.map((e) => e.name).join(', ')} on machine "${machineId}" run${users.length === 1 ? 's' : ''} on ${runtime}; remove ${users.length === 1 ? 'it' : 'them'} first`);
+                        if (from === undefined && report?.status !== 'broken') throw new ServerFnError(409, `not-installed: machine "${machineId}" has no ${runtime} harness installed`);
+                    } else {
+                        if (op === 'update' && from === undefined) throw new ServerFnError(409, `not-installed: machine "${machineId}" has no ${runtime} harness to update; install it`);
+                        const dir = await lifecycle.directory();
+                        if (!dir) throw new ServerFnError(503, `machine: no release directory to install the ${runtime} harness from`);
+                        const { channel } = effectiveUpdates(s.update);
+                        const version = input.version ?? dir.channels[channel]?.harnesses?.[runtime]?.version;
+                        const shipped = [dir.channels[channel], dir.channels[channel === 'stable' ? 'latest' : 'stable']].map((m) => m?.harnesses?.[runtime]).find((h) => h !== undefined && h.version === version);
+                        if (!shipped) throw new ServerFnError(400, `machine: no release ships ${runtime}${version ? ` ${version}` : ` on the ${channel} channel`}`);
+                        const asset = shipped.assets[s.build.platform];
+                        if (!asset) throw new ServerFnError(400, `machine: ${runtime} ${shipped.version} has no build for ${s.build.platform}`);
+                        if (from === shipped.version && report?.status === 'ready') throw new ServerFnError(400, `machine "${machineId}" already has ${runtime} ${shipped.version}`);
+                        target = structuredClone(asset);
+                        to = shipped.version;
+                    }
+                    const at = now();
+                    const requestId = `harness_${crypto.randomUUID()}`;
+                    if (!send({ v: V, t: 'harness.request', requestId, op, runtime, ...(target ? { target } : {}), mode })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                    const requests = (s.harnessRequests ??= {});
+                    pruneHarnessRequests(requests, at);
+                    requests[requestId] = { requestId, op, runtime, mode, status: 'pending', requestedAt: at, deadline: at + HARNESS_DEADLINE_MS, by: principalLabel(ctx.principal), ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) };
+                    // Only this runtime drains: its prompts park on capacity, every other runtime keeps running.
+                    s.draining = { requestId, since: at, runtime };
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /** One harness request as stored (#370) — a primitive argument, so a live read can key on it. 404 for an unknown, evicted or pruned id. */
+                harnessResult(requestId: string): HarnessResultView {
+                    const r = ctx.state.harnessRequests?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no harness request "${requestId}"`);
+                    return ctx.snapshot(harnessResultOf(r)) as HarnessResultView;
                 }
             };
         },
@@ -1671,8 +1891,17 @@ export function defineMachineActor(ports: MachinePorts) {
                 pruneHistory(s.history, at, false);
                 for (const key of answers.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in s.history)) answers.delete(key);
             }
+            const lifecycle = ids ? updates(ctx) : undefined;
+            if (s.harnessRequests) {
+                // A harness request past its deadline fails `timeout` and its drain ends (#370).
+                for (const r of Object.values(s.harnessRequests)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    await lifecycle?.harnessEnded(r, 'timeout', { code: 'timeout', message: `no end from machine ${ids?.machineId ?? ctx.key} within ${Math.round(HARNESS_DEADLINE_MS / 60_000)} minutes` });
+                }
+                pruneHarnessRequests(s.harnessRequests, at, false);
+            }
             // Daemon updates (#365): a pending one past its deadline fails, the build is compared again, the policy runs.
-            if (ids) await updates(ctx).tick();
+            await lifecycle?.tick();
             if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
             await ctx.save();
         }

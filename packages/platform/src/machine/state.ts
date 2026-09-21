@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -182,6 +182,41 @@ export interface MachineUpdateState {
     comparedAt?: number;
 }
 
+/** What a harness op asks for (#370): the frame's `op`. */
+export type HarnessOp = 'install' | 'update' | 'remove';
+
+/**
+ * One `requestHarness` (#370): sent as `harness.request`, followed by the daemon's `harness.status` frames in later
+ * `socketMessage` turns — stored like an `envRequest`, read with `harnessResult(requestId)`. While it is pending the
+ * machine drains its runtime (`MachineState.draining` with `runtime`).
+ */
+export interface HarnessRequestRecord {
+    readonly requestId: string;
+    readonly op: HarnessOp;
+    readonly runtime: RuntimeId;
+    readonly mode: 'drain' | 'now';
+    status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** After this the liveness reminder fails a pending request with `timeout`. */
+    readonly deadline: number;
+    /** Who asked (`principalLabel`) — the `by` of the `harness.changed` audit record. */
+    readonly by: string;
+    /** The version installed when it was asked; absent when none was. */
+    readonly from?: string;
+    /** The version asked for; absent for `remove`. */
+    readonly to?: string;
+    phase?: HarnessPhase;
+    finishedAt?: number;
+    error?: LifecycleError;
+}
+
+/** A harness build the release on the machine's channel ships (#370), for the machine's `<os>-<arch>`. */
+export interface AvailableHarness {
+    readonly version: string;
+    /** Absent when the release ships no build of it for the machine's platform. */
+    readonly asset?: ReleaseAsset;
+}
+
 export interface MachineState {
     v: number;
     name: string;
@@ -231,6 +266,12 @@ export interface MachineState {
     crashLoopAt?: number;
     update?: MachineUpdateState;
     draining?: MachineDraining;
+    /** `requestHarness` entries by request id (#370), at most `MAX_HARNESS_REQUESTS`. */
+    harnessRequests?: Record<string, HarnessRequestRecord>;
+    /** The harness builds the channel's release ships, by runtime, as last compared (#370). */
+    harnessesAvailable?: Record<string, AvailableHarness>;
+    /** The version a `harness-update-available` Inbox row last went out for, by runtime: once per runtime and version. */
+    harnessesNotified?: Record<string, string>;
 }
 
 export const MAX_CLOSURES = 32;
@@ -246,6 +287,10 @@ export const ENV_RESULT_TTL_MS = 120_000;
 export const MAX_HISTORY_REQUESTS = 16;
 /** A finished history request is pruned this long after it finished — its reader takes the answer at once. */
 export const HISTORY_RESULT_TTL_MS = 60_000;
+/** At most this many harness requests are kept (#370); the oldest is evicted first. */
+export const MAX_HARNESS_REQUESTS = 16;
+/** A finished harness request is pruned this long after it finished. */
+export const HARNESS_RESULT_TTL_MS = 120_000;
 
 export function initialMachineState(): MachineState {
     return {
@@ -356,6 +401,11 @@ export function pruneEnvRequests(requests: Record<string, EnvRequestRecord>, at:
 /** `pruneFs` for history requests (#397): the same rule over `HISTORY_RESULT_TTL_MS` / `MAX_HISTORY_REQUESTS`. */
 export function pruneHistory(requests: Record<string, HistoryRequestRecord>, at: number, room = true): void {
     prune(requests, at, room, HISTORY_RESULT_TTL_MS, MAX_HISTORY_REQUESTS);
+}
+
+/** `pruneFs` for harness requests (#370): the same rule over `HARNESS_RESULT_TTL_MS` / `MAX_HARNESS_REQUESTS`. */
+export function pruneHarnessRequests(requests: Record<string, HarnessRequestRecord>, at: number, room = true): void {
+    prune(requests, at, room, HARNESS_RESULT_TTL_MS, MAX_HARNESS_REQUESTS);
 }
 
 function prune(entries: Record<string, { readonly requestId: string; readonly status: string; readonly requestedAt: number; readonly finishedAt?: number }>, at: number, room: boolean, ttlMs: number, max: number): void {

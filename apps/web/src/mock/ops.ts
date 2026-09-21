@@ -8,8 +8,8 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, DaemonBuild, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
-import type { Dependents, MachineUpdateView, PluginView } from '@agentic/platform';
+import type { AgentId, DaemonBuild, DaemonFeature, EnvironmentDescriptor, EnvironmentId, HarnessReport, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
+import type { AvailableHarness, Dependents, HarnessResultView, MachineUpdateView, PluginView } from '@agentic/platform';
 import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
 
@@ -201,6 +201,72 @@ export function opsUpdate(machineId: string, state: OpsUpdateState = opsUpdateSt
     const view: MachineUpdateView = opsUpdateStates[state].view;
     return { ...view, machineId: machineId as MachineId, online: m?.online ?? view.online };
 }
+
+/* ---------------------------------------------------------- harnesses (#370) */
+
+const harnessBuild = (runtime: string, version: string): NonNullable<AvailableHarness['asset']> => ({ url: `https://agentic.example/releases/daemon-v0.2.0/harness-${runtime}-win32-x64.zip`, sha256: 'e'.repeat(64), bytes: 90_000_000, version });
+
+/** What the stable release ships for `win32-x64`: Claude Code is newer than alien01's. */
+export const opsHarnessesAvailable: Readonly<Record<string, AvailableHarness>> = {
+    'claude-code': { version: '2.1.0', asset: harnessBuild('claude-code', '2.1.0') },
+    'codex-cli': { version: '0.46.0', asset: harnessBuild('codex-cli', '0.46.0') },
+    'copilot-cli': { version: '1.0.14', asset: harnessBuild('copilot-cli', '1.0.14') }
+};
+
+const HARNESS_AT = Date.parse('2026-09-12T09:00:00Z');
+/** alien01's daemon: Claude Code one release behind, Codex current, Copilot never installed (its environment reports `harness-missing`). */
+const harnessBase: readonly HarnessReport[] = [
+    { runtime: 'claude-code', installed: { version: '2.0.0', at: HARNESS_AT }, status: 'ready', current: false },
+    { runtime: 'codex-cli', installed: { version: '0.46.0', at: HARNESS_AT }, status: 'ready', current: true },
+    { runtime: 'copilot-cli', status: 'missing' }
+];
+const harnessRequest = (op: HarnessResultView['op'], runtime: string, status: HarnessResultView['status'], extra: Partial<HarnessResultView> = {}): HarnessResultView => ({
+    requestId: 'harness_mock',
+    op,
+    runtime,
+    mode: 'drain',
+    status,
+    requestedAt: MOCK_AT - 60_000,
+    ...(op === 'update' ? { from: '2.0.0', to: '2.1.0' } : op === 'install' ? { to: '1.0.14' } : {}),
+    ...(status === 'pending' ? {} : { finishedAt: MOCK_AT }),
+    ...extra
+});
+
+/** A machine's harnesses as the card reads them (`Machine.get()`'s fields, #370). */
+export interface OpsHarnessView {
+    readonly features: readonly DaemonFeature[];
+    readonly harnesses?: readonly HarnessReport[];
+    readonly harnessesAvailable?: Readonly<Record<string, AvailableHarness>>;
+    readonly request?: HarnessResultView;
+}
+
+/**
+ * Every state of the "Runtimes on this machine" card (#370), for `pnpm
+ * dev:mock`: the mock Machine page opens on the machine's own state and
+ * offers the rest in its "Preview" picker.
+ */
+export const opsHarnessStates = {
+    mixed: { label: 'Update available, current, not installed', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable } },
+    requested: { label: 'Update requested (no report yet)', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('update', 'claude-code', 'pending') } },
+    downloading: { label: 'Update downloading', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('update', 'claude-code', 'pending', { phase: 'downloading' }) } },
+    draining: { label: 'Update draining its runtime', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('update', 'claude-code', 'pending', { phase: 'draining' }) } },
+    installing: { label: 'Installing Copilot CLI', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('install', 'copilot-cli', 'pending', { phase: 'verifying' }) } },
+    updated: { label: 'Updated', view: { features: ['update', 'harness'], harnesses: [{ ...harnessBase[0]!, installed: { version: '2.1.0', at: MOCK_AT }, current: true }, ...harnessBase.slice(1)], harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('update', 'claude-code', 'done', { phase: 'done' }) } },
+    failed: { label: 'Update failed', view: { features: ['update', 'harness'], harnesses: harnessBase, harnessesAvailable: opsHarnessesAvailable, request: harnessRequest('update', 'claude-code', 'error', { phase: 'failed', error: { code: 'checksum', message: 'the download does not match its sha256' } }) } },
+    broken: { label: 'Broken install', view: { features: ['update', 'harness'], harnesses: [harnessBase[0]!, { runtime: 'codex-cli', installed: { version: '0.46.0', at: HARNESS_AT }, status: 'broken' }, harnessBase[2]!], harnessesAvailable: opsHarnessesAvailable } },
+    'no-feature': { label: 'Predates harnesses (reinstall once)', view: { features: [] } }
+} as const satisfies Readonly<Record<string, { readonly label: string; readonly view: OpsHarnessView }>>;
+
+export type OpsHarnessState = keyof typeof opsHarnessStates;
+
+/** The state each sample machine opens on: alien01 has a Claude Code update waiting, nuc-lab's daemon predates harnesses. */
+export const opsHarnessStateOf: Readonly<Record<string, OpsHarnessState>> = { alien01: 'mixed', 'nuc-lab': 'no-feature' };
+
+export const opsHarness = (machineId: string, state: OpsHarnessState = opsHarnessStateOf[machineId] ?? 'mixed'): OpsHarnessView => opsHarnessStates[state].view;
+
+/** The sample sessions as the harness rows count them: in their environment, `active` running a turn. */
+export const opsHostedSessions = (machineId: string): readonly { sessionId: SessionId; environmentId: string; agentId: string; running?: true }[] =>
+    sessionsOn(machineId).map((s) => ({ sessionId: s.id as SessionId, environmentId: envId(machineId, s.environment), agentId: s.agentId, ...(s.status === 'active' ? { running: true as const } : {}) }));
 
 /* ------------------------------------------------------------------ pairing */
 
