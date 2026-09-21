@@ -44,14 +44,14 @@ async function collect(turn: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
 }
 
 describe('copilotCliDriver.open', () => {
-    it('opens a Copilot session in the spec folder with the platform prompt appended and repository instructions off', async () => {
+    it('opens a Copilot session in the spec folder with the platform prompt appended and repository instructions on', async () => {
         const { driver, clients } = harness();
         const { session, capabilities } = await driver.open(envA, spec({ model: 'gpt-5', tools: ['memory_search'] }), ctx());
         const config = clients[0]!.configs[0]!;
         expect(config.workingDirectory).toBe('C:\\src\\app');
         expect(config.model).toBe('gpt-5');
-        expect(config.skipCustomInstructions).toBe(true);
-        expect(config.enableConfigDiscovery).toBe(false);
+        expect(config.skipCustomInstructions).toBe(false);
+        expect(config.enableConfigDiscovery).toBe(true);
         expect(config.systemMessage?.mode).toBe('append');
         expect(config.systemMessage?.content).toContain(`${PLATFORM_MEMORY_HEADING}\n\n${COPILOT_PLATFORM_MEMORY_NOTE}`);
         expect(config.tools?.map((t) => t.name)).toEqual(['memory_search']);
@@ -61,6 +61,26 @@ describe('copilotCliDriver.open', () => {
         await session.close();
         await driver.dispose();
         expect(clients[0]!.stopped).toBe(1);
+    });
+
+    it("keeps the CLI's title for the conversation from session.title_changed, the newest one, a turn running or not (#460)", async () => {
+        let prompts = 0;
+        const script: CopilotScript = async (api) => {
+            if (++prompts === 1) api.emit('session.title_changed', { title: '  Greeting   Ada ' });
+            api.say('Hello!');
+            api.idle();
+            // Retitled after the turn ended — ephemeral, but the session remembers the newest.
+            if (prompts === 2) api.emit('session.title_changed', { title: 'Ada, greeted twice' });
+        };
+        const { driver } = harness({ script });
+        const opened = await driver.open(envA, spec(), ctx());
+        expect(await opened.title!()).toBeUndefined();
+        await collect(opened.session.prompt('hi'));
+        expect(await opened.title!()).toBe('Greeting Ada');
+        await collect(opened.session.prompt('more'));
+        expect(await opened.title!()).toBe('Ada, greeted twice');
+        await opened.session.close();
+        await driver.dispose();
     });
 
     it('refuses a folder outside the environment and another runtime\'s environment', async () => {

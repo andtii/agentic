@@ -229,7 +229,7 @@ describe('/plugins/:id', () => {
         expect(root.querySelector<HTMLSelectElement>('select')!.value).toBe('claude-opus-5');
         const row = root.querySelector('[data-permission="secret:anthropic-api-key"]')!;
         expect(row.hasAttribute('data-granted')).toBe(true);
-        expect(row.querySelector('[data-permission-reason]')!.textContent).toBe('Calls the Anthropic API with your key when a session starts.');
+        expect(row.querySelector('[data-permission-reason]')!.textContent).toBe('Calls the Anthropic API with your key when a session starts, and once or twice per chat to title it.');
         expect(texts([...root.querySelectorAll('[data-dependent-via]')])).toEqual(['runtime', 'runtime', 'fallback']);
 
         // The field hydrates enabled; the value leaves through `save` once and the page keeps the NAME only.
@@ -361,8 +361,8 @@ describe('/usage', () => {
         expect(limits.compareDocumentPosition(root.querySelector('[data-usage-stats]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         const work = limits.querySelector('[data-limit-account="env_alien01_work"]')!;
         expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="label"]')].map(l => l.textContent)).toEqual(['Current session', 'Current week (all models)', 'Current week (Fable)']);
-        expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="used"]')].map(l => l.textContent)).toEqual(['19% used', '76% used', '80% used']);
-        expect(work.querySelector('[data-window="seven_day:fable"]')!.getAttribute('data-tone')).toBe('needs-you');
+        expect([...work.querySelectorAll('[data-scope="ag-quota"][data-part="used"]')].map(l => l.textContent)).toEqual(['19% used', '76% used', '100% used']);
+        expect(work.querySelector('[data-window="seven_day:fable"]')!.getAttribute('data-tone')).toBe('failed');
         expect(limits.querySelector('[data-limit-account="env_nuclab_work"] [data-scope="ag-quota-panel"]')!.hasAttribute('data-mod-stale')).toBe(true);
         expect(limits.querySelector('[data-limit-account="env_alien01_client_acme"]')!.textContent).toContain('No usage reported yet');
         expect(limits.querySelector('[data-limit-account="platform"]')!.textContent).toContain('Not reported by provider — The Anthropic API has per-minute rate limits');

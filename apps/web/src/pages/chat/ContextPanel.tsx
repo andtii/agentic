@@ -1,8 +1,9 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import type { AccountRef, EnvironmentId, ProjectRecord, RuntimeId, WorkdirRef } from '@agentic/core';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WORKDIR_EMPTY, resetsText, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
+import { memberWindows, type AccountRef, type EnvironmentId, type ProjectRecord, type QuotaWindow, type RuntimeId, type SessionOptionsPatch, type WorkdirRef } from '@agentic/core';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, QuotaPanel, QuotaRings, StatusPill, WORKDIR_EMPTY, resetsShortText, ringWindows, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
+import { DEFAULT_PERMISSION_MODE, modeChoices, modelChoices, type MemberChoice } from './member-options';
 import { effectiveWorkdir } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
@@ -39,36 +40,84 @@ export type ContextPanelProps =
     /** A member's folder for this chat was picked, or cleared with `null`. */
     & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>
     /** "New session" confirmed for a member (#399): its session ends and the next message opens a fresh one; the chat's history stays. */
-    & Define.Event<'resetSession', { readonly agentId: string }>;
+    & Define.Event<'resetSession', { readonly agentId: string }>
+    /** A member's model or permission mode for this chat was picked, or cleared back to its config with `null` (#453). */
+    & Define.Event<'setOptions', { readonly agentId: string; readonly patch: SessionOptionsPatch }>;
+
+/** Which of a member's switchable rows is open (#453). */
+type OptionKey = 'model' | 'permissionMode';
+
+const OPTION_TITLE: Readonly<Record<OptionKey, string>> = { model: 'Model', permissionMode: 'Mode' };
 
 const historyLine = (member: MockChatSummary['members'][number], time: TimeText): string => {
     const base = member.history.access === 'all' ? 'sees all history' : `Added ${time(member.history.at)} · sees history from then`;
     return member.coordinator ? `Coordinator · ${base}` : base.charAt(0).toUpperCase() + base.slice(1);
 };
 
+/** What a limit is called on the card (#452): `Session`, `Weekly`, the model a week is scoped to (`Fable`), else the provider's label. */
+const limitName = (w: QuotaWindow): string => w.scope?.model ?? (w.period === 'session' ? 'Session' : w.period === 'week' ? 'Weekly' : w.label);
+
 /**
- * The line under a member's usage meter once the account is out: when the exhausted window opens again. Picked by
- * `status`, not utilization — a runtime can report an exhausted window with no number (Claude Code's limit message).
+ * The line under a member's rings once it is out: which limit, and when it opens again — `Fable limit · resets Thu
+ * 12:00`. Only a window that limits the member's model counts (#452): another model's exhausted week is not its limit.
+ * Picked by `status`, not utilization — a runtime can report an exhausted window with no number (Claude Code's limit message).
  */
-const limitLine = (quota: ReturnType<typeof memberQuota>): string | undefined => {
-    const w = quota.snapshot?.windows.find((x) => x.status === 'exhausted');
+const limitLine = (quota: ReturnType<typeof memberQuota>, model: string | undefined): string | undefined => {
+    const w = quota.snapshot ? memberWindows(quota.snapshot, model).find((x) => x.status === 'exhausted') : undefined;
     if (!w) return undefined;
-    const resets = resetsText(w.resetsAt);
-    return resets ? `Limit reached · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : 'Limit reached';
+    const resets = resetsShortText(w.resetsAt, { date: false });
+    return resets ? `${limitName(w)} limit · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : `${limitName(w)} limit reached`;
 };
 
 /**
  * The chat's right column: the members as cards — name and status, then one
  * bordered group of rows in mono (where it runs, the folder it works in, the
- * model its config names), its account's usage as one line, and a footer with
+ * model its config names), its usage as rings for the windows that limit its
+ * model — the limit line under them once one is out, and "Details" opening the
+ * account's full panel (#452) — and a footer with
  * its history access and "New session" (#399, confirmed before the member's
  * session is ended) — the tasks in this chat, "Stop task chain", and the
  * memory privacy note (MEM-11). The add-agent dialog asks for history access
- * (CHT-04). Only the folder row switches today: the environment follows the
- * agent's config and the chat's machine, the model the agent's config.
+ * (CHT-04). The folder, model and mode rows switch; the model and mode open a
+ * listbox under the group and apply to the member's next turn (#453). The
+ * environment follows the agent's config and the chat's machine.
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
-    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '' });
+    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '', details: [] as readonly string[], optionFor: '', optionKey: 'model' as OptionKey, active: 0 });
+
+    /** Open (or close) a member's model / mode listbox on the entry in effect. */
+    const toggleOption = (agentId: string, key: OptionKey, choices: readonly MemberChoice[], current: string | undefined): void => {
+        if (st.optionFor === agentId && st.optionKey === key) {
+            st.optionFor = '';
+            return;
+        }
+        st.optionFor = agentId;
+        st.optionKey = key;
+        st.active = Math.max(0, choices.findIndex((c) => c.id === current));
+    };
+
+    const choose = (agentId: string, key: OptionKey, id: string, current: string | undefined): void => {
+        st.optionFor = '';
+        if (id !== current) emit('setOptions', { agentId, patch: { [key]: id } });
+    };
+
+    /** The listbox's keys: arrows move, Enter / Space picks, Escape closes. */
+    const onListKey = (e: KeyboardEvent, agentId: string, key: OptionKey, choices: readonly MemberChoice[], current: string | undefined): void => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            st.active = (st.active + (e.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length;
+        } else if (e.key === 'Home' || e.key === 'End') {
+            e.preventDefault();
+            st.active = e.key === 'Home' ? 0 : choices.length - 1;
+        } else if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            const c = choices[st.active];
+            if (c) choose(agentId, key, c.id, current);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            st.optionFor = '';
+        }
+    };
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
         const lookup = props.lookup ?? agentNamed;
@@ -96,7 +145,74 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
                             const environments = props.environments;
                             const quota = environments ? memberQuota(a, folder.ref?.environmentId, environments, machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined) : undefined;
-                            const limit = quota ? limitLine(quota) : undefined;
+                            // The model it runs here: its override for this chat, else its config's (#450).
+                            const model = member.options?.model ?? a.model;
+                            // What its rows offer (#453): the models its environment's account reports, its runtime's modes.
+                            const optionEnv = environments?.find((e) => e.id === (folder.ref?.environmentId ?? onMachine ?? a.environmentId));
+                            const models = modelChoices(a.environment.runtime, optionEnv, model);
+                            const modes = modeChoices(a.environment.runtime, optionEnv);
+                            const mode = member.options?.permissionMode ?? DEFAULT_PERMISSION_MODE;
+                            const optionRow = (key: OptionKey, icon: 'settings' | 'shield', value: string, choices: readonly MemberChoice[]) => {
+                                const open = st.optionFor === member.agentId && st.optionKey === key;
+                                const overridden = member.options?.[key] !== undefined;
+                                return (
+                                    <span data-member-row data-row={key === 'model' ? 'model' : 'mode'} data-member-option data-overridden={overridden ? '' : undefined}>
+                                        <button
+                                            type="button"
+                                            data-member-option-open
+                                            aria-expanded={open ? 'true' : 'false'}
+                                            aria-controls={`member-${member.agentId}-${key}`}
+                                            aria-label={`${OPTION_TITLE[key]} for ${a.name}: ${value}`}
+                                            onClick={() => toggleOption(member.agentId, key, choices, value)}
+                                        >
+                                            <Icon name={icon} size={14} />
+                                            <span data-member-row-value {...(key === 'model' ? { 'data-member-model': '' } : { 'data-member-mode': '' })}>{value}</span>
+                                            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+                                        </button>
+                                        {overridden ? <button type="button" data-member-option-clear aria-label={`${OPTION_TITLE[key]} for ${a.name} back to its default`} title="Back to the agent's default" onClick={() => emit('setOptions', { agentId: member.agentId, patch: { [key]: null } })}><Icon name="close" size={14} /></button> : null}
+                                    </span>
+                                );
+                            };
+                            const openKey = st.optionFor === member.agentId ? st.optionKey : undefined;
+                            const openChoices = openKey === 'model' ? models : openKey === 'permissionMode' ? modes : [];
+                            const openValue = openKey === 'model' ? model : mode;
+                            const listbox = openKey ? (
+                                <div data-member-options id={`member-${member.agentId}-${openKey}`}>
+                                    <span data-member-options-head>{OPTION_TITLE[openKey]} · applies to the next turn</span>
+                                    <ul
+                                        role="listbox"
+                                        tabIndex={0}
+                                        aria-label={`${OPTION_TITLE[openKey]} for ${a.name}`}
+                                        aria-activedescendant={`member-${member.agentId}-${openKey}-${st.active}`}
+                                        onKeydown={(e: KeyboardEvent) => onListKey(e, member.agentId, openKey, openChoices, openValue)}
+                                        ref={(el: HTMLElement | null) => el?.focus()}
+                                    >
+                                        {openChoices.map((c, i) => (
+                                            <li
+                                                id={`member-${member.agentId}-${openKey}-${i}`}
+                                                role="option"
+                                                data-member-option-item
+                                                data-active={i === st.active ? '' : undefined}
+                                                aria-selected={c.id === openValue ? 'true' : 'false'}
+                                                onClick={() => choose(member.agentId, openKey, c.id, openValue)}
+                                            >
+                                                <span data-member-option-check aria-hidden="true">{c.id === openValue ? <Icon name="check" size={12} /> : null}</span>
+                                                <span data-member-option-label>{c.label}</span>
+                                                {c.hint ? <span data-member-option-hint>{c.hint}</span> : null}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : null;
+                            const limit = quota ? limitLine(quota, model) : undefined;
+                            const snapshot = quota?.snapshot;
+                            const rings = !!snapshot && ringWindows(snapshot, model).length > 0;
+                            const open = st.details.includes(member.agentId);
+                            const details = snapshot?.windows.length ? (
+                                <button type="button" data-link-button data-member-details-toggle aria-expanded={open ? 'true' : 'false'} aria-label={`Usage details for ${a.name}`} onClick={() => { st.details = open ? st.details.filter((id) => id !== member.agentId) : [...st.details, member.agentId]; }}>
+                                    Details <Icon name="chevron-down" size={12} />
+                                </button>
+                            ) : null;
                             return (
                                 <li data-member>
                                     <header data-member-head>
@@ -132,16 +248,21 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                                 {member.workdir ? <button type="button" data-member-workdir-clear aria-label={`Use the project folder for ${a.name}`} title="Back to the project folder" onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}><Icon name="close" size={14} /></button> : null}
                                             </span>
                                         ) : null}
-                                        {a.model ? (
-                                            <span data-member-row data-row="model">
-                                                <Icon name="settings" size={14} />
-                                                <span data-member-row-value data-member-model>{a.model}</span>
-                                            </span>
-                                        ) : null}
+                                        {model || models.length ? optionRow('model', 'settings', model ?? 'runtime default', models) : null}
+                                        {modes.length ? optionRow('permissionMode', 'shield', mode, modes) : null}
                                     </div>
+                                    {listbox}
                                     {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}.</span> : null}
-                                    {quota ? <span data-member-quota data-limit={limit ? '' : undefined}><QuotaBadge {...quota} /></span> : null}
-                                    {limit ? <span data-member-limit>{limit}</span> : null}
+                                    {quota ? (
+                                        <div data-member-usage data-limit={limit ? '' : undefined}>
+                                            <div data-member-usage-line>
+                                                <span data-member-quota>{rings && snapshot ? <QuotaRings snapshot={snapshot} {...(model ? { model } : {})} /> : <QuotaBadge {...quota} {...(model ? { model } : {})} />}</span>
+                                                {limit ? null : details}
+                                            </div>
+                                            {limit ? <div data-member-usage-line><span data-member-limit>{limit}</span>{details}</div> : null}
+                                            {open && snapshot ? <div data-member-details><QuotaPanel snapshot={snapshot} zoneInHeader /></div> : null}
+                                        </div>
+                                    ) : null}
                                     <footer data-member-foot>
                                         <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
                                         <button type="button" data-link-button data-member-reset aria-label={`New session for ${a.name}`} onClick={() => { st.resetFor = member.agentId; }}>New session</button>

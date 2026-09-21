@@ -64,6 +64,7 @@ import {
     createEnvironmentProbe,
     createSessionFactory,
     createToolCallPort,
+    createChatTitler,
     defineChatActor,
     defineInbox,
     defineMachineActor,
@@ -256,8 +257,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
             }
         });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
-    // Removing a member ends its session through the router (#399, architecture §6).
-    const Chat = defineChatActor({ ...withFiles, routing: () => Routing });
+    // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the
+    // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.
+    const Chat = defineChatActor({ ...withFiles, routing: () => Routing, titles: createChatTitler({ registry }) });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
     return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }

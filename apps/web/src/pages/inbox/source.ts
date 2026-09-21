@@ -25,6 +25,13 @@ import type { ApprovalRequester, EnvironmentParts } from '@agentic/ui';
 /** `machine`: a daemon's update or crash notice (#367) — it links to the machine and is dismissed, not answered. */
 export type NeedsKind = 'approval' | 'input' | 'interrupted' | 'machine';
 
+/** An approved plan's mode, and whose it becomes (#454). */
+export interface PlanApproval {
+    readonly permissionMode: string;
+    readonly agentId: string;
+    readonly chatId?: string;
+}
+
 /** The session and the request an inbox notification points at. */
 export interface RequestRef {
     readonly sessionId: string;
@@ -76,8 +83,11 @@ export interface NeedsSource {
     useRows(): () => readonly NeedsRow[];
     /** Called in a row's setup: a reactive getter of the request behind its `ref`. */
     useRequest(ref: RequestRef): () => RequestState;
-    /** `Session.respond` — one decision per request; rejects when the answer did not get through. */
-    respond(ref: RequestRef, decision: Decision): Promise<void>;
+    /**
+     * `Session.respond` — one decision per request; rejects when the answer did not get through. An approved plan
+     * (#454) names the permission mode it goes on in, and the chat and member it is for: the mode becomes the member's.
+     */
+    respond(ref: RequestRef, decision: Decision, plan?: PlanApproval): Promise<void>;
     /** `Routing.resume` for an `interrupted` row — the row leaves once the route runs again; rejects when it did not get through. */
     resume?(row: NeedsRow): Promise<void>;
     /** Mark a `machine` row read (`Inbox.ack`) — it leaves the list with the live read. */

@@ -52,7 +52,7 @@ describe('actor keys', () => {
 });
 
 describe('/chats/:id (live)', () => {
-    it('renders the chat from the actors: the title from its members, the posted message attributed, the composer addressing the coordinator', async () => {
+    it('renders the chat from the actors: the title from its first message (#460), the posted message attributed, the composer addressing the coordinator', async () => {
         const { chatId, chat } = await seedChat();
         await chat.post('hello there');
         const dom = await mountLive(`/chats/${chatId}`, h);
@@ -63,12 +63,12 @@ describe('/chats/:id (live)', () => {
         expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-name]'))).toEqual(['Atlas']);
         expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-history]'))).toEqual(['Coordinator · sees all history']);
         expect(dom.querySelector('[data-scope="ai-composer"][data-part="addressing"]')!.textContent).toContain('Atlas answers unless you @ someone');
-        // The list column shows this chat, titled by its members, current.
-        expect(dom.querySelector('[data-chat-row][data-current] [data-chat-title]')!.textContent).toBe('Atlas');
+        // The list column shows this chat, titled by its first message (#460: the chat named itself on the post), current.
+        expect(dom.querySelector('[data-chat-row][data-current] [data-chat-title]')!.textContent).toBe('hello there');
         expect(dom.querySelector('[data-chat-row][data-current] [data-chat-last]')!.textContent).toBe('You: hello there');
         // The topbar reads the page's head.
-        expect(chatHead.value?.title).toBe('Atlas');
-        expect(topbarFor({ name: 'chat', path: `/chats/${chatId}`, params: { id: chatId } })?.crumb).toBe('Atlas');
+        expect(chatHead.value?.title).toBe('hello there');
+        expect(topbarFor({ name: 'chat', path: `/chats/${chatId}`, params: { id: chatId } })?.crumb).toBe('hello there');
     });
 
     it('two tabs see the same stream: a post by someone else appears in both without a reload (AC-06)', async () => {
@@ -182,7 +182,7 @@ describe('/chats/:id (live)', () => {
 });
 
 describe('/chats (live)', () => {
-    it('lists the workspace chats newest first, titled by their members', async () => {
+    it('lists the workspace chats newest first, each titled by its first message (#460)', async () => {
         const { chat, atlas, forge } = await seedChat();
         await chat.post('older');
         const second = await h.app.as(owner).actor(Workspace, workspaceKey(WS)).createChat({});
@@ -193,7 +193,7 @@ describe('/chats (live)', () => {
         const dom = await mountLive('/chats', h);
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
         expect(dom.querySelector('[data-chat-list][data-wide]')).not.toBeNull();
-        expect(texts(dom.querySelectorAll('[data-chat-title]'))).toEqual(['Atlas, Forge', 'Atlas']);
+        expect(texts(dom.querySelectorAll('[data-chat-title]'))).toEqual(['newer', 'older']);
         expect(texts(dom.querySelectorAll('[data-chat-last]'))).toEqual(['You: newer', 'You: older']);
         setDataMode('mock');
     });
@@ -229,7 +229,7 @@ describe('/chats (live)', () => {
 
         const list = await mountLive('/chats', h);
         await until(() => list.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
-        expect(texts(list.querySelectorAll('[data-chat-title]'))).toEqual(['Release plan', 'Atlas']);
+        expect(texts(list.querySelectorAll('[data-chat-title]'))).toEqual(['Release plan', 'untitled']);
 
         const page = await mountLive(`/chats/${chatId}`, h);
         await until(() => page.querySelector('[data-chat-row][data-current] [data-chat-title]')?.textContent === 'Release plan', 'the titled row');

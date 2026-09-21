@@ -84,6 +84,9 @@ const STREAM_WINDOWS: Readonly<Record<string, Pick<QuotaWindow, 'id' | 'label' |
     seven_day: { id: 'seven_day', label: 'Current week (all models)', period: 'week' },
     seven_day_opus: weekOf('Opus'),
     seven_day_sonnet: weekOf('Sonnet'),
+    // The week of the model whose use is included on top of the shared week — what the CLI calls the "Fable limit"; the
+    // probe reports it as `model_scoped` Fable, so it lands on the same window, never on the shared `seven_day` (#452).
+    seven_day_overage_included: weekOf('Fable'),
     overage: { id: 'extra_usage', label: 'Extra usage', period: 'month' }
 };
 

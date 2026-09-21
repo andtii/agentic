@@ -24,6 +24,7 @@ import {
     workspaceOfKey,
     type AgentId,
     type Author,
+    type AutoTitle,
     type ChatEntry,
     type ChatFile,
     type ChatFileStore,
@@ -38,6 +39,7 @@ import {
     type PromptPart,
     type SessionEvent,
     type SessionId,
+    type SessionOptionsPatch,
     type TaskId,
     type WorkdirRef,
     type WorkspaceId
@@ -50,6 +52,7 @@ import { Workspace } from '../workspace/index.js';
 import { ChatPage, pageKey } from './page.js';
 import { appendEntry } from './persist.js';
 import { MAX_PENDING_UPLOADS, PAGE, PENDING_TTL_MS, WINDOW, applyChatEntry, entryMatches, initialChatState, memberIds, principalKey, visibleFrom, type ChatFileRow, type ChatSessionRow, type ChatState, type IndexedEntry } from './state.js';
+import { TITLE_AT_AGENT_MESSAGES, acceptsAutoTitle, agentMessageCount, heuristicTitle, titleInputOf, type ChatTitler } from './titles.js';
 
 /** The topic a Session publishes on for its chat; the Chat actor subscribes under its own key. */
 export const sessionEvents = (chatKey: string): Topic<SessionEvent> => topic<SessionEvent>(SESSION_EVENTS_TOPIC, chatKey);
@@ -95,6 +98,9 @@ function parseSessionEvent(payload: unknown, chatKey: string): SessionEvent {
             }
             if (e.taskId !== undefined && typeof e.taskId !== 'string') throw malformed('taskId');
             break;
+        case 'title':
+            if (typeof e.title !== 'string' || !e.title.trim()) throw malformed('title');
+            break;
         default:
             throw malformed(`unknown kind "${String(e.kind)}"`);
     }
@@ -122,8 +128,10 @@ export interface ChatSummary {
     readonly coordinator: AgentId | null;
     /** The session bound to each agent member (#392): its id, when it began, and the seq of that member's last message. */
     readonly sessions: Readonly<Record<string, ChatSessionRow>>;
-    /** The chat's title (#124), absent until `Workspace.createChat({ title })` or `rename` set one — the pages then title it by its members. */
+    /** The chat's title (#124), absent until `Workspace.createChat({ title })`, `rename` or the chat itself (#460) set one — the pages then title it by its members. */
     readonly title?: string;
+    /** How `title` was generated (#460); absent when a person set it. */
+    readonly titleAuto?: AutoTitle;
     /** The project the chat belongs to (#332, `setProject`); absent when it is in none. */
     readonly projectId?: ProjectId;
     /** `projectId` with the project's name, when the Workspace still has it — a removed project leaves `projectId` alone. */
@@ -283,8 +291,8 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
  * Machine actor: whether the machine is online is the caller's to read.
  */
 async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
-    const { seq, members, coordinator, sessions, title, projectId, machineId } = ctx.state;
-    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }) });
+    const { seq, members, coordinator, sessions, title, titleAuto, projectId, machineId } = ctx.state;
+    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(titleAuto === undefined ? {} : { titleAuto }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }) });
     if (projectId === undefined && machineId === undefined) return summary;
     const workspace = ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId));
     if (projectId !== undefined) {
@@ -349,6 +357,37 @@ export interface ChatOptions {
      * that chat (§6). Absent: the binding is dropped and the session lives on.
      */
     readonly routing?: () => AnyActorDefinition;
+    /**
+     * Titles a chat from its first messages (#460, `createChatTitler`) for the runtimes that do not title their own
+     * conversations: asked in the `title` task after the agent messages `TITLE_AT_AGENT_MESSAGES` name, while no
+     * runtime title stands and no person has named the chat. Absent: the heuristic title (the first user line) stays
+     * until a runtime reports one.
+     */
+    readonly titles?: ChatTitler;
+}
+
+/** The generated title `auto` names, when it may replace what stands (`acceptsAutoTitle`) and it is news: one `rename` entry. */
+async function autoRename(ctx: ActorContext<ChatState>, title: string, auto: AutoTitle): Promise<void> {
+    const next = title.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_LENGTH).trim();
+    if (!next || !acceptsAutoTitle(ctx.state, auto.source, auto.sessionId) || ctx.state.title === next) return;
+    await archive(ctx);
+    await appendEntry(ctx, { t: 'rename', title: next, at: Date.now(), auto });
+}
+
+/**
+ * After a message is folded (#460): the first user message names an untitled chat at once; the agent messages
+ * `TITLE_AT_AGENT_MESSAGES` count start the `title` task when a model title may still replace what stands.
+ */
+async function afterMessage(ctx: ActorContext<ChatState>, entry: Extract<ChatEntry, { t: 'msg' }>, titles: ChatTitler | undefined): Promise<void> {
+    if (entry.workdir || entry.project || entry.machine) return; // a note, not something said
+    if (entry.author.kind === 'user') {
+        if (ctx.state.title !== undefined) return;
+        const title = heuristicTitle(entry.parts);
+        if (title) await autoRename(ctx, title, { source: 'heuristic' });
+        return;
+    }
+    if (!titles || !TITLE_AT_AGENT_MESSAGES.includes(agentMessageCount(ctx.state)) || !acceptsAutoTitle(ctx.state, 'model')) return;
+    await ctx.tasks.start('title', {});
 }
 
 /**
@@ -369,6 +408,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             setCoordinator: [userOrExternal],
             rename: [userOrExternal],
             setWorkdir: [userOrExternal],
+            setOptions: [userOrExternal],
             // Users, external clients and member agents; a non-member agent is refused inside the method (a policy sees no state).
             setProject: [notMachine],
             setMachine: [notMachine],
@@ -416,6 +456,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 };
                 await archive(ctx);
                 await appendEntry(ctx, entry);
+                await afterMessage(ctx, entry, ports.titles);
                 return { messageId, activated };
             },
 
@@ -468,7 +509,8 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 const next = title.replace(/\s+/g, ' ').trim();
                 if (!next) throw new Error('Chat.rename: title is required');
                 if (next.length > MAX_TITLE_LENGTH) throw new Error(`Chat.rename: title is longer than ${MAX_TITLE_LENGTH} characters`);
-                if (ctx.state.title === next) return;
+                // The same title again is no entry — unless a generated one (#460): a person keeping it makes it theirs, final.
+                if (ctx.state.title === next && !ctx.state.titleAuto) return;
                 await archive(ctx);
                 await appendEntry(ctx, { t: 'rename', title: next, at: Date.now() });
             },
@@ -493,6 +535,35 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 const text = next === null ? `Working folder for ${agentId} cleared` : `Working folder for ${agentId} → ${next.path} on ${next.environmentId}`;
                 await archive(ctx);
                 await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at: Date.now(), mentions: [], workdir: { agentId, ref: next } });
+                return ctx.snapshot(ctx.state.members[agentId]!);
+            },
+
+            /**
+             * Set a member's model or permission mode for this chat (#453), or clear one back to the agent's config with
+             * `null`: folded onto the member (`get().members[agentId].options`). The router reads it when it places the
+             * member's next turn — a fresh session opens with it, a live one is configured to it before the prompt, a
+             * turn already running keeps what it runs with (AGT-07). Written as a visible note (a user message carrying
+             * `options`, activating nobody). Members only (404); a key other than `model` / `permissionMode`, or a value
+             * that is not text, is 400. Whether the environment allows the mode is judged where it runs.
+             */
+            async setOptions(agentId: AgentId, patch: SessionOptionsPatch): Promise<ChatMember> {
+                const member = ctx.state.members[agentId];
+                if (!member) throw new ServerFnError(404, `Chat.setOptions: ${agentId} is not a member`);
+                const next: Record<string, string | null> = {};
+                for (const [key, value] of Object.entries(patch ?? {})) {
+                    if (key !== 'model' && key !== 'permissionMode') throw new ServerFnError(400, `Chat.setOptions: unknown option ${key}`);
+                    if (value === undefined) continue;
+                    if (value !== null && (typeof value !== 'string' || !value.trim() || value.length > 256)) throw new ServerFnError(400, `Chat.setOptions: ${key} must be a name or null`);
+                    // Unchanged keys are left out, so an idempotent call writes nothing.
+                    if ((value === null ? undefined : value.trim()) !== member.options?.[key]) next[key] = value === null ? null : value.trim();
+                }
+                if (!Object.keys(next).length) return ctx.snapshot(member);
+                const label = (key: string) => (key === 'model' ? 'Model' : 'Permission mode');
+                const text = Object.entries(next)
+                    .map(([key, value]) => (value === null ? `${label(key)} for ${agentId} back to its default` : `${label(key)} for ${agentId} → ${value}`))
+                    .join('; ');
+                await archive(ctx);
+                await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at: Date.now(), mentions: [], options: { agentId, patch: next } });
                 return ctx.snapshot(ctx.state.members[agentId]!);
             },
 
@@ -693,9 +764,14 @@ export function defineChatActor(ports: ChatOptions = {}) {
                         if (e.status === 'session-ended' && ctx.state.sessions[e.agentId]?.sessionId !== e.sessionId) return;
                         await appendEntry(ctx, { t: 'status', agentId: e.agentId, kind: e.status, ref: e.ref ?? e.sessionId, at: e.at });
                     }
+                } else if (e.kind === 'title') {
+                    // The runtime's own title for the conversation (#460): only the member's bound session speaks for it (#392),
+                    // and it replaces a generated title — never one a person set, nor another session's runtime title.
+                    if (ctx.state.sessions[e.agentId]?.sessionId !== e.sessionId) return;
+                    await autoRename(ctx, e.title, { source: 'runtime', sessionId: e.sessionId as SessionId });
                 } else {
                     await archive(ctx);
-                    await appendEntry(ctx, {
+                    const entry: ChatEntry = {
                         t: 'msg',
                         id: createId('msg') as MessageId,
                         author: { kind: 'agent', agentId: e.agentId, sessionId: e.sessionId },
@@ -704,10 +780,34 @@ export function defineChatActor(ports: ChatOptions = {}) {
                         mentions: e.mentions ?? [],
                         sessionId: e.sessionId,
                         ...(e.taskId ? { taskId: e.taskId } : {})
-                    });
+                    };
+                    await appendEntry(ctx, entry);
+                    await afterMessage(ctx, entry, ports.titles);
                 }
             }
-        }
+        },
+        tasks: (ctx) => ({
+            /**
+             * Ask the titler for a title over the first messages (#460), outside any turn — a model call never holds the
+             * chat. Single-flight; started by `afterMessage`, and checked again before writing: a runtime title or a
+             * rename that landed meanwhile wins. A titler that answers nothing (no key) or fails leaves the title as it
+             * is — a title is a courtesy, never an error in the thread.
+             */
+            async title(): Promise<void> {
+                const snap = ctx.snapshot();
+                if (!ports.titles || !acceptsAutoTitle(snap, 'model')) return;
+                const workspaceId = workspaceOfKey(ctx.key) as WorkspaceId;
+                let title: string | undefined;
+                try {
+                    title = await ports.titles(workspaceId, titleInputOf(snap), ctx.abortSignal);
+                } catch (e) {
+                    console.warn(`[chat] titling ${ctx.key} failed:`, e instanceof Error ? e.message : e);
+                    return;
+                }
+                if (!title) return;
+                await ctx.turn((c) => autoRename(c, title, { source: 'model' }));
+            }
+        })
     });
 }
 

@@ -58,6 +58,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         invalid: { v: V, t: 'session.ref', sessionId: 's1' },
         path: 'ref'
     },
+    'session.title': {
+        valid: { v: V, t: 'session.title', sessionId: 's1' as never, title: 'Chat list auto-generated titles' },
+        invalid: { v: V, t: 'session.title', sessionId: 's1', title: '   ' },
+        path: 'title'
+    },
     'session.frame': {
         valid: { v: V, t: 'session.frame', sessionId: 's1' as never, frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } } },
         invalid: { v: V, t: 'session.frame', sessionId: 's1', frame: { v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x' } } },
@@ -302,6 +307,19 @@ describe('daemon frame schemas', () => {
         expect((parsed.data as { spec: unknown }).spec).toEqual(spec);
         expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: [{ id: 'r1', match: {}, outcome: 'maybe' }], grants: [] } } }).success).toBe(false);
         expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: Array.from({ length: LIMITS.list + 1 }, (_, i) => ({ id: `r${i}`, match: {}, outcome: 'allow' })), grants: [] } } }).success).toBe(false);
+    });
+
+    it('session.open carries the permission mode and env frames the account’s models and bypass flag (#450); both stay optional', () => {
+        const spec = { ...platformCases['session.open'].valid.spec, model: 'claude-fable-5-1', permissionMode: 'plan' };
+        const parsed = platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec });
+        expect(parsed.success).toBe(true);
+        expect((parsed.data as { spec: unknown }).spec).toEqual(spec);
+        const described = { ...env, models: [{ id: 'claude-fable-5-1', label: 'Fable', description: 'most capable' }, { id: 'opus' }], allowBypassPermissions: true };
+        const frame = daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [described] });
+        expect(frame.success).toBe(true);
+        expect(frame.data?.environments[0]).toEqual(described);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [{ ...env, models: [{ label: 'no id' }] }] }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [{ ...env, allowBypassPermissions: 'yes' }] }).success).toBe(false);
     });
 
     it('session.open carries the agent’s MCP connectors (#280) with secret names; a bad transport or a value-shaped auth is refused', () => {

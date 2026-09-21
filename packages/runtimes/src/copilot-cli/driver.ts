@@ -3,7 +3,8 @@
  *
  * One Copilot runtime (`CopilotClient`) per environment, isolated by its own `COPILOT_HOME`, with the
  * parent's token variables removed (`env.ts`; EXE-04/05). Sessions append the
- * platform's system prompt to Copilot's own, leave repository instructions out (MEM-10), run the
+ * platform's system prompt to Copilot's own, let Copilot read the repository's instructions (#461; platform
+ * memory stays labelled as the platform's, MEM-10), run the
  * platform tools the spec names and the agent's MCP connectors as client tools bridged back through
  * `callTool` (shared with Claude Code: `../harness`), and report their capabilities (AGT-09).
  */
@@ -17,7 +18,7 @@ import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener }
 import { assertCwdInRoots, assertRuntime, closingWith } from '../harness/session.js';
 import { withPlatformMemoryLabel, withUnavailableConnectors } from '../harness/system.js';
 import { bridgedPlatformTools } from '../harness/tools.js';
-import { COPILOT_CLI_CAPABILITIES, copilotCli, type CopilotSessionOptions } from './agent.js';
+import { COPILOT_CLI_CAPABILITIES, copilotCli, copilotSessionTitle, type CopilotSessionOptions } from './agent.js';
 import { readCopilotAuth } from './auth.js';
 import { copilotCliDoctor, type CopilotDoctorInput } from './doctor.js';
 import { copilotAccountEnv } from './env.js';
@@ -27,7 +28,7 @@ import type { Agent } from '@sigx/ai-agent';
 const RUNTIME = 'copilot-cli';
 
 export const COPILOT_PLATFORM_MEMORY_NOTE =
-    'Supplied by the agentic platform for this session. It is not Copilot memory: repository instructions (copilot-instructions.md, AGENTS.md) and Copilot settings are not loaded here. Store what should outlive the session with memory_remember, not in files.';
+    'Supplied by the agentic platform for this session. It is not Copilot memory: the repository instructions of the folder (.github/copilot-instructions.md, AGENTS.md) are loaded as usual and belong to the project, not to this agent. Store what should outlive the session with memory_remember, not in files.';
 
 export interface CopilotCliDriverOptions {
     /** Builds a client for one profile; the SDK's `CopilotClient` by default. */
@@ -96,7 +97,7 @@ export function copilotCliDriver(options: CopilotCliDriverOptions = {}): Copilot
             {
                 runtime: RUNTIME,
                 name: 'Copilot CLI',
-                runtimeMemory: 'repository instructions and Copilot settings are not loaded (skipCustomInstructions); memory comes from the platform, labelled in the system prompt'
+                runtimeMemory: 'repository instructions and Copilot config are loaded from the folder and belong to the project; memory comes from the platform, labelled in the system prompt'
             },
             COPILOT_CLI_CAPABILITIES,
             input
@@ -149,7 +150,8 @@ export function copilotCliDriver(options: CopilotCliDriverOptions = {}): Copilot
             }
             // A connector tool the agent is granted is not a platform tool the daemon failed to serve: `__` names are connectors'.
             const capabilities = report({ tools: tools.map((t) => t.name), unknownTools: unknown.filter((name) => !name.includes('__')), unavailableConnectors: connectors.unavailable });
-            return { session: closingWith(session, connectors.close), capabilities };
+            // The CLI's own title for the conversation (#460), kept from its `session.title_changed` events.
+            return { session: closingWith(session, connectors.close), capabilities, title: async () => copilotSessionTitle(session) };
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

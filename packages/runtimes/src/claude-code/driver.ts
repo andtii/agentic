@@ -14,10 +14,10 @@
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
 import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
-import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
+import { BYPASS_PERMISSIONS_MODE, type DoctorReport, type EnvironmentInspection, type LocalEnvironment, type ModelOption, type OpenedRuntimeSession, type OpenSpec, type RuntimeDriver, type RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
 import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener } from '../harness/connectors.js';
@@ -25,7 +25,10 @@ import { assertCwdInRoots, assertRuntime as assertRuntimeOf, closingWith } from 
 import { bridgedPlatformTools } from '../harness/tools.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
+import { claudeCodeModels, type ModelsQueryFn } from './models.js';
+import { withPlanReview } from './plan.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
+import { readSessionTitle } from './title.js';
 
 export interface ClaudeCodeDriverOptions {
     /** The SDK's `query`; a fake in tests. */
@@ -50,6 +53,8 @@ export interface ClaudeCodeDriverOptions {
      * connectors are left out of every session, and the agent is told why.
      */
     readonly connectors?: DaemonConnectorOpener;
+    /** The SDK's `query` for `models(env)`'s unprompted probe; a fake in tests. */
+    readonly modelsQuery?: ModelsQueryFn;
 }
 
 export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
@@ -62,6 +67,14 @@ export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
 }
 
 const RUNTIME = 'claude-code';
+
+/**
+ * The setting sources a session loads: the repository's own (`CLAUDE.md` and its imports,
+ * `.claude/settings.json`, hooks, skills) from `cwd` upward — what the interactive CLI reads in
+ * that folder (#461). `user` and `local` stay out: the account lives in `CLAUDE_CONFIG_DIR`, not in
+ * settings, and nothing of the daemon operator's own `~/.claude` reaches an agent (decision 3).
+ */
+export const SETTING_SOURCES: readonly SettingSource[] = ['project'];
 
 /**
  * Claude Code's own cross-session tools: they list and message OTHER Claude Code sessions on the
@@ -112,10 +125,12 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         if (!agent) {
             agent = claudeCode({
                 id: `${RUNTIME}:${env.id}`,
-                settingSources: [],
+                settingSources: SETTING_SOURCES,
                 env: childEnvFor(env),
                 ...(options.models ? { models: options.models } : {}),
                 ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+                // Only where the machine allows it (#453): without it the adapter refuses `bypassPermissions` on open and configure.
+                ...(env.allowBypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),
                 query: withoutCrossSessionTools(options.query ?? sdkQuery),
                 ...(options.listen ? { listen: options.listen } : {}),
                 ...(options.listSessions ? { listSessions: options.listSessions } : {}),
@@ -148,6 +163,9 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);
             assertCwdInRoots(RUNTIME, env, spec.cwd);
+            if (spec.permissionMode === BYPASS_PERMISSIONS_MODE && !env.allowBypassPermissions) {
+                throw new Error(`${RUNTIME}: permission mode ${BYPASS_PERMISSIONS_MODE} is not allowed in environment ${env.id} (set allowBypassPermissions on it in environments.json)`);
+            }
             const { tools: platform, unknown } = bridgedPlatformTools(spec.tools, ctx.callTool);
             const connectors = await openDaemonConnectors({
                 connectors: spec.connectors ?? [],
@@ -158,17 +176,19 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 taken: platform.map((t) => t.name)
             });
             const tools = [...platform, ...connectors.tools];
-            const policy = withConnectorPolicy(ctx.policy, connectors.annotations);
+            // Plan mode's way out always reaches a person (#454), whatever the rules and grants say.
+            const policy = withPlanReview(withConnectorPolicy(ctx.policy, connectors.annotations));
             let session: AgentSession;
             try {
                 session = await agent.session({
                     cwd: spec.cwd,
                     system: withUnavailableConnectors(claudeCodeSystemPrompt(spec.system), connectors.unavailable),
                     systemPromptPreset: true,
-                    settingSources: [],
+                    settingSources: SETTING_SOURCES,
                     interactive: true,
                     tools,
                     ...(spec.model !== undefined ? { model: spec.model } : {}),
+                    ...(spec.permissionMode !== undefined ? { permissionMode: spec.permissionMode as PermissionMode } : {}),
                     ...(spec.maxTurns !== undefined ? { maxTurns: spec.maxTurns } : {}),
                     ...(spec.maxBudgetUsd !== undefined ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
                     ...(policy !== undefined ? { policy } : {}),
@@ -184,7 +204,24 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 unknownTools: unknown.filter((name) => !name.includes('__')),
                 unavailableConnectors: connectors.unavailable
             });
-            return { session: closingWith(session, connectors.close), capabilities };
+            // The CLI's own title for the conversation (#460), read from the transcript it files under this environment's config
+            // dir. The ref carries the CLI's id once the first stream event names it (#389); before that there is nothing to read.
+            const title = async (): Promise<string | undefined> => {
+                const ref = session.ref as { readonly id?: unknown; readonly data?: { readonly cwd?: unknown } };
+                if (typeof ref.id !== 'string' || !ref.id) return undefined;
+                const cwd = typeof ref.data?.cwd === 'string' && ref.data.cwd ? ref.data.cwd : spec.cwd;
+                return readSessionTitle({ configDir: configDirOf(env), cwd, sessionId: ref.id });
+            };
+            return { session: closingWith(session, connectors.close), capabilities, title };
+        },
+
+        models(env: LocalEnvironment): Promise<readonly ModelOption[] | null> {
+            assertRuntime(env);
+            return claudeCodeModels(env, {
+                parentEnv: options.parentEnv ?? process.env,
+                ...(options.modelsQuery ? { query: options.modelsQuery } : {}),
+                ...(options.pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable } : {})
+            });
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

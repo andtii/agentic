@@ -4,7 +4,7 @@ import { FS_LIST_MAX_ENTRIES, type EnvironmentDescriptor, type EnvironmentId, ty
 import { mockFsList, mockFsWorktree } from '../../src/mock/fs';
 import { newScheduleSpec } from '../../src/pages/ops/live';
 import type { EnvironmentEntry } from '../../src/pages/ops/environments';
-import { titleOf, validateStartTask } from '../../src/pages/task/start';
+import { validateStartTask } from '../../src/pages/task/start';
 import { mockWorkdirEnvironments } from '../../src/pages/workdir/environments';
 import { DEFAULT_OS, requestError, startingPoint, unavailableReason, workdirEnvironmentOf } from '../../src/pages/workdir/model';
 
@@ -112,12 +112,6 @@ describe('start task', () => {
     it('asks for an agent and an objective', () => {
         expect(validateStartTask({ agentId: '', objective: ' ', workdir: null })).toEqual({ agentId: 'Pick the agent that does it.', objective: 'Say what it should do.' });
         expect(validateStartTask({ agentId: 'forge', objective: 'Fix the drawer', workdir: null })).toEqual({});
-    });
-
-    it('titles the chat by the objective’s first line, at most 60 characters', () => {
-        expect(titleOf('  Fix the drawer\nand the tests ')).toBe('Fix the drawer');
-        expect(titleOf('x'.repeat(80))).toHaveLength(60);
-        expect(titleOf('x'.repeat(80)).endsWith('…')).toBe(true);
     });
 });
 

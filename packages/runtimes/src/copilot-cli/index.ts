@@ -7,7 +7,7 @@
 export type { CopilotCliDriver, CopilotCliDriverOptions } from './driver.js';
 export { copilotCliDriver, COPILOT_PLATFORM_MEMORY_NOTE } from './driver.js';
 export type { CopilotCliOptions, CopilotSessionOptions } from './agent.js';
-export { copilotCli, COPILOT_CLI_AGENT_ID, COPILOT_CLI_CAPABILITIES, permissionRequestOf } from './agent.js';
+export { copilotCli, copilotSessionTitle, COPILOT_CLI_AGENT_ID, COPILOT_CLI_CAPABILITIES, permissionRequestOf } from './agent.js';
 export type { CopilotAuth } from './auth.js';
 export { readCopilotAuth } from './auth.js';
 export type { CopilotDoctorInput } from './doctor.js';

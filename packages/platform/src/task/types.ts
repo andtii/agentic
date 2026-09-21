@@ -8,6 +8,7 @@ import type {
     ProjectId,
     PromptPart,
     SessionId,
+    SessionOptions,
     TaskContract,
     MachineId,
     TaskError,
@@ -151,6 +152,8 @@ export interface TaskState {
     projectId?: ProjectId;
     /** The earlier session whose engine conversation this task continues (#285). */
     resumeFrom?: SessionId;
+    /** The model and permission mode its session runs with (#453), from the contract; the chat member's own win at placement. */
+    options?: SessionOptions;
     owner: AgentId;
     depth: number;
     parentId?: TaskId;

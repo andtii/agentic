@@ -1,6 +1,7 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
 import type { AgentId, ChatId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
+import type { SessionOptions, SessionOptionsPatch } from './session-options.js';
 import type { TaskError } from './task.js';
 import type { WorkdirRef } from './workdir.js';
 
@@ -38,6 +39,11 @@ export type ChatEntry =
            * changed. Whoever folds the entries copies `ref` onto the member; `null` clears it.
            */
           readonly workdir?: { readonly agentId: AgentId; readonly ref: WorkdirRef | null };
+          /**
+           * Set on the note `Chat.setOptions` writes (#450): a member's model or permission mode for this chat changed.
+           * Whoever folds the entries applies `patch` to the member's `options` (`applySessionOptions`; `null` clears a key).
+           */
+          readonly options?: { readonly agentId: AgentId; readonly patch: SessionOptionsPatch };
           /**
            * Set on the note `Chat.setProject` writes (#330): the chat now belongs to this project,
            * or to none with `null`. Whoever folds the entries keeps the last one; the router reads
@@ -85,8 +91,20 @@ export type ChatEntry =
           readonly at: number;
       }
     | { readonly t: 'coordinator'; readonly agentId: AgentId | null; readonly at: number }
-    /** The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one. */
-    | { readonly t: 'rename'; readonly title: string; readonly at: number };
+    /**
+     * The chat was (re)named (#124): the title in force from this entry on. Whoever folds the entries keeps the last one.
+     * `auto` says the title was generated, not chosen (#460): from the first user message (`heuristic`), by the platform's
+     * own model call (`model`), or reported by the runtime of `sessionId` (`runtime`). Absent: a person set it, and no
+     * generated title replaces it.
+     */
+    | { readonly t: 'rename'; readonly title: string; readonly at: number; readonly auto?: AutoTitle };
+
+/** Where a generated chat title came from (#460). */
+export interface AutoTitle {
+    readonly source: 'heuristic' | 'model' | 'runtime';
+    /** With `runtime`: the session whose runtime titled the conversation. */
+    readonly sessionId?: SessionId;
+}
 
 export interface ChatMember {
     readonly since: number;
@@ -94,6 +112,8 @@ export interface ChatMember {
     readonly historyFrom: number;
     /** The folder this agent works in for this chat (#185): copied into every task the chat activates it for. */
     readonly workdir?: WorkdirRef;
+    /** Its model and permission mode for this chat (#450): copied into the task of every activation; its session takes them on its next turn. */
+    readonly options?: SessionOptions;
 }
 
 /** Result of posting: who the message activates (CHT-06). */
@@ -142,6 +162,14 @@ export type SessionEvent =
           readonly taskId?: TaskId;
           readonly parts: readonly PromptPart[];
           readonly mentions?: readonly AgentId[];
+          readonly at: number;
+      }
+    /** The runtime titled the conversation (#460): the chat takes it unless a person named the chat. */
+    | {
+          readonly kind: 'title';
+          readonly agentId: AgentId;
+          readonly sessionId: SessionId;
+          readonly title: string;
           readonly at: number;
       };
 

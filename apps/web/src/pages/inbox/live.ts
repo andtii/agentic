@@ -25,16 +25,17 @@
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AuditEvent, InboxNotification, RoutingView } from '@agentic/platform';
-import type { TaskId } from '@agentic/core';
+import type { AgentId, TaskId } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { interruptionCause, interruptionOf, useInterruptionReads, useMachineNames } from '../../components/status';
-import { inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
+import { chatKeyOf, inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
+import { answerRequest } from '../chat/live';
 import { clockNow, zoneFormat } from '../../time';
 import { isMachineNotice } from '../machines/MachineNotice';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
-export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace'>;
+export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace' | 'Chat'>;
 
 /** What an interrupted row says under its title (OPS-05: nothing is replayed, the person decides), after its cause. */
 export const INTERRUPTED_CONTEXT = 'Nothing was replayed. The transcript is intact.';
@@ -118,11 +119,26 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
                 };
             };
         },
-        async respond(ref, decision) {
+        async respond(ref, decision, plan) {
             const key = sessionKey(ref);
-            if (!key) throw new Error('not signed in');
-            const reply = await actor(defs.Session, key).respond(ref.requestId, decision);
-            if (reply.kind === 'error') throw new Error(reply.message);
+            if (!key || !viewer.workspaceId) throw new Error('not signed in');
+            const session = actor(defs.Session, key);
+            const ws = viewer.workspaceId;
+            // The chat's own answer path (#454): an approved plan's mode becomes the member's and the session switches now.
+            await answerRequest(
+                {
+                    respond: async (id, d) => {
+                        const reply = await session.respond(id, d);
+                        if (reply.kind === 'error') throw new Error(reply.message);
+                    },
+                    setOptions: (agentId, patch) => (plan?.chatId ? actor(defs.Chat, chatKeyOf(ws, plan.chatId)).setOptions(agentId as AgentId, patch) : Promise.resolve()),
+                    configure: (patch) => session.configure(patch)
+                },
+                plan?.agentId ?? '',
+                ref.requestId,
+                decision,
+                plan
+            );
         },
         async dismiss(row) {
             if (!viewer.workspaceId) throw new Error('not signed in');

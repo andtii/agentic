@@ -90,7 +90,9 @@ export function addEnvironment(current: readonly LocalEnvironment[], input: Envi
         ...(profileDir === undefined ? {} : { profileDir }),
         cwdRoots: [...(input.cwdRoots ?? [])],
         ...(input.concurrency === undefined ? {} : { concurrency: input.concurrency }),
-        ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel })
+        ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
+        // Set by hand in environments.json only (#453): a replace from the CLI or the platform keeps it.
+        ...(existing?.allowBypassPermissions ? { allowBypassPermissions: true } : {})
     };
     const others = current.filter((e) => e.id !== id);
     const sharing = profileDir === undefined ? undefined : others.find((e) => e.profileDir !== undefined && samePath(e.profileDir, profileDir, platform));

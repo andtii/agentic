@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AccountKey, AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, TaskId } from '@agentic/core';
+import type { AccountKey, AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, SessionOptions, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import type { RegistryGate } from '../registry/types.js';
 
@@ -68,6 +68,12 @@ export interface Route {
     readonly constraints?: readonly ApprovalRule[];
     /** What `Registry.gate()` answered for this route's runtime (§9) — asked once at `run`, again only when `fallback-api` changes the runtime; copied onto the session spec. */
     plugins?: RegistryGate;
+    /**
+     * The model and permission mode the session runs with (#453), settled at placement: the chat member's, else the
+     * task's, else the agent's config, else the runtime plugin's default. A reused session is configured to them
+     * before the prompt (`steerOrPrompt`) — never while a turn runs.
+     */
+    options?: SessionOptions;
     /**
      * Bound at placement (#393): a chat route takes the member's live session from the chat's binding
      * (`ChatSummary.sessions[agentId]`) when it can go on, else — and always for a chatless route — a fresh id is

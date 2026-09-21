@@ -11,7 +11,7 @@ export function claudeCodeCapabilityReport(c: AgentCapabilities, input: ClaudeCo
         {
             runtime: 'claude-code',
             name: 'Claude Code',
-            runtimeMemory: 'settingSources is [] — CLAUDE.md files and Claude Code settings are not loaded; memory comes from the platform, labelled in the system prompt'
+            runtimeMemory: 'CLAUDE.md and project settings are loaded from the folder (settingSources: project) and belong to the project; memory comes from the platform, labelled in the system prompt'
         },
         c,
         input

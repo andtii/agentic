@@ -95,8 +95,10 @@ describe('post with file parts', () => {
         const { messageId } = await chatAs(user).post(withFile('f1'));
         expect(store.posted).toEqual([`${WS}/c1/f1`]);
         expect(await chatAs(external).fileAccess('f1')).toMatchObject({ id: 'f1', chatId: 'c1', name: 'f1.png', mediaType: 'image/png', bytes: 3 });
-        const last = (await chatAs(user).history()).entries.at(-1)!.entry;
-        expect(last).toMatchObject({ t: 'msg', id: messageId, parts: withFile('f1') });
+        // The first user message also names the chat (#460): the message is the entry before that rename.
+        const { entries } = await chatAs(user).history();
+        expect(entries.map((e) => e.entry.t)).toEqual(['msg', 'rename']);
+        expect(entries[0]!.entry).toMatchObject({ t: 'msg', id: messageId, parts: withFile('f1') });
     });
 
     it('rejects a foreign chat, an unknown file, another principal’s pending upload, a mismatched type, a malformed reference', async () => {

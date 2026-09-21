@@ -12,6 +12,10 @@ export interface CopilotEvent {
     readonly ephemeral?: boolean;
 }
 
+/** `session.title_changed` (ephemeral): the CLI titled the conversation, or retitled it as the work moved on (#460). */
+export interface CopilotTitleChanged {
+    readonly title: string;
+}
 export interface CopilotMessageDelta {
     readonly messageId: string;
     readonly deltaContent: string;

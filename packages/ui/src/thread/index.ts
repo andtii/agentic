@@ -16,8 +16,8 @@ export { ToolCall, ToolCall as AiToolCall, toolIcon, OUTPUT_FOLD, OUTPUT_LOG } f
 export type { ToolCallProps, ThreadContextProps, ToolMetaFn, ApprovalContext, RequestContext, DescribeRequestFn } from './ToolCall.js';
 export { Reasoning, Reasoning as AiReasoning, reasoningSummary } from './Reasoning.js';
 export type { ReasoningProps } from './Reasoning.js';
-export { ApprovalPrompt, ApprovalPrompt as AiApproval, DENY_MESSAGE, decisionText } from './ApprovalPrompt.js';
-export type { ApprovalPromptProps, RespondFn, ApprovalRequester, ApprovalDecision } from './ApprovalPrompt.js';
+export { ApprovalPrompt, ApprovalPrompt as AiApproval, DENY_MESSAGE, EXIT_PLAN_MODE_TOOL, KEEP_PLANNING_MESSAGE, decisionText, planOf } from './ApprovalPrompt.js';
+export type { ApprovalPromptProps, RespondFn, RespondOptions, ApprovalRequester, ApprovalDecision } from './ApprovalPrompt.js';
 export { StreamingMarkdown } from './StreamingMarkdown.js';
 export type { StreamingMarkdownProps } from './StreamingMarkdown.js';
 export { toolCallState, agentState } from './tool-state.js';

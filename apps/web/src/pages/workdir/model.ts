@@ -41,7 +41,10 @@ export function workdirEnvironmentOf(entry: EnvironmentEntry): WorkdirEnvironmen
         roots: entry.descriptor.cwdRoots,
         ...(unavailable ? { unavailable } : {}),
         // Its account's limits (#315): shown in the picker's strip, and where a chat member or New chat names this environment.
-        ...(entry.quota !== undefined ? { quota: entry.quota } : {})
+        ...(entry.quota !== undefined ? { quota: entry.quota } : {}),
+        // What a chat member's model and mode rows offer here (#453).
+        ...(entry.descriptor.models?.length ? { models: entry.descriptor.models } : {}),
+        ...(entry.descriptor.allowBypassPermissions ? { allowBypassPermissions: true } : {})
     };
 }
 

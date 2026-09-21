@@ -9,7 +9,7 @@
  * `applyEntry` hook of `ctx.append`.
  */
 
-import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MachineId, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
+import { applySessionOptions, isChatFilePart, parseChatFileUri, type AgentId, type AutoTitle, type ChatEntry, type ChatFile, type ChatMember, type MachineId, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
 
 /** Entries kept in state before the oldest page is archived. */
 export const WINDOW = 200;
@@ -94,6 +94,8 @@ export interface ChatState {
     sessions: Record<string, ChatSessionRow>;
     /** The title the last `rename` entry set (#124); absent until one is. Records written before it existed have none. */
     title?: string;
+    /** How the title in force was generated (#460); absent when a person set it — no generated title replaces such a one. */
+    titleAuto?: AutoTitle;
     /** The project the last `project` note put the chat in (#332, `Chat.setProject`); absent until one does, or after one clears it. */
     projectId?: ProjectId;
     /** The machine the last `machine` note put the chat on (#414, `Chat.setMachine`); absent until one does, or after one clears it. */
@@ -135,6 +137,13 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
                 const { workdir: _old, ...rest } = member;
                 state.members[entry.workdir.agentId] = entry.workdir.ref ? { ...rest, workdir: entry.workdir.ref } : rest;
             }
+            // The note `setOptions` writes (#453): the member's model / permission mode for this chat.
+            const optioned = entry.options ? state.members[entry.options.agentId] : undefined;
+            if (entry.options && optioned) {
+                const { options: old, ...rest } = optioned;
+                const options = applySessionOptions(old, entry.options.patch);
+                state.members[entry.options.agentId] = options ? { ...rest, options } : rest;
+            }
             // The note `setProject` writes (#332): the chat's project from here on, or none.
             if (entry.project) {
                 if (entry.project.id === null) delete state.projectId;
@@ -162,6 +171,8 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             return;
         case 'rename':
             state.title = entry.title;
+            if (entry.auto) state.titleAuto = entry.auto;
+            else delete state.titleAuto;
             return;
         case 'status':
             // The binding (#392): a start with a ref creates or replaces the member's row, an end drops it.

@@ -349,8 +349,8 @@ export const opsPlugins: readonly PluginView[] = [
         id: 'anthropic-api', version: '0.1.0', kind: 'runtime', name: 'Anthropic API', capabilities: ['platform-hosted', 'model'],
         description: 'Agents run on the platform against the Anthropic API with your own key.',
         config: { type: 'object', properties: { defaultModel: { type: 'string', title: 'Default model', description: 'The model an agent runs on when its own config names none.', enum: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'], default: 'claude-opus-5' } }, additionalProperties: false },
-        secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session.', required: true }],
-        permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts.' }]
+        secrets: [{ name: 'anthropic-api-key', title: 'Anthropic API key', description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session or to title a chat.', required: true }],
+        permissions: [{ scope: 'secret:anthropic-api-key', reason: 'Calls the Anthropic API with your key when a session starts, and once or twice per chat to title it.' }]
     }), { config: { defaultModel: 'claude-opus-5' } }),
     builtin(manifest({
         id: 'claude-code', version: '0.1.0', kind: 'runtime', name: 'Claude Code', capabilities: ['daemon-hosted', 'harness', 'usage-limits'],
@@ -506,7 +506,8 @@ export const opsHistory: readonly HistoryEntry[] = [
 
 /**
  * Provider limits per account (#270): `alien01 / work` mirrors a real
- * `claude` → `/usage` (19 % session, 76 % week, 80 % Fable week); `nuc-lab`
+ * `claude` → `/usage` (19 % session, 76 % week) with its Fable week used up —
+ * Forge runs Sonnet there, so its card shows no limit (#452); `nuc-lab`
  * is offline, so its snapshot is hours old and shows stale; the platform's
  * `anthropic-api` reports none, and says why. Times are relative to load.
  */
@@ -538,7 +539,7 @@ export const opsQuota: Readonly<Record<string, QuotaSnapshot>> = {
     [envId('alien01', 'work')]: claudeQuota(envId('alien01', 'work'), [
         quotaWin('five_hour', 'Current session', 'session', 0.19, 3.2),
         quotaWin('seven_day', 'Current week (all models)', 'week', 0.76, 78),
-        quotaWin('seven_day:fable', 'Current week (Fable)', 'week', 0.8, 78, 'Fable')
+        quotaWin('seven_day:fable', 'Current week (Fable)', 'week', 1, 78, 'Fable')
     ], 2),
     [envId('alien01', 'personal')]: claudeQuota(envId('alien01', 'personal'), [
         quotaWin('five_hour', 'Current session', 'session', 0.42, 1.5),

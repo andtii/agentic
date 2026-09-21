@@ -66,6 +66,14 @@ describe('env-store', () => {
         expect(environments).toHaveLength(1);
     });
 
+    it('replace keeps allowBypassPermissions: only environments.json sets it (#453)', () => {
+        const first = addEnvironment([], input({ id: 'env_a' }), paths());
+        const flagged = first.environments.map((e) => ({ ...e, allowBypassPermissions: true }));
+        const { environment } = addEnvironment(flagged, input({ id: 'env_a', concurrency: 2 }), paths(), { replace: true });
+        expect(environment).toMatchObject({ id: 'env_a', concurrency: 2, allowBypassPermissions: true });
+        expect(addEnvironment([], input({ id: 'env_b' }), paths()).environment.allowBypassPermissions).toBeUndefined();
+    });
+
     it('remove names the row it dropped; an unknown id is not-found', () => {
         const { environments } = addEnvironment([], input({ id: 'env_a' }), paths());
         expect(removeEnvironment(environments, 'env_a')).toMatchObject({ environments: [], removed: { id: 'env_a' } });

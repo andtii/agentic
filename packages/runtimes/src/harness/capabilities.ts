@@ -22,7 +22,7 @@ export interface HarnessReportSubject {
     readonly runtime: RuntimeId;
     /** Its display name, in the reasons: "Claude Code", "Copilot CLI". */
     readonly name: string;
-    /** Why the harness's own memory (instruction files, settings) is not loaded. */
+    /** Why the harness's own memory (instruction files, settings) is the project's, not platform memory. */
     readonly runtimeMemory: string;
     /** Whether the harness can put a question to the user mid-turn. Default `true`. */
     readonly inputRequest?: boolean;
@@ -49,7 +49,7 @@ export function harnessCapabilityReport(subject: HarnessReportSubject, c: AgentC
     flag(c.fork, HARNESS_OPS.fork, `${name} cannot fork a session`);
     flag(c.cancel, HARNESS_OPS.cancel, `${name} cannot cancel a running turn`);
     flag(c.steer, HARNESS_OPS.steer, 'a message sent mid-turn is not folded into the running turn; it waits for the next one');
-    flag(c.config, HARNESS_OPS.configure, 'the model cannot be switched in a running session');
+    flag(c.config, HARNESS_OPS.configure, 'the model and permission mode cannot be switched in a running session');
     flag(c.structuredOutput, HARNESS_OPS.structured, `${name} cannot constrain a reply to a schema`);
     flag(c.subagents !== 'none', HARNESS_OPS.subagents, `${name} runs no sub-agents`);
     flag(c.listSessions, HARNESS_OPS.listSessions, `${name} cannot list its sessions`);

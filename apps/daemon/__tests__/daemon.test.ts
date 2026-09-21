@@ -11,7 +11,7 @@ import { harnessMissingDriver } from '../src/drivers';
 import { harnessStore } from '../src/harness';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
-import { agentDriver, namingDriver, scriptedDriver } from './helpers/drivers';
+import { agentDriver, namingDriver, scriptedDriver, titlingDriver } from './helpers/drivers';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
@@ -152,6 +152,23 @@ describe('daemon', () => {
         const settled = inspected;
         await new Promise((r) => setTimeout(r, 80));
         expect(inspected).toBe(settled);
+        expect(await daemon.reinspect()).toBe(false);
+    });
+
+    it('reports what each account may run once welcomed (#453): the list rides on the descriptors, asked once, the bypass flag with it', async () => {
+        const base = scriptedDriver({ events: 1, heartbeatMs: 1_000 });
+        let asked = 0;
+        const listing: DaemonDriver = { ...base, models: async (e) => (asked++, e.id === 'env_a' ? [{ id: 'claude-fable-5-1', label: 'Fable' }, { id: 'sonnet' }] : null) };
+        const { hello, seat, daemon } = await start([env('env_a', { allowBypassPermissions: true }), env('env_b')], [listing]);
+        expect(hello.environments[0]).toMatchObject({ id: 'env_a', allowBypassPermissions: true });
+        expect(hello.environments[0]!.models).toBeUndefined();
+        const announced = await expectFrame(seat, 'env');
+        expect(announced.environments.map((e) => [e.id, e.models])).toEqual([
+            ['env_a', [{ id: 'claude-fable-5-1', label: 'Fable' }, { id: 'sonnet' }]],
+            ['env_b', undefined]
+        ]);
+        expect(asked).toBe(2);
+        // A later inspection keeps the list; nothing changed means no frame.
         expect(await daemon.reinspect()).toBe(false);
     });
 
@@ -772,6 +789,38 @@ describe('daemon', () => {
         expect((await turn(2)).refs).toEqual([]);
     });
 
+    it("reports the runtime's title for the conversation: session.title after the turn that brought it, once more when it moves on, again after a re-probe (#460)", { timeout: 15_000 }, async () => {
+        // Probes: after turn 1 nothing (the CLI's background call is still running), the re-probe finds one; after turn 2 and its
+        // re-probe the same; after turn 3 a new one.
+        const driver = titlingDriver({ events: 3, heartbeatMs: 1_000 }, [undefined, 'Greeting Ada', 'Greeting Ada', 'Greeting Ada', 'Ada, greeted thrice']);
+        const { seat } = await start([env('env_a')], [driver], undefined, { titleRecheckMs: 30 });
+        open(seat, 'session_1', 'env_a');
+        await expectFrame(seat, 'session.opened');
+        expect(driver.probes).toEqual([]); // a fresh session is not asked before its first turn
+        /** One turn, then whatever the daemon says up to the second heartbeat (≥ 1 s) after its `turn-end`. */
+        const turn = async (n: number) => {
+            seat.send({ v: V, t: 'session.command', sessionId: 'session_1' as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+            const titles: string[] = [];
+            let ended = false;
+            let beats = 0;
+            while (beats < 2) {
+                const frame = await next(seat);
+                if (frame.t === 'heartbeat' && ended) beats++;
+                if (frame.t === 'session.title') titles.push(frame.title);
+                if (frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') ended = true;
+            }
+            return titles;
+        };
+        // Turn 1: the probe finds nothing; the re-probe (30 ms later) does.
+        expect(await turn(1)).toEqual(['Greeting Ada']);
+        expect(driver.probes).toEqual([1, 1]);
+        // Turn 2: the same title is not news (the re-probe after it reads the same and says nothing).
+        expect(await turn(2)).toEqual([]);
+        expect(driver.probes).toEqual([1, 1, 2, 2]);
+        // Turn 3: it moved on.
+        expect(await turn(3)).toEqual(['Ada, greeted thrice']);
+    });
+
     it('bridges platform tools as tool.call; an unanswered call times out', async () => {
         const script = { events: 2, heartbeatMs: 1_000, tool: { name: 'memory_search', input: { q: 'x' } } };
         const { seat } = await start([env('env_a')], [scriptedDriver(script)], 50);
@@ -907,6 +956,10 @@ describe('daemon helpers', () => {
     it('agentCapabilitiesOf maps the report onto what serveSession checks', () => {
         const report: CapabilityReport = { runtime: 'x', supported: ['prompt', 'configure', 'fork'], unsupported: [], resume: 'local', cancel: true, steer: true, permissions: 'every-call', tools: 'mcp' };
         expect(agentCapabilitiesOf(report)).toMatchObject({ resume: 'local', cancel: true, steer: true, config: true, fork: true, structuredOutput: false, permissions: 'every-call', tools: 'mcp' });
+    });
+    it('agentCapabilitiesOf reads the ops a harness reports under their own names (#453): configure reaches the session', () => {
+        const report: CapabilityReport = { runtime: 'claude-code', supported: ['session.configure-model', 'session.fork', 'turn.structured-output', 'agent.list-sessions'], unsupported: [], resume: 'portable', cancel: true, steer: true, permissions: 'harness-filtered', tools: 'mcp' };
+        expect(agentCapabilitiesOf(report)).toMatchObject({ config: true, fork: true, structuredOutput: true, listSessions: true });
     });
 });
 

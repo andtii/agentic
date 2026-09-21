@@ -107,7 +107,7 @@ export const IN_MEMORY_POLICY: MachinePolicy = { webManaged: true, allowedRoots:
 
 export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     runtime: 'in-memory',
-    supported: ['prompt', 'cancel', 'close'],
+    supported: ['prompt', 'cancel', 'close', 'configure'],
     unsupported: [{ op: 'fork', reason: 'not implemented' }],
     resume: 'local',
     cancel: true,
@@ -189,6 +189,8 @@ interface FakeSession {
     busy: boolean;
     /** The runtime has reported its own id for the session (`session.ref`, #388). */
     named: boolean;
+    /** The runtime's title went out (`session.title`, #460) — after the first turn, once. */
+    titled?: boolean;
     /** Lost to a `restart()` (#363): a `wanted` cursor for it is answered from the log and then `session.closed { code: 'restart' }`. */
     lost?: boolean;
 }
@@ -612,6 +614,11 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 session.seq++;
                 this.emit({ v: V, t: 'session.frame', sessionId: session.id, frame: { v: W, kind: 'event', epoch: session.epoch, seq: session.seq, event } });
                 if (!last) await tick();
+            }
+            // The runtime titled the conversation with its first turn (#460): once, the way a real daemon sends only a change.
+            if (this.script.title !== undefined && !session.titled && !session.closed) {
+                session.titled = true;
+                this.emit({ v: V, t: 'session.title', sessionId: session.id, title: this.script.title });
             }
         } finally {
             session.busy = false;

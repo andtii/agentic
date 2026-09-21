@@ -1,11 +1,14 @@
 // @vitest-environment node
 /** `claudeCodeDriver`: environment → isolated agent, OpenSpec → session options, bridged platform tools, capability report. */
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Options, SpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import { allowAll, type AgentEvent, type AgentTurn } from '@sigx/ai-agent';
 import type { EnvironmentId, LocalEnvironment, OpenSpec, SessionId } from '@agentic/core';
 import { buildSystemPrompt } from '../../src/anthropic/index';
 import { claudeCodeDriver, PLATFORM_MEMORY_HEADING, withoutCrossSessionTools, type ClaudeCodeDriverOptions } from '../../src/claude-code/index';
-import { fakeListen, fakeQuery, messageStart, messageStop, RESULT, textBlocks, toolResult, toolUseBlocks, type TurnScript } from './fake-query';
+import { fakeListen, fakeQuery, messageStart, messageStop, RESULT, SESSION, textBlocks, toolResult, toolUseBlocks, type TurnScript } from './fake-query';
 import { frozenConfig, memoryEntry } from '../anthropic/helpers';
 
 const envA: LocalEnvironment = { id: 'environment_a' as EnvironmentId, name: 'work', runtime: 'claude-code', profileDir: 'C:\\profiles\\work', cwdRoots: ['C:\\src'], concurrency: 2, accountLabel: 'Work' };
@@ -49,13 +52,13 @@ describe('claudeCodeDriver', () => {
         await expect(driver.open(other, spec(), ctx())).rejects.toThrow(/runs "anthropic-api"/);
     });
 
-    it('maps the spec onto the query: config dir, no setting sources, preset + platform system, cwd, limits, model', async () => {
+    it('maps the spec onto the query: config dir, project setting sources, preset + platform system, cwd, limits, model', async () => {
         const { driver, fake } = driverWith(hello);
         const { session } = await driver.open(envA, spec({ model: 'claude-opus-5', maxTurns: 7, maxBudgetUsd: 2.5 }), ctx());
         await drain(session.prompt('Hello'));
         const opts = fake.calls[0]!;
         expect(opts.cwd).toBe('C:\\src\\app');
-        expect(opts.settingSources).toEqual([]);
+        expect(opts.settingSources).toEqual(['project']);
         expect(opts.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'You are Ada.' });
         expect(opts.model).toBe('claude-opus-5');
         expect(opts.maxTurns).toBe(7);
@@ -63,6 +66,28 @@ describe('claudeCodeDriver', () => {
         expect(opts.env?.CLAUDE_CONFIG_DIR).toBe('C:\\profiles\\work');
         await session.close();
         await driver.dispose();
+    });
+
+    it('opens in the spec’s permission mode (#453); bypassPermissions only where the environment allows it', async () => {
+        const { driver, fake } = driverWith(hello);
+        const { session } = await driver.open(envA, spec({ permissionMode: 'plan' }), ctx());
+        await drain(session.prompt('Hello'));
+        expect(fake.calls[0]!.permissionMode).toBe('plan');
+        await expect(driver.open(envA, spec({ permissionMode: 'bypassPermissions' }), ctx())).rejects.toThrow(/not allowed in environment environment_a/);
+        const allowed = { ...envB, id: 'environment_c' as EnvironmentId, cwdRoots: envA.cwdRoots, allowBypassPermissions: true };
+        const opened = await driver.open(allowed, spec({ permissionMode: 'bypassPermissions' }), ctx());
+        await drain(opened.session.prompt('Hello'));
+        expect(fake.calls[1]).toMatchObject({ permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true });
+    });
+
+    it('lists the account’s models from an unprompted query (#453), null when it cannot', async () => {
+        const closed: boolean[] = [];
+        const modelsQuery = () => ({ supportedModels: async () => [{ value: 'claude-fable-5-1', displayName: 'Fable', description: 'Most capable' }, { value: 'sonnet', displayName: 'Sonnet', description: '' }], close: () => void closed.push(true) });
+        const { driver } = driverWith(hello, { modelsQuery: modelsQuery as never });
+        expect(await driver.models!(envA)).toEqual([{ id: 'claude-fable-5-1', label: 'Fable', description: 'Most capable' }, { id: 'sonnet', label: 'Sonnet' }]);
+        expect(closed).toEqual([true]);
+        const failing = driverWith(hello, { modelsQuery: (() => ({ supportedModels: async () => { throw new Error('signed out'); }, close: () => {} })) as never }).driver;
+        expect(await failing.models!(envA)).toBeNull();
     });
 
     it("takes Claude Code's cross-session tools out of every session: they reach the operator's own sessions, not chat members", async () => {
@@ -195,5 +220,34 @@ describe('claudeCodeDriver isolation (EXE-04/05)', () => {
         await drain(session.prompt('one'));
         expect(spawned[0]!.env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
         await driver.dispose();
+    });
+
+    it("reads the CLI's own title for the conversation from the transcript under the environment's config dir (#460)", async () => {
+        const configDir = await mkdtemp(join(tmpdir(), 'agentic-cc-'));
+        try {
+            const { driver } = driverWith(hello);
+            const env: LocalEnvironment = { ...envA, profileDir: configDir };
+            const opened = await driver.open(env, spec(), ctx());
+            // Before the first stream event the ref is a placeholder and nothing is filed: no title, no error.
+            expect(await opened.title!()).toBeUndefined();
+            await drain(opened.session.prompt('Hello'));
+            expect(await opened.title!()).toBeUndefined();
+            await mkdir(join(configDir, 'projects', 'C--src-app'), { recursive: true });
+            await writeFile(join(configDir, 'projects', 'C--src-app', `${SESSION}.jsonl`), `${JSON.stringify({ type: 'ai-title', aiTitle: 'Greeting Ada', sessionId: SESSION })}\n`);
+            expect(await opened.title!()).toBe('Greeting Ada');
+            await opened.session.close();
+            await driver.dispose();
+        } finally {
+            await rm(configDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('claude-code plugin lists (#453)', () => {
+    it('keep in step with the adapter: every adapter model and mode is offered', async () => {
+        const { CLAUDE_CODE_MODELS, PERMISSION_MODES } = await import('@sigx/ai-agent-claude-code');
+        const { CLAUDE_CODE_MODEL_IDS, CLAUDE_CODE_PERMISSION_MODES } = await import('../../src/plugins');
+        expect(CLAUDE_CODE_MODEL_IDS).toEqual(expect.arrayContaining(CLAUDE_CODE_MODELS.map((m) => m.id)));
+        expect(CLAUDE_CODE_PERMISSION_MODES).toEqual([...PERMISSION_MODES]);
     });
 });

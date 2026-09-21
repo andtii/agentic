@@ -92,6 +92,11 @@ test('demo 1: sign in, create an agent on anthropic-api, chat with it, watch the
     const messages = page.locator('[data-scope="ai-message"][data-part="root"]');
     await expect(messages.first().locator('[data-part="body"]')).toContainText(PROMPT);
     await expect(page.locator('[data-chat-error]')).toHaveCount(0);
+    // The first message names the chat at once (#460) — its first line, unless Ada's reply already brought a generated
+    // title; either way the row never reads 'Ada' again.
+    const title = page.locator('[data-chat-row][data-current] [data-chat-title]');
+    await expect(title).not.toHaveText('Ada');
+    await expect(title).not.toHaveText('');
 
     // Ada's row appears while her turn is still running (the streaming pill), then settles with text.
     const ada = messages.filter({ has: page.locator('[data-part="name"]', { hasText: 'Ada' }) }).first();
@@ -104,4 +109,6 @@ test('demo 1: sign in, create an agent on anthropic-api, chat with it, watch the
     expect(answer.startsWith('echo:')).toBe(false);
     console.log(`[demo1] agent ${agentId} answered${sawStreaming ? ' (streaming observed)' : ''}: ${answer}`);
     await expect(page.locator('[data-chat-error]')).toHaveCount(0);
+    await expect(title).not.toHaveText('Ada');
+    console.log(`[demo1] chat titled: ${(await title.innerText()).trim()}`);
 });
