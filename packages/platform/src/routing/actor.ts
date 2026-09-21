@@ -279,11 +279,23 @@ function withModel(config: FrozenAgentConfig, options: SessionOptions | undefine
     return { ...config, execution: { ...config.execution, model: options.model } };
 }
 
-/** The keys of `want` a session running with `has` differs in (#453): what `Session.configure` must set. */
+/**
+ * What a runtime takes to go back to its own choice (#453): Claude Code's alias for its default model and its default
+ * permission mode. Only sent to a session that was set to something and should now run with nothing named.
+ */
+const RUNTIME_DEFAULT = 'default';
+
+/**
+ * The keys a session running with `has` must change to run with `want` (#453): what `Session.configure` sets. A key
+ * `want` leaves out (an override cleared, nothing in the config or the plugin) resets a session that was set to
+ * something back to the runtime's default — a clear never leaves the old value running.
+ */
 function optionsDrift(has: SessionOptions | undefined, want: SessionOptions | undefined): Record<string, string> {
     const patch: Record<string, string> = {};
-    if (want?.model && want.model !== has?.model) patch['model'] = want.model;
-    if (want?.permissionMode && want.permissionMode !== has?.permissionMode) patch['permissionMode'] = want.permissionMode;
+    for (const key of ['model', 'permissionMode'] as const) {
+        const target = want?.[key] ?? (has?.[key] !== undefined ? RUNTIME_DEFAULT : undefined);
+        if (target !== undefined && target !== has?.[key]) patch[key] = target;
+    }
     return patch;
 }
 

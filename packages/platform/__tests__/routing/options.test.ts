@@ -226,6 +226,13 @@ describe('member session options (#453)', () => {
         await message(chatId, cc, 'three', 't3');
         await settled('t3');
         expect(configures(m1, sid)).toHaveLength(1);
+
+        // Cleared back to nothing the config or the plugin names: the session goes back to the runtime's own default.
+        await chat(chatId).setOptions(cc, { model: null, permissionMode: null });
+        await message(chatId, cc, 'four', 't4');
+        await settled('t4');
+        expect(configures(m1, sid)).toEqual([{ model: 'claude-fable-5-1', permissionMode: 'acceptEdits' }, { model: 'default', permissionMode: 'default' }]);
+        await until(async () => (await session(sid).get()).options?.model === 'default', 'the session to record the default');
     });
 
     it('bypassPermissions fails the task by name where the environment does not allow it, and opens where it does (EXE-12)', async () => {
