@@ -1,7 +1,7 @@
 /** The conformance suite passes against the in-memory pair — and fails against a daemon broken on purpose. */
 
-import type { ConformanceCase } from '../src/testing/index';
-import { ConformanceError, daemonConformance, inMemoryEnvironment, inMemoryHarness, type InMemoryFaults } from '../src/testing/index';
+import type { ConformanceCase, ConformanceDaemon, ConformanceScript } from '../src/testing/index';
+import { ConformanceError, daemonConformance, InMemoryDaemon, inMemoryEnvironment, inMemoryHarness, type InMemoryFaults } from '../src/testing/index';
 
 /** Two checkouts of one origin (spelled two ways) in the fake tree, plus one of another repo, so `fs-locate` proves a match (#331). */
 const REPOS = [
@@ -13,7 +13,7 @@ const REPOS = [
 describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
 
-    it('has every scenario the issue names; only session-reopen is skipped, until #363 teaches the fake to resume', () => {
+    it('has every scenario the issue names, and the fake runs them all', () => {
         expect(cases.map((c) => c.name)).toEqual([
             'hello-welcome',
             'malformed-input',
@@ -37,7 +37,7 @@ describe('daemonConformance × inMemoryHarness', () => {
             'harness-remove-in-use',
             'history'
         ]);
-        expect(cases.filter((c) => c.skip).map((c) => [c.name, c.skip])).toEqual([['session-reopen', 'the harness does not declare the "resume" feature']]);
+        expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
     for (const c of cases) it.skipIf(!!c.skip)(c.name, c.run);
@@ -142,9 +142,21 @@ describe('daemonConformance catches a broken daemon', () => {
         await expect(drain.run()).rejects.toThrow(/the harness names an updateTarget/);
     });
 
-    it('session-reopen fails against a daemon that cannot resume yet (#363 makes the fake pass it)', async () => {
-        const reopen = daemonConformance({ ...inMemoryHarness(), features: ['resume'] }, { timeoutMs: 300, events: 5 }).find((c) => c.name === 'session-reopen')!;
-        expect(reopen.skip).toBeUndefined();
+    it('a daemon that re-opens a resumed session back at (0, 0) (#363)', async () => {
+        await expect(only('session-reopen', { ignoreResume: true }).run()).rejects.toThrow(/a re-opened session starts a new epoch/);
+    });
+
+    it('a daemon that closes a session it lost to a restart without a code (#363)', async () => {
+        await expect(only('session-reopen', { uncodedRestart: true }).run()).rejects.toThrow(/closed with code restart/);
+    });
+
+    it('a harness that claims "resume" without a restart hook', async () => {
+        const harness = inMemoryHarness();
+        const withoutRestart = (script: ConformanceScript): ConformanceDaemon => {
+            const d = new InMemoryDaemon(script, {});
+            return { machineId: d.machineId, environmentId: d.environmentId, dial: () => d.dial(), stop: () => d.stop() };
+        };
+        const reopen = daemonConformance({ ...harness, start: withoutRestart }, { timeoutMs: 300, events: 5 }).find((c) => c.name === 'session-reopen')!;
         await expect(reopen.run()).rejects.toThrow(/the harness implements restart/);
     });
 

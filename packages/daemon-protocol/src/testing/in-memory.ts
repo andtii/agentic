@@ -6,8 +6,10 @@
  * cursors, bridges the scripted tool call as `tool.call`, and ignores
  * malformed input the way a daemon must. It reports a build, updates itself
  * (drain, cancel, restart) and installs harnesses without downloading
- * anything (#360). `faults` breaks it on purpose so a test can check that
- * the suite notices.
+ * anything (#360). `restart()` loses its live sessions but keeps their logs;
+ * a `wanted` session it lost is closed with code `restart`, and a re-open
+ * from `spec.resume` continues the log on the next epoch (#363). `faults`
+ * breaks it on purpose so a test can check that the suite notices.
  */
 
 import {
@@ -75,6 +77,10 @@ export interface InMemoryFaults {
     readonly ignoreCancel?: boolean;
     /** Remove a harness an environment still uses (#360). */
     readonly removeHarnessInUse?: boolean;
+    /** Ignore `spec.resume`: a re-open starts over at (0, 0), the way the fake did before #363. */
+    readonly ignoreResume?: boolean;
+    /** Close a wanted session lost to a restart without a code (#363). */
+    readonly uncodedRestart?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -183,6 +189,8 @@ interface FakeSession {
     busy: boolean;
     /** The runtime has reported its own id for the session (`session.ref`, #388). */
     named: boolean;
+    /** Lost to a `restart()` (#363): a `wanted` cursor for it is answered from the log and then `session.closed { code: 'restart' }`. */
+    lost?: boolean;
 }
 
 /** A self-update in flight: its request, its phase, and the timer that ends a drain that takes too long. */
@@ -281,6 +289,20 @@ export class InMemoryDaemon implements ConformanceDaemon {
         this.pendingTools.clear();
     }
 
+    /**
+     * A process restart (#363): the connection, the self-update in flight and every live session are lost — nothing is
+     * announced — while the logs are kept. The platform dials again; a session it still wants is answered from its log and
+     * closed with code `restart`, and a `session.open` with `spec.resume` continues it on the next epoch.
+     */
+    restart(): void {
+        this.stop();
+        for (const s of this.sessions.values()) {
+            if (s.closed) continue;
+            s.closed = true;
+            s.lost = true;
+        }
+    }
+
     private disconnect(): void {
         if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
         this.heartbeat = undefined;
@@ -310,7 +332,12 @@ export class InMemoryDaemon implements ConformanceDaemon {
         switch (frame.t) {
             case 'welcome': {
                 if (this.link) this.link.welcomed = true;
-                for (const [sessionId, cursor] of Object.entries(frame.wanted)) this.replay(sessionId, cursor);
+                for (const [sessionId, cursor] of Object.entries(frame.wanted)) {
+                    this.replay(sessionId, cursor);
+                    // A session lost to a restart is gone once its log is replayed; the code tells the platform to re-open it (#363).
+                    const lost = this.sessions.get(sessionId);
+                    if (lost?.lost) this.close(lost, 'the session is no longer running on this machine (daemon restarted)', this.options.faults?.uncodedRestart ? undefined : 'restart');
+                }
                 if (this.heartbeat === undefined) this.heartbeat = setInterval(() => this.emit({ v: V, t: 'heartbeat', at: Date.now(), active: this.active() }), this.script.heartbeatMs);
                 // A daemon probes provider limits once welcomed (#261); the suite must pass over the unsolicited frame.
                 this.emit({ v: V, t: 'quota', environmentId: this.environmentId, snapshot: { sourceId: 'in-memory', runtime: 'in-memory', environmentId: this.environmentId, availability: 'not-reported', reason: 'the in-memory runtime has no provider limits', windows: [], observedAt: Date.now(), via: 'probe' } });
@@ -320,7 +347,9 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 this.emit({ v: V, t: 'pong', at: Date.now() });
                 return;
             case 'session.open': {
-                const session: FakeSession = { id: frame.sessionId, environmentId: frame.environmentId, epoch: 0, seq: 0, log: [], closed: false, busy: false, named: false };
+                // A re-open from `spec.resume` (#363) continues the session's log on the next epoch, so its head follows the old one.
+                const previous = frame.spec.resume !== undefined && !this.options.faults?.ignoreResume ? this.sessions.get(frame.sessionId) : undefined;
+                const session: FakeSession = { id: frame.sessionId, environmentId: frame.environmentId, epoch: previous ? previous.epoch + 1 : 0, seq: 0, log: previous?.log ?? [], closed: false, busy: false, named: false };
                 this.sessions.set(frame.sessionId, session);
                 const ref: SessionRef = { agent: 'in-memory', v: 1, id: frame.sessionId };
                 this.emit({ v: V, t: 'session.opened', sessionId: frame.sessionId, ref, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: session.epoch, seq: session.seq } });
@@ -610,8 +639,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
-        // `resume` (re-opening from `spec.resume` after a restart) lands with #363.
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'update', 'harness'],
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         updateTarget: IN_MEMORY_RELEASE,
         harnessTarget: IN_MEMORY_HARNESS_TARGET,

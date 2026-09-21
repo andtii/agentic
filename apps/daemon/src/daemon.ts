@@ -10,7 +10,12 @@
  *   session pump, so a reconnect replays gaplessly — from `serveSession`'s
  *   buffer, then from the log on disk, or as a `gap` when neither reaches.
  *   A wanted session that is no longer live (the daemon restarted) is
- *   replayed from its log and then reported closed.
+ *   replayed from its log and then reported closed with code `restart`.
+ * - Close codes and re-open (#363): `stop({ reason })` closes each live session
+ *   with the code the reason maps to (`restart`, `update`, `harness-update`).
+ *   A `session.open` carrying `spec.resume` re-opens the runtime conversation
+ *   on the same log, its head continuing on the runtime's later epoch; a
+ *   runtime that refuses the resume is answered `code: 'resume-failed'`.
  * - `session.command` goes through `ServedSession.handleCommand`
  *   (idempotent by `commandId`) and comes back as `session.reply`.
  * - Capacity counts running turns, not open sessions (#394, EXE-09): a chat
@@ -66,6 +71,7 @@ import {
     type MachinePolicy,
     type QuotaSource,
     type RuntimeDriver,
+    type SessionClosedCode,
     type SessionId
 } from '@agentic/core';
 import { decodePlatformFrame, encodeFrame, LIMITS, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
@@ -140,9 +146,24 @@ export interface DaemonOptions {
     readonly onWelcome?: () => void;
 }
 
+/**
+ * Why the daemon stops (#363): each live session is closed with the matching `session.closed` code, so the platform knows
+ * to re-open it — `restart` (SIGINT / SIGTERM: the supervisor brings the daemon back), `update` (the update client, #364),
+ * `harness-update` (the harness store, #369). A plain `stop` closes them without a code.
+ */
+export type StopReason = 'stop' | 'restart' | 'update' | 'harness-update';
+
+const STOP_CLOSES: Record<StopReason, { readonly reason: string; readonly code?: SessionClosedCode }> = {
+    stop: { reason: 'daemon stopping' },
+    restart: { reason: 'the daemon is restarting', code: 'restart' },
+    update: { reason: 'the daemon is restarting for an update', code: 'update' },
+    'harness-update': { reason: 'the harness is being updated', code: 'harness-update' }
+};
+
 export interface Daemon {
     start(): Promise<void>;
-    stop(): Promise<void>;
+    /** Close every live session — with the code `reason` maps to, while the socket is up — flush the logs and disconnect. Default reason `stop`. */
+    stop(options?: { readonly reason?: StopReason }): Promise<void>;
     /** Replace the environments and announce them with `env`. */
     setEnvironments(environments: readonly LocalEnvironment[]): Promise<void>;
     /** Inspect every environment again now; `env` goes out when a descriptor changed. Resolves to whether one did. */
@@ -173,6 +194,12 @@ interface LiveSession {
     readonly session: AgentSession;
     readonly served: ServedSession;
     readonly capabilities: CapabilityReport;
+    /**
+     * Where the session starts (#363): `serveSession`'s own `(0, 0)` for a fresh one and, for one re-opened from
+     * `spec.resume`, `(epoch, 0)` of the later epoch the runtime stamps — so `session.opened.head` continues after the
+     * log's head instead of going back to `(0, 0)`. `headOf` reads the later of it and the served head.
+     */
+    readonly base: Cursor;
     /**
      * The ref the platform last heard — `session.opened`'s, then each `session.ref` (#389). A runtime names its session
      * on its own terms (a CLI with its first stream event), so `session.ref` goes out only when the identity moved on.
@@ -232,6 +259,9 @@ export function agentCapabilitiesOf(report: CapabilityReport): AgentCapabilities
         listSessions: has('list-sessions', 'listSessions')
     });
 }
+
+/** A live session's head: the served head once the runtime emitted, a re-open's `base` before that. */
+const headOf = (s: Pick<LiveSession, 'served' | 'base'>): Cursor => (cursorBefore(s.served.head, s.base) ? s.base : s.served.head);
 
 /** `at` is the event right after `last`: the next seq in the epoch, or the first of a later epoch. */
 export function follows(at: Cursor, last: Cursor): boolean {
@@ -393,7 +423,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         const resume: Record<string, Cursor> = {};
         // The later of the served head and what was last sent: the served head (and the log behind it) advances
         // only as appends reach disk, so it can trail frames already on the wire.
-        for (const s of sessions.values()) resume[s.id] = cursorBefore(s.served.head, s.lastSent) ? s.lastSent : s.served.head;
+        for (const s of sessions.values()) resume[s.id] = cursorBefore(headOf(s), s.lastSent) ? s.lastSent : headOf(s);
         send({ v: V, t: 'hello', machineId, daemonVersion: options.daemonVersion ?? DAEMON_VERSION, os: options.os ?? osOf(platform), environments: descriptors(), capabilities: runtimeReports(), resume, policy: announcedPolicy() });
     }
 
@@ -523,13 +553,13 @@ export function createDaemon(options: DaemonOptions): Daemon {
         const { sessionId, environmentId, spec } = frame;
         const existing = sessions.get(sessionId);
         if (existing) {
-            send({ v: V, t: 'session.opened', sessionId, ref: existing.session.ref, capabilities: existing.capabilities, head: existing.served.head });
+            send({ v: V, t: 'session.opened', sessionId, ref: existing.session.ref, capabilities: existing.capabilities, head: headOf(existing) });
             return;
         }
         if (opening.has(sessionId)) return;
-        const refuse = (reason: string) => {
-            logger.warn('session: open refused', { session: sessionId, environment: environmentId, reason });
-            send({ v: V, t: 'session.closed', sessionId, reason });
+        const refuse = (reason: string, code?: SessionClosedCode) => {
+            logger.warn('session: open refused', { session: sessionId, environment: environmentId, reason, ...(code ? { code } : {}) });
+            send({ v: V, t: 'session.closed', sessionId, reason, ...(code ? { code } : {}) });
         };
         const env = environments.find((e) => e.id === environmentId);
         if (!env) return refuse(`unknown environment ${environmentId}`);
@@ -546,27 +576,48 @@ export function createDaemon(options: DaemonOptions): Daemon {
             if (!where.ok) return refuse(where.code === 'not-found' ? `cwd ${spec.cwd} does not exist` : `cwd is outside the environment's cwdRoots`);
             // The agent's rules, grants and the ancestors' constraints, compiled here exactly as the platform compiles them (AC-12).
             const policy = spec.policy ? sessionPolicyOf(spec.policy) : undefined;
-            const opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input), ...(policy ? { policy } : {}) });
+            let opened: Awaited<ReturnType<DaemonDriver['open']>>;
+            try {
+                opened = await driver.open(env, spec, { sessionId, callTool: (tool, input) => callTool(sessionId, tool, input), ...(policy ? { policy } : {}) });
+            } catch (e) {
+                // A runtime that cannot take the conversation back says so by code (#363); the platform then starts it fresh (#420).
+                if (spec.resume !== undefined) return refuse(`the runtime could not resume the session: ${(e as Error).message}`, 'resume-failed');
+                throw e;
+            }
             if (stopped) {
                 await opened.session.close().catch(() => {});
                 return;
             }
-            // Logged under the platform's session id: the runtime names its sessions its own way.
+            // Logged under the platform's session id: the runtime names its sessions its own way. A re-open appends to the same log.
             const served = serveSession(opened.session, { agentId: spec.agentId, capabilities: agentCapabilitiesOf(opened.capabilities), eventLog: log.forSession(sessionId) });
             // `session.opened` carries whatever the runtime calls the session before its first prompt — a placeholder for a CLI.
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, sentRef: ref, lastSent: served.head, tapped: served.head, pump: undefined, running: false, turns: new AbortController() };
+            const base = spec.resume !== undefined ? await reopenedBase(sessionId, ref) : served.head;
+            const live: LiveSession = { id: sessionId, environmentId: env.id, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
             sessions.set(sessionId, live);
             watchTurns(live);
-            logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime });
-            send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: served.head });
+            logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });
+            send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: headOf(live) });
             if (welcomed) startPump(live, served.head);
         } catch (e) {
             refuse(`the runtime could not open a session: ${(e as Error).message}`);
         } finally {
             opening.delete(sessionId);
         }
+    }
+
+    /**
+     * Where a re-opened session starts (#363). `serveSession` starts every session at `(0, 0)` and offers no seam to seed
+     * it, but a resumed runtime stamps a later epoch: the one its ref names (`data.epoch`, which every driver reports), or
+     * else the one after the log's. `(epoch, 0)` continues after the log's head, and the runtime's first event follows it.
+     */
+    async function reopenedBase(sessionId: SessionId, ref: SessionRef): Promise<Cursor> {
+        const logged = await log.head(sessionId).catch(() => undefined);
+        const epoch = refEpoch(ref);
+        if (typeof epoch !== 'number') return { epoch: (logged?.epoch ?? 0) + 1, seq: 0 };
+        if (logged && epoch <= logged.epoch) logger.warn('session: resumed on an epoch the log already holds', { session: sessionId, epoch, logged });
+        return { epoch, seq: 0 };
     }
 
     // -------------------------------------------------------------- folders
@@ -693,7 +744,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (command.type === 'close' && reply.kind === 'ack') await closeSession(sessionId, 'closed by command');
     }
 
-    async function closeSession(sessionId: SessionId, reason: string): Promise<void> {
+    async function closeSession(sessionId: SessionId, reason: string, code?: SessionClosedCode): Promise<void> {
         const s = sessions.get(sessionId);
         if (!s) return;
         sessions.delete(sessionId);
@@ -709,11 +760,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
         await s.served.close().catch((e: unknown) => logger.warn('session: serve close failed', { session: sessionId, error: e }));
         await s.session.close().catch((e: unknown) => logger.warn('session: close failed', { session: sessionId, error: e }));
         await log.flush(sessionId);
-        logger.info('session: closed', { session: sessionId, reason });
-        send({ v: V, t: 'session.closed', sessionId, reason });
+        logger.info('session: closed', { session: sessionId, reason, ...(code ? { code } : {}) });
+        send({ v: V, t: 'session.closed', sessionId, reason, ...(code ? { code } : {}) });
     }
 
-    /** A wanted session this daemon no longer runs: replay what its log holds, then say it is gone. */
+    /**
+     * A wanted session this daemon no longer runs: replay what its log holds, then say it is gone — with code `restart`
+     * when its log shows this machine ran it (the daemon restarted since, #363), so the platform re-opens it from its ref.
+     */
     async function replayArchived(sessionId: SessionId, wanted: Cursor): Promise<void> {
         let next: Cursor = wanted;
         let any = false;
@@ -732,7 +786,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             logger.warn('session: archived replay failed', { session: sessionId, error: e });
         }
         const known = any || (await log.head(sessionId)) !== undefined;
-        send({ v: V, t: 'session.closed', sessionId, reason: known ? 'the session is no longer running on this machine (daemon restarted)' : 'unknown session' });
+        send({ v: V, t: 'session.closed', sessionId, ...(known ? { reason: 'the session is no longer running on this machine (daemon restarted)', code: 'restart' as const } : { reason: 'unknown session' }) });
     }
 
     function callTool(sessionId: SessionId, tool: string, input: unknown): Promise<unknown> {
@@ -780,12 +834,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 reinspectTimer.unref?.();
             }
         },
-        async stop() {
+        async stop(stopOptions) {
             stopped = true;
             quota.stop();
             if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
             reinspectTimer = undefined;
-            for (const id of sessions.keys()) await closeSession(id, 'daemon stopping');
+            // While the socket is still up: each session closes with the code its reason maps to (#363).
+            const { reason, code } = STOP_CLOSES[stopOptions?.reason ?? 'stop'];
+            for (const id of sessions.keys()) await closeSession(id, reason, code);
             await connection?.stop();
             onClose();
             for (const pending of pendingTools.values()) {

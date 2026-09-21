@@ -173,6 +173,74 @@ describe('agentic-daemon end to end', () => {
         expect(credentialsText).toContain(relay.token);
     }, 30_000);
 
+    it('a SIGTERM closes each session with code restart; the next daemon answers wanted with restart and re-opens from spec.resume on the same log (#363)', async () => {
+        const paths = daemonPaths({ env: { AGENTIC_DAEMON_HOME: dir } });
+        const relay = await startRelay();
+        relays.push(relay);
+        await writeFile(paths.credentialsFile, JSON.stringify({ url: relay.url, workspaceId: 'ws_test', machineId: TEST_MACHINE, token: relay.token, name: 'box', pairedAt: 1 }));
+        await writeFile(paths.environmentsFile, JSON.stringify([{ id: 'env_work', name: 'Work', runtime: 'mock', cwdRoots: [dir] }]));
+        const agent = mockAgent({ id: 'mock', respond: () => [{ text: 'one two three', chunkSize: 4 }] });
+        const sessionId = 'session_restart' as DaemonFrameOf<'session.opened'>['sessionId'];
+        const run = () => {
+            let end!: (how?: 'signal') => void;
+            const until = new Promise<void | 'signal'>((r) => (end = r));
+            const exited = main(['run'], { paths, drivers: [agentDriver('mock', agent)], log: () => {}, err: () => {}, out: () => {}, until, heartbeatMs: 1_000, backoff: { initialMs: 10, maxMs: 50 } });
+            return { end, exited };
+        };
+        const turn = async (seat: PlatformSeat, n: number): Promise<Cursor[]> => {
+            send(seat, { v: V, t: 'session.command', sessionId, command: { v: 1, commandId: `cmd_${n}`, type: 'prompt', turnId: `turn_${n}`, input: [{ type: 'text', text: 'go' }] } });
+            const seen: Cursor[] = [];
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t !== 'session.frame' || frame.frame.kind !== 'event') continue;
+                seen.push({ epoch: frame.frame.epoch, seq: frame.frame.seq });
+                if (frame.frame.event.type === 'turn-end') return seen;
+            }
+        };
+
+        // --- the first daemon: a session with one turn, then SIGTERM
+        const first = run();
+        const seat = await relay.nextSeat();
+        await expectFrame(seat, 'hello');
+        send(seat, { v: V, t: 'welcome', serverTime: Date.now(), wanted: {} });
+        send(seat, { v: V, t: 'session.open', sessionId, environmentId: 'env_work', spec: { agentId: 'agent_e2e', cwd: dir, system: 'You are a test.', tools: [] } });
+        const opened = await expectFrame(seat, 'session.opened');
+        const before = await turn(seat, 1);
+        const head = before[before.length - 1]!;
+        const closing = expectFrame(seat, 'session.closed', ['heartbeat', 'session.frame', 'session.ref']);
+        first.end('signal');
+        expect(await closing).toMatchObject({ sessionId, code: 'restart' });
+        expect(await first.exited).toBe(0);
+
+        // --- the supervisor's next daemon over the same dirs
+        const second = run();
+        const seat2 = await relay.nextSeat();
+        expect((await expectFrame(seat2, 'hello')).resume).toEqual({});
+        // What the session logged after the platform's cursor (the runtime's closing `state`) is replayed first.
+        send(seat2, { v: V, t: 'welcome', serverTime: Date.now(), wanted: { [sessionId]: head } });
+        expect(await expectFrame(seat2, 'session.closed', ['heartbeat', 'session.frame'])).toMatchObject({ sessionId, code: 'restart' });
+        send(seat2, { v: V, t: 'session.open', sessionId, environmentId: 'env_work', spec: { agentId: 'agent_e2e', cwd: dir, system: 'You are a test.', tools: [], resume: opened.ref } });
+        const reopened = await expectFrame(seat2, 'session.opened');
+        // The same runtime conversation, on the next epoch; the head continues after the old one instead of going back to (0, 0).
+        expect((reopened.ref as { id: string }).id).toBe((opened.ref as { id: string }).id);
+        expect(reopened.head).toEqual({ epoch: head.epoch + 1, seq: 0 });
+        const after = await turn(seat2, 2);
+        expect(after[0]).toEqual({ epoch: head.epoch + 1, seq: 1 });
+        second.end();
+        expect(await second.exited).toBe(0);
+
+        // One NDJSON log across both processes: the first epoch whole, then the second from its first event.
+        const onDisk = (await readFile(join(paths.sessionsDir, `${sessionId}.ndjson`), 'utf8'))
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line) as Cursor);
+        const epochs = [head.epoch, head.epoch + 1].map((epoch) => onDisk.filter((e) => e.epoch === epoch).map((e) => e.seq));
+        expect(onDisk.map((e) => e.epoch)).toEqual([...epochs[0]!.map(() => head.epoch), ...epochs[1]!.map(() => head.epoch + 1)]);
+        for (const seqs of epochs) expect(seqs).toEqual(seqs.map((_, i) => i + 1));
+        expect(epochs[0]!.slice(0, before.length)).toEqual(before.map((c) => c.seq));
+        expect(epochs[1]!.slice(0, after.length)).toEqual(after.map((c) => c.seq));
+    }, 30_000);
+
     it('a refused token is logged without the token and retried at the ceiling', async () => {
         const captured: string[] = [];
         const capture = (line: string) => captured.push(line);
