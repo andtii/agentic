@@ -71,13 +71,10 @@ export const TELEMETRY_LIMITS = {
 /** Below this fraction of its limit a warning re-arms, so a value hovering at the limit does not warn on every sample. */
 export const TELEMETRY_REARM = 0.8;
 
-export interface TelemetryWarning {
-    readonly kind: 'session-memory' | 'machine-memory';
-    readonly sessionId?: SessionId;
-    /** The measured value in the limit's unit: bytes for a session, a 0..1 fraction for the machine. */
-    readonly value: number;
-    readonly limit: number;
-}
+/** A limit crossed: a session's resident bytes, or the machine's 0..1 fraction of memory in use. */
+export type TelemetryWarning =
+    | { readonly kind: 'session-memory'; readonly sessionId: SessionId; readonly value: number; readonly limit: number }
+    | { readonly kind: 'machine-memory'; readonly value: number; readonly limit: number };
 
 /** A warning's identity across samples — what the platform remembers as told, and re-arms. */
 export function telemetryWarningKey(w: TelemetryWarning): string {
