@@ -12,7 +12,7 @@ export const MACHINE_NOTICE: Readonly<Partial<Record<NotificationKind, { readonl
     'harness-update-available': { label: 'HARNESS', tone: 'needs-you' }
 };
 
-export const isMachineNotice = (kind: string): boolean => kind in MACHINE_NOTICE;
+export const isMachineNotice = (kind: string): boolean => Object.hasOwn(MACHINE_NOTICE, kind);
 
 /**
  * One machine notice in "Needs you" (#367): an update is available, applied

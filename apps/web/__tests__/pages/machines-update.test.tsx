@@ -272,6 +272,9 @@ describe('/machines and /machines/:id on mock data (#367)', () => {
         buttonNamed(root.querySelector('[data-update-card]')!, 'Cancel update').click();
         await tick();
         expect(text(root.querySelector('[data-update-last]'))).toMatch(/was cancelled/);
+        // A cancel is not a failure: no alert, no failed tone.
+        expect(root.querySelector('[data-update-last]')!.getAttribute('role')).toBeNull();
+        expect(root.querySelector('[data-update-last]')!.getAttribute('data-tone')).toBeNull();
         expect(opsUpdate('nuc-lab').features).toEqual([]);
     });
 });

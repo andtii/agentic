@@ -225,5 +225,7 @@ describe('History and Inbox rows for daemon updates (#367)', () => {
         }
         expect(rowOf(n('update-available', { read: true }))).toBeNull();
         expect(rowOf(n('task-done'))).toBeNull();
+        // A prototype name is not a notice kind.
+        expect(rowOf(n('toString'))).toBeNull();
     });
 });

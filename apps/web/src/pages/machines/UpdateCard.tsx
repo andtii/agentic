@@ -73,7 +73,8 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
         const offline = !u.online;
         const busy = !!props.busy;
         const last = pending ? null : lastLine(u.last, props.timeZone);
-        const lastFailed = u.last && u.last.outcome !== 'applied';
+        // A cancel is the owner's own choice, not a failure: only a failed, rolled-back or timed-out update is an alert.
+        const lastFailed = u.last !== undefined && u.last.outcome !== 'applied' && u.last.outcome !== 'cancelled';
         const back = pending ? null : rollbackTarget(u);
         const restarts = restartWarning(u, props.now, props.timeZone);
         const percent = progressPercent(pending?.progress);
