@@ -3,7 +3,7 @@
 import { DAEMON_PROTOCOL_VERSION, type DaemonFeature } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
-import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, machineId, machinePolicy, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
+import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, machineId, machinePolicy, machineTelemetry, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
 import { DAEMON_FEATURES, HARNESS_PHASES, SESSION_CLOSED_CODES, UPDATE_PHASES } from '../lifecycle.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireEventFrame, wireFrame, wireReply } from './wire.js';
@@ -70,6 +70,7 @@ const envResponse = z
 const quota = z
     .object({ v, t: z.literal('quota'), environmentId, snapshot: quotaSnapshot })
     .refine((f) => f.snapshot.environmentId === f.environmentId, { message: 'quota snapshot is for another environment', path: ['snapshot', 'environmentId'] });
+const telemetry = z.object({ v, t: z.literal('telemetry'), snapshot: machineTelemetry });
 /** The events of a history slice (#397): at most `LIMITS.list`, and named errors — a `gap` may say how far back the log still reaches. */
 const historyResult = z.object({ events: z.array(wireEventFrame).max(LIMITS.list), more: z.boolean().optional() });
 const historyError = z.object({ code: z.enum(['unknown-session', 'gap', 'internal']), message: text, earliest: cursor.optional() });
@@ -110,6 +111,7 @@ export const pongFrame: z.ZodType<DaemonFrameOf<'pong'>> = pong;
 export const fsResponseFrame: z.ZodType<DaemonFrameOf<'fs.response'>> = fsResponse;
 export const envResponseFrame: z.ZodType<DaemonFrameOf<'env.response'>> = envResponse;
 export const quotaFrame: z.ZodType<DaemonFrameOf<'quota'>> = quota;
+export const telemetryFrame: z.ZodType<DaemonFrameOf<'telemetry'>> = telemetry;
 export const historyResponseFrame: z.ZodType<DaemonFrameOf<'history.response'>> = historyResponse;
 export const updateStatusFrame: z.ZodType<DaemonFrameOf<'update.status'>> = updateStatus;
 export const harnessStatusFrame: z.ZodType<DaemonFrameOf<'harness.status'>> = harnessStatus;
@@ -131,10 +133,11 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     'fs.response': fsResponseFrame,
     'env.response': envResponseFrame,
     quota: quotaFrame,
+    telemetry: telemetryFrame,
     'history.response': historyResponseFrame,
     'update.status': updateStatusFrame,
     'harness.status': harnessStatusFrame,
     harnesses: harnessesFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionTitled, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse, updateStatus, harnessStatus, harnesses]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionTitled, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, telemetry, historyResponse, updateStatus, harnessStatus, harnesses]);

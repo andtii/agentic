@@ -343,6 +343,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 if (this.heartbeat === undefined) this.heartbeat = setInterval(() => this.emit({ v: V, t: 'heartbeat', at: Date.now(), active: this.active() }), this.script.heartbeatMs);
                 // A daemon probes provider limits once welcomed (#261); the suite must pass over the unsolicited frame.
                 this.emit({ v: V, t: 'quota', environmentId: this.environmentId, snapshot: { sourceId: 'in-memory', runtime: 'in-memory', environmentId: this.environmentId, availability: 'not-reported', reason: 'the in-memory runtime has no provider limits', windows: [], observedAt: Date.now(), via: 'probe' } });
+                // And reports its load on the heartbeat cadence (#400); the in-memory runtime has no processes to charge.
+                this.emit({ v: V, t: 'telemetry', snapshot: { observedAt: Date.now(), intervalMs: this.script.heartbeatMs, cpus: 0, machine: { cpu: null, memoryUsed: null, memoryTotal: 0 }, daemon: { cpu: null, rss: 0, processes: 1 }, environments: {}, sessions: {}, availability: 'not-reported', reason: 'the in-memory daemon samples no processes' } });
                 return;
             }
             case 'ping':

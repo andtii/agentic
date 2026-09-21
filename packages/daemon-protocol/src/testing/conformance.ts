@@ -52,10 +52,10 @@ export interface DaemonConformanceOptions {
 const V = DAEMON_PROTOCOL_VERSION;
 
 /**
- * Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), a runtime naming
- * its session (#388), and the harnesses when the daemon finds they changed (#359).
+ * Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), the machine's
+ * load (#400), a runtime naming its session (#388), and the harnesses when the daemon finds they changed (#359).
  */
-const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref', 'session.title', 'harnesses'];
+const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'telemetry', 'session.ref', 'session.title', 'harnesses'];
 /** Cases that need an optional harness feature. */
 const NEEDS: Record<string, ConformanceFeature> = {
     env: 'env',
@@ -363,11 +363,11 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
             run: () =>
                 withDaemon(script, async (daemon) => {
                     const { peer, hello } = await handshake(daemon);
-                    const idle = await peer.expect('heartbeat', ['quota']);
+                    const idle = await peer.expect('heartbeat', ['quota', 'telemetry']);
                     assertEqual(idle.active, [], 'an idle daemon heartbeats with no active sessions');
                     assert(idle.at <= Date.now() + 1, 'heartbeat.at is a time');
                     await open(peer, hello, daemon, S1);
-                    const busy = await peer.expect('heartbeat', ['quota']);
+                    const busy = await peer.expect('heartbeat', ['quota', 'telemetry']);
                     assert(busy.active.includes(S1), 'a heartbeat lists the open session as active (EXE-08)');
                 })
         },
