@@ -9,7 +9,7 @@
  * `applyEntry` hook of `ctx.append`.
  */
 
-import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
+import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MachineId, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
 
 /** Entries kept in state before the oldest page is archived. */
 export const WINDOW = 200;
@@ -96,6 +96,8 @@ export interface ChatState {
     title?: string;
     /** The project the last `project` note put the chat in (#332, `Chat.setProject`); absent until one does, or after one clears it. */
     projectId?: ProjectId;
+    /** The machine the last `machine` note put the chat on (#414, `Chat.setMachine`); absent until one does, or after one clears it. */
+    machineId?: MachineId;
     /**
      * Every file ever posted, keyed by file id (#203). Kept in the actor's own state, never in the
      * window, so it outlives archiving. Absent until the first file is posted.
@@ -137,6 +139,11 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             if (entry.project) {
                 if (entry.project.id === null) delete state.projectId;
                 else state.projectId = entry.project.id;
+            }
+            // The note `setMachine` writes (#414): the machine the chat runs on from here on, or none.
+            if (entry.machine) {
+                if (entry.machine.id === null) delete state.machineId;
+                else state.machineId = entry.machine.id;
             }
             return;
         }

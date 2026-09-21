@@ -1,5 +1,5 @@
 /** The reducer is pure over (state, entry): replaying entries rebuilds the same state, which is what `ctx.append` relies on. */
-import type { AgentId, ChatEntry, MessageId, Principal, ProjectId, SessionId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatEntry, MachineId, MessageId, Principal, ProjectId, SessionId, WorkspaceId } from '@agentic/core';
 import { applyChatEntry, initialChatState, visibleFrom } from '../../src/chat/index.js';
 
 const WS = 'ws_1' as WorkspaceId;
@@ -70,6 +70,16 @@ describe('applyChatEntry', () => {
         expect('projectId' in cleared).toBe(false);
         // A plain message leaves it alone.
         expect(replay([...script, note('project_1' as ProjectId, 10), msg('m', 12)]).projectId).toBe('project_1');
+    });
+
+    it('a machine note sets machineId, the last one wins, and null clears it (#414)', () => {
+        const note = (id: MachineId | null, at: number): ChatEntry => ({ ...(msg(`m${at}`, at) as Extract<ChatEntry, { t: 'msg' }>), machine: { id } });
+        expect(replay([...script]).machineId).toBeUndefined();
+        expect(replay([...script, note('machine_mac' as MachineId, 10)]).machineId).toBe('machine_mac');
+        expect(replay([...script, note('machine_mac' as MachineId, 10), note('machine_pc' as MachineId, 11)]).machineId).toBe('machine_pc');
+        const cleared = replay([...script, note('machine_mac' as MachineId, 10), note(null, 11)]);
+        expect('machineId' in cleared).toBe(false);
+        expect(replay([...script, note('machine_mac' as MachineId, 10), msg('m', 12)]).machineId).toBe('machine_mac');
     });
 
     it('from-now starts at the join entry itself', () => {
