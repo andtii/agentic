@@ -28,7 +28,7 @@ import type { Agent } from '@sigx/ai-agent';
 const RUNTIME = 'copilot-cli';
 
 export const COPILOT_PLATFORM_MEMORY_NOTE =
-    'Supplied by the agentic platform for this session. It is not Copilot memory: the repository instructions of the folder (copilot-instructions.md, AGENTS.md) are loaded as usual and belong to the project, not to this agent. Store what should outlive the session with memory_remember, not in files.';
+    'Supplied by the agentic platform for this session. It is not Copilot memory: the repository instructions of the folder (.github/copilot-instructions.md, AGENTS.md) are loaded as usual and belong to the project, not to this agent. Store what should outlive the session with memory_remember, not in files.';
 
 export interface CopilotCliDriverOptions {
     /** Builds a client for one profile; the SDK's `CopilotClient` by default. */

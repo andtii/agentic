@@ -133,7 +133,7 @@ Where it runs is the other axis: `daemon-hosted` or `platform-hosted`. Today eve
 - **Isolation:** each environment gets its own `COPILOT_HOME`, and the parent's `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN` are stripped. That is not airtight. A profile with no Copilot login of its own falls back to `gh auth token`, and the GitHub CLI reads its token from the OS keyring whatever its config dir. So the doctor warns (`shared-login`) instead of claiming isolation, and `env login` gives the profile its own login, which Copilot prefers.
 - **Usage limits:** Copilot meters requests per month. Premium requests, chat and completions each become a `month` window counted in `requests`. An unlimited entitlement has no utilization.
 - **Permissions:** `harness-filtered`. Copilot runs reads inside the folder without asking. Platform tools and connectors run in the daemon as client tools with `skipPermission`, and their handler asks the platform policy, so every call to one is ruled on.
-- **Memory:** repository instructions and config discovery are on (`skipCustomInstructions: false`, `enableConfigDiscovery: true` — #461, previously off), so `copilot-instructions.md` / `AGENTS.md` in the folder apply as in the interactive CLI. Memory comes from the platform, labelled as such (MEM-10).
+- **Memory:** repository instructions and config discovery are on (`skipCustomInstructions: false`, `enableConfigDiscovery: true` — #461, previously off), so `.github/copilot-instructions.md` / `AGENTS.md` in the folder apply as in the interactive CLI. Memory comes from the platform, labelled as such (MEM-10).
 
 ## 2026-09-19 — Codex runs through `codex app-server` (#320)
 

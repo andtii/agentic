@@ -60,7 +60,7 @@ describe('codexCliDriver', () => {
         // Codex's own AGENTS.md discovery stays on: no base-instructions override, no config beyond the MCP server (#461).
         expect(start.baseInstructions).toBeUndefined();
         expect(Object.keys(start.config as object)).toEqual(['mcp_servers']);
-        const mcp =(start.config as { mcp_servers: { agentic: { url: string; http_headers: Record<string, string> } } }).mcp_servers.agentic;
+        const mcp = (start.config as { mcp_servers: { agentic: { url: string; http_headers: Record<string, string> } } }).mcp_servers.agentic;
         expect(mcp.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
         expect(mcp.http_headers.Authorization).toMatch(/^Bearer [0-9a-f]{64}$/);
         expect(capabilities).toMatchObject({ runtime: 'codex-cli', resume: 'local', cancel: true, steer: true, permissions: 'harness-filtered', tools: 'mcp' });
