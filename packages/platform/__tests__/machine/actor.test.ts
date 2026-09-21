@@ -1059,7 +1059,8 @@ describe('Machine telemetry (#400)', () => {
 
     it('prunes sessions the machine no longer hosts and environments it no longer reports', async () => {
         const { asDaemon, telemetry } = await rawDaemon();
-        await telemetry({ s1: sample(GiB), s2: sample(GiB), s_nope: sample(GiB) }, { [E1]: { sample: sample(GiB), attribution: 'session' }, [E2]: { sample: sample(GiB), attribution: 'environment' }, env_nope: { sample: null, attribution: 'none' } });
+        // `toString` is a session id off the wire like any other: only hosted ids are kept, never a prototype's.
+        await telemetry({ s1: sample(GiB), s2: sample(GiB), s_nope: sample(GiB), toString: sample(GiB) }, { [E1]: { sample: sample(GiB), attribution: 'session' }, [E2]: { sample: sample(GiB), attribution: 'environment' }, env_nope: { sample: null, attribution: 'none' } });
         let stored = (await machine().get()).telemetry!;
         expect(Object.keys(stored.sessions).sort()).toEqual(['s1', 's2']);
         expect(Object.keys(stored.environments).sort()).toEqual([E1, E2]);

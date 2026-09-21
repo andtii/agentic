@@ -399,12 +399,13 @@ export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = 
 export function pruneTelemetry(s: MachineState): void {
     const t = s.telemetry;
     if (t) {
-        const sessions = Object.fromEntries(Object.entries(t.sessions).filter(([id]) => id in s.activeSessions));
+        // Own keys only: a session id off the wire is any bounded string, `toString` included.
+        const sessions = Object.fromEntries(Object.entries(t.sessions).filter(([id]) => Object.hasOwn(s.activeSessions, id)));
         const environments = Object.fromEntries(Object.entries(t.environments).filter(([id]) => s.environments.some((e) => e.id === id)));
         s.telemetry = { ...t, sessions, environments };
     }
     if (s.telemetryWarned) {
-        for (const key of Object.keys(s.telemetryWarned)) if (key.startsWith('session:') && !(key.slice('session:'.length) in s.activeSessions)) delete s.telemetryWarned[key];
+        for (const key of Object.keys(s.telemetryWarned)) if (key.startsWith('session:') && !Object.hasOwn(s.activeSessions, key.slice('session:'.length))) delete s.telemetryWarned[key];
         if (Object.keys(s.telemetryWarned).length === 0) delete s.telemetryWarned;
     }
 }

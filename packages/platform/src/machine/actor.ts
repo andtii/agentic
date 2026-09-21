@@ -1255,7 +1255,7 @@ export function defineMachineActor(ports: MachinePorts) {
                             ref: { kind: 'machine', machineId }
                         });
                     } else {
-                        const hosted = s.activeSessions[w.sessionId];
+                        const hosted = Object.hasOwn(s.activeSessions, w.sessionId) ? s.activeSessions[w.sessionId] : undefined;
                         await lifecycle.inbox({
                             kind: 'resource-pressure',
                             title: `A session on ${lifecycle.named()} holds ${gb(w.value)}`,
