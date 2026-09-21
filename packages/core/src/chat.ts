@@ -1,6 +1,6 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
-import type { AgentId, ChatId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
+import type { AgentId, ChatId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { TaskError } from './task.js';
 import type { WorkdirRef } from './workdir.js';
 
@@ -44,6 +44,12 @@ export type ChatEntry =
            * the project's folder for each member's environment unless the member has its own.
            */
           readonly project?: { readonly id: ProjectId | null };
+          /**
+           * Set on the note `Chat.setMachine` writes (#414): the chat now runs on this machine, or
+           * on none with `null`. Whoever folds the entries keeps the last one; the activation
+           * contract copies it into each task as `machineId`.
+           */
+          readonly machine?: { readonly id: MachineId | null };
       }
     | { readonly t: 'member'; readonly op: 'add' | 'remove'; readonly agentId: AgentId; readonly historyAccess: HistoryAccess; readonly at: number }
     | {
@@ -164,4 +170,6 @@ export interface ChatRoster {
     readonly members: readonly ChatRosterMember[];
     /** The project the chat belongs to (#330), named so the prompt can say where the work lives. */
     readonly project?: { readonly id: ProjectId; readonly name: string };
+    /** The machine the chat runs on (#414), named so the prompt can say where the work runs. */
+    readonly machine?: { readonly id: MachineId; readonly name: string };
 }

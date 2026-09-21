@@ -63,6 +63,20 @@ describe('mergeAgentConfig', () => {
         expect(next.tools).not.toBe(patch.tools);
     });
 
+    it('null clears an account or a pinned environment; leaving them out keeps them (#414)', () => {
+        const bound = mergeAgentConfig(defaultAgentConfig(), {
+            execution: { runtime: 'claude-code', account: { identity: 'me@work' }, defaultEnvironmentId: 'env_work' as never, defaultWorkdir: 'C:\\src' }
+        });
+        expect(bound.execution).toMatchObject({ account: { identity: 'me@work' }, defaultEnvironmentId: 'env_work' });
+        const kept = mergeAgentConfig(bound, { execution: { model: 'opus' } });
+        expect(kept.execution).toMatchObject({ account: { identity: 'me@work' }, defaultEnvironmentId: 'env_work', model: 'opus' });
+        const unbound = mergeAgentConfig(bound, { execution: { account: null, defaultEnvironmentId: null } });
+        expect('account' in unbound.execution).toBe(false);
+        expect('defaultEnvironmentId' in unbound.execution).toBe(false);
+        expect(unbound.execution.defaultWorkdir).toBe('C:\\src');
+        expect(JSON.stringify(unbound.execution)).not.toContain('null');
+    });
+
     it('keeps skills and tool grants apart: adding a skill grants nothing (AGT-04)', () => {
         const next = mergeAgentConfig(defaultAgentConfig(), { skills: [{ id: 'deploy', version: '1' }] });
         expect(next.tools).toEqual([]);

@@ -352,6 +352,87 @@ describe('project (#332)', () => {
     });
 });
 
+describe('machine (#414)', () => {
+    const wsOwner = testUser(WS);
+    const ws = () => app.as(wsOwner).actor(Workspace, workspaceKey(WS));
+    const auditEvents = async () => (await app.as(wsOwner).actor(AuditActor, auditKey(WS)).list({ kinds: ['chat.machine-set'] })).events;
+    const machineOf = (e: { data: unknown }) => (e.data as { machineId: MachineId | null }).machineId;
+    /** A machine of the index, paired (the Workspace's own half of `Machine.pair`), or left pending. */
+    const registerMachine = async (name: string, paired = true): Promise<MachineId> => {
+        const { machineId, pairingCode } = await ws().registerMachinePending({ name });
+        if (paired) expect(await ws().claimPairing(pairingCode)).toEqual({ machineId });
+        return machineId;
+    };
+
+    beforeEach(async () => {
+        await app.stop();
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
+        await app.start();
+    });
+
+    it('setMachine writes a visible note that activates nobody, folds into the summary with the name, and survives a restart', async () => {
+        const mac = await registerMachine('mac');
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        const summary = await chat.setMachine(mac);
+        expect(summary).toMatchObject({ machineId: mac, machine: { id: mac, name: 'mac' } });
+        expect(await chat.get()).toMatchObject({ machineId: mac, machine: { id: mac, name: 'mac' } });
+        const { entries } = await chat.history();
+        const note = entries.at(-1)!.entry;
+        expect(note).toMatchObject({ t: 'msg', author: { kind: 'user' }, mentions: [], machine: { id: mac } });
+        expect(text(note)).toBe('Machine → mac');
+        // Idempotent: the same machine again writes nothing.
+        await chat.setMachine(mac);
+        expect((await chat.history()).entries).toHaveLength(entries.length);
+        expect(await auditEvents()).toMatchObject([{ by: 'user:u1', data: { chatId: 'c1', machineId: mac, name: 'mac' } }]);
+
+        const before = await chat.get();
+        const { storage } = app;
+        await app.stop();
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor], { storage });
+        await app.start();
+        expect(await chatAs(user).get()).toEqual(before);
+    });
+
+    it('null clears it with a note of its own; the last note wins; a removed machine leaves machineId without a name', async () => {
+        const mac = await registerMachine('mac');
+        const pc = await registerMachine('pc');
+        const chat = chatAs(user);
+        await chat.setMachine(mac);
+        const cleared = await chat.setMachine(null);
+        expect('machineId' in cleared).toBe(false);
+        expect(text((await chat.history()).entries.at(-1)!.entry)).toBe('Machine cleared');
+        await chat.setMachine(mac);
+        await chat.setMachine(pc);
+        expect(await chat.get()).toMatchObject({ machineId: pc, machine: { name: 'pc' } });
+        // Newest first.
+        expect((await auditEvents()).map(machineOf)).toEqual([pc, mac, null, mac]);
+
+        await ws().removeMachine(pc);
+        const summary = await chat.get();
+        expect(summary.machineId).toBe(pc);
+        expect(summary.machine).toBeUndefined();
+    });
+
+    it('refuses an unknown or pending machine (400); member agents and external clients may set it, a non-member agent and a machine may not (403)', async () => {
+        const mac = await registerMachine('mac');
+        const pending = await registerMachine('pending', false);
+        const chat = chatAs(user);
+        await chat.addAgent(A);
+        expect(await statusOf(chat.setMachine('machine_nope' as MachineId))).toBe(400);
+        expect(await statusOf(chat.setMachine(pending))).toBe(400);
+        expect(await statusOf(chat.setMachine('  ' as MachineId))).toBe(400);
+        expect(await statusOf(chatAs(agent(B)).setMachine(mac))).toBe(403);
+        expect((await chat.get()).machineId).toBeUndefined();
+        await expect(chatAs(agent(A)).setMachine(mac)).resolves.toMatchObject({ machineId: mac });
+        const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'cli', scopes: ['chats'] };
+        await expect(chatAs(external).setMachine(null)).resolves.not.toHaveProperty('machineId');
+        const machine: Principal = { kind: 'machine', workspaceId: WS, machineId: mac };
+        expect(await statusOf(chatAs(machine).setMachine(mac))).toBe(403);
+        expect((await auditEvents()).map((e) => e.by)).toEqual(['external:cli', `agent:${A}`]);
+    });
+});
+
 describe('membership bookkeeping', () => {
     it('addAgent is idempotent and the join entry carries the access', async () => {
         const chat = chatAs(user);

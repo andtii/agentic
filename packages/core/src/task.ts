@@ -2,7 +2,7 @@
 
 import type { Limits } from './agent.js';
 import type { PromptPart } from './chat.js';
-import type { AgentId, ChatId, EnvironmentId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
+import type { AgentId, ChatId, EnvironmentId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { Usage } from './usage.js';
 
 export type TaskStatus = 'queued' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled';
@@ -41,6 +41,12 @@ export interface TaskContract {
     /** Free text or a JSON Schema the result must satisfy. */
     readonly expected?: string | JsonSchemaObject;
     readonly environmentId?: EnvironmentId;
+    /**
+     * The machine the task runs on (#414): copied from the chat by the activation contract,
+     * inherited by delegated children and carried by a schedule's fired task. Without an
+     * `environmentId` that machine reports, the router resolves the assignee's account there.
+     */
+    readonly machineId?: MachineId;
     /**
      * The folder the task's session runs in (#185): absolute, machine-native, within
      * the `cwdRoots` of `environmentId` — which it requires. Absent: the router picks

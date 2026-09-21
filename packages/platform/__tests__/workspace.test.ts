@@ -172,6 +172,32 @@ describe('Workspace machines', () => {
         const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
         expect(stored.machines).toEqual([]);
     });
+
+    it('createChat({ machineId }) puts the chat on the machine over a hop and notes it as the last used; an unknown or pending machine is refused first (#414)', async () => {
+        const { machineId: mac, pairingCode } = await ws().registerMachinePending({ name: 'mac' });
+        const { machineId: pending } = await ws().registerMachinePending({ name: 'pc' });
+        expect(await statusOf(ws().createChat({ machineId: 'machine_nope' as MachineId }))).toBe(400);
+        expect(await statusOf(ws().createChat({ machineId: pending }))).toBe(400);
+        expect(await statusOf(ws().createChat({ machineId: mac }))).toBe(400); // registered, not yet paired
+        expect((await ws().get()).chats).toEqual([]);
+        await ws().claimPairing(pairingCode);
+        const { chatId } = await ws().createChat({ title: 'general', machineId: mac });
+        const chat = app.as(owner).actor(Chat, actorKey('u1' as WorkspaceId, 'chat', chatId));
+        expect(await chat.get()).toMatchObject({ title: 'general', machineId: mac, machine: { id: mac, name: 'mac' } });
+        expect((await ws().get()).lastMachineId).toBe(mac);
+        expect((await ws().get()).chats).toEqual([chatId]);
+        // `noteMachine` remembers or forgets one; a pending machine is no choice.
+        expect(await statusOf(ws().noteMachine(pending))).toBe(400);
+        await ws().noteMachine(null);
+        expect((await ws().get()).lastMachineId).toBeUndefined();
+        await ws().noteMachine(mac);
+        expect((await ws().get()).lastMachineId).toBe(mac);
+        // Removing the machine clears the last-used note; the chat keeps its id (decisions 2026-09-21).
+        await ws().removeMachine(mac);
+        expect((await ws().get()).lastMachineId).toBeUndefined();
+        expect(await chat.get()).toMatchObject({ machineId: mac });
+        expect((await chat.get()).machine).toBeUndefined();
+    });
 });
 
 describe('Workspace recent folders (#190)', () => {
