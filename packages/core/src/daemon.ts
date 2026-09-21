@@ -13,12 +13,14 @@ import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, E
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
-/** What a daemon build is (#359): its version, the commit it was built from, the protocol it speaks and its release channel. */
+/** What a daemon build is (#359): its version, the commit it was built from, the protocol it speaks, its release channel and the platform it was packaged for. */
 export interface DaemonBuild {
     readonly version: string;
     readonly commit: string;
     readonly protocol: number;
     readonly channel: string;
+    /** The release asset key this build was packaged for, `<platform>-<arch>` as Node names them, e.g. `win32-x64`, `darwin-arm64`, `linux-x64`. */
+    readonly platform: string;
 }
 
 /**

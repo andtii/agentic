@@ -225,7 +225,7 @@ describe('daemon frame schemas', () => {
     it('hello, welcome and session.closed keep the lifecycle fields (#359); an older frame still parses', () => {
         const hello = {
             ...daemonCases.hello.valid,
-            build: { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable' },
+            build: { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable', platform: 'win32-x64' },
             features: ['update', 'harness'],
             restarts: 2,
             lastExit: { at: 1, reason: 'crashed', code: 1 },
@@ -234,6 +234,8 @@ describe('daemon frame schemas', () => {
         };
         expect(daemonFrame.safeParse(hello)).toEqual({ success: true, data: hello });
         expect(daemonFrame.safeParse({ ...hello, features: ['suspend'] }).success).toBe(false);
+        // The asset key the platform picks a release asset by is required on a build.
+        expect(daemonFrame.safeParse({ ...hello, build: { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable' } }).success).toBe(false);
         const welcome = { ...platformCases.welcome.valid, platform: { version: '1.3.0', minDaemonVersion: '1.0.0', latest: { stable: '1.2.0', latest: '1.3.0-rc.1' } } };
         expect(platformFrame.safeParse(welcome)).toEqual({ success: true, data: welcome });
         const closed = { v: V, t: 'session.closed', sessionId: 's1', reason: 'the daemon is updating', code: 'update' };

@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 import type { DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
@@ -27,6 +27,7 @@ describe('contract type tests', () => {
         expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<(typeof PLATFORM_FRAME_TYPES)[number]>();
         expectTypeOf<Extract<DaemonFrame, { t: 'session.closed' }>['code']>().toEqualTypeOf<SessionClosedCode | undefined>();
         expectTypeOf<Extract<PlatformFrame, { t: 'update.request' }>['target']>().toEqualTypeOf<ReleaseAsset | 'previous'>();
+        expectTypeOf<DaemonBuild['platform']>().toEqualTypeOf<string>();
         expectTypeOf<Discriminant<Extract<PlatformFrame, { t: 'env.request' }>, 'op'>>().toEqualTypeOf<'put' | 'remove'>();
     });
     it('fs operations and results are closed unions', () => {

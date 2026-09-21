@@ -30,7 +30,7 @@ export interface ReleaseManifest {
     /** The `DAEMON_PROTOCOL_VERSION` the build speaks. */
     readonly protocol: number;
     readonly notesUrl?: string;
-    /** Keyed `<os>-<arch>` (`windows-x64`). */
+    /** Keyed by release asset key, `<platform>-<arch>` as Node names them (`win32-x64`, `darwin-arm64`, `linux-x64`), as `DaemonBuild.platform` names it. */
     readonly assets: Readonly<Record<string, ReleaseAsset>>;
     /** The harness builds the release ships, by runtime; a runtime it ships none for is absent. */
     readonly harnesses: Readonly<Partial<Record<RuntimeId, { readonly version: string; readonly assets: Readonly<Record<string, ReleaseAsset>> }>>>;

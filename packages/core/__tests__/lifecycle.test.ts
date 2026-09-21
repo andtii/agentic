@@ -40,7 +40,7 @@ describe('daemon lifecycle contract', () => {
 
     it('a release manifest pins each asset by digest, per platform and per harness', () => {
         const asset = { url: 'https://example.test/d.zip', sha256: 'ab12', bytes: 1, version: '1.2.0' };
-        const manifest: ReleaseManifest = { version: '1.2.0', channel: 'stable', publishedAt: 1, commit: 'abc1234', protocol: 1, assets: { 'windows-x64': asset }, harnesses: { 'claude-code': { version: '2.1.0', assets: { 'windows-x64': { ...asset, version: '2.1.0' } } } } };
-        expect(Object.keys(manifest.assets)).toEqual(['windows-x64']);
+        const manifest: ReleaseManifest = { version: '1.2.0', channel: 'stable', publishedAt: 1, commit: 'abc1234', protocol: 1, assets: { 'win32-x64': asset }, harnesses: { 'claude-code': { version: '2.1.0', assets: { 'win32-x64': { ...asset, version: '2.1.0' } } } } };
+        expect(Object.keys(manifest.assets)).toEqual(['win32-x64']);
     });
 });

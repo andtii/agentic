@@ -20,7 +20,7 @@ const hello = z.object({
     resume: cursors,
     policy: machinePolicy.optional(),
     // #359: build, features and lifecycle history; each optional, so an older daemon's hello still parses.
-    build: z.object({ version: name, commit: name, protocol: nonNegativeInt, channel: name }).optional(),
+    build: z.object({ version: name, commit: name, protocol: nonNegativeInt, channel: name, platform: name }).optional(),
     features: z.array(z.enum(['update', 'harness'])).max(LIMITS.list).optional(),
     restarts: nonNegativeInt.optional(),
     lastExit: z.object({ at: nonNegativeInt, reason: text, code: z.number().int().optional() }).optional(),
