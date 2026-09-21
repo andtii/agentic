@@ -1,11 +1,12 @@
 import { component, signal, type Define } from 'sigx';
 import type { MachineUpdateView } from '@agentic/platform';
 import { EmptyState } from '@agentic/ui';
-import { environmentsOf, opsAgent, opsMachines, opsQuota, opsUpdate, platformRow, queuedFor, type OpsMachine } from '../mock/ops';
+import { environmentsOf, opsAgent, opsHarness, opsMachines, opsQuota, opsUpdate, platformRow, queuedFor, type OpsMachine } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { MachineGroup, PlatformRow, mockDefaultFor } from './machines/MachineGroup';
 import { LiveMachines } from './machines/LiveMachines';
 import { UpdateAll, type UpdateAllEntry, type UpdateAllResult } from './machines/UpdateAll';
+import { harnessUpdates } from './machines/harness';
 import { updateBadge } from './machines/update';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
@@ -34,7 +35,7 @@ export const MachinesView = component<MachinesViewProps>(({ props }) => {
     return () => (
         <OpsPage page="machines" title="Machines">
             <UpdateAll machines={props.machines.map(m => ({ id: m.id, name: m.name, update: st.updates[m.id] ?? null }))} results={st.results} onRun={updateAll} />
-            {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} queued={queuedFor} defaultFor={mockDefaultFor} quota={opsQuota} update={updateBadge(st.updates[m.id])} />)}
+            {props.machines.map(m => <MachineGroup machine={m} environments={environmentsOf(m.id)} queued={queuedFor} defaultFor={mockDefaultFor} quota={opsQuota} update={updateBadge(st.updates[m.id])} harnessUpdates={harnessUpdates(opsHarness(m.id))} />)}
             <PlatformRow defaultFor={platformRow.defaultFor.map(id => ({ name: opsAgent(id).name, hue: opsAgent(id).hue }))} caption={platformRow.caption} keyStatus={platformRow.key} keyLabel={platformRow.keyLabel} />
             {props.machines.length === 0 ? <EmptyState variant="machines" /> : null}
         </OpsPage>

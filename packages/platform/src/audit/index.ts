@@ -17,6 +17,7 @@ export {
     type EnvironmentChosenData,
     type EnvironmentPutData,
     type EnvironmentRemovedData,
+    type HarnessChangedData,
     type MachinePairedData,
     type MachineRevokedData,
     type MachineUpdateRequestedData,

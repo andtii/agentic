@@ -11,6 +11,8 @@
  * `updateState()` live for the update pill, and hands it up so "Update all
  * machines" knows which ones have a release waiting; it asks each of them
  * with `requestUpdate({ mode: 'drain' })` and lists what they answered.
+ * A second pill counts the runtimes with a newer harness waiting (#370),
+ * from the same `get`.
  */
 import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
@@ -25,6 +27,7 @@ import { LIVE_PLATFORM_ROW, defaultForByEnvironment, machineOf, platformAgents, 
 import type { AgentIdentity } from '../chat/live';
 import { MachineGroup, PlatformRow } from './MachineGroup';
 import { UpdateAll, type UpdateAllEntry, type UpdateAllResult } from './UpdateAll';
+import { harnessUpdates } from './harness';
 import { needsReinstall, updateBadge } from './update';
 
 /** One machine's group over a live read of its record; busy (and empty) until the first value. */
@@ -38,7 +41,7 @@ const LiveMachineGroup = component<{ id: string; name: string; workspaceId: stri
         const v = view.value;
         if (!v) return <section data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />;
         // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
-        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} update={v.revoked ? null : updateBadge(update.value)} />;
+        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} />;
     };
 });
 

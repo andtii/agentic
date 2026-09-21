@@ -25,13 +25,13 @@ function sources(dir: string): string[] {
 
 /**
  * A call that asks a machine to change its environments or its daemon (a mention in a comment is not one), or the frame
- * itself: the environment requests (#237), and the daemon's update, channel and policy and the harness requests (#365).
+ * itself: the environment requests (#237), the daemon's update, channel and policy (#365), and the harness requests (`requestHarness`, #370).
  */
-const ENV_MUTATION = /\b(putEnvironment|removeEnvironment|envRequest|requestUpdate|cancelUpdate|setUpdatePolicy|setChannel|updateState)\s*\(|['"](env|update|harness)\.request['"]/;
+const ENV_MUTATION = /\b(putEnvironment|removeEnvironment|envRequest|requestUpdate|cancelUpdate|setUpdatePolicy|setChannel|updateState|requestHarness|harnessResult)\s*\(|['"](env|update|harness)\.request['"]/;
 /** A tool name that reads like one. */
 const ENV_MUTATION_TOOL = /env(ironment)?s?_(put|add|create|set|update|remove|delete)|(put|add|create|set|update|remove|delete)_env(ironment)?|daemon|update_(machine|policy|channel)|machine_update|harness/i;
 
-describe('environment and daemon management is on no tool surface (#237, #365)', () => {
+describe('environment, daemon and harness management is on no tool surface (#237, #365, #370)', () => {
     it('the platform tools an agent can call name no environment mutation', () => {
         for (const name of PLATFORM_TOOL_NAMES) expect(name).not.toMatch(ENV_MUTATION_TOOL);
     });

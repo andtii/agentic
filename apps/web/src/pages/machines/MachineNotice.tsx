@@ -9,7 +9,7 @@ export const MACHINE_NOTICE: Readonly<Partial<Record<NotificationKind, { readonl
     'update-applied': { label: 'UPDATED', tone: 'live' },
     'update-failed': { label: 'UPDATE FAILED', tone: 'failed' },
     'daemon-crash-loop': { label: 'RESTARTING', tone: 'failed' },
-    'harness-update-available': { label: 'HARNESS', tone: 'needs-you' }
+    'harness-update-available': { label: 'RUNTIME UPDATE', tone: 'needs-you' }
 };
 
 export const isMachineNotice = (kind: string): boolean => Object.hasOwn(MACHINE_NOTICE, kind);
@@ -17,7 +17,8 @@ export const isMachineNotice = (kind: string): boolean => Object.hasOwn(MACHINE_
 /**
  * One machine notice in "Needs you" (#367): an update is available, applied
  * or failed, or the daemon keeps restarting — with a link to the machine's
- * page, where it is acted on, and Dismiss (`Inbox.ack`).
+ * page, where it is acted on, and Dismiss (`Inbox.ack`). A runtime's newer
+ * harness (#370) links to the page's "Runtimes on this machine" card.
  */
 export const MachineNotice = component<
     & Define.Prop<'kind', NotificationKind, true>
@@ -48,7 +49,9 @@ export const MachineNotice = component<
                     {props.age ? <span> · {props.age}</span> : null}
                 </p>
                 <div data-machine-notice-actions>
-                    <LinkButton to={`/machines/${props.machineId}`} label="Open machine">Open machine</LinkButton>
+                    {props.kind === 'harness-update-available'
+                        ? <LinkButton to={`/machines/${props.machineId}#runtimes`} label="Open runtimes">Open runtimes</LinkButton>
+                        : <LinkButton to={`/machines/${props.machineId}`} label="Open machine">Open machine</LinkButton>}
                     {props.dismiss ? <Button intent="default" loading={st.busy} disabled={st.busy} onClick={dismiss}>Dismiss</Button> : null}
                 </div>
                 {st.error ? <p data-needs-error role="alert">{`Could not dismiss: ${st.error}`}</p> : null}

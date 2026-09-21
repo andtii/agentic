@@ -9,6 +9,7 @@ import { EnvironmentDialog } from './machines/EnvironmentDialog';
 import { EnvironmentGrid, mockDefaultFor, type EnvironmentFacts } from './machines/MachineGroup';
 import { machineHead } from './machines/head';
 import { LiveMachine } from './machines/LiveMachine';
+import { MockHarnessCard } from './machines/MockHarnessCard';
 import { MockUpdateCard } from './machines/MockUpdateCard';
 import { SessionsTable } from './machines/SessionsTable';
 import { buildLabel } from './machines/update';
@@ -61,7 +62,9 @@ export type MachineViewProps =
     /** Revoke, then leave the workspace. */
     & Define.Event<'removeMachine'>
     /** The daemon update card (#367) under the header: the live page's or the mock's. */
-    & Define.Slot<'update'>;
+    & Define.Slot<'update'>
+    /** "Runtimes on this machine" (#370) under the environments: the live page's or the mock's. */
+    & Define.Slot<'harness'>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -191,6 +194,8 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     {removeFailure ? <p data-env-failure role="alert">{failureText(removeFailure)}</p> : null}
                 </ConfirmDialog>
                 </>) : null}
+
+                {slots.harness?.()}
 
                 <div data-machine-grid>
                     <section aria-label="Active sessions" data-machine-sessions>
@@ -352,7 +357,10 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
             onRemoveEnvironment={remove}
             onRename={(name: string) => { st.name = name; }}
             onRemoveMachine={() => { void router.push('/machines'); }}
-            slots={{ update: () => <MockUpdateCard machineId={props.machine.id} name={st.name} os={props.machine.os} daemonVersion={props.machine.daemonVersion} /> }}
+            slots={{
+                update: () => <MockUpdateCard machineId={props.machine.id} name={st.name} os={props.machine.os} daemonVersion={props.machine.daemonVersion} />,
+                harness: () => <MockHarnessCard machineId={props.machine.id} name={st.name} os={props.machine.os} online={props.machine.online} />
+            }}
         />
     );
 });

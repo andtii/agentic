@@ -21,7 +21,7 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created'] },
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
-    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set'] },
+    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set', 'harness.changed'] },
     { id: 'plugins', label: 'Plugins and secrets', kinds: ['plugin.enabled', 'plugin.disabled', 'plugin.activated', 'plugin.granted', 'secret.opened'] }
 ] as const satisfies readonly { id: string; label: string; kinds?: readonly AuditKind[] }[];
 
@@ -90,6 +90,8 @@ export function kindLabel(e: AuditEvent): string {
     if (e.kind === 'workdir.worktree-created') return 'worktree created';
     // A daemon update (#367): `update requested`, `updated`, `channel set`…
     if (MACHINE_UPDATE_KINDS.has(e.kind)) return e.kind.slice('machine.'.length).replace(/-/g, ' ');
+    // A runtime's harness (#370): `harness installed`, `harness updated`, `harness removed`, or `harness failed`.
+    if (e.kind === 'harness.changed') return e.data.outcome === 'done' ? `harness ${e.data.op === 'install' ? 'installed' : e.data.op === 'update' ? 'updated' : 'removed'}` : 'harness failed';
     return e.kind.replace('.', ' ');
 }
 
@@ -102,6 +104,7 @@ export function toneOf(e: AuditEvent): Tone | undefined {
         return undefined;
     }
     if (e.kind === 'environment.put' || e.kind === 'environment.removed') return e.data.outcome === 'ok' ? 'live' : 'failed';
+    if (e.kind === 'harness.changed') return e.data.outcome === 'done' ? 'live' : 'failed';
     return KIND_TONE[e.kind];
 }
 
@@ -150,6 +153,7 @@ export function refOf(e: AuditEvent): HistoryRef | null {
     if (e.kind === 'environment.put') return { label: e.data.name, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'environment.removed') return { label: e.data.environmentId, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'workdir.worktree-created') return { label: e.data.branch, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'harness.changed') return { label: e.data.runtime, href: `/machines/${e.data.machineId}#runtimes` };
     if (e.kind === 'machine.update-requested' || e.kind === 'machine.updated' || e.kind === 'machine.update-failed' || e.kind === 'machine.channel-set' || e.kind === 'machine.update-policy-set') return { label: e.data.machineId, href: `/machines/${e.data.machineId}` };
     if (e.taskId) return { label: e.taskId, href: `/tasks/${e.taskId}` };
     if (e.sessionId) return { label: e.sessionId, href: `/sessions/${e.sessionId}` };

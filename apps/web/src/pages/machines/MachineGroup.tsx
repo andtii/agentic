@@ -50,7 +50,9 @@ export function queuedLine(machine: OpsMachine, queued: number): string | undefi
 
 export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Define.Prop<'environments', readonly EnvironmentDescriptor[], true> & EnvironmentFacts
     /** The machine's daemon update, as a pill beside its status (#367): available, draining, updating, required. */
-    & Define.Prop<'update', UpdateBadge | null>;
+    & Define.Prop<'update', UpdateBadge | null>
+    /** How many of its runtimes have a newer harness waiting (#370): a second pill beside the daemon's. */
+    & Define.Prop<'harnessUpdates', number>;
 
 /** One bordered group per machine on `/machines`: glyph, name, OS and heartbeat, status, Details, then its environments. */
 export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
@@ -65,6 +67,7 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                     <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
                 </div>
                 {props.update ? <StatusPill status={props.update} label={BADGE_TEXT[props.update].label} tone={BADGE_TEXT[props.update].tone} class="ag-update-badge" /> : null}
+                {props.harnessUpdates ? <StatusPill status="available" label={props.harnessUpdates === 1 ? '1 RUNTIME UPDATE' : `${props.harnessUpdates} RUNTIME UPDATES`} tone="needs-you" class="ag-harness-badge" /> : null}
                 <StatusPill status={m.online ? 'online' : 'offline'} />
                 <LinkButton to={`/machines/${m.id}`}>Details</LinkButton>
             </header>

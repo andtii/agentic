@@ -915,6 +915,22 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-machine-notice-actions] { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
 [data-machine-notice] > [data-needs-error] { grid-column: 2; }
 
+/* runtimes on a machine (#370): the Machine page's harness card, the runtime plugin page's machine list */
+[data-harness-card] p { margin: 0; }
+[data-harness-list], [data-runtime-machine-list] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+[data-harness-row] { display: flex; flex-direction: column; gap: var(--space-sm); padding-block: var(--space-md); min-inline-size: 0; }
+[data-harness-row] + [data-harness-row] { border-block-start: var(--border) solid var(--ag-line); }
+[data-harness-head] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); min-inline-size: 0; }
+[data-harness-name] { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+[data-harness-version] { font-family: var(--font-mono); font-size: var(--text-md); overflow-wrap: anywhere; }
+[data-harness-envs], [data-harness-remove-reason] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-harness-pending], [data-harness-confirm] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
+[data-harness-outcome] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-harness-outcome][data-tone="failed"], [data-harness-error] { font-size: var(--text-md); color: var(--color-error); }
+[data-runtime-machine] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); padding-block: var(--space-sm); font-size: var(--text-md); }
+[data-runtime-machine] + [data-runtime-machine] { border-block-start: var(--border) solid var(--ag-line); }
+[data-runtime-machine-version] { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ag-text-muted); }
+
 /* ---- pair (#90): 620 + 360 ---- */
 /* 620 + 360 as drawn at 1440; the steps column gives way first so 1280 still fits without a sideways scroll */
 [data-pair-grid] { display: grid; grid-template-columns: minmax(0, 620px) minmax(280px, 360px); gap: 40px; align-items: start; }
