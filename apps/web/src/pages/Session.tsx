@@ -2,7 +2,7 @@ import { component, type Define, type JSXElement } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
 import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, EventsLostRow, Icon, StatusPill, ToolCall, type RespondFn } from '@agentic/ui';
 import { KeyValue } from '../components/KeyValue';
-import { FailureNotice, failureOf } from '../components/status';
+import { FailureNotice, failureOf, interruptionLine } from '../components/status';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar, routeId } from '../components/topbar';
@@ -97,6 +97,8 @@ export const SessionView = component<SessionViewProps>(({ props }) => {
 
                 <section data-session-main aria-label="Session activity">
                     {failure ? <FailureNotice state={failure} {...(props.onResume ? { onResume: props.onResume } : {})} busy={props.recovering ?? false} /> : null}
+                    {!failure && v.interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(v.interruption)}</p> : null}
+                    {!failure && v.hostLost ? <p data-session-lost role="note">The machine lost this session; it re-opens with the next message.</p> : null}
                     {v.current ? <ToolCall part={v.current.part} transcript={v.current.transcript} {...(v.current.meta ? { meta: v.current.meta } : {})} /> : null}
                     {v.request ? <ApprovalPrompt request={v.request.request} {...v.request.context} compact onRespond={(id, d) => props.onRespond?.(id, d)} /> : null}
                     <Panel label="Event log · tail" slots={{ aside: () => (v.state === 'running' || v.state === 'awaiting' ? <StatusPill status="live" /> : null) }}>

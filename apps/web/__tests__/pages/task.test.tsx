@@ -14,7 +14,7 @@ describe('/tasks (Tasks)', () => {
         expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
         chips.find((c) => c.textContent!.startsWith('Waiting'))!.click();
         await tick();
-        expect(dom.querySelectorAll('tbody tr')).toHaveLength(3);
+        expect(dom.querySelectorAll('tbody tr')).toHaveLength(loadTasks().filter((t) => t.status === 'waiting').length);
         expect(dom.querySelector('[data-chip][aria-pressed="true"]')!.textContent).toContain('Waiting');
     });
 });

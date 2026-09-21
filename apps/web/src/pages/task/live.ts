@@ -45,9 +45,9 @@ export interface TaskListRow {
 }
 
 /** An index row with its assignee resolved through the agent directory. */
-export function taskListRow(row: TaskIndexRow, lookup: AgentLookup): TaskListRow {
+export function taskListRow(row: TaskIndexRow, lookup: AgentLookup, machineName?: (id: string) => string | undefined): TaskListRow {
     const agent = lookup(row.assignee);
-    const detail = waitDetailOf(row.wait);
+    const detail = waitDetailOf(row.wait, machineName);
     return {
         id: row.id,
         objective: row.objective,

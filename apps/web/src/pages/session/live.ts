@@ -18,7 +18,7 @@ import type { MachineView, SessionInfo } from '@agentic/platform';
 import { createTranscript, reduceAgentEvent, type AgentEvent } from '@sigx/ai-agent';
 import type { ToolPartState } from '@sigx/ai-agent/app';
 import type { ApprovalContext } from '@agentic/ui';
-import type { FailureSignals } from '../../components/status';
+import { cutOfEvents, interruptionOf, type FailureSignals, type RouteSignal } from '../../components/status';
 import type { MockEvent, MockSessionView } from '../../mock/workspace';
 import type { AgentIdentity } from '../chat/live';
 
@@ -116,15 +116,20 @@ export function sessionSignals(v: MockSessionView): FailureSignals {
         machine: v.machine.id === 'platform' ? null : { id: v.machine.id, name: v.machine.name, online: v.machine.online },
         auth: v.auth ?? null,
         session: { status: v.state, ...(v.error ? { error: v.error } : {}), ...(v.interrupted ? { interrupted: true } : {}) },
-        ...(v.taskId ? { task: { id: v.taskId, status: 'active' } } : {})
+        ...(v.taskId ? { task: { id: v.taskId, status: 'active' } } : {}),
+        ...(v.interruption ? { interruption: v.interruption } : {})
     };
 }
 
 /**
  * `Session.get()`, its log and — for a daemon session — its machine's record
  * (`Machine.online`, the environment's account) folded into the page view.
+ * #368: the last cut turn's cause is the log's own (`cutOfEvents`: the
+ * interrupted `error` event's `data.host`), where its resume stands the
+ * router's `route` for the session; an idle daemon session its online
+ * machine no longer hosts is `hostLost`.
  */
-export function liveSessionView(id: string, info: SessionInfo, events: readonly AgentEvent[], agent: AgentIdentity, machine?: MachineView): MockSessionView {
+export function liveSessionView(id: string, info: SessionInfo, events: readonly AgentEvent[], agent: AgentIdentity, machine?: MachineView, route?: RouteSignal | null): MockSessionView {
     const spec = info.spec;
     const runtime = spec?.runtime ?? ('anthropic-api' as RuntimeId);
     const transcript = createTranscript(id);
@@ -139,6 +144,11 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
     const model = spec?.config.execution.model;
     const env = machine?.environments.find((e) => e.id === spec?.environmentId);
     const error = transcript.error && !transcript.error.recoverable ? { code: transcript.error.code, message: transcript.error.message, recoverable: false } : undefined;
+    const cut = cutOfEvents(events);
+    const interruption = cut || route?.status === 'interrupted'
+        ? interruptionOf({ cut: { ...(cut?.host ? { host: cut.host } : {}), resumed: cut?.resumed ?? false, ...(spec?.machineId ? { machineId: spec.machineId } : {}), runtime }, route: route ?? null, machineName: () => machine?.name })
+        : null;
+    const hostLost = !!spec?.machineId && !!machine?.online && info.status === 'idle' && !machine.activeSessions.some((h) => h.sessionId === id);
     return {
         id: id as SessionId,
         ref: info.ref?.id ?? id,
@@ -166,6 +176,8 @@ export function liveSessionView(id: string, info: SessionInfo, events: readonly 
         ...(info.gap ? { gap: { from: info.gap.from.seq, to: info.gap.resumeAt.seq } } : {}),
         capabilities: capabilityReport(runtime, info.capabilities),
         grants: transcript.grants.map((key) => ({ key, label: key.replace(':', '  ') })),
-        ...(last && isInterruptedEnd(last) ? { interrupted: true } : {})
+        ...(last && isInterruptedEnd(last) ? { interrupted: true } : {}),
+        ...(interruption ? { interruption } : {}),
+        ...(hostLost ? { hostLost: true } : {})
     };
 }

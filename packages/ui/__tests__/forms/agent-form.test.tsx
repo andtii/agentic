@@ -65,6 +65,19 @@ describe('AgentForm', () => {
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(next);
     });
 
+    it('edits execution.onInterrupt with a two-option select that explains itself (#368)', () => {
+        const { form, root, state, submitted } = mountForm();
+        const select = root.querySelector<HTMLSelectElement>(`select[name="${F.onInterrupt}"]`)!;
+        expect([...select.options].map((o) => o.textContent)).toEqual(['Ask me', 'Resume automatically, once']);
+        expect(select.value).toBe('ask');
+        expect(labelOf(select)).toBe('When a turn is interrupted');
+        expect(root.textContent).toContain('what ran before the cut is uncertain');
+        setSelect(select, 'auto');
+        submit(form);
+        expect(submitted).toHaveLength(1);
+        expect(state.config.execution.onInterrupt).toBe('auto');
+    });
+
     it('hands the workdir slot the default environment and folder; a folder picked sets both and posts, another environment clears it (#193)', () => {
         const state = signal({ config: fullAgentConfig() });
         let slot: AgentFormWorkdirProps | null = null;

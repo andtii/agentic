@@ -41,7 +41,7 @@ import type { IndexedEntry } from '@agentic/platform';
 import type { Decision } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor } from '@agentic/ui';
 import { Page } from '../../components/Page';
-import { FailureNotice } from '../../components/status';
+import { baseTurnId, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { chatKeyOf, inboxKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { resolveAddressing, type MockChatSummary } from '../../mock/workspace';
@@ -54,7 +54,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
@@ -87,6 +87,17 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The chat's project (#333): its folder per environment is what a member without an override runs in.
     const projects = useProjects(defs, viewer);
     const time = (at: number): string => zoneFormat(zone()).time(at);
+    // Why a member's turn was cut and where its resume stands (#368): the Audit's rows and the router's routes, live.
+    const cuts = useInterruptionReads(defs, viewer);
+    const machineNameOf = (id: string): string | undefined => workdirs.machines().find((m) => m.id === id)?.name;
+    const interruptionOfTurn: InterruptionOfTurn = (turnId, agentId) => {
+        const base = turnId ? baseTurnId(turnId) : undefined;
+        const mine = cuts.routes().filter((r) => r.chatId === props.id && r.agentId === agentId);
+        const route = base ? mine.find((r) => r.turnId !== undefined && baseTurnId(r.turnId) === base) : mine.find((r) => r.status === 'interrupted');
+        const row = base ? cuts.audit().find((e) => e.kind === 'session.interrupted' && e.data.turnId === base) : undefined;
+        const taskId = route?.taskId ?? (row?.kind === 'session.interrupted' ? row.data.taskId : undefined);
+        return { interruption: interruptionOf({ audit: cuts.audit(), ...(base ? { turnId: base } : {}), ...(taskId ? { taskId } : {}), route: route ?? null, machineName: machineNameOf }), ...(taskId ? { taskId } : {}) };
+    };
 
     const st = signal({ draft: '', error: '', sending: false, recovering: false, stopping: false, saving: false, resetting: false });
     const transcript = signal(chatTranscript('chat'));
@@ -166,7 +177,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
 
     // The thread's one transcript: the chat's rows plus every feed's in-flight rows, recomposed as either side changes.
     const stopCompose = effect(() => {
-        const entries = entryTranscript(kept.list, directory.lookup, YOU, time);
+        const entries = entryTranscript(kept.list, directory.lookup, YOU, time, interruptionOfTurn);
         authors.value = composeTranscript(transcript, entries, feeds.list, directory.lookup);
     });
     onUnmounted(stopCompose);
@@ -385,7 +396,10 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const memberIds = new Set(members.map((m) => m.agentId));
         const candidates = directory.all().filter((a) => !memberIds.has(a.id));
         const tasks = chatTasks(index.value ?? [], props.id);
-        const failure = chatFailure(entries, feeds.list);
+        const failure = chatFailure(entries, feeds.list, interruptionOfTurn, machineNameOf);
+        // A task of this chat waiting on its machine (#366): a wait, never a failure — the machine, since when, and the deadline.
+        const inChat = new Set(tasks.map((t) => t.id));
+        const offline = (index.value ?? []).flatMap((r) => (inChat.has(r.id) && r.status === 'waiting' && r.wait?.kind === 'machine-offline' ? [r.wait] : []))[0];
         const empty = transcript.messages.length === 0;
         const loading = summary.loading && !s;
         return (
@@ -421,9 +435,14 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 state={failure.state}
                                 busy={st.recovering}
                                 {...(failure.state.kind === 'interrupted' && failure.state.taskId ? { onResume: () => { void resume(failure.state.taskId!); } } : {})}
-                                {...(failure.state.kind === 'runtime' ? { onRetry: retry } : {})}
+                                {...(failure.state.kind === 'runtime' || failure.state.retry ? { onRetry: retry } : {})}
                             />
                         </div>
+                    ) : null}
+                    {offline ? (
+                        <p data-chat-wait role="status">
+                            {machineOfflineText(offline, machineNameOf(offline.machineId), time)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link>
+                        </p>
                     ) : null}
                     {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
                     <div data-chat-composer onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>

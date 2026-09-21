@@ -25,6 +25,8 @@ export const APPROVAL_CATEGORIES: readonly ApprovalCategory[] = ['read', 'write'
 export const APPROVAL_OUTCOMES: readonly ApprovalOutcome[] = ['allow', 'ask', 'deny'];
 export const TOOL_MODES: readonly ToolMode[] = ['allow', 'ask', 'deny'];
 export const OFFLINE_POLICIES: readonly OfflinePolicy[] = ['queue', 'fail', 'fallback-api'];
+/** What a turn the machine cut short does next (#368, `ExecutionDefaults.onInterrupt`): `ask` is the default. */
+export type OnInterrupt = NonNullable<AgentConfig['execution']['onInterrupt']>;
 export const LIMIT_KEYS: readonly LimitKey[] = ['maxTurns', 'maxSteps', 'maxTokens', 'maxCostUsd', 'maxWallMs', 'maxDepth', 'maxConcurrentChildren'];
 
 /** Field names as posted. One place, so the form and the parser cannot drift. */
@@ -49,6 +51,7 @@ export const AGENT_FIELDS = {
     /** The typed model when the model select says `CUSTOM_MODEL`. */
     modelCustom: 'model-custom',
     offlinePolicy: 'offline-policy',
+    onInterrupt: 'on-interrupt',
     limit: (key: LimitKey) => `limit:${key}`,
     collaborateAll: 'collaborate-all',
     collaborators: 'collaborators',
@@ -108,6 +111,8 @@ export interface AgentDraft {
     defaultWorkdir: string;
     model: string;
     offlinePolicy: OfflinePolicy;
+    /** `execution.onInterrupt` (#368): `ask` when the config names none. */
+    onInterrupt: OnInterrupt;
     limits: Record<LimitKey, number | null>;
     collaborateAll: boolean;
     collaborators: string[];
@@ -180,6 +185,7 @@ export function toAgentDraft(config: AgentConfig): AgentDraft {
         defaultWorkdir: config.execution.defaultWorkdir ?? '',
         model: config.execution.model ?? '',
         offlinePolicy: config.execution.offlinePolicy,
+        onInterrupt: config.execution.onInterrupt ?? 'ask',
         limits,
         collaborateAll: config.collaborators === 'all',
         collaborators: config.collaborators === 'all' ? [] : [...config.collaborators],
@@ -221,7 +227,9 @@ export function fromAgentDraft(draft: AgentDraft): AgentConfig {
             ...(draft.defaultEnvironmentId && draft.defaultWorkdir.trim() ? { defaultWorkdir: draft.defaultWorkdir.trim() } : {}),
             ...(draft.model ? { model: draft.model } : {}),
             limits,
-            offlinePolicy: draft.offlinePolicy
+            offlinePolicy: draft.offlinePolicy,
+            // `ask` is the default: only `auto` is written, so a config that never chose stays as it was.
+            ...(draft.onInterrupt === 'auto' ? { onInterrupt: 'auto' as const } : {})
         },
         collaborators: draft.collaborateAll ? 'all' : (draft.collaborators as AgentId[])
     };
@@ -273,6 +281,7 @@ export function agentDraftFromFormData(fd: FormData): AgentDraft {
         defaultWorkdir: text(fd, F.workdir),
         model: model === CUSTOM_MODEL ? text(fd, F.modelCustom).trim() : model,
         offlinePolicy: isOffline(offline) ? offline : 'queue',
+        onInterrupt: text(fd, F.onInterrupt) === 'auto' ? 'auto' : 'ask',
         limits: Object.fromEntries(LIMIT_KEYS.map((k) => [k, number(fd, F.limit(k))])) as AgentDraft['limits'],
         collaborateAll: flag(fd, F.collaborateAll),
         collaborators: list(fd, F.collaborators),

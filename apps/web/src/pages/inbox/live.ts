@@ -11,6 +11,9 @@
  * own record. The rows also carry every route parked `interrupted`
  * (`Routing.get()`, live), and "Resume" is `Routing.resume(taskId)` — the
  * route runs again and the row leaves, here and in every other tab.
+ * #368: the row names why the turn was cut (the Audit's
+ * `session.interrupted` row) and, while the route re-opens its session or
+ * its agent's `onInterrupt: 'auto'` resumes it, says so with Resume disabled.
  *
  * The definitions come from `useActorDefs` (during SSR the platform's own —
  * `actor()` dispatches in-process through the host seam — in the browser
@@ -21,18 +24,19 @@
  */
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import type { InboxNotification, RoutingView } from '@agentic/platform';
+import type { AuditEvent, InboxNotification, RoutingView } from '@agentic/platform';
 import type { TaskId } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
+import { interruptionCause, interruptionOf, useInterruptionReads, useMachineNames } from '../../components/status';
 import { inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import { clockNow, zoneFormat } from '../../time';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
-export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing'>;
+export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace'>;
 
-/** What an interrupted row says under its title (OPS-05: nothing is replayed, the person decides). */
-export const INTERRUPTED_CONTEXT = 'The platform restarted the session. Nothing was replayed. The transcript is intact.';
+/** What an interrupted row says under its title (OPS-05: nothing is replayed, the person decides), after its cause. */
+export const INTERRUPTED_CONTEXT = 'Nothing was replayed. The transcript is intact.';
 
 /** A stable identity hue for an agent id the page has no record for. */
 export function hueOf(id: string): AgentHue {
@@ -55,12 +59,17 @@ export function rowOf(n: InboxNotification): NeedsRow | null {
     };
 }
 
-/** The router's routes parked `interrupted`, as rows: the agent by its frozen config, the chat the task came from (else the task), Resume. */
-export function interruptedRows(view: Pick<RoutingView, 'routes'> | null | undefined): NeedsRow[] {
+/**
+ * The router's routes parked `interrupted`, as rows: the agent by its frozen config, the cause (the Audit's rows,
+ * #368), the chat the task came from (else the task), Resume — disabled while the resume is already under way.
+ */
+export function interruptedRows(view: Pick<RoutingView, 'routes'> | null | undefined, audit: readonly AuditEvent[] = [], machineName?: (id: string) => string | undefined): NeedsRow[] {
     return (view?.routes ?? [])
         .filter((route) => route.status === 'interrupted')
         .map((route): NeedsRow => {
             const name = route.config.name || route.agentId;
+            const cut = interruptionOf({ audit, taskId: route.taskId, ...(route.turnId ? { turnId: route.turnId } : {}), route, ...(machineName ? { machineName } : {}) });
+            const cause = interruptionCause(cut);
             return {
                 id: `interrupted:${route.taskId}`,
                 kind: 'interrupted',
@@ -68,10 +77,10 @@ export function interruptedRows(view: Pick<RoutingView, 'routes'> | null | undef
                 at: route.updatedAt,
                 taskId: route.taskId,
                 agent: { name, hue: hueOf(route.agentId) },
-                context: INTERRUPTED_CONTEXT,
+                context: `Interrupted: ${cause}. ${INTERRUPTED_CONTEXT}`,
                 href: route.chatId ? `/chats/${route.chatId}` : `/tasks/${route.taskId}`,
                 hrefLabel: route.chatId ? 'Open chat' : 'Open task',
-                primary: { label: 'Resume' }
+                primary: cut?.resume === 'auto' ? { label: 'Resuming automatically', disabled: true } : cut?.resume === 'resuming' ? { label: 'Resuming…', disabled: true } : { label: 'Resume' }
             };
         });
 }
@@ -85,8 +94,9 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
     return {
         useRows() {
             const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
-            const routing = useActorState(defs.Routing, () => viewer.workspaceId && ([routingKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
-            return () => [...(list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows(routing.value)];
+            const cuts = useInterruptionReads(defs, viewer);
+            const machineName = useMachineNames(defs, viewer);
+            return () => [...(list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows({ routes: cuts.routes() }, cuts.audit(), machineName)];
         },
         useRequest(ref) {
             const state = useActorState(defs.Session, () => {

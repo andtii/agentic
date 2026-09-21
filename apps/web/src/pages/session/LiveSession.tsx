@@ -12,6 +12,7 @@ import type { Decision } from '@sigx/ai-agent';
 import type { TaskId } from '@agentic/core';
 import { EmptyState } from '@agentic/ui';
 import { Page } from '../../components/Page';
+import { useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import type { MockSessionView } from '../../mock/workspace';
@@ -33,6 +34,8 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const events = useActorState(defs.Session, () => { const k = key(); return k && ([k, 'events'] as const); }, { live: true });
     // A daemon session's machine, live: `Machine.online` and the environment's account are two of the four failure signals (OPS-04).
     const machine = useActorState(defs.Machine, () => { const ws = viewer.workspaceId; const m = info.value?.spec?.machineId; return ws && m && ([machineKeyOf(ws, m), 'get'] as const); }, { live: true });
+    // The router's route for this session (#368): whether a cut turn re-opens, or resumes on its own.
+    const cuts = useInterruptionReads(defs, viewer, () => info.value?.spec?.taskId);
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const client = () => actor(defs.Session, key()!);
@@ -40,7 +43,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const view = (): MockSessionView | null => {
         const i = info.value;
         if (!i || !i.opened) return null;
-        return liveSessionView(props.id, i, events.value ?? [], directory.lookup(i.spec?.agentId ?? ''), machine.value ?? undefined);
+        return liveSessionView(props.id, i, events.value ?? [], directory.lookup(i.spec?.agentId ?? ''), machine.value ?? undefined, cuts.routes().find((r) => r.sessionId === props.id) ?? null);
     };
 
     /** "Resume" on an interrupted turn (OPS-05): through the router when the session runs a task (it follows the new turn), else the session itself. */

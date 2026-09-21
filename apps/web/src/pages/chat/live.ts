@@ -12,7 +12,7 @@ import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
-import { failureOf, INTERRUPTED_CODE, type FailureState } from '../../components/status';
+import { failureOf, interruptionLine, INTERRUPTED_CODE, type FailureState, type Interruption } from '../../components/status';
 import { formatTime, USER, type MockChatMember, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
 
 // ---- identities --------------------------------------------------------------
@@ -411,7 +411,9 @@ function threadPart(p: PromptPart, id: string): AgentPart {
  * member and ends when someone means it to, so `session-started` / `session-ended` maintain the chat's binding and
  * are never narrated as rows.
  */
-function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string | null {
+function statusText(entry: Extract<ChatEntry, { t: 'status' }>, interruption?: InterruptionOfTurn): string | null {
+    // The Session's `interrupted:{turnId}` marker (#368): its cause and where the resume stands, not the raw ref.
+    if (entry.kind === 'task' && entry.ref?.startsWith(INTERRUPTED_REF)) return interruptionLine(interruption?.(entry.ref.slice(INTERRUPTED_REF.length), entry.agentId)?.interruption);
     switch (entry.kind) {
         case 'session-started':
         case 'session-ended':
@@ -429,6 +431,16 @@ function statusText(entry: Extract<ChatEntry, { t: 'status' }>): string | null {
     }
 }
 
+/** The prefix of the status row the Session publishes when a turn is cut short: `interrupted:{turnId}`. */
+export const INTERRUPTED_REF = 'interrupted:';
+
+/**
+ * What the page knows about a cut turn (#368): the interruption (`interruptionOf` over the Audit and the router's
+ * route) and the task it worked — where Resume goes when the member's feed has not named it. `turnId` is absent
+ * when a feed's transcript cut a turn it has no id for.
+ */
+export type InterruptionOfTurn = (turnId: string | undefined, agentId: string) => { readonly interruption: Interruption | null; readonly taskId?: string } | null;
+
 /** `14:02` for an instant — the workspace zone's on the live pages (`time.ts`), the mock workspace's by default. */
 export type TimeText = (at: number) => string;
 
@@ -445,7 +457,7 @@ export interface EntryTranscript {
  * members panel shows them). The live page passes who the user reads as
  * ("You") and its workspace's clock face.
  */
-export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentLookup, userName: string = USER.name, time: TimeText = formatTime): EntryTranscript {
+export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentLookup, userName: string = USER.name, time: TimeText = formatTime, interruption?: InterruptionOfTurn): EntryTranscript {
     const timeOf = (at: number): MessageAuthor['time'] => ({ text: time(at), dateTime: new Date(at).toISOString() });
     const messages: AgentMessage[] = [];
     const authors: Record<string, MessageAuthor> = {};
@@ -466,7 +478,7 @@ export function entryTranscript(entries: readonly IndexedEntry[], lookup: AgentL
                 authors[entry.id] = { name: a.name, hue: a.hue, environment: a.environment, time: timeOf(entry.at) };
             }
         } else if (entry.t === 'status') {
-            const text = statusText(entry);
+            const text = statusText(entry, interruption);
             if (text === null) continue;
             const a = lookup(entry.agentId);
             const id = `status:${seq}`;
@@ -554,15 +566,23 @@ export interface ChatFailure {
  * while a feed of that agent is mid-turn (a resume in flight). Interrupted
  * work is uncertain (OPS-05).
  */
-export function chatFailure(entries: readonly IndexedEntry[], feeds: readonly SessionFeed[]): ChatFailure | null {
+export function chatFailure(entries: readonly IndexedEntry[], feeds: readonly SessionFeed[], interruption?: InterruptionOfTurn, machineName?: (id: string) => string | undefined): ChatFailure | null {
+    // The cut turn's cause and task (#368): the feed's task first, else the router's.
+    const cut = (turnId: string | undefined, agentId: string, taskId: string | undefined) => {
+        const known = interruption?.(turnId, agentId) ?? null;
+        const id = taskId ?? known?.taskId;
+        return { ...(known?.interruption ? { interruption: known.interruption } : {}), ...(id ? { task: { id, status: 'active' as const } } : {}) };
+    };
     for (const feed of feeds) {
         const t = feed.transcript;
+        const interrupted = feedInterrupted(t);
         const session = {
             status: t.state,
             ...(t.error && !t.error.recoverable ? { error: { code: t.error.code, message: t.error.message, recoverable: false } } : {}),
-            ...(feedInterrupted(t) ? { interrupted: true } : {})
+            ...(interrupted ? { interrupted: true } : {})
         };
-        const state = failureOf({ session, ...(feed.taskId ? { task: { id: feed.taskId, status: 'active' } } : {}) });
+        const context = interrupted ? cut(t.turn?.turnId, feed.agentId, feed.taskId) : feed.taskId ? { task: { id: feed.taskId, status: 'active' as const } } : {};
+        const state = failureOf({ session, ...context });
         if (state) return { state, agentId: feed.agentId, sessionId: feed.sessionId };
     }
     const busy = new Set(feeds.filter((f) => sessionMidTurn(f.transcript)).map((f) => f.agentId));
@@ -578,13 +598,13 @@ export function chatFailure(entries: readonly IndexedEntry[], feeds: readonly Se
         if (entry.t !== 'status' || busy.has(entry.agentId)) continue;
         if (entry.kind === 'task-failed') {
             if ([...answered].some((taskId) => taskId !== entry.ref)) continue;
-            const state = failureOf({ task: { id: entry.ref, status: 'failed', error: entry.error } });
+            const state = failureOf({ task: { id: entry.ref, status: 'failed', error: entry.error }, ...(machineName ? { machineName } : {}) });
             if (state) return { state, agentId: entry.agentId };
         }
-        if (entry.kind === 'task' && entry.ref?.startsWith('interrupted:')) {
+        if (entry.kind === 'task' && entry.ref?.startsWith(INTERRUPTED_REF)) {
             if (answered.size) continue;
             const feed = feeds.find((f) => f.agentId === entry.agentId);
-            const state = failureOf({ session: { status: 'idle', interrupted: true }, ...(feed?.taskId ? { task: { id: feed.taskId, status: 'active' } } : {}) });
+            const state = failureOf({ session: { status: 'idle', interrupted: true }, ...cut(entry.ref.slice(INTERRUPTED_REF.length), entry.agentId, feed?.taskId) });
             if (state) return { state, agentId: entry.agentId, ...(feed ? { sessionId: feed.sessionId } : {}) };
         }
     }

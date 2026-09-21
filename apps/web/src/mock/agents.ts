@@ -186,7 +186,8 @@ const PROFILES: Record<string, Omit<AgentProfile, 'id'>> = {
             role: 'Maintainer',
             instructions: 'Run the nightly checks. Open one PR per fix. Never force-push.',
             tools: [{ name: 'Read' }, { name: 'Bash', mode: 'ask' }],
-            execution: { runtime: 'claude-code', limits: { maxTurns: 20, maxCostUsd: 1 }, offlinePolicy: 'queue' }
+            // #368: a nightly job resumes a turn its machine cut short on its own, once.
+            execution: { runtime: 'claude-code', limits: { maxTurns: 20, maxCostUsd: 1 }, offlinePolicy: 'queue', onInterrupt: 'auto' }
         }),
         versions: versions(2, 'Andy', ['One PR per fix.', 'Created.']),
         activeOnOlder: 0,
