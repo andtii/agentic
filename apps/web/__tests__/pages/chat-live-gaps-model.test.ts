@@ -1,14 +1,18 @@
 /** The live chat's pure rules added by #152: tasks in a chat, what a stop reaches, open requests, unread, the settings change, the list filter, the read marks. */
 import { describe, it, expect, afterEach } from 'vitest';
-import type { AgentId, MessageId, TaskId } from '@agentic/core';
+import type { AgentId, MessageId, QuotaSnapshot, TaskId } from '@agentic/core';
+import type { WorkdirEnvironment } from '@agentic/ui';
 import type { ChatSummary, InboxNotification, IndexedEntry, TaskIndexRow } from '@agentic/platform';
 import { createTranscript } from '@sigx/ai-agent';
 import { matchingChats } from '../../src/pages/chat/ChatList';
 import { settingsChange } from '../../src/pages/chat/ChatSettingsDialog';
+import { NO_PLAN_LIMITS, memberQuota, type QuotaMachine } from '../../src/pages/chat/quota';
+import { configPatch } from '../../src/pages/agent/live';
 import { chatRow, chatTasks, detachedQuestions, entryTranscript, keepEntries, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
 import { baselineReadMarks, loadReadMarks, markSeen, readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
 import { zoneFormat } from '../../src/time';
 
+const fullConfig = { name: 'x', description: '', role: '', instructions: '', skills: [], tools: [], connectors: [], approvalPolicy: [], memoryPolicy: { shared: [], autoLearn: 'off' }, collaborators: 'all' };
 const atlas: AgentIdentity = { id: 'a1', name: 'Atlas', role: 'Assistant', hue: 1, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, configVersion: 3 };
 const forge: AgentIdentity = { id: 'a2', name: 'Forge', role: 'Builder', hue: 2, environment: { machine: 'alien01', runtime: 'claude-code', account: 'work' }, configVersion: 1 };
 const lookup = lookupOver({ a1: atlas, a2: forge });
@@ -205,6 +209,15 @@ describe('settingsChange', () => {
         expect(settingsChange(current, { title: 'Release plan', coordinator: 'a2', remove: ['a1'] })).toEqual({ coordinator: 'a2', remove: ['a1'] });
         expect(settingsChange({ title: '', coordinator: null }, { title: '', coordinator: 'a2', remove: ['a2'] })).toEqual({ remove: ['a2'] });
     });
+    it('names the machine only when it changed (#414): another one, or none with null', () => {
+        const form = { title: 'Release plan', coordinator: 'a1', remove: [] as string[] };
+        expect(settingsChange({ ...current, machineId: 'm_mac' }, { ...form, machineId: 'm_mac' })).toEqual({ remove: [] });
+        expect(settingsChange({ ...current, machineId: 'm_mac' }, { ...form, machineId: 'm_pc' })).toEqual({ remove: [], machineId: 'm_pc' });
+        expect(settingsChange({ ...current, machineId: 'm_mac' }, { ...form, machineId: '' })).toEqual({ remove: [], machineId: null });
+        expect(settingsChange(current, { ...form, machineId: '' })).toEqual({ remove: [] });
+        expect(settingsChange(current, { ...form, machineId: 'm_pc' })).toEqual({ remove: [], machineId: 'm_pc' });
+        expect(settingsChange(current, form)).toEqual({ remove: [] });
+    });
 });
 
 describe('matchingChats', () => {
@@ -256,5 +269,34 @@ describe('read marks', () => {
         } finally {
             Storage.prototype.setItem = setItem;
         }
+    });
+});
+
+describe('memberQuota on the chat’s machine (#414)', () => {
+    const quota = (id: string): QuotaSnapshot => ({ sourceId: 'q', runtime: 'claude-code', environmentId: id as never, availability: 'reported', windows: [], observedAt: 1, via: 'probe' });
+    const environments: WorkdirEnvironment[] = [
+        { id: 'env_pc_work' as never, label: 'pc / work', os: 'windows', roots: ['C:/Dev'], quota: quota('env_pc_work') },
+        { id: 'env_mac_work' as never, label: 'mac / work', os: 'darwin', roots: ['/Users/me'], quota: quota('env_mac_work') }
+    ];
+    const bound: AgentIdentity = { id: 'a3', name: 'Two', role: '', hue: 2, environment: { machine: 'any machine', runtime: 'claude-code', account: 'me@work' }, account: { identity: 'me@work' }, configVersion: 1 };
+    const on = (machineId: string, found: string | undefined): QuotaMachine => ({ machineId, machineName: machineId === 'm_pc' ? 'pc' : 'mac', accountEnvironment: () => found });
+    it("reads the account's environment on the chat's machine, else says it is not signed in there; a folder's environment still wins; without a machine an account-bound member has none to read", () => {
+        expect(memberQuota(bound, undefined, environments, on('m_pc', 'env_pc_work')).snapshot?.environmentId).toBe('env_pc_work');
+        expect(memberQuota(bound, undefined, environments, on('m_mac', 'env_mac_work')).snapshot?.environmentId).toBe('env_mac_work');
+        expect(memberQuota(bound, undefined, environments, on('m_pc', undefined))).toEqual({ note: 'Not signed in on pc' });
+        expect(memberQuota(bound, 'env_mac_work', environments, on('m_pc', 'env_pc_work')).snapshot?.environmentId).toBe('env_mac_work');
+        expect(memberQuota(bound, undefined, environments)).toEqual({ note: 'No machine chosen' });
+        // A pinned member and a platform one are as before.
+        expect(memberQuota({ ...bound, account: undefined, environmentId: 'env_mac_work' }, undefined, environments, on('m_pc', 'env_pc_work')).snapshot?.environmentId).toBe('env_mac_work');
+        expect(memberQuota(atlas, undefined, environments, on('m_pc', 'env_pc_work'))).toEqual({ note: NO_PLAN_LIMITS });
+    });
+});
+
+describe('configPatch (#414)', () => {
+    it('clears an account or a pin the form dropped by name, since a patch merges execution one level deep', () => {
+        const config = { ...fullConfig, execution: { runtime: 'claude-code', limits: {}, offlinePolicy: 'queue' as const } };
+        expect(configPatch(config as never).execution).toEqual({ runtime: 'claude-code', limits: {}, offlinePolicy: 'queue', account: null, defaultEnvironmentId: null });
+        const bound = { ...config, execution: { ...config.execution, account: { identity: 'me@work' } } };
+        expect(configPatch(bound as never).execution).toMatchObject({ account: { identity: 'me@work' }, defaultEnvironmentId: null });
     });
 });

@@ -25,7 +25,9 @@ export const LiveStartTask = component(() => {
         st.busy = true;
         st.error = '';
         try {
-            const { chatId } = await startTaskWith(defs, ws, input, agents.lookup);
+            // The machine (#414): the folder's when one was picked, else the one used last.
+            const machineId = (input.workdir ? workdirs.machineOf(input.workdir.environmentId) : undefined) ?? workdirs.lastMachineId();
+            const { chatId } = await startTaskWith(defs, ws, { ...input, machineId }, agents.lookup);
             closeStartTask();
             await router.push(`/chats/${chatId}`);
         } catch (e) {

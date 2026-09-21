@@ -11,7 +11,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { useRoute, useRouter } from '@sigx/router';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
-import { projectFolderFor, type AgentId, type EnvironmentId, type ProjectId, type ProjectRecord } from '@agentic/core';
+import { projectFolderFor, type AgentId, type EnvironmentId, type MachineId, type ProjectId, type ProjectRecord } from '@agentic/core';
 import { EmptyState } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
@@ -25,7 +25,8 @@ import { baselineReadMarks, loadReadMarks, readMarks } from './read-marks';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
 import { newProjectLink, type NewChatPrefill } from './new-chat-prefill';
 import { useProjects } from '../projects/live';
-import { useLiveWorkdirEnvironments } from '../workdir/environments';
+import { useLiveWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
+import type { AgentIdentity } from './live';
 
 interface ChatRead {
     readonly id: string;
@@ -140,9 +141,9 @@ export const LiveChatList = component<LiveChatListProps>(({ props, emit }) => {
     };
 });
 
-/** Create a chat with `agentIds` as members (all history), an optional coordinator and, in a project (#333), its id; resolves to the new id. */
-export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null, projectId: string | null = null): Promise<string> {
-    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat(projectId ? { projectId: projectId as ProjectId } : {});
+/** Create a chat with `agentIds` as members (all history), an optional coordinator, in a project (#333) and on a machine (#414) when named; resolves to the new id. */
+export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null, projectId: string | null = null, machineId: string | null = null): Promise<string> {
+    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({ ...(projectId ? { projectId: projectId as ProjectId } : {}), ...(machineId ? { machineId: machineId as MachineId } : {}) });
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     for (const id of agentIds) await chat.addAgent(id as AgentId, 'all');
     if (coordinator) await chat.setCoordinator(coordinator as AgentId);
@@ -152,19 +153,30 @@ export async function createChatWith(defs: ActorDefs, ws: string, agentIds: read
 /**
  * `createChatWith` from a prefilled opening (#336): a folder to save on the project goes through
  * `Workspace.upsertProject` first, so the chat inherits it; otherwise the folder is set on every picked member
- * that runs in that environment (`Chat.setWorkdir`, as "Start task" does for one agent) — unless the project's
- * folder there is already this one.
+ * that runs in that environment (`Chat.setWorkdir`, as "Start task" does for one agent) — where it runs on the
+ * chat's machine (#414: its account's environment there, else its pinned one) — unless the project's folder
+ * there is already this one.
  */
-export async function createChatFrom(defs: ActorDefs, ws: string, input: NewChatCreate, environmentOf: (agentId: string) => string | undefined, project?: Pick<ProjectRecord, 'folders'>): Promise<string> {
+export async function createChatFrom(defs: ActorDefs, ws: string, input: NewChatCreate, environmentOf: (agentId: string, machineId: string | null) => string | undefined, project?: Pick<ProjectRecord, 'folders'>): Promise<string> {
     const { workdir } = input;
     const environmentId = workdir?.environmentId as EnvironmentId;
     if (workdir?.saveToProject && input.projectId) await actor(defs.Workspace, workspaceKeyOf(ws)).upsertProject({ id: input.projectId as ProjectId, folders: { [environmentId]: workdir.path } });
-    const chatId = await createChatWith(defs, ws, input.agentIds, input.coordinator, input.projectId);
+    const chatId = await createChatWith(defs, ws, input.agentIds, input.coordinator, input.projectId, input.machineId);
     if (workdir && !workdir.saveToProject && !(project && projectFolderFor(project, environmentId) === workdir.path)) {
         const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
-        for (const id of input.agentIds) if (environmentOf(id) === workdir.environmentId) await chat.setWorkdir(id as AgentId, { environmentId, path: workdir.path });
+        for (const id of input.agentIds) if (environmentOf(id, input.machineId) === workdir.environmentId) await chat.setWorkdir(id as AgentId, { environmentId, path: workdir.path });
     }
     return chatId;
+}
+
+/** Where a member runs for `createChatFrom` (#414): its account's environment on the chat's machine, else its pin. */
+export function memberEnvironmentFor(lookup: (id: string) => Pick<AgentIdentity, 'environment' | 'environmentId' | 'account'>, workdirs: Pick<WorkdirEnvironments, 'accountEnvironment' | 'hosted'>): (agentId: string, machineId: string | null) => string | undefined {
+    return (agentId, machineId) => {
+        const a = lookup(agentId);
+        if (machineId && a.account) return workdirs.accountEnvironment(machineId, a.environment.runtime, a.account);
+        if (machineId && a.environmentId && !workdirs.hosted(machineId, a.environmentId)) return undefined;
+        return a.environmentId;
+    };
 }
 
 /** `/chats` on the platform: the list at full width plus the new-chat dialog. */
@@ -184,7 +196,7 @@ export const LiveChats = component(() => {
         if (!ws) return;
         st.busy = true;
         try {
-            const chatId = await createChatFrom(defs, ws, input, (id) => directory.lookup(id).environmentId, projects.byId(input.projectId));
+            const chatId = await createChatFrom(defs, ws, input, memberEnvironmentFor(directory.lookup, workdirs), projects.byId(input.projectId));
             // From the deep link (#336) the URL is replaced, so back never reopens it; the entry closes the dialog as it leaves.
             if (route.name === 'chat-new') await router.replace(`/chats/${chatId}`);
             else {
@@ -211,6 +223,8 @@ export const LiveChats = component(() => {
                 environments={workdirs.list()}
                 projects={projects.list()}
                 lastProjectId={projects.lastProjectId()}
+                machines={workdirs.machines()}
+                lastMachineId={workdirs.lastMachineId()}
                 {...(newChatRequest.prefill ? { prefill: newChatRequest.prefill } : {})}
                 busy={st.busy}
                 onCancel={closeNewChat}

@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import type { EnvironmentId, ProjectRecord, WorkdirRef } from '@agentic/core';
+import type { AccountRef, EnvironmentId, ProjectRecord, RuntimeId, WorkdirRef } from '@agentic/core';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { effectiveWorkdir } from '../projects/model';
@@ -30,6 +30,12 @@ export type ContextPanelProps =
     & Define.Prop<'machineOf', (environmentId: string) => string | undefined>
     /** The chat's project (#333): a member without its own folder runs in the project's folder for its environment. */
     & Define.Prop<'project', Pick<ProjectRecord, 'folders'>>
+    /** The name of the chat's machine (`chat.machineId`, #414), for the rows. */
+    & Define.Prop<'machineName', string>
+    /** Whether a machine reports an environment (#414): a member's folder on another machine reads stale. */
+    & Define.Prop<'hosted', (machineId: string, environmentId: string) => boolean>
+    /** The environment of an account on a machine (#414): where an account-bound member runs on the chat's machine, for its quota and its folder. */
+    & Define.Prop<'accountEnvironment', (machineId: string, runtime: RuntimeId, ref: AccountRef) => string | undefined>
     /** A member's folder for this chat was picked, or cleared with `null`. */
     & Define.Event<'setWorkdir', { readonly agentId: string; readonly ref: WorkdirRef | null }>
     /** "New session" confirmed for a member (#399): its session ends and the next message opens a fresh one; the chat's history stays. */
@@ -67,8 +73,14 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                     <ul data-members>
                         {props.chat.members.map((member) => {
                             const a = lookup(member.agentId);
+                            const machineId = props.chat.machineId;
+                            // Where it runs on the chat's machine (#414): its account's environment there (or its pin, when that machine reports it) — the project's folder is read for that one.
+                            const onMachine = machineId && a.environment.runtime !== 'anthropic-api' ? (a.account ? props.accountEnvironment?.(machineId, a.environment.runtime, a.account) : a.environmentId && props.hosted?.(machineId, a.environmentId) ? a.environmentId : undefined) : undefined;
+                            // A folder picked on another machine is stale there (#414): the activation leaves it aside, the project's folder or the first root applies.
+                            const stale = !!(member.workdir && machineId && props.hosted && !props.hosted(machineId, member.workdir.environmentId));
                             // The folder it runs in: its override for this chat, else the project's for its environment (#333).
-                            const folder = effectiveWorkdir(member, a.environmentId, props.project);
+                            const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
+                            const quota = memberQuota(a, folder.ref?.environmentId, props.environments ?? [], machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined);
                             return (
                                 <li data-member>
                                     <AgentTile name={a.name} hue={a.hue} size={28} />
@@ -76,8 +88,9 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     <span data-member-role>{a.role}</span>
                                     <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     <EnvironmentLine tone="muted" {...a.environment} />
-                                    {props.environments ? <span data-member-quota><QuotaBadge {...memberQuota(a, folder.ref?.environmentId, props.environments)} /></span> : null}
+                                    {props.environments ? <span data-member-quota><QuotaBadge {...quota} /></span> : null}
                                     <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
+                                    {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}. <button type="button" data-link-button data-member-workdir-clear onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}>Clear</button></span> : null}
                                     {props.environments && a.environment.runtime !== 'anthropic-api' ? (
                                         <span data-member-workdir data-inherited={folder.inherited ? '' : undefined}>
                                             <WorkdirField

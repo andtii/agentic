@@ -6,8 +6,8 @@
  * from the mock workspace, plus the patches a form submit persists. Nothing
  * here touches a hook or the DOM.
  */
-import { isTerminal, type AgentConfig, type AgentConfigVersion, type MemoryEntry } from '@agentic/core';
-import type { EnvironmentParts } from '@agentic/ui';
+import { isTerminal, type AccountEntry, type AgentConfig, type AgentConfigVersion, type MemoryEntry } from '@agentic/core';
+import type { AccountOption, EnvironmentParts } from '@agentic/ui';
 import type { AgentConfigPatch, AgentView, PendingProposal, TaskIndexRow } from '@agentic/platform';
 import type { AgentPresence, AgentProfile, SessionRow } from '../../mock/agents';
 import { identityOf } from '../chat/live';
@@ -50,9 +50,19 @@ export function configPatch(config: AgentConfig): AgentConfigPatch {
         connectors: config.connectors,
         approvalPolicy: config.approvalPolicy,
         memoryPolicy: config.memoryPolicy,
-        execution: config.execution,
+        // A patch merges `execution` one level deep, so an account or a pin the form dropped is cleared by name (#414).
+        execution: { ...config.execution, account: config.execution.account ?? null, defaultEnvironmentId: config.execution.defaultEnvironmentId ?? null },
         collaborators: config.collaborators
     };
+}
+
+/** The "Account" select's options (#414): one per login the machines report, labelled with where it is signed in. */
+export function accountOptions(accounts: readonly AccountEntry[], machineName: (machineId: string) => string): AccountOption[] {
+    return accounts.map((a) => ({
+        value: a.key,
+        runtime: a.runtime,
+        label: `${a.label}${a.identity && a.identity !== a.label ? ` (${a.identity})` : ''} — on ${[...new Set(a.environments.map((e) => machineName(e.machineId)))].join(', ')}`
+    }));
 }
 
 /** What the other actors say about an agent (#153); everything absent reads as idle / empty / zero. */

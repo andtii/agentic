@@ -161,6 +161,7 @@ export const LiveSchedules = component(() => {
                     busy={st.busy}
                     workdirs={workdirs}
                     projects={projects.list().map((p) => ({ value: p.id, label: p.name }))}
+                    machines={workdirs.machines().map((m) => ({ value: m.id, label: m.online ? m.name : `${m.name} (offline)` }))}
                     onCancel={closeNewSchedule}
                     onCreate={(input) => { void create(input); }}
                 />

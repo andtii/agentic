@@ -16,6 +16,8 @@ export type NewScheduleDialogProps =
     & Define.Prop<'workdirs', WorkdirEnvironments>
     /** The workspace's projects (#333): a third, exclusive way to say where an agent task runs; absent or empty, no option. */
     & Define.Prop<'projects', readonly { value: string; label: string }[]>
+    /** The paired machines (#414): "Machine" beside Environment, exclusive with it, compatible with a project. */
+    & Define.Prop<'machines', readonly { value: string; label: string }[]>
     & Define.Event<'create', NewScheduleInput>
     & Define.Event<'cancel'>;
 
@@ -37,18 +39,28 @@ type PlaceMode = 'environment' | 'project';
  * a field missing keeps the dialog open with the field marked.
  */
 export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emit }) => {
-    const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean; mode: PlaceMode; sync: 'none' | 'folder' }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', projectId: '', prompt: '', attempted: false, mode: 'environment', sync: 'none' });
-    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, workdir: st.workdir, projectId: st.projectId, prompt: st.prompt });
+    const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean; mode: PlaceMode; sync: 'none' | 'folder' }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', projectId: '', machineId: '', prompt: '', attempted: false, mode: 'environment', sync: 'none' });
+    const input = (): NewScheduleInput => ({ kind: st.kind, title: st.title, at: st.at, cron: st.cron, agentId: st.agentId, environmentId: st.environmentId, workdir: st.workdir, projectId: st.projectId, machineId: st.machineId, prompt: st.prompt });
     // A folder belongs to its environment: choosing another one in the select drops it — unless the folder picker itself set the environment (`sync`).
     watch(() => st.environmentId, () => { if (st.sync === 'folder') st.sync = 'none'; else st.workdir = ''; });
     // A project is exclusive with the environment and the folder (the actor refuses both): picking one clears them and the fields disable.
     watch(() => st.projectId, (id) => {
-        st.mode = id ? 'project' : 'environment';
+        st.mode = id || st.machineId ? 'project' : 'environment';
         if (id) {
             st.environmentId = '';
             st.workdir = '';
         }
     });
+    // A machine names where the work runs (#414): exclusive with the environment and the folder too; a project may ride along.
+    watch(() => st.machineId, (id) => {
+        st.mode = id || st.projectId ? 'project' : 'environment';
+        if (id) {
+            st.environmentId = '';
+            st.workdir = '';
+        }
+    });
+    // An environment names its machine already: picking one drops the machine.
+    watch(() => st.environmentId, (id) => { if (id && st.machineId) st.machineId = ''; });
     return () => {
         const errors: NewScheduleErrors = st.attempted ? validateNewSchedule(input(), props.timeZone) : {};
         const inProject = st.mode === 'project';
@@ -79,7 +91,10 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
                             {props.projects?.length ? (
                                 <SelectField model={() => st.projectId} name="schedule-project" label="Project" options={[{ value: '', label: 'No project' }, ...props.projects]} description="In a project, each run works in the project's folder on the environment it lands on." />
                             ) : null}
-                            <SelectField model={() => st.environmentId} name="schedule-environment" label="Environment" options={[{ value: '', label: 'platform (no machine needed)' }, ...props.environments]} disabled={inProject} description={inProject ? 'The project says where the work lives.' : 'An offline machine queues the task until it returns.'} />
+                            {props.machines?.length ? (
+                                <SelectField model={() => st.machineId} name="schedule-machine" label="Machine" options={[{ value: '', label: 'No particular machine' }, ...props.machines]} description="Each run goes to this machine, under the agent's account there." />
+                            ) : null}
+                            <SelectField model={() => st.environmentId} name="schedule-environment" label="Environment" options={[{ value: '', label: 'platform (no machine needed)' }, ...props.environments]} disabled={inProject} description={inProject ? (st.machineId ? 'The machine says where the work runs.' : 'The project says where the work lives.') : 'An offline machine queues the task until it returns.'} />
                             {props.workdirs ? (
                                 <WorkdirInput
                                     value={st.workdir && st.environmentId ? { environmentId: st.environmentId as EnvironmentId, path: st.workdir } : null}

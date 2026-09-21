@@ -2,6 +2,7 @@ import { component, signal, type Define } from 'sigx';
 import { ConfirmDialog } from '@agentic/ui';
 import type { MockChatMember } from '../../mock/workspace';
 import type { AgentLookup } from './live';
+import type { MachineEntry } from '../ops/environments';
 
 /** What the dialog's confirm asks for — only what changed. */
 export interface ChatSettingsChange {
@@ -11,6 +12,8 @@ export interface ChatSettingsChange {
     readonly coordinator?: string | null;
     /** Members to remove (`Chat.removeAgent`). */
     readonly remove: readonly string[];
+    /** The machine the chat runs on from now (`Chat.setMachine`, #414), or `null` for none; absent when unchanged. */
+    readonly machineId?: string | null;
 }
 
 export type ChatSettingsDialogProps =
@@ -19,6 +22,9 @@ export type ChatSettingsDialogProps =
     & Define.Prop<'title', string, true>
     & Define.Prop<'members', readonly MockChatMember[], true>
     & Define.Prop<'lookup', AgentLookup, true>
+    /** The chat's machine (`ChatSummary.machineId`, #414), `''` for none; with `machines`, the dialog offers a change. */
+    & Define.Prop<'machineId', string>
+    & Define.Prop<'machines', readonly MachineEntry[]>
     & Define.Prop<'busy', boolean>
     & Define.Event<'save', ChatSettingsChange>
     & Define.Event<'cancel'>;
@@ -29,14 +35,16 @@ export type ChatSettingsDialogProps =
  * leaves the chat without one (`Chat.removeAgent`), so that alone is not a
  * coordinator change; the page removes first, then names the coordinator.
  */
-export function settingsChange(current: { title: string; coordinator: string | null }, form: { title: string; coordinator: string; remove: readonly string[] }): ChatSettingsChange {
+export function settingsChange(current: { title: string; coordinator: string | null; machineId?: string }, form: { title: string; coordinator: string; remove: readonly string[]; machineId?: string }): ChatSettingsChange {
     const title = form.title.replace(/\s+/g, ' ').trim();
     const after = current.coordinator !== null && form.remove.includes(current.coordinator) ? null : current.coordinator;
     const wanted = form.coordinator && !form.remove.includes(form.coordinator) ? form.coordinator : null;
+    const machine = form.machineId === undefined || form.machineId === (current.machineId ?? '') ? undefined : form.machineId || null;
     return {
         ...(title && title !== current.title ? { title } : {}),
         ...(wanted !== after ? { coordinator: wanted } : {}),
-        remove: form.remove
+        remove: form.remove,
+        ...(machine !== undefined ? { machineId: machine } : {})
     };
 }
 
@@ -48,7 +56,8 @@ export function settingsChange(current: { title: string; coordinator: string | n
  */
 export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, emit }) => {
     const coordinatorOf = (): string => props.members.find((m) => m.coordinator)?.agentId ?? '';
-    const st = signal({ title: props.title, coordinator: coordinatorOf(), remove: [] as string[] });
+    const st = signal({ title: props.title, coordinator: coordinatorOf(), remove: [] as string[], machineId: props.machineId ?? '' });
+    const machineChanged = (): boolean => st.machineId !== (props.machineId ?? '');
     const toggle = (id: string, on: boolean): void => {
         st.remove = on ? [...new Set([...st.remove, id])] : st.remove.filter((r) => r !== id);
     };
@@ -56,11 +65,11 @@ export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, e
         <ConfirmDialog
             model={props.model}
             title="Chat settings"
-            description="Rename the chat, choose who answers when nobody is mentioned, or take an agent out of it."
+            description="Rename the chat, choose who answers when nobody is mentioned, move it to another machine, or take an agent out of it."
             confirmLabel="Save settings"
             danger={false}
             busy={props.busy}
-            onConfirm={() => emit('save', settingsChange({ title: props.title, coordinator: coordinatorOf() || null }, st))}
+            onConfirm={() => emit('save', settingsChange({ title: props.title, coordinator: coordinatorOf() || null, machineId: props.machineId ?? '' }, st))}
             onCancel={() => emit('cancel')}
         >
             <label data-new-chat-coordinator data-chat-settings-title>
@@ -74,6 +83,16 @@ export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, e
                     {props.members.filter((m) => !st.remove.includes(m.agentId)).map((m) => <option value={m.agentId}>{props.lookup(m.agentId).name}</option>)}
                 </select>
             </label>
+            {props.machines?.length ? (
+                <label data-new-chat-coordinator data-chat-settings-machine>
+                    <span>Machine</span>
+                    <select data-scope="select" data-part="select" value={st.machineId} onChange={(e: Event) => { st.machineId = (e.target as HTMLSelectElement).value; }}>
+                        <option value="">No particular machine</option>
+                        {props.machines.map((m) => <option value={m.id}>{m.name}{m.online ? '' : ' (offline)'}</option>)}
+                    </select>
+                    {machineChanged() ? <span data-chat-settings-machine-note role="status">Each member starts a fresh session {st.machineId ? `on ${props.machines.find((m) => m.id === st.machineId)?.name ?? st.machineId}` : 'where it runs next'} at its next message; work in flight finishes where it runs; the chat's history stays.</span> : null}
+                </label>
+            ) : null}
             <fieldset data-new-chat-members data-chat-settings-remove>
                 <legend>Remove from this chat</legend>
                 {props.members.length ? props.members.map((m) => {

@@ -8,7 +8,7 @@
  * replace the body of each loader with actor reads; the pages keep the
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
-import type { AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
+import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
@@ -26,6 +26,8 @@ export interface MockAgentIdentity {
     /** Where this agent's sessions run (EXE-06: all three parts, always). */
     readonly environment: EnvironmentParts;
     readonly environmentId: EnvironmentId;
+    /** The account it runs as across machines (#414); the sample agents are pinned, so none carries one. */
+    readonly account?: AccountRef;
     readonly configVersion: number;
 }
 
@@ -187,6 +189,8 @@ export interface MockChatSummary {
     readonly updatedAt: number;
     /** The project the chat belongs to (#333, `Chat.setProject`); absent when it is in none. */
     readonly projectId?: string;
+    /** The machine the chat runs on (#414, `Chat.setMachine`); absent when it names none. */
+    readonly machineId?: string;
 }
 
 // ---- projects (#333) ------------------------------------------------------

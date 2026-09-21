@@ -5,7 +5,7 @@
  * form submit persists. Nothing here touches a hook or the DOM, and
  * nothing of `@agentic/platform` is imported at runtime.
  */
-import type { AgentId, EnvironmentId, ProjectId, RuntimeId } from '@agentic/core';
+import type { AgentId, EnvironmentId, MachineId, ProjectId, RuntimeId } from '@agentic/core';
 import type { ConnectorRecord, Dependents, PluginView, ScheduleSpec, ScheduleView, SettingsPatch, WorkspaceOpRecord, WorkspaceSettings } from '@agentic/platform';
 import type { OpsSchedule, ScheduleKind } from '../../mock/ops';
 
@@ -115,6 +115,8 @@ export interface NewScheduleInput {
     readonly workdir?: string;
     /** `agent-task`: the project the task belongs to (#333) — the router picks its folder per environment; exclusive with `environmentId` / `workdir`. `''` = none. */
     readonly projectId?: string;
+    /** `agent-task`: the machine each run runs on (#414) — the router resolves the agent's account there; exclusive with `environmentId` / `workdir`. `''` = none. */
+    readonly machineId?: string;
     readonly prompt: string;
 }
 
@@ -144,9 +146,11 @@ export function newScheduleSpec(input: NewScheduleInput, tz: string): ScheduleSp
         ...(input.kind === 'agent-task'
             ? {
                   agentId: input.agentId as AgentId,
-                  // A project says where the work lives (#333): then no environment or folder of its own.
-                  ...(input.projectId
-                      ? { projectId: input.projectId as ProjectId }
+                  // A project says where the work lives (#333), a machine where it runs (#414): either way no environment or folder of its own.
+                  ...(input.projectId ? { projectId: input.projectId as ProjectId } : {}),
+                  ...(input.machineId ? { machineId: input.machineId as MachineId } : {}),
+                  ...(input.projectId || input.machineId
+                      ? {}
                       : {
                             ...(input.environmentId ? { environmentId: input.environmentId as EnvironmentId } : {}),
                             // A folder only means something in its environment.

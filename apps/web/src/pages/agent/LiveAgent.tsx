@@ -35,7 +35,7 @@ import { useAgentActivity } from './activity';
 import { useAgentCatalog } from './catalog';
 import { ConfigTab, type ConfigStore } from './ConfigTab';
 import { agentHead } from './head';
-import { configPatch, learningPatch, profileOf, sessionRowsOf } from './live';
+import { accountOptions, configPatch, learningPatch, profileOf, sessionRowsOf } from './live';
 import { MemoryTab, type MemoryTabStore } from './MemoryTab';
 import { OverviewTab } from './OverviewTab';
 import { SessionsTab } from './SessionsTab';
@@ -113,7 +113,8 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
         st.starting = true;
         st.error = '';
         try {
-            const chatId = await createChatWith(defs, ws, [props.id], null);
+            // On the machine used last (#414), as New chat would preselect it; an account-bound agent needs one.
+            const chatId = await createChatWith(defs, ws, [props.id], null, null, workdirs.lastMachineId());
             await router.push(`/chats/${chatId}`);
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
@@ -175,7 +176,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value="overview"><OverviewTab profile={profile} agent={agent} sessions={sessions} zone={zone()} /></Tabs.Panel>
-                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} catalog={catalog(v.config)} workdirs={workdirs} /></Tabs.Panel>
+                    <Tabs.Panel value="config"><ConfigTab profile={profile} store={store} collaborators={collaborators} environments={environments.options()} accounts={accountOptions(workdirs.accounts(), (id) => workdirs.machines().find((m) => m.id === id)?.name ?? id)} catalog={catalog(v.config)} workdirs={workdirs} /></Tabs.Panel>
                     <Tabs.Panel value="memory"><MemoryTab profile={profile} store={memoryStore} zone={zone()} source={activity.memory.name()} /></Tabs.Panel>
                     <Tabs.Panel value="sessions"><SessionsTab agentId={id} rows={sessions} agent={{ name: agent.name, hue: profile.hue }} zone={zone()} /></Tabs.Panel>
                 </Tabs>
