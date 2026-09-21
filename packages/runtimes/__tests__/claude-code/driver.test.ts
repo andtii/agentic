@@ -49,13 +49,13 @@ describe('claudeCodeDriver', () => {
         await expect(driver.open(other, spec(), ctx())).rejects.toThrow(/runs "anthropic-api"/);
     });
 
-    it('maps the spec onto the query: config dir, no setting sources, preset + platform system, cwd, limits, model', async () => {
+    it('maps the spec onto the query: config dir, project setting sources, preset + platform system, cwd, limits, model', async () => {
         const { driver, fake } = driverWith(hello);
         const { session } = await driver.open(envA, spec({ model: 'claude-opus-5', maxTurns: 7, maxBudgetUsd: 2.5 }), ctx());
         await drain(session.prompt('Hello'));
         const opts = fake.calls[0]!;
         expect(opts.cwd).toBe('C:\\src\\app');
-        expect(opts.settingSources).toEqual([]);
+        expect(opts.settingSources).toEqual(['project']);
         expect(opts.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'You are Ada.' });
         expect(opts.model).toBe('claude-opus-5');
         expect(opts.maxTurns).toBe(7);

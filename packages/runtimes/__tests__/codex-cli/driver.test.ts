@@ -57,6 +57,9 @@ describe('codexCliDriver', () => {
         expect(start).toMatchObject({ cwd: 'C:\\work\\repo', model: 'gpt-5.5', approvalPolicy: 'on-request', sandbox: 'workspace-write' });
         expect(start.developerInstructions).toContain(`${PLATFORM_MEMORY_HEADING}\n\n${CODEX_PLATFORM_MEMORY_NOTE}`);
         expect(start.developerInstructions).toContain(memoryEntry.text);
+        // Codex's own AGENTS.md discovery stays on: no base-instructions override, no config beyond the MCP server (#461).
+        expect(start.baseInstructions).toBeUndefined();
+        expect(Object.keys(start.config as object)).toEqual(['mcp_servers']);
         const mcp = (start.config as { mcp_servers: { agentic: { url: string; http_headers: Record<string, string> } } }).mcp_servers.agentic;
         expect(mcp.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
         expect(mcp.http_headers.Authorization).toMatch(/^Bearer [0-9a-f]{64}$/);

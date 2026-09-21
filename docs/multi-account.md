@@ -20,7 +20,7 @@ One **environment** = one account = one Claude Code config dir.
   request can never name one, and a changed environment keeps its own.
   The daemon's Claude Code driver (`@agentic/runtimes/claude-code`) runs one
   `claudeCode()` agent per environment with `CLAUDE_CONFIG_DIR = profileDir`,
-  `settingSources: []`, and a child environment from which the daemon's own
+  `settingSources: ['project']` (the folder's own `CLAUDE.md` and project settings, never the operator's `~/.claude`), and a child environment from which the daemon's own
   `CLAUDE_CONFIG_DIR` and every `ANTHROPIC_*` variable are removed. A child
   process can therefore only ever see its own profile: the CLI reads
   `<profileDir>/.credentials.json` (OAuth tokens) and `<profileDir>/.claude.json`
