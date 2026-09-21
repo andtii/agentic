@@ -2,11 +2,12 @@
  * The update drain through the router (#365; EXE-09, EXE-11): while an update is pending a new task's session still
  * opens, but its prompt parks `waiting-capacity`; the `hello` on the new version ends the drain and the parked task
  * runs. The in-process host of `routing/capacity.test.ts` — Routing + Task + Agent + Session + Chat + Machine over an
- * in-memory daemon — with the daemon's build told in a `hello` of the test's own (the harness reports none).
+ * in-memory daemon, which reports `IN_MEMORY_BUILD` and fakes the update's phases; the `hello` it would send as the new
+ * build is the test's own.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { actorKey, type AgentId, type ChatId, type EnvironmentId, type MachineId, type MessageId, type Principal, type PromptPart, type ReleaseManifest, type TaskId, type WorkspaceId } from '@agentic/core';
-import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
+import { IN_MEMORY_BUILD, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 
 import { AgentActor, agentKey } from '../../src/agent/index';
 import { AuditActor, auditKey } from '../../src/audit/index';
@@ -106,7 +107,7 @@ async function message(chatId: ChatId, assignee: AgentId, text: string, id: stri
     return routing().run(id as TaskId);
 }
 
-/** Pair a machine, connect an in-memory daemon, and tell the machine the daemon's build (`version`) and `update` feature. */
+/** Pair a machine and connect an in-memory daemon (its own `hello` reports `IN_MEMORY_BUILD` and the `update` feature); `hello(version)` is the daemon back on another build. */
 async function pairMachine(): Promise<{ machineId: MachineId; hello: (version: string) => Promise<unknown> }> {
     const { machineId, pairingCode } = await app.as(owner).actor(Workspace, workspaceKey(WS)).registerMachinePending({ name: 'laptop' });
     await machine(machineId).pair(pairingCode, { name: 'laptop' });
@@ -128,9 +129,9 @@ async function pairMachine(): Promise<{ machineId: MachineId; hello: (version: s
     await until(async () => (await machine(machineId).get()).online, 'online');
     const hello = (version: string) =>
         asDaemon.socketMessage(
-            JSON.stringify({ v: 1, t: 'hello', machineId, daemonVersion: version, os: 'linux', environments, capabilities: [], resume: {}, build: { version, commit: 'abc1234', protocol: 1, channel: 'stable', platform: 'linux-x64' }, features: ['update'] })
+            JSON.stringify({ v: 1, t: 'hello', machineId, daemonVersion: version, os: 'linux', environments, capabilities: [], resume: {}, build: { ...IN_MEMORY_BUILD, version }, features: ['update', 'harness'] })
         );
-    await hello('0.1.0');
+    await until(async () => (await machine(machineId).updateState()).available?.version === '0.2.0', 'the release available');
     return { machineId, hello };
 }
 
@@ -143,6 +144,9 @@ describe('the update drain through the router (#365)', () => {
 
         const { requestId } = await machine(machineId).requestUpdate();
         expect(sockets.frames(machineKey(WS, machineId), 'update.request')[0]).toMatchObject({ requestId, target: { version: '0.2.0', url: 'https://example.test/0.2.0/agentic-daemon-linux-x64.zip' } });
+        // The fake stages the update and, with no turn running, restarts at once; the platform keeps draining until the next hello.
+        await until(async () => (await machine(machineId).updateState()).pending?.phase === 'restarting', 'the update restarting');
+        expect((await machine(machineId).updateState()).pending).toMatchObject({ from: IN_MEMORY_BUILD.version, target: '0.2.0' });
 
         const t = await message(chatId, cc, 'build it', 't_1');
         await until(async () => (await routing().get()).routes.find((r) => r.taskId === 't_1')?.status === 'waiting-capacity', 'the route parked on capacity');
