@@ -272,6 +272,7 @@ interface SessionClient {
     forwardFrames(frames: readonly WireFrame[]): Promise<void>;
     commandReplied(reply: WireReply): Promise<void>;
     noteRef(ref: SessionRef): Promise<void>;
+    hostEnded(ended: { readonly reason: string; readonly code?: string }): Promise<void>;
 }
 
 /** The Routing actor's machine-facing entry points (`defineRoutingActor`). */
@@ -428,7 +429,11 @@ export function defineMachineActor(ports: MachinePorts) {
                 s.queued = keep;
             }
 
-            /** Forget a hosted or queued session; answer its open commands with `closed`. */
+            /**
+             * Forget a hosted or queued session; answer its open commands with `closed`. A session the daemon had opened is
+             * handed to its record first (#420, `Session.hostEnded`): a turn still running there is interrupted — never left
+             * `running` for a session nobody hosts — and the record waits `idle` for a re-open. Before the router hears it.
+             */
             async function sessionGone(sessionId: SessionId, reason: string): Promise<void> {
                 const s = ctx.state;
                 const hosted = s.activeSessions[sessionId];
@@ -441,6 +446,14 @@ export function defineMachineActor(ports: MachinePorts) {
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
                 const known = wasHosted || s.queued.length !== before;
                 if (known) record({ sessionId, reason, at: now() });
+                if (hosted?.status === 'open') {
+                    try {
+                        await session(sessionId)?.hostEnded({ reason });
+                    } catch (e) {
+                        // The record's word, never the socket's: a refusal or a failure here must not take the daemon's connection down.
+                        console.warn(`[machine] session ${sessionId} of ${ctx.key} could not be told its host ended (${reason}): ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                }
                 if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId));
                 for (const [key, p] of Object.entries(s.pending)) {
                     if (p.sessionId !== sessionId) continue;

@@ -20,8 +20,9 @@ import type { RegistryGate } from '../registry/types.js';
  * - `waiting-answer`: a chat route's turn ended with its `ask_user` question still open (#396; the call answered
  *   `pending`) — the task stays `waiting {input}` and nothing follows the route until `deliverAnswer` prompts the
  *   session with the answer, under this same task.
- * - `interrupted`: the turn was cut short by an eviction (OPS-05) — the task waits `{input, resume:{turnId}}`
- *   for a person's `resume`, which re-prompts the session and puts the route back to `running`.
+ * - `interrupted`: the turn was cut short — by an eviction (OPS-05), or by its machine no longer hosting the session
+ *   (#420: a daemon restart) — the task waits `{input, resume:{turnId}}` for a person's `resume`, which re-prompts the
+ *   session and puts the route back to `running`; a session the machine lost is re-opened first (`rehosting`).
  */
 export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'waiting-turn' | 'running' | 'waiting-answer' | 'interrupted';
 
@@ -91,6 +92,12 @@ export interface Route {
      * stays, so `follow` keeps waiting for the same `turn-end`.
      */
     attempt?: number;
+    /**
+     * While `interrupted` (#420): `resume` re-opened the session on its machine — the record's spec, the ref as
+     * `spec.resume` — and the prompt goes out when the daemon acknowledges it (`sessionOpened`). A daemon that closes
+     * it instead sends the task to a fresh session (`sessionClosed`).
+     */
+    rehosting?: boolean;
     /** While `waiting-answer` (#396): the platform request the turn left open — the question this task waits an answer to. */
     question?: string;
     /** While `waiting-turn` after a `deliverAnswer` (#396): the answer to send when the turn ends, in place of the task's own input. */

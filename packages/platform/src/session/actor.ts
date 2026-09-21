@@ -163,11 +163,19 @@ export interface CorrectionResult {
 
 /** The `error.code` an interrupted turn ends with; `error.data.interrupted` and `isInterruptedTurnEnd` name it exactly. */
 export const INTERRUPTED_CODE = 'process_exited' as const;
-export const INTERRUPTED_MESSAGE = 'interrupted: the session was evicted mid-turn; nothing was re-run';
+/** How every interrupted turn's message starts: `interrupted: {why}` — an eviction's, or the host's reason (#420). */
+export const INTERRUPTED_PREFIX = 'interrupted: ';
+export const INTERRUPTED_MESSAGE = `${INTERRUPTED_PREFIX}the session was evicted mid-turn; nothing was re-run`;
 
-/** The `turn-end` a resumed driver writes for a turn the eviction cut short. */
+/** The `turn-end` the platform writes for a turn cut short: by an eviction, or by its host going away (`hostEnded`, #420). */
 export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
-    return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && ev.error.message === INTERRUPTED_MESSAGE;
+    return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && !!ev.error.message?.startsWith(INTERRUPTED_PREFIX);
+}
+
+/** What `Session.hostEnded` is told (#420): the machine no longer hosts the session. `code` is the daemon's close code (#359 narrows it). */
+export interface HostEnded {
+    readonly reason: string;
+    readonly code?: string;
 }
 
 /**
@@ -850,11 +858,13 @@ export function defineSessionActor(ports: SessionPorts) {
     }
 
     /**
-     * A turn the eviction cut short: close what is open (calls, requests),
-     * end the turn with the interrupted error and settle the session state
-     * — stamped in the epoch the events were in, gapless after the head.
+     * A turn cut short — by an eviction, or by its host going away (`hostEnded`, #420): close what is open (calls,
+     * requests), end the turn with the interrupted error and settle the session state. A local turn is stamped in the
+     * epoch the events were in, gapless after the head. A remote one is stamped the way a platform-raised request is
+     * (`platformCursor`, fractional): the daemon may hold events past the head that never arrived, and a session it
+     * re-opens goes on from its own cursor — an integer stamp here could shadow either.
      */
-    async function finishInterrupted(c: ActorContext<SessionState>, turnId: string): Promise<void> {
+    async function finishInterrupted(c: ActorContext<SessionState>, turnId: string, cut: { readonly message: string; readonly data?: Readonly<Record<string, unknown>> } = { message: INTERRUPTED_MESSAGE }): Promise<void> {
         const s = c.state;
         const run = s.running;
         if (!run || run.turnId !== turnId) return;
@@ -863,26 +873,28 @@ export function defineSessionActor(ports: SessionPorts) {
         const sessionId = sessionIdOf(c);
         const epoch = Math.max(1, s.head.epoch);
         let seq = s.head.epoch === 0 ? 0 : s.head.seq;
-        const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, epoch, seq: ++seq });
+        const stamp = (): EventCursor => (s.mode === 'remote' ? platformCursor(s.head) : { epoch, seq: ++seq });
+        const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, ...stamp() });
+        const { message } = cut;
         const before = await snapshotTranscript(c);
         if (!findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId)) await emit({ type: 'turn-start', turnId, input });
         for (const m of before.messages) {
             if (m.turnId !== turnId) continue;
             for (const p of m.parts) {
                 if (p.type === 'tool' && (p.status === 'pending' || p.status === 'in_progress')) {
-                    await emit({ type: 'tool-update', turnId, ...(m.parentCallId ? { parentCallId: m.parentCallId } : {}), callId: p.callId, status: 'cancelled', error: INTERRUPTED_MESSAGE });
+                    await emit({ type: 'tool-update', turnId, ...(m.parentCallId ? { parentCallId: m.parentCallId } : {}), callId: p.callId, status: 'cancelled', error: message });
                 }
             }
         }
         for (const r of Object.values(before.requests)) {
             // A detached question outlives its turn (#285): its answer starts the asker again.
             if (r.turnId !== turnId || s.detachedRequests?.includes(r.requestId)) continue;
-            await emit({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: INTERRUPTED_MESSAGE, at: now() });
+            await emit({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: message, at: now() });
         }
-        await emit({ type: 'error', turnId, code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE, recoverable: true, data: { interrupted: true } });
+        await emit({ type: 'error', turnId, code: INTERRUPTED_CODE, message, recoverable: true, data: { ...cut.data, interrupted: true } });
         // The session settles before the turn closes, so the `turn-end` is the last word — what a resumer reads first.
         if (s.status !== 'closed') await emit({ type: 'state', value: 'idle' });
-        await emit({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message: INTERRUPTED_MESSAGE } });
+        await emit({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message } });
         await finishTurn(c, turnId, taskId);
         await publishChat(c, { kind: 'status', status: 'task', ref: `interrupted:${turnId}` });
     }
@@ -890,7 +902,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, noteRef: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, noteRef: internalPolicy, hostEnded: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
@@ -1310,6 +1322,27 @@ export function defineSessionActor(ports: SessionPorts) {
                     const s = ctx.state;
                     if (s.ref && sameRefIdentity(s.ref, ref)) return;
                     await appendEntry(ctx, set({ ref: ctx.snapshot(ref) }));
+                },
+
+                /**
+                 * Daemon path (internal, #420): the machine no longer hosts this session — its daemon closed it, or came
+                 * back from a restart without it. A turn still running is cut short as an eviction's is (`interrupted:
+                 * {reason}`, `data.host` the close code): the chat hears `interrupted:{turnId}` and the router parks the
+                 * task on `resume:{turnId}`. The record then waits `idle` with its `opened`, `spec` and `ref`, so the next
+                 * activation — a message, or `resume` — re-opens it on the machine with the ref as `spec.resume` (#393).
+                 * A record whose runtime never named it has nothing to resume from: it is `closed`. Idempotent.
+                 */
+                async hostEnded(ended: HostEnded): Promise<void> {
+                    assertHostingMachine();
+                    const s = ctx.state;
+                    if (s.status === 'closed') return;
+                    if (s.running) await finishInterrupted(ctx, s.running.turnId, { message: `${INTERRUPTED_PREFIX}${ended.reason}`, data: { host: ended.code ?? 'closed' } });
+                    if (!s.ref) {
+                        await appendEntry(ctx, set({ status: 'closed', closedAt: now() }));
+                        await publishChat(ctx, { kind: 'status', status: 'session-ended' });
+                        return;
+                    }
+                    if (s.status !== 'idle') await appendEntry(ctx, set({ status: 'idle' }));
                 }
             };
         },
