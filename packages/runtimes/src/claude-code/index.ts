@@ -6,6 +6,7 @@
 
 export type { ClaudeCodeDriver, ClaudeCodeDriverOptions } from './driver.js';
 export { claudeCodeDriver, withoutCrossSessionTools, CROSS_SESSION_TOOLS } from './driver.js';
+export { EXIT_PLAN_MODE_TOOL, withPlanReview } from './plan.js';
 export type { ProfileAuth, ProfileAuthDeps } from './auth.js';
 export { readProfileAuth } from './auth.js';
 export type { DoctorInput } from './doctor.js';

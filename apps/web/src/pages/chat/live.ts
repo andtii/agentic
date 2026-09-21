@@ -8,7 +8,7 @@
  */
 import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
-import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
+import { createTranscript, type AgentCapabilities, type AgentEvent, type Decision } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
@@ -770,6 +770,26 @@ export function activationContract(agentId: AgentId, chatId: ChatId, messageId: 
     // The chat's project rides along (#333): the router resolves its folder for the environment unless the member has its own.
     // So does its machine (#414): the router resolves the member's account there — and leaves a folder aside whose environment that machine does not report.
     return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}), ...(projectId ? { projectId } : {}), ...(machineId ? { machineId } : {}) };
+}
+
+/** What answering a request reaches (#454): the member's session, and the chat's member options. */
+export interface AnswerPorts {
+    respond(requestId: string, decision: Decision): Promise<unknown>;
+    setOptions(agentId: string, patch: { readonly permissionMode: string }): Promise<unknown>;
+    configure(patch: Readonly<Record<string, string>>): Promise<unknown>;
+}
+
+/**
+ * Answer a request; an approved plan (#454, `RespondOptions.permissionMode`) then leaves plan mode for good: the mode
+ * becomes the member's for this chat (so its next turns keep it) and the session switches now — the CLI is waiting on
+ * this very answer, the one case a mode changes inside a running turn. A deny ("Keep planning") changes nothing.
+ */
+export async function answerRequest(ports: AnswerPorts, agentId: string, requestId: string, decision: Decision, options?: { readonly permissionMode?: string }): Promise<void> {
+    await ports.respond(requestId, decision);
+    const mode = options?.permissionMode;
+    if (!mode || decision.type !== 'permission' || decision.outcome !== 'allow') return;
+    await ports.setOptions(agentId, { permissionMode: mode });
+    await ports.configure({ permissionMode: mode });
 }
 
 /**

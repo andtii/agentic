@@ -39,7 +39,7 @@ import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type MachineId, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { IndexedEntry } from '@agentic/platform';
 import type { Decision } from '@sigx/ai-agent';
-import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor } from '@agentic/ui';
+import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -54,7 +54,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
@@ -273,10 +273,22 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         void send(last.entry.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''), last.entry.parts.filter(isChatFilePart));
     };
 
-    const respond = (requestId: string, decision: Decision): void => {
+    const respond = (requestId: string, decision: Decision, options?: RespondOptions): void => {
         const feed = feeds.list.find((f) => f.transcript.requests[requestId]);
         if (!feed) return;
-        void session(feed.sessionId).respond(requestId, decision).catch(fail);
+        const k = key();
+        const client = session(feed.sessionId);
+        void answerRequest(
+            {
+                respond: (id, d) => client.respond(id, d),
+                setOptions: (agentId, patch) => (k ? actor(defs.Chat, k).setOptions(agentId as AgentId, patch) : Promise.resolve()),
+                configure: (patch) => client.configure(patch)
+            },
+            feed.agentId,
+            requestId,
+            decision,
+            options
+        ).catch(fail);
     };
 
     /** A member's model or permission mode for this chat (#453): its next turn runs with it; a running turn keeps its own. */
