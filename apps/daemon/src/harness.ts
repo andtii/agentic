@@ -15,6 +15,12 @@
  * `manifest.json` into `<version>/` beside the current one; `activate` switches `current.json`; `prune` removes the
  * others. The daemon drains the runtime between the two (`daemon.ts`, `harness.request`), the CLI does not
  * (`harness-cli.ts`): a running daemon takes a version installed from the terminal on its next start.
+ *
+ * `selection.json { runtimes }` records which harnesses the machine wants (the installers write it, `harness install`
+ * / `rm` add and remove); a missing file — a machine installed before it existed — selects every built-in runtime. A
+ * daemon starting under an install root installs a selected harness that is not there (`daemon.ts`, the heal), so an
+ * update from a build that bundled the runtimes does not strand the machine; a failure is kept in `failures.json`
+ * for `doctor` and retried on the next start.
  */
 
 import type { HarnessPhase, HarnessReport, ReleaseAsset, ReleaseManifest } from '@agentic/core';
@@ -156,6 +162,20 @@ export interface HarnessStore extends HarnessLocator {
     prune(runtime: string): Promise<string[]>;
     /** Remove the runtime's harness from the store; `false` when the store has none. */
     remove(runtime: string): Promise<boolean>;
+    /** The release asset key this store installs for, `<os>-<arch>`. */
+    readonly platform: string;
+    /** `selection.json` as written; `undefined` when there is none. */
+    selection(): readonly string[] | undefined;
+    /** The runtimes the machine wants: `selection.json`, or every built-in runtime without one. */
+    selected(): readonly string[];
+    /** Replace the selection. */
+    setSelection(runtimes: readonly string[]): Promise<void>;
+    /** Add to (`true`) or remove from (`false`) the selection. */
+    select(runtime: string, selected: boolean): Promise<void>;
+    /** Installs that failed and are retried on the next start (`failures.json`), by runtime. */
+    failures(): Readonly<Record<string, { readonly at: number; readonly message: string }>>;
+    /** Record (`message`) or clear (`undefined`) a failed install of `runtime`. */
+    setFailure(runtime: string, message: string | undefined): Promise<void>;
 }
 
 export interface HarnessStoreOptions {
@@ -412,8 +432,49 @@ export function harnessStore(options: HarnessStoreOptions): HarnessStore {
         return { status: 'ready', location: { runtime, version: current.version, dir, binary, source: 'store', installedAt: current.installedAt } };
     };
 
+    const readJson = (file: string): unknown => {
+        try {
+            return JSON.parse(readFileSync(join(root, file), 'utf8')) as unknown;
+        } catch {
+            return undefined;
+        }
+    };
+    const writeJson = async (file: string, value: unknown): Promise<void> => {
+        await mkdir(root, { recursive: true });
+        const tmp = join(root, `.${file}-${randomBytes(6).toString('hex')}`);
+        await writeFile(tmp, `${JSON.stringify(value)}\n`);
+        await rename(tmp, join(root, file));
+    };
+    const selection = (): readonly string[] | undefined => {
+        const value = readJson('selection.json');
+        return isRecord(value) && Array.isArray(value.runtimes) ? value.runtimes.filter((r): r is string => typeof r === 'string' && isRuntimeId(r)) : undefined;
+    };
+    const selected = (): readonly string[] => selection() ?? Object.keys(BUILTIN_HARNESSES);
+    const setSelection = (runtimes: readonly string[]): Promise<void> => {
+        for (const r of runtimes) if (!isRuntimeId(r)) throw new HarnessError('invalid', `"${r}" is not a runtime id`);
+        return writeJson('selection.json', { runtimes: [...new Set(runtimes)] });
+    };
+    const failures = (): Record<string, { at: number; message: string }> => {
+        const value = readJson('failures.json');
+        return isRecord(value) ? (value as Record<string, { at: number; message: string }>) : {};
+    };
+
     return {
         root,
+        platform,
+        selection,
+        selected,
+        setSelection,
+        select: (runtime, on) => setSelection(on ? [...selected(), runtime] : selected().filter((r) => r !== runtime)),
+        failures,
+        async setFailure(runtime, message) {
+            const all = failures();
+            if (message === undefined) {
+                if (!(runtime in all)) return;
+                delete all[runtime];
+            } else all[runtime] = { at: now(), message };
+            await writeJson('failures.json', all);
+        },
         state,
         locate(runtime) {
             const s = state(runtime);

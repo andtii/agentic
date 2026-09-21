@@ -262,8 +262,33 @@ describe('agentic-daemon harness', () => {
         expect(err.at(-1)).toMatch(/env_f runs on fake; remove it first/);
         await writeEnvironments(join(dir, 'environments.json'), [], { run: async () => ({ code: 0, stderr: '' }) });
         expect(await run(['rm', 'fake'])).toBe(0);
-        expect(await run(['rm', 'fake'])).toBe(1);
-        expect(err.at(-1)).toMatch(/has no harness installed/);
+        expect(out.at(-1)).toBe('removed the fake harness; it is no longer selected');
+        expect(await run(['rm', 'fake'])).toBe(0);
+        expect(out.at(-1)).toMatch(/has no harness installed .*; it is no longer selected$/);
+    });
+
+    it('keeps the selection a starting daemon heals from: install adds, rm takes out, select replaces; none is empty', async () => {
+        const store = () => harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+        // No file: every built-in runtime (a machine installed before the selection existed).
+        expect(store().selection()).toBeUndefined();
+        expect(store().selected()).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
+        expect(await run(['select', 'none'])).toBe(0);
+        expect(store().selection()).toEqual([]);
+        expect(out.at(-1)).toBe('no harness selected: a starting daemon installs none');
+        await release('1.0.0', '5.0.0');
+        expect(await run(['install', 'fake'])).toBe(0);
+        expect(store().selection()).toEqual(['fake']);
+        expect(await run(['select', 'fake', 'other'])).toBe(0);
+        expect(store().selection()).toEqual(['fake', 'other']);
+        expect(await run(['rm', 'fake'])).toBe(0);
+        expect(store().selection()).toEqual(['other']);
+        expect(await run(['select', 'nope'])).toBe(1);
+        expect(await run(['select'])).toBe(2);
+        // A recorded failure is cleared by an install.
+        await store().setFailure('fake', 'offline');
+        expect(store().failures()).toMatchObject({ fake: { message: 'offline' } });
+        expect(await run(['install', 'fake'])).toBe(0);
+        expect(store().failures()).toEqual({});
     });
 
     it('names what it cannot do: an unknown runtime, a release without the harness, a missing manifest, usage', async () => {

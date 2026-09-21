@@ -30,6 +30,8 @@ describe('doctor: harnesses (#369)', () => {
         await mkdir(join(root, 'codex-cli'), { recursive: true });
         await writeFile(join(root, 'codex-cli', 'current.json'), JSON.stringify({ version: '9.0.0', installedAt: 1 }));
         const store = harnessStore({ root, bundled: false });
+        // What the daemon's install on start last hit.
+        await store.setFailure('claude-code', 'no release manifest at https://releases.test/manifest.json (404)');
 
         const paths = { configDir: dir, stateDir: dir, credentialsFile: join(dir, 'credentials.json'), environmentsFile: join(dir, 'environments.json'), policyFile: join(dir, 'policy.json'), sessionsDir: join(dir, 'sessions') };
         await writeEnvironments(paths.environmentsFile, [{ id: 'env_claude' as EnvironmentId, name: 'Claude', runtime: 'claude-code', cwdRoots: [dir], concurrency: 1 }], { run: async () => ({ code: 0, stderr: '' }) });
@@ -43,6 +45,7 @@ describe('doctor: harnesses (#369)', () => {
                 ['info', 'harness'],
                 ['warn', 'harness-missing'],
                 ['info', 'harness-on-path'],
+                ['warn', 'harness-install-failed'],
                 ['error', 'harness-broken'],
                 ['error', 'harness-missing']
             ])
@@ -51,6 +54,7 @@ describe('doctor: harnesses (#369)', () => {
         expect(report.findings.find((f) => f.level === 'warn' && f.code === 'harness-missing')?.message).toMatch(/no claude-code harness in .* — install it with `agentic-daemon harness install claude-code`/);
         expect(report.findings.find((f) => f.code === 'harness-on-path')?.message).toBe('/usr/local/bin/claude is on PATH, but the daemon runs only an installed harness — `agentic-daemon harness install claude-code`');
         expect(report.findings.find((f) => f.code === 'harness-broken')?.message).toMatch(/harness codex-cli is broken: .*manifest\.json is missing/);
+        expect(report.findings.find((f) => f.code === 'harness-install-failed')?.message).toMatch(/^installing the claude-code harness failed at .*: no release manifest .* — the daemon tries again when it starts/);
         // The environment on the missing runtime carries the driver's own error.
         expect(report.findings.find((f) => f.level === 'error' && f.code === 'harness-missing')).toMatchObject({ environmentIds: ['env_claude'] });
         expect(report.ok).toBe(false);

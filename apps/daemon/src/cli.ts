@@ -25,7 +25,7 @@ import { builtinRuntimes, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
 import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.js';
 import { harnessCommand, HARNESS_USAGE } from './harness-cli.js';
-import { harnessRoot, harnessStore, type HarnessStore } from './harness.js';
+import { DEFAULT_RELEASES, harnessRoot, harnessStore, releaseManifestUrl, type HarnessStore } from './harness.js';
 import { watchEnvironments } from './env-store.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
@@ -37,7 +37,7 @@ import { daemonPaths, installPaths, type DaemonPaths, type InstallPaths } from '
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
 import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
 import { isSupervised, updateCommand, UPDATE_USAGE, type UpdateTestOptions } from './update-cli.js';
-import { DAEMON_VERSION, versionLine } from './version.js';
+import { DAEMON_CHANNEL, DAEMON_VERSION, versionLine } from './version.js';
 
 export interface CliContext {
     readonly paths?: DaemonPaths;
@@ -369,7 +369,20 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     ...(context.platform ? { platform: context.platform } : {}),
                     onWelcome,
                     lifecycle: helloLifecycle(state),
-                    ...(harnesses && builtin ? { harnesses: { store: harnesses, rebuild: builtin.rebuild } } : {}),
+                    ...(harnesses && builtin
+                        ? {
+                              harnesses: {
+                                  store: harnesses,
+                                  rebuild: builtin.rebuild,
+                                  ...(context.fetch ? { fetch: context.fetch } : {}),
+                                  // Under an install root, the selected harnesses this machine lacks come from its own channel (#369): the
+                                  // migration from builds that bundled the runtimes, and a retry of whatever failed last time.
+                                  ...(install
+                                      ? { heal: { manifestUrl: releaseManifestUrl({ releases: (context.env ?? process.env).AGENTIC_RELEASES || DEFAULT_RELEASES, channel: DAEMON_CHANNEL === 'stable' ? 'stable' : 'latest' }) } }
+                                      : {})
+                              }
+                          }
+                        : {}),
                     ...(supervised && install
                         ? {
                               update: {

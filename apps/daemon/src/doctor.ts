@@ -78,6 +78,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         }
     }
     if (options.harnesses) {
+        const failures = options.harnesses.failures();
         for (const runtime of drivers.keys()) {
             const state = options.harnesses.state(runtime);
             const install = `\`agentic-daemon harness install ${runtime}\``;
@@ -88,6 +89,9 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
             }
             if (state.status === 'broken') findings.push({ level: 'error', code: 'harness-broken', message: `harness ${runtime} is broken: ${state.problem} — reinstall it with ${install}` });
             else findings.push({ level: 'warn', code: 'harness-missing', message: `no ${runtime} harness in ${options.harnesses.root} — install it with ${install}` });
+            // What the daemon's install on start (#369) last hit; it tries again on the next start.
+            const failed = failures[runtime];
+            if (failed) findings.push({ level: 'warn', code: 'harness-install-failed', message: `installing the ${runtime} harness failed at ${new Date(failed.at).toISOString()}: ${failed.message} — the daemon tries again when it starts, or run ${install}` });
             const command = BUILTIN_HARNESSES[runtime]?.command;
             const onPath = command ? await (options.which ?? whichOnPath)(command) : undefined;
             if (onPath) findings.push({ level: 'info', code: 'harness-on-path', message: `${onPath} is on PATH, but the daemon runs only an installed harness — ${install}` });

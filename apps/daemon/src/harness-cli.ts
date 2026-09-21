@@ -3,6 +3,7 @@
  * `agentic-daemon harness install <runtime>… [--version <release>] [--channel latest|stable] [--manifest <url>]`
  * `agentic-daemon harness update [<runtime>…] [same flags]`
  * `agentic-daemon harness rm <runtime>`
+ * `agentic-daemon harness select <runtime>…|none`
  *
  * The harness store (`harness.ts`, #369) from the terminal, reading the same release manifests as the one-line
  * installers: `--manifest` names one, `--version <semver>` the `daemon-v<semver>` release, `--channel` (or
@@ -12,6 +13,9 @@
  * A running daemon keeps the version it started with until it restarts (the platform's `harness.request` drains and
  * switches live); it removes the versions it no longer uses when it starts. `rm` is refused while an environment in
  * `environments.json` runs on the runtime, as the platform's removal is.
+ *
+ * The selection (`selection.json`, #369) is what a starting daemon installs when it is missing: `install` adds to it,
+ * `rm` takes out, `select` replaces it — the installers write `AGENTIC_HARNESSES` there (`none`: an empty selection).
  */
 
 import type { ReleaseManifest } from '@agentic/core';
@@ -24,7 +28,9 @@ export const HARNESS_USAGE = `  agentic-daemon harness list
   agentic-daemon harness install <runtime>… [--version <release>] [--channel latest|stable] [--manifest <url>]
                        (from the release this daemon came from, or the one named; runtimes: claude-code, copilot-cli, codex-cli)
   agentic-daemon harness update [<runtime>…] [--version <release>] [--channel latest|stable] [--manifest <url>]
-  agentic-daemon harness rm <runtime>`;
+  agentic-daemon harness rm <runtime>
+  agentic-daemon harness select <runtime>…|none
+                       (the harnesses a starting daemon installs when they are missing; install adds, rm takes out)`;
 
 export interface HarnessCommandContext {
     readonly store: HarnessStore;
@@ -68,7 +74,7 @@ export async function harnessCommand(sub: string | undefined, positional: readon
             return 2;
         }
     }
-    const unknown = positional.filter((r) => !c.runtimes.includes(r));
+    const unknown = positional.filter((r) => !c.runtimes.includes(r) && !(sub === 'select' && r === 'none'));
     if (unknown.length) {
         c.err(`this daemon has no runtime ${unknown.join(', ')} (it has: ${c.runtimes.join(', ')})`);
         return 1;
@@ -99,6 +105,8 @@ export async function harnessCommand(sub: string | undefined, positional: readon
             onPhase: (phase) => c.out(`${runtime}: ${phase}${phase === 'downloading' ? ` ${asset.url} (${(asset.bytes / 1024 / 1024).toFixed(1)} MB)` : ''}`),
             ...(c.fetch ? { fetch: c.fetch } : {})
         });
+        await c.store.select(runtime, true);
+        await c.store.setFailure(runtime, undefined);
         if (staged.already) {
             c.out(`${runtime} ${staged.version} is already installed`);
             return true;
@@ -110,10 +118,22 @@ export async function harnessCommand(sub: string | undefined, positional: readon
 
     try {
         switch (sub) {
+            case 'select': {
+                if (positional.length === 0) {
+                    c.err(`harness select needs runtimes, or none\n\n${HARNESS_USAGE}`);
+                    return 2;
+                }
+                const runtimes = positional.filter((r) => r !== 'none');
+                await c.store.setSelection(runtimes);
+                c.out(runtimes.length ? `selected: ${runtimes.join(', ')}` : 'no harness selected: a starting daemon installs none');
+                return 0;
+            }
             case 'list': {
+                const selected = c.store.selected();
                 for (const runtime of c.runtimes) {
                     const state = c.store.state(runtime);
                     const pinned = c.store.pinned(runtime);
+                    if (!selected.includes(runtime)) c.out(`${runtime}\t(not selected)`);
                     if (state.status === 'ready') {
                         const { location } = state;
                         c.out(`${runtime}\t${location.version}\t${location.source === 'store' ? 'installed' : "the daemon's own node_modules"}${pinned && pinned !== location.version ? `\t(this daemon was built with ${pinned})` : ''}\t${location.binary}`);
@@ -154,11 +174,14 @@ export async function harnessCommand(sub: string | undefined, positional: readon
                     c.err(`environment${users.length === 1 ? '' : 's'} ${users.map((e) => e.id).join(', ')} run${users.length === 1 ? 's' : ''} on ${runtime}; remove ${users.length === 1 ? 'it' : 'them'} first (agentic-daemon env rm <id>)`);
                     return 1;
                 }
+                // Out of the selection first: a starting daemon must not install it again.
+                await c.store.select(runtime, false);
+                await c.store.setFailure(runtime, undefined);
                 if (!(await c.store.remove(runtime))) {
-                    c.err(`${runtime} has no harness installed in ${c.store.root}`);
-                    return 1;
+                    c.out(`${runtime} has no harness installed in ${c.store.root}; it is no longer selected`);
+                    return 0;
                 }
-                c.out(`removed the ${runtime} harness`);
+                c.out(`removed the ${runtime} harness; it is no longer selected`);
                 return 0;
             }
             default:

@@ -493,6 +493,81 @@ describe('daemon', () => {
             });
         });
 
+        describe('the heal on start: an update from a build that bundled the runtimes', () => {
+            const BUILTIN = ['claude-code', 'copilot-cli', 'codex-cli'];
+            /** The three harness builds and a manifest naming them, at `https://releases.test/manifest.json`. */
+            async function servedRelease() {
+                const releases = fakeReleases();
+                const harnesses: Record<string, { version: string; assets: Record<string, import('@agentic/core').ReleaseAsset> }> = {};
+                for (const runtime of BUILTIN) {
+                    const zip = await fakeHarnessZip(dir, runtime, '1.0.0');
+                    releases.put(`harness-${runtime}.zip`, zip.bytes);
+                    harnesses[runtime] = { version: '1.0.0', assets: { [`${process.platform}-${process.arch}`]: zip.asset(releases.url(`harness-${runtime}.zip`)) } };
+                }
+                releases.put('manifest.json', JSON.stringify({ version: '0.2.0', channel: 'stable', publishedAt: 0, commit: 'abcdef0', protocol: 1, assets: {}, harnesses }));
+                return releases;
+            }
+            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) =>
+                start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map((r) => harnessMissingDriver(r)), undefined, {
+                    harnesses: {
+                        store,
+                        fetch: releases.fetch,
+                        rebuild: (runtime) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime)),
+                        heal: { manifestUrl: releases.url('manifest.json') }
+                    }
+                });
+            const until = async (check: () => boolean) => {
+                for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
+                expect(check()).toBe(true);
+            };
+
+            it('no harnesses and no selection file: all three are installed from the channel manifest, a harnesses frame after each, and the sessions open', async () => {
+                const releases = await servedRelease();
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                const { seat, hello } = await startHealing(releases, store);
+                expect(hello.harnesses?.map((h) => h.status)).toEqual(['missing', 'missing', 'missing']);
+                const frames = await collect(seat, (f) => f.filter((x) => x.t === 'harnesses').length === 3);
+                const last = frames.filter((f): f is DaemonFrameOf<'harnesses'> => f.t === 'harnesses').at(-1)!;
+                expect(last.harnesses.map((h) => [h.runtime, h.status, h.installed?.version])).toEqual(BUILTIN.map((r) => [r, 'ready', '1.0.0']));
+                expect(frames.find((f) => f.t === 'env')).toMatchObject({ environments: [{ id: 'env_c', doctor: { ok: true } }] });
+                for (const runtime of BUILTIN) expect(store.locate(runtime)?.version).toBe('1.0.0');
+                expect(store.selection()).toBeUndefined();
+                expect(store.failures()).toEqual({});
+                open(seat, 's1', 'env_c');
+                expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s1');
+            });
+
+            it('an empty selection installs nothing; a failed install is recorded for doctor and tried again on the next start', async () => {
+                const releases = await servedRelease();
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                await store.setSelection([]);
+                const first = await startHealing(releases, store);
+                await new Promise((r) => setTimeout(r, 300));
+                expect(releases.requests).toEqual([]);
+                expect(BUILTIN.map((r) => store.state(r).status)).toEqual(['missing', 'missing', 'missing']);
+                open(first.seat, 's1', 'env_c');
+                expect(await expectFrame(first.seat, 'session.closed')).toMatchObject({ code: 'harness-missing' });
+                await first.daemon.stop();
+
+                // Selected, but the release is unreachable: named, never fatal.
+                await store.setSelection(['codex-cli']);
+                const offline = fakeReleases();
+                const second = await startHealing(offline, store);
+                await until(() => 'codex-cli' in store.failures());
+                expect(Object.keys(store.failures())).toEqual(['codex-cli']);
+                expect(store.failures()['codex-cli']!.message).toMatch(/no release manifest at https:\/\/releases\.test\/manifest\.json/);
+                expect(second.daemon.connected).toBe(true);
+                await second.daemon.stop();
+
+                // The next start: the release is back, codex-cli is installed and its failure cleared; the others stay unselected.
+                const third = await startHealing(releases, store);
+                await collect(third.seat, (f) => f.some((x) => x.t === 'harnesses'));
+                expect(store.locate('codex-cli')?.version).toBe('1.0.0');
+                expect(store.locate('claude-code')).toBeUndefined();
+                expect(store.failures()).toEqual({});
+            });
+        });
+
         it('removes a harness no environment uses, and a runtime without one refuses its sessions with harness-missing', async () => {
             await withHarnessServer(async (target, fetch) => {
                 const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });

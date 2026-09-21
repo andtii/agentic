@@ -64,7 +64,9 @@
  *   re-opens the sessions from `spec.resume`. `remove` is refused `in-use` while
  *   an environment runs on the runtime. A runtime without a harness keeps its
  *   environments, reported `harness-missing`; opening a session on one is
- *   refused with that code.
+ *   refused with that code. Started with `harnesses.heal`, the daemon installs
+ *   the selected harnesses it lacks in the background (the migration from builds
+ *   that bundled the runtimes), a `harnesses` frame after each.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -103,7 +105,7 @@ import type { SecureWriteOptions } from './credentials.js';
 import { answerEnvRequest } from './env-manage.js';
 import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
-import { HarnessError, type HarnessStore } from './harness.js';
+import { fetchReleaseManifest, harnessAsset, HarnessError, type HarnessStore } from './harness.js';
 import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
@@ -184,6 +186,12 @@ export interface DaemonHarnesses {
     readonly drainTimeoutMs?: number;
     /** How the store downloads (tests). Default the global `fetch`. */
     readonly fetch?: typeof fetch;
+    /**
+     * Heal on start (#369): install every selected harness (`store.selected()`) that is not ready, in the background, from
+     * this release manifest — so a daemon updated from a build that bundled the runtimes gets them back unattended.
+     * The CLI passes the daemon's own channel's manifest when it runs under an install root.
+     */
+    readonly heal?: { readonly manifestUrl: string };
 }
 
 /** How long a harness drain waits for running turns by default. */
@@ -867,6 +875,51 @@ export function createDaemon(options: DaemonOptions): Daemon {
      * and removes the old version. `remove` is refused `in-use` while an environment runs on the runtime. Each change ends
      * with `done` and a `harnesses` frame, or `failed` with a named error.
      */
+    /**
+     * The heal (#369), queued with the harness requests: every selected runtime this daemon has a driver for whose harness
+     * is not ready is installed from `heal.manifestUrl` — stage, activate, driver rebuilt — and a `harnesses` frame goes
+     * out after each. Until then `session.open` on it is refused `harness-missing`. A failure is logged and recorded in
+     * the store (`doctor` shows it), and the next start tries again; it never stops the daemon.
+     */
+    function heal(manifestUrl: string): Promise<void> {
+        const harness = options.harnesses!;
+        const run = harnessWork.then(async () => {
+            const missing = harness.store.selected().filter((runtime) => drivers.has(runtime) && harness.store.state(runtime).status !== 'ready');
+            if (missing.length === 0 || stopped) return;
+            logger.info('harness: installing the selected harnesses this machine lacks', { runtimes: missing, manifest: manifestUrl });
+            const fail = async (runtime: string, message: string) => {
+                logger.warn('harness: install failed; retried on the next start', { runtime, error: message });
+                await harness.store.setFailure(runtime, message).catch(() => undefined);
+            };
+            let manifest: Awaited<ReturnType<typeof fetchReleaseManifest>>;
+            try {
+                manifest = await fetchReleaseManifest(manifestUrl, harness.fetch ?? fetch);
+            } catch (e) {
+                for (const runtime of missing) await fail(runtime, (e as Error).message);
+                return;
+            }
+            for (const runtime of missing) {
+                if (stopped) return;
+                const asset = harnessAsset(manifest, runtime, harness.store.platform);
+                if (!asset) {
+                    await fail(runtime, `the release ${manifest.version} ships no ${runtime} harness for ${harness.store.platform}`);
+                    continue;
+                }
+                try {
+                    const staged = await harness.store.stage(runtime, asset, harness.fetch ? { fetch: harness.fetch } : {});
+                    if (!staged.already) await swapDriver(runtime, () => harness.store.activate(runtime, staged.version));
+                    await harness.store.setFailure(runtime, undefined).catch(() => undefined);
+                    logger.info('harness: installed', { runtime, version: staged.version, healed: true });
+                    if (socket) send({ v: V, t: 'harnesses', harnesses: harness.store.reports(drivers.keys()) });
+                } catch (e) {
+                    await fail(runtime, (e as Error).message);
+                }
+            }
+        });
+        harnessWork = run.catch(() => undefined);
+        return run;
+    }
+
     function harnessRequest(frame: PlatformFrameOf<'harness.request'>): Promise<void> {
         const run = harnessWork.then(() => changeHarness(frame));
         harnessWork = run.catch(() => undefined);
@@ -988,6 +1041,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         async start() {
             stopped = false;
             await updater?.start();
+            if (options.harnesses?.heal) void heal(options.harnesses.heal.manifestUrl).catch((e: unknown) => logger.warn('harness: heal failed', { error: e }));
             await inspectAll();
             const url = options.socketUrl ?? daemonSocketUrl(options.credentials.url, options.credentials.machineId);
             connection = reconnectingConnection({

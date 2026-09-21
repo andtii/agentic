@@ -98,6 +98,9 @@ if ($Code) {
 # 4. The harnesses (#369): each runtime's native build, from the release. Not fatal - install one later with
 # `agentic-daemon harness install <runtime>`; until then its environments refuse sessions.
 $runtimes = @($Harness -split '[,\s]+' | Where-Object { $_ -and $_ -ne 'none' })
+# The selection: what the daemon installs by itself when it starts without it (an update, a failed download here).
+$selectArgs = @('harness', 'select') + $(if ($runtimes.Count -gt 0) { $runtimes } else { @('none') })
+& $node.Source $bin @selectArgs
 if ($runtimes.Count -gt 0) {
     $harnessArgs = @('harness', 'install') + $runtimes
     if ($Manifest) { $harnessArgs += @('--manifest', $Manifest) }

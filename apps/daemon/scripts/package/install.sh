@@ -85,6 +85,9 @@ fi
 # `agentic-daemon harness install <runtime>`; until then its environments refuse sessions.
 runtimes=$(echo "$harness" | tr ',' ' ')
 [ "$runtimes" = "none" ] && runtimes=""
+# The selection: what the daemon installs by itself when it starts without it (an update, a failed download here).
+# shellcheck disable=SC2086 # one word per runtime
+"$node" "$bin" harness select ${runtimes:-none} || echo "warning: could not record the harness selection" >&2
 if [ -n "$runtimes" ]; then
     # shellcheck disable=SC2086 # one word per runtime
     if [ -n "$manifest" ]; then set -- $runtimes --manifest "$manifest"; else set -- $runtimes; fi
