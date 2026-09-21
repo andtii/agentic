@@ -9,6 +9,11 @@
  *
  * A page is about `PAGE_BYTES` of JSON — well under a Durable Object value's
  * 2 MB, whatever the session's length.
+ *
+ * On the daemon path the platform keeps only the newest `RETAINED_PAGES`
+ * (#397): an older page is forgotten with `forget` — its record deleted, the
+ * key deterministic, so nothing is left behind unreachable — and the events
+ * it held are read from the machine's own log from then on.
  */
 
 import { defineActor, type ActorContext } from '@sigx/actors';
@@ -39,6 +44,10 @@ export const SessionPage = defineActor({
         },
         async read(): Promise<readonly AgentEvent[]> {
             return ctx.snapshot(ctx.state.events);
+        },
+        /** Delete the page's record (#397): idempotent — a page already gone is a fresh, unsaved state. */
+        async forget(): Promise<void> {
+            await ctx.clearState();
         }
     })
 });

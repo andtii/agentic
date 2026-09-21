@@ -8,9 +8,9 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, MessageId, Principal, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, HistoryError, HistoryRange, MachineId, MemoryEntry, MemoryScope, MessageId, Principal, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
-import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
+import type { AgentCapabilities, AgentEvent, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 import type { RegistryGate } from '../registry/types.js';
 import type { LearningPorts, SkippedScope } from '../task/driver.js';
@@ -130,6 +130,25 @@ export interface CommandSink {
     send(target: { readonly workspaceId: WorkspaceId; readonly machineId: MachineId; readonly sessionId: SessionId }, command: WireCommand): Promise<void>;
 }
 
+/** A session hosted by a machine, as the history port addresses it. */
+export interface HistoryTarget {
+    readonly workspaceId: WorkspaceId;
+    readonly machineId: MachineId;
+    readonly sessionId: SessionId;
+}
+
+/** What the machine answered a history range with: the events (unwrapped from their frames), or the daemon's named error. */
+export type HistoryAnswer = { readonly result: { readonly events: readonly AgentEvent[]; readonly more?: boolean } } | { readonly error: HistoryError };
+
+/**
+ * Where a daemon session's older events are read from (#397): the machine's own log, through the Machine actor's
+ * `historyRequest` / `historyAnswer` in the app (`machineHistorySource`). A throw (offline, no socket, timed out) is
+ * surfaced by the Session as `history-unavailable`; a daemon `gap` as `history-gap`.
+ */
+export interface HistorySource {
+    fetch(target: HistoryTarget, range: HistoryRange): Promise<HistoryAnswer>;
+}
+
 /**
  * A late answer to a detached `ask_user` (#285, #396): the question outlived its tool call, so the answer is handed
  * to the asker as a new message in its own live session under the asking task, or — when no task waits on the
@@ -160,6 +179,12 @@ export interface SessionPorts {
     readonly factory: SessionFactory;
     /** Required for the daemon path; without it a remote command is refused as `unsupported`. */
     readonly commands?: CommandSink;
+    /**
+     * The machine's history for a daemon session (#397). With it the record keeps only the newest `RETAINED_PAGES` pages
+     * and asks the machine for anything older; without it nothing is forgotten — a deployment that cannot read the
+     * machine's log keeps every page, as a local session always does.
+     */
+    readonly history?: HistorySource;
     /** Where turn-scoped `usage` events go (the Ledger, OPS-07) and who says when the task's budget is spent (OPS-08); `ledgerRecorder()` in the app. */
     readonly usage?: UsageRecorder;
     /**

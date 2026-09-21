@@ -56,6 +56,7 @@ import {
     PairingDirectory,
     RegistryError,
     SessionPage,
+    SessionTranscriptPage,
     TaskActor,
     TaskIndex,
     asPrincipal,
@@ -73,6 +74,7 @@ import {
     defineWorkspace,
     importWorkspaceKek,
     ledgerRecorder,
+    machineHistorySource,
     machineKey,
     machinePrincipal,
     memoryAccess,
@@ -212,6 +214,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
+        // The machine owns a daemon session's history (#397): the record keeps `RETAINED_PAGES` pages and reads older events here.
+        history: machineHistorySource(() => Machine),
         usage: ledgerRecorder(),
         learning,
         // Approvals (#40): every request, on both paths, becomes an Inbox notification the user answers from any client.
@@ -248,7 +252,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // Removing a member ends its session through the router (#399, architecture §6).
     const Chat = defineChatActor({ ...withFiles, routing: () => Routing });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */

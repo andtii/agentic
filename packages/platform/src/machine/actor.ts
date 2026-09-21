@@ -14,10 +14,10 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
-import { capabilities as agentCapabilities, type AgentCapabilities, type SessionRef } from '@sigx/ai-agent';
+import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
@@ -28,7 +28,8 @@ import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneQuota, runningIn, type EnvRequestRecord, type FsRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import type { HistoryAnswer } from '../session/ports.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHistory, pruneQuota, runningIn, type EnvRequestRecord, type FsRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -39,15 +40,26 @@ export const DEFAULT_HEARTBEAT_WINDOW_MS = 90_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 export const DEFAULT_FS_TIMEOUT_MS = 30_000;
 export const DEFAULT_ENV_TIMEOUT_MS = 30_000;
+export const DEFAULT_HISTORY_TIMEOUT_MS = 30_000;
 /** The code a `putEnvironment` / `removeEnvironment` 503 starts with when the daemon is not connected. */
 export const MACHINE_OFFLINE_CODE = 'machine-offline';
 /** The reminder floor (architecture §2): nothing is checked more often. */
 const REMINDER_FLOOR_MS = 60_000;
 
-/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder request or environment request. */
+/** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment or history request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending);
+    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending);
+}
+
+/** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
+function failPendingHistory(s: MachineState, at: number, message: string): void {
+    for (const r of Object.values(s.history ?? {})) {
+        if (r.status !== 'pending') continue;
+        r.status = 'error';
+        r.error = { code: 'internal', message };
+        r.finishedAt = at;
+    }
 }
 
 /** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
@@ -130,6 +142,26 @@ export interface EnvResultView {
     readonly finishedAt?: number;
     readonly result?: EnvResult;
     readonly error?: EnvError;
+}
+
+/** `historyRequest` — the id `historyAnswer` / `historyResult` read the answer by. */
+export interface HistoryRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `historyResult(requestId)` — one history request as stored (#397): `pending` until the daemon's `history.response`
+ * lands (or the deadline / a disconnect fails it), then `done` — the events themselves are read from the
+ * `historyAnswer` stream, never from the record — or `error` with the daemon's own error (`gap`, `unknown-session`, …).
+ */
+export interface HistoryResultView {
+    readonly requestId: string;
+    readonly sessionId: SessionId;
+    readonly range: HistoryRange;
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    readonly finishedAt?: number;
+    readonly error?: HistoryError;
 }
 
 /** What `socketMessage` reports back to the host, for its logs. */
@@ -260,7 +292,15 @@ export function defineMachineActor(ports: MachinePorts) {
     const commandTimeoutMs = ports.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const fsTimeoutMs = ports.fsTimeoutMs ?? DEFAULT_FS_TIMEOUT_MS;
     const envTimeoutMs = ports.envTimeoutMs ?? DEFAULT_ENV_TIMEOUT_MS;
-    const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs, envTimeoutMs));
+    const historyTimeoutMs = ports.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS;
+    const livenessDue = Math.max(REMINDER_FLOOR_MS, Math.min(heartbeatWindowMs, commandTimeoutMs, fsTimeoutMs, envTimeoutMs, historyTimeoutMs));
+    /**
+     * History answers by `${actor key}:${requestId}` (#397): the events a daemon answered with, held by the activation
+     * that took them and handed out by the `historyAnswer` stream. Never on the record — a slice weighs up to half a
+     * frame — so an activation that goes between the answer and its reader loses it, and the reader asks again.
+     */
+    const answers = new Map<string, HistoryAnswer>();
+    const answerKey = (key: string, requestId: string): string => `${key}:${requestId}`;
 
     function view(c: ActorContext<MachineState>): MachineView {
         const s = c.snapshot();
@@ -312,7 +352,9 @@ export function defineMachineActor(ports: MachinePorts) {
             // Owner only, and never a tool (decisions 2026-09-19 (c)): an agent must not widen where agents may work.
             putEnvironment: owner,
             removeEnvironment: owner,
-            envResult: owner
+            envResult: owner,
+            historyRequest: sessionDriver,
+            historyResult: sessionDriver
         },
         state: (): MachineState => initialMachineState(),
         methods: (ctx) => {
@@ -636,6 +678,28 @@ export function defineMachineActor(ports: MachinePorts) {
                 return { requestId };
             }
 
+            /**
+             * The daemon's answer to a `historyRequest` (#397): the record turns `done` or `error` (the daemon's own code —
+             * `gap`, `unknown-session`, `internal` — stored unchanged), the events go to the activation's `answers` for the
+             * `historyAnswer` stream. An unknown, pruned or already answered id is ignored — except over a `timeout`.
+             */
+            function onHistoryResponse(frame: DaemonFrameOf<'history.response'>): void {
+                const r = ctx.state.history?.[frame.requestId];
+                if (!r || r.status === 'done' || (r.status === 'error' && r.error?.code !== 'internal')) return;
+                r.finishedAt = now();
+                if (frame.result) {
+                    r.status = 'done';
+                    delete r.error;
+                    const events: AgentEvent[] = [];
+                    for (const f of frame.result.events) if (f.kind === 'event') events.push(f.event);
+                    answers.set(answerKey(ctx.key, r.requestId), { result: { events, ...(frame.result.more ? { more: true } : {}) } });
+                } else {
+                    r.status = 'error';
+                    r.error = structuredClone(frame.error ?? { code: 'internal', message: 'history.response carried neither result nor error' });
+                    answers.delete(answerKey(ctx.key, r.requestId));
+                }
+            }
+
             /** Fold an environment's provider limits in (#261): a stream snapshot replaces only the windows it carries. An environment the machine does not report is ignored. */
             function onQuota(frame: DaemonFrameOf<'quota'>): void {
                 const s = ctx.state;
@@ -683,6 +747,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onEnvResponse(frame);
                     case 'quota':
                         return onQuota(frame);
+                    case 'history.response':
+                        return onHistoryResponse(frame);
                 }
             }
 
@@ -733,6 +799,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     s.online = false;
                     failPendingFs(s, now(), 'machine revoked');
                     failPendingEnv(s, now(), 'machine revoked');
+                    failPendingHistory(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
                     await ctx.save();
@@ -845,6 +912,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     // No socket, no answer: a folder request never outlives the connection it was sent on.
                     failPendingFs(s, now(), 'machine went offline');
                     failPendingEnv(s, now(), 'machine went offline');
+                    failPendingHistory(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
                 },
@@ -1021,9 +1089,73 @@ export function defineMachineActor(ports: MachinePorts) {
                         ...(r.result ? { result: r.result } : {}),
                         ...(r.error ? { error: r.error } : {})
                     }) as EnvResultView;
+                },
+
+                /**
+                 * Ask the daemon for a session's events in a cursor range (#397), from its own log — what the Session
+                 * reads when the range is older than the pages it kept: `history.request` goes out and the answer lands
+                 * with its `history.response` in a later `socketMessage` turn; `historyAnswer(requestId)` yields it, and
+                 * `historyResult(requestId)` shows the status. The session need not be hosted here any more: the log
+                 * outlives the runtime session. 403 revoked, 503 offline (or no socket to send on).
+                 */
+                async historyRequest(sessionId: SessionId, range: HistoryRange): Promise<HistoryRequested> {
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    const at = now();
+                    const requestId = `history_${crypto.randomUUID()}`;
+                    if (!send({ v: V, t: 'history.request', requestId, sessionId, ...range })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                    const requests = (s.history ??= {});
+                    pruneHistory(requests, at);
+                    // An answer whose record was just pruned is nobody's any more.
+                    for (const key of answers.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in requests)) answers.delete(key);
+                    const record: HistoryRequestRecord = { requestId, sessionId, range: structuredClone(range), status: 'pending', requestedAt: at, deadline: at + historyTimeoutMs };
+                    requests[requestId] = record;
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /** One history request as stored — its status and the daemon's error, never the events. 404 for an unknown, evicted or pruned id. */
+                historyResult(requestId: string): HistoryResultView {
+                    const r = ctx.state.history?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no history request "${requestId}"`);
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        sessionId: r.sessionId,
+                        range: r.range,
+                        status: r.status,
+                        requestedAt: r.requestedAt,
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+                        ...(r.error ? { error: r.error } : {})
+                    }) as HistoryResultView;
                 }
             };
         },
+        streams: (ctx) => ({
+            /**
+             * The answer to `historyRequest(requestId)` (#397), yielded once — when the daemon's `history.response` has
+             * landed, or the request failed (its deadline, a disconnect, a revoke): the events, or the daemon's named
+             * error. An id this record does not hold, or an answer this activation no longer has, is an `internal` error
+             * the caller answers by asking again.
+             */
+            async *historyAnswer(requestId: string): AsyncIterable<HistoryAnswer> {
+                for await (const s of ctx.changes({ initial: true, throttleMs: 20 })) {
+                    const r = s.history?.[requestId];
+                    if (!r) {
+                        yield { error: { code: 'internal', message: `machine has no history request "${requestId}"` } };
+                        return;
+                    }
+                    if (r.status === 'pending') continue;
+                    if (r.status === 'error') {
+                        yield { error: r.error ?? { code: 'internal', message: 'the history request failed' } };
+                        return;
+                    }
+                    yield answers.get(answerKey(ctx.key, requestId)) ?? { error: { code: 'internal', message: `the answer to history request "${requestId}" did not survive the machine's activation; ask again` } };
+                    return;
+                }
+            }
+        }),
         /** The liveness reminder: a silent daemon goes offline, an unanswered command answers `internal`, an unanswered folder or environment request fails `timeout`, and finished ones past their TTL are pruned. */
         onReminder: async (ctx, name) => {
             if (name !== LIVENESS) return;
@@ -1057,6 +1189,16 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.finishedAt = at;
                 }
                 pruneEnvRequests(s.envRequests, at, false);
+            }
+            if (s.history) {
+                for (const r of Object.values(s.history)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    r.status = 'error';
+                    r.error = { code: 'internal', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${historyTimeoutMs} ms` };
+                    r.finishedAt = at;
+                }
+                pruneHistory(s.history, at, false);
+                for (const key of answers.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in s.history)) answers.delete(key);
             }
             if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
             await ctx.save();

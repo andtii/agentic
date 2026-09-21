@@ -7,7 +7,8 @@
  * browsing that never leaves the environment's `cwdRoots` (#187), a
  * `locate` of an origin's checkouts under those roots (#331), and
  * environments managed from the platform only inside the machine-local
- * policy (#236), and the runtime's own session id reported once it is known (#388). No test-runner
+ * policy (#236), the runtime's own session id reported once it is known (#388), and a session's history answered
+ * from the daemon's own log — a range it no longer holds as a named gap (#397). No test-runner
  * import: consumers wire the cases into theirs, e.g.
  *
  * ```ts
@@ -49,7 +50,7 @@ const V = DAEMON_PROTOCOL_VERSION;
 /** Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), and a runtime naming its session (#388). */
 const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref'];
 /** Cases that need an optional harness feature. */
-const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'fs-locate': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage', 'session-ref': 'session-ref' };
+const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'fs-locate': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage', 'session-ref': 'session-ref', history: 'history' };
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
 
@@ -537,6 +538,63 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     assert(failing.callId !== call.callId, 'every tool call has its own callId');
                     peer.send({ v: V, t: 'tool.result', callId: failing.callId, error: { code: 'boom', message: 'the tool failed on purpose' } });
                     assertTurn(await peer.events(S1, events, cursorOf(first[first.length - 1]!), 'the turn after a tool error'), 'the turn after a tool error');
+                })
+        },
+        {
+            name: 'history',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const opened = await open(peer, hello, daemon, S1);
+                    await prompt(peer, S1, 1);
+                    const all = await peer.events(S1, events, opened.head, 'the turn');
+                    const head = cursorOf(all[all.length - 1]!);
+                    /** One `history.request`, its answer. */
+                    const ask = async (requestId: string, range: { from: Cursor; to?: Cursor; limit?: number }, sessionId: SessionId = S1) => {
+                        peer.send({ v: V, t: 'history.request', requestId, sessionId, ...range });
+                        const response = await peer.expect('history.response');
+                        assertEqual(response.requestId, requestId, 'history.response answers the request it was sent');
+                        return response;
+                    };
+                    const answered = (r: DaemonFrameOf<'history.response'>, what: string) => {
+                        assert(r.result !== undefined, `${what}: the range is answered with events, not ${r.error?.code ?? 'nothing'} (${r.error?.message ?? ''})`);
+                        for (const f of r.result.events) assert(f.kind === 'event', `${what}: history carries event frames only, not a ${f.kind}`);
+                        return r.result as { readonly events: readonly EventFrame[]; readonly more?: boolean };
+                    };
+
+                    // The whole turn, again, out of the log: the same frames the session streamed.
+                    const whole = answered(await ask('history_all', { from: opened.head }), 'the whole turn');
+                    assertEqual(whole.events, all, 'history answers the event frames the session streamed, in cursor order, from the cursor asked for (exclusive)');
+                    assert(!whole.more, 'a range the answer covers whole says no more');
+
+                    // Bounded: `to` is inclusive, `limit` cuts and says `more`, and the next request continues from the last frame.
+                    const half = Math.floor(events / 2);
+                    const upTo = answered(await ask('history_to', { from: opened.head, to: cursorOf(all[half]!) }), 'a range with an end');
+                    assertEqual(upTo.events, all.slice(0, half + 1), 'history.request.to is inclusive');
+                    const cut = answered(await ask('history_limit', { from: opened.head, limit: 3 }), 'a limited range');
+                    assertEqual(cut.events, all.slice(0, 3), 'limit caps the answer, oldest first');
+                    assertEqual(cut.more, true, 'a slice cut by limit says more');
+                    const next = answered(await ask('history_next', { from: cursorOf(cut.events[2]!), limit: 3 }), 'the slice after a cut');
+                    assertEqual(next.events, all.slice(3, 6), 'asking again from the last frame continues the range without a duplicate or a hole');
+                    assertEqual(answered(await ask('history_after_head', { from: head }), 'a range after the head').events, [], 'nothing after the head is an empty answer, not an error');
+
+                    // A session this machine has no log for.
+                    const unknown = await ask('history_unknown', { from: { epoch: 0, seq: 0 } }, 'session_conformance_nobody' as SessionId);
+                    assertEqual(unknown.error?.code, 'unknown-session', 'a session without a log answers unknown-session (OPS-04: never an empty result that looks like history)');
+
+                    // Retention forgot the start of the log: a range that reaches into it answers a named gap, one after it is still answered.
+                    if (!daemon.truncateLog) return;
+                    const keepFrom: Cursor = { epoch: head.epoch, seq: Math.max(2, head.seq - 10) };
+                    await daemon.truncateLog(S1, keepFrom);
+                    const gap = await ask('history_gap', { from: opened.head });
+                    assertEqual(gap.error?.code, 'gap', `a range the log no longer reaches answers a gap, not ${gap.result ? `${gap.result.events.length} events` : gap.error?.code} (OPS-04: lost events are named, not hidden)`);
+                    assert(gap.error?.earliest !== undefined && !cursorBefore(gap.error.earliest, keepFrom) && !cursorBefore(head, gap.error.earliest), 'gap.earliest is the oldest cursor the log still holds');
+                    const kept = answered(await ask('history_kept', { from: keepFrom }), 'the range the log still holds');
+                    assertEqual(
+                        kept.events,
+                        all.filter((f) => cursorBefore(keepFrom, cursorOf(f))),
+                        'a range inside what the log still holds is answered'
+                    );
                 })
         }
     ];

@@ -5,7 +5,7 @@
  */
 export { DAEMON_VERSION } from './version.js';
 export { main, parseArgs, type CliContext, type ParsedArgs } from './cli.js';
-export { createDaemon, withoutLocalPaths, agentCapabilitiesOf, follows, PlatformToolError, type Daemon, type DaemonDriver, type DaemonOptions } from './daemon.js';
+export { createDaemon, withoutLocalPaths, agentCapabilitiesOf, follows, PlatformToolError, DEFAULT_LOG_MAX_BYTES, HISTORY_RESPONSE_BYTES, type Daemon, type DaemonDriver, type DaemonOptions } from './daemon.js';
 export { answerFsRequest, checkWithinRoots, gitInfo, withinRoots, type FsOptions, type FsOutcome, type RootCheck } from './fs.js';
 export { builtinDrivers, isDisposable, type DisposableDriver } from './drivers.js';
 export { runDoctor, formatDoctorReport, type DoctorOptions } from './doctor.js';
@@ -48,7 +48,7 @@ export {
 } from './policy.js';
 export { policyCommand, describePolicy, POLICY_USAGE, type PolicyCommandContext } from './policy-cli.js';
 export { envCommand, flagValues, loginEnv, runLogin, ENV_USAGE, type EnvCommandContext, type LoginRunner } from './env-cli.js';
-export { ndjsonEventLog, type NdjsonEventLog, type NdjsonEventLogOptions } from './event-log.js';
+export { ndjsonEventLog, reachesBack, type NdjsonEventLog, type NdjsonEventLogOptions, type RetentionPolicy, type HistorySlice } from './event-log.js';
 export { reconnectingConnection, backoffDelay, type BackoffOptions, type Connection, type ConnectionHandlers, type ConnectionOptions, type Socket } from './connection.js';
 export { pair, normalizePlatformUrl, normalizePairingCode, daemonSocketUrl, PairingError, type PairOptions, type PairResult } from './pair.js';
 export { saveCredentials, loadCredentials, writeOwnerOnly, ownerOnlyAclArgs, credentialSecrets, runCommand, type Credentials, type CommandRunner, type CommandResult, type SecureWriteOptions } from './credentials.js';

@@ -59,6 +59,91 @@ describe('NDJSON session log', () => {
         expect((await collect(log.read('runtime_1'))).map((e) => e.seq)).toEqual([8, 9, 10]);
     });
 
+    it('truncate keeps a line appended while it runs: the rewrite reads inside the write queue', async () => {
+        const log = ndjsonEventLog(dir);
+        for (let i = 1; i <= 10; i++) void log.append(ev(i));
+        const cut = log.truncate('runtime_1', { epoch: 1, seq: 8 });
+        void log.append(ev(11));
+        await cut;
+        await log.flush();
+        expect((await collect(log.read('runtime_1'))).map((e) => e.seq)).toEqual([8, 9, 10, 11]);
+    });
+
+    describe('history slices (#397)', () => {
+        it('answers the events after a cursor up to an inclusive end, at most limit, and says more when cut', async () => {
+            const log = ndjsonEventLog(dir);
+            for (let i = 1; i <= 10; i++) void log.append(ev(i));
+            const whole = await log.slice('runtime_1', { from: { epoch: 1, seq: 0 } });
+            expect('result' in whole && whole.result.events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            expect('result' in whole && whole.result.more).toBeUndefined();
+            const bounded = await log.slice('runtime_1', { from: { epoch: 1, seq: 3 }, to: { epoch: 1, seq: 6 } });
+            expect('result' in bounded && bounded.result.events.map((e) => e.seq)).toEqual([4, 5, 6]);
+            const cut = await log.slice('runtime_1', { from: { epoch: 1, seq: 0 }, limit: 4 });
+            expect('result' in cut && cut.result).toMatchObject({ more: true });
+            expect('result' in cut && cut.result.events.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+            // A platform-stamped cursor sits between two runtime events: the next integer follows it.
+            const between = await log.slice('runtime_1', { from: { epoch: 1, seq: 7.5 } });
+            expect('result' in between && between.result.events.map((e) => e.seq)).toEqual([8, 9, 10]);
+            // Past the head: an empty answer, not an error.
+            expect(await log.slice('runtime_1', { from: { epoch: 1, seq: 10 } })).toEqual({ result: { events: [] } });
+        });
+
+        it('cuts at about maxBytes of JSON, never at zero events', async () => {
+            const log = ndjsonEventLog(dir);
+            for (let i = 1; i <= 10; i++) void log.append(ev(i));
+            const small = await log.slice('runtime_1', { from: { epoch: 1, seq: 0 } }, { maxBytes: 10 });
+            expect('result' in small && small.result.events.map((e) => e.seq)).toEqual([1]);
+            expect('result' in small && small.result.more).toBe(true);
+        });
+
+        it('names a gap with the earliest cursor it still holds, and an unknown session', async () => {
+            const log = ndjsonEventLog(dir);
+            for (let i = 1; i <= 10; i++) void log.append(ev(i));
+            await log.truncate('runtime_1', { epoch: 1, seq: 5 });
+            expect(await log.slice('runtime_1', { from: { epoch: 1, seq: 0 } })).toEqual({ error: { code: 'gap', message: expect.stringContaining('starts at (1, 5)'), earliest: { epoch: 1, seq: 5 } } });
+            // Right before the oldest line still reaches; at or after it is plain history.
+            expect('result' in (await log.slice('runtime_1', { from: { epoch: 1, seq: 4 } }))).toBe(true);
+            expect(await log.slice('runtime_1', { from: { epoch: 1, seq: 5 } })).toMatchObject({ result: { events: [expect.objectContaining({ seq: 6 }), expect.anything(), expect.anything(), expect.anything(), expect.anything()] } });
+            expect(await log.slice('nothing_here', { from: { epoch: 0, seq: 0 } })).toEqual({ error: { code: 'unknown-session', message: expect.stringContaining('nothing_here') } });
+        });
+    });
+
+    describe('retention (#397)', () => {
+        const turn = (t: number, events: number): AgentEvent[] => [
+            { type: 'turn-start', turnId: `t${t}`, input: [{ type: 'text', text: `go ${t}` }], sessionId: 'runtime_1', epoch: 1, seq: (t - 1) * (events + 2) + 1 } as AgentEvent,
+            ...Array.from({ length: events }, (_, i) => ({ type: 'part-delta', partId: 'p', delta: 'x'.repeat(40), turnId: `t${t}`, sessionId: 'runtime_1', epoch: 1, seq: (t - 1) * (events + 2) + 2 + i }) as AgentEvent),
+            { type: 'turn-end', stopReason: 'end_turn', turnId: `t${t}`, sessionId: 'runtime_1', epoch: 1, seq: t * (events + 2) } as AgentEvent
+        ];
+
+        it('keeps the newest whole turns that fit the budget, cutting on a turn start; under budget it does nothing', async () => {
+            const log = ndjsonEventLog(dir);
+            for (let t = 1; t <= 4; t++) for (const e of turn(t, 5)) void log.append(e);
+            await log.flush();
+            expect(await log.retain('runtime_1', { maxBytes: 1024 * 1024 })).toBeUndefined();
+            expect(await log.retain('runtime_1', { maxBytes: 0 })).toBeUndefined();
+            // Exactly the last two turns of NDJSON: one byte less and the second-newest turn would not fit whole.
+            const lastTwo = [...turn(3, 5), ...turn(4, 5)].reduce((n, e) => n + JSON.stringify(e).length + 1, 0);
+            const keepFrom = await log.retain('runtime_1', { maxBytes: lastTwo });
+            // Two turns fit, and the cut is the third turn's start — not somewhere inside the second.
+            expect(keepFrom).toEqual({ epoch: 1, seq: 15 });
+            const left = await collect(log.read('runtime_1'));
+            expect(left[0]).toMatchObject({ type: 'turn-start', turnId: 't3' });
+            expect(left.map((e) => e.seq)).toEqual(Array.from({ length: 14 }, (_, i) => 15 + i));
+            // What went is a gap now, what stayed is history.
+            expect(await log.slice('runtime_1', { from: { epoch: 1, seq: 0 } })).toMatchObject({ error: { code: 'gap', earliest: { epoch: 1, seq: 15 } } });
+            expect('result' in (await log.slice('runtime_1', { from: { epoch: 1, seq: 14 } }))).toBe(true);
+        });
+
+        it('a runtime that stamps no turn-start is cut where the budget says', async () => {
+            const log = ndjsonEventLog(dir);
+            for (let i = 1; i <= 20; i++) void log.append(ev(i));
+            await log.flush();
+            const keepFrom = await log.retain('runtime_1', { maxBytes: 400 });
+            expect(keepFrom?.seq).toBeGreaterThan(1);
+            expect((await collect(log.read('runtime_1'))).at(-1)?.seq).toBe(20);
+        });
+    });
+
     it('refuses a session id that is not a safe file name', async () => {
         const log = ndjsonEventLog(dir);
         expect(() => log.forSession('../escape')).toThrow(/safe file name/);

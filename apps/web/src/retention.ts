@@ -8,8 +8,12 @@
  *   only that object can deactivate its live activation and clear its
  *   storage (record, task ledger, reminder shards) and alarm. There is no
  *   `list`: a namespace cannot be enumerated, so records the Workspace
- *   index does not reach (tasks, sessions, ledger months, audit) stay
- *   behind, as the retention doc says.
+ *   index does not reach (tasks, ledger months, audit) stay behind, as the
+ *   retention doc says. A chat's live sessions are reached through the
+ *   chat's binding (#399), and each session's pages through its own record
+ *   (`SessionInfo.pages` / `transcriptPages`, #397): every `SessionPage`
+ *   and `SessionTranscriptPage` has a deterministic key, so a purge names
+ *   them without a listing — a page the session already forgot is a no-op.
  * - `createPurgeHandler` — the object half, at `PURGE_PATH`. The Worker
  *   never forwards that path (its mount owns `/_sigx/*` and the daemon
  *   prefix only); the request must also carry `SESSION_SECRET`, so nothing

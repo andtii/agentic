@@ -40,6 +40,11 @@
  *   from rate-limit events in the live session streams and, unless
  *   `quota.probe` is off, by probing accounts once welcomed, when idle and
  *   after a turn. An unchanged snapshot is only re-sent after a refresh interval.
+ * - `history.request` is answered from the NDJSON log (#397): the machine
+ *   owns a session's history, the platform keeps a bounded recent window and
+ *   asks here for anything older — a session it no longer has a log for, or a
+ *   range retention already forgot, is a named error, never silence. After
+ *   every turn the log is trimmed to `retention.maxBytes` of whole turns.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -63,14 +68,14 @@ import {
     type RuntimeDriver,
     type SessionId
 } from '@agentic/core';
-import { decodePlatformFrame, encodeFrame, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
+import { decodePlatformFrame, encodeFrame, LIMITS, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
 import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy, type SessionRef } from '@sigx/ai-agent';
-import { cursorBefore, serveSession, type ServedSession } from '@sigx/ai-agent/wire';
+import { cursorBefore, serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireFrame } from '@sigx/ai-agent/wire';
 import { reconnectingConnection, type BackoffOptions, type Connection, type Socket } from './connection.js';
 import type { SecureWriteOptions } from './credentials.js';
 import { answerEnvRequest } from './env-manage.js';
-import type { NdjsonEventLog } from './event-log.js';
+import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
 import { silentLogger, type Logger } from './logger.js';
 import { daemonSocketUrl } from './pair.js';
@@ -80,6 +85,12 @@ import { createQuotaMonitor } from './quota.js';
 import { DAEMON_VERSION } from './version.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
+const W = WIRE_PROTOCOL_VERSION;
+
+/** What a session's log keeps by default (#397): the newest whole turns under 64 MB — weeks of a chat, far past the platform's own window. */
+export const DEFAULT_LOG_MAX_BYTES = 64 * 1024 * 1024;
+/** About how much event JSON one `history.response` carries — half the frame limit, so the envelope and the frames' own stamps always fit. */
+export const HISTORY_RESPONSE_BYTES = Math.floor(LIMITS.frameBytes / 2);
 
 export type DaemonDriver = RuntimeDriver<AgentSession, Policy>;
 
@@ -119,6 +130,12 @@ export interface DaemonOptions {
      * probe after a turn ends (default 30 s later) and how long an unchanged snapshot is not sent again (default 15 min).
      */
     readonly quota?: { readonly sources?: readonly QuotaSource[]; readonly probe?: boolean; readonly pollMs?: number; readonly turnEndDebounceMs?: number; readonly refreshMs?: number };
+    /**
+     * How much of a session's history the machine keeps (#397): the newest whole turns under `maxBytes` of NDJSON, trimmed
+     * after every turn end. Default `DEFAULT_LOG_MAX_BYTES`; `0` keeps everything. What is trimmed becomes a named `gap`
+     * to a `history.request` (and to a reconnect's `wanted` cursor) — never silence.
+     */
+    readonly retention?: Partial<RetentionPolicy>;
 }
 
 export interface Daemon {
@@ -243,6 +260,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const toolTimeoutMs = options.toolTimeoutMs ?? 10 * 60_000;
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const log = options.eventLog;
+    const retention: RetentionPolicy = { maxBytes: options.retention?.maxBytes ?? DEFAULT_LOG_MAX_BYTES };
 
     let environments: readonly LocalEnvironment[] = options.environments;
     let policy: MachinePolicy = options.policy ?? POLICY_OFF;
@@ -417,6 +435,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
             case 'env.request':
                 void envRequest(frame);
                 return;
+            case 'history.request':
+                void historyRequest(frame);
+                return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
                 if (!pending) return;
@@ -486,6 +507,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
                     if (!send({ v: V, t: 'session.frame', sessionId: s.id, frame })) return;
                     s.lastSent = last;
                     reportRef(s);
+                    // The turn is on disk whole: apply retention now, when a cut can land on a turn boundary (#397).
+                    if (frame.kind === 'event' && frame.event.type === 'turn-end') void retainLog(s.id);
                 }
             } catch (e) {
                 if (!controller.signal.aborted) logger.warn('session: event stream failed', { session: s.id, error: e });
@@ -548,6 +571,42 @@ export function createDaemon(options: DaemonOptions): Daemon {
     async function fsRequest(frame: PlatformFrameOf<'fs.request'>): Promise<void> {
         const outcome = await answerFsRequest(environments, frame.environmentId, frame.op, { platform, logger });
         send({ v: V, t: 'fs.response', requestId: frame.requestId, ...outcome });
+    }
+
+    // -------------------------------------------------------------- history
+
+    /**
+     * A history slice out of the session's log (#397), live session or not: the log outlives the process, so a daemon
+     * restarted since still answers for a session it no longer runs. What the log lost to retention is a named `gap`.
+     */
+    async function historyRequest(frame: PlatformFrameOf<'history.request'>): Promise<void> {
+        let answer: Extract<DaemonFrame, { t: 'history.response' }>;
+        try {
+            const slice = await log.slice(frame.sessionId, { from: frame.from, ...(frame.to ? { to: frame.to } : {}), ...(frame.limit !== undefined ? { limit: frame.limit } : {}) }, { maxBytes: HISTORY_RESPONSE_BYTES });
+            answer =
+                'error' in slice
+                    ? { v: V, t: 'history.response', requestId: frame.requestId, error: slice.error }
+                    : {
+                          v: V,
+                          t: 'history.response',
+                          requestId: frame.requestId,
+                          result: { events: slice.result.events.map((event): WireFrame => ({ v: W, kind: 'event', epoch: event.epoch, seq: event.seq, event })), ...(slice.result.more ? { more: true } : {}) }
+                      };
+        } catch (e) {
+            logger.warn('session: history read failed', { session: frame.sessionId, error: e });
+            answer = { v: V, t: 'history.response', requestId: frame.requestId, error: { code: 'internal', message: 'the session log could not be read; see the daemon log' } };
+        }
+        send(answer);
+    }
+
+    /** Trim a session's log to the retention policy; a failure is logged, the stream is not touched. */
+    async function retainLog(sessionId: SessionId): Promise<void> {
+        try {
+            const keepFrom = await log.retain(sessionId, retention);
+            if (keepFrom) logger.info('session: log trimmed', { session: sessionId, keepFrom, maxBytes: retention.maxBytes });
+        } catch (e) {
+            logger.warn('session: log retention failed', { session: sessionId, error: e });
+        }
     }
 
     // ---------------------------------------------------------- environments

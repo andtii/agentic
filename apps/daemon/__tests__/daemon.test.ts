@@ -311,6 +311,98 @@ describe('daemon', () => {
         expect(seqs).toEqual([3, 4, 5]);
     });
 
+    it('answers history.request from its log — live, bounded, unknown — and after a restart from the file on disk (#397)', async () => {
+        const first = await start([env('env_a')]);
+        open(first.seat, 'session_1', 'env_a');
+        const opened = await expectFrame(first.seat, 'session.opened');
+        first.seat.send({ v: V, t: 'session.command', sessionId: 'session_1' as SessionId, command: { v: 1, commandId: 'c1', type: 'prompt', turnId: 't1', input: [{ type: 'text', text: 'go' }] } });
+        const streamed: { epoch: number; seq: number; event: unknown }[] = [];
+        for (;;) {
+            const frame = await next(first.seat);
+            if (frame.t !== 'session.frame' || frame.frame.kind !== 'event') continue;
+            streamed.push({ epoch: frame.frame.epoch, seq: frame.frame.seq, event: frame.frame.event });
+            if (frame.frame.event.type === 'turn-end') break;
+        }
+        expect(streamed).toHaveLength(5);
+        const ask = async (seat: PlatformSeat, requestId: string, range: Record<string, unknown>, sessionId = 'session_1') => {
+            seat.send({ v: V, t: 'history.request', requestId, sessionId: sessionId as SessionId, from: opened.head, ...range });
+            const response = await expectFrame(seat, 'history.response');
+            expect(response.requestId).toBe(requestId);
+            return response;
+        };
+        // Waits for the log's pending writes: the frames just streamed are on disk when asked for.
+        const whole = await ask(first.seat, 'h1', {});
+        expect(whole.result?.events).toEqual(streamed.map((f) => ({ v: 1, kind: 'event', ...f })));
+        expect(whole.result?.more).toBeUndefined();
+        const cut = await ask(first.seat, 'h2', { limit: 2 });
+        expect(cut.result).toMatchObject({ more: true });
+        expect(cut.result?.events.map((f) => f.kind === 'event' && f.seq)).toEqual([1, 2]);
+        expect((await ask(first.seat, 'h3', { to: { epoch: 0, seq: 3 } })).result?.events.map((f) => f.kind === 'event' && f.seq)).toEqual([1, 2, 3]);
+        expect((await ask(first.seat, 'h4', {}, 'session_nobody')).error).toEqual({ code: 'unknown-session', message: expect.stringContaining('session_nobody') });
+
+        // The daemon restarts: the session is gone, its log is not.
+        await first.daemon.stop();
+        daemons.length = 0;
+        const daemon = createDaemon({ credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token }, environments: [env('env_a')], drivers: [scriptedDriver({ events: 5, heartbeatMs: 1_000 })], eventLog: ndjsonEventLog(join(dir, 'sessions')), backoff: { initialMs: 5, maxMs: 20 } });
+        daemons.push(daemon);
+        await daemon.start();
+        const seat = await relay.nextSeat();
+        await expectFrame(seat, 'hello');
+        seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: {} });
+        expect((await ask(seat, 'h5', {})).result?.events).toEqual(whole.result?.events);
+    });
+
+    it('trims a session log to the retention budget after a turn ends, and a range before the cut answers a named gap (#397)', async () => {
+        const daemon = createDaemon({
+            credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
+            environments: [env('env_a')],
+            drivers: [scriptedDriver({ events: 5, heartbeatMs: 1_000 })],
+            eventLog: ndjsonEventLog(join(dir, 'sessions')),
+            backoff: { initialMs: 5, maxMs: 20 },
+            heartbeatMs: 1_000,
+            // About one and a half scripted turns of NDJSON: the third turn pushes the first out.
+            retention: { maxBytes: 1_100 }
+        });
+        daemons.push(daemon);
+        await daemon.start();
+        const seat = await relay.nextSeat();
+        await expectFrame(seat, 'hello');
+        seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: {} });
+        open(seat, 'session_1', 'env_a');
+        const opened = await expectFrame(seat, 'session.opened');
+        let head = opened.head;
+        for (let n = 1; n <= 3; n++) {
+            seat.send({ v: V, t: 'session.command', sessionId: 'session_1' as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t !== 'session.frame' || frame.frame.kind !== 'event') continue;
+                head = { epoch: frame.frame.epoch, seq: frame.frame.seq };
+                if (frame.frame.event.type === 'turn-end') break;
+            }
+        }
+        expect(head).toEqual({ epoch: 0, seq: 15 });
+        // Retention runs after the turn-end frame went out: poll until the log's start moved.
+        const log = ndjsonEventLog(join(dir, 'sessions'));
+        const deadline = Date.now() + 5_000;
+        let gap: DaemonFrameOf<'history.response'> | undefined;
+        for (let n = 0; !gap?.error; n++) {
+            if (Date.now() > deadline) throw new Error('the log was not trimmed');
+            await new Promise((r) => setTimeout(r, 20));
+            seat.send({ v: V, t: 'history.request', requestId: `g${n}`, sessionId: 'session_1' as SessionId, from: opened.head });
+            gap = await expectFrame(seat, 'history.response');
+        }
+        expect(gap.error).toMatchObject({ code: 'gap', earliest: { epoch: 0, seq: expect.any(Number) } });
+        const earliest = gap.error!.earliest!;
+        expect(earliest.seq).toBeGreaterThan(1);
+        // The newest turn is whole on disk; what is left is exactly what a range from the cut answers.
+        const left = [];
+        for await (const e of log.read('session_1')) left.push(e.seq);
+        expect(left[0]).toBe(earliest.seq);
+        expect(left.at(-1)).toBe(15);
+        seat.send({ v: V, t: 'history.request', requestId: 'kept', sessionId: 'session_1' as SessionId, from: { epoch: 0, seq: earliest.seq - 1 } });
+        expect((await expectFrame(seat, 'history.response')).result?.events.map((f) => f.kind === 'event' && f.seq)).toEqual(left);
+    });
+
     it('reports the id the runtime names its session with: session.ref once it changes, nothing while it does not (#389)', async () => {
         const { seat } = await start([env('env_a')], [namingDriver({ events: 3, heartbeatMs: 1_000 })]);
         open(seat, 'session_1', 'env_a');

@@ -12,10 +12,12 @@
  * either way. Promotion candidate (docs/promotion.md).
  */
 
-import type { AgentEvent, AgentTranscript, EventCursor, EventLogStore, TranscriptStore } from '@sigx/ai-agent';
+import type { ActorClientWith, AnyActorDefinition } from '@sigx/actors';
+import type { AgentEvent, AgentMessage, AgentTranscript, EventCursor, EventLogStore, TranscriptStore } from '@sigx/ai-agent';
 import type { AgentPart } from '@sigx/ai-agent/app';
 
-import { applySessionEntry, eventsAfter, jsonBytes, utf8Bytes, type SessionEntry, type SessionState } from './state.js';
+import { applySessionEntry, eventsAfter, jsonBytes, utf8Bytes, type SessionEntry, type SessionState, type TranscriptPageMeta } from './state.js';
+import { SessionTranscriptPage, transcriptPageKey } from './transcript.js';
 
 /** The slice of `ActorContext<SessionState>` the stores use — the real context satisfies it inside a turn. */
 export interface SessionStoreContext {
@@ -24,6 +26,10 @@ export interface SessionStoreContext {
     snapshot(): SessionState;
     /** `ctx.append`: fold through the definition's `applyEntry` and write the entry alone. */
     append?(entry: unknown): Promise<void>;
+    /** The actor key, `{ws}:session:{id}` — with `actor`, where the transcript pages are keyed from (#397). */
+    readonly key?: string;
+    /** `ctx.actor`: the hop to a `SessionTranscriptPage`. A context without it (a test double) keeps only the bounded snapshot. */
+    actor?<D extends AnyActorDefinition>(def: D, key: string): ActorClientWith<D>;
 }
 
 /** Fold `entry` into the state and make it durable — call only inside a turn. */
@@ -37,10 +43,18 @@ export async function appendEntry(ctx: SessionStoreContext, entry: SessionEntry)
 }
 
 /**
- * The stored transcript snapshot's budget (#198). With the event window (`WINDOW_BYTES`) it keeps
- * the Session record under a Durable Object value's 2 MB whatever the session's length.
+ * The RECORD's transcript snapshot's budget (#198): with the event window (`WINDOW_BYTES`) it keeps
+ * the Session record under a Durable Object value's 2 MB whatever the session's length. It bounds a
+ * view — what `transcript()` and a request card read — never the model's history: the transcript the
+ * runtime saves through the store lives whole in `SessionTranscriptPage`s (#397), so a long API
+ * session's older outputs are not replaced by trim markers on resume. Whether that history should
+ * be cut to a model's context window is a product decision, not a storage limit: compaction or
+ * summarisation of a long transcript is #401.
  */
 export const TRANSCRIPT_BYTES = 1024 * 1024;
+
+/** About how many UTF-8 JSON bytes of messages one `SessionTranscriptPage` holds (#397) — a quarter of a Durable Object value. */
+export const TRANSCRIPT_PAGE_BYTES = 512 * 1024;
 
 const trimmed = (bytes: number): string => `[trimmed from the stored snapshot: ${Math.max(1, Math.round(bytes / 1024))} KB — the session's events keep it]`;
 const sizeOf = jsonBytes;
@@ -123,24 +137,82 @@ export function createEventLogStore(ctx: SessionStoreContext): EventLogStore {
     };
 }
 
-/** Whole-transcript persistence keyed by the runtime session id; `save` is a full save, which compacts the log. */
+/**
+ * `messages` cut into pages of about `TRANSCRIPT_PAGE_BYTES` (#397), each with the meta that fingerprints it: a message
+ * alone past the budget is a page of its own. Pages before the last are append-only in practice (a finished turn's
+ * messages do not change), so a save that compares metas rewrites only the tail.
+ */
+export function pageMessages(messages: readonly AgentMessage[], budget: number = TRANSCRIPT_PAGE_BYTES): { readonly messages: AgentMessage[]; readonly meta: TranscriptPageMeta }[] {
+    const out: { messages: AgentMessage[]; meta: TranscriptPageMeta }[] = [];
+    let page: AgentMessage[] = [];
+    let bytes = 0;
+    const flush = () => {
+        if (page.length === 0) return;
+        out.push({ messages: page, meta: { page: out.length, count: page.length, bytes, first: page[0]!.id, last: page[page.length - 1]!.id } });
+        page = [];
+        bytes = 0;
+    };
+    for (const m of messages) {
+        const size = jsonBytes(m);
+        if (page.length > 0 && bytes + size > budget) flush();
+        page.push(m);
+        bytes += size;
+    }
+    flush();
+    return out;
+}
+
+const sameMeta = (a: TranscriptPageMeta, b: TranscriptPageMeta): boolean => a.page === b.page && a.count === b.count && a.bytes === b.bytes && a.first === b.first && a.last === b.last;
+
+/**
+ * Whole-transcript persistence keyed by the runtime session id; `save` is a full save, which compacts the log.
+ * While the transcript fits `TRANSCRIPT_BYTES` the record holds it whole, as it always did. Past that the record keeps
+ * the bounded snapshot (`boundTranscript`) and the messages go whole to `SessionTranscriptPage`s (#397) — only the pages
+ * whose fingerprint changed — and `load` returns them, so the model's history on the API path is bounded by no record
+ * budget. A context without `actor` (a test double) keeps only the bounded snapshot.
+ */
 export function createTranscriptStore(ctx: SessionStoreContext): TranscriptStore {
+    const pageOf = (page: number) => ctx.actor!(SessionTranscriptPage, transcriptPageKey(ctx.key!, page));
+    const paged = () => typeof ctx.actor === 'function' && ctx.key !== undefined;
     return {
         async load(sessionId: string) {
-            const t = ctx.snapshot().transcript;
-            return t && t.sessionId === sessionId ? t : undefined;
+            const s = ctx.snapshot();
+            const t = s.transcript;
+            if (!t || t.sessionId !== sessionId) return undefined;
+            const pages = s.transcriptPages;
+            if (!pages?.length || !paged()) return t;
+            const messages: AgentMessage[] = [];
+            for (const p of pages) messages.push(...(await pageOf(p.page).read()));
+            return { ...t, messages };
         },
         async save(sessionId: string, transcript: AgentTranscript) {
             // `load` finds a snapshot by its own id: refuse one that could never be read back.
             if (transcript.sessionId !== sessionId) throw new Error(`transcript of "${transcript.sessionId}" saved under "${sessionId}"`);
+            const before = ctx.state.transcriptPages ?? [];
+            if (paged() && jsonBytes(transcript) > TRANSCRIPT_BYTES) {
+                const next = pageMessages(transcript.messages);
+                // The pages first, the record last: a record never lists a page that is not there.
+                for (const p of next) {
+                    const was = before[p.meta.page];
+                    if (was && sameMeta(was, p.meta)) continue;
+                    await pageOf(p.meta.page).store(p.messages);
+                }
+                for (let n = next.length; n < before.length; n++) await pageOf(n).forget();
+                ctx.state.transcriptPages = next.map((p) => p.meta);
+            } else {
+                // It fits the record whole (or shrank back into it): the pages, if any, are not needed.
+                if (paged()) for (const p of before) await pageOf(p.page).forget();
+                delete ctx.state.transcriptPages;
+            }
             ctx.state.transcript = boundTranscript(transcript);
             await ctx.save();
         },
         async delete(sessionId: string) {
-            if (ctx.state.transcript?.sessionId === sessionId) {
-                delete ctx.state.transcript;
-                await ctx.save();
-            }
+            if (ctx.state.transcript?.sessionId !== sessionId) return;
+            if (paged()) for (const p of ctx.state.transcriptPages ?? []) await pageOf(p.page).forget();
+            delete ctx.state.transcriptPages;
+            delete ctx.state.transcript;
+            await ctx.save();
         }
     };
 }

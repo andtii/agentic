@@ -78,4 +78,6 @@ export interface MachinePorts {
     readonly fsTimeoutMs?: number;
     /** The same deadline for `putEnvironment` / `removeEnvironment` and the daemon's `env.response`. Default 30 s. */
     readonly envTimeoutMs?: number;
+    /** The same deadline for `historyRequest` and the daemon's `history.response` (#397). Default 30 s. */
+    readonly historyTimeoutMs?: number;
 }

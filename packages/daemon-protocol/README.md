@@ -10,8 +10,8 @@ The frame TYPES live in `@agentic/core` (`DaemonFrame<F, R>`, `PlatformFrame<C>`
 import type { DaemonFrame, PlatformFrame, HelloFrame, SessionFrameFrame } from '@agentic/daemon-protocol';
 ```
 
-`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.ref` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong` · `fs.response` · `env.response` · `quota`.
-`PlatformFrame` (platform → daemon): `welcome` · `session.open` · `session.command` · `session.close` · `tool.result` · `ping` · `fs.request` · `env.request`.
+`DaemonFrame` (daemon → platform): `hello` · `env` · `heartbeat` · `session.opened` · `session.ref` · `session.frame` · `session.reply` · `session.closed` · `tool.call` · `pong` · `fs.response` · `env.response` · `quota` · `history.response`.
+`PlatformFrame` (platform → daemon): `welcome` · `session.open` · `session.command` · `session.close` · `tool.result` · `ping` · `fs.request` · `env.request` · `history.request`.
 
 ## Validators
 
@@ -61,6 +61,7 @@ Refusals are checked in order and named: `too-large` (before parsing) · `not-js
 | `env-remove` | `remove` refuses `in-use` while a session runs there, removes an idle environment, answers `unknown-environment` for one it does not have — feature `env-manage` |
 | `env-policy` | a policy turned off on the machine (`setPolicy`) is announced with `env`, and every `env.request` then answers `policy-disabled` — feature `env-manage` |
 | `tool-round-trip` | `tool.call` → `tool.result` (output, then error) and the turn completes both times |
+| `history` | `history.request` answers the same event frames the session streamed, from `from` (exclusive) up to an inclusive `to`; `limit` cuts and says `more`, and asking again from the last frame continues without a duplicate or a hole; an unknown session answers `unknown-session`; after `truncateLog` a range the log no longer reaches answers a `gap` naming `earliest`, a range inside what is left is still answered (#397, OPS-04) — feature `history` |
 
 ```ts
 import { daemonConformance, inMemoryHarness } from '@agentic/daemon-protocol/testing';
@@ -68,6 +69,6 @@ import { daemonConformance, inMemoryHarness } from '@agentic/daemon-protocol/tes
 for (const c of daemonConformance(inMemoryHarness())) it.skipIf(!!c.skip)(c.name, c.run);
 ```
 
-A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` behind `features`); an optional `knownOrigin` names a remote URL with a checkout under the suite environment's roots so `fs-locate` proves a match. `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side — its `repos` option fakes git checkouts (badged in listings, found by `locate`; the first with an `origin` becomes `knownOrigin`), and its `faults` option breaks it on purpose so a test can check the suite notices.
+A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` behind `features`); an optional `knownOrigin` names a remote URL with a checkout under the suite environment's roots so `fs-locate` proves a match. `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side: it answers `history.request` from the per-session log it keeps — its `repos` option fakes git checkouts (badged in listings, found by `locate`; the first with an `origin` becomes `knownOrigin`), and its `faults` option breaks it on purpose so a test can check the suite notices.
 
 Design: `docs/architecture.md`. What may move into the sigx estate later: `docs/promotion.md`.

@@ -79,6 +79,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         valid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 0.76 }]) },
         invalid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 76 }]) },
         path: 'snapshot.windows.0.utilization'
+    },
+    'history.response': {
+        valid: { v: V, t: 'history.response', requestId: 'h_1', result: { events: [{ v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } }], more: true } },
+        invalid: { v: V, t: 'history.response', requestId: 'h_1', result: { events: [] }, error: { code: 'gap', message: 'forgotten', earliest: cursor } },
+        path: 'error'
     }
 };
 
@@ -111,6 +116,11 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         // A profile directory never crosses the wire: the input is strict, so the key fails the frame instead of being stripped.
         invalid: { v: V, t: 'env.request', requestId: 'env_1', op: 'put', environment: { name: 'Work', runtime: 'in-memory', cwdRoots: ['/work/app'], profileDir: '/home/me/.claude' } },
         path: 'environment'
+    },
+    'history.request': {
+        valid: { v: V, t: 'history.request', requestId: 'h_1', sessionId: 's1' as never, from: cursor, to: { epoch: 0, seq: 9 }, limit: 100 },
+        invalid: { v: V, t: 'history.request', requestId: 'h_1', sessionId: 's1', from: cursor, limit: 0 },
+        path: 'limit'
     }
 };
 
@@ -296,6 +306,33 @@ describe('daemon frame schemas', () => {
         if (!missing.success) expect(missing.error.issues.map((i) => i.path.join('.'))).toContain('op.origin');
         expect(request({ kind: 'locate', origin: '' }).success).toBe(false);
         expect(request({ kind: 'locate', origin: 'x'.repeat(LIMITS.text + 1) }).success).toBe(false);
+    });
+
+    it('history frames (#397): a platform-stamped cursor may be fractional, the answer carries event frames and exactly one of result or error, a gap may name the earliest cursor', () => {
+        const request = (f: Record<string, unknown>) => platformFrameSchemas['history.request'].safeParse({ v: V, t: 'history.request', requestId: 'h_1', sessionId: 's1', ...f });
+        expect(request({ from: { epoch: 1, seq: 5.5 } }).success).toBe(true);
+        expect(request({ from: { epoch: 1, seq: 5 }, to: { epoch: 1, seq: 7.5 } }).success).toBe(true);
+        expect(request({ from: { epoch: 1, seq: -1 } }).success).toBe(false);
+        expect(request({ from: { epoch: 1 } }).success).toBe(false);
+        expect(request({}).success).toBe(false);
+        expect(request({ from: cursor, limit: LIMITS.list + 1 }).success).toBe(false);
+        expect(request({ from: cursor, limit: 1.5 }).success).toBe(false);
+
+        const response = (f: Record<string, unknown>) => daemonFrameSchemas['history.response'].safeParse({ v: V, t: 'history.response', requestId: 'h_1', ...f });
+        const frame = (seq: number) => ({ v: W, kind: 'event', epoch: 0, seq, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq } });
+        expect(response({ result: { events: [] } }).success).toBe(true);
+        expect(response({ result: { events: [frame(1), frame(2)], more: false } }).success).toBe(true);
+        // Only event frames: a hello or a gap is no history.
+        expect(response({ result: { events: [{ v: W, kind: 'gap', from: cursor, resumeAt: cursor }] } }).success).toBe(false);
+        expect(response({ result: { events: [{ ...frame(1), event: { type: 'part-delta' } }] } }).success).toBe(false);
+        expect(response({ result: { events: Array.from({ length: LIMITS.list + 1 }, (_, i) => frame(i + 1)) } }).success).toBe(false);
+        expect(response({ error: { code: 'gap', message: 'the log starts later', earliest: { epoch: 0, seq: 40 } } }).success).toBe(true);
+        expect(response({ error: { code: 'unknown-session', message: 'no log' } }).success).toBe(true);
+        expect(response({ error: { code: 'teapot', message: 'no' } }).success).toBe(false);
+        const neither = response({});
+        expect(neither.success).toBe(false);
+        expect(neither.error?.issues[0]?.path).toEqual(['result']);
+        expect(response({ result: { events: [] }, error: { code: 'internal', message: 'both' } }).success).toBe(false);
     });
 
     it('refuse the wrong protocol version at the schema level too', () => {

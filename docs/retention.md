@@ -24,7 +24,8 @@ in a shared table.
 | Schedule `{ws}:schedule:{id}` | recurrence, target agent, firing log | `Workspace.schedules` (`createSchedule` allocates the id) |
 | Inbox `{ws}:inbox` | notifications (capped at 500), push subscriptions | implied (one per workspace) |
 | Registry `{ws}:registry` | plugins (manifest, enabled, config, grantedPermissions), connectors, **secrets sealed under `WORKSPACE_KEK`** | implied (one per workspace) |
-| Task `{ws}:task:{id}`, Session `{ws}:session:{id}` | task transitions; session event log + transcript snapshot | **not indexed** by the Workspace — reachable only through a `WorkspaceStore.list` (see below) |
+| Task `{ws}:task:{id}` | task transitions | **not indexed** by the Workspace — reachable only through a `WorkspaceStore.list` (see below) |
+| Session `{ws}:session:{id}` + SessionPage `…:p{n}` + SessionTranscriptPage `…:t{n}` | the recent event window, its index, the bounded transcript view; older events in pages of ~256 KB; on the `anthropic-api` path the whole transcript (the model's history) in pages of ~512 KB (#397) | a chat member's live session through the chat's binding (`Chat.get().sessions`, #399); its pages through the record: `Session.get().pages` counts every `SessionPage` ever written (a daemon session keeps only the newest `RETAINED_PAGES` = 16 and forgets the rest — the record deleted at once, #397 — so a delete of an older number finds nothing) and `transcriptPages` the transcript's. `Routing.endSession` (New session, removal) and `Workspace.deleteAll` purge both kinds before the record; a session no chat binds is reachable only through a `WorkspaceStore.list` |
 | Ledger `{ws}:ledger:{yyyy-mm}`, Audit `{ws}:audit` | usage rows; approvals and transitions | not built yet; same rule as Task / Session |
 | Machine `{ws}:machine:{id}` | machine token hash, environments, activity | not built yet; `Workspace.machines` is the index |
 | Chat attachments (R2, not an actor) | the bytes of every file uploaded into a chat, under `files/{ws}/{chat}/{fileId}` in the `ARTIFACTS` bucket; the record (name, type, size, which message) is in the Chat's state | the Chat: `Workspace.deleteAll` deletes each indexed chat's files (`ChatFileStore.deleteChat`) before purging the records |
@@ -96,8 +97,10 @@ asks the target object to purge itself: a `POST /_agentic/purge` to that
 object, authenticated with `SESSION_SECRET` and never forwarded by the
 Worker, deactivates the actor and runs `storage.deleteAll()` +
 `deleteAlarm()`. A namespace cannot be enumerated, so the Cloudflare store
-has no `list`: tasks, sessions, ledger months and audit records stay behind
-until their own retention lands. Without `SESSION_SECRET` every purge is
+has no `list`: tasks, ledger months, audit records and sessions no chat
+binds stay behind until their own retention lands — a chat's sessions and
+their pages are reached through the binding and the record (table above).
+Without `SESSION_SECRET` every purge is
 refused and `ops.delete.error` records it; the purge of already-reached
 children is not rolled back.
 
@@ -124,7 +127,7 @@ These are NOT deleted by `deleteAll` and NOT covered by the retention settings:
 | Copy | Where | Who removes it |
 |---|---|---|
 | Claude Code sessions, transcripts, credentials | on each paired machine under the profile's `CLAUDE_CONFIG_DIR` (EXE-10) | the machine's owner (`agentic-daemon` does not delete them) |
-| Daemon event logs and queued frames | `apps/daemon` NDJSON logs on the machine | the machine's owner |
+| Daemon event logs — **the history of a daemon session** (#397): the platform keeps only its newest pages and reads older events from here | `apps/daemon` NDJSON logs on the machine, `%LOCALAPPDATA%/agentic/sessions/{sessionId}.ndjson`, trimmed after every turn to the newest whole turns under `retention.maxBytes` (64 MB); a session's file is not deleted when the session ends | the daemon's retention for what is old, the machine's owner for the file |
 | Prompts, tool inputs and outputs sent to a model provider | the provider (Anthropic API) under its own retention policy | the provider |
 | Data an MCP connector or A2A peer received | the remote server | that operator |
 | Push notifications already delivered | the browser / push service | the user's device |
