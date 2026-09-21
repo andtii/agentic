@@ -8,7 +8,8 @@ export interface ManifestAsset {
 export interface Manifest {
     readonly version: string;
     readonly channel: 'stable' | 'latest';
-    readonly publishedAt: string;
+    /** Epoch ms. */
+    readonly publishedAt: number;
     readonly commit: string;
     readonly protocol: number;
     readonly notesUrl: string;
@@ -22,5 +23,5 @@ export function buildManifest(input: {
     readonly repo: string;
     readonly stamp: { readonly version: string; readonly commit: string; readonly channel: 'stable' | 'latest' };
     readonly protocol: number;
-    readonly publishedAt?: string;
+    readonly publishedAt?: number;
 }): Manifest;

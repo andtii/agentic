@@ -18,7 +18,7 @@ import { buildManifest, readSidecar } from '../scripts/lib/manifest.mjs';
 import { buildStamp, protocolVersion, releaseTagFrom, stampFor } from '../scripts/lib/stamp.mjs';
 import { extractZip, readZip, writeZip } from '../scripts/lib/zip.mjs';
 import { packageDaemon, resolveClosure } from '../scripts/package.mjs';
-import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, type ReleaseManifest } from '@agentic/core';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const built = existsSync(join(DAEMON_DIR, 'dist', 'cli.js')) && existsSync(join(DAEMON_DIR, '../../packages/runtimes/dist/index.js'));
@@ -107,9 +107,12 @@ describe('release manifest', () => {
     it('keys every zip by <os>-<arch> with its release url, the sidecar sha256 and its size', async () => {
         for (const key of ['win32-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']) await zip(`agentic-daemon-${key}.zip`, `zip for ${key}`);
         await writeFile(join(dir, 'notes.txt'), 'not an asset');
-        const manifest = buildManifest({ dir, tag: 'daemon-v0.0.1-rc.1', repo: 'andtii/agentic', stamp, protocol: 1, publishedAt: '2026-09-21T00:00:00.000Z' });
+        const manifest = buildManifest({ dir, tag: 'daemon-v0.0.1-rc.1', repo: 'andtii/agentic', stamp, protocol: 1, publishedAt: 1_790_000_000_000 });
+        // the core contract's shape, checked by the compiler
+        const contract: ReleaseManifest = manifest;
+        expect(contract.assets['win32-x64']?.version).toBe('0.0.1-rc.1');
         expect(Object.keys(manifest.assets).sort()).toEqual(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']);
-        expect(manifest).toMatchObject({ version: '0.0.1-rc.1', channel: 'stable', publishedAt: '2026-09-21T00:00:00.000Z', commit: '0123456', protocol: 1, notesUrl: 'https://github.com/andtii/agentic/releases/tag/daemon-v0.0.1-rc.1', harnesses: {} });
+        expect(manifest).toMatchObject({ version: '0.0.1-rc.1', channel: 'stable', publishedAt: 1_790_000_000_000, commit: '0123456', protocol: 1, notesUrl: 'https://github.com/andtii/agentic/releases/tag/daemon-v0.0.1-rc.1', harnesses: {} });
         expect(manifest.assets['linux-x64']).toEqual({
             url: 'https://github.com/andtii/agentic/releases/download/daemon-v0.0.1-rc.1/agentic-daemon-linux-x64.zip',
             sha256: createHash('sha256').update('zip for linux-x64').digest('hex'),
@@ -136,7 +139,8 @@ describe('release manifest', () => {
         const run = spawnSync(process.execPath, [join(DAEMON_DIR, 'scripts/lib/manifest.mjs'), '--dir', dir, '--tag', 'daemon-v0.0.1-rc.1', '--repo', 'andtii/agentic', '--out', out], { encoding: 'utf8', env });
         expect(run.stderr).toBe('');
         expect(run.status).toBe(0);
-        const manifest = JSON.parse(readFileSync(out, 'utf8')) as { version: string; channel: string; commit: string; protocol: number; assets: Record<string, { sha256: string }> };
+        const manifest = JSON.parse(readFileSync(out, 'utf8')) as ReleaseManifest;
+        expect(typeof manifest.publishedAt).toBe('number');
         expect(manifest).toMatchObject({ version: '0.0.1-rc.1', channel: 'stable', commit: 'fedcba9', protocol: DAEMON_PROTOCOL_VERSION });
         expect(manifest.assets['linux-arm64']?.sha256).toBe(createHash('sha256').update('arm').digest('hex'));
         expect(spawnSync(process.execPath, [join(DAEMON_DIR, 'scripts/lib/manifest.mjs'), '--dir', dir], { encoding: 'utf8' }).status).toBe(2);

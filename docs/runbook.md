@@ -202,7 +202,7 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 `.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` (Windows x64, macOS arm64 and x64, Linux x64 and arm64), each with a `<zip>.sha256` sidecar, and publishes them with a **`manifest.json`** (#361):
 
 ```json
-{ "version": "0.1.0-main.16c7d40", "channel": "latest", "publishedAt": "…", "commit": "16c7d40", "protocol": 1,
+{ "version": "0.1.0-main.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
   "notesUrl": "https://github.com/andtii/agentic/releases/tag/daemon-latest",
   "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.0-main.16c7d40" }, … },
   "harnesses": {} }

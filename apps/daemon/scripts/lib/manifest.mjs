@@ -3,6 +3,7 @@
  * The release manifest (`manifest.json`, the `ReleaseManifest` shape): one per
  * GitHub release, uploaded beside the zips by `.github/workflows/daemon-release.yml`.
  * The one-line installers read it to find this machine's zip and its sha256.
+ * The shape is `ReleaseManifest` (`packages/core/src/release.ts`; `package.test.ts` holds the two together).
  *
  * Each `agentic-daemon-<os>-<arch>.zip` in the release folder needs the
  * `<zip>.sha256` sidecar `package.mjs --sha256` wrote beside it, so nothing is
@@ -33,7 +34,7 @@ export function readSidecar(file) {
  * @param {{
  *   dir: string; tag: string; repo: string;
  *   stamp: { version: string; commit: string; channel: 'stable' | 'latest' };
- *   protocol: number; publishedAt?: string;
+ *   protocol: number; publishedAt?: number;
  * }} input
  */
 export function buildManifest({ dir, tag, repo, stamp, protocol, publishedAt }) {
@@ -51,7 +52,7 @@ export function buildManifest({ dir, tag, repo, stamp, protocol, publishedAt }) 
     return {
         version: stamp.version,
         channel: stamp.channel,
-        publishedAt: publishedAt ?? new Date().toISOString(),
+        publishedAt: publishedAt ?? Date.now(),
         commit: stamp.commit,
         protocol,
         notesUrl: `https://github.com/${repo}/releases/tag/${tag}`,
