@@ -63,6 +63,14 @@ export interface MachinePorts {
      * a reason (§7, EXE-11).
      */
     readonly routing?: () => AnyActorDefinition;
+    /**
+     * The ReleaseDirectory definition (`defineReleaseDirectory`, `global:releases`), as a thunk (#365). When set, the
+     * machine compares its daemon's build against the channel's manifest on `hello` and on the liveness tick, runs its
+     * update policy and takes `requestUpdate`; without it the machine records what the daemon reports and offers no update.
+     */
+    readonly releases?: () => AnyActorDefinition;
+    /** The Inbox definition (`defineInbox`) the machine's update and crash notices go to (#365); absent → none are sent. */
+    readonly inbox?: () => AnyActorDefinition;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
     /**

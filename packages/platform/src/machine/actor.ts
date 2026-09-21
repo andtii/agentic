@@ -14,8 +14,8 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
-import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
+import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessReport, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
@@ -24,12 +24,16 @@ import { isServerFnError, ServerFnError } from '@sigx/server';
 import { principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
 import { asPrincipal, issueMachineToken, machinePrincipal, mintAgentPrincipal, sameWorkspace, workspaceKey, type MachineTokenRecord } from '../auth/index.js';
+import { inboxKey } from '../notify/inbox.js';
+import type { NotificationInput } from '../notify/types.js';
+import { MIN_DAEMON_VERSION, platformVersion, RELEASE_DIRECTORY_KEY, type ReleasesView } from '../releases/directory.js';
 import { routingKey } from '../routing/key.js';
 import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHistory, pruneQuota, runningIn, type EnvRequestRecord, type FsRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineOs, type MachineState, type PendingCommand, type QueuedSession, type SessionClosure } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHistory, pruneQuota, runningIn, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -45,11 +49,13 @@ export const DEFAULT_HISTORY_TIMEOUT_MS = 30_000;
 export const MACHINE_OFFLINE_CODE = 'machine-offline';
 /** The reminder floor (architecture §2): nothing is checked more often. */
 const REMINDER_FLOOR_MS = 60_000;
+/** The liveness tick re-reads the release directory and the workspace's update settings at most this often (#365); `hello` always does. */
+export const UPDATE_COMPARE_EVERY_MS = 15 * 60_000;
 
 /** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment or history request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending);
+    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending);
 }
 
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
@@ -193,6 +199,44 @@ export interface MachineView {
     readonly pending: readonly PendingCommand[];
     readonly closures: readonly SessionClosure[];
     readonly rejected: number;
+    /** What the daemon reported on `hello` (#359): its build, the frame families it answers, its harnesses. */
+    readonly build?: DaemonBuild;
+    readonly features?: readonly DaemonFeature[];
+    readonly harnesses?: readonly HarnessReport[];
+    /** Its build is older than `MIN_DAEMON_VERSION`. */
+    readonly outdated?: boolean;
+    /** An update is pending (#365): no new turn starts where it covers — `freeSlots` reads it. */
+    readonly draining?: MachineDraining;
+}
+
+/** `requestUpdate` (#365). */
+export interface UpdateRequestInput {
+    /** A version the machine's release directory lists, or `previous`; absent → the newest release on the machine's channel. */
+    readonly target?: string;
+    /** `drain` (default) lets running turns end first, for at most `drainTimeoutMs`; `now` does not wait. */
+    readonly mode?: 'drain' | 'now';
+    readonly drainTimeoutMs?: number;
+}
+
+/** `Machine.updateState()` (#365): what the Machines page shows and the update confirm asks about. */
+export interface MachineUpdateView {
+    readonly machineId: MachineId;
+    readonly online: boolean;
+    readonly build?: DaemonBuild;
+    readonly features: readonly DaemonFeature[];
+    readonly outdated: boolean;
+    readonly channel: ReleaseChannel;
+    readonly policy: UpdatePolicy;
+    /** Whether the channel / the policy are the workspace's (the machine has none of its own). */
+    readonly inherited: { readonly channel: boolean; readonly policy: boolean };
+    readonly available?: AvailableUpdate;
+    readonly pending?: PendingUpdate;
+    readonly last?: UpdateOutcome;
+    readonly draining?: MachineDraining;
+    readonly restarts?: number;
+    readonly lastExit?: DaemonExit;
+    /** What an update now would interrupt (#367's confirm): the turns running, and how many sessions are live. */
+    readonly impact: { readonly runningTurns: readonly { readonly sessionId: SessionId; readonly taskId?: TaskId; readonly agentId: string }[]; readonly liveSessions: number };
 }
 
 /** One environment's doctor verdict as `Machine.doctor()` reports it (EXE-05/07). */
@@ -281,11 +325,22 @@ interface RoutingClient {
     /** The machine went offline (#366): its running routes wait `machine-offline` until it is back, or fail `machine-lost`. */
     machineOffline(machineId: MachineId): Promise<void>;
     sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void>;
-    sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void>;
+    /** A session is gone; `code` is the daemon's close code (#359), `resume-failed` for a re-open it refused (#366, #433). */
+    sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId, code?: SessionClosedCode): Promise<void>;
     /** A turn ended in the environment, or a session running one closed (#394): a slot is free for a route parked `waiting-capacity` there. */
     slotFreed(machineId: MachineId, environmentId: EnvironmentId, why: string): Promise<void>;
     /** The daemon answered a prompt with an error (#394): `busy` parks the route on capacity, anything else fails its task. */
     promptRefused(sessionId: SessionId, turnId: string, code: string, message: string): Promise<void>;
+}
+
+/** The ReleaseDirectory's read (`global:releases`, #365). */
+interface ReleasesClient {
+    get(): Promise<ReleasesView>;
+}
+
+/** The slice of the Inbox a machine notifies (#365). */
+interface InboxClient {
+    push(input: NotificationInput): Promise<unknown>;
 }
 
 /** Build the Machine actor definition over its ports. One call per app — the actor `type` is `'machine'`. */
@@ -331,8 +386,288 @@ export function defineMachineActor(ports: MachinePorts) {
             queued: rest.queued,
             pending: Object.values(rest.pending),
             closures: rest.closures,
-            rejected: rest.rejected
+            rejected: rest.rejected,
+            ...(rest.build ? { build: rest.build } : {}),
+            ...(rest.features ? { features: rest.features } : {}),
+            ...(rest.harnesses ? { harnesses: rest.harnesses } : {}),
+            ...(rest.outdated ? { outdated: true } : {}),
+            ...(rest.draining ? { draining: rest.draining } : {})
         };
+    }
+
+    /** `updateState()` (#365). */
+    function updateView(c: ActorContext<MachineState>): MachineUpdateView {
+        const s = c.snapshot();
+        const u = s.update;
+        const { channel, policy, inherited } = effectiveUpdates(u);
+        const running = new Map<string, HostedSession>();
+        for (const h of Object.values(s.activeSessions)) for (const r of runningIn(s, h.environmentId)) running.set(r.sessionId, r);
+        return {
+            machineId: parseMachineKey(c.key)!.machineId,
+            online: s.online,
+            ...(s.build ? { build: s.build } : {}),
+            features: s.features ?? [],
+            outdated: s.outdated === true,
+            channel,
+            policy,
+            inherited,
+            ...(u?.available ? { available: u.available } : {}),
+            ...(u?.pending ? { pending: u.pending } : {}),
+            ...(u?.last ? { last: u.last } : {}),
+            ...(s.draining ? { draining: s.draining } : {}),
+            ...(s.restarts !== undefined ? { restarts: s.restarts } : {}),
+            ...(s.lastExit ? { lastExit: s.lastExit } : {}),
+            impact: {
+                runningTurns: [...running.values()].map((h) => ({ sessionId: h.sessionId, ...(h.taskId ? { taskId: h.taskId } : {}), agentId: h.agentId })),
+                liveSessions: Object.keys(s.activeSessions).length
+            }
+        };
+    }
+
+    /** The router, told one-way as the machine `c` names — a fresh call, for the reasons `session()` gives; a router that is not wired hears nothing. */
+    async function tellRouter(c: ActorContext<MachineState>, call: (routing: RoutingClient) => Promise<void>): Promise<void> {
+        const def = ports.routing?.();
+        const ids = parseMachineKey(c.key);
+        if (!def || !ids) return;
+        const client = actor(def, routingKey(ids.workspaceId)).with({ context: asPrincipal(machinePrincipal(ids.workspaceId, ids.machineId)), oneWay: true }) as unknown as RoutingClient;
+        await call(client).catch(() => undefined);
+    }
+
+    /** Room to open a session in: `freeSlots` without the drain. An open costs no slot (#394), so a drain never holds one back (#365). */
+    const openRoom = (s: MachineState, environmentId: EnvironmentId): number => freeSlots({ environments: s.environments, activeSessions: s.activeSessions, pending: s.pending }, environmentId);
+
+    /** Move queued sessions into environments that have room, sending `session.open` for each. */
+    function dequeueIn(c: ActorContext<MachineState>): void {
+        const s = c.state;
+        if (!s.online) return;
+        const keep: QueuedSession[] = [];
+        for (const q of s.queued) {
+            if (openRoom(s, q.environmentId) > 0) {
+                const hosted: HostedSession = { sessionId: q.sessionId, environmentId: q.environmentId, agentId: q.agentId, ...(q.taskId ? { taskId: q.taskId } : {}), spec: q.spec, status: 'opening', requestedAt: now() };
+                s.activeSessions[q.sessionId] = hosted;
+                ports.socket.send(c.key, encodeFrame({ v: V, t: 'session.open', sessionId: hosted.sessionId, environmentId: hosted.environmentId, spec: c.snapshot(hosted.spec) }));
+            } else keep.push(q);
+        }
+        s.queued = keep;
+    }
+
+    /**
+     * Daemon updates on the machine `c` names (#365): what `hello` reports, the compare against the release directory,
+     * the pending `update.request` from asked to judged, the drain it holds, the policy, and the audit records and Inbox
+     * rows for all of it. A factory over the context, so a method turn and the liveness reminder share it.
+     */
+    function updates(c: ActorContext<MachineState>) {
+        const { workspaceId, machineId } = parseMachineKey(c.key)!;
+        const ref = { kind: 'machine', machineId } as const;
+        const byMachine = `machine:${machineId}`;
+        const named = (): string => c.state.name || machineId;
+
+        async function inbox(input: NotificationInput): Promise<void> {
+            const def = ports.inbox?.();
+            if (!def) return;
+            try {
+                await (c.actor(def, inboxKey(workspaceId)).with({ oneWay: true }) as unknown as InboxClient).push(input);
+            } catch {
+                // A notification is never a gate on the work.
+            }
+        }
+
+        /** The release directory's manifests, or `null` when it is not wired or cannot be read. */
+        async function directory(): Promise<ReleasesView | null> {
+            const def = ports.releases?.();
+            if (!def) return null;
+            try {
+                return await (c.actor(def, RELEASE_DIRECTORY_KEY) as unknown as ReleasesClient).get();
+            } catch {
+                return null;
+            }
+        }
+
+        /** The workspace's `settings.updates` into `update.defaults`; a workspace that cannot be read leaves the last copy. */
+        async function readDefaults(): Promise<void> {
+            const u = (c.state.update ??= {});
+            try {
+                const w = await c.actor(Workspace, workspaceKey(workspaceId)).get();
+                u.defaults = c.snapshot(w.settings.updates ?? DEFAULT_UPDATE_SETTINGS);
+            } catch {
+                // Kept: the defaults it last read, else `DEFAULT_UPDATE_SETTINGS`.
+            }
+        }
+
+        /** `available` from the channel's manifest; a version newly seen is told to the Inbox once. `dir: null` changes nothing. */
+        async function compare(dir: ReleasesView | null): Promise<void> {
+            const s = c.state;
+            const u = (s.update ??= {});
+            u.comparedAt = now();
+            if (!dir) return;
+            const manifest = dir.channels[effectiveUpdates(u).channel];
+            if (!s.build || !manifest || compareVersions(manifest.version, s.build.version) <= 0) {
+                delete u.available;
+                return;
+            }
+            const asset = manifest.assets[s.build.platform];
+            u.available = { version: manifest.version, ...(manifest.notesUrl ? { notesUrl: manifest.notesUrl } : {}), ...(dir.lastCheckedAt !== undefined ? { checkedAt: dir.lastCheckedAt } : {}), ...(asset ? { asset: c.snapshot(asset) } : {}) };
+            if (u.notified === manifest.version) return;
+            u.notified = manifest.version;
+            await inbox({ kind: 'update-available', title: `Daemon ${manifest.version} is available for ${named()}`, body: `It runs ${s.build.version}.${asset ? '' : ` The release has no build for ${s.build.platform}.`}`, ref });
+        }
+
+        /** While `onHello` runs nothing goes out before `welcome`: a drain it ends is told by `releaseDrain` after. */
+        let holding = false;
+        let held: string | undefined;
+
+        /** The drain ends (#365): queued opens go out, and the router hears a slot freed in every environment, so parked prompts run. */
+        async function endDrain(why: string): Promise<void> {
+            const s = c.state;
+            if (!s.draining) return;
+            delete s.draining;
+            if (holding) {
+                held ??= why;
+                return;
+            }
+            dequeueIn(c);
+            for (const env of s.environments) await tellRouter(c, (r) => r.slotFreed(machineId, env.id, why));
+        }
+
+        /** After `welcome` (and the `hello` turn's own `dequeue`): the router hears the slots a drain `onHello` ended freed. */
+        async function releaseDrain(): Promise<void> {
+            const why = held;
+            held = undefined;
+            if (why === undefined) return;
+            for (const env of c.state.environments) await tellRouter(c, (r) => r.slotFreed(machineId, env.id, why));
+        }
+
+        /** Close the pending update: `last` records how it ended, the audit and the Inbox hear it, and its drain ends. */
+        async function close(outcome: UpdateOutcome['outcome'], error?: string, to?: string, by = byMachine): Promise<void> {
+            const s = c.state;
+            const u = s.update;
+            const p = u?.pending;
+            if (!u || !p) return;
+            const at = now();
+            const target = to ?? p.target;
+            u.last = { requestId: p.requestId, from: p.from, to: target, outcome, at, ...(error ? { error } : {}) };
+            delete u.pending;
+            if (outcome === 'applied') {
+                await recordAudit(c, workspaceId, { key: `${c.key}:update:${p.requestId}:applied`, kind: 'machine.updated', at, by, summary: `machine ${named()} updated ${p.from} → ${target}`, data: { machineId, from: p.from, to: target } });
+                await inbox({ kind: 'update-applied', title: `${named()} runs daemon ${target}`, body: `Updated from ${p.from}.`, ref });
+            } else if (outcome !== 'cancelled') {
+                const message = error ?? outcome;
+                await recordAudit(c, workspaceId, { key: `${c.key}:update:${p.requestId}:failed`, kind: 'machine.update-failed', at, by, summary: `machine ${named()} did not update ${p.from} → ${target}: ${message}`, data: { machineId, from: p.from, to: target, error: message } });
+                await inbox({ kind: 'update-failed', title: `${named()} did not update to ${target}`, body: message, ref });
+            }
+            if (s.draining?.requestId === p.requestId) await endDrain(`the update of machine ${machineId} ${outcome === 'applied' ? 'landed' : `ended (${outcome})`}`);
+        }
+
+        /** Send one `update.request` and hold it pending, with its drain. 503 when no socket takes it. */
+        async function request(target: ReleaseAsset | 'previous', to: string, mode: 'drain' | 'now', drainTimeoutMs: number, by: string): Promise<string> {
+            const s = c.state;
+            const u = (s.update ??= {});
+            const at = now();
+            const requestId = `update_${crypto.randomUUID()}`;
+            if (!ports.socket.send(c.key, encodeFrame({ v: V, t: 'update.request', requestId, target, mode, drainTimeoutMs }))) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+            const from = s.build?.version ?? s.daemonVersion ?? 'unknown';
+            u.pending = { requestId, target: to, ...(target !== 'previous' ? { asset: target } : {}), mode, from, requestedAt: at, deadline: at + drainTimeoutMs + UPDATE_DEADLINE_GRACE_MS, by };
+            s.draining = { requestId, since: at };
+            await recordAudit(c, workspaceId, { key: `${c.key}:update:${requestId}`, kind: 'machine.update-requested', at, by, summary: `update of machine ${named()} ${from} → ${to} requested (${mode})`, data: { machineId, from, to, mode, by } });
+            return requestId;
+        }
+
+        /** The policy's update, when it asks for one now (`nextAutoUpdate`) — requested as `system:updates`. */
+        async function autoUpdate(): Promise<void> {
+            if (!ports.releases) return;
+            const next = nextAutoUpdate(c.state, now());
+            if (!next?.asset) return;
+            try {
+                await request(next.asset, next.version, 'drain', DEFAULT_DRAIN_TIMEOUT_MS, SYSTEM_UPDATES);
+            } catch {
+                // No socket to send on: the next tick asks again.
+            }
+        }
+
+        /**
+         * What `hello` says about updates, before `welcome` goes out: the build and features, the crash-loop count, the
+         * pending update judged (the version asked for → applied; another, or a rollback → failed), the drain cleared, the
+         * compare. Returns `welcome.platform`.
+         */
+        async function onHello(frame: DaemonFrameOf<'hello'>): Promise<PlatformInfo> {
+            holding = true;
+            try {
+                return await hello(frame);
+            } finally {
+                holding = false;
+            }
+        }
+
+        async function hello(frame: DaemonFrameOf<'hello'>): Promise<PlatformInfo> {
+            const s = c.state;
+            const u = (s.update ??= {});
+            const at = now();
+            if (frame.build) s.build = c.snapshot(frame.build) as DaemonBuild;
+            else delete s.build;
+            if (frame.features) s.features = [...frame.features];
+            else delete s.features;
+            if (frame.lastExit) s.lastExit = c.snapshot(frame.lastExit) as DaemonExit;
+            if (frame.harnesses) s.harnesses = c.snapshot(frame.harnesses) as HarnessReport[];
+            if (s.build) s.outdated = compareVersions(s.build.version, MIN_DAEMON_VERSION) < 0;
+            else delete s.outdated;
+            if (foldRestarts(s, frame.restarts, at) && (s.crashLoopAt === undefined || s.crashLoopAt <= at - CRASH_LOOP_WINDOW_MS)) {
+                s.crashLoopAt = at;
+                const restarts = (s.restartLog ?? []).reduce((n, r) => n + r.count, 0);
+                await inbox({ kind: 'daemon-crash-loop', title: `The daemon on ${named()} keeps restarting`, body: `${restarts} restarts in the last ${CRASH_LOOP_WINDOW_MS / 60_000} minutes.${s.lastExit ? ` Last exit: ${s.lastExit.reason}.` : ''}`, ref });
+            }
+            const reported = frame.lastUpdate && frame.lastUpdate.at !== u.reported ? frame.lastUpdate : undefined;
+            if (reported) u.reported = reported.at;
+            const p = u.pending;
+            if (p) {
+                const version = s.build?.version;
+                const cameBack = `the daemon came back on ${version ?? 'a build it does not name'}`;
+                if (reported?.outcome === 'rolled-back' && reported.at >= p.requestedAt) await close('rolled-back', reported.error ?? `rolled back to ${reported.from}`, reported.to);
+                else if (p.target === 'previous') await (version !== undefined && version !== p.from ? close('applied', undefined, version) : close('failed', cameBack));
+                else if (version === p.target) await close('applied');
+                else await close('failed', `${cameBack}, not ${p.target}`);
+            } else if (reported?.outcome === 'rolled-back') {
+                u.last = { from: reported.from, to: reported.to, outcome: 'rolled-back', at: reported.at, ...(reported.error ? { error: reported.error } : {}) };
+                const message = reported.error ?? `rolled back to ${reported.from}`;
+                await recordAudit(c, workspaceId, { key: `${c.key}:rollback:${reported.at}`, kind: 'machine.update-failed', at, by: byMachine, summary: `machine ${named()} did not update ${reported.from} → ${reported.to}: ${message}`, data: { machineId, from: reported.from, to: reported.to, error: message } });
+                await inbox({ kind: 'update-failed', title: `${named()} did not update to ${reported.to}`, body: message, ref });
+            }
+            // Every `hello` ends a drain: a daemon that came back takes turns again.
+            await endDrain(`machine ${machineId} said hello`);
+            const dir = await directory();
+            if (ports.releases) {
+                await readDefaults();
+                await compare(dir);
+            }
+            const stable = dir?.channels.stable?.version;
+            const latest = dir?.channels.latest?.version;
+            return { version: platformVersion(), minDaemonVersion: MIN_DAEMON_VERSION, ...(stable || latest ? { latest: { ...(stable ? { stable } : {}), ...(latest ? { latest } : {}) } } : {}) };
+        }
+
+        /** An `update.status` frame: the phase and progress; `failed` closes the update and ends its drain. Another request's status is ignored. */
+        async function onStatus(frame: DaemonFrameOf<'update.status'>): Promise<void> {
+            const p = c.state.update?.pending;
+            if (!p || p.requestId !== frame.requestId) return;
+            p.phase = frame.phase;
+            if (frame.progress) p.progress = { bytes: frame.progress.bytes, total: frame.progress.total };
+            if (frame.error) p.error = { code: frame.error.code, message: frame.error.message };
+            if (frame.phase === 'failed') await close('failed', frame.error ? `${frame.error.code}: ${frame.error.message}` : 'the daemon reported the update failed');
+        }
+
+        /** The liveness tick: a pending update past its deadline fails `timeout`; an online machine re-compares (at most every `UPDATE_COMPARE_EVERY_MS`) and runs its policy. */
+        async function tick(): Promise<void> {
+            const s = c.state;
+            const at = now();
+            const p = s.update?.pending;
+            if (p && p.deadline <= at) await close('timeout', `no daemon on the new version within ${Math.round((p.deadline - p.requestedAt) / 60_000)} minutes`, undefined, SYSTEM_UPDATES);
+            if (!s.online || !ports.releases) return;
+            if ((s.update?.comparedAt ?? 0) + UPDATE_COMPARE_EVERY_MS <= at) {
+                await readDefaults();
+                await compare(await directory());
+            }
+            await autoUpdate();
+        }
+
+        return { directory, readDefaults, compare, close, request, autoUpdate, onHello, releaseDrain, onStatus, tick };
     }
 
     return defineActor({
@@ -357,7 +692,13 @@ export function defineMachineActor(ports: MachinePorts) {
             removeEnvironment: owner,
             envResult: owner,
             historyRequest: sessionDriver,
-            historyResult: sessionDriver
+            historyResult: sessionDriver,
+            // Owner only, and never a tool (#365, decisions 2026-09-19 (c)): an agent must not replace the daemon it runs on.
+            requestUpdate: owner,
+            cancelUpdate: owner,
+            setUpdatePolicy: owner,
+            setChannel: owner,
+            updateState: owner
         },
         state: (): MachineState => initialMachineState(),
         methods: (ctx) => {
@@ -389,12 +730,8 @@ export function defineMachineActor(ports: MachinePorts) {
             }
 
             /** The router, told one-way as this machine (the same fresh-call reasoning as `session()`); a router that is not wired hears nothing. */
-            async function notify(call: (routing: RoutingClient) => Promise<void>): Promise<void> {
-                const def = ports.routing?.();
-                if (!def) return;
-                const client = actor(def, routingKey(workspaceId)).with({ context: asPrincipal(self), oneWay: true }) as unknown as RoutingClient;
-                await call(client).catch(() => undefined);
-            }
+            const notify = (call: (routing: RoutingClient) => Promise<void>): Promise<void> => tellRouter(ctx, call);
+            const lifecycle = updates(ctx);
 
             const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: W, kind: 'error', commandId, code, message });
             /** `commandId` is unique per Session, not per machine: pending replies are keyed by both. */
@@ -417,19 +754,7 @@ export function defineMachineActor(ports: MachinePorts) {
             }
 
             /** Move queued sessions into environments that have room, sending `session.open` for each. */
-            function dequeue(): void {
-                const s = ctx.state;
-                if (!s.online) return;
-                const keep: QueuedSession[] = [];
-                for (const q of s.queued) {
-                    if (freeSlots(s, q.environmentId) > 0) {
-                        const hosted: HostedSession = { sessionId: q.sessionId, environmentId: q.environmentId, agentId: q.agentId, ...(q.taskId ? { taskId: q.taskId } : {}), spec: q.spec, status: 'opening', requestedAt: now() };
-                        s.activeSessions[q.sessionId] = hosted;
-                        send(openFrame(hosted));
-                    } else keep.push(q);
-                }
-                s.queued = keep;
-            }
+            const dequeue = (): void => dequeueIn(ctx);
 
             /**
              * Forget a hosted or queued session; answer its open commands with `closed`. A session the daemon had opened is
@@ -461,7 +786,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         console.warn(`[machine] session ${sessionId} of ${ctx.key} could not be told its host ended (${reason}): ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
-                if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId));
+                const closedCode: SessionClosedCode | undefined = reopenRefused ? 'resume-failed' : code;
+                if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId, closedCode));
                 for (const [key, p] of Object.entries(s.pending)) {
                     if (p.sessionId !== sessionId) continue;
                     delete s.pending[key];
@@ -497,7 +823,9 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (h.status === 'opening' && !(h.sessionId in frame.resume)) reopen.push(h);
                     else wanted[h.sessionId] = h.cursor ? { epoch: h.cursor.epoch, seq: h.cursor.seq } : { epoch: 0, seq: 0 };
                 }
-                send({ v: V, t: 'welcome', serverTime: at, wanted });
+                // The build against the releases, the pending update judged, the drain ended (#365) — and what `welcome` says of the platform.
+                const platform = await lifecycle.onHello(frame);
+                send({ v: V, t: 'welcome', serverTime: at, wanted, platform });
                 for (const h of reopen) send(openFrame(h));
                 // Replies are idempotent by commandId on the daemon: what is still pending is asked again.
                 for (const p of Object.values(s.pending)) if (p.deadline > at) send({ v: V, t: 'session.command', sessionId: p.sessionId, command: ctx.snapshot(p.command) });
@@ -505,6 +833,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 await armLiveness();
                 // Tasks parked on this machine (`waiting {environment-offline}`, policy `queue`) get their retry (§7).
                 await notify((r) => r.machineOnline(machineId));
+                await lifecycle.releaseDrain();
+                await lifecycle.autoUpdate();
             }
 
             async function onSessionOpened(frame: DaemonFrameOf<'session.opened'>): Promise<void> {
@@ -563,6 +893,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 if (h && ended !== undefined) {
                     dequeue();
                     await notify((r) => r.slotFreed(machineId, h.environmentId, `turn ${ended} ended in session ${frame.sessionId}`));
+                    // The machine may be idle now: its update policy runs (#365).
+                    await lifecycle.autoUpdate();
                 }
             }
 
@@ -769,6 +1101,12 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onQuota(frame);
                     case 'history.response':
                         return onHistoryResponse(frame);
+                    case 'update.status':
+                        return lifecycle.onStatus(frame);
+                    case 'harness.status':
+                    case 'harnesses':
+                        // The harness issue's (#370).
+                        return;
                 }
             }
 
@@ -958,7 +1296,8 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (!s.online) throw new ServerFnError(503, `machine "${machineId}" is offline`);
                     const at = now();
                     const base = { sessionId, environmentId, agentId: spec.agentId, ...(options.taskId ? { taskId: options.taskId } : {}), spec: structuredClone(spec) };
-                    if (freeSlots(s, environmentId) > 0) {
+                    // A drain holds back turns, not opens (#365): `openRoom` is `freeSlots` without it.
+                    if (openRoom(s, environmentId) > 0) {
                         const hosted: HostedSession = { ...base, status: 'opening', requestedAt: at };
                         s.activeSessions[sessionId] = hosted;
                         send(openFrame(hosted));
@@ -1161,6 +1500,99 @@ export function defineMachineActor(ports: MachinePorts) {
                         ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
                         ...(r.error ? { error: r.error } : {})
                     }) as HistoryResultView;
+                },
+
+                /**
+                 * Ask the daemon to update itself (#365): `update.request` goes out with the asset for the build's
+                 * platform, the update is pending and the machine drains — no new turn starts until the next `hello`
+                 * judges it (the version asked for → `machine.updated`), a `failed` phase, `cancelUpdate` or its
+                 * deadline. OWNER ONLY, on no tool surface. 403 revoked, 503 offline or no release directory, 409 an
+                 * update pending or a daemon that cannot update itself ("reinstall once"), 400 an unknown version, a
+                 * release without a build for the platform, or the version the daemon already runs.
+                 */
+                async requestUpdate(input: UpdateRequestInput = {}): Promise<{ requestId: string }> {
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    if (s.update?.pending) throw new ServerFnError(409, `machine "${machineId}" has an update pending (${s.update.pending.requestId})`);
+                    if (!s.build || !s.features?.includes('update')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that cannot update itself: reinstall once`);
+                    const mode = input.mode ?? 'drain';
+                    if (mode !== 'drain' && mode !== 'now') throw new ServerFnError(400, 'machine: mode must be "drain" or "now"');
+                    const drainTimeoutMs = input.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+                    if (!Number.isInteger(drainTimeoutMs) || drainTimeoutMs < 0 || drainTimeoutMs > MAX_DRAIN_TIMEOUT_MS) throw new ServerFnError(400, `machine: drainTimeoutMs must be a whole number of ms up to ${MAX_DRAIN_TIMEOUT_MS}`);
+                    let target: ReleaseAsset | 'previous' = 'previous';
+                    let to = 'previous';
+                    if (input.target !== 'previous') {
+                        const dir = await lifecycle.directory();
+                        if (!dir) throw new ServerFnError(503, `machine: no release directory to update "${machineId}" from`);
+                        const { channel } = effectiveUpdates(s.update);
+                        const version = input.target ?? dir.channels[channel]?.version;
+                        const manifest = [dir.channels[channel], dir.channels[channel === 'stable' ? 'latest' : 'stable']].find((m) => m !== undefined && m.version === version);
+                        if (!manifest) throw new ServerFnError(400, `machine: no release ${version ?? `on the ${channel} channel`} is known`);
+                        const asset = manifest.assets[s.build.platform];
+                        if (!asset) throw new ServerFnError(400, `machine: release ${manifest.version} has no build for ${s.build.platform}`);
+                        if (manifest.version === s.build.version) throw new ServerFnError(400, `machine "${machineId}" already runs ${manifest.version}`);
+                        target = structuredClone(asset);
+                        to = manifest.version;
+                    }
+                    const requestId = await lifecycle.request(target, to, mode, drainTimeoutMs, principalLabel(ctx.principal));
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /** Take back the pending update (#365): `update.cancel` goes out, the drain ends. `false` when nothing is pending. */
+                async cancelUpdate(): Promise<boolean> {
+                    const p = ctx.state.update?.pending;
+                    if (!p) return false;
+                    send({ v: V, t: 'update.cancel', requestId: p.requestId });
+                    await lifecycle.close('cancelled', `cancelled by ${principalLabel(ctx.principal)}`);
+                    await armLiveness();
+                    await ctx.save();
+                    return true;
+                },
+
+                /** When this machine takes updates (#365); `null` follows the workspace's default again. The policy runs at once. */
+                async setUpdatePolicy(policy: UpdatePolicy | null): Promise<MachineUpdateView> {
+                    const u = (ctx.state.update ??= {});
+                    if (policy === null) delete u.policy;
+                    else {
+                        try {
+                            u.policy = checkUpdatePolicy(policy);
+                        } catch (e) {
+                            throw new ServerFnError(400, `machine: ${e instanceof Error ? e.message : String(e)}`);
+                        }
+                    }
+                    await recordAudit(ctx, workspaceId, { key: `${ctx.key}:update-policy:${crypto.randomUUID()}`, kind: 'machine.update-policy-set', at: now(), by: principalLabel(ctx.principal), summary: `machine ${ctx.state.name || machineId} takes updates ${u.policy ? u.policy.kind : 'as the workspace says'}`, data: { machineId, policy: u.policy ? ctx.snapshot(u.policy) : null } });
+                    await lifecycle.autoUpdate();
+                    await armLiveness();
+                    await ctx.save();
+                    return updateView(ctx);
+                },
+
+                /** The release channel this machine follows (#365); `null` follows the workspace's default again. `available` is compared again. */
+                async setChannel(channel: ReleaseChannel | null): Promise<MachineUpdateView> {
+                    const u = (ctx.state.update ??= {});
+                    if (channel === null) delete u.channel;
+                    else {
+                        try {
+                            u.channel = checkChannel(channel);
+                        } catch (e) {
+                            throw new ServerFnError(400, `machine: ${e instanceof Error ? e.message : String(e)}`);
+                        }
+                    }
+                    await recordAudit(ctx, workspaceId, { key: `${ctx.key}:channel:${crypto.randomUUID()}`, kind: 'machine.channel-set', at: now(), by: principalLabel(ctx.principal), summary: `machine ${ctx.state.name || machineId} follows ${u.channel ?? 'the workspace channel'}`, data: { machineId, channel: u.channel ?? null } });
+                    if (ports.releases) {
+                        await lifecycle.readDefaults();
+                        await lifecycle.compare(await lifecycle.directory());
+                    }
+                    await ctx.save();
+                    return updateView(ctx);
+                },
+
+                /** The machine's update record (#365) — a live read for the Machines page: channel, policy, what is available, pending and last, and what an update now would interrupt. */
+                updateState(): MachineUpdateView {
+                    return updateView(ctx);
                 }
             };
         },
@@ -1239,6 +1671,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 pruneHistory(s.history, at, false);
                 for (const key of answers.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in s.history)) answers.delete(key);
             }
+            // Daemon updates (#365): a pending one past its deadline fails, the build is compared again, the policy runs.
+            if (ids) await updates(ctx).tick();
             if (needsLiveness(s)) await ctx.reminders.set(LIVENESS, { due: livenessDue });
             await ctx.save();
         }

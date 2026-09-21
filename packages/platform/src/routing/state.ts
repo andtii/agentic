@@ -103,6 +103,12 @@ export interface Route {
      */
     rehosting?: boolean;
     /**
+     * While `waiting-capacity` (#433): the route waited on a live session — for a slot, or for the running turn — and the
+     * daemon closed it for a restart or an update. The record waits `idle` with its ref; the session is re-opened on the
+     * machine's next `hello` (`machineOnline`) and the route prompted when the daemon acknowledges it.
+     */
+    reopen?: boolean;
+    /**
      * While `running` (#366): when the route's machine went offline (`Routing.machineOffline`). The task waits
      * `machine-offline` and the route stays `running` — its turn goes on when the daemon comes back (`machineOnline`
      * clears it); past `MACHINE_LOST_MS` the task fails `machine-lost`.

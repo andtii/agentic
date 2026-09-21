@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -192,6 +192,13 @@ export const PROJECT_MISSING_CODE = 'project-missing';
 
 /** The `TaskError` a task fails with when its session is ended under it (#399): "New session", or the member's removal. Recoverable — the next message opens a fresh one. */
 export const SESSION_RESET_CODE = 'session-reset';
+
+/**
+ * The close codes of a host that goes away and comes back (#359, #433): a session closed with one of them — or with none,
+ * its record left `idle` with its ref — is re-opened for a message parked on it. `resume-failed` and `harness-missing`
+ * (and `draining`, a refused open) are not.
+ */
+const HOST_CLOSE_CODES: ReadonlySet<SessionClosedCode> = new Set<SessionClosedCode>(['restart', 'update', 'harness-update']);
 
 /** How many of an ended session's pages `endSession` purges at once (#399): a long session has many, and one turn should not wait on them one by one. */
 const PURGE_BATCH = 8;
@@ -888,6 +895,34 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             /**
+             * Re-open the session a parked route waits on (#433), lost to a daemon restart or update: the record's own spec,
+             * its ref as `spec.resume` (`hostSession`). The route stays `waiting-capacity` and `sessionOpened` prompts it when
+             * the daemon acknowledges — into the same session, under the same task. A machine that cannot take it now
+             * (offline) keeps it for the next `hello`; a record that cannot be re-opened fails the task, recoverable.
+             */
+            async function reopenParked(route: Route): Promise<void> {
+                const sessionId = route.sessionId!;
+                delete route.reopen;
+                touch(route);
+                const info = await session(sessionId)
+                    .get()
+                    .catch(() => undefined);
+                if (!info?.spec || info.status === 'closed') {
+                    await fail(route, { code: 'session-refused', message: `machine ${route.machineId} closed session ${sessionId} and it cannot be re-opened`, recoverable: true });
+                    return;
+                }
+                try {
+                    await hostSession(route, sessionId, ctx.snapshot(info.spec));
+                } catch (e) {
+                    if (isServerFnError(e) && e.status === 503) {
+                        route.reopen = true;
+                        return;
+                    }
+                    await fail(route, { code: 'session-open', message: e instanceof Error ? e.message : String(e), recoverable: true });
+                }
+            }
+
+            /**
              * Resume an interrupted turn on a session its machine hosts (OPS-05): `Session.resume` prompts it anew with the
              * cut turn's input over the intact transcript, the task's `waiting {input, resume:…}` resolves `active` and
              * `follow` picks the new turn up. A refusal fails the task with the reply.
@@ -1407,6 +1442,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (t.status === 'waiting' && t.wait?.kind === 'machine-offline') await task(route.taskId).resolveWaiting(ROUTER, `machine ${machineId} is back; the turn goes on`, route.sessionId);
                     }
                     for (const route of Object.values(s.routes)) if (route.machineId === machineId) await autoResumeRoute(route);
+                    for (const route of Object.values(s.routes)) if (route.machineId === machineId && route.reopen) await reopenParked(route);
                     await armLost();
                     await ctx.save();
                 },
@@ -1556,10 +1592,21 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  * Session first (`hostEnded`, #420), which ended its turn as interrupted, and `follow` parks it for a
                  * `resume`. A re-open that `resume` asked for and the daemon refused (`rehosting`) sends the task to a
                  * fresh session (`freshSession`) — unless the machine hosts the session again, and this is the word
-                 * about the session it lost, arriving late.
+                 * about the session it lost, arriving late. A message parked on the live session (`waiting-capacity`,
+                 * `waiting-turn`) that its host closed for a restart or an update (#433: `code` `restart` / `update` /
+                 * `harness-update`, or none, with the record left `idle` with its ref) is kept, not failed: the session is
+                 * re-opened with its ref (`reopenParked`) — at once, or after the next `hello` for an update — and the
+                 * message delivered in it under the same task. `resume-failed`, `harness-missing` and a closed record fail it.
                  */
-                async sessionClosed(sessionId: SessionId, reason: string, _taskId?: TaskId): Promise<void> {
+                async sessionClosed(sessionId: SessionId, reason: string, _taskId?: TaskId, code?: SessionClosedCode): Promise<void> {
                     const s = ctx.state;
+                    /** The record, read once: whether the host left it `idle` with its ref (`hostEnded`), to be re-opened. */
+                    let record: Promise<SessionInfo | undefined> | undefined;
+                    const resumable = async (): Promise<boolean> => {
+                        if (code !== undefined && !HOST_CLOSE_CODES.has(code)) return false;
+                        const info = await (record ??= session(sessionId).get().catch(() => undefined));
+                        return !!info && info.status !== 'closed' && !!info.ref && !!info.spec;
+                    };
                     for (const route of Object.values(s.routes)) {
                         if (route.sessionId === sessionId && route.status === 'interrupted' && route.rehosting) {
                             const hosted = route.machineId !== undefined && (await machine(route.machineId).get()).activeSessions.some((h) => h.sessionId === sessionId);
@@ -1567,6 +1614,19 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             continue;
                         }
                         if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity' && route.status !== 'waiting-turn' && route.status !== 'waiting-answer')) continue;
+                        // A message parked on the live session — for a slot, or for its running turn — outlives a daemon restart or
+                        // update (#433): the record keeps its ref, and the session is re-opened with it rather than the task failed.
+                        if ((route.status === 'waiting-capacity' || route.status === 'waiting-turn') && route.machineId && (await resumable())) {
+                            // The turn it waited for is gone with the session: the task now waits for a slot on the re-opened one.
+                            if (route.status === 'waiting-turn') await parkOnCapacity(route, await machine(route.machineId).get());
+                            route.status = 'waiting-capacity';
+                            route.reopen = true;
+                            touch(route);
+                            // A restart's close comes after the daemon's `hello`: re-open now. An update's comes before the daemon
+                            // stops, so the one that answers is the next — after its `hello`.
+                            if (code !== 'update' && (await machine(route.machineId).get()).online) await reopenParked(route);
+                            continue;
+                        }
                         // A task waiting for the answer to its question (#396) fails here too: the answer, when it comes, starts the asker again in a fresh session.
                         const when = route.status === 'waiting-turn' ? 'while this task waited for its running turn to end' : route.status === 'waiting-answer' ? 'while this task waited for the answer to its question' : 'before it opened';
                         await fail(route, { code: 'session-refused', message: `machine ${route.machineId} closed the session ${when}: ${reason}`, recoverable: true });

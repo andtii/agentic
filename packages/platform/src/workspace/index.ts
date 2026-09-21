@@ -15,14 +15,15 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentId, ChatFileStore, ChatId, ConnectorRef, EnvironmentDescriptor, EnvironmentId, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
-import { actorKey, createId, DEFAULT_WORKSPACE_SETTINGS, pathWithin, PROJECTS_MAX } from '@agentic/core';
+import type { AgentId, ChatFileStore, ChatId, ConnectorRef, EnvironmentDescriptor, EnvironmentId, HostOs, MachineId, NotificationPrefs, ProjectFeatures, ProjectId, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, pathWithin, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { recordAudit } from '../audit/port.js';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { defineMachineActor, machineKey, type MachineView } from '../machine/index.js';
+import { checkChannel, checkUpdatePolicy } from '../machine/update.js';
 import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
 import { Registry } from '../registry/actor.js';
 import { registryKey } from '../registry/key.js';
@@ -136,6 +137,8 @@ export interface SettingsPatch {
     readonly notifications?: Partial<NotificationPrefs>;
     readonly defaults?: Partial<WorkspaceDefaults>;
     readonly retention?: Partial<RetentionSettings>;
+    /** The channel and policy machines follow unless given their own (#365); absent in the settings means `DEFAULT_UPDATE_SETTINGS`. */
+    readonly updates?: Partial<UpdateSettings>;
 }
 
 export interface WorkspaceOptions {
@@ -564,11 +567,26 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const s = ctx.state.settings;
                 // Rebuilt field by field: a record written before #230 may still carry `defaults.model`, which is the runtime plugin's to say now.
                 const defaults = { ...s.defaults, ...patch.defaults };
+                // Updates (#365): kept only once set, so a workspace that never chose follows `DEFAULT_UPDATE_SETTINGS` as it moves.
+                let updates = s.updates;
+                // Only a patch that names a field sets them: an empty `updates: {}` keeps the workspace on the defaults.
+                if (patch.updates && (patch.updates.defaultChannel !== undefined || patch.updates.defaultPolicy !== undefined)) {
+                    const base = s.updates ?? DEFAULT_UPDATE_SETTINGS;
+                    try {
+                        updates = {
+                            defaultChannel: patch.updates.defaultChannel === undefined ? base.defaultChannel : checkChannel(patch.updates.defaultChannel),
+                            defaultPolicy: patch.updates.defaultPolicy === undefined ? base.defaultPolicy : checkUpdatePolicy(patch.updates.defaultPolicy)
+                        };
+                    } catch (e) {
+                        throw new ServerFnError(400, `Workspace.updateSettings: ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                }
                 ctx.state.settings = {
                     timeZone: patch.timeZone ?? s.timeZone,
                     notifications: { ...s.notifications, ...patch.notifications },
                     defaults: { runtime: defaults.runtime, ...(defaults.environmentId ? { environmentId: defaults.environmentId } : {}) },
-                    retention: { ...s.retention, ...patch.retention }
+                    retention: { ...s.retention, ...patch.retention },
+                    ...(updates ? { updates } : {})
                 };
                 await ctx.save();
                 return ctx.snapshot(ctx.state.settings);
