@@ -1,10 +1,12 @@
 import { component, signal, type Define } from 'sigx';
+import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
 import { Button, ConfirmDialog, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { opsSettings, type NotificationRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
 import { LiveSettings } from './ops/LiveSettings';
+import { UpdateDefaults } from './machines/UpdateDefaults';
 
 export type SettingsViewProps =
     & Define.Prop<'timeZone', string, true>
@@ -46,7 +48,9 @@ export const SettingsView = component<SettingsViewProps>(({ props }) => {
         sessionLogs: props.retention.sessionLogs,
         artifacts: props.retention.artifacts,
         matrix: Object.fromEntries(props.notifications.flatMap(row => [[`${row.kind}:inbox`, row.inbox], [`${row.kind}:push`, row.push]])) as Record<string, boolean>,
-        deleting: false
+        deleting: false,
+        updates: DEFAULT_UPDATE_SETTINGS as UpdateSettings,
+        updatesSaved: false
     });
     return () => (
         <OpsPage page="settings" title="Settings" maxWidth="860px">
@@ -93,6 +97,10 @@ export const SettingsView = component<SettingsViewProps>(({ props }) => {
                             </li>
                         ))}
                     </ul>
+                </Section>
+
+                <Section title="Machine updates" hint="Which releases machines follow and when they take them, unless a machine's own page says otherwise. A machine never updates in the middle of a turn unless someone chooses Update now.">
+                    <UpdateDefaults value={draft.updates} timeZone={draft.timeZone} status={draft.updatesSaved ? 'Saved.' : ''} onSave={(next: UpdateSettings) => { draft.updates = next; draft.updatesSaved = true; }} />
                 </Section>
 
                 <Section title="Budgets" hint="Execution and delegation stop at these limits.">

@@ -9,12 +9,14 @@
  * plugin declares is listed too. "Export workspace" is `Workspace.exportAll`
  * (its record says what landed and where); "Delete workspace" is
  * `Workspace.deleteAll` behind a dialog that needs the workspace's name
- * typed back.
+ * typed back. "Machine updates" (#367) sets the channel and policy machines
+ * follow by default — `updateSettings({ updates })`, saved on its own.
  */
 import { component, effect, onUnmounted, signal, useHead, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
+import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
 import type { RegistryOverview } from '@agentic/platform';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -26,6 +28,7 @@ import { useWorkspaceReadiness } from '../plugins/readiness';
 import { opStatus, settingsPatch, timeZoneOptions, toDraft, validateDraft, type SettingsDraft } from './live';
 import { OpsPage } from './OpsPage';
 import { PushDevices } from '../../push/PushDevices';
+import { UpdateDefaults } from '../machines/UpdateDefaults';
 
 /** The one form id the topbar's Save submits. */
 export const SETTINGS_FORM = 'settings-form';
@@ -53,6 +56,7 @@ export const LiveSettings = component(() => {
 
     const draft = signal<SettingsDraft & { loaded: boolean }>({ loaded: false, timeZone: 'UTC', environmentId: '', inbox: true, push: false, sessionLogDays: '90', artifactDays: '30' });
     const st = signal({ saving: false, saved: false, error: '', deleting: false, typed: '', exporting: false, deleteAsked: false });
+    const upd = signal({ busy: false, status: '', failed: false });
     let seenSettings: unknown;
     /** The draft as it was last synced from the actor: edits are what differs from it. */
     let synced: SettingsDraft | null = null;
@@ -92,6 +96,24 @@ export const LiveSettings = component(() => {
             fail(e);
         } finally {
             st.saving = false;
+        }
+    };
+
+    /** The machine update defaults, saved apart from the form: the workspace's `settings.updates`. */
+    const saveUpdates = async (updates: UpdateSettings): Promise<void> => {
+        const k = wsKey();
+        if (!k || upd.busy) return;
+        upd.busy = true;
+        upd.status = '';
+        upd.failed = false;
+        try {
+            await actor(defs.Workspace, k).updateSettings({ updates });
+            upd.status = 'Saved.';
+        } catch (e) {
+            upd.failed = true;
+            upd.status = e instanceof Error ? e.message : String(e);
+        } finally {
+            upd.busy = false;
         }
     };
 
@@ -178,6 +200,10 @@ export const LiveSettings = component(() => {
 
                     <Section title="API keys" hint="Keys are set on the page of the plugin that uses them, sealed under the workspace key; only their names are ever shown. Runtime logins never leave their machine.">
                         {apiKeys(plugins.overview(), secrets.value)}
+                    </Section>
+
+                    <Section title="Machine updates" hint="Which releases machines follow and when they take them, unless a machine's own page says otherwise. A machine never updates in the middle of a turn unless someone chooses Update now.">
+                        <UpdateDefaults value={ws.settings.updates ?? DEFAULT_UPDATE_SETTINGS} timeZone={ws.settings.timeZone} busy={upd.busy} status={upd.status} failed={upd.failed} onSave={(next: UpdateSettings) => { void saveUpdates(next); }} />
                     </Section>
 
                     <Section title="Retention" hint="Days each record is kept (docs/retention.md). Copies already handed to a runtime are outside platform control.">

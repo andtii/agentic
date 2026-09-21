@@ -58,6 +58,8 @@ export function machineOf(view: MachineView, indexName: string, now: number): Op
         os: view.os ?? 'linux',
         osLabel: osLabel(view.os),
         daemonVersion: view.daemonVersion ?? '—',
+        ...(view.build ? { build: view.build } : {}),
+        ...(view.outdated ? { outdated: true } : {}),
         online: view.online && !view.revoked,
         lastSeenAt: view.lastSeen ?? 0,
         seen: seenLabel(view.lastSeen, now),
