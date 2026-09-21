@@ -18,7 +18,7 @@ Dated product and engineering decisions that the requirements leave open (requir
 - **Skin**: `@sigx/zero-daisyui`, derived into the `agentic` design system (`@agentic/ui/design-system`) with the `control-room` theme from `docs/design/HANDOFF.md`.
 - **Theme (2026-09-17, #84)**: dark only in v1 — `control-room` is the one theme, set as both scheme defaults; no toggle in the shell. A light pair is a later issue if wanted.
 - **Repo scope**: all work stays in `andtii/agentic` as private `@agentic/*` packages; generic pieces are tracked in `promotion.md`. Friction with `@sigx/zero` is filed on andtii/zero-wip.
-- **Process**: issue → worktree → PR → green CI → squash merge. No Copilot review step; `main` requires a PR and green checks, zero approvals.
+- **Process**: issue → worktree → PR → green CI → squash merge. `main` requires a PR and green checks, zero approvals. ~~No Copilot review step.~~ Revised 2026-09-21 (#448): the sigx-standard flow in full — Copilot is requested as reviewer on every PR and its threads are resolved before merge; the ruleset already required thread resolution, so the deviation only made PRs stall.
 - **Orchestration from outside**: every capability is an actor method; the platform MCP server projects them so an external MCP client can drive every daemon on every machine (phase 3), and the principal model carries an `external` kind with scopes from the first contracts issue.
 
 ## 2026-09-18 — first release: every §18 open decision, answered or deferred (#52)

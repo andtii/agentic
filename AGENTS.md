@@ -16,8 +16,11 @@ Copilot CLI, work agents, …). Tool-specific notes live in `CLAUDE.md`; it defe
 here for everything shared.
 
 This repo follows the sigx standard agent setup
-([`signalxjs/repo-template`](https://github.com/signalxjs/repo-template)) with one
-deliberate deviation: **there is no Copilot review step**. PRs merge on green CI.
+([`signalxjs/repo-template`](https://github.com/signalxjs/repo-template)): issue →
+worktree → PR with Copilot as reviewer → threads resolved → green CI →
+squash-merge. Nobody approves by hand (`--approvals 0`), but the ruleset requires
+every review thread to be resolved, so a PR that skips the Copilot step stalls at
+merge however green it is.
 
 ## What this repo is
 
@@ -68,10 +71,12 @@ All work is tracked as sub-issues of the tracking issue
    the PR body; `docs/architecture.md` updated if a seam changed. No
    `CHANGELOG.md` entries: the PR title and body are the record, and release
    notes are drafted from PR titles (the files are frozen history).
-9. **PR and merge:**
+9. **PR, Copilot review, merge** — the full loop is under "Development
+   workflow" below. In short:
    ```sh
-   gh pr create --base main --title "<area>: <what>" --body "Closes #N. <summary>"
+   gh pr create --base main --title "<area>: <what>" --body "Closes #N. <summary>" --reviewer @copilot
    gh pr checks <pr> --watch
+   # wait for copilot-pull-request-reviewer, fix what it raises, resolve every thread
    gh pr merge <pr> --squash --delete-branch \
      --subject "$(gh pr view <pr> --json title -q .title) (#<pr>)" \
      --body "$(gh pr view <pr> --json body -q .body)"
@@ -79,21 +84,79 @@ All work is tracked as sub-issues of the tracking issue
    ```
    Pass `--subject`/`--body` explicitly so GitHub adds no generated trailers.
 
-## Development workflow (issue → worktree → PR → CI → merge)
+## Development workflow (issue → worktree → PR → Copilot review → merge)
 
 Mandatory for every agent-driven change, including one-line fixes. Never commit
-straight to `main` — it is protected (PR + green CI required, squash only).
+straight to `main` — it is protected (PR, resolved review threads, green CI,
+squash only; `scripts/apply-branch-protection.mjs` is the ruleset as code).
 
 1. **Issue first.** If no issue tracks the work, create one before writing code
    with the plan in its body (`.github/ISSUE_TEMPLATE/task.md` is the shape).
-2. **Worktree, always** (`pnpm wt new <N-short-slug>`).
+2. **Worktree, always** (`pnpm wt new <N-short-slug>`). Never `git switch -c`
+   in `<repo>/main` — parallel sessions share it.
 3. **Implement and verify.** Bug fix → write the failing test first (red), then
    fix (green). `pnpm typecheck` for any `.ts`; relevant `pnpm test` / `pnpm build`.
    Stage specific files (`git add <path>`), never `git add -A`. No co-author
    trailers.
-4. **Open the PR** with `Closes #N` in the body; the body becomes the squash
-   commit body verbatim.
-5. **Merge on green** with the explicit subject/body shown above.
+4. **Open the PR with Copilot as the reviewer.** `Closes #N` in the body; the
+   body becomes the squash commit body verbatim, the title (with ` (#<pr>)`
+   appended) its subject — write them as the commit you want on `main`.
+   ```sh
+   gh pr create --base main --title "<area>: <what>" \
+     --body "Closes #N. <summary>" --reviewer @copilot
+   ```
+   On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`. If `gh`
+   cannot resolve `@copilot` (`'@copilot' not found`), request it via the API —
+   don't skip it:
+   ```sh
+   gh api --method POST repos/andtii/agentic/pulls/<pr>/requested_reviewers \
+     -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+   ```
+5. **Wait for Copilot's review, then fix.** The bot
+   `copilot-pull-request-reviewer` reviews within a minute or two; do not merge
+   before it has.
+   ```sh
+   gh pr view <pr> --json reviews -q '.reviews[].author.login'   # wait for "copilot-pull-request-reviewer"
+   gh pr view <pr> --json reviews,comments
+   ```
+   Address every actionable comment with follow-up commits and push. If the
+   review doesn't re-trigger, re-request it: `gh pr edit <pr> --add-reviewer @copilot`.
+
+   **Then resolve the threads.** The ruleset sets
+   `required_review_thread_resolution`, so a PR carrying an unresolved inline
+   comment cannot merge however green it is — `gh pr merge` just says BLOCKED and
+   `gh pr checks` shows nothing wrong. Pushing a fix does not resolve a thread,
+   nor does replying at PR level. There is no `gh pr` porcelain — reply on each
+   thread and resolve it over GraphQL:
+   ```sh
+   # list the open threads
+   gh api graphql -f query='query { repository(owner:"andtii", name:"agentic") {
+     pullRequest(number:<pr>) { reviewThreads(first:100) { nodes {
+       id isResolved comments(first:1){nodes{body}} } } } } }' \
+     -q '.data.repository.pullRequest.reviewThreads.nodes[]
+         | select(.isResolved==false) | "\(.id) \(.comments.nodes[0].body[0:60])"'
+
+   # reply (say which commit fixed it, or why it stays), then resolve — pass the
+   # body as a GraphQL variable, not string-interpolated
+   gh api graphql -f query='mutation($t:ID!,$b:String!){
+     addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t, body:$b}){ comment { id } } }' \
+     -f t="<thread-id>" -f b="Fixed in <sha>. <what changed>"
+   gh api graphql -f query='mutation($t:ID!){
+     resolveReviewThread(input:{threadId:$t}){ thread { isResolved } } }' -f t="<thread-id>"
+   ```
+6. **Merge it yourself** once the threads are resolved and CI is green — squash
+   (repo rules block merge commits), delete the branch, remove the worktree:
+   ```sh
+   pr=123
+   gh pr checks "$pr"                         # all green, including e2e and size
+   gh pr merge "$pr" --squash --delete-branch \
+     --subject "$(gh pr view "$pr" --json title -q .title) (#$pr)" \
+     --body "$(gh pr view "$pr" --json body -q .body)"
+   pnpm wt rm <N-short-slug>
+   ```
+   Pass `--subject`/`--body` explicitly: GitHub appends `Co-authored-by:`
+   trailers to every message it generates itself whenever a branch-commit author
+   differs from the merging account; an explicit message is used verbatim.
 
 ## Build, Test, Lint
 

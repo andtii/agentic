@@ -27,5 +27,6 @@ Please include:
 
 ## Supported versions
 
-<!-- TODO(sigx-standard): set the supported version line for this repo. -->
-Security fixes are applied to the latest released minor line.
+Nothing is published to npm; the deployed Worker and the daemon's `stable`
+release channel track `main`. Security fixes land on `main` and ship in the
+next daemon release.
