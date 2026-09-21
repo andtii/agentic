@@ -14,7 +14,7 @@ import { AuditActor, auditKey, type AuditKind } from '../../src/audit/index';
 import { workspaceKey } from '../../src/auth/index';
 import { defineMachineActor, freeSlots, machineKey, type MachineSocketPort } from '../../src/machine/index';
 import { Inbox, inboxKey } from '../../src/notify/index';
-import { defineReleaseDirectory, RELEASE_DIRECTORY_KEY, RELEASE_SOURCES } from '../../src/releases/index';
+import { defineReleaseDirectory, RELEASE_CHECK_MIN_MS, RELEASE_DIRECTORY_KEY, RELEASE_SOURCES } from '../../src/releases/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 import { Workspace } from '../../src/workspace/index';
 
@@ -285,7 +285,23 @@ describe('requestUpdate, the drain and the judging hello (#365)', () => {
             expect(await statusOf(machine(who).setUpdatePolicy({ kind: 'auto-when-idle' }))).toBe(403);
             expect(await statusOf(machine(who).setChannel('latest'))).toBe(403);
             expect(await statusOf(machine(who).updateState())).toBe(403);
+            expect(await statusOf(machine(who).checkUpdates())).toBe(403);
         }
+    });
+
+    it('checkUpdates shows a new release at once, not after the hourly read and the 15-minute compare (#468)', async () => {
+        await hello({ build: build('0.2.0') });
+        const before = await machine().updateState();
+        expect(before.available).toBeUndefined();
+        expect(before.checkedAt).toBe(Date.now());
+        served[RELEASE_SOURCES.stable] = manifest('0.2.1');
+        // Within the check floor the directory is not read again: still nothing.
+        expect((await machine().checkUpdates()).available).toBeUndefined();
+        vi.setSystemTime(Date.now() + RELEASE_CHECK_MIN_MS);
+        const after = await machine().checkUpdates();
+        expect(after.available).toMatchObject({ version: '0.2.1' });
+        expect(after.checkedAt).toBe(Date.now());
+        await until(async () => (await inbox()).some((n) => n.kind === 'update-available'), 'the update-available row');
     });
 });
 

@@ -17,10 +17,10 @@ import { mountRoute } from './mount';
 const NOW = Date.parse('2026-09-17T14:20:04Z');
 const view = (state: OpsUpdateState, extra: Partial<MachineUpdateView> = {}): MachineUpdateView => ({ ...opsUpdateStates[state].view, ...extra });
 
-interface Emitted { request: ('drain' | 'now')[]; cancel: number; rollback: number; saves: unknown[] }
+interface Emitted { request: ('drain' | 'now')[]; cancel: number; rollback: number; saves: unknown[]; checks: number }
 
-async function card(update: MachineUpdateView, props: { reinstall?: boolean; failure?: string } = {}) {
-    const emitted: Emitted = { request: [], cancel: 0, rollback: 0, saves: [] };
+async function card(update: MachineUpdateView, props: { reinstall?: boolean; failure?: string; checking?: boolean } = {}) {
+    const emitted: Emitted = { request: [], cancel: 0, rollback: 0, saves: [], checks: 0 };
     const root = await mountAt('/machines/alien01', (
         <UpdateCard
             update={update}
@@ -38,6 +38,8 @@ async function card(update: MachineUpdateView, props: { reinstall?: boolean; fai
             onCancel={() => { emitted.cancel += 1; }}
             onRollback={() => { emitted.rollback += 1; }}
             onSaveUpdates={(c: unknown) => { emitted.saves.push(c); }}
+            checking={props.checking}
+            onCheck={() => { emitted.checks += 1; }}
         />
     ));
     await tick();
@@ -127,6 +129,16 @@ describe('the update model (#367)', () => {
 });
 
 describe('the update card (#367)', () => {
+    it('says when the releases were last read and checks again on demand (#468)', async () => {
+        const { section, emitted } = await card(view('current', { checkedAt: NOW - 3 * 60_000 }));
+        expect(text(section.querySelector('[data-update-checked] span'))).toBe('Checked 3 min ago');
+        buttonNamed(section, 'Check for updates').click();
+        expect(emitted.checks).toBe(1);
+        const busy = await card(view('available'), { checking: true });
+        expect(text(busy.section.querySelector('[data-update-checked] span'))).toBe('Checking for updates…');
+        expect(busy.section.querySelector<HTMLButtonElement>('[data-update-check]')!.disabled).toBe(true);
+    });
+
     it('offers an available release: What’s new, Update when idle, Update now and Schedule', async () => {
         const { section, emitted } = await card(view('available'));
         expect(section.getAttribute('data-update-state')).toBe('available');
