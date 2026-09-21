@@ -21,6 +21,7 @@ export const AUDIT_KINDS = [
     'environment.chosen',
     'environment.put',
     'environment.removed',
+    'harness.changed',
     'task.transition',
     'config.versioned',
     'proposal.reviewed',
@@ -195,6 +196,20 @@ export interface MachineUpdateFailedData {
     readonly error: string;
 }
 
+/**
+ * A harness install, update or removal on a machine ended (#370): the daemon's `done` or `failed` phase, or the
+ * request's deadline. `from` is the version installed when it was asked, `to` the one asked for (absent for `remove`).
+ */
+export interface HarnessChangedData {
+    readonly machineId: MachineId;
+    readonly runtime: RuntimeId;
+    readonly op: 'install' | 'update' | 'remove';
+    readonly from?: string;
+    readonly to?: string;
+    readonly outcome: 'done' | 'failed' | 'timeout';
+    readonly error?: string;
+}
+
 /** The owner set the release channel a machine follows (#365); `null` goes back to the workspace default. */
 export interface MachineChannelSetData {
     readonly machineId: MachineId;
@@ -336,6 +351,7 @@ export interface AuditDataByKind {
     readonly 'machine.update-failed': MachineUpdateFailedData;
     readonly 'machine.channel-set': MachineChannelSetData;
     readonly 'machine.update-policy-set': MachineUpdatePolicySetData;
+    readonly 'harness.changed': HarnessChangedData;
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;

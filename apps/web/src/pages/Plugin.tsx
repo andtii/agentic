@@ -1,9 +1,10 @@
 import { component, signal, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
-import type { PermissionScope, PluginReadinessFacts } from '@agentic/core';
+import { runtimeKindOf, type PermissionScope, type PluginReadinessFacts } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
 import { EmptyState, Switch } from '@agentic/ui';
-import { opsPluginDependents, opsPlugins } from '../mock/ops';
+import { opsHarness, opsMachines, opsPluginDependents, opsPlugins } from '../mock/ops';
+import { runtimeOnMachine } from './machines/harness';
 import { defineTopbar, routeId } from '../components/topbar';
 import { dataMode } from '../data-mode';
 import { OpsPage } from './ops/OpsPage';
@@ -11,6 +12,7 @@ import { mockAgentOf, mockPluginFacts } from './Plugins';
 import { LivePlugin } from './plugins/LivePlugin';
 import { PluginDetail, type SecretWrite } from './plugins/PluginDetail';
 import { readinessById } from './plugins/readiness';
+import { RuntimeMachineRow, RuntimeMachines } from './plugins/RuntimeMachines';
 
 /** The breadcrumb names the plugin by its id until the page knows better — the id is what a person typed or followed. */
 defineTopbar('plugin', (route) => ({ crumb: routeId(route) }));
@@ -51,6 +53,11 @@ export const PluginPageView = component<PluginPageViewProps>(({ props }) => {
                     secretNames={st.secretNames}
                     status={{ saved: st.saved }}
                     agentOf={mockAgentOf}
+                    extra={() => (runtimeKindOf(p.manifest) === 'harness' ? (
+                        <RuntimeMachines name={p.manifest.name}>
+                            {opsMachines.map((m) => <RuntimeMachineRow machine={runtimeOnMachine(id, { machineId: m.id, name: m.name, online: m.online, ...opsHarness(m.id) })} />)}
+                        </RuntimeMachines>
+                    ) : null)}
                     toggle={() => <Switch label={`Enable ${p.manifest.name}`} hideLabel model={() => st.enabled} />}
                     onConfigure={(config: Record<string, unknown>) => { st.config = config; st.saved = true; }}
                     onSaveSecret={(w: SecretWrite) => { if (!st.secretNames.includes(w.name)) st.secretNames = [...st.secretNames, w.name]; }}

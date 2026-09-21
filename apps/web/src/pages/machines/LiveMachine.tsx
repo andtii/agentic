@@ -14,6 +14,10 @@
  * arrives with the daemon's `env` frame on `get`. Rename is `Machine.rename`;
  * removing the machine revokes it first, then drops it from the Workspace
  * index (`removeMachine` alone leaves the token valid, #259).
+ *
+ * Runtimes (#370): "Runtimes on this machine" (`LiveHarnessCard`) reads the
+ * same live `get` — the daemon's harnesses, what the release ships — and
+ * installs, updates or removes one with `Machine.requestHarness`.
  */
 import { component, effect, onUnmounted, signal, useData, type JSXElement } from 'sigx';
 import { useRouter } from '@sigx/router';
@@ -31,6 +35,7 @@ import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { machineHead } from './head';
 import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
+import { LiveHarnessCard } from './LiveHarnessCard';
 import { LiveUpdateCard } from './LiveUpdateCard';
 
 export const LiveMachine = component<{ id: string }>(({ props }) => {
@@ -190,6 +195,15 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                                 name={v.name || id}
                                 os={v.os ?? 'linux'}
                                 daemonVersion={v.daemonVersion}
+                                turnLabel={(t) => `${directory.lookup(t.agentId).name} · ${t.sessionId}`}
+                            />
+                        )),
+                        harness: () => (v.revoked ? null : (
+                            <LiveHarnessCard
+                                machineKey={key()!}
+                                view={v}
+                                name={v.name || id}
+                                os={v.os ?? 'linux'}
                                 turnLabel={(t) => `${directory.lookup(t.agentId).name} · ${t.sessionId}`}
                             />
                         ))

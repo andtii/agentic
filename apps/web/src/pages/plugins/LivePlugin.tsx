@@ -12,7 +12,7 @@
 import { component, signal, useData, useHead, type Define } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
-import type { PermissionScope } from '@agentic/core';
+import { runtimeKindOf, type PermissionScope } from '@agentic/core';
 import type { Dependents, MemorySwitchReport, SlotKind } from '@agentic/platform';
 import { ConfirmDialog, EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -23,6 +23,7 @@ import { isInUse, memorySwitchText, registryErrorText } from './model';
 import { PluginDetail, type SecretWrite } from './PluginDetail';
 import { useWorkspaceReadiness } from './readiness';
 import { usePluginSwitches } from './switches';
+import { LiveRuntimeMachines } from './RuntimeMachines';
 import { GenerateKeys } from '../../push/GenerateKeys';
 import { VAPID_SECRET, WEB_PUSH_PLUGIN } from '../../push/model';
 
@@ -188,7 +189,8 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                     toggle={() => switches.switchFor(p)}
                                     extra={() => (p.manifest.id === WEB_PUSH_PLUGIN && viewer.workspaceId
                                         ? <GenerateKeys plugin={p} workspaceId={viewer.workspaceId} hasKek={ready.overview()!.hasKek} hasPrivateKey={ready.overview()!.secretNames.includes(VAPID_SECRET)} defs={defs} />
-                                        : null)}
+                                        // A harness runtime (#370): the machines that have it or lack it.
+                                        : runtimeKindOf(p.manifest) === 'harness' ? <LiveRuntimeMachines runtime={p.manifest.id} name={p.manifest.name} /> : null)}
                                     onConfigure={(config: Record<string, unknown>) => { void configure(config); }}
                                     onSaveSecret={(w: SecretWrite) => { void saveSecret(w); }}
                                     onRemoveSecret={(name: string) => { void removeSecret(name); }}
