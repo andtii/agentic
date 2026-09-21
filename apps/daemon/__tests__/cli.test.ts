@@ -2,6 +2,7 @@
 import type { EnvironmentId } from '@agentic/core';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
@@ -13,6 +14,7 @@ import { daemonPaths, installPaths } from '../src/paths';
 import { loadPolicy, POLICY_OFF } from '../src/policy';
 import { DAEMON_CHANNEL, DAEMON_COMMIT, DAEMON_VERSION, versionLine } from '../src/version';
 import { scriptedDriver } from './helpers/drivers';
+import { assetOf, releaseZip, startReleaseServer, type ReleaseServer } from './helpers/release';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
 import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
@@ -461,6 +463,177 @@ describe('cli', () => {
         await writeFile(paths().environmentsFile, JSON.stringify([{ id: 'env_a', name: 'A', runtime: 'scripted', cwdRoots: [dir] }]));
         expect(await main(['doctor'], { paths: paths(), drivers: [scriptedDriver({ events: 1, heartbeatMs: 1_000 })], ...io() })).toBe(0);
         expect(out.join('\n')).toMatch(/doctor: ok/);
+    });
+    // #364: the update client in `run`, and `agentic-daemon update`.
+    describe('update', () => {
+        let server: ReleaseServer;
+        let release: ReturnType<typeof releaseZip>;
+        beforeEach(async () => {
+            server = await startReleaseServer();
+            release = releaseZip(dir, '0.2.0');
+            server.serve('/download/daemon-v0.2.0/agentic-daemon.zip', release.bytes);
+        });
+        afterEach(async () => {
+            await server.close();
+        });
+        const KEY = 'test-x64';
+        const manifest = (version = '0.2.0') => JSON.stringify({ version, channel: 'stable', commit: 'abc1234', publishedAt: 1, protocol: 1, assets: { [KEY]: assetOf(`${server.origin}/download/daemon-v0.2.0/agentic-daemon.zip`, release, version) }, harnesses: {} });
+        const supervise = async () => {
+            await mkdir(install().stateDir, { recursive: true });
+            await writeFile(install().supervisorFile, JSON.stringify({ restarts: 0, lastExit: null }));
+        };
+        const update = (argv: string[], extra: { pickupMs?: number; allowLoopbackHttp?: boolean } = {}) =>
+            main(['update', ...argv], {
+                paths: paths(),
+                install: install(),
+                env: { AGENTIC_RELEASES: server.origin },
+                ...io(),
+                update: { allowLoopbackHttp: extra.allowLoopbackHttp ?? true, platformKey: KEY, pollMs: 10, check: async () => 'agentic-daemon 0.2.0', ...(extra.pickupMs ? { pickupMs: extra.pickupMs } : {}) }
+            });
+
+        it('run: hello carries the build, features and the supervisor state; a rolled-back update is reported once', async () => {
+            const relay = await startRelay();
+            let stop!: () => void;
+            const until = new Promise<void>((r) => (stop = r));
+            try {
+                await pairedWith(relay);
+                await mkdir(install().stateDir, { recursive: true });
+                await writeFile(install().supervisorFile, JSON.stringify({ restarts: 2, lastExit: { at: 5, code: 75, signal: null } }));
+                await writeFile(install().updateFailedFile, JSON.stringify({ from: '0.1.0', to: '0.2.0', at: 6, reason: 'not-ready' }));
+                const running = main(['run'], { paths: paths(), install: install(), env: { AGENTIC_INSTALL_DIR: install().root }, drivers: [scripted()], ...io(), until, backoff: { initialMs: 5, maxMs: 20 } });
+                const seat = await relay.nextSeat();
+                const hello = await expectFrame(seat, 'hello');
+                expect(hello.build).toEqual({ version: DAEMON_VERSION, commit: DAEMON_COMMIT, protocol: DAEMON_PROTOCOL_VERSION, channel: DAEMON_CHANNEL, platform: `${process.platform}-${process.arch}` });
+                expect(hello.features).toEqual(['update']);
+                expect(hello).toMatchObject({ restarts: 2, lastExit: { at: 5, reason: 'update', code: 75 }, lastUpdate: { from: '0.1.0', to: '0.2.0', outcome: 'rolled-back', at: 6, error: 'not-ready' } });
+                seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
+                await vi.waitFor(() => expect(existsSync(install().updateFailedFile)).toBe(false));
+                stop();
+                expect(await running).toBe(0);
+            } finally {
+                stop();
+                await relay.close();
+            }
+        });
+
+        it('run: without the supervisor it offers no update and refuses one unsupported', async () => {
+            const relay = await startRelay();
+            let stop!: () => void;
+            const until = new Promise<void>((r) => (stop = r));
+            try {
+                await pairedWith(relay);
+                const running = main(['run'], { paths: paths(), install: install(), drivers: [scripted()], ...io(), until, backoff: { initialMs: 5, maxMs: 20 } });
+                const seat = await relay.nextSeat();
+                expect((await expectFrame(seat, 'hello')).features).toEqual([]);
+                seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
+                seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'update.request', requestId: 'upd_x', target: 'previous', mode: 'now', drainTimeoutMs: 1_000 });
+                expect(await expectFrame(seat, 'update.status')).toMatchObject({ requestId: 'upd_x', phase: 'failed', error: { code: 'unsupported' } });
+                stop();
+                expect(await running).toBe(0);
+            } finally {
+                stop();
+                await relay.close();
+            }
+        });
+
+        it('run: an update.request stages the release, restarts with code update, removes state/ready and exits 75', async () => {
+            const relay = await startRelay();
+            try {
+                await pairedWith(relay);
+                await supervise();
+                const target = { url: 'https://github.com/andtii/agentic/releases/download/daemon-v0.2.0/agentic-daemon-test.zip', sha256: release.sha256, bytes: release.bytes.byteLength, version: '0.2.0' };
+                const fetchRelease: typeof fetch = async () => new Response(release.bytes);
+                const running = main(['run'], {
+                    paths: paths(),
+                    install: install(),
+                    env: { AGENTIC_INSTALL_DIR: install().root },
+                    fetch: fetchRelease,
+                    update: { check: async () => 'agentic-daemon 0.2.0', pollMs: 10 },
+                    drivers: [scripted()],
+                    ...io(),
+                    until: new Promise(() => {}),
+                    backoff: { initialMs: 5, maxMs: 20 }
+                });
+                const seat = await relay.nextSeat();
+                await expectFrame(seat, 'hello');
+                seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
+                await vi.waitFor(() => expect(existsSync(install().readyFile)).toBe(true));
+                seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'update.request', requestId: 'upd_1', target, mode: 'drain', drainTimeoutMs: 60_000 });
+                const phases: string[] = [];
+                while (phases.at(-1) !== 'restarting' && phases.at(-1) !== 'failed') phases.push((await expectFrame(seat, 'update.status')).phase);
+                expect(phases).toEqual(['downloading', 'verifying', 'staged', 'draining', 'restarting']);
+                expect(await running).toBe(EXIT_UPDATE);
+                expect(exits()).toEqual([expect.objectContaining({ reason: 'update', code: 75 })]);
+                expect(existsSync(install().readyFile)).toBe(false);
+                expect(JSON.parse(await readFile(join(install().root, 'daemon.staged', 'package.json'), 'utf8'))).toEqual({ version: '0.2.0' });
+            } finally {
+                await relay.close();
+            }
+        });
+
+        it('update --check prints what is installed and what is available', async () => {
+            server.serve('/download/daemon-stable/manifest.json', manifest());
+            expect(await update(['--check', '--channel', 'stable'])).toBe(0);
+            expect(out).toEqual([`installed: ${versionLine()}`, 'available: agentic-daemon 0.2.0 (stable, abc1234) — newer']);
+            expect(server.requests).toEqual(['/download/daemon-stable/manifest.json']);
+
+            out = [];
+            server.serve('/download/daemon-v0.1.0/manifest.json', manifest(DAEMON_VERSION));
+            expect(await update(['--version', 'daemon-v0.1.0'])).toBe(1);
+            expect(out.join('\n')).toContain('does not run under the supervisor');
+            expect(await update(['--channel', 'nightly'])).toBe(2);
+            server.serve('/download/daemon-latest/manifest.json', manifest(DAEMON_VERSION));
+            out = [];
+            expect(await update([])).toBe(0);
+            expect(out.at(-1)).toBe('already up to date');
+        });
+
+        it('update reads releases over https: only', async () => {
+            server.serve('/download/daemon-stable/manifest.json', manifest());
+            expect(await update(['--check', '--channel', 'stable'], { allowLoopbackHttp: false })).toBe(1);
+            expect(out.join('\n')).toContain('https: only');
+            expect(server.requests).toEqual([]);
+        });
+
+        it('update stages the release and waits for the daemon to come back on it', async () => {
+            await supervise();
+            server.serve('/download/daemon-stable/manifest.json', manifest());
+            // The running daemon and the supervisor, as far as the CLI sees them: the request is taken, the new version is ready.
+            const daemon = setInterval(() => {
+                const request = join(install().stateDir, 'update-request.json');
+                if (!existsSync(request)) return;
+                clearInterval(daemon);
+                const { mode } = JSON.parse(readFileSync(request, 'utf8')) as { mode: string };
+                rmSync(request);
+                writeFileSync(install().readyFile, JSON.stringify({ version: '0.2.0', pid: 1, at: Date.now(), mode }));
+            }, 5);
+            try {
+                expect(await update(['--channel', 'stable', '--now'])).toBe(0);
+            } finally {
+                clearInterval(daemon);
+            }
+            expect(out.at(-1)).toBe('updated: agentic-daemon 0.2.0 is running');
+            expect(JSON.parse(await readFile(install().readyFile, 'utf8'))).toMatchObject({ mode: 'now' });
+            expect(JSON.parse(await readFile(join(install().root, 'daemon.staged', 'package.json'), 'utf8'))).toEqual({ version: '0.2.0' });
+        });
+
+        it('update: a tampered release, or a daemon that never takes the request, leaves nothing staged', async () => {
+            await supervise();
+            const tampered = new Uint8Array(release.bytes);
+            tampered[0]! ^= 0xff;
+            server.serve('/download/daemon-v0.2.0/agentic-daemon.zip', tampered);
+            server.serve('/download/daemon-stable/manifest.json', manifest());
+            expect(await update(['--channel', 'stable'])).toBe(1);
+            expect(out.join('\n')).toContain('update failed (checksum)');
+            expect(existsSync(join(install().root, 'daemon.staged'))).toBe(false);
+
+            out = [];
+            server.serve('/download/daemon-v0.2.0/agentic-daemon.zip', release.bytes);
+            expect(await update(['--channel', 'stable'], { pickupMs: 50 })).toBe(1);
+            expect(out.join('\n')).toContain('did not take the update');
+            expect(existsSync(join(install().root, 'daemon.staged'))).toBe(false);
+            expect(existsSync(join(install().stateDir, 'update-request.json'))).toBe(false);
+        });
     });
 });
 
