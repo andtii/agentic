@@ -21,11 +21,13 @@ Please include:
 ## Response
 
 - We aim to acknowledge new reports within a few business days.
-- Once a fix is ready, a patched version will be published to npm and a
-  security advisory will be posted on GitHub crediting the reporter
-  (unless they prefer to remain anonymous).
+- Once a fix is ready, it lands on `main`, the Worker is redeployed, a
+  patched daemon is released on the `stable` channel, and a security advisory
+  is posted on GitHub crediting the reporter (unless they prefer to remain
+  anonymous).
 
 ## Supported versions
 
-<!-- TODO(sigx-standard): set the supported version line for this repo. -->
-Security fixes are applied to the latest released minor line.
+Nothing is published to npm; the deployed Worker and the daemon's `stable`
+release channel track `main`. Security fixes land on `main` and ship in the
+next daemon release.
