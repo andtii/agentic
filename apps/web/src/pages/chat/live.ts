@@ -77,15 +77,16 @@ const NOBODY: ReadonlySet<string> = new Set();
 /**
  * `Chat.get()` → the members as the panel and the composer read them. A
  * member in `waiting` has a request open in this chat (`openRequests`) —
- * it reads WAITING, ahead of its session being active. A member reads
- * ACTIVE while the chat runs a session for it, or while it works a task of
- * this chat's tree (`working`, #258) — a delegated child runs outside the
- * chat, so it never shows in `sessions`.
+ * it reads WAITING, ahead of anything else. A member reads ACTIVE while it
+ * works a task of this chat's tree (`working`, #258: `workingAgents` over
+ * the task index) and IDLE otherwise. Every member holds a live session for
+ * the life of the chat (#393), so `sessions` says nothing about whether it
+ * is working (#398) and is not read here.
  */
 export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : summary.sessions[agentId] || working.has(agentId) ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {})
@@ -170,7 +171,7 @@ export function openRequests(entries: readonly IndexedEntry[]): OpenChatRequest[
     return [...open.values()];
 }
 
-/** An open question of this chat whose session has left it (#285): answered from its own card, it starts the asker again. */
+/** An open question of this chat that outlived the turn which asked it (#285): answered from its own card, it starts the asker again. */
 export interface DetachedQuestion {
     readonly sessionId: string;
     readonly requestId: string;
@@ -178,11 +179,14 @@ export interface DetachedQuestion {
 }
 
 /**
- * The chat's open questions no live feed carries (#285): an `ask_user` that answered `pending` outlives its turn
- * and its session, so it leaves `activeSessions` while still open. The chat's `input` statuses say which are open;
- * the unread Inbox row of each says which session asked (a chat status carries no session).
+ * The chat's open questions no live feed carries (#285, #398): an `ask_user` that answered `pending` outlives its
+ * turn, and a feed carries only the turn that runs now, so a question from an earlier turn is not in any feed's
+ * requests. The chat's `request` / `request-resolved` statuses say which questions are still open; the session to
+ * answer through is the one the unread Inbox row names (the session that asked — precise even after a reset, #399),
+ * else the member's bound session (`ChatSummary.sessions`, #392: a member's session lives for the life of the chat).
+ * A question with neither has nowhere to go and is not listed.
  */
-export function detachedQuestions(entries: readonly IndexedEntry[], inbox: readonly InboxNotification[], feeds: readonly { readonly transcript: AgentTranscript }[]): DetachedQuestion[] {
+export function detachedQuestions(entries: readonly IndexedEntry[], inbox: readonly InboxNotification[], feeds: readonly { readonly transcript: AgentTranscript }[], sessions: ChatSummary['sessions'] = {}): DetachedQuestion[] {
     const live = new Set(feeds.flatMap((f) => Object.keys(f.transcript.requests)));
     const sessionOf = new Map<string, string>();
     for (const n of inbox) if (!n.read && n.ref?.kind === 'session' && n.ref.requestId) sessionOf.set(n.ref.requestId, n.ref.sessionId);
@@ -190,7 +194,7 @@ export function detachedQuestions(entries: readonly IndexedEntry[], inbox: reado
         const cut = r.ref.indexOf(':');
         const need = r.ref.slice(0, cut);
         const requestId = r.ref.slice(cut + 1);
-        const sessionId = sessionOf.get(requestId);
+        const sessionId = sessionOf.get(requestId) ?? sessions[r.agentId]?.sessionId;
         return cut > 0 && need === 'input' && !live.has(requestId) && sessionId ? [{ sessionId, requestId, agentId: r.agentId }] : [];
     });
 }
@@ -269,7 +273,14 @@ export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: nu
     return out;
 }
 
-/** The agents working a task of this chat's tree right now (#258): each `active` row whose chain of parents ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. */
+/** A task in flight: running, or waiting on a child it delegated (its work goes on elsewhere). Parked work — offline, capacity, budget, a plugin — and a task waiting on the user are not. */
+const inFlight = (r: TaskIndexRow): boolean => r.status === 'active' || (r.status === 'waiting' && r.wait?.kind === 'child');
+
+/**
+ * The agents working a task of this chat's tree right now (#258, #398): each in-flight row whose chain of parents
+ * ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. This is what reads ACTIVE
+ * in the members panel: the work, never the existence of a session.
+ */
 export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
     const byId = new Map<string, TaskIndexRow>(rows.map((r) => [r.id, r]));
     const inChat = new Map<string, boolean>();
@@ -283,8 +294,44 @@ export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Se
         return yes;
     };
     const out = new Set<string>();
-    for (const r of rows) if (r.status === 'active' && belongs(r)) out.add(r.assignee);
+    for (const r of rows) if (inFlight(r) && belongs(r)) out.add(r.assignee);
     return out;
+}
+
+// ---- scrollback (#398) ----------------------------------------------------------
+
+/**
+ * What the page keeps of the chat's entries (#398, CHT-08): the newest page
+ * is a live read that slides forward as entries arrive; older pages come
+ * from `Chat.history(cursor)` as the reader scrolls up. Both are merged here
+ * by `seq` — the log is append-only, so a seq never changes hands — and the
+ * kept list stays contiguous from the oldest page read to the newest entry,
+ * so nothing the live page slides past is lost. Both lists are oldest first
+ * (`Chat.history` reads them so, and this keeps them so), so the merge is one
+ * pass. Returns `kept` itself when the page adds nothing, so an effect over
+ * it does not re-run for a re-read.
+ */
+export function keepEntries(kept: readonly IndexedEntry[], page: readonly IndexedEntry[]): readonly IndexedEntry[] {
+    if (!page.length) return kept;
+    if (!kept.length) return page;
+    const out: IndexedEntry[] = [];
+    let i = 0;
+    let j = 0;
+    let fresh = 0;
+    while (i < kept.length || j < page.length) {
+        const a = kept[i];
+        const b = page[j];
+        if (a !== undefined && (b === undefined || a.seq <= b.seq)) {
+            out.push(a);
+            i++;
+            if (b !== undefined && a.seq === b.seq) j++;
+        } else {
+            out.push(b!);
+            j++;
+            fresh++;
+        }
+    }
+    return fresh ? out : kept;
 }
 
 /** The tasks "Stop task chain" would stop: everything in the panel that has not settled. */

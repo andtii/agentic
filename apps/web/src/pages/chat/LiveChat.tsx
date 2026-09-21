@@ -18,6 +18,14 @@
  * photos (`prepareImage`), uploaded to `POST /files/chats/:chatId` and shown
  * as chips; a send posts the text and the ready chips' `agentic-file:` parts
  * (`runActivation`), then clears them.
+ *
+ * #398: the chat opens newest-first (CHT-08). The thread holds the newest
+ * page of entries (a live read) merged with every older page the reader has
+ * scrolled up to (`Chat.history(cursor)` from the last page's `next`, until
+ * it is `null` — the caller's `historyFrom`); nothing older is read until
+ * asked for. Each member's feed follows its session from the last turn's end
+ * (`feeds.ts`), so it carries the turn running now and never replays the
+ * session's past — every earlier turn's final message is already an entry.
  */
 import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link, useRouter } from '@sigx/router';
@@ -25,6 +33,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type TaskId, type WorkdirRef } from '@agentic/core';
+import type { IndexedEntry } from '@agentic/platform';
 import type { Decision } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor } from '@agentic/ui';
 import { Page } from '../../components/Page';
@@ -41,7 +50,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { chatFailure, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
@@ -52,7 +61,7 @@ import { previewable, readyParts, uploadChatFile, uploaded, type Upload } from '
 /** Who the user reads as in their own thread. */
 export const YOU = 'You';
 
-/** Entries read per chat — the Chat actor's page maximum; older ones are a follow-up ("Load earlier"). */
+/** Entries read per page — the Chat actor's page maximum: the newest page on open, one more per scroll to the top (#398). */
 export const HISTORY_LIMIT = 200;
 
 export const LiveChat = component<{ id: string }>(({ props }) => {
@@ -86,6 +95,46 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     const session = (sessionId: string): SessionActorClient => actor(defs.Session, sessionKeyOf(viewer.workspaceId!, sessionId)) as unknown as SessionActorClient;
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
 
+    // The entries the thread holds (#398): the live newest page merged into every page read before it, by seq
+    // (`keepEntries`), so a stretch the live page has slid past stays on screen. `older.next` is the cursor of the
+    // page before the oldest held — the live page's `next` when it first arrives, then each older page's — and
+    // `null` once the caller's `historyFrom` is reached.
+    let held: readonly IndexedEntry[] = [];
+    const kept = signal<{ list: readonly IndexedEntry[] }>({ list: [] });
+    const older = signal<{ next: number | null | undefined; loading: boolean }>({ next: undefined, loading: false });
+    const keep = (page: readonly IndexedEntry[]): void => {
+        const next = keepEntries(held, page);
+        if (next !== held) {
+            held = next;
+            kept.list = next;
+        }
+    };
+    const stopKeep = effect(() => {
+        const page = history.value;
+        if (!page) return;
+        const first = held.length === 0;
+        keep(page.entries);
+        if (first) older.next = page.next;
+    });
+    onUnmounted(stopKeep);
+
+    /** The thread reached its top (`Thread.onEarlier`): read the page before the oldest held, once at a time. */
+    const loadOlder = async (): Promise<void> => {
+        const k = key();
+        const cursor = older.next;
+        if (!k || older.loading || cursor === null || cursor === undefined) return;
+        older.loading = true;
+        try {
+            const page = await actor(defs.Chat, k).history(cursor, HISTORY_LIMIT);
+            keep(page.entries);
+            older.next = page.next;
+        } catch (e) {
+            fail(e);
+        } finally {
+            older.loading = false;
+        }
+    };
+
     // The feeds follow `sessions` (#392): opened on the client only (a server render tails nothing), closed when a session leaves the chat or the page unmounts.
     onMounted(() => {
         const stop = effect(() => {
@@ -113,7 +162,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
 
     // The thread's one transcript: the chat's rows plus every feed's in-flight rows, recomposed as either side changes.
     const stopCompose = effect(() => {
-        const entries = entryTranscript(history.value?.entries ?? [], directory.lookup, YOU, time);
+        const entries = entryTranscript(kept.list, directory.lookup, YOU, time);
         authors.value = composeTranscript(transcript, entries, feeds.list, directory.lookup);
     });
     onUnmounted(stopCompose);
@@ -121,7 +170,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The topbar reads the title and members from here.
     const stopHead = effect(() => {
         const s = summary.value;
-        const members = s ? membersOf(s, waitingAgents(history.value?.entries ?? []), workingAgents(index.value ?? [], props.id)) : [];
+        const members = s ? membersOf(s, waitingAgents(kept.list), workingAgents(index.value ?? [], props.id)) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
         chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities, ...(s?.project ? { project: s.project } : {}) };
     });
@@ -176,7 +225,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                     run: (taskId) => actor(defs.Routing, routingKeyOf(ws)).run(taskId),
                     newTaskId: () => createId('task') as TaskId
                 },
-                { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: history.value?.entries ?? [], lookup: directory.lookup }
+                { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: kept.list, lookup: directory.lookup }
             );
             st.draft = '';
             dropUploads(new Set(sent.map((c) => c.id)));
@@ -204,7 +253,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
 
     /** "Retry turn" after a runtime error: the last message posted again — a new task, never a replay. */
     const retry = (): void => {
-        const last = [...(history.value?.entries ?? [])].reverse().find((e) => e.entry.t === 'msg' && e.entry.author.kind === 'user');
+        const last = [...(kept.list)].reverse().find((e) => e.entry.t === 'msg' && e.entry.author.kind === 'user');
         if (!last || last.entry.t !== 'msg') return;
         void send(last.entry.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''), last.entry.parts.filter(isChatFilePart));
     };
@@ -299,7 +348,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                 </Page>
             );
         }
-        const entries = history.value?.entries ?? [];
+        const entries = kept.list;
         const waiting = waitingAgents(entries);
         const members = s ? membersOf(s, waiting, workingAgents(index.value ?? [], props.id)) : [];
         const last = lastOf(entries, directory.lookup);
@@ -328,6 +377,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             <Thread
                                 transcript={transcript}
                                 describe={(m) => authors.value[m.id]}
+                                hasEarlier={older.next !== null && older.next !== undefined}
+                                onEarlier={() => { void loadOlder(); }}
                                 onRespond={respond}
                                 describeRequest={(r) => {
                                     const feed = feeds.list.find((f) => f.transcript.requests[r.requestId]);
@@ -337,7 +388,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                                 }}
                             />
                         )}
-                    {detachedQuestions(entries, inbox.value ?? [], feeds.list).map((q) => (
+                    {detachedQuestions(entries, inbox.value ?? [], feeds.list, s?.sessions).map((q) => (
                         <div key={`${q.sessionId}:${q.requestId}`} data-chat-question>
                             <DetachedQuestionCard question={q} lookup={directory.lookup} onError={fail} />
                         </div>

@@ -5,7 +5,7 @@ import type { ChatSummary, InboxNotification, IndexedEntry, TaskIndexRow } from 
 import { createTranscript } from '@sigx/ai-agent';
 import { matchingChats } from '../../src/pages/chat/ChatList';
 import { settingsChange } from '../../src/pages/chat/ChatSettingsDialog';
-import { chatRow, chatTasks, detachedQuestions, entryTranscript, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
+import { chatRow, chatTasks, detachedQuestions, entryTranscript, keepEntries, lastOf, lookupOver, membersOf, notStoppedLine, openRequests, stopTargets, stoppable, unreadOf, waitingAgents, workingAgents, type AgentIdentity } from '../../src/pages/chat/live';
 import { baselineReadMarks, loadReadMarks, markSeen, readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
 import { zoneFormat } from '../../src/time';
 
@@ -59,18 +59,31 @@ describe('chatTasks', () => {
     it("a member working a delegated task of this chat reads active; settled, queued or other chats' work does not (#258)", () => {
         const summary = { seq: 1, members: { a1: { since: 0, historyFrom: 0 }, a2: { since: 0, historyFrom: 0 }, a3: { since: 0, historyFrom: 0 } }, coordinator: 'a1', sessions: { a1: { sessionId: 's1', since: 0, seenSeq: 0 } } } as unknown as ChatSummary;
         const tree = [
-            row('root', { chatId: 'c1' as never, status: 'waiting', createdAt: 1 }),
+            // The root waits on the child it delegated: its work goes on, so its assignee is working (#398).
+            row('root', { chatId: 'c1' as never, status: 'waiting', wait: { kind: 'child', childTaskIds: ['kid' as TaskId] }, createdAt: 1 }),
             row('kid', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a2' as AgentId, createdAt: 2 }),
             row('queued', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a3' as AgentId, status: 'queued', createdAt: 3 }),
             row('elsewhere', { chatId: 'c2' as never, assignee: 'a3' as AgentId })
         ];
-        expect(workingAgents(tree, 'c1')).toEqual(new Set(['a2']));
+        expect(workingAgents(tree, 'c1')).toEqual(new Set(['a1', 'a2']));
         expect(membersOf(summary, new Set(), workingAgents(tree, 'c1')).map((m) => [m.agentId, m.status])).toEqual([['a1', 'active'], ['a2', 'active'], ['a3', 'idle']]);
         // An open request still reads WAITING first.
         expect(membersOf(summary, new Set(['a2']), workingAgents(tree, 'c1'))[1]!.status).toBe('waiting');
         // Beyond the panel's cap: status still counts every row.
         const many = [row('r', { chatId: 'c1' as never, createdAt: 1 }), ...Array.from({ length: 12 }, (_, i) => row(`k${i}`, { parentId: 'r' as TaskId, origin: 'agent', depth: 1, assignee: (i === 11 ? 'a3' : 'a2') as AgentId, status: i === 11 ? 'active' : 'completed', createdAt: 2 + i }))];
         expect(workingAgents(many, 'c1').has('a3')).toBe(true);
+    });
+
+    it('in flight is running or waiting on a delegated child; parked work and a wait on the user are not (#398)', () => {
+        const rows = [
+            row('root', { chatId: 'c1' as never, status: 'waiting', wait: { kind: 'child', childTaskIds: ['kid' as TaskId] } }),
+            row('kid', { parentId: 'root' as TaskId, origin: 'agent', depth: 1, assignee: 'a2' as AgentId }),
+            row('offline', { chatId: 'c1' as never, assignee: 'a3' as AgentId, status: 'waiting', wait: { kind: 'environment-offline', environmentId: 'env' as never, policy: 'queue' } }),
+            row('asking', { chatId: 'c1' as never, assignee: 'a4' as AgentId, status: 'waiting', wait: { kind: 'input', requestId: 'q1' } }),
+            row('queued', { chatId: 'c1' as never, assignee: 'a5' as AgentId, status: 'queued' }),
+            row('done', { chatId: 'c1' as never, assignee: 'a6' as AgentId, status: 'completed' })
+        ];
+        expect(workingAgents(rows, 'c1')).toEqual(new Set(['a1', 'a2']));
     });
 
     it('what could not be stopped is named by objective, once (COL-12)', () => {
@@ -88,8 +101,46 @@ describe('detachedQuestions (#285)', () => {
         const live = createTranscript('s2');
         live.requests['ask:c2'] = { requestId: 'ask:c2', kind: 'input', seq: 2 };
         expect(detachedQuestions(entries, inbox, [{ transcript: live }])).toEqual([{ sessionId: 's1', requestId: 'ask:c1', agentId: 'a1' }]);
-        // Without the Inbox row there is no session to answer through: nothing to show.
+        // Without the Inbox row or a bound session there is no session to answer through: nothing to show.
         expect(detachedQuestions(entries, [], [])).toEqual([]);
+    });
+
+    it("names the member's bound session when no Inbox row does (#398): the asker's session lives for the life of the chat", () => {
+        const entries = [request(1, 'a1', 'request', 'input:ask:c1')];
+        const sessions = { a1: { sessionId: 's7' as never, since: 0, seenSeq: 0 } };
+        expect(detachedQuestions(entries, [], [], sessions)).toEqual([{ sessionId: 's7', requestId: 'ask:c1', agentId: 'a1' }]);
+        // The Inbox row's session wins: it is the one that asked, even once a reset has bound a new one.
+        expect(detachedQuestions(entries, [note('ask:c1', 's1')], [], sessions)).toEqual([{ sessionId: 's1', requestId: 'ask:c1', agentId: 'a1' }]);
+        // A feed that carries the question — the turn that asked still runs — leaves nothing detached.
+        const live = createTranscript('s7');
+        live.requests['ask:c1'] = { requestId: 'ask:c1', kind: 'input', seq: 1 };
+        expect(detachedQuestions(entries, [], [{ transcript: live }], sessions)).toEqual([]);
+        // Another member's session is never the asker's.
+        expect(detachedQuestions(entries, [], [], { a2: { sessionId: 's8' as never, since: 0, seenSeq: 0 } })).toEqual([]);
+    });
+});
+
+describe('keepEntries (#398)', () => {
+    const seqs = (list: readonly IndexedEntry[]): number[] => list.map((e) => e.seq);
+
+    it('merges pages by seq, oldest first, and keeps what a sliding live page leaves behind', () => {
+        const first = keepEntries([], [msg(10, 'user', 'a'), msg(11, 'a1', 'b')]);
+        expect(seqs(first)).toEqual([10, 11]);
+        // The live page slides forward, overlapping: one list, nothing twice.
+        const slid = keepEntries(first, [msg(11, 'a1', 'b'), msg(12, 'user', 'c')]);
+        expect(seqs(slid)).toEqual([10, 11, 12]);
+        // It slides clean past what was held: what it left behind stays.
+        const past = keepEntries(slid, [msg(14, 'user', 'e'), msg(15, 'a1', 'f')]);
+        expect(seqs(past)).toEqual([10, 11, 12, 14, 15]);
+        // An older page lands before it all.
+        expect(seqs(keepEntries(past, [msg(8, 'user', 'x'), msg(9, 'a1', 'y')]))).toEqual([8, 9, 10, 11, 12, 14, 15]);
+    });
+
+    it('returns the same list when a page adds nothing, so a re-read is not a change', () => {
+        const kept = keepEntries([], [msg(0, 'user', 'a')]);
+        expect(keepEntries(kept, [msg(0, 'user', 'a')])).toBe(kept);
+        expect(keepEntries(kept, [])).toBe(kept);
+        expect(keepEntries([], [])).toEqual([]);
     });
 });
 
@@ -105,9 +156,10 @@ describe('open requests, waiting and unread', () => {
         expect([...waitingAgents(entries)]).toEqual(['a2']);
     });
 
-    it('a member with an open request reads waiting, ahead of its active session', () => {
-        expect(membersOf(summary, waitingAgents(entries)).map((m) => [m.agentId, m.status])).toEqual([['a1', 'active'], ['a2', 'waiting']]);
-        expect(membersOf(summary).map((m) => m.status)).toEqual(['active', 'active']);
+    it('a member with an open request reads waiting, ahead of its work; a bound session alone reads idle (#398)', () => {
+        expect(membersOf(summary, waitingAgents(entries)).map((m) => [m.agentId, m.status])).toEqual([['a1', 'idle'], ['a2', 'waiting']]);
+        expect(membersOf(summary).map((m) => m.status)).toEqual(['idle', 'idle']);
+        expect(membersOf(summary, waitingAgents(entries), new Set(['a1', 'a2'])).map((m) => m.status)).toEqual(['active', 'waiting']);
     });
 
     it('unread counts agent messages at or past the marker; no marker counts nothing', () => {

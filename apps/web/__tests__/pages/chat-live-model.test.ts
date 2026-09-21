@@ -51,11 +51,12 @@ describe('identities', () => {
 });
 
 describe('members and rows', () => {
-    it('reads members with status, coordinator and history access from the summary', () => {
+    it('reads members with status, coordinator and history access from the summary; a bound session says nothing about work (#398)', () => {
         expect(membersOf(summary)).toEqual([
-            { agentId: 'a1', status: 'active', coordinator: true, history: { access: 'all' } },
+            { agentId: 'a1', status: 'idle', coordinator: true, history: { access: 'all' } },
             { agentId: 'a2', status: 'idle', history: { access: 'from', at: 3000 } }
         ]);
+        expect(membersOf(summary, new Set(), new Set(['a1'])).map((m) => m.status)).toEqual(['active', 'idle']);
         expect(chatTitle(membersOf(summary), lookup)).toBe('Atlas, Forge');
         expect(chatTitle([], lookup)).toBe('New chat');
         // A stored title wins over the members' names (#124); an absent one falls back.
