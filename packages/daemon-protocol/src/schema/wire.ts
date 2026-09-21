@@ -64,6 +64,9 @@ export const outputSpec: z.ZodType<WireOutputSpec> = z.custom<WireOutputSpec>((v
     message: `expected { schema: JSON Schema, name? } with name 1-${LIMITS.id} chars`
 });
 
+/** One stamped event on the wire — what a `session.frame` streams and a `history.response` answers with (#397). */
+export const wireEventFrame: z.ZodType<Extract<WireFrame, { readonly kind: 'event' }>> = z.object({ v: wireVersion, kind: z.literal('event'), epoch: nonNegativeInt, seq: nonNegativeInt, seqFrom: nonNegativeInt.optional(), event: agentEvent });
+
 export const wireFrame: z.ZodType<WireFrame> = z.discriminatedUnion('kind', [
     z.object({ v: wireVersion, kind: z.literal('hello'), agentId: name, sessionId: name, sessionRef, capabilities: agentCapabilities, head: cursor }),
     z.object({ v: wireVersion, kind: z.literal('event'), epoch: nonNegativeInt, seq: nonNegativeInt, seqFrom: nonNegativeInt.optional(), event: agentEvent }),

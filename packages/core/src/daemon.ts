@@ -83,6 +83,38 @@ export interface ConnectorCredentials {
     readonly env?: Readonly<Record<string, string>>;
 }
 
+/**
+ * A slice of a session's history the platform asks its machine for (#397): the events strictly after `from`,
+ * up to and including `to` when given, at most `limit` of them (default `HISTORY_LIMIT`). The daemon answers
+ * from its NDJSON log — the copy that outlives the platform's bounded pages — and may answer fewer than the
+ * range holds, saying `more`; the caller asks again from the last event it got.
+ */
+export interface HistoryRange {
+    readonly from: Cursor;
+    readonly to?: Cursor;
+    readonly limit?: number;
+}
+
+/** How many events a `history.response` carries at most when the request names no `limit`. */
+export const HISTORY_LIMIT = 500;
+
+/** A `history.request` answered: event frames in cursor order; `more` when the log holds more of the range after the last one. */
+export interface HistoryResult<F = unknown> {
+    readonly events: readonly F[];
+    readonly more?: boolean;
+}
+
+/**
+ * Why a `history.request` was not answered with events: `unknown-session` (no log for it on this machine), `gap` (the
+ * log no longer reaches back to `from` — retention forgot it; `earliest` is the oldest cursor still held, so the hole
+ * is named, never silent), `internal` (the log could not be read).
+ */
+export interface HistoryError {
+    readonly code: 'unknown-session' | 'gap' | 'internal';
+    readonly message: string;
+    readonly earliest?: Cursor;
+}
+
 /** What a daemon needs to open a runtime session. */
 export interface OpenSpec {
     readonly agentId: string;
@@ -139,7 +171,9 @@ export type DaemonFrame<F = unknown, R = unknown> =
      * An environment's provider limits changed (#261): pushed unsolicited, from a probe or a streamed rate-limit
      * signal. A stream snapshot carries only the windows it saw; the platform merges it (`mergeQuota`).
      */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'quota'; readonly environmentId: EnvironmentId; readonly snapshot: QuotaSnapshot };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'quota'; readonly environmentId: EnvironmentId; readonly snapshot: QuotaSnapshot }
+    /** The answer to `history.request` (#397): exactly one of `result` (event frames, `F` = the wire `event` frame) / `error`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.response'; readonly requestId: string; readonly result?: HistoryResult<F>; readonly error?: HistoryError };
 
 export type PlatformFrame<C = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>> }
@@ -154,7 +188,13 @@ export type PlatformFrame<C = unknown> =
      * Create, change or remove an environment under the machine-local policy (#236; decisions 2026-09-19 (c)); answered by
      * `env.response`. The `EnvOp` fields sit on the frame: `op: 'put'` carries `environment`, `op: 'remove'` carries `environmentId`.
      */
-    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.request'; readonly requestId: string } & EnvOp);
+    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env.request'; readonly requestId: string } & EnvOp)
+    /**
+     * The events of a session in a cursor range, from the daemon's own log (#397): the machine owns the history and the
+     * platform keeps only a bounded recent window, so anything older is read this way. Answered by `history.response`.
+     * `from` may be a platform-stamped cursor (a fractional `seq`, `platformCursor`): the log's next integer follows it.
+     */
+    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.request'; readonly requestId: string; readonly sessionId: SessionId } & HistoryRange);
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota'] as const;
-export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response'] as const;
+export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request'] as const;

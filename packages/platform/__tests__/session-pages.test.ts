@@ -10,7 +10,7 @@ import { actorKey, CHAT_FILE_INLINE_BUDGET, type AgentId, type FrozenAgentConfig
 import { allowAll, createTranscript, reduceAgentEvent, type AgentEvent, type AgentTranscript, type EventCursor } from '@sigx/ai-agent';
 import { checkEventInvariants, checkReplayEquality, mockAgent, type MockAgent } from '@sigx/ai-agent/testing';
 
-import { boundTranscript, defineSessionActor, jsonBytes, PAGE_BYTES, SessionPage, sessionPageKey, TRANSCRIPT_BYTES, utf8Bytes, WINDOW_BYTES, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
+import { boundTranscript, defineSessionActor, jsonBytes, PAGE_BYTES, RETAINED_PAGES, SessionPage, sessionPageKey, TRANSCRIPT_BYTES, utf8Bytes, WINDOW_BYTES, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
 import { applySessionEntry, initialSessionState, knownEvents, type SessionEntry, type SessionState } from '../src/session/state';
 import { testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 
@@ -187,6 +187,24 @@ describe('Session event log paging (#198)', { timeout: 60_000 }, () => {
         applySessionEntry(state, { t: 'roll', page: { page: 0, count: 10, first: { epoch: 1, seq: 1 }, last: { epoch: 1, seq: 10 } } });
         expect(state.events).toHaveLength(13);
     });
+
+    it('a forget drops the page from the list and moves the frontier forward only; replayed, it drops nothing more (#397)', () => {
+        const state = initialSessionState();
+        const page = (n: number) => ({ page: n, count: 10, first: { epoch: 1, seq: n * 10 + 1 }, last: { epoch: 1, seq: n * 10 + 10 } });
+        for (let n = 0; n < 3; n++) applySessionEntry(state, { t: 'roll', page: page(n) });
+        applySessionEntry(state, { t: 'forget', page: 0, to: page(0).last });
+        expect(state.pages!.map((p) => p.page)).toEqual([1, 2]);
+        expect(state.archivedTo).toEqual({ epoch: 1, seq: 10 });
+        applySessionEntry(state, { t: 'forget', page: 0, to: page(0).last });
+        expect(state.pages!.map((p) => p.page)).toEqual([1, 2]);
+        applySessionEntry(state, { t: 'forget', page: 1, to: page(1).last });
+        expect(state.pages!.map((p) => p.page)).toEqual([2]);
+        expect(state.archivedTo).toEqual({ epoch: 1, seq: 20 });
+        // An older frontier never moves it back; the count of what left the window is untouched by forgetting.
+        applySessionEntry(state, { t: 'forget', page: 0, to: page(0).last });
+        expect(state.archivedTo).toEqual({ epoch: 1, seq: 20 });
+        expect(state.archived).toBe(0);
+    });
 });
 
 describe('the record stays bounded over a long session (#391)', { timeout: 180_000 }, () => {
@@ -207,6 +225,10 @@ describe('the record stays bounded over a long session (#391)', { timeout: 180_0
         // The record: a window, an index without prompts, replied commands without inputs, a bounded transcript.
         expect(bytes).toBeLessThan(2 * 1024 * 1024 - 256 * 1024);
         expect(state.windowBytes).toBeLessThanOrEqual(WINDOW_BYTES);
+        // A local session has no machine to ask, so it keeps every page (#397): far more than a daemon session would.
+        expect(state.pages!.length).toBeGreaterThan(RETAINED_PAGES);
+        expect(state.archivedTo).toBeUndefined();
+        expect(info.archivedTo).toBeUndefined();
         const starts = state.index!.filter((e) => e.type === 'turn-start');
         expect(starts).toHaveLength(TURNS);
         for (const e of starts) {

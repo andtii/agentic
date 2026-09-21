@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HistoryError, HistoryRange, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -93,6 +93,23 @@ export interface EnvRequestRecord {
     error?: EnvError;
 }
 
+/**
+ * One `historyRequest` (#397): sent as `history.request`, answered by the daemon's `history.response` in a later
+ * `socketMessage` turn. The record keeps the request and its status — the events themselves (hundreds of KB) are held by
+ * the activation that received them and handed out by the `historyAnswer` stream, never saved on this record.
+ */
+export interface HistoryRequestRecord {
+    readonly requestId: string;
+    readonly sessionId: SessionId;
+    readonly range: HistoryRange;
+    status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** After this the liveness reminder fails a pending request with `timeout`. */
+    readonly deadline: number;
+    finishedAt?: number;
+    error?: HistoryError;
+}
+
 export interface SessionClosure {
     readonly sessionId: SessionId;
     readonly reason: string;
@@ -121,6 +138,8 @@ export interface MachineState {
     fs?: Record<string, FsRequestRecord>;
     /** `putEnvironment` / `removeEnvironment` entries by request id, at most `MAX_ENV_REQUESTS`; absent on a record saved before #237. */
     envRequests?: Record<string, EnvRequestRecord>;
+    /** `historyRequest` entries by request id (#397), at most `MAX_HISTORY_REQUESTS` — statuses only, never the events. */
+    history?: Record<string, HistoryRequestRecord>;
     /** The machine-local policy the daemon last reported (`hello` / `env`); absent when it reports none (it predates web-managed environments). */
     policy?: MachinePolicy;
     /**
@@ -144,6 +163,10 @@ export const FS_RESULT_TTL_MS = 120_000;
 export const MAX_ENV_REQUESTS = 16;
 /** A finished environment request is pruned this long after it finished. */
 export const ENV_RESULT_TTL_MS = 120_000;
+/** At most this many history requests are kept (#397); the oldest is evicted first. */
+export const MAX_HISTORY_REQUESTS = 16;
+/** A finished history request is pruned this long after it finished — its reader takes the answer at once. */
+export const HISTORY_RESULT_TTL_MS = 60_000;
 
 export function initialMachineState(): MachineState {
     return {
@@ -235,6 +258,11 @@ export function pruneQuota(s: MachineState): void {
 /** `pruneFs` for environment requests: the same TTL-then-oldest rule over `ENV_RESULT_TTL_MS` / `MAX_ENV_REQUESTS`. */
 export function pruneEnvRequests(requests: Record<string, EnvRequestRecord>, at: number, room = true): void {
     prune(requests, at, room, ENV_RESULT_TTL_MS, MAX_ENV_REQUESTS);
+}
+
+/** `pruneFs` for history requests (#397): the same rule over `HISTORY_RESULT_TTL_MS` / `MAX_HISTORY_REQUESTS`. */
+export function pruneHistory(requests: Record<string, HistoryRequestRecord>, at: number, room = true): void {
+    prune(requests, at, room, HISTORY_RESULT_TTL_MS, MAX_HISTORY_REQUESTS);
 }
 
 function prune(entries: Record<string, { readonly requestId: string; readonly status: string; readonly requestedAt: number; readonly finishedAt?: number }>, at: number, room: boolean, ttlMs: number, max: number): void {

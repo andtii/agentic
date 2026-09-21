@@ -20,6 +20,12 @@
  * keeps only the last `INDEX_TURNS` turns, a replied command forgets its
  * input, and a single-record reader (`findEvent`, `requestById`) scans
  * newest-first without materialising the log.
+ *
+ * The pages are bounded too, on the daemon path (#397): the machine owns
+ * the history, so the platform keeps the newest `RETAINED_PAGES` and a
+ * `forget` entry drops an older one — `archivedTo` is the newest cursor the
+ * machine alone serves from then on. A local (`anthropic-api`) session has
+ * no machine, so it keeps every page.
  */
 
 import type { Correction, MessageId, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
@@ -66,6 +72,24 @@ export interface SessionPageMeta {
     readonly count: number;
     readonly first: EventCursor;
     readonly last: EventCursor;
+}
+
+/**
+ * Pages a daemon-path session keeps (#397): the newest ones, about `RETAINED_PAGES * PAGE_BYTES` of events behind the
+ * window — what a reader gets without a round trip to the machine. Older pages are forgotten and read from the machine.
+ */
+export const RETAINED_PAGES = 16;
+
+/**
+ * One slice of the stored transcript's messages (#397): `SessionTranscriptPage` `{sessionKey}:t{page}`, about
+ * `TRANSCRIPT_PAGE_BYTES` each. `bytes` and the ids fingerprint the slice, so a save rewrites only pages that changed.
+ */
+export interface TranscriptPageMeta {
+    readonly page: number;
+    readonly count: number;
+    readonly bytes: number;
+    readonly first: string;
+    readonly last: string;
 }
 
 export type SessionStatus = 'idle' | 'running' | 'awaiting' | 'closed' | 'error' | 'disconnected';
@@ -133,10 +157,22 @@ export interface SessionState {
     events: AgentEvent[];
     /** JSON bytes of `events`, kept per event (never recomputed while it grows). */
     windowBytes?: number;
-    /** The slices paged out of `events`, oldest first. */
+    /** The slices paged out of `events`, oldest first — the ones still kept (#397): a forgotten page leaves the list. */
     pages?: SessionPageMeta[];
-    /** How many events `pages` hold. */
+    /** How many events left the window for a page, forgotten ones included: with `events.length`, the session's event count. */
     archived?: number;
+    /** How many pages were ever written (`{key}:p0` … `p{paged-1}`), forgotten ones included: the next page's number, and what a delete must reach (#399). */
+    paged?: number;
+    /**
+     * The newest cursor whose page was forgotten (#397): everything at or before it is the machine's to serve
+     * (`SessionPorts.history`), nothing of it is on the platform. Absent while every page is kept.
+     */
+    archivedTo?: EventCursor;
+    /**
+     * The stored transcript's messages, whole, in `SessionTranscriptPage`s (#397) — the model's own history on the API
+     * path, which the record's `transcript` snapshot only bounds. Absent until the runtime saves one through the store.
+     */
+    transcriptPages?: TranscriptPageMeta[];
     /**
      * Every `request`, `request-resolved`, `turn-start` (stripped of its prompt) and `turn-end`, and the `tool-call`
      * a request asks about, in cursor order — for the last `INDEX_TURNS` turns; whole-history readers never read a page.
@@ -198,7 +234,9 @@ export type SessionEntry =
     | { readonly t: 'command'; readonly command: WireCommand; readonly at: number; readonly taskId?: TaskId }
     | { readonly t: 'reply'; readonly command: WireCommand; readonly reply: WireReply; readonly at: number; readonly taskId?: TaskId }
     /** The oldest `page.count` events of the window are stored in page `page.page`: drop them from the record. */
-    | { readonly t: 'roll'; readonly page: SessionPageMeta };
+    | { readonly t: 'roll'; readonly page: SessionPageMeta }
+    /** Page `page` was deleted (#397): the machine serves its events, up to `to`, from now on. */
+    | { readonly t: 'forget'; readonly page: number; readonly to: EventCursor };
 
 export function initialSessionState(): SessionState {
     return { opened: false, status: 'idle', head: { epoch: 0, seq: 0 }, events: [], openRequests: [], commands: {}, commandOrder: [] };
@@ -252,7 +290,16 @@ export function applySessionEntry(state: SessionState, entry: SessionEntry): voi
             state.windowBytes = Math.max(0, (state.windowBytes ?? 0) - bytesOf(dropped));
             (state.pages ??= []).push(entry.page);
             state.archived = (state.archived ?? 0) + dropped.length;
+            state.paged = Math.max(state.paged ?? 0, entry.page.page + 1);
             rollIndex(state);
+            return;
+        }
+        case 'forget': {
+            // Idempotent: a page already forgotten (a replayed entry) is not in the list; the frontier only moves forward.
+            const pages = state.pages ?? [];
+            const at = pages.findIndex((p) => p.page === entry.page);
+            if (at >= 0) pages.splice(at, 1);
+            if (!state.archivedTo || cursorAfter(state.archivedTo, entry.to)) state.archivedTo = entry.to;
             return;
         }
     }

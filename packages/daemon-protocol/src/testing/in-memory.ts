@@ -13,6 +13,7 @@ import {
     FS_LIST_MAX_ENTRIES,
     FS_LOCATE_MAX_DEPTH,
     FS_LOCATE_MAX_MATCHES,
+    HISTORY_LIMIT,
     normalizePath,
     pathWithin,
     sameOrigin,
@@ -31,8 +32,9 @@ import {
 } from '@agentic/core';
 import type { AgentEvent, SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, cursorBefore, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, EnvRequestFrame, PlatformFrame } from '../frames.js';
+import type { DaemonFrame, EnvRequestFrame, HistoryRequestFrame, PlatformFrame } from '../frames.js';
 import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
+import { LIMITS } from '../schema/limits.js';
 import type { ConformanceDaemon, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
 
 export interface InMemoryFaults {
@@ -54,6 +56,8 @@ export interface InMemoryFaults {
     readonly ignorePolicy?: boolean;
     /** Report the placeholder id `session.opened` carried as the runtime's own (#388). */
     readonly sameRef?: boolean;
+    /** Answer a `history.request` the log no longer reaches with what is left, instead of a named `gap` (#397). */
+    readonly historyHole?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -66,6 +70,8 @@ export interface InMemoryHarnessOptions {
      * directly below it (and badges the folder itself), and `locate` finds the ones whose `git.origin` matches.
      */
     readonly repos?: readonly { readonly path: string; readonly git: FsGitInfo }[];
+    /** How many characters each streamed `part-delta` carries (default: the event's number and a space) — a platform test that needs a session to page out sets it. */
+    readonly deltaChars?: number;
     readonly faults?: InMemoryFaults;
 }
 
@@ -148,6 +154,12 @@ interface FakeSession {
 }
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+/** The log reaches back to `from` (exclusive): its oldest frame is at or before it, or is the very next stamp — `from` may be platform-stamped, a fractional seq. */
+function reaches(oldest: Cursor, from: Cursor): boolean {
+    if (!cursorBefore(from, oldest)) return true;
+    return oldest.epoch === from.epoch ? oldest.seq === Math.floor(from.seq) + 1 : oldest.epoch > from.epoch && oldest.seq === 1;
+}
 
 export class InMemoryDaemon implements ConformanceDaemon {
     readonly machineId: MachineId;
@@ -308,7 +320,36 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 this.emit({ v: V, t: 'env.response', requestId: frame.requestId, ...outcome });
                 return;
             }
+            case 'history.request':
+                this.emit({ v: V, t: 'history.response', requestId: frame.requestId, ...this.history(frame) });
+                return;
         }
+    }
+
+    /**
+     * A history slice out of the session's log (#397): the frames after `from` up to `to`, at most `limit`, `more` when cut.
+     * A log that no longer reaches back to `from` answers `gap` naming its oldest cursor — unless the `historyHole` fault.
+     */
+    private history(frame: HistoryRequestFrame): Pick<Extract<DaemonFrame, { t: 'history.response' }>, 'result' | 'error'> {
+        const session = this.sessions.get(frame.sessionId);
+        if (!session) return { error: { code: 'unknown-session', message: `no log for session ${frame.sessionId} on this machine` } };
+        const oldest = session.log[0];
+        if (oldest && !reaches(oldest, frame.from) && !this.options.faults?.historyHole) {
+            const earliest: Cursor = { epoch: oldest.epoch, seq: oldest.seq };
+            return { error: { code: 'gap', message: `the log of ${frame.sessionId} starts at (${earliest.epoch}, ${earliest.seq})`, earliest } };
+        }
+        const limit = Math.min(frame.limit ?? HISTORY_LIMIT, LIMITS.list);
+        const inRange = session.log.filter((f) => cursorBefore(frame.from, f) && (!frame.to || !cursorBefore(frame.to, f)));
+        // Bounded like a real daemon's answer: by count, and by about half a frame of JSON — the rest is `more`.
+        const events: typeof inRange = [];
+        let bytes = 0;
+        for (const f of inRange) {
+            const size = JSON.stringify(f).length;
+            if (events.length >= limit || (events.length > 0 && bytes + size > LIMITS.frameBytes / 2)) break;
+            events.push(f);
+            bytes += size;
+        }
+        return { result: { events, ...(inRange.length > events.length ? { more: true } : {}) } };
     }
 
     /** `env.request` under the policy: an upsert inside the allowed roots, a removal of an idle environment. No profile directory anywhere. */
@@ -404,7 +445,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 const last = i === this.script.events;
                 const event: AgentEvent = last
                     ? { type: 'turn-end', stopReason: 'end_turn', turnId, sessionId: session.id, epoch: session.epoch, seq: session.seq + 1 }
-                    : { type: 'part-delta', partId: 'part_1', delta: `${i} `, turnId, sessionId: session.id, epoch: session.epoch, seq: session.seq + 1 };
+                    : { type: 'part-delta', partId: 'part_1', delta: this.options.deltaChars ? `${i} `.padEnd(this.options.deltaChars, 'x') : `${i} `, turnId, sessionId: session.id, epoch: session.epoch, seq: session.seq + 1 };
                 session.seq++;
                 this.emit({ v: V, t: 'session.frame', sessionId: session.id, frame: { v: W, kind: 'event', epoch: session.epoch, seq: session.seq, event } });
                 if (!last) await tick();
@@ -434,7 +475,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref'],
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
         start: (script) => new InMemoryDaemon(script, options)
     };

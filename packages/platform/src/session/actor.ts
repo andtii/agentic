@@ -39,11 +39,23 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
 const V = WIRE_PROTOCOL_VERSION;
+
+/**
+ * The error a read of events the machine alone holds starts with (#397): `history-gap` (410) when the machine's log no
+ * longer reaches back that far — the message names the earliest cursor it still has — and `history-unavailable` (503)
+ * when the machine cannot be asked (no history port, offline, no socket, timed out, an unknown session). A hole is
+ * never silent: a reader that wants only what the platform holds reads from `SessionInfo.archivedTo`.
+ */
+export const HISTORY_GAP_CODE = 'history-gap';
+export const HISTORY_UNAVAILABLE_CODE = 'history-unavailable';
+
+/** The slice of the state a reader across the window, the pages and the machine's history needs. */
+type Readable = Pick<SessionState, 'pages' | 'events' | 'archivedTo' | 'spec'>;
 
 /** What a command returns: the served reply, or `pending` while a daemon has yet to answer. */
 export type SessionCommandResult = WireReply | { readonly v: typeof V; readonly kind: 'pending'; readonly commandId: string };
@@ -61,10 +73,21 @@ export interface SessionInfo {
     readonly running?: SessionState['running'];
     readonly openRequests: readonly string[];
     readonly eventCount: number;
-    /** How many `SessionPage` records hold the log's older slices (`{key}:p0` … `{key}:p{pages-1}`, #198) — what a delete of the session must reach (#399). */
+    /**
+     * How many `SessionPage` records were ever written (`{key}:p0` … `{key}:p{pages-1}`, #198) — what a delete of the
+     * session must reach (#399). A daemon session forgets its oldest pages (#397): those numbers are still counted, so
+     * a delete reaches them too and finds nothing there — a purge of a record that is already gone is a no-op.
+     */
     readonly pages: number;
+    /** How many `SessionTranscriptPage` records hold the stored transcript's messages (`{key}:t0` … `t{n-1}`, #397) — a delete reaches these too. */
+    readonly transcriptPages: number;
     /** The cursor the transcript snapshot stands at. */
     readonly transcriptAt?: EventCursor;
+    /**
+     * The newest cursor the platform forgot (#397): events at or before it are read from the machine — `events(from)` /
+     * `tail(from)` with an older `from` ask it, and fail by name when it cannot answer. Absent while every page is kept.
+     */
+    readonly archivedTo?: EventCursor;
     readonly gap?: SessionState['gap'];
     readonly closedAt?: number;
     /** What the last finished turn taught (architecture §8), when the actor has learning ports. */
@@ -290,17 +313,80 @@ export function defineSessionActor(ports: SessionPorts) {
             let count = 0;
             while (count < s.events.length - 1 && bytes < PAGE_BYTES) bytes += jsonBytes(s.events[count++]);
             const slice = c.snapshot(s.events.slice(0, count));
-            const page = s.pages?.length ?? 0;
+            // The next page number: pages ever written, not pages kept — a forgotten page's number is never reused (#397).
+            const page = s.paged ?? s.pages?.length ?? 0;
             await c.actor(SessionPage, sessionPageKey(c.key, page)).store(slice);
             const first = slice[0]!;
             const last = slice[slice.length - 1]!;
             await appendEntry(c, { t: 'roll', page: { page, count, first: { epoch: first.epoch, seq: first.seq }, last: { epoch: last.epoch, seq: last.seq } } });
         }
+        await forgetPages(c);
     }
 
-    /** Every event after `from` (exclusive; all without one), oldest first: the pages that reach past it, then the window. */
-    async function eventsSince(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Pick<SessionState, 'pages' | 'events'>, from?: EventCursor): Promise<AgentEvent[]> {
+    /**
+     * The machine owns the history (#397): on the daemon path — a hosted session, and a history port to ask the machine
+     * through — the record keeps the newest `RETAINED_PAGES` pages and forgets the rest, oldest first: the page's record
+     * is deleted (a deterministic key, so nothing is left behind unreachable), then the `forget` entry drops it from the
+     * list and moves `archivedTo`. The page first, so a record never lists a page that is not there; a page deleted
+     * before its entry landed is forgotten again on the next roll, since it is still the oldest. A local session has no
+     * machine to ask, so it keeps every page; so does a daemon session on a deployment without the port.
+     */
+    async function forgetPages(c: ActorContext<SessionState>): Promise<void> {
+        const s = c.state;
+        if (!ports.history || s.mode !== 'remote' || !s.spec?.machineId) return;
+        while ((s.pages?.length ?? 0) > RETAINED_PAGES) {
+            const oldest = s.pages![0]!;
+            await c.actor(SessionPage, sessionPageKey(c.key, oldest.page)).forget();
+            await appendEntry(c, { t: 'forget', page: oldest.page, to: { epoch: oldest.last.epoch, seq: oldest.last.seq } });
+        }
+    }
+
+    /**
+     * The events the machine alone holds (#397): after `from` (exclusive), up to `to` (inclusive) — the forgotten range,
+     * or one event of it — read through the history port, in as many requests as the daemon's answers take. A hole is
+     * never silent: no port, no machine, a machine that cannot be reached or an answer that never comes is
+     * `history-unavailable`; a log that no longer reaches back is `history-gap`, naming the earliest cursor it still has.
+     */
+    async function remoteEvents(key: string, s: Pick<SessionState, 'spec'>, from: EventCursor, to: EventCursor): Promise<AgentEvent[]> {
+        const parsed = parseSessionKey(key);
+        const machineId = s.spec?.machineId;
+        const where = `session "${key}" holds no events before (${to.epoch}, ${to.seq})`;
+        if (!ports.history || !machineId || !parsed) throw new ServerFnError(503, `${HISTORY_UNAVAILABLE_CODE}: ${where}, and has no machine to ask for them`);
         const out: AgentEvent[] = [];
+        // Plain cursors: `from` / `to` may be the record's own (reactive) objects, and the port's call crosses an actor boundary.
+        const end: EventCursor = { epoch: to.epoch, seq: to.seq };
+        let cursor: EventCursor = { epoch: from.epoch, seq: from.seq };
+        for (;;) {
+            let answer;
+            try {
+                answer = await ports.history.fetch({ workspaceId: parsed.workspaceId, machineId, sessionId: parsed.sessionId }, { from: cursor, to: end });
+            } catch (e) {
+                throw new ServerFnError(503, `${HISTORY_UNAVAILABLE_CODE}: ${where}, and machine ${machineId} could not be asked: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            if ('error' in answer) {
+                const { code, message, earliest } = answer.error;
+                if (code === 'gap') throw new ServerFnError(410, `${HISTORY_GAP_CODE}: machine ${machineId} no longer holds the events of session "${parsed.sessionId}" before ${earliest ? `(${earliest.epoch}, ${earliest.seq})` : 'its log'}: ${message}`);
+                throw new ServerFnError(503, `${HISTORY_UNAVAILABLE_CODE}: ${where}, and machine ${machineId} answered ${code}: ${message}`);
+            }
+            let last: EventCursor | undefined;
+            for (const ev of answer.result.events) {
+                // What the daemon answered is what it holds; the platform keeps the range it asked for and the order it needs.
+                if (!cursorAfter(cursor, ev) || cursorAfter(to, ev)) continue;
+                out.push(ev);
+                last = { epoch: ev.epoch, seq: ev.seq };
+            }
+            if (!answer.result.more || !last) return out;
+            cursor = last;
+        }
+    }
+
+    /**
+     * Every event after `from` (exclusive; all without one), oldest first: what the machine alone holds when the range
+     * reaches into it (#397), then the pages that reach past `from`, then the window.
+     */
+    async function eventsSince(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Readable, from?: EventCursor): Promise<AgentEvent[]> {
+        const out: AgentEvent[] = [];
+        if (s.archivedTo && (!from || cursorAfter(from, s.archivedTo))) out.push(...(await remoteEvents(c.key, s, from ?? { epoch: 0, seq: 0 }, s.archivedTo)));
         for (const p of s.pages ?? []) {
             if (from && !cursorAfter(from, p.last)) continue;
             out.push(...eventsAfter(await c.actor(SessionPage, sessionPageKey(c.key, p.page)).read(), from));
@@ -309,15 +395,20 @@ export function defineSessionActor(ports: SessionPorts) {
         return out;
     }
 
-    /** The whole event at `at` (#391): from the window, else read out of the one page that holds it; `undefined` when neither does. */
-    async function eventAt(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Pick<SessionState, 'pages' | 'events'>, at: EventCursor): Promise<AgentEvent | undefined> {
+    /**
+     * The whole event at `at` (#391): from the window, else read out of the one page that holds it, else — when the
+     * platform forgot it (#397) — out of the machine's history; `undefined` when none holds it.
+     */
+    async function eventAt(c: Pick<ActorContext<SessionState>, 'actor' | 'key'>, s: Readable, at: EventCursor): Promise<AgentEvent | undefined> {
         const same = (e: EventCursor) => e.epoch === at.epoch && e.seq === at.seq;
         const inWindow = s.events.find(same);
         if (inWindow) return inWindow;
         // `p.first <= at <= p.last`: the first is not after it, and it is not after the last.
         const page = (s.pages ?? []).find((p) => !cursorAfter(at, p.first) && !cursorAfter(p.last, at));
-        if (!page) return undefined;
-        return (await c.actor(SessionPage, sessionPageKey(c.key, page.page)).read()).find(same);
+        if (page) return (await c.actor(SessionPage, sessionPageKey(c.key, page.page)).read()).find(same);
+        if (!s.archivedTo || cursorAfter(s.archivedTo, at)) return undefined;
+        // The one event: from just before it (a platform-stamped cursor never sits on an integer's predecessor by accident) up to it.
+        return (await remoteEvents(c.key, s, { epoch: at.epoch, seq: Math.ceil(at.seq) - 1 }, at)).find(same);
     }
 
     /**
@@ -486,13 +577,15 @@ export function defineSessionActor(ports: SessionPorts) {
             head: { epoch: s.head.epoch, seq: s.head.seq },
             openRequests: [...s.openRequests],
             eventCount: (s.archived ?? 0) + s.events.length,
-            pages: s.pages?.length ?? 0,
+            pages: s.paged ?? s.pages?.length ?? 0,
+            transcriptPages: s.transcriptPages?.length ?? 0,
             ...(s.spec ? { spec: c.snapshot(s.spec) } : {}),
             ...(s.mode ? { mode: s.mode } : {}),
             ...(s.ref ? { ref: c.snapshot(s.ref) } : {}),
             ...(s.capabilities ? { capabilities: c.snapshot(s.capabilities) } : {}),
             ...(s.running ? { running: c.snapshot(s.running) } : {}),
             ...(s.transcript ? { transcriptAt: { epoch: s.transcript.epoch, seq: s.transcript.seq } } : {}),
+            ...(s.archivedTo ? { archivedTo: { epoch: s.archivedTo.epoch, seq: s.archivedTo.seq } } : {}),
             ...(s.gap ? { gap: c.snapshot(s.gap) } : {}),
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),

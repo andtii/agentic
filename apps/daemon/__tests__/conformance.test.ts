@@ -25,7 +25,8 @@ const KNOWN_ORIGIN = 'https://github.com/andtii/agentic.git';
 
 const harness: DaemonConformanceHarness = {
     // `session-ref` (#389): the scripted runtime names its session on the first prompt, so the daemon's `session.ref` is proven here too.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref'],
+    // `history` (#397): answered from the NDJSON log on disk; `truncateLog` is the log's own `truncate`, so the gap case is real.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history'],
     knownOrigin: KNOWN_ORIGIN,
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));

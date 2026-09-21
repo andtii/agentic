@@ -5,8 +5,8 @@
  */
 
 export { LIMITS } from './limits.js';
-export { cursor, cursors, environment, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot } from './common.js';
-export { sessionRef, agentCapabilities, agentEvent, promptPart, decision, outputSpec, wireFrame, wireReply, wireCommand } from './wire.js';
+export { cursor, cursors, platformCursor, environment, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot } from './common.js';
+export { sessionRef, agentCapabilities, agentEvent, promptPart, decision, outputSpec, wireFrame, wireEventFrame, wireReply, wireCommand } from './wire.js';
 export {
     helloFrame,
     envFrame,
@@ -20,7 +20,8 @@ export {
     fsResponseFrame,
     envResponseFrame,
     quotaFrame,
+    historyResponseFrame,
     daemonFrameSchemas,
     daemonFrame
 } from './daemon.js';
-export { welcomeFrame, sessionOpenFrame, sessionCommandFrame, sessionCloseFrame, toolResultFrame, pingFrame, fsRequestFrame, envRequestFrame, platformFrameSchemas, platformFrame } from './platform.js';
+export { welcomeFrame, sessionOpenFrame, sessionCommandFrame, sessionCloseFrame, toolResultFrame, pingFrame, fsRequestFrame, envRequestFrame, historyRequestFrame, platformFrameSchemas, platformFrame } from './platform.js';

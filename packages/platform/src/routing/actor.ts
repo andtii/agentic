@@ -89,7 +89,7 @@ import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
 import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { freeSlots, machineKey, runningIn, type FsResultView, type MachineView, type OpenSessionResult } from '../machine/index.js';
-import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, sessionPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec, type SessionRequestView } from '../session/index.js';
+import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, SESSION_TRANSCRIPT_PAGE_TYPE, sessionPageKey, transcriptPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec, type SessionRequestView } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
@@ -1357,9 +1357,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (ports.store) {
                         const key = `${workspaceId}:session:${bound}`;
                         const pages = info?.pages ?? 0;
-                        // The pages in bounded batches (a long session has many), every one of them before the record.
+                        // The pages in bounded batches (a long session has many), every one of them before the record. A page the
+                        // record already forgot (#397, a daemon session keeps only the newest) purges as a no-op; the transcript's
+                        // pages (#397, an API session's history) go the same way.
                         for (let from = 0; from < pages; from += PURGE_BATCH) {
                             await Promise.all(Array.from({ length: Math.min(PURGE_BATCH, pages - from) }, (_, i) => ports.store!.purge({ type: SESSION_PAGE_TYPE, key: sessionPageKey(key, from + i) })));
+                        }
+                        const transcriptPages = info?.transcriptPages ?? 0;
+                        for (let from = 0; from < transcriptPages; from += PURGE_BATCH) {
+                            await Promise.all(Array.from({ length: Math.min(PURGE_BATCH, transcriptPages - from) }, (_, i) => ports.store!.purge({ type: SESSION_TRANSCRIPT_PAGE_TYPE, key: transcriptPageKey(key, from + i) })));
                         }
                         await ports.store.purge({ type: ports.sessions().type, key });
                     }

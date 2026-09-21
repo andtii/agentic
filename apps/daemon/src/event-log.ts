@@ -11,15 +11,30 @@
  * are serialised per session (order on disk is emit order), every read waits
  * for the queue, and a failed write is reported to `onError`. A torn last
  * line (a crash mid-write) is skipped, not fatal.
+ *
+ * The machine owns the history (#397): the platform keeps a bounded recent
+ * window and asks for anything older with `history.request`, answered by
+ * `slice`. The log itself is bounded by `retain` — the newest whole turns
+ * that fit a byte budget — so one file per (chat, agent) does not grow for
+ * the life of the chat; what it forgot is a named `gap`, never silence.
  */
 
-import type { Cursor } from '@agentic/core';
+import type { Cursor, HistoryError, HistoryRange } from '@agentic/core';
+import { HISTORY_LIMIT } from '@agentic/core';
 import type { AgentEvent, EventLogStore } from '@sigx/ai-agent';
 import { cursorBefore } from '@sigx/ai-agent/wire';
 import { createReadStream } from 'node:fs';
-import { appendFile, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+
+/** What `slice` answers: the events of the range and whether the log holds more of it, or why it could not. */
+export type HistorySlice = { readonly result: { readonly events: AgentEvent[]; readonly more?: boolean } } | { readonly error: HistoryError };
+
+export interface RetentionPolicy {
+    /** The most a session's log keeps, in bytes of NDJSON: past it the oldest whole turns go. `0` keeps everything. */
+    readonly maxBytes: number;
+}
 
 export interface NdjsonEventLog extends EventLogStore {
     readonly dir: string;
@@ -31,14 +46,32 @@ export interface NdjsonEventLog extends EventLogStore {
     head(sessionId: string): Promise<Cursor | undefined>;
     /** Session ids with a log on disk. */
     sessions(): Promise<string[]>;
+    /**
+     * A history slice (#397): the events after `range.from` (exclusive) up to `range.to` (inclusive), at most `range.limit`
+     * (default `HISTORY_LIMIT`) and about `maxBytes` of JSON, `more` when cut short. A log that no longer reaches back to
+     * `from` answers `gap` naming its oldest cursor; a session without a log `unknown-session`.
+     */
+    slice(sessionId: string, range: HistoryRange, options?: { readonly maxBytes?: number }): Promise<HistorySlice>;
     /** Forget events before `keepFrom` (retention; makes an older cursor a gap). */
     truncate(sessionId: string, keepFrom: Cursor): Promise<void>;
+    /**
+     * Apply the retention policy (#397): while the file is over `maxBytes`, forget the oldest whole turns until what is
+     * left fits — a turn is never cut in the middle. Resolves to the cursor the log now starts at when it was trimmed,
+     * `undefined` when it was under budget. Cheap when under budget (one `stat`).
+     */
+    retain(sessionId: string, policy: RetentionPolicy): Promise<Cursor | undefined>;
     /** Resolves once every pending append has reached the file. */
     flush(sessionId?: string): Promise<void>;
     remove(sessionId: string): Promise<void>;
 }
 
 const SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
+
+/** The log reaches back to `from` (exclusive): its oldest event is at or before it, or is the very next stamp — `from` may be platform-stamped, a fractional seq. */
+export function reachesBack(oldest: Cursor, from: Cursor): boolean {
+    if (!cursorBefore(from, oldest)) return true;
+    return oldest.epoch === from.epoch ? oldest.seq === Math.floor(from.seq) + 1 : oldest.epoch > from.epoch && oldest.seq === 1;
+}
 
 export interface NdjsonEventLogOptions {
     /** A write that failed; the event is lost from disk (the live stream still has it). */
@@ -69,9 +102,9 @@ export function ndjsonEventLog(dir: string, options: NdjsonEventLogOptions = {})
         return run;
     };
 
-    async function* lines(sessionId: string): AsyncGenerator<AgentEvent> {
-        await (chains.get(sessionId) ?? Promise.resolve());
-        const stream = createReadStream(fileOf(sessionId), { encoding: 'utf8' });
+    /** The file's lines as written, with the event each one holds — without waiting for the write queue (the queue's own work reads this way). */
+    async function* rawLines(file: string): AsyncGenerator<{ readonly line: string; readonly event: AgentEvent }> {
+        const stream = createReadStream(file, { encoding: 'utf8' });
         const opened = new Promise<boolean>((resolve) => {
             stream.once('open', () => resolve(true));
             stream.once('error', () => resolve(false));
@@ -90,13 +123,44 @@ export function ndjsonEventLog(dir: string, options: NdjsonEventLogOptions = {})
                 } catch {
                     continue;
                 }
-                if (typeof event?.seq === 'number' && typeof event.epoch === 'number') yield event;
+                if (typeof event?.seq === 'number' && typeof event.epoch === 'number') yield { line, event };
             }
         } finally {
             reader.close();
-            stream.destroy();
+            // Wait for the handle to close: a reader left early (a `slice` cut by its limit) must not hold the file open
+            // when a `truncate` renames over it — Windows refuses the rename while a handle is open.
+            await new Promise<void>((resolve) => {
+                if (stream.destroyed) return resolve();
+                stream.once('close', () => resolve());
+                stream.destroy();
+            });
         }
     }
+
+    /** `rename` with a few retries: on Windows a handle another process holds for a moment (an indexer, a scanner) refuses it once. */
+    async function replaceFile(tmp: string, file: string): Promise<void> {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await rename(tmp, file);
+                return;
+            } catch (e) {
+                if (attempt >= 5 || (e as NodeJS.ErrnoException).code !== 'EPERM') throw e;
+                await new Promise((r) => setTimeout(r, 20 * attempt));
+            }
+        }
+    }
+
+    /** The file's lines once every pending write has landed — what every read outside the queue goes through. */
+    async function* settledLines(sessionId: string): AsyncGenerator<{ readonly line: string; readonly event: AgentEvent }> {
+        await (chains.get(sessionId) ?? Promise.resolve());
+        yield* rawLines(fileOf(sessionId));
+    }
+
+    async function* lines(sessionId: string): AsyncGenerator<AgentEvent> {
+        for await (const { event } of settledLines(sessionId)) yield event;
+    }
+
+    const cursorOf = (event: AgentEvent): Cursor => ({ epoch: event.epoch, seq: event.seq });
 
     const store: NdjsonEventLog = {
         dir,
@@ -140,15 +204,69 @@ export function ndjsonEventLog(dir: string, options: NdjsonEventLogOptions = {})
                 throw e;
             }
         },
-        async truncate(sessionId, keepFrom) {
-            const kept: string[] = [];
-            for await (const event of lines(sessionId)) if (!cursorBefore({ epoch: event.epoch, seq: event.seq }, keepFrom)) kept.push(JSON.stringify(event));
+        async slice(sessionId, range, options = {}) {
+            const limit = Math.max(1, range.limit ?? HISTORY_LIMIT);
+            const maxBytes = options.maxBytes ?? Infinity;
+            const events: AgentEvent[] = [];
+            let bytes = 0;
+            let oldest: Cursor | undefined;
+            let more = false;
+            for await (const { line, event } of settledLines(sessionId)) {
+                const at = cursorOf(event);
+                oldest ??= at;
+                if (!cursorBefore(range.from, at) || (range.to && cursorBefore(range.to, at))) continue;
+                // UTF-8 bytes, what the frame limit counts — `length` undercounts anything past ASCII.
+                const size = Buffer.byteLength(line, 'utf8');
+                if (events.length >= limit || (events.length > 0 && bytes + size > maxBytes)) {
+                    more = true;
+                    break;
+                }
+                events.push(event);
+                bytes += size;
+            }
+            if (!oldest) return { error: { code: 'unknown-session', message: `no session log for ${sessionId} on this machine` } };
+            if (!reachesBack(oldest, range.from)) return { error: { code: 'gap', message: `the log of ${sessionId} starts at (${oldest.epoch}, ${oldest.seq}); what came before was forgotten by retention`, earliest: oldest } };
+            return { result: { events, ...(more ? { more: true } : {}) } };
+        },
+        truncate(sessionId, keepFrom) {
             const file = fileOf(sessionId);
-            await enqueue(sessionId, async () => {
+            // Read inside the queue: a line appended while the kept lines were being collected would otherwise be lost to the rewrite.
+            return enqueue(sessionId, async () => {
+                const kept: string[] = [];
+                for await (const { line, event } of rawLines(file)) if (!cursorBefore(cursorOf(event), keepFrom)) kept.push(line);
                 const tmp = `${file}.tmp`;
                 await writeFile(tmp, kept.map((l) => `${l}\n`).join(''), 'utf8');
-                await rename(tmp, file);
+                await replaceFile(tmp, file);
             });
+        },
+        async retain(sessionId, policy) {
+            const file = fileOf(sessionId);
+            if (policy.maxBytes <= 0) return undefined;
+            await store.flush(sessionId);
+            try {
+                if ((await stat(file)).size <= policy.maxBytes) return undefined;
+            } catch {
+                return undefined; // no log yet
+            }
+            // One pass: what each line weighs and where turns start, so the cut lands on a turn boundary.
+            const entries: { readonly at: Cursor; readonly bytes: number; readonly turnStart: boolean }[] = [];
+            let total = 0;
+            for await (const { line, event } of rawLines(file)) {
+                const bytes = Buffer.byteLength(line, 'utf8') + 1;
+                total += bytes;
+                entries.push({ at: cursorOf(event), bytes, turnStart: event.type === 'turn-start' });
+            }
+            let i = 0;
+            while (i < entries.length && total > policy.maxBytes) total -= entries[i++]!.bytes;
+            // Whole turns only: move up to the next turn start (the tail of a turn without its start is no history) — unless
+            // the runtime stamps none, when the cut lands where the budget says.
+            let cut = i;
+            while (cut < entries.length && !entries[cut]!.turnStart) cut++;
+            if (cut >= entries.length) cut = i;
+            if (cut === 0 || cut >= entries.length) return undefined;
+            const keepFrom = entries[cut]!.at;
+            await store.truncate(sessionId, keepFrom);
+            return keepFrom;
         },
         async flush(sessionId) {
             if (sessionId !== undefined) await (chains.get(sessionId) ?? Promise.resolve());

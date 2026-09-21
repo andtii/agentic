@@ -3,8 +3,9 @@
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
 import { z } from 'zod';
 import type { PlatformFrame, PlatformFrameOf, PlatformFrameType } from '../frames.js';
-import { cursors, environmentId, environmentInput, fsOp, name, nonNegativeInt, openSpec, sessionId, text } from './common.js';
+import { cursors, environmentId, environmentInput, fsOp, name, nonNegativeInt, openSpec, platformCursor, sessionId, text } from './common.js';
 import { wireCommand } from './wire.js';
+import { LIMITS } from './limits.js';
 
 const v = z.literal(DAEMON_PROTOCOL_VERSION);
 
@@ -23,6 +24,8 @@ const envRequest = z.discriminatedUnion('op', [
     z.object({ v, t: z.literal('env.request'), requestId: name, op: z.literal('put'), environment: environmentInput }),
     z.object({ v, t: z.literal('env.request'), requestId: name, op: z.literal('remove'), environmentId })
 ]);
+/** A history slice (#397): `from` may be platform-stamped (fractional), `to` and `limit` bound the answer. */
+const historyRequest = z.object({ v, t: z.literal('history.request'), requestId: name, sessionId, from: platformCursor, to: platformCursor.optional(), limit: z.number().int().min(1).max(LIMITS.list).optional() });
 
 export const welcomeFrame: z.ZodType<PlatformFrameOf<'welcome'>> = welcome;
 export const sessionOpenFrame: z.ZodType<PlatformFrameOf<'session.open'>> = sessionOpen;
@@ -32,6 +35,7 @@ export const toolResultFrame: z.ZodType<PlatformFrameOf<'tool.result'>> = toolRe
 export const pingFrame: z.ZodType<PlatformFrameOf<'ping'>> = ping;
 export const fsRequestFrame: z.ZodType<PlatformFrameOf<'fs.request'>> = fsRequest;
 export const envRequestFrame: z.ZodType<PlatformFrameOf<'env.request'>> = envRequest;
+export const historyRequestFrame: z.ZodType<PlatformFrameOf<'history.request'>> = historyRequest;
 
 /** Every platform frame kind by its `t`. */
 export const platformFrameSchemas: { readonly [T in PlatformFrameType]: z.ZodType<PlatformFrameOf<T>> } = {
@@ -42,7 +46,8 @@ export const platformFrameSchemas: { readonly [T in PlatformFrameType]: z.ZodTyp
     'tool.result': toolResultFrame,
     ping: pingFrame,
     'fs.request': fsRequestFrame,
-    'env.request': envRequestFrame
+    'env.request': envRequestFrame,
+    'history.request': historyRequestFrame
 };
 
-export const platformFrame: z.ZodType<PlatformFrame> = z.union([welcome, sessionOpen, sessionCommand, sessionClose, toolResult, ping, fsRequest, envRequest]);
+export const platformFrame: z.ZodType<PlatformFrame> = z.union([welcome, sessionOpen, sessionCommand, sessionClose, toolResult, ping, fsRequest, envRequest, historyRequest]);

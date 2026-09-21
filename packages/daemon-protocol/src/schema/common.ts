@@ -18,6 +18,8 @@ export const sessionId = id<SessionId>();
 export const environmentId = id<EnvironmentId>();
 
 export const cursor: z.ZodType<Cursor> = z.object({ epoch: nonNegativeInt, seq: nonNegativeInt });
+/** A cursor the PLATFORM stamps may sit between two runtime events (`platformCursor`, a fractional `seq`); a history range is read from one (#397). */
+export const platformCursor: z.ZodType<Cursor> = z.object({ epoch: nonNegativeInt, seq: z.number().finite().min(0) });
 
 /** `{ sessionId → cursor }` with a bounded number of keys. */
 export const cursors: z.ZodType<Readonly<Record<string, Cursor>>> = z

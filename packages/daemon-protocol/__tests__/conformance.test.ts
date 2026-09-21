@@ -14,7 +14,7 @@ describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
 
     it('has every scenario the issue names, none skipped', () => {
-        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'session-ref', 'reconnect-replay', 'gap', 'fs-list', 'fs-locate', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip']);
+        expect(cases.map((c) => c.name)).toEqual(['hello-welcome', 'malformed-input', 'env', 'heartbeat', 'session', 'session-ref', 'reconnect-replay', 'gap', 'fs-list', 'fs-locate', 'env-put', 'env-remove', 'env-policy', 'tool-round-trip', 'history']);
         expect(cases.filter((c) => c.skip)).toEqual([]);
     });
 
@@ -30,7 +30,8 @@ describe('daemonConformance × inMemoryHarness', () => {
             ['fs-locate', 'the harness does not declare the "fs" feature'],
             ['env-put', 'the harness does not declare the "env-manage" feature'],
             ['env-remove', 'the harness does not declare the "env-manage" feature'],
-            ['env-policy', 'the harness does not declare the "env-manage" feature']
+            ['env-policy', 'the harness does not declare the "env-manage" feature'],
+            ['history', 'the harness does not declare the "history" feature']
         ]);
     });
 });
@@ -89,6 +90,10 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that reports the placeholder id as its own (#388)', async () => {
         await expect(only('session-ref', { sameRef: true }).run()).rejects.toThrow(/not the placeholder session\.opened carried/);
+    });
+
+    it('a daemon that answers a history range its log no longer reaches with what is left, instead of a gap (#397, OPS-04)', async () => {
+        await expect(only('history', { historyHole: true }).run()).rejects.toThrow(/a range the log no longer reaches answers a gap, not \d+ events/);
     });
 
     it('a daemon that never announces environments', async () => {

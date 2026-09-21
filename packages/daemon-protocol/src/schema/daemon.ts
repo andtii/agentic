@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
 import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, machineId, machinePolicy, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
 import { LIMITS } from './limits.js';
-import { sessionRef, wireFrame, wireReply } from './wire.js';
+import { sessionRef, wireEventFrame, wireFrame, wireReply } from './wire.js';
 
 const v = z.literal(DAEMON_PROTOCOL_VERSION);
 
@@ -40,6 +40,13 @@ const envResponse = z
 const quota = z
     .object({ v, t: z.literal('quota'), environmentId, snapshot: quotaSnapshot })
     .refine((f) => f.snapshot.environmentId === f.environmentId, { message: 'quota snapshot is for another environment', path: ['snapshot', 'environmentId'] });
+/** The events of a history slice (#397): at most `LIMITS.list`, and named errors — a `gap` may say how far back the log still reaches. */
+const historyResult = z.object({ events: z.array(wireEventFrame).max(LIMITS.list), more: z.boolean().optional() });
+const historyError = z.object({ code: z.enum(['unknown-session', 'gap', 'internal']), message: text, earliest: cursor.optional() });
+const historyResponse = z
+    .object({ v, t: z.literal('history.response'), requestId: name, result: historyResult.optional(), error: historyError.optional() })
+    .refine((f) => f.result === undefined || f.error === undefined, { message: 'history.response carries result or error, not both', path: ['error'] })
+    .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'history.response carries result or error', path: ['result'] });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
 export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
@@ -54,6 +61,7 @@ export const pongFrame: z.ZodType<DaemonFrameOf<'pong'>> = pong;
 export const fsResponseFrame: z.ZodType<DaemonFrameOf<'fs.response'>> = fsResponse;
 export const envResponseFrame: z.ZodType<DaemonFrameOf<'env.response'>> = envResponse;
 export const quotaFrame: z.ZodType<DaemonFrameOf<'quota'>> = quota;
+export const historyResponseFrame: z.ZodType<DaemonFrameOf<'history.response'>> = historyResponse;
 
 /** Every daemon frame kind by its `t`. */
 export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
@@ -69,7 +77,8 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     pong: pongFrame,
     'fs.response': fsResponseFrame,
     'env.response': envResponseFrame,
-    quota: quotaFrame
+    quota: quotaFrame,
+    'history.response': historyResponseFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse]);

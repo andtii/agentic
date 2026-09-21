@@ -34,7 +34,7 @@ import { FlatMemory, Memory, memoryActorKey } from '../memory/index.js';
 import { Inbox, inboxKey } from '../notify/index.js';
 import { Registry, registryKey } from '../registry/index.js';
 import { defineScheduleActor } from '../schedule/index.js';
-import { defineSessionActor, SESSION_PAGE_TYPE, sessionPageKey } from '../session/index.js';
+import { defineSessionActor, SESSION_PAGE_TYPE, SESSION_TRANSCRIPT_PAGE_TYPE, sessionPageKey, transcriptPageKey } from '../session/index.js';
 import { TaskActor } from '../task/index.js';
 import type { ActorRecordRef, ArtifactSink, WorkspaceStore } from './ports.js';
 import type { WorkspaceState } from './index.js';
@@ -220,7 +220,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
 }
 
 /** Types the export reads through the index; anything else the store lists is "present, not exported". Literals: this module and the Registry import each other. */
-const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'FlatMemory', 'Chat', 'ChatPage', 'session-page', 'Schedule', 'Inbox', 'Registry']);
+const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'FlatMemory', 'Chat', 'ChatPage', 'session-page', 'session-transcript-page', 'Schedule', 'Inbox', 'Registry']);
 
 /** Every child record the index implies, children first; the root is NOT included. */
 export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef[]> {
@@ -261,12 +261,17 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
         for (const sessionId of sessions) {
             const sessionKey = `${ws}:session:${sessionId}`;
             let pages = 0;
+            let transcriptPages = 0;
             try {
-                pages = (await as(SessionRef, sessionKey).get()).pages;
+                const info = await as(SessionRef, sessionKey).get();
+                pages = info.pages;
+                transcriptPages = info.transcriptPages;
             } catch {
                 // Unreadable session: purge the record anyway; its pages, if any, are unreachable without it.
             }
+            // Every page ever written — one a daemon session already forgot (#397) purges as a no-op — and the transcript's pages (#397).
             for (let page = 0; page < pages; page++) add(SESSION_PAGE_TYPE, sessionPageKey(sessionKey, page));
+            for (let page = 0; page < transcriptPages; page++) add(SESSION_TRANSCRIPT_PAGE_TYPE, transcriptPageKey(sessionKey, page));
             add(SessionRef.type, sessionKey);
         }
         add(Chat.type, key);
