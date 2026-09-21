@@ -101,7 +101,7 @@ case "${AGENTIC_DAEMON_ZIP:-}" in
             channel=${AGENTIC_CHANNEL:-$DEFAULT_CHANNEL}
             case "$channel" in
                 latest) manifest_url="$RELEASES/download/daemon-latest/manifest.json" ;;
-                stable) manifest_url="$RELEASES/latest/download/manifest.json" ;;
+                stable) manifest_url="$RELEASES/download/daemon-stable/manifest.json" ;;
                 *) fail "unknown AGENTIC_CHANNEL $channel (latest or stable)" ;;
             esac
         fi

@@ -8,7 +8,10 @@ name: Daemon release
 # - a push to main updates the rolling `daemon-latest` pre-release — channel
 #   `latest`, version `<package.json version>-main.<sha7>`;
 # - a pushed tag `daemon-v<semver>` (or a manual run with the `tag` input)
-#   creates the release `daemon-v<semver>` — channel `stable`, version <semver>.
+#   creates the release `daemon-v<semver>` — channel `stable`, version <semver> —
+#   and, unless the semver is a pre-release (`-rc.1`), copies its manifest to the
+#   rolling `daemon-stable` pre-release, which is where the stable channel reads it.
+#   Nothing depends on GitHub's "latest release" (release-drafter owns that for the app).
 #
 # Assets are named without a version (agentic-daemon-<os>-<arch>.zip, each with
 # its `.sha256`); the version is in the manifest and inside the zip
@@ -144,9 +147,9 @@ jobs:
           else
             set -- --generate-notes
           fi
-          # A semver pre-release (daemon-v0.2.0-rc.1) is a GitHub pre-release: the stable channel
-          # (releases/latest) never picks it up; pin it with AGENTIC_VERSION.
-          case "$AGENTIC_DAEMON_TAG" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest ;; esac
+          # A semver pre-release (daemon-v0.2.0-rc.1) is a GitHub pre-release. Never --latest: GitHub's
+          # "latest release" belongs to the app's release-drafter releases.
+          case "$AGENTIC_DAEMON_TAG" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest=false ;; esac
           gh release create "$AGENTIC_DAEMON_TAG" --title "Daemon ${AGENTIC_DAEMON_TAG#daemon-v}" --target "$GITHUB_SHA" "$@" \
             release/agentic-daemon-*.zip release/agentic-daemon-*.zip.sha256
 
@@ -157,3 +160,15 @@ jobs:
           node apps/daemon/scripts/lib/manifest.mjs --dir release --tag "$tag" --repo "$GITHUB_REPOSITORY" --out manifest.json
           cat manifest.json
           gh release upload "$tag" manifest.json --clobber
+
+      # The stable channel: the same manifest on the rolling daemon-stable pre-release (its asset urls
+      # point at the versioned release). A semver pre-release (-rc.1) never moves it.
+      - name: Move daemon-stable to this release
+        if: env.AGENTIC_DAEMON_TAG != '' && !contains(env.AGENTIC_DAEMON_TAG, '-')
+        run: |
+          notes="The stable channel of the machine daemon: its manifest.json names the current stable release, ${AGENTIC_DAEMON_TAG} (https://github.com/${GITHUB_REPOSITORY}/releases/tag/${AGENTIC_DAEMON_TAG}). Not a release of its own."
+          if ! gh release view daemon-stable >/dev/null 2>&1; then
+            gh release create daemon-stable --prerelease --title "Daemon (stable)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload daemon-stable manifest.json --clobber
+          gh release edit daemon-stable --notes "$notes"

@@ -211,7 +211,9 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 Two channels:
 
 - **`latest`** — every push to `main` that touches `apps/daemon` or `packages/` (and `workflow_dispatch` without a `tag`) replaces the assets of the rolling **`daemon-latest`** pre-release (https://github.com/andtii/agentic/releases/tag/daemon-latest). The version is `<apps/daemon/package.json version>-main.<sha7>`.
-- **`stable`** — pushing a tag `daemon-v<semver>` creates the GitHub release `daemon-v<semver>` (not a pre-release; notes from release-drafter's newest draft when there is one, else generated). The version is the tag's semver. `stable` installs read GitHub's newest non-pre-release (`releases/latest/download/manifest.json`), so only daemon releases may be published as full releases. A semver pre-release tag (`daemon-v0.2.0-rc.1`) becomes a GitHub pre-release: its manifest still says `stable`, but only `AGENTIC_VERSION=daemon-v0.2.0-rc.1` installs it.
+- **`stable`** — pushing a tag `daemon-v<semver>` creates the GitHub release `daemon-v<semver>` (notes from release-drafter's newest draft when there is one, else generated). The version is the tag's semver. The run then uploads the same `manifest.json` to the rolling **`daemon-stable`** pre-release (created on first use; its notes name the current stable version), whose asset urls point at the versioned release. A semver pre-release tag (`daemon-v0.2.0-rc.1`) becomes a GitHub pre-release and leaves `daemon-stable` alone: its manifest still says `stable`, but only `AGENTIC_VERSION=daemon-v0.2.0-rc.1` installs it.
+
+  Each channel's manifest is at a fixed URL — `releases/download/daemon-latest/manifest.json` and `releases/download/daemon-stable/manifest.json` — and the installers (and later the platform) read only those or a pinned `releases/download/daemon-v<semver>/manifest.json`. Nothing depends on GitHub's "latest release", which the app's release-drafter releases own.
 
   ```sh
   git tag daemon-v0.1.0 && git push origin daemon-v0.1.0

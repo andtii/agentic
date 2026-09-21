@@ -93,7 +93,7 @@ if ($env:AGENTIC_DAEMON_ZIP -and -not ($env:AGENTIC_DAEMON_ZIP -match '^https?:/
         $channel = if ($env:AGENTIC_CHANNEL) { $env:AGENTIC_CHANNEL } else { $DefaultChannel }
         $manifestUrl = switch ($channel) {
             'latest' { "$Releases/download/daemon-latest/manifest.json" }
-            'stable' { "$Releases/latest/download/manifest.json" }
+            'stable' { "$Releases/download/daemon-stable/manifest.json" }
             default { Fail "unknown AGENTIC_CHANNEL $channel (latest or stable)" }
         }
     }
