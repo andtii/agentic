@@ -728,7 +728,7 @@ const quotaPanel: RecipeInput = {
 const quotaRings: RecipeInput = {
     component: 'ag-quota-rings',
     parts: {
-        root: { base: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center', gap: 'var(--space-sm)', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
+        root: { base: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center', justifyItems: 'start', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
         item: {
             // The ring on the left across both rows, the percent over the label beside it.
             base: { '--ag-ink': 'var(--color-primary)', display: 'grid', gridTemplateColumns: '28px auto', gridTemplateRows: 'auto auto', columnGap: 'var(--space-xs)', alignItems: 'center', minInlineSize: '0' },
