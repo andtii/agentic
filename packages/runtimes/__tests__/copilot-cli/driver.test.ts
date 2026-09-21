@@ -44,14 +44,14 @@ async function collect(turn: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
 }
 
 describe('copilotCliDriver.open', () => {
-    it('opens a Copilot session in the spec folder with the platform prompt appended and repository instructions off', async () => {
+    it('opens a Copilot session in the spec folder with the platform prompt appended and repository instructions on', async () => {
         const { driver, clients } = harness();
         const { session, capabilities } = await driver.open(envA, spec({ model: 'gpt-5', tools: ['memory_search'] }), ctx());
         const config = clients[0]!.configs[0]!;
         expect(config.workingDirectory).toBe('C:\\src\\app');
         expect(config.model).toBe('gpt-5');
-        expect(config.skipCustomInstructions).toBe(true);
-        expect(config.enableConfigDiscovery).toBe(false);
+        expect(config.skipCustomInstructions).toBe(false);
+        expect(config.enableConfigDiscovery).toBe(true);
         expect(config.systemMessage?.mode).toBe('append');
         expect(config.systemMessage?.content).toContain(`${PLATFORM_MEMORY_HEADING}\n\n${COPILOT_PLATFORM_MEMORY_NOTE}`);
         expect(config.tools?.map((t) => t.name)).toEqual(['memory_search']);

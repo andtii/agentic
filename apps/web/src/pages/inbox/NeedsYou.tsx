@@ -17,7 +17,7 @@ import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, NeedsIt
 import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
 import { MachineNotice } from '../machines/MachineNotice';
-import { sortRows, type NeedsRow, type NeedsSource, type RequestState } from './source';
+import { sortRows, type NeedsRow, type NeedsSource, type PlanApproval, type RequestState } from './source';
 
 /** The Session's request as the card takes it. */
 export function openRequestOf(view: SessionRequestView): OpenRequest {
@@ -57,12 +57,12 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
     const request: (() => RequestState) | undefined = row.ref ? source.useRequest(row.ref) : undefined;
     const st = signal({ busy: false, error: '' });
 
-    const respond = async (decision: Decision): Promise<void> => {
+    const respond = async (decision: Decision, plan?: PlanApproval): Promise<void> => {
         if (!row.ref) return;
         st.busy = true;
         st.error = '';
         try {
-            await source.respond(row.ref, decision);
+            await source.respond(row.ref, decision, plan);
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
             throw e;
@@ -115,7 +115,7 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                         environment={view.environment}
                         via={view.via}
                         decision={decisionOf(view.view)}
-                        onRespond={(_, decision) => respond(decision)}
+                        onRespond={(_, decision, options) => respond(decision, options?.permissionMode ? { permissionMode: options.permissionMode, agentId: view.view.agentId, ...(view.view.chatId ? { chatId: view.view.chatId } : {}) } : undefined)}
                     />
                 ) : null}
                 {row.kind === 'input' && view ? (

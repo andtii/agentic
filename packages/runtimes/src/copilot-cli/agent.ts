@@ -226,8 +226,8 @@ export function copilotCli(options: CopilotCliOptions): Agent<CopilotSessionOpti
             ...(opts.system ? { systemMessage: { mode: 'append', content: opts.system } } : {}),
             tools,
             streaming: true,
-            skipCustomInstructions: true,
-            enableConfigDiscovery: false,
+            skipCustomInstructions: false,
+            enableConfigDiscovery: true,
             onPermissionRequest,
             onUserInputRequest
         };

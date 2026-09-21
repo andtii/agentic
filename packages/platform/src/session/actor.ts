@@ -24,7 +24,7 @@
  * approval card all read the same log.
  */
 
-import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionClosedCode, type SessionEvent, type SessionId, type SessionOptions, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type SessionRef, type UnstampedEvent } from '@sigx/ai-agent';
@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, optionsOf, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -99,6 +99,8 @@ export interface SessionInfo {
      * from the log. Listed, never revocable: the adapter keeps its grants private (`policy/requests.ts`).
      */
     readonly grants: readonly SessionGrant[];
+    /** The model and permission mode it runs with (#453): what it opened with, then what a `configure` set. */
+    readonly options?: SessionOptions;
 }
 
 /**
@@ -601,6 +603,7 @@ export function defineSessionActor(ports: SessionPorts) {
             ...(s.gap ? { gap: c.snapshot(s.gap) } : {}),
             ...(s.closedAt !== undefined ? { closedAt: s.closedAt } : {}),
             ...(s.learning ? { learning: c.snapshot(s.learning) } : {}),
+            ...(s.spec ? { options: optionsOf(s) } : {}),
             corrections: c.snapshot(s.corrections ?? []),
             // The whole set, genuinely: every grant of the session — the index's stripped turn-starts are no events and say nothing about one.
             grants: sessionGrantsOf(knownEvents(s).filter(isWholeEvent))
@@ -1009,6 +1012,9 @@ export function defineSessionActor(ports: SessionPorts) {
                     return;
                 }
                 if (command.type === 'configure' && replied.kind === 'ack') {
+                    // What the session now runs with (#453): the router compares it with the member's options before a prompt.
+                    const { model, permissionMode } = command.patch;
+                    if (model !== undefined || permissionMode !== undefined) await appendEntry(ctx, set({ options: { ...optionsOf(s), ...(model !== undefined ? { model } : {}), ...(permissionMode !== undefined ? { permissionMode } : {}) } }));
                     const live = lives.get(ctx.key);
                     if (live) await drainBuffered(ctx, live);
                 }
@@ -1093,7 +1099,9 @@ export function defineSessionActor(ports: SessionPorts) {
                     if (first || !s.running) {
                         // Memory is retrieved before the runtime session exists, so the factory (and a daemon) sees the block in the spec.
                         const recorded = ports.learning ? await withRetrievedMemory(ctx, structuredClone(spec), ports.learning) : structuredClone(spec);
-                        await appendEntry(ctx, set({ opened: true, spec: recorded, status: 'idle', ...(first && spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
+                        // What the runtime session runs with (#453): the first open's; a re-open keeps it, a `configure` moves it.
+                        const options = first ? specOptions(spec) : optionsOf(s);
+                        await appendEntry(ctx, set({ opened: true, spec: recorded, status: 'idle', options, ...(first && spec.resume ? { ref: spec.resume } : {}), ...(spec.machineId ? { mode: 'remote' } : {}) }));
                     }
                     await ensureLive();
                     if (first) await publishChat(ctx, { kind: 'status', status: 'session-started' });

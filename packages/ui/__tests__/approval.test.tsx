@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Decision, OpenRequest } from '@sigx/ai-agent/app';
 import { expectAnatomy } from '@sigx/zero/testing';
-import { ApprovalPrompt, DENY_MESSAGE, aiApprovalAnatomy, decisionText } from '../src/thread';
+import { ApprovalPrompt, DENY_MESSAGE, KEEP_PLANNING_MESSAGE, aiApprovalAnatomy, decisionText, type RespondOptions } from '../src/thread';
 import { mount, one, all, buttonNamed, buttonName, tick } from './helpers';
 
 const request: OpenRequest = { requestId: 'r1', kind: 'permission', toolName: 'Bash', message: 'Runs `git status`.', seq: 1 };
@@ -101,5 +101,43 @@ describe('the approval card', () => {
         expect(one(dom, 'ai-approval', 'root')!.hasAttribute('aria-live')).toBe(false);
         expect(decisionText({ outcome: 'deny', scope: 'once' })).toBe('Denied');
         expect(decisionText({ outcome: 'allow', scope: 'once', by: 'policy' })).toBe('Allowed once by policy');
+    });
+});
+
+describe('the plan card (#454)', () => {
+    const exit: OpenRequest = { requestId: 'r2', kind: 'permission', toolName: 'ExitPlanMode', seq: 2 };
+    function plan(input: unknown = { plan: ['## Plan', '', '1. Read the card', '2. Add the listbox'].join('\n') }) {
+        const seen: [string, Decision, RespondOptions | undefined][] = [];
+        const dom = mount(<ApprovalPrompt request={exit} onRespond={(id, d, o) => seen.push([id, d, o])} input={input} />);
+        return { dom, seen };
+    }
+
+    it('shows the plan as markdown under "Plan ready for review", with the three plan answers instead of the tool well', () => {
+        const { dom } = plan();
+        expect(one(dom, 'ai-approval', 'title')!.textContent).toBe('Plan ready for review');
+        expect(one(dom, 'ai-approval', 'request')).toBeNull();
+        const body = one(dom, 'ai-approval', 'plan')!;
+        expect(body.querySelector('h2')?.textContent).toBe('Plan');
+        expect([...body.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Read the card', 'Add the listbox']);
+        expect(buttons(dom).map((b) => [buttonName(b), b.getAttribute('data-intent')])).toEqual([
+            ['Approve · default', 'wait'],
+            ['Approve · accept edits', 'default'],
+            ['Keep planning', 'danger']
+        ]);
+    });
+
+    it.each([
+        ['Approve · default', { type: 'permission', outcome: 'allow', scope: 'once' }, { permissionMode: 'default' }],
+        ['Approve · accept edits', { type: 'permission', outcome: 'allow', scope: 'once' }, { permissionMode: 'acceptEdits' }],
+        ['Keep planning', { type: 'permission', outcome: 'deny', scope: 'once', message: KEEP_PLANNING_MESSAGE }, undefined]
+    ] as const)('"%s" answers with the mode the member goes on in', (label, decision, options) => {
+        const { dom, seen } = plan();
+        buttonNamed(dom, label).click();
+        expect(seen).toEqual([['r2', decision, options]]);
+    });
+
+    it('says so when the call carries no plan', () => {
+        const { dom } = plan({});
+        expect(one(dom, 'ai-approval', 'plan')!.textContent).toContain('without a written plan');
     });
 });

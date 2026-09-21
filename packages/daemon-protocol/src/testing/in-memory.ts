@@ -107,7 +107,7 @@ export const IN_MEMORY_POLICY: MachinePolicy = { webManaged: true, allowedRoots:
 
 export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     runtime: 'in-memory',
-    supported: ['prompt', 'cancel', 'close'],
+    supported: ['prompt', 'cancel', 'close', 'configure'],
     unsupported: [{ op: 'fork', reason: 'not implemented' }],
     resume: 'local',
     cancel: true,

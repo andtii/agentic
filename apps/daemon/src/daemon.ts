@@ -89,6 +89,7 @@ import {
     type HarnessPhase,
     type LifecycleError,
     type LocalEnvironment,
+    type ModelOption,
     type MachineId,
     type MachinePolicy,
     type QuotaSource,
@@ -121,6 +122,8 @@ const W = WIRE_PROTOCOL_VERSION;
 export const DEFAULT_LOG_MAX_BYTES = 64 * 1024 * 1024;
 /** About how much event JSON one `history.response` carries — half the frame limit, so the envelope and the frames' own stamps always fit. */
 export const HISTORY_RESPONSE_BYTES = Math.floor(LIMITS.frameBytes / 2);
+/** How long an environment's model list is trusted before a reconnect asks its account again (#453). */
+export const MODELS_REFRESH_MS = 6 * 60 * 60_000;
 
 export type DaemonDriver = RuntimeDriver<AgentSession, Policy>;
 
@@ -318,10 +321,11 @@ export function agentCapabilitiesOf(report: CapabilityReport): AgentCapabilities
         steer: report.steer,
         permissions: report.permissions,
         tools: report.tools,
-        fork: has('fork'),
-        config: has('configure', 'config'),
-        structuredOutput: has('structured-output', 'structuredOutput'),
-        listSessions: has('list-sessions', 'listSessions')
+        // A harness reports its ops under their own names (`HARNESS_OPS`, #453); the short ones are an in-memory runtime's.
+        fork: has('session.fork', 'fork'),
+        config: has('session.configure-model', 'configure', 'config'),
+        structuredOutput: has('turn.structured-output', 'structured-output', 'structuredOutput'),
+        listSessions: has('agent.list-sessions', 'list-sessions', 'listSessions')
     });
 }
 
@@ -366,6 +370,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const announcedPolicy = (): MachinePolicy => (options.manage ? reportedPolicy(policy) : POLICY_OFF);
     let inspections = new Map<EnvironmentId, EnvironmentInspection>();
     let verdicts = new Map<EnvironmentId, EnvironmentVerdict>();
+    /** What each environment's account says it may run (#453, `RuntimeDriver.models`), and when it was asked. */
+    const models = new Map<EnvironmentId, { readonly list: readonly ModelOption[]; readonly at: number }>();
+    let modelsRunning = false;
     const sessions = new Map<SessionId, LiveSession>();
     const opening = new Map<SessionId, EnvironmentId>();
     const pendingTools = new Map<string, PendingTool>();
@@ -473,13 +480,44 @@ export function createDaemon(options: DaemonOptions): Daemon {
         return changed;
     }
 
+    /**
+     * Ask each environment's runtime which models its account may use (#453), one environment at a time, for those not
+     * asked within `MODELS_REFRESH_MS`: a probe starts the runtime's CLI. A new list goes out as an `env` frame; a
+     * failure keeps the last one (the web falls back to the runtime plugin's list without any).
+     */
+    async function refreshModels(): Promise<void> {
+        if (modelsRunning) return;
+        modelsRunning = true;
+        try {
+            let changed = false;
+            for (const env of environments) {
+                const driver = drivers.get(env.runtime);
+                const known = models.get(env.id);
+                if (!driver?.models || stopped || (known && Date.now() - known.at < MODELS_REFRESH_MS)) continue;
+                let list: readonly ModelOption[] | null;
+                try {
+                    list = await driver.models(env);
+                } catch (e) {
+                    logger.warn('environment model list failed', { environment: env.id, error: e });
+                    list = null;
+                }
+                if (!list) continue;
+                changed ||= JSON.stringify(list) !== JSON.stringify(known?.list);
+                models.set(env.id, { list, at: Date.now() });
+            }
+            if (changed && socket && !stopped) send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+        } finally {
+            modelsRunning = false;
+        }
+    }
+
     function descriptors(): EnvironmentDescriptor[] {
         const out: EnvironmentDescriptor[] = [];
         for (const env of environments) {
             const inspection = inspections.get(env.id);
             if (!inspection) continue;
             // `concurrency.active` is what the budget counts: turns running, not sessions open (#394).
-            out.push(toEnvironmentDescriptor(env, machineId, inspection, runningOn(env.id), verdicts.get(env.id)));
+            out.push(toEnvironmentDescriptor(env, machineId, inspection, runningOn(env.id), verdicts.get(env.id), models.get(env.id)?.list));
         }
         return out;
     }
@@ -591,6 +629,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             heartbeat = setInterval(() => send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] }), heartbeatMs);
         }
         quota.welcomed();
+        void refreshModels();
         options.onWelcome?.();
     }
 

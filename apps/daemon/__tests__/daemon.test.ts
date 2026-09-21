@@ -155,6 +155,23 @@ describe('daemon', () => {
         expect(await daemon.reinspect()).toBe(false);
     });
 
+    it('reports what each account may run once welcomed (#453): the list rides on the descriptors, asked once, the bypass flag with it', async () => {
+        const base = scriptedDriver({ events: 1, heartbeatMs: 1_000 });
+        let asked = 0;
+        const listing: DaemonDriver = { ...base, models: async (e) => (asked++, e.id === 'env_a' ? [{ id: 'claude-fable-5-1', label: 'Fable' }, { id: 'sonnet' }] : null) };
+        const { hello, seat, daemon } = await start([env('env_a', { allowBypassPermissions: true }), env('env_b')], [listing]);
+        expect(hello.environments[0]).toMatchObject({ id: 'env_a', allowBypassPermissions: true });
+        expect(hello.environments[0]!.models).toBeUndefined();
+        const announced = await expectFrame(seat, 'env');
+        expect(announced.environments.map((e) => [e.id, e.models])).toEqual([
+            ['env_a', [{ id: 'claude-fable-5-1', label: 'Fable' }, { id: 'sonnet' }]],
+            ['env_b', undefined]
+        ]);
+        expect(asked).toBe(2);
+        // A later inspection keeps the list; nothing changed means no frame.
+        expect(await daemon.reinspect()).toBe(false);
+    });
+
     it('refuses unknown environments and a cwd outside cwdRoots — with a reason; an open session never counts against concurrency (#394)', async () => {
         const { seat } = await start([env('env_a')]);
         open(seat, 'session_1', 'env_nope');
@@ -939,6 +956,10 @@ describe('daemon helpers', () => {
     it('agentCapabilitiesOf maps the report onto what serveSession checks', () => {
         const report: CapabilityReport = { runtime: 'x', supported: ['prompt', 'configure', 'fork'], unsupported: [], resume: 'local', cancel: true, steer: true, permissions: 'every-call', tools: 'mcp' };
         expect(agentCapabilitiesOf(report)).toMatchObject({ resume: 'local', cancel: true, steer: true, config: true, fork: true, structuredOutput: false, permissions: 'every-call', tools: 'mcp' });
+    });
+    it('agentCapabilitiesOf reads the ops a harness reports under their own names (#453): configure reaches the session', () => {
+        const report: CapabilityReport = { runtime: 'claude-code', supported: ['session.configure-model', 'session.fork', 'turn.structured-output', 'agent.list-sessions'], unsupported: [], resume: 'portable', cancel: true, steer: true, permissions: 'harness-filtered', tools: 'mcp' };
+        expect(agentCapabilitiesOf(report)).toMatchObject({ config: true, fork: true, structuredOutput: true, listSessions: true });
     });
 });
 

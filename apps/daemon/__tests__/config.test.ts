@@ -32,6 +32,11 @@ describe('environments.json', () => {
         expect(parseEnvironments([row])).toEqual({ ok: true, environments: [row] });
         expect(parseEnvironments({ environments: [noConcurrency] })).toEqual({ ok: true, environments: [{ ...noConcurrency, concurrency: 1 }] });
     });
+    it('reads allowBypassPermissions (#453): only true is kept, anything but a boolean is an error', () => {
+        expect(parseEnvironments([{ ...row, allowBypassPermissions: true }])).toEqual({ ok: true, environments: [{ ...row, allowBypassPermissions: true }] });
+        expect(parseEnvironments([{ ...row, allowBypassPermissions: false }])).toEqual({ ok: true, environments: [row] });
+        expect(parseEnvironments([{ ...row, allowBypassPermissions: 'yes' }])).toEqual({ ok: false, errors: ['environments[0].allowBypassPermissions must be true or false'] });
+    });
     it('reports every problem at once', () => {
         const result = parseEnvironments([row, { ...row }, { id: '../x', name: '', runtime: 'x', cwdRoots: [], concurrency: 0 }, 'nope']);
         expect(result.ok).toBe(false);
