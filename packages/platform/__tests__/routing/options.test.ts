@@ -167,17 +167,8 @@ const settled = async (id: string) => {
         throw new Error(`${(e as Error).message}\n${JSON.stringify({ task: { status: t.status, wait: t.wait, sessionId: t.sessionId }, routes: r.routes, session: t.sessionId ? await session(t.sessionId).get() : undefined }, null, 1)}`);
     }
 };
-const statuses = async (chatId: ChatId) => (await chat(chatId).history(null, 50)).entries.map((e) => e.entry).filter((e) => e.t === 'status').map((e) => e.kind);
 const messages = async (chatId: ChatId) => (await chat(chatId).history(null, 50)).entries.map((e) => e.entry).filter((e) => e.t === 'msg');
-const promptText = (input: readonly PromptPart[]): string => input.map((p) => (p.type === 'text' ? p.text : `<${p.type}>`)).join('\n');
-/** The text of every prompt a local session's log holds, one string per turn, oldest first. */
-const prompts = async (sessionId: string): Promise<string[]> => (await session(sessionId).events()).filter((e) => e.type === 'turn-start').map((e) => promptText((e as { input: readonly PromptPart[] }).input));
 const frames = (machineId: MachineId, t: string) => sockets.frames(machineKey(WS, machineId)).filter((f) => f.t === t);
-/** The text of every prompt the platform sent the daemon for `sessionId`, oldest first (the in-memory daemon logs no `turn-start`). */
-const sentPrompts = (machineId: MachineId, sessionId: string): string[] =>
-    frames(machineId, 'session.command')
-        .filter((f) => f.sessionId === sessionId && (f.command as { type: string }).type === 'prompt')
-        .map((f) => promptText((f.command as { input: PromptPart[] }).input));
 
 const configures = (machineId: MachineId, sessionId: string) =>
     frames(machineId, 'session.command')
