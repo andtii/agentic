@@ -325,7 +325,8 @@ interface RoutingClient {
     /** The machine went offline (#366): its running routes wait `machine-offline` until it is back, or fail `machine-lost`. */
     machineOffline(machineId: MachineId): Promise<void>;
     sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void>;
-    sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void>;
+    /** A session is gone; `code` is the daemon's close code (#359), `resume-failed` for a re-open it refused (#366, #433). */
+    sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId, code?: SessionClosedCode): Promise<void>;
     /** A turn ended in the environment, or a session running one closed (#394): a slot is free for a route parked `waiting-capacity` there. */
     slotFreed(machineId: MachineId, environmentId: EnvironmentId, why: string): Promise<void>;
     /** The daemon answered a prompt with an error (#394): `busy` parks the route on capacity, anything else fails its task. */
@@ -785,7 +786,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         console.warn(`[machine] session ${sessionId} of ${ctx.key} could not be told its host ended (${reason}): ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
-                if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId));
+                const closedCode: SessionClosedCode | undefined = reopenRefused ? 'resume-failed' : code;
+                if (known) await notify((r) => r.sessionClosed(sessionId, reason, taskId, closedCode));
                 for (const [key, p] of Object.entries(s.pending)) {
                     if (p.sessionId !== sessionId) continue;
                     delete s.pending[key];
