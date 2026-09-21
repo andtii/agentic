@@ -19,6 +19,8 @@ export type CodexPeer = Pick<JsonRpcPeer, 'request' | 'notify' | 'onRequest' | '
 export interface CodexConnection {
     readonly peer: CodexPeer;
     readonly info: InitializeResponse;
+    /** The app-server's OS process (#400); absent for a fake. */
+    readonly pid?: number;
     /** Terminates the process (or the fake); idempotent. */
     close(): Promise<void>;
 }
@@ -93,7 +95,7 @@ export async function spawnCodexAppServer(env: LocalEnvironment, options: SpawnC
     void proc.exited.then(() => peer.close().catch(() => undefined));
     try {
         const info = await initializeCodex(peer, options.clientInfo, options.timeoutMs);
-        return { peer, info, close };
+        return { peer, info, close, ...(proc.pid !== undefined ? { pid: proc.pid } : {}) };
     } catch (e) {
         await close();
         const tail = proc.stderrTail().trim().split('\n').slice(-3).join(' | ');

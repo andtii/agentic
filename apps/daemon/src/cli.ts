@@ -1,6 +1,6 @@
 /**
  * `agentic-daemon pair <code> --url <platform> [--name <machine>] [--allow-root <dir>…]`
- * `agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]`
+ * `agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>] [--telemetry on|off]`
  * `agentic-daemon doctor`
  * `agentic-daemon open [path] [--env <id>] [--no-browser]` (`open.ts`)
  * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
@@ -105,8 +105,9 @@ const USAGE = `agentic-daemon ${DAEMON_VERSION}
 Usage:
   agentic-daemon pair <code> --url <platform> [--name <machine name>] [--allow-root <dir>…]
                        (--allow-root lets the web add environments inside <dir>)
-  agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>]
-                       (--quota-probe off: usage limits from running sessions only, no account probes)
+  agentic-daemon run [--verbose] [--quota-probe on|off] [--quota-poll-ms <ms>] [--telemetry on|off]
+                       (--quota-probe off: usage limits from running sessions only, no account probes;
+                        --telemetry off: no CPU and memory per session reported to the platform)
   agentic-daemon doctor
   agentic-daemon open [path] [--env <id>] [--no-browser]
                        (start a chat in this folder: prints the link, opens the browser; --env picks
@@ -211,6 +212,14 @@ export function quotaFlags(flags: ParsedArgs['flags']): { probe?: boolean; pollM
     return out;
 }
 
+/** `--telemetry on|off` (#400); a message when it is malformed. */
+export function telemetryFlags(flags: ParsedArgs['flags']): { enabled?: boolean } | string {
+    const value = flags['telemetry'];
+    if (value === undefined) return {};
+    if (value !== 'on' && value !== 'off') return '--telemetry takes on or off';
+    return { enabled: value === 'on' };
+}
+
 function stopSignal(): Promise<'signal'> {
     return new Promise((resolve) => {
         const done = () => {
@@ -307,6 +316,11 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     err(`${quota}\n\n${USAGE}`);
                     return exiting('config', 2, { problem: quota });
                 }
+                const telemetry = telemetryFlags(args.flags);
+                if (typeof telemetry === 'string') {
+                    err(`${telemetry}\n\n${USAGE}`);
+                    return exiting('config', 2, { problem: telemetry });
+                }
                 const loaded = await loadEnvironments(paths.environmentsFile);
                 if (!loaded.ok) {
                     for (const e of loaded.errors) log.error('environments.json is invalid', { problem: e });
@@ -361,6 +375,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     manage: { paths, secure },
                     drivers,
                     quota: { sources: context.quotaSources ?? builtin?.quotaSources ?? [], ...quota },
+                    telemetry,
                     eventLog: ndjsonEventLog(paths.sessionsDir, { onError: (e, session) => log.error('session log write failed', { session, error: e }) }),
                     logger: log,
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),

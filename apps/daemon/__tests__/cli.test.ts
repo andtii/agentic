@@ -80,7 +80,7 @@ describe('cli', () => {
             const decoded = decodeDaemonFrame((await seat.next()) as string);
             if (!decoded.ok) throw new Error(decoded.error.message);
             if (decoded.frame.t === t) return decoded.frame as DaemonFrameOf<T>;
-            if (decoded.frame.t !== 'heartbeat') throw new Error(`expected ${t}, got ${decoded.frame.t}`);
+            if (decoded.frame.t !== 'heartbeat' && decoded.frame.t !== 'telemetry') throw new Error(`expected ${t}, got ${decoded.frame.t}`);
         }
     }
 

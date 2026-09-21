@@ -29,7 +29,7 @@ async function next(seat: PlatformSeat, ms = 5_000): Promise<DaemonFrame> {
     return decoded.frame;
 }
 
-async function expectFrame<T extends DaemonFrameType>(seat: PlatformSeat, t: T, ignore: readonly DaemonFrameType[] = ['heartbeat']): Promise<DaemonFrameOf<T>> {
+async function expectFrame<T extends DaemonFrameType>(seat: PlatformSeat, t: T, ignore: readonly DaemonFrameType[] = ['heartbeat', 'telemetry']): Promise<DaemonFrameOf<T>> {
     for (;;) {
         const frame = await next(seat);
         if (frame.t === t) return frame as DaemonFrameOf<T>;
@@ -157,7 +157,7 @@ describe('agentic-daemon end to end', () => {
 
         // --- stop
         send(seat2, { v: V, t: 'session.close', sessionId });
-        expect((await expectFrame(seat2, 'session.closed', ['heartbeat', 'session.frame'])).sessionId).toBe(sessionId);
+        expect((await expectFrame(seat2, 'session.closed', ['heartbeat', 'telemetry', 'session.frame'])).sessionId).toBe(sessionId);
         stop();
         expect(await running).toBe(0);
 
@@ -207,7 +207,7 @@ describe('agentic-daemon end to end', () => {
         const opened = await expectFrame(seat, 'session.opened');
         const before = await turn(seat, 1);
         const head = before[before.length - 1]!;
-        const closing = expectFrame(seat, 'session.closed', ['heartbeat', 'session.frame', 'session.ref']);
+        const closing = expectFrame(seat, 'session.closed', ['heartbeat', 'telemetry', 'session.frame', 'session.ref']);
         first.end('signal');
         expect(await closing).toMatchObject({ sessionId, code: 'restart' });
         expect(await first.exited).toBe(0);
@@ -218,7 +218,7 @@ describe('agentic-daemon end to end', () => {
         expect((await expectFrame(seat2, 'hello')).resume).toEqual({});
         // What the session logged after the platform's cursor (the runtime's closing `state`) is replayed first.
         send(seat2, { v: V, t: 'welcome', serverTime: Date.now(), wanted: { [sessionId]: head } });
-        expect(await expectFrame(seat2, 'session.closed', ['heartbeat', 'session.frame'])).toMatchObject({ sessionId, code: 'restart' });
+        expect(await expectFrame(seat2, 'session.closed', ['heartbeat', 'telemetry', 'session.frame'])).toMatchObject({ sessionId, code: 'restart' });
         send(seat2, { v: V, t: 'session.open', sessionId, environmentId: 'env_work', spec: { agentId: 'agent_e2e', cwd: dir, system: 'You are a test.', tools: [], resume: opened.ref } });
         const reopened = await expectFrame(seat2, 'session.opened');
         // The same runtime conversation, on the next epoch; the head continues after the old one instead of going back to (0, 0).

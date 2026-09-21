@@ -222,6 +222,35 @@ describe('claudeCodeDriver isolation (EXE-04/05)', () => {
         await driver.dispose();
     });
 
+    it('charges the CLI process to the session whose prompt started it, and forgets it when it exits (#400)', async () => {
+        const exits: Array<() => void> = [];
+        let nextPid = 4000;
+        const script: TurnScript = (_u, _t, c) => {
+            const o = c.options as Options;
+            o.spawnClaudeCodeProcess?.({ command: 'claude', args: [], cwd: o.cwd, env: o.env ?? {}, signal: new AbortController().signal } as SpawnOptions);
+            return [messageStart(), ...textBlocks('ok'), ...messageStop(), RESULT()];
+        };
+        const spawn = () =>
+            ({ pid: ++nextPid, killed: false, exitCode: null, kill: () => true, on: (event: string, fn: () => void) => void (event === 'exit' && exits.push(fn)), once: () => undefined, off: () => undefined }) as unknown as SpawnedProcess;
+        const driver = claudeCodeDriver({ query: fakeQuery(script).query, listen: fakeListen, spawn });
+
+        const a = await driver.open(envA, spec(), { ...ctx(), sessionId: 'session_a' as SessionId });
+        const b = await driver.open(envB, spec({ cwd: 'D:\\home\\x' }), { ...ctx(), sessionId: 'session_b' as SessionId });
+        expect(a.pid!()).toBeUndefined();
+        await drain(a.session.prompt('one'));
+        expect(a.pid!()).toBe(4001);
+        expect(b.pid!()).toBeUndefined();
+        await drain(b.session.prompt('two'));
+        expect(b.pid!()).toBe(4002);
+        expect(a.pid!()).toBe(4001);
+
+        // The process exits (a crash, or the adapter's restart): the session reads unknown again, never a dead pid.
+        for (const exit of exits) exit();
+        expect(a.pid!()).toBeUndefined();
+        expect(b.pid!()).toBeUndefined();
+        await driver.dispose();
+    });
+
     it("reads the CLI's own title for the conversation from the transcript under the environment's config dir (#460)", async () => {
         const configDir = await mkdtemp(join(tmpdir(), 'agentic-cc-'));
         try {

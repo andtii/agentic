@@ -223,6 +223,34 @@ describe('codexCliDriver', () => {
     });
 });
 
+describe('codexCliDriver: the app-server pid (#400)', () => {
+    it("names the environment's app-server once its agent opened it, and forgets it when the process goes", async () => {
+        // Every connect is its own process, as `spawnCodexAppServer` spawns one.
+        const servers: FakeAppServer[] = [];
+        const driver = codexCliDriver({ connect: async () => { const server = new FakeAppServer(); servers.push(server); return { ...server.connection(), pid: 4000 + servers.length }; }, parentEnv: {} });
+        expect(driver.pids!(ENV.id)).toEqual([]);
+        // A short-lived connection (inspect, the quota probe) is not the environment's server.
+        await driver.inspect(ENV);
+        expect(driver.pids!(ENV.id)).toEqual([]);
+        const opened = await driver.open(ENV, spec(), ctx());
+        await drain(opened.session.prompt('Hello'));
+        expect(driver.pids!(ENV.id)).toEqual([4002]);
+        expect(driver.pids!(envB.id)).toEqual([]);
+        servers[1]!.exit();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(driver.pids!(ENV.id)).toEqual([]);
+        await driver.dispose();
+    });
+
+    it('a connection without a pid (a fake) names none', async () => {
+        const { driver } = driverWith();
+        const opened = await driver.open(ENV, spec(), ctx());
+        await drain(opened.session.prompt('Hello'));
+        expect(driver.pids!(ENV.id)).toEqual([]);
+        await driver.dispose();
+    });
+});
+
 describe('codexCliDriver: auth and doctor', () => {
     it('inspect asks Codex who is signed in, on a short-lived app-server', async () => {
         const server = new FakeAppServer();
