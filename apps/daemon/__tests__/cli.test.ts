@@ -1,14 +1,15 @@
 // @vitest-environment node
 import type { EnvironmentId } from '@agentic/core';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
-import { main, parseArgs } from '../src/cli';
+import { EXIT_UPDATE, main, parseArgs } from '../src/cli';
 import { quoteArg } from '../src/env-cli';
 import type { DaemonDriver } from '../src/daemon';
 import { loadEnvironments } from '../src/environments';
-import { daemonPaths } from '../src/paths';
+import { daemonPaths, installPaths } from '../src/paths';
 import { loadPolicy, POLICY_OFF } from '../src/policy';
 import { DAEMON_CHANNEL, DAEMON_COMMIT, DAEMON_VERSION, versionLine } from '../src/version';
 import { scriptedDriver } from './helpers/drivers';
@@ -97,6 +98,73 @@ describe('cli', () => {
             stop();
             await relay.close();
         }
+    });
+
+    // #362: the supervisor's side of `run` — the ready marker, its state read back, and a reason on every exit.
+    const exits = () => out.filter((l) => l.includes('"daemon: exiting"')).map((l) => JSON.parse(l) as { reason: string; code: number; error?: { message: string }; stack?: string });
+    const install = () => installPaths({ env: { AGENTIC_INSTALL_DIR: join(dir, 'install') } });
+
+    it('run: writes state/ready after the first welcome, logs the supervisor state, exits 0 on stop and 75 on update', async () => {
+        const relay = await startRelay();
+        let stop!: (value?: 'update') => void;
+        const until = new Promise<void | 'update'>((r) => (stop = r));
+        try {
+            await pairedWith(relay);
+            await mkdir(install().stateDir, { recursive: true });
+            await writeFile(install().supervisorFile, JSON.stringify({ restarts: 3, lastExit: { at: 1, code: 1, signal: null } }));
+            await writeFile(install().updateFailedFile, JSON.stringify({ from: '0.1.0', to: '0.2.0', at: 2, reason: 'not-ready' }));
+            const running = main(['run'], { paths: paths(), install: install(), drivers: [scripted()], ...io(), until, backoff: { initialMs: 5, maxMs: 20 } });
+            const seat = await relay.nextSeat();
+            await expectFrame(seat, 'hello');
+            await expect(readFile(install().readyFile, 'utf8')).rejects.toThrow();
+            seat.send({ v: DAEMON_PROTOCOL_VERSION, t: 'welcome', serverTime: Date.now(), wanted: {} });
+            await vi.waitFor(async () => expect(JSON.parse(await readFile(install().readyFile, 'utf8'))).toMatchObject({ version: DAEMON_VERSION, pid: process.pid }));
+            const state = out.map((l) => JSON.parse(l) as { msg: string }).find((l) => l.msg === 'supervisor state');
+            expect(state).toMatchObject({ restarts: 3, lastExit: { code: 1 }, lastUpdate: { to: '0.2.0', reason: 'not-ready' } });
+            stop('update');
+            expect(await running).toBe(EXIT_UPDATE);
+            expect(exits()).toEqual([expect.objectContaining({ reason: 'update', code: 75 })]);
+
+            out = [];
+            const again = new Promise<void | 'update'>((r) => (stop = r));
+            const second = main(['run'], { paths: paths(), install: install(), drivers: [scripted()], ...io(), until: again, backoff: { initialMs: 5, maxMs: 20 } });
+            await expectFrame(await relay.nextSeat(), 'hello');
+            stop();
+            expect(await second).toBe(0);
+            expect(exits()).toEqual([expect.objectContaining({ reason: 'stop', code: 0 })]);
+        } finally {
+            stop();
+            await relay.close();
+        }
+    });
+
+    it('run: an uncaught exception or unhandled rejection is logged with its reason and exits 1', async () => {
+        const relay = await startRelay();
+        let stop!: () => void;
+        const until = new Promise<void>((r) => (stop = r));
+        try {
+            await pairedWith(relay);
+            const host = Object.assign(new EventEmitter(), { exit: vi.fn() });
+            const running = main(['run'], { paths: paths(), drivers: [scripted()], ...io(), until, host, backoff: { initialMs: 5, maxMs: 20 } });
+            await expectFrame(await relay.nextSeat(), 'hello');
+            host.emit('uncaughtException', new Error('boom'));
+            host.emit('unhandledRejection', new Error('lost'));
+            expect(host.exit.mock.calls).toEqual([[1], [1]]);
+            expect(exits()).toEqual([expect.objectContaining({ reason: 'uncaught', code: 1, error: expect.objectContaining({ message: 'boom' }) }), expect.objectContaining({ reason: 'unhandled-rejection', code: 1 })]);
+            expect(exits()[0]!.stack).toMatch(/boom/);
+            stop();
+            expect(await running).toBe(0);
+            // A stopped run leaves no handler behind.
+            expect(host.listenerCount('uncaughtException') + host.listenerCount('unhandledRejection')).toBe(0);
+        } finally {
+            stop();
+            await relay.close();
+        }
+    });
+
+    it('run: an exit before the daemon starts still says why', async () => {
+        expect(await main(['run'], { paths: paths(), ...io() })).toBe(1);
+        expect(exits()).toEqual([expect.objectContaining({ reason: 'config', code: 1 })]);
     });
 
     const secure = { run: async () => ({ code: 0, stderr: '' }) };

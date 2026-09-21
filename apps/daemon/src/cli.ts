@@ -13,7 +13,7 @@
  * a real profile directory or a real process exit.
  */
 
-import { stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import type { QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
@@ -29,7 +29,7 @@ import { describeLauncher, installLauncher, launcherPlan, removeLauncher, type L
 import { createLogger, redact, type Logger, type LogLevel } from './logger.js';
 import { openUrl, resolveOpen, type UrlOpener } from './open.js';
 import { pair, PairingError } from './pair.js';
-import { daemonPaths, type DaemonPaths } from './paths.js';
+import { daemonPaths, installPaths, type DaemonPaths, type InstallPaths } from './paths.js';
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
 import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
 import { DAEMON_VERSION, versionLine } from './version.js';
@@ -44,8 +44,21 @@ export interface CliContext {
     readonly err?: (text: string) => void;
     /** Log lines (JSON); default `err`. */
     readonly log?: (line: string) => void;
-    /** `run` stops when this resolves; default SIGINT / SIGTERM. */
-    readonly until?: Promise<void>;
+    /**
+     * `run` stops when this resolves — with `'update'` it exits `EXIT_UPDATE` (the supervisor applies the staged
+     * update); default SIGINT / SIGTERM.
+     */
+    readonly until?: Promise<void | 'update'>;
+    /**
+     * Where `run` hears `uncaughtException` / `unhandledRejection` and how it exits on one: it logs
+     * `daemon: exiting` and exits 1. Default `process` — unless `until` is injected (tests), then none.
+     */
+    readonly host?: CrashHost;
+    /**
+     * The install root's `state/` (#362): `run` writes `ready` after the first `welcome` and reads what the
+     * supervisor left there. Default `installPaths()` — unless `paths` is injected (tests), then none.
+     */
+    readonly install?: InstallPaths;
     readonly platform?: NodeJS.Platform;
     readonly run?: CommandRunner;
     readonly hostname?: string;
@@ -90,6 +103,44 @@ ${LAUNCHER_USAGE}
   agentic-daemon --version
 `;
 
+/** The daemon's exit code for "apply the staged update" — the supervisor swaps `daemon.staged` in (`scripts/supervise.mjs`). */
+export const EXIT_UPDATE = 75;
+
+/** Why `run` ended, logged as `daemon: exiting { reason, code }` on every exit path (#353, #362). */
+export type ExitReason = 'signal' | 'stop' | 'update' | 'uncaught' | 'unhandled-rejection' | 'config' | 'error';
+
+export interface CrashHost {
+    on(event: 'uncaughtException' | 'unhandledRejection', listener: (error: unknown) => void): unknown;
+    off(event: 'uncaughtException' | 'unhandledRejection', listener: (error: unknown) => void): unknown;
+    exit(code: number): void;
+}
+
+/** What the supervisor left in `state/`: its restart count and the daemon's last exit, and the last rolled-back update. */
+export interface SupervisorState {
+    readonly restarts?: number;
+    readonly lastExit?: { readonly at: number; readonly code: number | null; readonly signal: string | null };
+    readonly lastUpdate?: { readonly from: string | null; readonly to: string | null; readonly at: number; readonly reason: string };
+}
+
+/** `state/supervisor.json` and `state/update-failed.json`; a missing or unreadable file is simply absent. */
+export async function readSupervisorState(install: Pick<InstallPaths, 'supervisorFile' | 'updateFailedFile'>): Promise<SupervisorState> {
+    const json = async (file: string): Promise<Record<string, unknown> | undefined> => {
+        try {
+            const value: unknown = JSON.parse(await readFile(file, 'utf8'));
+            return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+        } catch {
+            return undefined;
+        }
+    };
+    const supervisor = await json(install.supervisorFile);
+    const failed = await json(install.updateFailedFile);
+    return {
+        ...(typeof supervisor?.restarts === 'number' ? { restarts: supervisor.restarts } : {}),
+        ...(supervisor?.lastExit && typeof supervisor.lastExit === 'object' ? { lastExit: supervisor.lastExit as SupervisorState['lastExit'] } : {}),
+        ...(failed && typeof failed.reason === 'string' ? { lastUpdate: failed as unknown as SupervisorState['lastUpdate'] } : {})
+    };
+}
+
 export interface ParsedArgs {
     readonly command: string | undefined;
     readonly positional: readonly string[];
@@ -128,12 +179,12 @@ export function quotaFlags(flags: ParsedArgs['flags']): { probe?: boolean; pollM
     return out;
 }
 
-function stopSignal(): Promise<void> {
+function stopSignal(): Promise<'signal'> {
     return new Promise((resolve) => {
         const done = () => {
             process.off('SIGINT', done);
             process.off('SIGTERM', done);
-            resolve();
+            resolve('signal');
         };
         process.on('SIGINT', done);
         process.on('SIGTERM', done);
@@ -153,6 +204,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     let secrets: string[] = [];
     const logger = (level: LogLevel): Logger => createLogger({ level, write: context.log ?? err, secrets: () => secrets });
     const secure = { ...(context.platform ? { platform: context.platform } : {}), ...(context.run ? { run: context.run } : {}) };
+    /** `run`'s logger once it has one: the outer catch logs the `error` exit with it. */
+    let runLog: Logger | undefined;
 
     if (args.command === undefined && args.flags.version === true) {
         out(versionLine());
@@ -201,23 +254,53 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 return 0;
             }
             case 'run': {
+                const log = logger(args.flags.verbose ? 'debug' : 'info');
+                runLog = log;
+                const exiting = (reason: ExitReason, code: number, fields: Record<string, unknown> = {}): number => {
+                    log.info('daemon: exiting', { reason, code, ...fields });
+                    return code;
+                };
                 const credentials = await loadCredentials(paths.credentialsFile);
                 if (!credentials) {
                     err(`not paired — run \`agentic-daemon pair <code> --url <platform>\` first`);
-                    return 1;
+                    return exiting('config', 1, { problem: 'not paired' });
                 }
                 secrets = credentialSecrets(credentials);
-                const log = logger(args.flags.verbose ? 'debug' : 'info');
                 const quota = quotaFlags(args.flags);
                 if (typeof quota === 'string') {
                     err(`${quota}\n\n${USAGE}`);
-                    return 2;
+                    return exiting('config', 2, { problem: quota });
                 }
                 const loaded = await loadEnvironments(paths.environmentsFile);
                 if (!loaded.ok) {
                     for (const e of loaded.errors) log.error('environments.json is invalid', { problem: e });
-                    return 1;
+                    return exiting('config', 1, { problem: 'environments.json is invalid' });
                 }
+                const install = context.install ?? (context.paths ? undefined : installPaths({ ...(context.platform ? { platform: context.platform } : {}), ...(context.env ? { env: context.env } : {}) }));
+                if (install) {
+                    const state = await readSupervisorState(install);
+                    if (Object.keys(state).length > 0) log.info('supervisor state', { ...state });
+                }
+                // A crash anywhere logs why before the process goes: the #353 exit left no line at all.
+                const host = context.host ?? (context.until ? undefined : (process as unknown as CrashHost));
+                const crash = (reason: 'uncaught' | 'unhandled-rejection') => (e: unknown) => {
+                    exiting(reason, 1, { error: e, ...(e instanceof Error && e.stack ? { stack: e.stack } : {}) });
+                    for (const child of registeredChildren()) killTreeSync(child);
+                    host?.exit(1);
+                };
+                const onUncaught = crash('uncaught');
+                const onRejection = crash('unhandled-rejection');
+                host?.on('uncaughtException', onUncaught);
+                host?.on('unhandledRejection', onRejection);
+                let welcomed = false;
+                const onWelcome = (): void => {
+                    if (welcomed || !install) return;
+                    welcomed = true;
+                    // The supervisor's go-ahead for a swapped-in version: this one reaches the platform.
+                    void mkdir(install.stateDir, { recursive: true })
+                        .then(() => writeFile(install.readyFile, `${JSON.stringify({ version: DAEMON_VERSION, pid: process.pid, at: Date.now() })}\n`))
+                        .catch((e: unknown) => log.warn('cannot write the ready marker', { file: install.readyFile, error: e }));
+                };
                 // No file yet is a machine with nothing to offer, not a failure (#235): it connects and reports none.
                 if (loaded.environments.length === 0) log.warn('no environments yet — add one with `agentic-daemon env add`; this daemon picks it up while running', { file: paths.environmentsFile });
                 // An unreadable policy is off: web management fails closed.
@@ -235,7 +318,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     ...(context.heartbeatMs ? { heartbeatMs: context.heartbeatMs } : {}),
                     ...(context.backoff ? { backoff: context.backoff } : {}),
                     ...(context.reinspectMs !== undefined ? { reinspectMs: context.reinspectMs } : {}),
-                    ...(context.platform ? { platform: context.platform } : {})
+                    ...(context.platform ? { platform: context.platform } : {}),
+                    onWelcome
                 });
                 await daemon.start();
                 // `env add` / `env rm` / an edit reach the platform without a restart. An invalid file keeps the running set.
@@ -277,14 +361,18 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     return undefined;
                 });
                 context.onStarted?.(daemon);
-                await (context.until ?? stopSignal());
+                const ended = await (context.until ?? stopSignal());
+                const reason: ExitReason = ended === 'signal' ? 'signal' : ended === 'update' ? 'update' : 'stop';
+                const code = exiting(reason, reason === 'update' ? EXIT_UPDATE : 0);
                 watcher?.close();
                 policyWatcher?.close();
                 await daemon.stop();
                 for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
-                return 0;
+                host?.off('uncaughtException', onUncaught);
+                host?.off('unhandledRejection', onRejection);
+                return code;
             }
             case 'open': {
                 const credentials = await loadCredentials(paths.credentialsFile);
@@ -386,6 +474,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 return 2;
         }
     } catch (e) {
+        runLog?.info('daemon: exiting', { reason: 'error' satisfies ExitReason, code: 1, error: e });
         const message = e instanceof PairingError ? `pairing failed: ${e.message}` : `agentic-daemon ${args.command ?? ''}: ${(e as Error).message}`;
         err(redact(message, secrets));
         return 1;

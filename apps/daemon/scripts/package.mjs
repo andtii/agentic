@@ -43,7 +43,8 @@ const ROOT_FILES = {
     'uninstall.sh': 'scripts/package/uninstall.sh',
     'README.md': 'scripts/package/README.md'
 };
-const SCRIPT_FILES = ['scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh'];
+/** The service scripts, and the supervisor they register (#362): copied out to `<install root>/supervisor/` at install. */
+const SCRIPT_FILES = ['scripts/install-service.ps1', 'scripts/uninstall-service.ps1', 'scripts/install-service.sh', 'scripts/uninstall-service.sh', 'scripts/supervise.mjs'];
 /** In a workspace package only the built output ships; everything else stays in the repo. */
 const WORKSPACE_PACKAGE_FILES = ['package.json', 'dist', 'README.md', 'CHANGELOG.md', 'LICENSE'];
 const SKIP_DIRS = new Set(['node_modules', '.git']);
