@@ -180,6 +180,8 @@ export interface MachineUpdateState {
     reported?: number;
     /** When `available` was last compared against the release directory. */
     comparedAt?: number;
+    /** When the release manifests it last compared against were read (#468): "Checked 3 min ago". */
+    checkedAt?: number;
 }
 
 /** What a harness op asks for (#370): the frame's `op`. */

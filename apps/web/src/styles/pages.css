@@ -927,6 +927,7 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-update-banner], [data-update-error], [data-update-last][data-tone="failed"] { font-size: var(--text-md); color: var(--color-error); }
 [data-update-restarts] { font-size: var(--text-md); color: var(--color-warning); }
 [data-update-last] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-update-checked] { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; font-size: var(--text-sm); color: var(--ag-text-muted); }
 [data-update-version] { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-md); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 [data-update-notes] { font-size: var(--text-md); font-weight: var(--weight-normal); }
 [data-update-pending], [data-update-available], [data-update-reinstall], [data-update-policy], [data-update-defaults] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }

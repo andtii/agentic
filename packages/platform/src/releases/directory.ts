@@ -22,6 +22,8 @@ export const RELEASE_SOURCES: Readonly<Record<ReleaseChannel, string>> = {
     latest: 'https://github.com/andtii/agentic/releases/download/daemon-latest/manifest.json'
 };
 export const RELEASE_REFRESH_MS = 60 * 60_000;
+/** `check` reads again only when the last read is older than this (#468): page visits never hammer GitHub. */
+export const RELEASE_CHECK_MIN_MS = 5 * 60_000;
 export const RELEASE_FETCH_TIMEOUT_MS = 10_000;
 /** A manifest larger than this is refused unread. */
 export const RELEASE_MANIFEST_MAX_BYTES = 1024 * 1024;
@@ -151,11 +153,11 @@ async function fetchManifest(doFetch: typeof fetch, url: string, timeoutMs: numb
     }
 }
 
-/** `get` for anyone signed in (a Machine's hop, the web); `refresh` for a user. */
+/** `get` and the rate-limited `check` for anyone signed in (a Machine's hop, the web); `refresh` for a user. */
 const directoryPolicy: ActorPolicy = (principal: Principal | null, _rq, op) => {
     if (!principal) return false;
     const method = (op.resource as { method?: string } | undefined)?.method;
-    return method === 'get' || principal.kind === 'user';
+    return method === 'get' || method === 'check' || principal.kind === 'user';
 };
 
 /** Build the ReleaseDirectory over its fetch. The default export {@link ReleaseDirectory} uses the global `fetch`. */
@@ -163,7 +165,8 @@ export function defineReleaseDirectory(options: ReleaseDirectoryOptions = {}) {
     const doFetch = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
     // Only a URL that is given overrides the default: `{ stable: undefined }` keeps it.
     const sources: Record<ReleaseChannel, string> = { stable: options.sources?.stable ?? RELEASE_SOURCES.stable, latest: options.sources?.latest ?? RELEASE_SOURCES.latest };
-    const now = options.now ?? Date.now;
+    // Read per call, never captured: a clock swapped after definition (tests' fake timers) is the one used.
+    const now = options.now ?? (() => Date.now());
     const refreshMs = options.refreshMs ?? RELEASE_REFRESH_MS;
     const timeoutMs = options.timeoutMs ?? RELEASE_FETCH_TIMEOUT_MS;
 
@@ -205,6 +208,21 @@ export function defineReleaseDirectory(options: ReleaseDirectoryOptions = {}) {
                     await ctx.reminders.set(REFRESH, { due: 0 });
                     await ctx.save();
                 }
+                return ctx.snapshot(view(s));
+            },
+
+            /**
+             * Read the manifests now unless the last read is younger than `minAgeMs` (#468: a machine's page opening, its
+             * "Check for updates") — so a release shows at once, and a burst of visits reads GitHub once.
+             */
+            async check(minAgeMs: number = RELEASE_CHECK_MIN_MS): Promise<ReleasesView> {
+                const s = ctx.state;
+                const floor = Math.max(RELEASE_CHECK_MIN_MS, Number.isFinite(minAgeMs) ? minAgeMs : RELEASE_CHECK_MIN_MS);
+                if (s.lastCheckedAt !== undefined && s.lastCheckedAt + floor > now()) return ctx.snapshot(view(s));
+                await read(s);
+                s.armedAt = now();
+                await ctx.reminders.set(REFRESH, { due: refreshMs });
+                await ctx.save();
                 return ctx.snapshot(view(s));
             },
 
