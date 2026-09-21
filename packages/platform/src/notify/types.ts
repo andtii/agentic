@@ -5,16 +5,13 @@
  * a `notification` plugin implements (architecture §9).
  */
 
-import type { ChatId, MessageId, ScheduleId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { NotificationKind, NotificationRef, WorkspaceId } from '@agentic/core';
 
-export type NotificationKind = 'reminder' | 'task-done' | 'task-failed' | 'approval' | 'input';
-
-/** What the notification is about — the UI deep-links through it. */
-export type NotificationRef =
-    | { readonly kind: 'task'; readonly taskId: TaskId }
-    | { readonly kind: 'schedule'; readonly scheduleId: ScheduleId }
-    | { readonly kind: 'session'; readonly sessionId: SessionId; readonly requestId?: string }
-    | { readonly kind: 'chat'; readonly chatId: ChatId; readonly messageId?: MessageId };
+/**
+ * The kinds and the refs are core's (#359): the reminder, task and request kinds, and the daemon's update and crash
+ * notices, which point at its `machine`.
+ */
+export type { NotificationKind, NotificationRef };
 
 /** What a producer (Schedule, Task, Session) hands the inbox. */
 export interface NotificationInput {

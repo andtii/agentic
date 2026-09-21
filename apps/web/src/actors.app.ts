@@ -67,6 +67,7 @@ import {
     defineChatActor,
     defineInbox,
     defineMachineActor,
+    defineReleaseDirectory,
     defineRegistry,
     defineRoutingActor,
     defineScheduleActor,
@@ -151,6 +152,8 @@ export interface PlatformPorts {
     readonly channels: readonly NotificationChannel[];
     /** Notification plugin id → implementation, opened per notification when that plugin is on (#244). Default: `channelCatalogue` (`src/plugins/catalogue.ts`). */
     readonly channelPlugins?: ChannelCatalogue;
+    /** How the ReleaseDirectory reads the daemon release manifests (#365). Default: the global `fetch`. */
+    readonly releasesFetch?: typeof fetch;
     /** Platform tools a daemon session calls back through `tool.call`. Default: `createToolCallPort` over the actors. */
     readonly tools?: ToolCallPort;
     /** Where `Workspace.exportAll` writes. Default: the `ARTIFACTS` R2 bucket. */
@@ -227,10 +230,14 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const store = ports.store ?? defaultPorts.store;
     // "New session" (#399): the router ends a chat member's session and purges its record and pages through the same store `deleteAll` uses.
     const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, ...withFiles, ...(store ? { store } : {}) });
+    // Daemon updates (#365): the global release directory every Machine compares its daemon against; update notices go to the Inbox.
+    const Releases = defineReleaseDirectory(ports.releasesFetch ? { fetch: ports.releasesFetch } : {});
     const Machine: MachineActor = defineMachineActor({
         socket: daemonSockets.port,
         sessions: () => Session,
         routing: () => Routing,
+        releases: () => Releases,
+        inbox: () => Inbox,
         tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, memory, ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
@@ -252,7 +259,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // Removing a member ends its session through the router (#399, architecture §6).
     const Chat = defineChatActor({ ...withFiles, routing: () => Routing });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */

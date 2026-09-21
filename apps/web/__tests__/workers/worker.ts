@@ -34,7 +34,8 @@ const runtimes: RuntimeCatalogue = {
     [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
 };
 
-const actors = platformActors({ ...defaultPorts, runtimes });
+// Offline: no daemon release manifest is fetched (#365).
+const actors = platformActors({ ...defaultPorts, runtimes, releasesFetch: async () => new Response('offline', { status: 404 }) });
 
 export const ActorHost = createActorHost(actors);
 

@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HistoryError, HistoryRange, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -116,6 +116,72 @@ export interface SessionClosure {
     readonly at: number;
 }
 
+/**
+ * The machine takes no new turns (#365): an update is pending. With no `runtime` it covers every environment; a harness
+ * drain (#370) names the runtime. Sessions still open — an open costs no slot (#394) — and prompts park on capacity.
+ */
+export interface MachineDraining {
+    readonly requestId: string;
+    readonly since: number;
+    readonly runtime?: RuntimeId;
+}
+
+/** An `update.request` in flight (#365), from `requestUpdate` to the `hello` that judges it, a `failed` phase or its deadline. */
+export interface PendingUpdate {
+    readonly requestId: string;
+    /** The version asked for, or `previous` (back to the build the daemon kept). */
+    readonly target: string;
+    readonly asset?: ReleaseAsset;
+    readonly mode: 'drain' | 'now';
+    /** The version the daemon ran when it was asked. */
+    readonly from: string;
+    readonly requestedAt: number;
+    /** `drainTimeoutMs` + 10 min: after this the liveness reminder fails it as `timeout`. */
+    readonly deadline: number;
+    /** Who asked (`principalLabel`, or `system:updates` for a policy). */
+    readonly by: string;
+    phase?: UpdatePhase;
+    progress?: { readonly bytes: number; readonly total: number };
+    error?: LifecycleError;
+}
+
+/** How the last update ended. */
+export interface UpdateOutcome {
+    readonly requestId?: string;
+    readonly from: string;
+    readonly to: string;
+    readonly outcome: 'applied' | 'failed' | 'rolled-back' | 'timeout' | 'cancelled';
+    readonly at: number;
+    readonly error?: string;
+}
+
+/** A release newer than the build the daemon runs, on the machine's channel. */
+export interface AvailableUpdate {
+    readonly version: string;
+    readonly notesUrl?: string;
+    /** When the release directory last read the manifest. */
+    readonly checkedAt?: number;
+    /** The asset for the build's platform; absent when the release ships none for it. */
+    readonly asset?: ReleaseAsset;
+}
+
+/** The machine's update record (#365). `channel` / `policy` are its own; absent, the Workspace's `settings.updates` apply (`defaults`, as last read). */
+export interface MachineUpdateState {
+    channel?: ReleaseChannel;
+    policy?: UpdatePolicy;
+    /** The Workspace's `settings.updates` as last read (on `hello` and the liveness tick). */
+    defaults?: UpdateSettings;
+    available?: AvailableUpdate;
+    /** The last version an `update-available` Inbox row was sent for: once per version. */
+    notified?: string;
+    pending?: PendingUpdate;
+    last?: UpdateOutcome;
+    /** The `at` of the last `hello.lastUpdate` already acted on, so a reconnect does not report it twice. */
+    reported?: number;
+    /** When `available` was last compared against the release directory. */
+    comparedAt?: number;
+}
+
 export interface MachineState {
     v: number;
     name: string;
@@ -152,6 +218,19 @@ export interface MachineState {
     closures: SessionClosure[];
     /** Daemon messages refused by the protocol codec since pairing. */
     rejected: number;
+    /** What the daemon last reported on `hello` (#359): its build, the frame families it answers, restarts, its last exit, its harnesses. */
+    build?: DaemonBuild;
+    features?: DaemonFeature[];
+    restarts?: number;
+    lastExit?: DaemonExit;
+    harnesses?: HarnessReport[];
+    /** The build is older than `MIN_DAEMON_VERSION`. */
+    outdated?: boolean;
+    /** Daemon restarts seen from `hello.restarts` deltas in the last `CRASH_LOOP_WINDOW_MS`, and when a crash loop was last reported. */
+    restartLog?: { at: number; count: number }[];
+    crashLoopAt?: number;
+    update?: MachineUpdateState;
+    draining?: MachineDraining;
 }
 
 export const MAX_CLOSURES = 32;
@@ -202,6 +281,8 @@ export interface CapacityView {
     readonly environments: readonly EnvironmentDescriptor[];
     readonly activeSessions: Readonly<Record<string, HostedSession>> | readonly HostedSession[];
     readonly pending: Readonly<Record<string, PendingCommand>> | readonly PendingCommand[];
+    /** While an update is pending (#365) no new turn starts where the drain covers. */
+    readonly draining?: MachineDraining;
 }
 
 /**
@@ -225,11 +306,20 @@ export function activeIn(view: CapacityView, environmentId: EnvironmentId | stri
     return runningIn(view, environmentId).length;
 }
 
-/** Free slots in an environment as the daemon last described it — `concurrency.max` minus the turns running; `0` for an unknown environment. */
+/**
+ * Free slots in an environment as the daemon last described it — `concurrency.max` minus the turns running; `0` for an
+ * unknown environment, and `0` while a drain covers it (#365): a prompt parks on capacity until the drain ends.
+ */
 export function freeSlots(view: CapacityView, environmentId: EnvironmentId | string): number {
     const env = view.environments.find((e) => e.id === environmentId);
     if (!env) return 0;
+    if (view.draining && (view.draining.runtime === undefined || view.draining.runtime === env.runtime)) return 0;
     return Math.max(0, env.concurrency.max - activeIn(view, environmentId));
+}
+
+/** Whether no turn runs anywhere on the machine (#365) — a live session with no turn does not count. What an update policy waits for. */
+export function isIdle(view: CapacityView): boolean {
+    return Object.values(view.activeSessions).every((s) => activeIn(view, s.environmentId) === 0);
 }
 
 /** `true` when `at` is strictly after `cursor` (or there is no cursor). */
