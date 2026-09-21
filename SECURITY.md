@@ -21,9 +21,10 @@ Please include:
 ## Response
 
 - We aim to acknowledge new reports within a few business days.
-- Once a fix is ready, a patched version will be published to npm and a
-  security advisory will be posted on GitHub crediting the reporter
-  (unless they prefer to remain anonymous).
+- Once a fix is ready, it lands on `main`, the Worker is redeployed, a
+  patched daemon is released on the `stable` channel, and a security advisory
+  is posted on GitHub crediting the reporter (unless they prefer to remain
+  anonymous).
 
 ## Supported versions
 
