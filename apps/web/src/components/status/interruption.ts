@@ -15,7 +15,8 @@
  *   no audit row    · "the platform restarted mid-turn" (an eviction)
  *
  * The browser bundle never imports the platform: its names are types only,
- * and `MACHINE_LOST_MS` is spelled here.
+ * and the router's `MACHINE_LOST_MS` (24 h) is spelled here in hours
+ * (`MACHINE_LOST_HOURS`).
  */
 import type { SessionClosedCode, WaitReason } from '@agentic/core';
 import type { AuditEvent } from '@agentic/platform';
@@ -55,7 +56,7 @@ export interface RouteSignal {
     readonly config: { readonly execution?: { readonly onInterrupt?: 'ask' | 'auto' } };
 }
 
-/** How long a machine may stay offline under a running turn before the task fails `machine-lost` (`MACHINE_LOST_MS`, #366). */
+/** How long a machine may stay offline under a running turn before the task fails `machine-lost`: the router's `MACHINE_LOST_MS` (#366) in hours. */
 export const MACHINE_LOST_HOURS = 24;
 
 /** The router's `machine-lost` failure code (`MACHINE_LOST_CODE`). */

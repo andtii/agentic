@@ -23,12 +23,11 @@ import { AgentTile, ConfirmDialog, EmptyState, EnvironmentLine, Label, StatusPil
 import { KeyValue } from '../../components/KeyValue';
 import { Page } from '../../components/Page';
 import { Panel } from '../../components/Panel';
-import { FailureNotice, failureOf, interruptionLine, interruptionOf, isResumeWait, machineOfflineDetail, machineOfflineText, useInterruptionReads, type ClockText } from '../../components/status';
+import { FailureNotice, failureOf, interruptionLine, interruptionOf, isResumeWait, machineOfflineDetail, machineOfflineText, useInterruptionReads, useMachineNames, type ClockText } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { routingKeyOf, taskKeyOf } from '../../actors/keys';
 import { formatTime } from '../../mock/workspace';
 import { useAgentDirectory } from '../chat/directory';
-import { useEnvironmentDirectory } from '../ops/environments';
 
 /** What the live page tells the topbar: the record for the crumb and the two actions. */
 export const taskHead = signal<{ value: { id: string; task: TaskView; stop: () => void } | null }>({ value: null });
@@ -89,8 +88,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
     const task = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const tree = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'tree'] as const); }, { live: true });
     const cuts = useInterruptionReads(defs, viewer, () => props.id);
-    const machines = useEnvironmentDirectory(defs, viewer);
-    const machineName = (id: string): string | undefined => machines.machines().find((m) => m.id === id)?.name;
+    const machineName = useMachineNames(defs, viewer);
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
 

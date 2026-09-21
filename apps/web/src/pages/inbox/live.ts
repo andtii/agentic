@@ -28,13 +28,12 @@ import type { AuditEvent, InboxNotification, RoutingView } from '@agentic/platfo
 import type { TaskId } from '@agentic/core';
 import type { AgentHue } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { interruptionCause, interruptionOf, useInterruptionReads } from '../../components/status';
-import { useEnvironmentDirectory } from '../ops/environments';
+import { interruptionCause, interruptionOf, useInterruptionReads, useMachineNames } from '../../components/status';
 import { inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import { clockNow, zoneFormat } from '../../time';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
-export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace' | 'Machine'>;
+export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace'>;
 
 /** What an interrupted row says under its title (OPS-05: nothing is replayed, the person decides), after its cause. */
 export const INTERRUPTED_CONTEXT = 'Nothing was replayed. The transcript is intact.';
@@ -96,8 +95,7 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
         useRows() {
             const list = useActorState(defs.Inbox, () => viewer.workspaceId && ([inboxKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
             const cuts = useInterruptionReads(defs, viewer);
-            const machines = useEnvironmentDirectory(defs, viewer);
-            const machineName = (id: string): string | undefined => machines.machines().find((m) => m.id === id)?.name;
+            const machineName = useMachineNames(defs, viewer);
             return () => [...(list.value ?? []).map(rowOf).filter((r): r is NeedsRow => r !== null), ...interruptedRows({ routes: cuts.routes() }, cuts.audit(), machineName)];
         },
         useRequest(ref) {
