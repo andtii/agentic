@@ -25,7 +25,6 @@ import type { ApprovalRequester, EnvironmentParts } from '@agentic/ui';
 /** `machine`: a daemon's update or crash notice (#367) — it links to the machine and is dismissed, not answered. */
 export type NeedsKind = 'approval' | 'input' | 'interrupted' | 'machine';
 
-/** The session and the request an inbox notification points at. */
 /** An approved plan's mode, and whose it becomes (#454). */
 export interface PlanApproval {
     readonly permissionMode: string;
@@ -33,6 +32,7 @@ export interface PlanApproval {
     readonly chatId?: string;
 }
 
+/** The session and the request an inbox notification points at. */
 export interface RequestRef {
     readonly sessionId: string;
     readonly requestId: string;
