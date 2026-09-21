@@ -3,6 +3,7 @@
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
 import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
+import { isHttpsUrl, SHA256_HEX } from '../release.js';
 import { LIMITS } from './limits.js';
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -199,8 +200,16 @@ export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z
     // PLG-09: "not reported" is said, with its reason, and carries no numbers.
     .refine((s) => s.availability !== 'not-reported' || (s.windows.length === 0 && !!s.reason), { message: 'a not-reported snapshot has a reason and no windows', path: ['reason'] });
 
-/** A release build (#359); minimal here — #360 bounds the URL and the digest. */
-export const releaseAsset: z.ZodType<ReleaseAsset> = z.object({ url: text.min(1), sha256: name, bytes: nonNegativeInt, version: name });
+/**
+ * A release build a daemon downloads (#359, #360): strict — a key the contract does not name fails it — with an `https:`
+ * URL, a 64-hex SHA-256 and a whole, non-zero byte count, so the daemon can verify what it fetched before it runs it.
+ */
+export const releaseAsset: z.ZodType<ReleaseAsset> = z.strictObject({
+    url: text.min(1).refine(isHttpsUrl, { message: 'a release asset is fetched over https:' }),
+    sha256: z.string().regex(SHA256_HEX, { message: 'sha256 is 64 hex characters' }),
+    bytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    version: name
+});
 
 /** A harness as a daemon reports it (#359). */
 export const harnessReport: z.ZodType<HarnessReport> = z.object({
@@ -209,7 +218,8 @@ export const harnessReport: z.ZodType<HarnessReport> = z.object({
     status: z.enum(['ready', 'missing', 'broken']),
     current: z.boolean().optional()
 });
-export const harnessReports = z.array(harnessReport).max(LIMITS.list);
+/** At most `LIMITS.harnesses` (16): one per runtime a daemon can drive. */
+export const harnessReports = z.array(harnessReport).max(LIMITS.harnesses);
 
 /** A named failure of an update or a harness change (#359). */
 export const lifecycleError = z.object({ code: name, message: text });

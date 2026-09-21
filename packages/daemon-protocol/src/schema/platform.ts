@@ -32,9 +32,12 @@ const envRequest = z.discriminatedUnion('op', [
 ]);
 /** A history slice (#397): `from` may be platform-stamped (fractional), `to` and `limit` bound the answer. */
 const historyRequest = z.object({ v, t: z.literal('history.request'), requestId: name, sessionId, from: platformCursor, to: platformCursor.optional(), limit: z.number().int().min(1).max(LIMITS.list).optional() });
-/** Update and harness requests (#359); #360 hardens these. */
+/**
+ * Update and harness requests (#359, #360). `target` is a strict `ReleaseAsset` (an `https:` URL and a 64-hex digest) or,
+ * for an update, the literal `'previous'`; a drain waits at most `LIMITS.drainTimeoutMs`.
+ */
 const mode = z.enum(['drain', 'now']);
-const updateRequest = z.object({ v, t: z.literal('update.request'), requestId: name, target: z.union([releaseAsset, z.literal('previous')]), mode, drainTimeoutMs: nonNegativeInt });
+const updateRequest = z.object({ v, t: z.literal('update.request'), requestId: name, target: z.union([releaseAsset, z.literal('previous')]), mode, drainTimeoutMs: nonNegativeInt.max(LIMITS.drainTimeoutMs) });
 const updateCancel = z.object({ v, t: z.literal('update.cancel'), requestId: name });
 const harnessRequest = z.object({ v, t: z.literal('harness.request'), requestId: name, op: z.enum(['install', 'update', 'remove']), runtime: name, target: releaseAsset.optional(), mode });
 

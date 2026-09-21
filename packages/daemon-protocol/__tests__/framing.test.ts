@@ -49,6 +49,16 @@ describe('framing', () => {
         expect(FRAME_ERROR_CODES).toEqual(['too-large', 'not-json', 'not-object', 'unsupported-version', 'unknown-type', 'invalid']);
     });
 
+    it('decodes an older daemon\'s hello without any lifecycle field, and names a platform frame it does not know (#360)', () => {
+        // A daemon that predates #359 sends no build, features, restarts, lastExit, lastUpdate or harnesses.
+        const hello = { v: V, t: 'hello', machineId: 'm1', daemonVersion: '0.1.0', os: 'linux', environments: [], capabilities: [], resume: {} };
+        expect(decodeDaemonFrame(JSON.stringify(hello))).toEqual({ ok: true, frame: hello });
+        // A frame family a daemon does not answer yet is unknown-type — it drops it and keeps the socket, which `hello.features` relies on.
+        const later = decodePlatformFrame(JSON.stringify({ v: V, t: 'update.schedule', requestId: 'u_1' }));
+        expect(code(later)).toBe('unknown-type');
+        if (!later.ok) expect(later.error.message).toBe('unknown platform frame type "update.schedule"');
+    });
+
     it('refuses an oversized message before parsing it', () => {
         const big = `{"v":${V},"t":"ping","pad":"${'x'.repeat(LIMITS.frameBytes)}"}`;
         expect(code(decodePlatformFrame(big))).toBe('too-large');

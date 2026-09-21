@@ -1,13 +1,29 @@
 /** Daemon → platform frames, one schema per kind plus the union. */
 
-import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, type DaemonFeature } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
 import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, machineId, machinePolicy, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
+import { DAEMON_FEATURES, HARNESS_PHASES, SESSION_CLOSED_CODES, UPDATE_PHASES } from '../lifecycle.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireEventFrame, wireFrame, wireReply } from './wire.js';
 
 const v = z.literal(DAEMON_PROTOCOL_VERSION);
+
+const isFeature = (f: string): f is DaemonFeature => (DAEMON_FEATURES as readonly string[]).includes(f);
+/**
+ * The optional frame families a daemon answers (#360): at most `LIMITS.harnesses` names, and one this end does not know
+ * is dropped rather than failing the `hello` — a newer daemon must still pair with an older platform, which then simply
+ * never sends it that family.
+ */
+const features = z
+    .array(name)
+    .max(LIMITS.harnesses)
+    .transform((fs) => fs.filter(isFeature));
+/** A build as the daemon reports it (#359): `platform` is the release asset key (`platformKey`), e.g. `win32-x64`. */
+const build = z.object({ version: name, commit: name, protocol: nonNegativeInt, channel: name, platform: name });
+/** A failed update or harness change names its error; nothing else carries one. */
+const failedHasError = (f: { readonly phase: string; readonly error?: unknown }) => (f.phase === 'failed') === (f.error !== undefined);
 
 const hello = z.object({
     v,
@@ -20,8 +36,8 @@ const hello = z.object({
     resume: cursors,
     policy: machinePolicy.optional(),
     // #359: build, features and lifecycle history; each optional, so an older daemon's hello still parses.
-    build: z.object({ version: name, commit: name, protocol: nonNegativeInt, channel: name, platform: name }).optional(),
-    features: z.array(z.enum(['update', 'harness'])).max(LIMITS.list).optional(),
+    build: build.optional(),
+    features: features.optional(),
     restarts: nonNegativeInt.optional(),
     lastExit: z.object({ at: nonNegativeInt, reason: text, code: z.number().int().optional() }).optional(),
     lastUpdate: z.object({ from: name, to: name, outcome: z.enum(['applied', 'rolled-back']), at: nonNegativeInt, error: text.optional() }).optional(),
@@ -38,7 +54,7 @@ const sessionClosed = z.object({
     t: z.literal('session.closed'),
     sessionId,
     reason: text,
-    code: z.enum(['restart', 'update', 'harness-update', 'draining', 'harness-missing', 'resume-failed']).optional()
+    code: z.enum(SESSION_CLOSED_CODES).optional()
 });
 const toolCall = z.object({ v, t: z.literal('tool.call'), callId: name, sessionId, tool: name, input: z.unknown() });
 const pong = z.object({ v, t: z.literal('pong'), at: nonNegativeInt });
@@ -60,22 +76,23 @@ const historyResponse = z
     .object({ v, t: z.literal('history.response'), requestId: name, result: historyResult.optional(), error: historyError.optional() })
     .refine((f) => f.result === undefined || f.error === undefined, { message: 'history.response carries result or error, not both', path: ['error'] })
     .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'history.response carries result or error', path: ['result'] });
-/** Update and harness progress (#359); #360 hardens these. */
-const updateStatus = z.object({
-    v,
-    t: z.literal('update.status'),
-    requestId: name,
-    phase: z.enum(['downloading', 'verifying', 'staged', 'draining', 'restarting', 'failed']),
-    progress: z.object({ bytes: nonNegativeInt, total: nonNegativeInt }).optional(),
-    error: lifecycleError.optional()
-});
-const harnessStatus = z.object({
-    v,
-    t: z.literal('harness.status'),
-    requestId: name,
-    phase: z.enum(['downloading', 'verifying', 'staged', 'draining', 'applying', 'done', 'failed']),
-    error: lifecycleError.optional()
-});
+/** Update and harness progress (#359, #360): `progress` never passes its total, and `error` comes with `failed` and only then. */
+const updateStatus = z
+    .object({
+        v,
+        t: z.literal('update.status'),
+        requestId: name,
+        phase: z.enum(UPDATE_PHASES),
+        progress: z
+            .object({ bytes: nonNegativeInt, total: nonNegativeInt })
+            .refine((p) => p.bytes <= p.total, { message: 'progress.bytes is at most progress.total', path: ['bytes'] })
+            .optional(),
+        error: lifecycleError.optional()
+    })
+    .refine(failedHasError, { message: 'update.status carries an error exactly when it failed', path: ['error'] });
+const harnessStatus = z
+    .object({ v, t: z.literal('harness.status'), requestId: name, phase: z.enum(HARNESS_PHASES), error: lifecycleError.optional() })
+    .refine(failedHasError, { message: 'harness.status carries an error exactly when it failed', path: ['error'] });
 const harnesses = z.object({ v, t: z.literal('harnesses'), harnesses: harnessReports });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
