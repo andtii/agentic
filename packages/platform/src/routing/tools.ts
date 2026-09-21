@@ -416,7 +416,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                         return {
                             status: 'pending',
                             questionId: requestId,
-                            note: 'The user has not answered yet. End your turn now, saying you are waiting on this question; the answer will start you again in this chat.'
+                            note: 'The user has not answered yet. End your turn now, saying you are waiting on this question; the answer will reach you as a new message in this chat, in this same session.'
                         };
                     }
                 }

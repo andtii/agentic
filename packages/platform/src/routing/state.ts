@@ -4,7 +4,7 @@
  * `ctx.save()` at the end of every mutating turn.
  */
 
-import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, RuntimeId, SessionId, TaskId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, EnvironmentId, FrozenAgentConfig, MachineId, OfflinePolicy, ProjectId, PromptPart, RuntimeId, SessionId, TaskId } from '@agentic/core';
 import type { TaskReport } from '@agentic/runtimes';
 import type { RegistryGate } from '../registry/types.js';
 
@@ -17,10 +17,22 @@ import type { RegistryGate } from '../registry/types.js';
  * - `waiting-turn`: the session runs another route's turn and its runtime cannot take a message into it (#395) —
  *   nothing was sent; the task waits `{turn, sessionId, turnId}` and the route is prompted when that turn ends.
  * - `running`: the prompt is out; `follow` settles the task at the turn's end.
+ * - `waiting-answer`: a chat route's turn ended with its `ask_user` question still open (#396; the call answered
+ *   `pending`) — the task stays `waiting {input}` and nothing follows the route until `deliverAnswer` prompts the
+ *   session with the answer, under this same task.
  * - `interrupted`: the turn was cut short by an eviction (OPS-05) — the task waits `{input, resume:{turnId}}`
  *   for a person's `resume`, which re-prompts the session and puts the route back to `running`.
  */
-export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'waiting-turn' | 'running' | 'interrupted';
+export type RouteStatus = 'waiting-offline' | 'waiting-capacity' | 'opening' | 'waiting-turn' | 'running' | 'waiting-answer' | 'interrupted';
+
+/** An answer the router holds for a route parked on another turn (#396): what `prompt` sends when that turn ends. */
+export interface RouteAnswer {
+    /** The platform request it answers (`ask:{callId}`). */
+    readonly requestId: string;
+    /** The turn it starts, `answerTurnId(taskId, requestId)` — deterministic, so a retried delivery runs once. */
+    readonly turnId: string;
+    readonly input: readonly PromptPart[];
+}
 
 export interface Route {
     readonly taskId: TaskId;
@@ -79,6 +91,10 @@ export interface Route {
      * stays, so `follow` keeps waiting for the same `turn-end`.
      */
     attempt?: number;
+    /** While `waiting-answer` (#396): the platform request the turn left open — the question this task waits an answer to. */
+    question?: string;
+    /** While `waiting-turn` after a `deliverAnswer` (#396): the answer to send when the turn ends, in place of the task's own input. */
+    answer?: RouteAnswer;
     readonly createdAt: number;
     updatedAt: number;
 }

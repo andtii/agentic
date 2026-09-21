@@ -22,7 +22,7 @@
  * newest-first without materialising the log.
  */
 
-import type { Correction, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
+import type { Correction, MessageId, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, PromptPart, SessionRef } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
@@ -167,15 +167,23 @@ export interface SessionState {
      * closed, every open platform request counts as detached too. An answer to one re-activates the asker.
      */
     detachedRequests?: string[];
-    /** Answers to detached requests that came while the session was still open: handed to `answered` when it closes (#285). */
+    /** Answers to detached requests, parked until no turn runs (#285, #393) and handed to `answered` one at a time; a failed hand-over stays here for its retries (#396). */
     answeredDetached?: DetachedAnswer[];
 }
 
-/** A detached request's answer, parked until the session closes (#285). */
+/** A detached request's answer, parked until no turn runs on the session (#285) and until it is handed over (#396). */
 export interface DetachedAnswer {
     readonly requestId: string;
     /** Who answered — the principal the follow-up posts the answer as. */
     readonly answeredBy: Principal;
+    /** The question was dismissed, not answered (#396): the asking task is released, nobody is prompted. */
+    readonly cancelled?: true;
+    /** Hand-overs that failed so far (#396); absent before the first. */
+    readonly attempts?: number;
+    /** When the next hand-over may run (`now()` ms), after a failure; absent means at once. */
+    readonly nextAt?: number;
+    /** The chat message a failed attempt had already posted the answer as: carried into the next attempt, never posted twice. */
+    readonly posted?: MessageId;
 }
 
 /** Replies remembered for idempotent retries (OPS-06); the same default as `serveSession`. */
