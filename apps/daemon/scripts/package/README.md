@@ -2,7 +2,7 @@
 
 The machine daemon of the agentic platform. It pairs this machine to your workspace once, keeps one outbound WebSocket to the platform, reports the machine's execution environments (one per Claude Code account) and runs agent sessions on them. Nothing listens on this machine; the platform never holds an account credential.
 
-This folder is self-contained: the daemon (`bin/`, `dist/`), every dependency (`node_modules/`, including the runtime CLIs the sessions run on) and the install scripts. Nothing is downloaded at install time.
+This folder is self-contained: the daemon (`bin/`, `dist/`), every dependency (`node_modules/`) and the install scripts. The runtimes the sessions run on — the Claude Code executable, the Copilot runtime, the Codex executable — are not in it: they are **harnesses**, installed separately from the same release (see "Harnesses"), which the install script does by default.
 
 Installing also writes the **`agentic-daemon` command** and puts it on your `PATH` for a new terminal, so every command below can be pasted as written. Where it went, and what to add by hand if the folder is not on `PATH`: `agentic-daemon launcher show`. From an unpacked zip before the install has run, the long form always works: `node bin/agentic-daemon.mjs <command>` (`node bin\agentic-daemon.mjs` on Windows).
 
@@ -23,14 +23,14 @@ The platform's **Machines → Pair a machine** page prints one line per OS that 
 
    ```powershell
    # Windows (PowerShell)
-   powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://<your platform> -Code <pairing code> [-Name <machine name>]
+   powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://<your platform> -Code <pairing code> [-Name <machine name>] [-Harness <runtime>,…|none] [-Manifest <url>]
    ```
    ```sh
    # macOS / Linux
-   sh install.sh --url https://<your platform> --code <pairing code> [--name <machine name>]
+   sh install.sh --url https://<your platform> --code <pairing code> [--name <machine name>] [--harness <runtime>,…|none] [--manifest <url>]
    ```
 
-   This checks Node, writes the `agentic-daemon` command (`--no-path` / `-NoPath` writes it without touching any `PATH`), pairs (`credentials.json`, owner-only), runs `doctor`, and registers the background service: a **per-user Scheduled Task** on Windows, a **launchd agent** on macOS (`~/Library/LaunchAgents/agentic-daemon.plist`), a **systemd user unit** on Linux (`~/.config/systemd/user/agentic-daemon.service`) — each named `agentic-daemon`, started at login, restarted if it exits. Within a minute the machine is online on the platform's Machines page.
+   This checks Node, writes the `agentic-daemon` command (`--no-path` / `-NoPath` writes it without touching any `PATH`), pairs (`credentials.json`, owner-only), installs the harnesses `--harness` names (all three by default, `none` for none; from the release `--manifest` names — the one-line installer passes the one it read — a failure is only a warning), runs `doctor`, and registers the background service: a **per-user Scheduled Task** on Windows, a **launchd agent** on macOS (`~/Library/LaunchAgents/agentic-daemon.plist`), a **systemd user unit** on Linux (`~/.config/systemd/user/agentic-daemon.service`) — each named `agentic-daemon`, started at login. The service runs the **supervisor** (`<install root>/supervisor/supervise.mjs`), which runs the daemon, restarts it after any exit and swaps in an update (see "Update and roll back"). Within a minute the machine is online on the platform's Machines page.
 
 Already paired (upgrade, or you ran `pair` yourself)? Run the install script with no arguments.
 
@@ -50,7 +50,9 @@ agentic-daemon env login <id> [--claude <path to the claude CLI>]
 agentic-daemon open [path]         # start a chat in this folder
 agentic-daemon run         # foreground, logs on stderr (--verbose for debug lines)
 agentic-daemon launcher show | install | remove   # the `agentic-daemon` command itself
-agentic-daemon --version
+agentic-daemon harness list | install <runtime>… | update [<runtime>…] | rm <runtime> | select <runtime>…|none
+agentic-daemon update [--check] [--now] [--channel stable|latest] [--version daemon-v<semver>]
+agentic-daemon --version   # version, commit, protocol, channel
 ```
 
 (`command not found`? The install has not run, or it predates the launcher: use `node bin/agentic-daemon.mjs <command>` from this folder — `bin\agentic-daemon.mjs` on Windows — or re-run the install script.)
@@ -80,9 +82,9 @@ agentic-daemon policy off
 }
 ```
 
-- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `agentic-daemon env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; without the `claude` CLI on `PATH`, add `--claude node_modules/@anthropic-ai/claude-agent-sdk-<os>-<arch>/claude` (`claude.exe` on Windows). A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the copy in this folder.
+- `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `agentic-daemon env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; it uses the installed Claude Code harness, so no `claude` on `PATH` is needed (`--claude <path>` names another). A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the installed harness, never on a CLI from `PATH`.
 - `cwdRoots`: the folders sessions may run in. A session outside them is refused.
-- `concurrency` (default 1): sessions at once on that account.
+- `concurrency` (default 1): turns running at once on that account; an open session between messages does not count.
 
 `doctor` reports a shared config dir as an error, and a profile that is not signed in — or having no environments at all — as a warning; the same verdict is sent to the platform per environment.
 
@@ -94,6 +96,8 @@ agentic-daemon policy off
 | `environments.json`, `profiles/` | `%APPDATA%\agentic` | `~/Library/Application Support/agentic` | `~/.config/agentic` |
 | session logs `{sessionId}.ndjson` | `%LOCALAPPDATA%\agentic\sessions` | `~/Library/Application Support/agentic/sessions` | `~/.local/state/agentic/sessions` |
 | `daemon.log` (the service's stdout/stderr) | `%LOCALAPPDATA%\agentic\logs` | `~/Library/Application Support/agentic/logs` | `~/.local/state/agentic/logs` |
+| this folder (`daemon/`), `daemon.prev` (the version before the last update), `supervisor/`, `harnesses/` | `%LOCALAPPDATA%\agentic` | `~/.agentic` | `~/.agentic` |
+| `state/`: `supervisor.log` (every exit, restart, update, rollback), `supervisor.json`, `update-failed.json`, `ready` | `%LOCALAPPDATA%\agentic\state` | `~/.agentic/state` | `~/.agentic/state` |
 
 `AGENTIC_DAEMON_HOME=<dir>` (set for the user, before installing) puts credentials, environments and sessions in one directory; the service inherits it.
 
@@ -103,6 +107,7 @@ agentic-daemon policy off
 # Windows
 Get-ScheduledTask -TaskName agentic-daemon | Get-ScheduledTaskInfo      # LastRunTime, LastTaskResult
 Get-Content -Wait "$env:LOCALAPPDATA\agentic\logs\daemon.log"
+Get-Content "$env:LOCALAPPDATA\agentic\state\supervisor.log" -Tail 20
 Stop-ScheduledTask -TaskName agentic-daemon; Start-ScheduledTask -TaskName agentic-daemon
 ```
 ```sh
@@ -114,13 +119,19 @@ launchctl kickstart -k gui/$(id -u)/agentic-daemon                      # restar
 systemctl --user status agentic-daemon
 tail -f ~/.local/state/agentic/logs/daemon.log
 systemctl --user restart agentic-daemon
+# both
+tail -20 ~/.agentic/state/supervisor.log
 ```
 
 Every log line is JSON; the token never appears in it.
 
-## Upgrade
+## Harnesses
 
-Re-run the one-line installer from the Pair page without a code (`AGENTIC_CODE` left out): it stops the service, replaces the folder and re-registers the service on the existing pairing. By hand: unpack the new zip to a new folder, run its install script with no arguments, delete the old folder.
+Each runtime's native build lives in `<install root>/harnesses/<runtime>/<version>/`. The Machine page's **Runtimes on this machine** card installs, updates and removes them live; from here, `agentic-daemon harness list | install | update | rm` does the same, and a running daemon picks a change made here up on its next start (restart the service). `harness select` sets which ones the machine wants: a starting daemon installs any wanted one it lacks. A runtime without its harness reports `harness-missing` in `doctor` with the command to run.
+
+## Update and roll back
+
+From the machine's page on the platform: **Update when idle** (waits for running turns), **Update now**, **Schedule…**, **Roll back**, and an update policy (manual, when idle, in a window). From here: `agentic-daemon update` (`--check` only looks). Either way the daemon downloads the new version, checks its sha256, stages it beside this folder and restarts onto it; the supervisor keeps the old one as `daemon.prev` and puts it back by itself if the new one does not come up within 90 seconds or crashes twice in 2 minutes (`state/update-failed.json` says why). A running turn is interrupted and offered Resume; conversations continue. A daemon installed before updates existed shows the install line on its page: re-run the one-line installer from the Pair page without a code (`AGENTIC_CODE` left out) once — it stops the service, replaces this folder and re-registers the service on the existing pairing. Details: the platform's `docs/runbook.md` §5.5.
 
 ## Uninstall
 
@@ -131,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1      # Windows
 sh uninstall.sh                                             # macOS / Linux
 ```
 
-Removes the service and the `agentic-daemon` command, and keeps the pairing, environments and logs (the folders above) — delete them by hand if wanted, and **revoke the machine on the platform** (its page's Revoke card) so its token stops working.
+Removes the service, the supervisor and the `agentic-daemon` command, and keeps the pairing, environments and logs (the folders above) — delete them by hand if wanted, and **revoke the machine on the platform** (its page's Revoke card) so its token stops working.
 
 ## Troubleshooting
 

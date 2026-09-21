@@ -34,7 +34,8 @@ The lifecycle frames (#359, #360) are bounded the same way: at most `LIMITS.harn
 ```ts
 import { compareVersions, platformKey, isHttpsAsset, SESSION_CLOSED_CODES, drainingReply, isDrainingReply } from '@agentic/daemon-protocol';
 
-compareVersions('0.2.0', '0.2.0-main.abc1234');  // > 0 — a main build orders below its release, above 0.1.9; malformed input orders lowest
+compareVersions('0.2.0', '0.2.0-main.1790000000.abc1234');  // > 0 — a main build orders below its release, above 0.1.9
+compareVersions('0.2.0-main.1790000100.0f1e2d3', '0.2.0-main.1790000000.abc1234');  // > 0 — main builds order by commit time (#437); malformed input orders lowest
 platformKey(process.platform, process.arch);     // 'win32-x64' — the release asset key `DaemonBuild.platform` carries
 isHttpsAsset(asset);                             // an https URL, a 64-hex sha256, bytes and a version
 ```
@@ -89,6 +90,6 @@ import { daemonConformance, inMemoryHarness } from '@agentic/daemon-protocol/tes
 for (const c of daemonConformance(inMemoryHarness())) it.skipIf(!!c.skip)(c.name, c.run);
 ```
 
-A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` / `restart` behind `features`); an optional `knownOrigin` names a remote URL with a checkout under the suite environment's roots so `fs-locate` proves a match, and `updateTarget` / `harnessTarget` name what `update` / `harness` install. `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side: it answers `history.request` from the per-session log it keeps, reports `IN_MEMORY_BUILD`, fakes an update (phases a tick apart, a drain that waits for running turns) and harness installs without downloading anything — `resume` lands with #363 — its `repos` option fakes git checkouts (badged in listings, found by `locate`; the first with an `origin` becomes `knownOrigin`), and its `faults` option breaks it on purpose so a test can check the suite notices.
+A harness implements `DaemonConformanceHarness`: `start(script)` returns a `ConformanceDaemon` (`machineId`, `environmentId`, `dial()` → a `PlatformSeat` with `send` / `next` / `drop`, `stop()`, and the optional `setEnvironments` / `truncateLog` / `setPolicy` / `restart` behind `features`); an optional `knownOrigin` names a remote URL with a checkout under the suite environment's roots so `fs-locate` proves a match, and `updateTarget` / `harnessTarget` name what `update` / `harness` install. `inMemoryHarness()` is the reference fake — also a stand-in daemon for tests of the platform side: it answers `history.request` from the per-session log it keeps, reports `IN_MEMORY_BUILD`, fakes an update (phases a tick apart, a drain that waits for running turns) and harness installs without downloading anything, and `restart()`s keeping its logs so a `wanted` session is answered `restart` and re-opened from `spec.resume` (#363) — its `repos` option fakes git checkouts (badged in listings, found by `locate`; the first with an `origin` becomes `knownOrigin`), and its `faults` option breaks it on purpose so a test can check the suite notices.
 
 Design: `docs/architecture.md`. What may move into the sigx estate later: `docs/promotion.md`.

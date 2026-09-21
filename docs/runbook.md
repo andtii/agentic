@@ -195,7 +195,7 @@ GITHUB_CLIENT_SECRET=<its secret>
 
 ## 5. Daemon on a machine (Windows, macOS, Linux)
 
-The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs once, and keeps one outbound WebSocket to the platform. It ships as a self-contained zip per OS and CPU, published by CI, and installs with one line from the Pair page; the machine needs nothing installed (#343).
+The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs once, and keeps one outbound WebSocket to the platform. It ships as a self-contained zip per OS and CPU, published by CI, and installs with one line from the Pair page; the machine needs nothing installed (#343). After that it keeps itself current (#358): a supervisor relaunches it (§5.4), the owner updates and rolls it back from its Machine page (§5.5), and the runtimes it drives are separately installed harnesses (§5.6).
 
 ### 5.1 Where the zip comes from
 
@@ -268,6 +268,21 @@ $env:AGENTIC_URL='https://agentic-web.ekdahls.workers.dev'; $env:AGENTIC_CODE='<
 curl -fsSL 'https://agentic-web.ekdahls.workers.dev/install.sh' | AGENTIC_URL=https://agentic-web.ekdahls.workers.dev AGENTIC_CODE=<code> AGENTIC_NAME=<name> sh
 ```
 
+What to install is chosen with three variables, set in front of the same line (PowerShell: `$env:NAME='…';`):
+
+| Variable | Default | Installs |
+|---|---|---|
+| `AGENTIC_CHANNEL` | `latest` until the first stable release (§5.1) | the newest build of `latest` (`daemon-latest`, every `main` push) or `stable` (`daemon-stable`, the newest `daemon-v<semver>` tag) |
+| `AGENTIC_VERSION` | — | exactly that release, `daemon-v0.1.1` (or a bare `0.1.1`); wins over the channel |
+| `AGENTIC_HARNESSES` | `claude-code,copilot-cli,codex-cli` | those runtime harnesses (§5.6); `none` installs none |
+
+```sh
+# a pinned version with only the Claude Code harness
+curl -fsSL '<origin>/install.sh' | AGENTIC_URL=<origin> AGENTIC_CODE=<code> AGENTIC_NAME=<name> AGENTIC_VERSION=daemon-v0.1.1 AGENTIC_HARNESSES=claude-code sh
+```
+
+The channel and version choose only what this install downloads. What the machine updates to afterwards is its update channel on the platform (§5.5), not the one it was installed from.
+
 The Worker serves the two bootstraps from `apps/web/public/` (`_headers` makes them `text/plain`). Each one: uses Node ≥ 22.12 from PATH or downloads a portable Node 22 from nodejs.org into the install root; reads the release manifest (§5.1) of `AGENTIC_CHANNEL` (`latest` or `stable`; the default is the `DEFAULT_CHANNEL` / `$DefaultChannel` constant at the top of each script, `latest` until the first stable release) or of the pinned `AGENTIC_VERSION=daemon-v<semver>`, downloads this machine's `<os>-<arch>` zip and refuses it, printing both hashes, unless its sha256 matches the manifest; stops a running daemon; unpacks to `%LOCALAPPDATA%\agentic\daemon` / `~/.agentic/daemon`; then runs the zip's own installer, which pairs with the code, installs the runtime harnesses `AGENTIC_HARNESSES` names (default `claude-code,copilot-cli,codex-cli`; `none` installs none) from the same manifest into `<install root>/harnesses` (`agentic-daemon harness install … --manifest <url>`: sha256 checked, a failure is a warning and the rest of the install goes on), runs `doctor` (pairing, `environments.json`, a driver per runtime, working roots, profile isolation and sign-in per profile — EXE-07), writes the `agentic-daemon` command (#354) and registers the background service — on Windows the per-user Scheduled Task `agentic-daemon` (`scripts\install-service.ps1`: at logon, restarted a minute after any exit, never a LocalSystem service because the token and every `CLAUDE_CONFIG_DIR` belong to the user); on macOS the launchd agent `~/Library/LaunchAgents/agentic-daemon.plist` (KeepAlive); on Linux the systemd user unit `agentic-daemon.service` (`Restart=always`, `loginctl enable-linger` so it survives logout). Environment overrides: `AGENTIC_DAEMON_ZIP=<path or url>` installs that zip instead (a local build, §5.1; no manifest, no hash check), `AGENTIC_RELEASES` reads the manifest from another releases URL (a fork, a test server), `AGENTIC_INSTALL_DIR` moves the install root, `AGENTIC_DAEMON_HOME` moves the daemon's data, `AGENTIC_NO_PATH=1` writes the command without touching any `PATH`.
 
 **The `agentic-daemon` command** (#354). The install writes a launcher — `~/.agentic/bin/agentic-daemon`, `%LOCALAPPDATA%\agentic\bin\agentic-daemon.cmd` — that hard-codes the Node it resolved and the install folder, so it runs on a machine whose only Node is the portable one the bootstrap downloaded. It is then made reachable in the least invasive way that works: its folder is already on `PATH` → nothing; `~/.local/bin` or `~/bin` is on `PATH` → a symlink there; otherwise a fenced `# >>> agentic-daemon >>>` block in `~/.zshrc` / `~/.bashrc` / `~/.config/fish/config.fish` / `~/.profile` (the shell `$SHELL` names), and on Windows the folder is added to the **user** `PATH` through `[Environment]::SetEnvironmentVariable` (never `setx`, which truncates a long `PATH`). Every step is idempotent, so re-running the installer repoints the launcher without a second `PATH` entry. **It takes a new terminal.** `agentic-daemon launcher show` says where it is and what it runs, `launcher install` / `launcher remove` do it by hand, and `uninstall.sh` / `uninstall.ps1` take it back out. A daemon installed before #354 has no command at all: run `node ~/.agentic/daemon/bin/agentic-daemon.mjs …` (PowerShell: `node "$env:LOCALAPPDATA\agentic\daemon\bin\agentic-daemon.mjs" …`) — which is what the Machine page's "command not found?" line shows — or re-run the installer from the Pair page.
@@ -278,7 +293,7 @@ Then add one environment per Claude Code account (`docs/multi-account.md`) — n
 
 By hand instead (an unpacked zip, no bootstrap): `powershell -ExecutionPolicy Bypass -File install.ps1 -Url <origin> -Code <code> [-Name <name>] [-NodePath <node.exe>] [-Harness <runtime>,…|none] [-Manifest <url>]` or `sh install.sh --url <origin> --code <code> [--name <name>] [--node <node>] [--harness <runtime>,…|none] [--manifest <url>]` from the folder; already paired, no arguments. `--no-path` / `-NoPath` writes the command but leaves every `PATH` alone.
 
-**Harnesses** (#369). Each runtime's native build is a separate install, `<install root>/harnesses/<runtime>/<version>/` with `current.json` naming the one in use. `agentic-daemon harness list` shows them; `harness install <runtime>…` / `harness update [<runtime>…]` fetch the build the release manifest names for this machine (a stable daemon: its own release; otherwise `daemon-latest`; `--version <semver>`, `--channel`, `--manifest <url>` pick another) and a running daemon uses it after its next start; `harness rm <runtime>` is refused while an environment runs on it. `harness select <runtime>…|none` sets which harnesses the machine wants (`selection.json`; the installers write `AGENTIC_HARNESSES` there, `install` adds, `rm` takes out). **A starting daemon installs any selected harness it lacks** from its own channel's release, in the background. This covers a machine updated from a daemon that still bundled the runtimes: with no `selection.json` all three are selected, so it gets them back by itself. Until one lands, sessions on that runtime are refused `harness-missing`. A failure shows in `doctor` (`harness-install-failed`) and is retried on the next start. The platform can also install and update them live over the socket (`harness.request`; the web side is its own issue): only that runtime drains — its new turns wait, its sessions close with `harness-update` once its running turns end (or at once) and re-open on the new version. An environment whose runtime has no harness stays listed, its doctor verdict says `harness-missing` with the command to run, and sessions on it are refused until the harness is installed. A `claude` / `copilot` / `codex` on `PATH` is never used; `doctor` only mentions it.
+The runtimes themselves (Claude Code, Copilot, Codex) are separate installs, the **harnesses** — §5.6.
 
 From a terminal inside a repo under one of the machine's working roots, `agentic-daemon open` (#336) prints and opens `https://<platform>/chats/new?env=…&path=…&origin=…`: New chat opens on that folder with the project whose git feature names the repo's origin preselected (the folder is saved as the project's on this environment the first time), or offers **Create project from this folder** / **Just this chat**. `--env <id>` picks the environment when the folder is under several; `--no-browser` only prints the link.
 
@@ -314,7 +329,7 @@ A swapped-in version must write `state/ready` (after its first `welcome` from th
 
 Every exit of `run` logs one `daemon: exiting` line with `reason` — `signal`, `stop`, `update`, `uncaught`, `unhandled-rejection`, `config` (not paired, a bad flag or file) or `error` — and `code`; an uncaught exception or unhandled rejection also logs its stack and exits 1 (#353). No such line before an exit means the process was killed from outside; `state/supervisor.json` still records it as `lastExit { at, code, signal }` next to `restarts`, and the daemon logs that file and `update-failed.json` as `supervisor state` when it starts. On Windows `Stop-ScheduledTask` ends the supervisor without a signal, so a stop there is abrupt (the platform treats it like a dropped connection).
 
-Machines installed before the supervisor ran `node bin/agentic-daemon.mjs run` directly (through `cmd.exe` on Windows); re-running the install line (5.5) or `scripts/install-service.*` replaces that action with the supervisor.
+Machines installed before the supervisor ran `node bin/agentic-daemon.mjs run` directly (through `cmd.exe` on Windows); re-running the install line (§5.3, without a code) or `scripts/install-service.*` replaces that action with the supervisor.
 
 | File | Windows | macOS | Linux |
 |---|---|---|---|
@@ -322,16 +337,82 @@ Machines installed before the supervisor ran `node bin/agentic-daemon.mjs run` d
 | session logs `{sessionId}.ndjson` (gapless replay after a reconnect) | `%LOCALAPPDATA%\agentic\sessions` | `~/Library/Application Support/agentic/sessions` | `~/.local/state/agentic/sessions` |
 | `daemon.log` | `%LOCALAPPDATA%\agentic\logs` | `~/Library/Application Support/agentic/logs` | `~/.local/state/agentic/logs` |
 | the install (the zip, and `node/` when downloaded) | `%LOCALAPPDATA%\agentic\daemon` | `~/.agentic/daemon` | `~/.agentic/daemon` |
+| an update: `daemon.staged` (the next version), `daemon.prev` (the one before, for a rollback), `downloads/` | `%LOCALAPPDATA%\agentic` | `~/.agentic` | `~/.agentic` |
 | the supervisor (`supervise.mjs`) | `%LOCALAPPDATA%\agentic\supervisor` | `~/.agentic/supervisor` | `~/.agentic/supervisor` |
 | supervisor state: `ready`, `supervisor.json`, `update-failed.json`, `supervisor.log` | `%LOCALAPPDATA%\agentic\state` | `~/.agentic/state` | `~/.agentic/state` |
 | harnesses (#369): `<runtime>/<version>/`, `<runtime>/current.json` | `%LOCALAPPDATA%\agentic\harnesses` | `~/.agentic/harnesses` | `~/.agentic/harnesses` |
 
-`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (the service scripts pass it on). `AGENTIC_INSTALL_DIR=<dir>` moves the install root (`daemon/`, `node/`, `bin/`, `supervisor/`, `state/`, `harnesses/`); the supervisor passes it to the daemon it runs.
+`AGENTIC_DAEMON_HOME=<dir>`, set for the user before installing, puts credentials, environments and sessions in one directory (the service scripts pass it on). `AGENTIC_INSTALL_DIR=<dir>` moves the install root (`daemon/`, `node/`, `bin/`, `supervisor/`, `state/`, `harnesses/`); the supervisor passes it to the daemon it runs. There are no session manifests: what a restart needs to resume a session (its spec and the runtime's ref) is on the platform, and the machine keeps only the session logs.
 
-### 5.5 Upgrade and uninstall
+### 5.5 Update and roll back
 
-- **Upgrade:** run the install line again without `AGENTIC_CODE` (the pairing is reused: the service is stopped, the folder replaced, the service re-registered and restarted). `daemon-latest` moves with `main`, so this is also how a machine follows a fix.
-- **Uninstall:** `powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\agentic\daemon\uninstall.ps1"` / `sh ~/.agentic/daemon/uninstall.sh` removes the service and keeps the data folders above; delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
+The platform decides, the daemon executes, the supervisor swaps (#358). A machine updates itself once its daemon runs under the supervisor and reports `features: ['update']` (#364); a daemon installed before that shows the install line instead of the buttons — run it once without `AGENTIC_CODE` (it upgrades in place: the pairing, environments and sign-ins stay), and from then on it updates from the page.
+
+**Channel and policy.** Each machine follows a release channel (`stable` or `latest`) under an update policy; both default to the workspace's **Settings → Machine updates** (`stable`, `manual` out of the box — `DEFAULT_UPDATE_SETTINGS`) and are overridden on the machine's page:
+
+- `manual` — the page says "update available" (and the Inbox once per version, `update-available`) and waits for a click;
+- `auto-when-idle` — the platform asks as soon as no turn is running on the machine (`system:updates` in History);
+- `window` — the same, but only inside a maintenance window: a cron in the workspace time zone plus a number of hours.
+
+The platform reads both channels' manifests hourly (`ReleaseDirectory`, `global:releases`; never GitHub's "latest release") and compares them with the machine's `hello.build.version`. Until the first `daemon-v<semver>` tag, `stable` has no manifest, so a machine on the default channel is offered nothing: set the workspace default (or the machine) to `latest` meanwhile. An automatic policy never retries a version whose last attempt failed.
+
+**Update from the web.** On `/machines/:id` the **Update** card shows "Running `<version>` (`<channel>`, built `<commit>`)" and, when a newer release is on the channel, **What's new**, **Update when idle**, **Update now** and **Schedule…** (sets a window). What happens:
+
+1. **Update when idle** drains: no new **turns** start on the machine — a message waits (`waiting capacity`) and goes out after the restart — while running turns finish and sessions still open. The card lists the turns it is waiting for; after 30 minutes (`DEFAULT_DRAIN_TIMEOUT_MS`) it goes on anyway.
+2. **Update now** first shows a confirm naming every running turn it will interrupt and the live sessions it restarts.
+3. The daemon downloads the zip (`https:` only), checks its sha256 and size, unpacks it to `daemon.staged` and runs it once with `--version`; the card shows each phase (`downloading` with a progress bar, `verifying`, `staged`, `draining`, `restarting`). **Cancel** works until `restarting` and leaves the old version running.
+4. It closes every live session with `session.closed { code: 'update' }`, exits `75`, and the supervisor swaps `daemon.staged` in (§5.4). The next `hello` on the new version is the proof: the card says "Updated to … at …", History has `machine.updated` and the Inbox `update-applied`.
+
+**Update all machines** on `/machines` asks every online machine that can update itself, each draining on its own. The platform refuses a second update while one is pending (409), an update while a harness change runs (409), and an offline or revoked machine.
+
+**What a restart or an update does to sessions.** The daemon keeps no session state across a restart; the platform owns resume (it holds each session's spec and the runtime's own ref). Every live session's process stops — **and with it anything the agent started in it: dev servers, watchers** — but the conversation continues:
+
+- **A turn that was running** is interrupted: the chat, the Task page and the Session page say why ("Interrupted: the daemon on alien01 restarted" / "alien01 was updated" / "the claude-code harness on alien01 was updated"), and the task waits on **Resume**. Resume re-opens the **same** session id on the same machine with `spec.resume` = the runtime's ref (Claude Code `--resume`, Copilot session id, Codex `thread/resume`) and prompts the cut turn again; if the runtime cannot resume (`resume-failed`), the task goes on in a fresh session with the old one as `resumeFrom`. An agent whose Config tab says **When a turn is interrupted: Resume automatically, once** (`execution.onInterrupt: 'auto'`) is resumed without a click on the machine's next `hello` ("Resuming automatically"); a second interruption of the same turn always asks. History records `session.interrupted` (with the close code) and `session.resumed` (`re-host` or `fresh`).
+- **An idle session** (no turn running) needs nothing: the member's next message re-opens it under the same id with resume, and a message that was waiting for a slot or for the turn is delivered in it (#433).
+- **A machine that goes away** (network, sleep, power) is a wait, not a failure: its running tasks show "Waiting for alien01 (offline since 14:02); fails after 24 h" (`machine-offline`). When it comes back they go on; after 24 h (`MACHINE_LOST_MS`) they fail `machine-lost` (recoverable, **Retry** in the chat) and the member's next message opens the session again.
+
+**Update from the terminal.** On the machine:
+
+```sh
+agentic-daemon update --check                      # installed vs. available on this build's channel
+agentic-daemon update                              # download, verify, stage, then restart once no turn runs (up to 10 min)
+agentic-daemon update --now                        # … restart at once, interrupting running turns
+agentic-daemon update --channel latest             # another channel; --version daemon-v0.1.1 pins a release (also to go back)
+```
+
+It reads the same manifests as the installers (`AGENTIC_RELEASES` honoured), needs the supervisor (without `state/supervisor.json` it says to reinstall), hands the staged build to the running daemon through `state/update-request.json`, and waits until `state/ready` names the new version — or says the supervisor rolled it back. The platform is not asked, so the Machine page shows only the result (the next `hello`).
+
+**Roll back.**
+
+- **Automatically:** a swapped-in version that does not reach the platform (`state/ready`) within 90 s, or exits twice within 2 minutes, is replaced by `daemon.prev` by the supervisor. The machine comes back on the old version; the card says the update failed and "The previous version was restored", History has `machine.update-failed` (`rolled-back`) and the Inbox `update-failed`. §9 "A rollback happened" reads it.
+- **From the page:** after an applied update the card offers **Roll back to `<from>`** (`update.request { target: 'previous' }`): the daemon renames `daemon.prev` to `daemon.staged` and restarts onto it the same way, drain included. No `daemon.prev` (a fresh install) fails `no-previous`.
+- **By hand**, when the daemon cannot reach the platform at all: stop the service (§5.4), rename `<install root>/daemon` to `daemon.failed` and `daemon.prev` to `daemon`, start the service. Or install a pinned release over it: the install line with `AGENTIC_VERSION=daemon-v<older>` and no code.
+
+The platform keeps serving any version; one below `MIN_DAEMON_VERSION` (`packages/platform/src/releases/directory.ts`) is badged **update required** on the Machines list and the card (`outdated`) — §9.
+
+### 5.6 Harnesses: install, update, remove
+
+Each runtime's native build — the Claude Code executable, the Copilot runtime, the Codex executable, ~45–150 MB each — is a separate install the daemon zip does not carry (#369): `<install root>/harnesses/<runtime>/<version>/`, with `<runtime>/current.json` naming the one in use and `selection.json` the runtimes the machine wants (no file = all three). A `claude` / `copilot` / `codex` on `PATH` is never used; `doctor` only mentions it.
+
+**From the web** (#370): the Machine page's **Runtimes on this machine** card (`/machines/:id#runtimes`) lists each runtime with its status (ready / not installed / broken), the installed version, the version the machine's channel ships, and the environments using it. **Install** goes out at once; **Update…** confirms, naming the running turns on that runtime, with a drain / now choice; **Remove…** is disabled while an environment uses the runtime and says so. Only that runtime drains: its new turns wait, and once its running turns end (up to 10 minutes, or at once with "now") its sessions close with `code: 'harness-update'` and re-open on the new version with resume — sessions on the other runtimes run on. One harness request per machine at a time, never during a daemon update (409). History files each change as `harness.changed`; a newer harness on the channel is one `harness-update-available` Inbox row per runtime and version; `/plugins/<runtime>` lists which machines have it.
+
+**From the terminal:**
+
+```sh
+agentic-daemon harness list
+agentic-daemon harness install claude-code codex-cli     # --version <semver> / --channel / --manifest <url> pick the release
+agentic-daemon harness update                            # the installed ones, when the release moved on
+agentic-daemon harness rm codex-cli                      # refused while an environment runs on it
+agentic-daemon harness select claude-code                # what the machine wants (none → none)
+```
+
+The default release is the daemon's own (`daemon-v<version>` for a stable build, `daemon-latest` otherwise). A terminal install does **not** reach a daemon that is already running: it uses the new version after its next start (restart the service, §5.4) — the web path applies live.
+
+**The heal on start.** A starting daemon installs every selected harness it lacks from its own channel's release, in the background, so a machine updated from a daemon that still bundled the runtimes gets them back by itself. Until one lands, sessions on that runtime are refused `harness-missing` and its environments' doctor verdict says so, with the command to run. A failure is recorded in `harnesses/failures.json`, shown by `doctor` (`harness-install-failed`) and retried on the next start.
+
+### 5.7 Uninstall
+
+`powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\agentic\daemon\uninstall.ps1"` / `sh ~/.agentic/daemon/uninstall.sh` removes the service, the supervisor and the `agentic-daemon` command, and keeps the data folders above (and `harnesses/`); delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
 
 ## 6. Demo 1 smoke (`smoke:demo1`, #35)
 
@@ -359,9 +440,9 @@ Demo 2 has no scripted runner yet (`smoke:demo2` is the open half of #38); the p
 5. The write raises an approval: the chat shows the request card; approve it → the write happens and the turn ends with the file on disk. Deny one on a second prompt → the tool call fails `denied` and the turn ends without the file.
 6. Post a long task and press **Cancel** in the chat → the daemon receives `session.command cancel`, the turn ends `cancelled`, the task is `cancelled`, no orphan `claude.exe` remains (`Get-Process claude`).
 7. AC-15: an environment whose driver reports `resume: false` shows the limitation with the runtime's reason on the Session page; nothing offers Resume.
-8. Stop the daemon task mid-turn and start it again: the session resumes from its NDJSON log with no gap (or shows `disconnected` with "events lost" if the log no longer covers the cursor), never a silent account or machine switch (AC-07, `offlinePolicy`).
+8. **Suspend and resume** (OPS-05, #420): post a long task, and mid-turn restart the service (`Stop-ScheduledTask` / `Start-ScheduledTask`, `launchctl kickstart -k …`, `systemctl --user restart …`, §5.4). The chat shows "Interrupted: the daemon on <machine> restarted" and the task waits on **Resume**; the Session page shows the same cause. Press **Resume**: the same session id re-opens on the same machine with the runtime's ref, the Claude Code conversation continues where it was cut (it remembers the task) and the task completes. Then post another message: the idle session re-opens with it, never on another account or machine (AC-07). Repeat with the agent's **When a turn is interrupted** set to "Resume automatically, once": it resumes without a click. Frames the platform already had are replayed from the NDJSON log with no gap (or the Session shows `disconnected` with "events lost" if the log no longer covers the cursor).
 
-Record the screen for steps 3–6 and link it from #38. (The cross-object hop hazard the acceptance suite found, #137 / #126, is fixed by PR #142: every `ActorHost` entry point is scoped to its own host, so two paired machines are fine.)
+Record the screen for steps 3–6 and 8 and link it from #38. Step 8 is `docs/acceptance.md` M5; the update, machine-offline and rollback runs are M6–M8. (The cross-object hop hazard the acceptance suite found, #137 / #126, is fixed by PR #142: every `ActorHost` entry point is scoped to its own host, so two paired machines are fine.)
 
 ## 8. Durable Object migrations — read before changing `wrangler.jsonc`
 
@@ -391,6 +472,20 @@ pnpm exec wrangler rollback <version-id> [--env preview]
 ```
 
 A rollback restores code, not Durable Object data. If the older version cannot read state a newer version wrote, roll forward instead. Secrets are not versioned with the code: a rotated secret stays rotated across a rollback.
+
+### A daemon reports outdated
+
+A machine whose `hello.build.version` is below `MIN_DAEMON_VERSION` (`packages/platform/src/releases/directory.ts`, `0.0.0-0` today: nothing is outdated) is badged **update required** on `/machines` and gets an error banner on its Update card (`MachineInfo.outdated`). It is still served — nothing is refused — so this is a prompt, not an outage. Update it from the card (§5.5), or, when it has no build or no `update` feature (a daemon from before #364; the card shows the install line then), re-run the install line without a code on the machine. Raise `MIN_DAEMON_VERSION` only in the same PR that makes the platform depend on something older daemons lack, and only to a version already published on `stable` (`docs/release-checklist.md`). `welcome.platform.minDaemonVersion` tells the daemon too.
+
+### A rollback happened
+
+The Update card says "The update to <version> failed at <time>: <error>. The previous version was restored.", History has `machine.update-failed` with outcome `rolled-back`, and the Inbox an `update-failed` row. The machine runs the previous version and keeps working; an automatic policy will not try that version again. To find out why, on the machine (§5.4):
+
+- `state/update-failed.json` — `{ from, to, at, reason }`: `not-ready` (the new version never reached the platform within 90 s), `crashed` (it exited twice within 2 minutes) or `swap-failed: …` (a folder could not be renamed — a file held open, often by an editor or an antivirus scan). The daemon reports it once as `hello.lastUpdate` and deletes it after the next `welcome`, so read it before restarting again.
+- `state/supervisor.log` — the timeline: `applying the staged update`, each `daemon exited` with code and uptime, `rolling back`.
+- `daemon.log` — the failed version's own lines up to its `daemon: exiting { reason, code }`; none before an exit means the process was killed from outside.
+
+A `not-ready` on a machine whose network was down is harmless: update again. A `crashed` is a bug in that release: file it with the log lines, and pin machines away from it (`window`/`manual` policy, or `latest` → `stable`) until a fixed build ships. Three restarts within 10 minutes are a crash loop: the Inbox gets `daemon-crash-loop` and the Machine page a restart warning — read `daemon.log` the same way.
 
 ### Rotate a secret
 
@@ -434,6 +529,10 @@ Kept honest: what a fresh deploy from this page does **not** give you, and where
 | Plugins beyond the runtimes | the build's plugins are listed and configured at `/plugins` and the runtimes are load-bearing (#229 – #231, #233: `Routing.run` gates on them, the `anthropic-api` key is the workspace's Registry secret); memory and learning follow the workspace's active plugin and its config (#242: turned off, a session retrieves, writes and learns nothing). Making another memory plugin active shows what moving the memories keeps and drops, then moves them (#243); the flat memory plugin is durable on its own FlatMemory actors under the scope's ACL (#281) and ships enabled, not active. The A2A server is mounted as a plugin, off by default (#245, §9 "Expose agents over A2A"), with live A2A task state per isolate, and a remote A2A agent added at `/plugins` is a runtime (#246). Notification channels come from the enabled notification plugins (#244). An MCP server added at `/plugins` (#241) gives the agents that pick it its tools: a Streamable HTTP server on `anthropic-api` and machine sessions, a stdio server on machine sessions only (#240, #280). Still open: the default runtime is not chosen in Settings (#301), the push switch is not read (#302), pushes carry no content (#303), "Test connection" runs in the browser (#308) | #301, #302, #303, #308 (decisions 2026-09-19) |
 | Adding a working root from the web | the daemon answers `env.request` under its machine-local `policy.json` (#238: off until `agentic-daemon policy allow-root <dir>` or `pair --allow-root <dir>`, then roots only inside the allowed folders), but the Machine actor's request and the Machine page are not wired yet; until then a root is added on the machine — `agentic-daemon env add --id <id> --replace --name … --root …`, picked up without a restart (#235) | #237, #239 (decisions 2026-09-19 (c)) |
 | `smoke:demo2` (mock driver in CI) and the recorded real run | §7 by hand; the platform half is pinned by `workers/daemon.test.ts` and AC-01/02/07 | #38 |
+| A terminal harness change reaching a running daemon | `agentic-daemon harness install / update / rm` changes the store; a running daemon uses it after its next start (restart the service, §5.6). The Machine page's Runtimes card applies live | #444 |
+| A re-opened session's head, upstream | `serveSession` starts every session at `(0, 0)`, so the daemon keeps `LiveSession.base` (`headOf`) to continue a resumed session after its log head; drop it once `@sigx/ai-agent` takes `serveSession({ head })` | `docs/promotion.md`; upstream in `@sigx/ai-agent` |
+| A `draining` wire error code | a draining daemon answers `busy` with a `draining:` message (`drainingReply`); the platform parks it like `busy` | `docs/promotion.md`; upstream in `@sigx/ai-agent/wire` |
+| The daemon lifecycle on real machines | pinned by unit, workers and conformance tests; still to run by hand: service registration on each OS (`Get-ScheduledTaskInfo` / `launchctl print` / `systemctl --user status`), a real update and a real rollback, a real Claude Code resume — `docs/acceptance.md` M5–M8 | #358 |
 | Session-log sweeper for `retention.sessionLogDays` | the setting is recorded and exported, not enforced | follow-up on Session / Task (`docs/retention.md`) |
 | Second Worker for the Durable Object host, so UI deploys do not evict live sessions | one Worker; a deploy interrupts live sessions, which resume as "interrupted" | follow-up (architecture §3) |
 | Chat read state across devices | unread counts on the chat list are device-local: the chat's `seq` when this browser last had it open, in `localStorage` (`apps/web/src/pages/chat/read-marks.ts`); another device, or cleared site data, starts from the chat's present end | #157 |
