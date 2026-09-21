@@ -1,27 +1,50 @@
 name: Daemon release
 
 # Builds the daemon installer zip on every OS the one-line installers serve
-# (apps/web/public/install.ps1, install.sh) and uploads them to the rolling
-# `daemon-latest` pre-release, so a machine always installs the current main.
-# Assets are named without a version (agentic-daemon-<os>-<arch>.zip; the
-# version is inside: `agentic-daemon --version`). A tagged release attaches
-# the same zips by hand (docs/release-checklist.md).
+# (apps/web/public/install.ps1, install.sh) and publishes them with a
+# `manifest.json` (version, channel, commit, protocol, per-<os>-<arch> url +
+# sha256 + bytes — apps/daemon/scripts/lib/manifest.mjs) the installers read:
+#
+# - a push to main updates the rolling `daemon-latest` pre-release — channel
+#   `latest`, version `<package.json version>-main.<sha7>`;
+# - a pushed tag `daemon-v<semver>` (or a manual run with the `tag` input)
+#   creates the release `daemon-v<semver>` — channel `stable`, version <semver> —
+#   and, unless the semver is a pre-release (`-rc.1`), copies its manifest to the
+#   rolling `daemon-stable` pre-release, which is where the stable channel reads it.
+#   Nothing depends on GitHub's "latest release" (release-drafter owns that for the app).
+#
+# Assets are named without a version (agentic-daemon-<os>-<arch>.zip, each with
+# its `.sha256`); the version is in the manifest and inside the zip
+# (`agentic-daemon --version`, stamped by apps/daemon/scripts/lib/stamp.mjs).
+# docs/runbook.md §5.1.
 
 on:
   push:
     branches: [main]
+    tags: ['daemon-v*']
     paths:
       - 'apps/daemon/**'
       - 'packages/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/daemon-release.yml'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag daemon-v<semver> to build from this ref (empty: update daemon-latest)'
+        required: false
+        default: ''
 
+# main runs replace each other (only the newest build matters); a release run is never cancelled,
+# and never cancels a main run — its own group per tag.
 concurrency:
-  group: daemon-release
-  cancel-in-progress: true
+  group: ${{ inputs.tag && format('daemon-release-{0}', inputs.tag) || (github.ref_type == 'tag' && format('daemon-release-{0}', github.ref_name) || 'daemon-release') }}
+  cancel-in-progress: ${{ !(inputs.tag || github.ref_type == 'tag') }}
 
 permissions: {}
+
+env:
+  # The release tag, empty on a main run: read by scripts/lib/stamp.mjs (the build, package and manifest steps).
+  AGENTIC_DAEMON_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:
   package:
@@ -47,13 +70,18 @@ jobs:
         run: pnpm build
 
       - name: Package
-        run: node scripts/package.mjs --unversioned
+        run: node scripts/package.mjs --unversioned --sha256
         working-directory: apps/daemon
+
+      - name: Version
+        run: node apps/daemon/bin/agentic-daemon.mjs --version
 
       - uses: actions/upload-artifact@v7
         with:
           name: agentic-daemon-${{ matrix.os }}
-          path: apps/daemon/release/agentic-daemon-*.zip
+          path: |
+            apps/daemon/release/agentic-daemon-*.zip
+            apps/daemon/release/agentic-daemon-*.zip.sha256
           if-no-files-found: error
           retention-days: 3
 
@@ -62,7 +90,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
+      # The manifest script and the stamp it reads (package.json, packages/core's protocol version).
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            apps/daemon/package.json
+            apps/daemon/scripts/lib
+            packages/core/src/daemon.ts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
       - uses: actions/download-artifact@v8
         with:
           path: release
@@ -71,16 +115,60 @@ jobs:
       - name: List
         run: ls -la release
 
+      # Every zip against its sidecar before anything is published.
+      - name: Check the hashes
+        working-directory: release
+        run: cat agentic-daemon-*.zip.sha256 | sha256sum -c -
+
       # The pre-release exists once; every run replaces its assets and moves the tag to this commit.
       - name: Upload to the daemon-latest pre-release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+        if: env.AGENTIC_DAEMON_TAG == ''
         run: |
+          notes="Rolling build of the machine daemon from main — what the one-line installers on the Pair page fetch (channel latest). Not a versioned release."
           if ! gh release view daemon-latest >/dev/null 2>&1; then
-            gh release create daemon-latest --prerelease --title "Daemon (latest main)" \
-              --notes "Rolling build of the machine daemon from main — what the one-line installers on the Pair page fetch. Not a versioned release." \
-              --target "$GITHUB_SHA"
+            gh release create daemon-latest --prerelease --title "Daemon (latest main)" --notes "$notes" --target "$GITHUB_SHA"
           fi
-          gh release upload daemon-latest release/agentic-daemon-*.zip --clobber
-          gh release edit daemon-latest --notes "Rolling build of the machine daemon from main — what the one-line installers on the Pair page fetch. Not a versioned release. Built from $GITHUB_SHA."
+          gh release upload daemon-latest release/agentic-daemon-*.zip release/agentic-daemon-*.zip.sha256 --clobber
+          gh release edit daemon-latest --notes "$notes Built from $GITHUB_SHA."
+
+      # A release: notes from release-drafter's newest draft when there is one, else generated.
+      - name: Create the release
+        if: env.AGENTIC_DAEMON_TAG != ''
+        run: |
+          case "$AGENTIC_DAEMON_TAG" in daemon-v[0-9]*) ;; *) echo "::error::$AGENTIC_DAEMON_TAG is not daemon-v<semver>"; exit 1 ;; esac
+          if gh release view "$AGENTIC_DAEMON_TAG" >/dev/null 2>&1; then
+            echo "::error::release $AGENTIC_DAEMON_TAG already exists — delete it first to rebuild"
+            exit 1
+          fi
+          draft=$(gh release list --limit 20 --json tagName,isDraft --jq '[.[] | select(.isDraft)][0].tagName // ""')
+          if [ -n "$draft" ]; then
+            gh release view "$draft" --json body --jq .body > notes.md
+            set -- --notes-file notes.md
+          else
+            set -- --generate-notes
+          fi
+          # A semver pre-release (daemon-v0.2.0-rc.1) is a GitHub pre-release. Never --latest: GitHub's
+          # "latest release" belongs to the app's release-drafter releases.
+          case "$AGENTIC_DAEMON_TAG" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest=false ;; esac
+          gh release create "$AGENTIC_DAEMON_TAG" --title "Daemon ${AGENTIC_DAEMON_TAG#daemon-v}" --target "$GITHUB_SHA" "$@" \
+            release/agentic-daemon-*.zip release/agentic-daemon-*.zip.sha256
+
+      # After the upload: the manifest names the uploaded assets, hashed from the sidecars.
+      - name: Upload the manifest
+        run: |
+          tag=${AGENTIC_DAEMON_TAG:-daemon-latest}
+          node apps/daemon/scripts/lib/manifest.mjs --dir release --tag "$tag" --repo "$GITHUB_REPOSITORY" --out manifest.json
+          cat manifest.json
+          gh release upload "$tag" manifest.json --clobber
+
+      # The stable channel: the same manifest on the rolling daemon-stable pre-release (its asset urls
+      # point at the versioned release). A semver pre-release (-rc.1) never moves it.
+      - name: Move daemon-stable to this release
+        if: env.AGENTIC_DAEMON_TAG != '' && !contains(env.AGENTIC_DAEMON_TAG, '-')
+        run: |
+          notes="The stable channel of the machine daemon: its manifest.json names the current stable release, ${AGENTIC_DAEMON_TAG} (https://github.com/${GITHUB_REPOSITORY}/releases/tag/${AGENTIC_DAEMON_TAG}). Not a release of its own."
+          if ! gh release view daemon-stable >/dev/null 2>&1; then
+            gh release create daemon-stable --prerelease --title "Daemon (stable)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload daemon-stable manifest.json --clobber
+          gh release edit daemon-stable --notes "$notes"

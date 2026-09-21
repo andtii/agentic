@@ -13,7 +13,7 @@
  * delayed) fires ONCE for the occurrence it was armed for, logs how many
  * later occurrences fell before "now", and re-arms from "now".
  */
-import type { AgentId, EnvironmentId, ProjectId, ScheduleId, WorkspaceId } from '@agentic/core';
+import type { AgentId, EnvironmentId, MachineId, ProjectId, ScheduleId, WorkspaceId } from '@agentic/core';
 import { workspaceOfKey } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
@@ -53,6 +53,8 @@ export interface ScheduleState {
     workdir?: string;
     /** The project a fired task belongs to (#332): the router picks its folder per environment. Never with `environmentId` or `workdir`. */
     projectId?: ProjectId;
+    /** The machine a fired task runs on (#414): the router resolves the agent's account there. Never with `environmentId` or `workdir`. */
+    machineId?: MachineId;
     prompt?: string;
     offlinePolicy: OfflinePolicy;
     log: ScheduleLogEntry[];
@@ -73,6 +75,11 @@ export interface ScheduleSpec {
      * the agent runs in. Exclusive with `environmentId` and `workdir` — a project says where the work lives.
      */
     readonly projectId?: ProjectId;
+    /**
+     * The machine a fired task runs on (#414): the router resolves the agent's account there — and the project's
+     * folder, when the schedule names one. Exclusive with `environmentId` and `workdir`, which name a machine already.
+     */
+    readonly machineId?: MachineId;
     readonly prompt?: string;
     /** Default `'queue'`. */
     readonly offlinePolicy?: OfflinePolicy;
@@ -80,8 +87,8 @@ export interface ScheduleSpec {
     readonly enabled?: boolean;
 }
 
-/** `workdir: null` clears the folder; `projectId: null` / `environmentId: null` clear those. */
-export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir' | 'projectId' | 'environmentId'>> & { readonly workdir?: string | null; readonly projectId?: ProjectId | null; readonly environmentId?: EnvironmentId | null };
+/** `workdir: null` clears the folder; `projectId: null` / `environmentId: null` / `machineId: null` clear those. */
+export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir' | 'projectId' | 'environmentId' | 'machineId'>> & { readonly workdir?: string | null; readonly projectId?: ProjectId | null; readonly environmentId?: EnvironmentId | null; readonly machineId?: MachineId | null };
 
 /** A folder travels with its environment (#190): refuse one without it, or a blank one. */
 function checkWorkdir(workdir: string | undefined, environmentId: EnvironmentId | undefined): void {
@@ -91,6 +98,12 @@ function checkWorkdir(workdir: string | undefined, environmentId: EnvironmentId 
 }
 
 /** A project names the folder itself (#332): refuse one beside an environment or a folder, or a blank one. */
+function checkMachine(machineId: MachineId | undefined, environmentId: EnvironmentId | undefined, workdir: string | undefined): void {
+    if (machineId === undefined) return;
+    if (typeof machineId !== 'string' || !machineId.trim()) throw new ServerFnError(400, '[schedule] machineId must be an id');
+    if (environmentId !== undefined || workdir !== undefined) throw new ServerFnError(400, '[schedule] a machineId is exclusive with environmentId and workdir (an environment names its machine)');
+}
+
 function checkProject(projectId: ProjectId | undefined, environmentId: EnvironmentId | undefined, workdir: string | undefined): void {
     if (projectId === undefined) return;
     if (typeof projectId !== 'string' || !projectId.trim()) throw new ServerFnError(400, '[schedule] projectId must be an id');
@@ -219,6 +232,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 validateRecurrence(spec.recurrence);
                 checkWorkdir(spec.workdir, spec.environmentId);
                 checkProject(spec.projectId, spec.environmentId, spec.workdir);
+                checkMachine(spec.machineId, spec.environmentId, spec.workdir);
                 const at = now();
                 const s = ctx.state;
                 s.created = true;
@@ -230,6 +244,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 if (spec.environmentId !== undefined) s.environmentId = spec.environmentId;
                 if (spec.workdir !== undefined) s.workdir = spec.workdir.trim();
                 if (spec.projectId !== undefined) s.projectId = spec.projectId;
+                if (spec.machineId !== undefined) s.machineId = spec.machineId;
                 if (spec.prompt !== undefined) s.prompt = spec.prompt;
                 s.offlinePolicy = spec.offlinePolicy ?? 'queue';
                 s.createdAt = at;
@@ -244,8 +259,10 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 const workdir = patch.workdir === null ? undefined : (patch.workdir ?? s.workdir);
                 const environmentId = patch.environmentId === null ? undefined : (patch.environmentId ?? s.environmentId);
                 const projectId = patch.projectId === null ? undefined : (patch.projectId ?? s.projectId);
+                const machineId = patch.machineId === null ? undefined : (patch.machineId ?? s.machineId);
                 checkWorkdir(workdir, environmentId);
                 checkProject(projectId, environmentId, workdir);
+                checkMachine(machineId, environmentId, workdir);
                 if (patch.title !== undefined) s.title = patch.title;
                 if (patch.recurrence !== undefined) s.recurrence = patch.recurrence;
                 if (patch.agentId !== undefined) s.agentId = patch.agentId;
@@ -255,6 +272,8 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 else s.workdir = workdir.trim();
                 if (projectId === undefined) delete s.projectId;
                 else s.projectId = projectId;
+                if (machineId === undefined) delete s.machineId;
+                else s.machineId = machineId;
                 if (patch.prompt !== undefined) s.prompt = patch.prompt;
                 if (patch.offlinePolicy !== undefined) s.offlinePolicy = patch.offlinePolicy;
                 if (patch.enabled !== undefined) s.enabled = patch.enabled;
@@ -316,6 +335,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
                 ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
                 ...(s.projectId !== undefined ? { projectId: s.projectId } : {}),
+                ...(s.machineId !== undefined ? { machineId: s.machineId } : {}),
                 ...(s.prompt !== undefined ? { prompt: s.prompt } : {}),
                 offlinePolicy: s.offlinePolicy
             };

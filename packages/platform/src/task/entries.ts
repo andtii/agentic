@@ -52,6 +52,7 @@ export function applyTaskEntry(state: TaskState, entry: unknown): void {
             state.constraints = { ...c.constraints };
             if (c.expected !== undefined) state.expected = c.expected;
             if (c.environmentId !== undefined) state.environmentId = c.environmentId;
+            if (c.machineId !== undefined) state.machineId = c.machineId;
             if (c.workdir !== undefined) state.workdir = c.workdir;
             if (c.projectId !== undefined) state.projectId = c.projectId;
             if (c.resumeFrom !== undefined) state.resumeFrom = c.resumeFrom;

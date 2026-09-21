@@ -78,13 +78,14 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { actorKey, createId, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
 import { AgentActor, agentKey } from '../agent/index.js';
+import type { EnvironmentChosenData } from '../audit/events.js';
 import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
 import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
@@ -100,7 +101,7 @@ import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './fa
 import { machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
-import { locateEnvironment, type LocatedEnvironment } from './locate.js';
+import { locateEnvironment, readMachine, type LocatedEnvironment } from './locate.js';
 import type { RoutingPorts } from './ports.js';
 import { initialRoutingState, type Route, type RoutingState } from './state.js';
 
@@ -1002,7 +1003,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 touch(route);
             }
 
-            const locate = (environmentId: EnvironmentId) => locateEnvironment(workspaceId, environmentId, { machines: ports.machines, driver });
+            const locate = (environmentId: EnvironmentId, preferMachineId?: MachineId) => locateEnvironment(workspaceId, environmentId, { machines: ports.machines, driver, ...(preferMachineId ? { preferMachineId } : {}) });
+            const readPairedMachine = (machineId: MachineId) => readMachine(workspaceId, machineId, { machines: ports.machines, driver });
 
             /**
              * The one question to the Registry before NEW work on `runtime` (§9, AC-13): `undefined` when the app has no
@@ -1105,7 +1107,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return task(taskId).get();
                     }
                     /** The one resolution of where this task runs (EXE-12), recorded before placement so a placement that fails still shows the choice (OPS-03). */
-                    const chosen = (why: string, environmentId?: EnvironmentId, folder: { cwd?: string; ignoredWorkdir?: string } = {}): Promise<void> =>
+                    const chosen = (why: string, environmentId?: EnvironmentId, extra: Pick<EnvironmentChosenData, 'cwd' | 'ignoredWorkdir' | 'machineId' | 'account' | 'ignoredEnvironment'> = {}): Promise<void> =>
                         audit.record(ctx, workspaceId, {
                             key: `${taskKey(workspaceId, taskId)}:environment`,
                             kind: 'environment.chosen',
@@ -1114,7 +1116,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                             summary: why,
                             agentId: t.assignee,
                             taskId,
-                            data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, ...folder, why }
+                            data: { runtime, ...(environmentId ? { environmentId } : {}), policy: config.execution.offlinePolicy, fallback: false, ...extra, why }
                         });
                     if (host === 'local') {
                         s.routes[taskId] = { ...base, status: 'opening' };
@@ -1125,45 +1127,153 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await ctx.save();
                         return task(taskId).get();
                     }
-                    // A daemon runtime: the environment is the task's, else the agent's, else — for a delegated task — the
-                    // delegating task's route (#220: a chat-started parent's environment lives on its route, not its record),
-                    // else the workspace's default (AGT-05). From here on, this one only (EXE-12).
+                    // A daemon runtime. The machine (#414): the task's own, else — for a delegated task — the delegating task's route.
+                    // The environment: the task's own when that machine reports it (or when no machine is named); else the agent's
+                    // ACCOUNT on that machine — the agent's, or the account of its pinned environment; else, with no machine named,
+                    // the agent's pinned environment, a delegating task's route (#220: a chat-started parent's environment lives on
+                    // its route, not its record — only for an agent with no account of its own, which would land on the wrong login),
+                    // the workspace's default (AGT-05). From here on, this one only (EXE-12).
                     const parent = t.origin.kind === 'agent' ? s.routes[t.origin.taskId] : undefined;
-                    const named = t.environmentId ?? config.execution.defaultEnvironmentId ?? parent?.environmentId;
-                    const environmentId = named ?? (await workspaceEnvironment());
-                    if (!environmentId) {
-                        const message =
-                            t.origin.kind === 'agent'
-                                ? `agent ${t.assignee} runs on ${runtime} but no environment is named by the task, the agent, the delegating task or the workspace's defaults`
-                                : `agent ${t.assignee} runs on ${runtime} but neither the task, the agent nor the workspace's defaults name an environment`;
-                        await task(taskId).fail({ code: 'no-environment', message, recoverable: false }, ROUTER);
+                    const requestedMachineId = t.machineId ?? parent?.machineId;
+                    const machineFrom = t.machineId ? "the task's own" : "the delegating task's";
+                    let environmentId: EnvironmentId | undefined;
+                    let envFrom = '';
+                    let located: LocatedEnvironment | null | undefined;
+                    /** What the audit says beyond the environment: the machine, the account, what was left aside. */
+                    const detail: { machineId?: MachineId; account?: AccountKey; ignoredEnvironment?: EnvironmentId; ignoredWorkdir?: string } = {};
+                    let workdir = t.workdir;
+                    let alsoWhy = '';
+                    /** Whether the agent's `defaultWorkdir` applies: in its pinned environment on the machine the pin resolves to (a folder is one machine's). */
+                    let pinFolder = true;
+                    if (t.environmentId !== undefined) {
+                        located = await locate(t.environmentId, requestedMachineId);
+                        if (requestedMachineId !== undefined && located?.machine.machineId !== requestedMachineId) {
+                            // The environment came with a folder picked on another machine (a member's sticky folder, a resumed session's):
+                            // the task's machine is what the person chose now, so the account's environment there is used instead, and the
+                            // record says what was left aside (EXE-12: never a silent fallback).
+                            detail.ignoredEnvironment = t.environmentId;
+                            if (workdir !== undefined) detail.ignoredWorkdir = workdir;
+                            alsoWhy = `; environment ${t.environmentId}${workdir !== undefined ? ` and folder ${workdir}` : ''} left aside: machine ${requestedMachineId} does not report it`;
+                            workdir = undefined;
+                            located = undefined;
+                        } else {
+                            environmentId = t.environmentId;
+                            envFrom = "the task's own";
+                        }
+                    }
+                    if (environmentId === undefined && requestedMachineId !== undefined) {
+                        const m = await readPairedMachine(requestedMachineId);
+                        if (!m) {
+                            await fail({ ...base, status: 'opening' }, { code: 'machine-unknown', message: `the task names machine ${requestedMachineId} (${machineFrom}), which this workspace has not paired or has revoked`, recoverable: false });
+                            return task(taskId).get();
+                        }
+                        const where = `machine ${m.machineId}${m.name ? ` (${m.name})` : ''}`;
+                        // The account: the agent's; else the login of its pinned environment. A pin the named machine reports itself is
+                        // taken as it stands (the pin names an environment, the task names the machine); one it does not report gives its
+                        // login as the pin resolves today — the first machine of the index reporting it.
+                        const pinnedHere = config.execution.account === undefined && config.execution.defaultEnvironmentId !== undefined ? m.environments.find((e) => e.id === config.execution.defaultEnvironmentId) : undefined;
+                        let account: { ref: AccountRef; from: string } | undefined = config.execution.account ? { ref: config.execution.account, from: "the agent's account" } : undefined;
+                        if (!account && !pinnedHere && config.execution.defaultEnvironmentId !== undefined) {
+                            const pinned = await locate(config.execution.defaultEnvironmentId);
+                            if (pinned) account = { ref: accountRefOf(pinned.env), from: `the account of the agent's environment ${config.execution.defaultEnvironmentId}` };
+                        }
+                        if (pinnedHere) {
+                            environmentId = pinnedHere.id;
+                            envFrom = "the agent's default";
+                            alsoWhy += `; on ${where} (${machineFrom}), which reports it`;
+                            located = { machine: m, env: pinnedHere };
+                            detail.machineId = m.machineId;
+                            // The pin's folder was picked on the machine the pin resolves to today (the first of the index): elsewhere the first root.
+                            if (config.execution.defaultWorkdir !== undefined) pinFolder = (await locate(pinnedHere.id))?.machine.machineId === m.machineId;
+                        } else if (!account) {
+                            // Nothing names a login: a delegating task's environment on this same machine (#220), else the workspace's
+                            // default environment when this machine reports it (AGT-05).
+                            const inherited = parent?.machineId === m.machineId ? parent.environmentId : undefined;
+                            const fallback = inherited ?? (await workspaceEnvironment());
+                            const env = fallback !== undefined ? m.environments.find((e) => e.id === fallback) : undefined;
+                            if (!env) {
+                                await fail({ ...base, status: 'opening' }, { code: 'no-account', message: `the task names ${where} (${machineFrom}), but agent ${t.assignee} names no account and no environment a machine reports, and neither a delegating task's environment nor the workspace's default is on that machine`, recoverable: false });
+                                return task(taskId).get();
+                            }
+                            environmentId = env.id;
+                            envFrom = inherited !== undefined ? "the delegating task's" : `the workspace's default on ${where} (${machineFrom})`;
+                            located = { machine: m, env };
+                            detail.machineId = m.machineId;
+                        } else {
+                            const label = account.ref.identity ?? account.ref.label ?? '';
+                            const matches = environmentsForAccount(m.environments, runtime, account.ref);
+                            const first = matches[0];
+                            if (!first) {
+                                const message = m.environments.length
+                                    ? `account ${label} (${account.from}) is not signed in on ${where} (${machineFrom}) for runtime ${runtime}; sign it in there and run the task again, or run the chat on another machine`
+                                    : `${where} (${machineFrom}) has not reported its environments yet, so account ${label} (${account.from}) cannot be placed on it`;
+                                await fail({ ...base, status: 'opening' }, { code: 'account-not-on-machine', message, recoverable: true });
+                                return task(taskId).get();
+                            }
+                            environmentId = first.id;
+                            envFrom = `${account.from} ${label} on ${where} (${machineFrom})`;
+                            if (matches.length > 1) alsoWhy += `; the account is also on ${matches.slice(1).map((e) => e.id).join(', ')} there — the first by sign-in and name is taken`;
+                            located = { machine: m, env: first };
+                            detail.machineId = m.machineId;
+                            detail.account = accountKeyFor(runtime, account.ref);
+                        }
+                    }
+                    if (located && detail.machineId !== undefined && located.env.runtime !== runtime) {
+                        await fail({ ...base, status: 'opening' }, { code: 'runtime-mismatch', message: `environment ${located.env.id} on machine ${detail.machineId} runs ${located.env.runtime}, the agent is configured for ${runtime}`, recoverable: false });
                         return task(taskId).get();
                     }
-                    const envFrom = t.environmentId ? "the task's own" : config.execution.defaultEnvironmentId ? "the agent's default" : named ? "the delegating task's" : "the workspace's default";
+                    if (environmentId === undefined) {
+                        if (config.execution.account && config.execution.defaultEnvironmentId === undefined) {
+                            await fail({ ...base, status: 'opening' }, { code: 'no-machine', message: `agent ${t.assignee} runs as account ${config.execution.account.identity ?? config.execution.account.label} on whichever machine the chat names, and neither the task nor a delegating task names one; pick a machine for the chat`, recoverable: false });
+                            return task(taskId).get();
+                        }
+                        const inherited = config.execution.account ? undefined : parent?.environmentId;
+                        const named = config.execution.defaultEnvironmentId ?? inherited;
+                        environmentId = named ?? (await workspaceEnvironment());
+                        if (!environmentId) {
+                            const message =
+                                t.origin.kind === 'agent'
+                                    ? `agent ${t.assignee} runs on ${runtime} but no environment is named by the task, the agent, the delegating task or the workspace's defaults`
+                                    : `agent ${t.assignee} runs on ${runtime} but neither the task, the agent nor the workspace's defaults name an environment`;
+                            await task(taskId).fail({ code: 'no-environment', message, recoverable: false }, ROUTER);
+                            return task(taskId).get();
+                        }
+                        envFrom = config.execution.defaultEnvironmentId ? "the agent's default" : named ? "the delegating task's" : "the workspace's default";
+                    }
                     // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment, a delegating
-                    // parent's in the same environment, the agent's default in its default environment, else the environment's
-                    // first root — which needs the machine's report.
+                    // parent's in the same environment (on the same machine), the agent's default in its default environment, else the
+                    // environment's first root — which needs the machine's report.
                     const projectFolder = project ? projectFolderFor(project, environmentId) : undefined;
                     const asked: { cwd: string; from: string } | undefined =
-                        t.workdir !== undefined
-                            ? { cwd: t.workdir, from: "the task's own" }
+                        workdir !== undefined
+                            ? { cwd: workdir, from: "the task's own" }
                             : projectFolder !== undefined
                               ? { cwd: projectFolder, from: "the project's folder" }
-                              : parent?.cwd !== undefined && parent.environmentId === environmentId
+                              : parent?.cwd !== undefined && parent.environmentId === environmentId && (detail.machineId === undefined || parent.machineId === detail.machineId)
                                 ? { cwd: parent.cwd, from: "the delegating task's" }
-                                : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId
+                                : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId && pinFolder
                                   ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
                                   : undefined;
-                    const located = await locate(environmentId);
+                    if (located === undefined) located = await locate(environmentId, requestedMachineId);
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
                     const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
-                    await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}`, environmentId, cwd !== undefined ? { cwd } : {});
+                    await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}${alsoWhy}`, environmentId, { ...(cwd !== undefined ? { cwd } : {}), ...detail });
                     // A folder picked for this task joins the workspace's recent folders — one-way, never failing the run.
-                    if (t.workdir !== undefined) await noteWorkdir({ environmentId, path: t.workdir });
-                    // The machine is bound inside `placeRemote` (the first one reporting the environment); an environment nobody
-                    // reports yet is "offline" under the agent's policy — `queue` waits for the machine that will (AST-05).
-                    s.routes[taskId] = { ...base, environmentId, ...(cwd !== undefined ? { cwd } : {}), ...(projectFolder !== undefined ? { projectFolder } : {}), status: 'opening' };
-                    await placeRemote(s.routes[taskId]!, undefined, t, located);
+                    if (workdir !== undefined) await noteWorkdir({ environmentId, path: workdir });
+                    // The machine is bound here when the task named it (#414), else inside `placeRemote` (the first one reporting the
+                    // environment); an environment nobody reports yet is "offline" under the agent's policy — `queue` waits for the
+                    // machine that will (AST-05), and a route bound to a machine waits for THAT machine.
+                    s.routes[taskId] = {
+                        ...base,
+                        environmentId,
+                        ...(detail.machineId !== undefined ? { machineId: detail.machineId } : {}),
+                        ...(requestedMachineId !== undefined ? { requestedMachineId } : {}),
+                        ...(detail.account !== undefined ? { account: detail.account } : {}),
+                        ...(cwd !== undefined ? { cwd } : {}),
+                        ...(projectFolder !== undefined ? { projectFolder } : {}),
+                        status: 'opening'
+                    };
+                    await placeRemote(s.routes[taskId]!, detail.machineId !== undefined ? located?.machine : undefined, t, located);
                     await ctx.save();
                     return task(taskId).get();
                 },

@@ -71,6 +71,8 @@ export interface CreateTaskInput {
     readonly agentId: AgentId;
     readonly objective: string;
     readonly environmentId?: EnvironmentId;
+    /** The machine to run on (#414): the agent's account is resolved there, unless `environmentId` names one that machine reports. */
+    readonly machineId?: MachineId;
     readonly context?: readonly PromptPart[];
     readonly constraints?: { readonly maxTurns?: number; readonly maxCostUsd?: number; readonly maxWallMs?: number };
 }
@@ -83,6 +85,8 @@ export interface DelegateTaskInput {
     readonly context?: readonly PromptPart[];
     readonly constraints?: { readonly maxTurns?: number; readonly maxCostUsd?: number; readonly maxWallMs?: number };
     readonly environmentId?: EnvironmentId;
+    /** The machine the child runs on (#414). Default: the parent's. */
+    readonly machineId?: MachineId;
     /** Idempotency key: the same call id finds the same child (`childTaskId(parent, callId)`). Default: a fresh id. */
     readonly callId?: string;
 }
@@ -145,6 +149,8 @@ export interface CreateScheduleInput {
     readonly recurrence: { readonly kind: 'at'; readonly at: number } | { readonly kind: 'cron'; readonly cron: string; readonly tz: string };
     readonly agentId?: AgentId;
     readonly environmentId?: EnvironmentId;
+    /** The machine a fired task runs on (#414); exclusive with `environmentId`. */
+    readonly machineId?: MachineId;
     readonly prompt?: string;
     readonly offlinePolicy?: 'queue' | 'fail' | 'fallback-api';
 }
@@ -220,6 +226,8 @@ export interface PlatformPort {
         list(): Promise<readonly ProjectSummary[]>;
         /** `Chat.setProject` under this client: put the chat in a project, or in none with `null`; an unknown project is a 400. */
         setChatProject(chatId: ChatId, projectId: ProjectId | null): Promise<void>;
+        /** `Chat.setMachine` under this client (#414): run the chat on a paired machine, or on none with `null`; an unknown machine is a 400. */
+        setChatMachine(chatId: ChatId, machineId: MachineId | null): Promise<void>;
     };
     readonly usage: {
         /** Every account's provider limits as its machine last reported them (#272, OPS-07): machines → environments → `Machine.quota`. */

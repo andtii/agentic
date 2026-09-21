@@ -201,7 +201,8 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                         assignee: input.agentId,
                         context: input.context ?? [],
                         constraints: input.constraints ?? {},
-                        ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {})
+                        ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {}),
+                        ...(input.machineId !== undefined ? { machineId: input.machineId } : {})
                     })
                 ),
             /**
@@ -217,7 +218,8 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     assignee: input.agentId,
                     ...(input.context !== undefined ? { context: input.context } : {}),
                     ...(input.constraints !== undefined ? { constraints: input.constraints } : {}),
-                    ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {})
+                    ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {}),
+                    ...(input.machineId !== undefined ? { machineId: input.machineId } : {})
                 });
                 try {
                     await as(Routing, routingKey(workspaceId), driver).run(childId);
@@ -254,6 +256,7 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     recurrence: input.recurrence,
                     ...(input.agentId !== undefined ? { agentId: input.agentId as AgentId } : {}),
                     ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {}),
+                    ...(input.machineId !== undefined ? { machineId: input.machineId } : {}),
                     ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
                     ...(input.offlinePolicy !== undefined ? { offlinePolicy: input.offlinePolicy } : {})
                 });
@@ -271,6 +274,9 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                 })),
             setChatProject: async (chatId, projectId) => {
                 await as(Chat, agentChatKey(workspaceId, chatId)).setProject(projectId);
+            },
+            setChatMachine: async (chatId, machineId) => {
+                await as(Chat, agentChatKey(workspaceId, chatId)).setMachine(machineId);
             }
         },
         usage: {

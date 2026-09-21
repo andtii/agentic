@@ -5,8 +5,9 @@
 #   curl -fsSL '<platform origin>/install.sh' | AGENTIC_URL=<platform origin> AGENTIC_CODE=<code> AGENTIC_NAME=<machine name> sh
 #
 # It needs nothing installed beyond curl, unzip and tar: Node.js 22.12+ on PATH is used when present,
-# otherwise a portable Node is downloaded from nodejs.org into the install folder. Then it downloads
-# the daemon zip (agentic-daemon-<os>-<arch>.zip from the daemon-latest GitHub release), unpacks it
+# otherwise a portable Node is downloaded from nodejs.org into the install folder. Then it reads the
+# release manifest of the channel (or pinned version) asked for, downloads this machine's daemon zip
+# (agentic-daemon-<os>-<arch>.zip) from that GitHub release, checks its sha256, unpacks it
 # to ~/.agentic/daemon and runs the zip's install.sh: pair (when AGENTIC_CODE is set), doctor, and the
 # background service that keeps the daemon running — a launchd agent on macOS, a systemd user unit
 # on Linux.
@@ -16,7 +17,13 @@
 #
 # Re-run without AGENTIC_CODE to upgrade an already paired machine (the service is stopped, the folder
 # replaced, the service re-registered). Environment overrides:
-#   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release
+#   AGENTIC_CHANNEL      the release channel: latest (the newest main build) or stable (the newest
+#                        daemon-v<semver> release); default below
+#   AGENTIC_VERSION      a pinned release instead of a channel: daemon-v<semver> (or just <semver>)
+#   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release (no manifest,
+#                        no sha256 check)
+#   AGENTIC_RELEASES     the GitHub releases URL the manifest is read from (default
+#                        https://github.com/andtii/agentic/releases): a fork, or a test server
 #   AGENTIC_INSTALL_DIR  the install root (default ~/.agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
 #   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching any PATH
@@ -24,8 +31,11 @@
 # Source: apps/web/public/install.sh in https://github.com/andtii/agentic (docs/runbook.md section 5).
 set -eu
 
+# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set. `latest` until the first
+# stable daemon release exists, then `stable`.
+DEFAULT_CHANNEL=latest
 NODE_VERSION=22.22.0
-RELEASE=https://github.com/andtii/agentic/releases/download/daemon-latest
+RELEASES=${AGENTIC_RELEASES:-https://github.com/andtii/agentic/releases}
 
 step() { printf '==> %s\n' "$*"; }
 fail() { printf 'error: agentic install: %s\n' "$*" >&2; exit 1; }
@@ -73,13 +83,51 @@ if [ -z "$node" ]; then
 fi
 echo "node: $node ($("$node" --version))"
 
-# 2. The daemon zip: the release asset, or AGENTIC_DAEMON_ZIP.
+# 2. The daemon zip: this machine's asset in the release manifest, checked against its sha256 - or AGENTIC_DAEMON_ZIP.
 asset="agentic-daemon-$os-$arch.zip"
 zip="$downloads/$asset"
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else "$node" -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))' "$1"
+    fi
+}
 case "${AGENTIC_DAEMON_ZIP:-}" in
     '')
-        step "downloading $RELEASE/$asset"
-        curl -fL --progress-bar -o "$zip" "$RELEASE/$asset"
+        if [ -n "${AGENTIC_VERSION:-}" ]; then
+            tag=daemon-v${AGENTIC_VERSION#daemon-v}
+            manifest_url="$RELEASES/download/$tag/manifest.json"
+        else
+            channel=${AGENTIC_CHANNEL:-$DEFAULT_CHANNEL}
+            case "$channel" in
+                latest) manifest_url="$RELEASES/download/daemon-latest/manifest.json" ;;
+                stable) manifest_url="$RELEASES/download/daemon-stable/manifest.json" ;;
+                *) fail "unknown AGENTIC_CHANNEL $channel (latest or stable)" ;;
+            esac
+        fi
+        step "reading $manifest_url"
+        manifest="$downloads/manifest.json"
+        curl -fsSL -o "$manifest" "$manifest_url" || fail "no release manifest at $manifest_url"
+        # url, sha256 and version of this machine's asset, one per line.
+        picked=$("$node" -e '
+            const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const a = m.assets && m.assets[process.argv[2]];
+            if (!a) { console.error("the release has no daemon for " + process.argv[2]); process.exit(1); }
+            console.log(a.url); console.log(String(a.sha256).toLowerCase()); console.log(a.version || m.version);
+        ' "$manifest" "$os-$arch") || fail "cannot install from $manifest_url"
+        rm -f "$manifest"
+        url=$(echo "$picked" | sed -n 1p)
+        expected=$(echo "$picked" | sed -n 2p)
+        step "downloading agentic-daemon $(echo "$picked" | sed -n 3p): $url"
+        curl -fL --progress-bar -o "$zip" "$url"
+        actual=$(sha256_of "$zip")
+        if [ "$actual" != "$expected" ]; then
+            rm -f "$zip"
+            fail "sha256 mismatch for $url
+  expected $expected (the release manifest)
+  actual   $actual (the download)"
+        fi
+        echo "sha256: $actual (matches the manifest)"
         ;;
     http://*|https://*)
         step "downloading $AGENTIC_DAEMON_ZIP"

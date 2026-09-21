@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { childTaskId } from '@agentic/core';
-import type { AgentId, ChatId, EnvironmentId, MessageId, Principal, SessionId, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChatId, EnvironmentId, MachineId, MessageId, Principal, SessionId, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
 import { statusOf, testActorApp, type TestActorApp } from '../../src/testing/index';
 import { TaskActor, parseTaskKey, taskKey } from '../../src/task/index';
 import type { TaskOutcome } from '../../src/task/index';
@@ -177,6 +177,19 @@ describe('delegation', () => {
         const none = await task(await root.delegate({ callId: 'call_3', objective: 'sub', assignee: b })).get();
         expect(none.environmentId).toBe('env_1');
         expect(none).not.toHaveProperty('workdir');
+    });
+
+    it("hands the child the parent's machine unless the spec names one (#414); a task without one hands down none", async () => {
+        const root = task(id('root_m'));
+        await root.create(contract({ machineId: 'machine_pc' as MachineId }), { owner: a });
+        expect((await root.get()).machineId).toBe('machine_pc');
+        await root.start('user:u1', 'sess_r' as SessionId);
+        expect(await task(await root.delegate({ callId: 'call_1', objective: 'sub', assignee: b })).get()).toMatchObject({ machineId: 'machine_pc' });
+        expect(await task(await root.delegate({ callId: 'call_2', objective: 'sub', assignee: b, machineId: 'machine_mac' as MachineId })).get()).toMatchObject({ machineId: 'machine_mac' });
+        const bare = task(id('root_n'));
+        await bare.create(contract({}), { owner: a });
+        await bare.start('user:u1', 'sess_n' as SessionId);
+        expect(await task(await bare.delegate({ callId: 'call_1', objective: 'sub', assignee: b })).get()).not.toHaveProperty('machineId');
     });
 
     it('creates the child deterministically, links both sides and parks the parent on waiting {child}', async () => {

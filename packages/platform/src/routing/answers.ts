@@ -187,6 +187,8 @@ export function createAnswerFollowUp(options: AnswerFollowUpOptions): (followUp:
                 entries,
                 nameOf: (a) => names.get(a) ?? a,
                 ...(f.environmentId ? { fallbackEnvironmentId: f.environmentId } : {}),
+                // The chat's machine now (#414): the asker's environment is kept when that machine still reports it, else the account there, fresh.
+                ...(summary.machineId ? { machineId: summary.machineId } : {}),
                 question: f.question,
                 ...(f.choices ? { choices: f.choices } : {}),
                 answer: f.answer,

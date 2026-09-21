@@ -282,6 +282,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                 agentId: id('The assignee.'),
                 objective: z.string().min(1).describe('What must be achieved.'),
                 environmentId: z.string().min(1).optional().describe('The environment to run in; explicit beats the agent default.'),
+                machineId: z.string().min(1).optional().describe('The machine to run on (from machines_list): the agent’s account is resolved there.'),
                 context: z.array(z.object({ type: z.literal('text'), text: z.string() })).optional().describe('Context parts handed to the agent with the objective.'),
                 constraints: z.object({ maxTurns: z.number().int().positive().optional(), maxCostUsd: z.number().positive().optional(), maxWallMs: z.number().int().positive().optional() }).optional()
             }),
@@ -291,6 +292,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                     agentId: input.agentId as AgentId,
                     objective: input.objective,
                     ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                    ...(input.machineId !== undefined ? { machineId: input.machineId as MachineId } : {}),
                     ...(input.context !== undefined ? { context: input.context } : {}),
                     ...(input.constraints !== undefined ? { constraints: input.constraints } : {})
                 })
@@ -307,6 +309,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                 context: z.array(z.object({ type: z.literal('text'), text: z.string() })).optional(),
                 constraints: z.object({ maxTurns: z.number().int().positive().optional(), maxCostUsd: z.number().positive().optional(), maxWallMs: z.number().int().positive().optional() }).optional(),
                 environmentId: z.string().min(1).optional().describe('The child’s environment; explicit beats the assignee’s default.'),
+                machineId: z.string().min(1).optional().describe('The machine the child runs on; default: the parent’s.'),
                 callId: z.string().min(1).optional().describe('Idempotency key: the same id re-finds the same child.')
             }),
             annotations: WRITE,
@@ -318,6 +321,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                     ...(input.context !== undefined ? { context: input.context } : {}),
                     ...(input.constraints !== undefined ? { constraints: input.constraints } : {}),
                     ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                    ...(input.machineId !== undefined ? { machineId: input.machineId as MachineId } : {}),
                     ...(input.callId !== undefined ? { callId: input.callId } : {})
                 })
         }),
@@ -388,6 +392,17 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                 return { chatId: input.chatId, projectId: input.projectId };
             }
         }),
+        tool({
+            name: 'chats_set_machine',
+            scope: 'chats',
+            description: 'Run a chat on a machine (a machine id from machines_list), or on none with `machineId: null` (#414): each member’s next message runs on that machine, under the member’s account there, in a fresh session — a turn running elsewhere finishes where it is. An unpaired machine is an error. Idempotent.',
+            input: z.object({ chatId: id('The chat id.'), machineId: z.string().min(1).nullable().describe('The machine id, or null to name none.') }),
+            annotations: { ...WRITE, idempotent: true },
+            run: async (input) => {
+                await port.projects.setChatMachine(input.chatId as ChatId, input.machineId as MachineId | null);
+                return { chatId: input.chatId, machineId: input.machineId };
+            }
+        }),
 
         // ---- memory ---------------------------------------------------------------------
         tool({
@@ -451,6 +466,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                 recurrence: z.union([z.object({ kind: z.literal('at'), at: z.number().int() }), z.object({ kind: z.literal('cron'), cron: z.string().min(1), tz: z.string().min(1) })]),
                 agentId: z.string().min(1).optional(),
                 environmentId: z.string().min(1).optional(),
+                machineId: z.string().min(1).optional().describe('The machine a fired task runs on; exclusive with environmentId.'),
                 prompt: z.string().optional(),
                 offlinePolicy: z.enum(['queue', 'fail', 'fallback-api']).optional()
             }),
@@ -462,6 +478,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
                     recurrence: input.recurrence,
                     ...(input.agentId !== undefined ? { agentId: input.agentId as AgentId } : {}),
                     ...(input.environmentId !== undefined ? { environmentId: input.environmentId as EnvironmentId } : {}),
+                    ...(input.machineId !== undefined ? { machineId: input.machineId as MachineId } : {}),
                     ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
                     ...(input.offlinePolicy !== undefined ? { offlinePolicy: input.offlinePolicy } : {})
                 })
