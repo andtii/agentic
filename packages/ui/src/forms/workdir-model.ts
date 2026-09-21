@@ -60,10 +60,15 @@ function segmentsOf(path: string): string[] {
 export function workdirLabel(ref: WorkdirRef | null | undefined, environments: readonly WorkdirEnvironment[], empty?: string): string {
     if (!ref) return empty ?? WORKDIR_EMPTY;
     const env = environments.find((e) => e.id === ref.environmentId);
+    return `${env?.label ?? ref.environmentId} · ${workdirPath(ref, environments)}`;
+}
+
+/** The path part of `workdirLabel` alone — "…\branches\47-drawer" — for where the environment is already on show (a chat member's card). */
+export function workdirPath(ref: WorkdirRef, environments: readonly WorkdirEnvironment[]): string {
+    const env = environments.find((e) => e.id === ref.environmentId);
     const sep = pathSeparator(env?.os, ref.path);
     const segments = segmentsOf(ref.path);
-    const path = segments.length > 2 ? `${ELLIPSIS}${sep}${segments.slice(-2).join(sep)}` : ref.path;
-    return `${env?.label ?? ref.environmentId} · ${path}`;
+    return segments.length > 2 ? `${ELLIPSIS}${sep}${segments.slice(-2).join(sep)}` : ref.path;
 }
 
 /** Whether two paths name the same folder on `os`: normalized, and case-insensitive on Windows. */
