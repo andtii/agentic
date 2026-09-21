@@ -73,4 +73,12 @@ describe('ContextPanel — the member card', () => {
         expect(forgeCard.querySelector('[data-member-quota]')!.hasAttribute('data-limit')).toBe(true);
         expect(forgeCard.querySelector('[data-member-limit]')!.textContent).toMatch(/^Limit reached · resets /);
     });
+
+    it('says so even when the exhausted window carries no number (Claude Code’s limit message)', async () => {
+        // Only the status says the account is out: `tightestWindow` skips it, the line must not.
+        const noNumber: QuotaSnapshot = { ...exhausted, windows: [{ ...exhausted.windows[0]!, utilization: null, resetsAt: undefined }] };
+        const envs: readonly WorkdirEnvironment[] = [{ ...environments[0]!, quota: noNumber }];
+        const root = await mountAt('/chats/c1', <ContextPanel chat={chat} tasks={[]} lookup={lookup} environments={envs} project={{ folders: {} }} />);
+        expect(root.querySelectorAll('[data-member]')[1]!.querySelector('[data-member-limit]')!.textContent).toBe('Limit reached');
+    });
 });

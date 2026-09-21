@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { tightestWindow, type AccountRef, type EnvironmentId, type ProjectRecord, type RuntimeId, type WorkdirRef } from '@agentic/core';
+import type { AccountRef, EnvironmentId, ProjectRecord, RuntimeId, WorkdirRef } from '@agentic/core';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WORKDIR_EMPTY, resetsText, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { effectiveWorkdir } from '../projects/model';
@@ -46,10 +46,13 @@ const historyLine = (member: MockChatSummary['members'][number], time: TimeText)
     return member.coordinator ? `Coordinator · ${base}` : base.charAt(0).toUpperCase() + base.slice(1);
 };
 
-/** The line under a member's usage meter once the account is out: when the tightest window opens again. */
+/**
+ * The line under a member's usage meter once the account is out: when the exhausted window opens again. Picked by
+ * `status`, not utilization — a runtime can report an exhausted window with no number (Claude Code's limit message).
+ */
 const limitLine = (quota: ReturnType<typeof memberQuota>): string | undefined => {
-    const w = quota.snapshot ? tightestWindow(quota.snapshot) : undefined;
-    if (w?.status !== 'exhausted') return undefined;
+    const w = quota.snapshot?.windows.find((x) => x.status === 'exhausted');
+    if (!w) return undefined;
     const resets = resetsText(w.resetsAt);
     return resets ? `Limit reached · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : 'Limit reached';
 };
