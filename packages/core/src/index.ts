@@ -16,6 +16,7 @@ export * from './memory.js';
 export * from './learning.js';
 export * from './principal.js';
 export * from './daemon.js';
+export * from './release.js';
 export * from './runtime.js';
 export * from './usage.js';
 export * from './quota.js';

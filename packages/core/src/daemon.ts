@@ -8,9 +8,61 @@
  * `R` its reply, `C` a command. `@agentic/daemon-protocol` instantiates them.
  */
 
-import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, QuotaSnapshot, SessionId, ToolGrant } from './index.js';
+import type { HarnessPhase, HarnessReport, ReleaseAsset, UpdatePhase } from './release.js';
+import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, QuotaSnapshot, RuntimeId, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
+
+/** What a daemon build is (#359): its version, the commit it was built from, the protocol it speaks, its release channel and the platform it was packaged for. */
+export interface DaemonBuild {
+    readonly version: string;
+    readonly commit: string;
+    readonly protocol: number;
+    readonly channel: string;
+    /** The release asset key this build was packaged for, `<platform>-<arch>` as Node names them, e.g. `win32-x64`, `darwin-arm64`, `linux-x64`. */
+    readonly platform: string;
+}
+
+/**
+ * Optional frame families a daemon answers (#359). The platform sends `update.*` / `harness.*` only to a daemon whose
+ * `hello.features` lists the feature; an older daemon drops a frame it cannot decode and keeps the socket.
+ */
+export type DaemonFeature = 'update' | 'harness';
+
+/**
+ * Why the host ended a session (#359), beside the human `reason`: the reason is for people, the code for the platform,
+ * which decides from it whether the session is re-opened from its last `session.ref`.
+ */
+export type SessionClosedCode = 'restart' | 'update' | 'harness-update' | 'draining' | 'harness-missing' | 'resume-failed';
+
+/** How a daemon last stopped, as it reports on `hello`. */
+export interface DaemonExit {
+    readonly at: number;
+    readonly reason: string;
+    readonly code?: number;
+}
+
+/** The last self-update a daemon attempted, as it reports on `hello`. */
+export interface DaemonUpdateOutcome {
+    readonly from: string;
+    readonly to: string;
+    readonly outcome: 'applied' | 'rolled-back';
+    readonly at: number;
+    readonly error?: string;
+}
+
+/** What the platform tells a daemon on `welcome` (#359): its own version, the oldest daemon it serves, and the current releases. */
+export interface PlatformInfo {
+    readonly version: string;
+    readonly minDaemonVersion?: string;
+    readonly latest?: { readonly stable?: string; readonly latest?: string };
+}
+
+/** Why an update or a harness change failed, named. */
+export interface LifecycleError {
+    readonly code: string;
+    readonly message: string;
+}
 
 /** Position in a session's event log; replay is gapless from here. */
 export interface Cursor {
@@ -132,6 +184,7 @@ export interface OpenSpec {
     readonly policy?: OpenSpecPolicy;
     /** The agent's ready MCP connectors (#280); a daemon that predates them ignores the field. */
     readonly connectors?: readonly OpenSpecConnector[];
+    /** The ref the runtime reported through `session.ref`; a daemon re-opens the runtime conversation with it. */
     readonly resume?: unknown;
 }
 
@@ -147,6 +200,15 @@ export type DaemonFrame<F = unknown, R = unknown> =
           readonly resume: Readonly<Record<string, Cursor>>;
           /** The machine-local policy for web-managed environments (#236); absent from a daemon that predates it. */
           readonly policy?: MachinePolicy;
+          /** The build (#359). `daemonVersion` stays: a daemon that predates this sends only that. */
+          readonly build?: DaemonBuild;
+          /** The optional frame families this daemon answers (#359). */
+          readonly features?: readonly DaemonFeature[];
+          /** How often the daemon was restarted, how it last stopped and its last self-update (#359). */
+          readonly restarts?: number;
+          readonly lastExit?: DaemonExit;
+          readonly lastUpdate?: DaemonUpdateOutcome;
+          readonly harnesses?: readonly HarnessReport[];
       }
     /** The environments changed — and, when it is carried, the policy too (it is edited on the machine while the daemon runs). */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'env'; readonly environments: readonly EnvironmentDescriptor[]; readonly policy?: MachinePolicy }
@@ -160,7 +222,7 @@ export type DaemonFrame<F = unknown, R = unknown> =
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.ref'; readonly sessionId: SessionId; readonly ref: unknown }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.frame'; readonly sessionId: SessionId; readonly frame: F }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.reply'; readonly sessionId: SessionId; readonly reply: R }
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.closed'; readonly sessionId: SessionId; readonly reason: string }
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.closed'; readonly sessionId: SessionId; readonly reason: string; readonly code?: SessionClosedCode }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'tool.call'; readonly callId: string; readonly sessionId: SessionId; readonly tool: string; readonly input: unknown }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'pong'; readonly at: number }
     /** The answer to `fs.request` (#185): exactly one of `result` / `error`. */
@@ -173,10 +235,16 @@ export type DaemonFrame<F = unknown, R = unknown> =
      */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'quota'; readonly environmentId: EnvironmentId; readonly snapshot: QuotaSnapshot }
     /** The answer to `history.request` (#397): exactly one of `result` (event frames, `F` = the wire `event` frame) / `error`. */
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.response'; readonly requestId: string; readonly result?: HistoryResult<F>; readonly error?: HistoryError };
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.response'; readonly requestId: string; readonly result?: HistoryResult<F>; readonly error?: HistoryError }
+    /** Progress of an `update.request` (#359): `progress` while downloading, `error` when `failed`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.status'; readonly requestId: string; readonly phase: UpdatePhase; readonly progress?: { readonly bytes: number; readonly total: number }; readonly error?: LifecycleError }
+    /** Progress of a `harness.request` (#359). */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.status'; readonly requestId: string; readonly phase: HarnessPhase; readonly error?: LifecycleError }
+    /** The harnesses changed (#359): pushed unsolicited, after a harness request or when the daemon finds a change. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harnesses'; readonly harnesses: readonly HarnessReport[] };
 
 export type PlatformFrame<C = unknown> =
-    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>> }
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'welcome'; readonly serverTime: number; readonly wanted: Readonly<Record<string, Cursor>>; readonly platform?: PlatformInfo }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.open'; readonly sessionId: SessionId; readonly environmentId: string; readonly spec: OpenSpec }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.command'; readonly sessionId: SessionId; readonly command: C }
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'session.close'; readonly sessionId: SessionId }
@@ -194,7 +262,15 @@ export type PlatformFrame<C = unknown> =
      * platform keeps only a bounded recent window, so anything older is read this way. Answered by `history.response`.
      * `from` may be a platform-stamped cursor (a fractional `seq`, `platformCursor`): the log's next integer follows it.
      */
-    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.request'; readonly requestId: string; readonly sessionId: SessionId } & HistoryRange);
+    | ({ readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.request'; readonly requestId: string; readonly sessionId: SessionId } & HistoryRange)
+    /**
+     * Update the daemon itself (#359; the `update` feature): to a release asset, or back to the `previous` build. `drain`
+     * lets running turns end, for at most `drainTimeoutMs`; `now` does not wait. Progress comes back as `update.status`.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.request'; readonly requestId: string; readonly target: ReleaseAsset | 'previous'; readonly mode: 'drain' | 'now'; readonly drainTimeoutMs: number }
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'update.cancel'; readonly requestId: string }
+    /** Install, update or remove a runtime harness (#359; the `harness` feature); progress comes back as `harness.status`. */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.request'; readonly requestId: string; readonly op: 'install' | 'update' | 'remove'; readonly runtime: RuntimeId; readonly target?: ReleaseAsset; readonly mode: 'drain' | 'now' };
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response'] as const;
-export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
+export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request', 'update.request', 'update.cancel', 'harness.request'] as const;

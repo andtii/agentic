@@ -21,7 +21,9 @@ export type WaitReason =
      * The task's session runs another task's turn (#395; CHT-09): the message is steered into that turn when the
      * runtime can take it — the wait resolves at once, `joined running turn …` — else it is sent when `turnId` ends.
      */
-    | { readonly kind: 'turn'; readonly sessionId: SessionId; readonly turnId: string };
+    | { readonly kind: 'turn'; readonly sessionId: SessionId; readonly turnId: string }
+    /** The machine running the task's session went away mid-turn (#359; EXE-08), `since` epoch ms; the agent's `onInterrupt` decides what follows. */
+    | { readonly kind: 'machine-offline'; readonly machineId: MachineId; readonly since: number };
 
 /** Where a task came from (COL-04 "originating agent or task"). */
 export type TaskOrigin =

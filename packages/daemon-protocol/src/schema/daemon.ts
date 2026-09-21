@@ -3,7 +3,7 @@
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
 import { z } from 'zod';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType } from '../frames.js';
-import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, machineId, machinePolicy, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
+import { capabilityReport, cursor, cursors, envError, environmentId, environments, envResult, fsError, fsResult, harnessReports, lifecycleError, machineId, machinePolicy, name, nonNegativeInt, os, quotaSnapshot, sessionId, text } from './common.js';
 import { LIMITS } from './limits.js';
 import { sessionRef, wireEventFrame, wireFrame, wireReply } from './wire.js';
 
@@ -18,7 +18,14 @@ const hello = z.object({
     environments,
     capabilities: z.array(capabilityReport).max(LIMITS.list),
     resume: cursors,
-    policy: machinePolicy.optional()
+    policy: machinePolicy.optional(),
+    // #359: build, features and lifecycle history; each optional, so an older daemon's hello still parses.
+    build: z.object({ version: name, commit: name, protocol: nonNegativeInt, channel: name, platform: name }).optional(),
+    features: z.array(z.enum(['update', 'harness'])).max(LIMITS.list).optional(),
+    restarts: nonNegativeInt.optional(),
+    lastExit: z.object({ at: nonNegativeInt, reason: text, code: z.number().int().optional() }).optional(),
+    lastUpdate: z.object({ from: name, to: name, outcome: z.enum(['applied', 'rolled-back']), at: nonNegativeInt, error: text.optional() }).optional(),
+    harnesses: harnessReports.optional()
 });
 const env = z.object({ v, t: z.literal('env'), environments, policy: machinePolicy.optional() });
 const heartbeat = z.object({ v, t: z.literal('heartbeat'), at: nonNegativeInt, active: z.array(sessionId).max(LIMITS.list) });
@@ -26,7 +33,13 @@ const sessionOpened = z.object({ v, t: z.literal('session.opened'), sessionId, r
 const sessionNamed = z.object({ v, t: z.literal('session.ref'), sessionId, ref: sessionRef });
 const sessionFrame = z.object({ v, t: z.literal('session.frame'), sessionId, frame: wireFrame });
 const sessionReply = z.object({ v, t: z.literal('session.reply'), sessionId, reply: wireReply });
-const sessionClosed = z.object({ v, t: z.literal('session.closed'), sessionId, reason: text });
+const sessionClosed = z.object({
+    v,
+    t: z.literal('session.closed'),
+    sessionId,
+    reason: text,
+    code: z.enum(['restart', 'update', 'harness-update', 'draining', 'harness-missing', 'resume-failed']).optional()
+});
 const toolCall = z.object({ v, t: z.literal('tool.call'), callId: name, sessionId, tool: name, input: z.unknown() });
 const pong = z.object({ v, t: z.literal('pong'), at: nonNegativeInt });
 const fsResponse = z
@@ -47,6 +60,23 @@ const historyResponse = z
     .object({ v, t: z.literal('history.response'), requestId: name, result: historyResult.optional(), error: historyError.optional() })
     .refine((f) => f.result === undefined || f.error === undefined, { message: 'history.response carries result or error, not both', path: ['error'] })
     .refine((f) => f.result !== undefined || f.error !== undefined, { message: 'history.response carries result or error', path: ['result'] });
+/** Update and harness progress (#359); #360 hardens these. */
+const updateStatus = z.object({
+    v,
+    t: z.literal('update.status'),
+    requestId: name,
+    phase: z.enum(['downloading', 'verifying', 'staged', 'draining', 'restarting', 'failed']),
+    progress: z.object({ bytes: nonNegativeInt, total: nonNegativeInt }).optional(),
+    error: lifecycleError.optional()
+});
+const harnessStatus = z.object({
+    v,
+    t: z.literal('harness.status'),
+    requestId: name,
+    phase: z.enum(['downloading', 'verifying', 'staged', 'draining', 'applying', 'done', 'failed']),
+    error: lifecycleError.optional()
+});
+const harnesses = z.object({ v, t: z.literal('harnesses'), harnesses: harnessReports });
 
 export const helloFrame: z.ZodType<DaemonFrameOf<'hello'>> = hello;
 export const envFrame: z.ZodType<DaemonFrameOf<'env'>> = env;
@@ -62,6 +92,9 @@ export const fsResponseFrame: z.ZodType<DaemonFrameOf<'fs.response'>> = fsRespon
 export const envResponseFrame: z.ZodType<DaemonFrameOf<'env.response'>> = envResponse;
 export const quotaFrame: z.ZodType<DaemonFrameOf<'quota'>> = quota;
 export const historyResponseFrame: z.ZodType<DaemonFrameOf<'history.response'>> = historyResponse;
+export const updateStatusFrame: z.ZodType<DaemonFrameOf<'update.status'>> = updateStatus;
+export const harnessStatusFrame: z.ZodType<DaemonFrameOf<'harness.status'>> = harnessStatus;
+export const harnessesFrame: z.ZodType<DaemonFrameOf<'harnesses'>> = harnesses;
 
 /** Every daemon frame kind by its `t`. */
 export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<DaemonFrameOf<T>> } = {
@@ -78,7 +111,10 @@ export const daemonFrameSchemas: { readonly [T in DaemonFrameType]: z.ZodType<Da
     'fs.response': fsResponseFrame,
     'env.response': envResponseFrame,
     quota: quotaFrame,
-    'history.response': historyResponseFrame
+    'history.response': historyResponseFrame,
+    'update.status': updateStatusFrame,
+    'harness.status': harnessStatusFrame,
+    harnesses: harnessesFrame
 };
 
-export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse]);
+export const daemonFrame: z.ZodType<DaemonFrame> = z.discriminatedUnion('t', [hello, env, heartbeat, sessionOpened, sessionNamed, sessionFrame, sessionReply, sessionClosed, toolCall, pong, fsResponse, envResponse, quota, historyResponse, updateStatus, harnessStatus, harnesses]);

@@ -1,7 +1,9 @@
 /** Machines, environments and capability transparency (EXE-01..12, AGT-09). */
 
 import type { RuntimeId } from './agent.js';
+import type { DaemonBuild } from './daemon.js';
 import type { EnvironmentId, MachineId } from './ids.js';
+import type { HarnessReport } from './release.js';
 
 export type AuthStatus = 'ok' | 'missing' | 'expired' | 'unknown';
 
@@ -61,6 +63,11 @@ export interface MachineInfo {
     readonly daemonVersion: string;
     readonly online: boolean;
     readonly lastSeenAt: number;
+    /** The build its last `hello` reported (#359); absent from a daemon that predates it. */
+    readonly build?: DaemonBuild;
+    /** A newer release is out on the machine's channel, or the platform no longer serves this build (#359). */
+    readonly outdated?: boolean;
+    readonly harnesses?: readonly HarnessReport[];
 }
 
 /**
