@@ -287,6 +287,8 @@ export interface MachineUpdateView {
     /** Whether the channel / the policy are the workspace's (the machine has none of its own). */
     readonly inherited: { readonly channel: boolean; readonly policy: boolean };
     readonly available?: AvailableUpdate;
+    /** When the release manifests it last compared against were read (#468); absent before the first. */
+    readonly checkedAt?: number;
     readonly pending?: PendingUpdate;
     readonly last?: UpdateOutcome;
     readonly draining?: MachineDraining;
@@ -395,6 +397,8 @@ interface RoutingClient {
 /** The ReleaseDirectory's read (`global:releases`, #365). */
 interface ReleasesClient {
     get(): Promise<ReleasesView>;
+    /** Read now unless the last read is younger than `minAgeMs` (never below `RELEASE_CHECK_MIN_MS`, #468). */
+    check(minAgeMs?: number): Promise<ReleasesView>;
 }
 
 /** The slice of the Inbox a machine notifies (#365). */
@@ -479,6 +483,7 @@ export function defineMachineActor(ports: MachinePorts) {
             policy,
             inherited,
             ...(u?.available ? { available: u.available } : {}),
+            ...(u?.checkedAt !== undefined ? { checkedAt: u.checkedAt } : {}),
             ...(u?.pending ? { pending: u.pending } : {}),
             ...(u?.last ? { last: u.last } : {}),
             ...(s.draining ? { draining: s.draining } : {}),
@@ -539,12 +544,13 @@ export function defineMachineActor(ports: MachinePorts) {
             }
         }
 
-        /** The release directory's manifests, or `null` when it is not wired or cannot be read. */
-        async function directory(): Promise<ReleasesView | null> {
+        /** The release directory's manifests, or `null` when it is not wired or cannot be read; `fresh` reads them now unless the last read is recent (#468). */
+        async function directory(fresh = false): Promise<ReleasesView | null> {
             const def = ports.releases?.();
             if (!def) return null;
             try {
-                return await (c.actor(def, RELEASE_DIRECTORY_KEY) as unknown as ReleasesClient).get();
+                const releases = c.actor(def, RELEASE_DIRECTORY_KEY) as unknown as ReleasesClient;
+                return await (fresh ? releases.check() : releases.get());
             } catch {
                 return null;
             }
@@ -595,6 +601,7 @@ export function defineMachineActor(ports: MachinePorts) {
             const u = (s.update ??= {});
             u.comparedAt = now();
             if (!dir) return;
+            if (dir.lastCheckedAt !== undefined) u.checkedAt = dir.lastCheckedAt;
             const manifest = dir.channels[effectiveUpdates(u).channel];
             await compareHarnesses(manifest);
             if (!s.build || !manifest || compareVersions(manifest.version, s.build.version) <= 0) {
@@ -831,6 +838,7 @@ export function defineMachineActor(ports: MachinePorts) {
             setUpdatePolicy: owner,
             setChannel: owner,
             updateState: owner,
+            checkUpdates: owner,
             // Owner only, and never a tool (#370): an agent must not change the runtimes a machine runs.
             requestHarness: owner,
             harnessResult: owner
@@ -1753,6 +1761,20 @@ export function defineMachineActor(ports: MachinePorts) {
 
                 /** The machine's update record (#365) — a live read for the Machines page: channel, policy, what is available, pending and last, and what an update now would interrupt. */
                 updateState(): MachineUpdateView {
+                    return updateView(ctx);
+                },
+
+                /**
+                 * Check for updates now (#468): the release directory reads the manifests unless it did within
+                 * `RELEASE_CHECK_MIN_MS`, and the machine compares at once — the page's open and its "Check for updates",
+                 * instead of waiting for the hourly read and the 15-minute compare. Returns the update record.
+                 */
+                async checkUpdates(): Promise<MachineUpdateView> {
+                    if (ports.releases) {
+                        await lifecycle.readDefaults();
+                        await lifecycle.compare(await lifecycle.directory(true));
+                        await ctx.save();
+                    }
                     return updateView(ctx);
                 },
 

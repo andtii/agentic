@@ -2,7 +2,7 @@ import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import type { HostOs, UpdateSettings } from '@agentic/core';
 import type { MachineUpdateView } from '@agentic/platform';
-import { Button, ConfirmDialog, Label, StatusPill } from '@agentic/ui';
+import { Button, ConfirmDialog, Label, StatusPill, ageText } from '@agentic/ui';
 import { CommandWell } from './CommandWell';
 import { UpdatePolicyForm, type UpdateChoice } from './UpdatePolicyForm';
 import { BADGE_TEXT, canSelfUpdate, drainingText, impactText, lastLine, phaseSteps, policyLabel, progressPercent, reinstallCommand, restartWarning, rollbackTarget, runningLine, updateBadge } from './update';
@@ -33,6 +33,10 @@ export type UpdateCardProps =
     & Define.Event<'cancel'>
     & Define.Event<'rollback'>
     & Define.Event<'saveUpdates', UpdateChoice>
+    /** "Check for updates" (#468): read the release manifests now instead of waiting for the hourly read. */
+    & Define.Event<'check'>
+    /** A check is out. */
+    & Define.Prop<'checking', boolean>
     /** Below the card's own content: the mock's state picker. */
     & Define.Slot<'default'>;
 
@@ -132,6 +136,12 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                     </div>
                 ) : null}
                 {able && !pending && !u.available ? <p data-card-text data-update-current>Up to date on {u.channel}.</p> : null}
+                {able && !pending ? (
+                    <p data-update-checked>
+                        <span>{props.checking ? 'Checking for updates…' : u.checkedAt !== undefined ? `Checked ${ageText(Math.max(0, props.now - u.checkedAt))}` : 'Not checked yet'}</span>
+                        <button type="button" data-link-button data-update-check disabled={props.checking} onClick={() => emit('check')}>Check for updates</button>
+                    </p>
+                ) : null}
 
                 {last ? <p data-update-last data-tone={lastFailed ? 'failed' : undefined} role={lastFailed ? 'alert' : undefined}>{last}</p> : null}
                 {able && back ? (

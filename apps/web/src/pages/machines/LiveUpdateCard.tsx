@@ -5,14 +5,15 @@
  * update now would interrupt — and the Workspace's `settings.updates` as
  * the defaults. The owner's actions are `requestUpdate` (`drain`, `now`, or
  * `previous` to roll back), `cancelUpdate`, `setChannel` and
- * `setUpdatePolicy`.
+ * `setUpdatePolicy`. Opening the card checks for updates (`checkUpdates`, #468),
+ * and "Check for updates" does it again.
  *
  * A request is followed the way the environment requests are
  * (`LiveMachine`): its id, then the live read settles it — the first phase
  * the daemon reports, or the outcome — and a client timer says so when the
  * daemon has not answered in `CLIENT_TIMEOUT_MS`. No polling.
  */
-import { component, effect, onUnmounted, signal, type Define, type JSXElement } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, type Define, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { DEFAULT_UPDATE_SETTINGS, type HostOs, type ReleaseChannel } from '@agentic/core';
@@ -41,7 +42,22 @@ export const LiveUpdateCard = component<LiveUpdateCardProps>(({ props }) => {
     const workspace = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'get'] as const); }, { live: true });
     const client = () => actor(defs.Machine, props.machineKey);
 
-    const st = signal({ busy: false, failure: null as string | null, reinstall: false, requestId: '', waiting: false });
+    const st = signal({ busy: false, failure: null as string | null, reinstall: false, requestId: '', waiting: false, checking: false });
+
+    /** Read the release manifests now (#468): once as the page opens, and on "Check for updates" — the directory reads GitHub at most every few minutes. */
+    const check = async (): Promise<void> => {
+        if (st.checking) return;
+        st.checking = true;
+        try {
+            await client().checkUpdates();
+        } catch {
+            // The live read keeps what it had; the hourly read still runs.
+        } finally {
+            st.checking = false;
+        }
+    };
+    // Once the card is on the page, never during setup (SSR, hydration).
+    onMounted(() => { void check(); });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const clearTimer = (): void => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
     onUnmounted(clearTimer);
@@ -110,6 +126,8 @@ export const LiveUpdateCard = component<LiveUpdateCardProps>(({ props }) => {
                 onRollback={() => { void request({ target: 'previous', mode: 'drain' }); }}
                 onCancel={() => { void act(async () => { st.waiting = false; clearTimer(); await client().cancelUpdate(); }); }}
                 onSaveUpdates={(choice: UpdateChoice) => { void saveUpdates(choice); }}
+                checking={st.checking}
+                onCheck={() => { void check(); }}
             />
         );
     };

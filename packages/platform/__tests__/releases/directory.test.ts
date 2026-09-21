@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Principal, ReleaseManifest } from '@agentic/core';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
 
-import { defineReleaseDirectory, parseReleaseManifest, RELEASE_DIRECTORY_KEY, RELEASE_MANIFEST_MAX_BYTES, RELEASE_SOURCES } from '../../src/releases/index';
+import { defineReleaseDirectory, parseReleaseManifest, RELEASE_CHECK_MIN_MS, RELEASE_DIRECTORY_KEY, RELEASE_MANIFEST_MAX_BYTES, RELEASE_SOURCES } from '../../src/releases/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const SHA = 'a'.repeat(64);
@@ -123,6 +123,19 @@ describe('ReleaseDirectory (#365)', () => {
         await advance(60 * 60_000);
         expect(fetched).toHaveLength(2);
         expect((await directory(asMachine).get()).channels.stable?.version).toBe('0.2.1');
+    });
+
+    it('check reads now, but at most once per RELEASE_CHECK_MIN_MS — a burst of page visits reads GitHub once (#468)', async () => {
+        const first = await directory(asMachine).check();
+        expect(fetched).toHaveLength(2);
+        expect(first.channels.stable?.version).toBe('0.2.0');
+        answers[RELEASE_SOURCES.stable] = json(manifest('0.2.1'));
+        await directory(asMachine).check();
+        await directory().check(0);
+        expect(fetched).toHaveLength(2);
+        await advance(RELEASE_CHECK_MIN_MS);
+        expect((await directory(asMachine).check()).channels.stable?.version).toBe('0.2.1');
+        expect(fetched).toHaveLength(4);
     });
 
     it('get is for anyone signed in; refresh only for a user', async () => {
