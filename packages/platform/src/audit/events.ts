@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -26,6 +26,11 @@ export const AUDIT_KINDS = [
     'proposal.reviewed',
     'machine.paired',
     'machine.revoked',
+    'machine.update-requested',
+    'machine.updated',
+    'machine.update-failed',
+    'machine.channel-set',
+    'machine.update-policy-set',
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
@@ -166,6 +171,42 @@ export interface MachineRevokedData {
     readonly name: string;
 }
 
+/** An update was asked of a machine's daemon (#365): by its owner, or by its policy (`by: system:updates`). `to` is a version or `previous`. */
+export interface MachineUpdateRequestedData {
+    readonly machineId: MachineId;
+    readonly from: string;
+    readonly to: string;
+    readonly mode: 'drain' | 'now';
+    readonly by: string;
+}
+
+/** The daemon came back on the version it was asked for (#365). */
+export interface MachineUpdatedData {
+    readonly machineId: MachineId;
+    readonly from: string;
+    readonly to: string;
+}
+
+/** An update did not land (#365): a `failed` phase, a rollback, another version on `hello`, or its deadline. */
+export interface MachineUpdateFailedData {
+    readonly machineId: MachineId;
+    readonly from: string;
+    readonly to: string;
+    readonly error: string;
+}
+
+/** The owner set the release channel a machine follows (#365); `null` goes back to the workspace default. */
+export interface MachineChannelSetData {
+    readonly machineId: MachineId;
+    readonly channel: ReleaseChannel | null;
+}
+
+/** The owner set when a machine takes updates (#365); `null` goes back to the workspace default. */
+export interface MachineUpdatePolicySetData {
+    readonly machineId: MachineId;
+    readonly policy: UpdatePolicy | null;
+}
+
 export interface PluginToggledData {
     readonly pluginId: string;
 }
@@ -290,6 +331,11 @@ export interface AuditDataByKind {
     readonly 'proposal.reviewed': ProposalReviewedData;
     readonly 'machine.paired': MachinePairedData;
     readonly 'machine.revoked': MachineRevokedData;
+    readonly 'machine.update-requested': MachineUpdateRequestedData;
+    readonly 'machine.updated': MachineUpdatedData;
+    readonly 'machine.update-failed': MachineUpdateFailedData;
+    readonly 'machine.channel-set': MachineChannelSetData;
+    readonly 'machine.update-policy-set': MachineUpdatePolicySetData;
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
