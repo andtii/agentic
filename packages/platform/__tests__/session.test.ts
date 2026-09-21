@@ -440,6 +440,90 @@ describe('Session on the daemon path', () => {
         expect(writes()).toBe(written + 2);
     });
 
+    /** A remote record running turn `t1`: opened, named by its runtime unless `named` is false, prompted and acknowledged, its turn started. */
+    async function runningRemote(named = true) {
+        await session().open(remote);
+        const asMachine = app.as(machine).actor(Session, KEY);
+        if (named) await asMachine.noteRef({ agent: 'claude-code', v: 1, id: 'sess-real' });
+        await session().prompt('hello', 't1');
+        await asMachine.commandReplied({ v: 1, kind: 'ack', commandId: 't1', turnId: 't1' });
+        const start: AgentEvent = { type: 'turn-start', turnId: 't1', input: [{ type: 'text', text: 'hello' }], sessionId: 'sess-real', epoch: 1, seq: 1 };
+        await asMachine.forwardFrames([{ v: 1, kind: 'event', epoch: 1, seq: 1, event: start }]);
+        expect((await session().get()).running?.turnId).toBe('t1');
+        return asMachine;
+    }
+
+    it('hostEnded (#420): a running turn is interrupted with the host’s reason, stamped between the head and the daemon’s next event; the record waits idle with its ref, and resume re-prompts it', async () => {
+        const asMachine = await runningRemote();
+        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restarted' });
+        const info = await session().get();
+        expect(info).toMatchObject({ status: 'idle', opened: true, ref: { id: 'sess-real' }, spec: { machineId: 'machine_1' } });
+        expect(info.running).toBeUndefined();
+        const events = await session().events();
+        const end = events.at(-1)!;
+        expect(isInterruptedTurnEnd(end)).toBe(true);
+        expect(end).toMatchObject({ turnId: 't1', error: { message: 'interrupted: the daemon restarted' } });
+        expect(events.find((e) => e.type === 'error')).toMatchObject({ message: 'interrupted: the daemon restarted', data: { interrupted: true, host: 'restarted' } });
+        // Never an integer the daemon could stamp: every platform event sits after (1, 1) and before (1, 2).
+        for (const e of events.slice(1)) expect(e.epoch === 1 && e.seq > 1 && e.seq < 2).toBe(true);
+        expect(received).toContainEqual(expect.objectContaining({ kind: 'status', status: 'task', ref: 'interrupted:t1' }));
+
+        // Idempotent: the same word again writes nothing.
+        const writes = () => [...app.saves, ...app.appends].filter((w) => w.type === 'session').length;
+        const written = writes();
+        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restarted' });
+        expect(writes()).toBe(written);
+
+        // The cut turn is resumable: a new prompt carrying its input.
+        sent.length = 0;
+        expect(await session().resume()).toMatchObject({ kind: 'pending', commandId: 'resume:t1' });
+        expect(sent).toEqual([expect.objectContaining({ type: 'prompt', turnId: 't1:resume', input: [{ type: 'text', text: 'hello' }] })]);
+    });
+
+    it('hostEnded (#420): however much is open, every event it writes lands, in order, before the daemon’s next integer seq', async () => {
+        const asMachine = await runningRemote();
+        const asks: WireFrame[] = Array.from({ length: 80 }, (_, i) => {
+            const event: AgentEvent = { type: 'request', requestId: `r${i}`, kind: 'input', message: `q${i}`, turnId: 't1', sessionId: 'sess-real', epoch: 1, seq: 2 + i };
+            return { v: 1, kind: 'event', epoch: 1, seq: 2 + i, event } as WireFrame;
+        });
+        await asMachine.forwardFrames(asks);
+        expect((await session().get()).openRequests).toHaveLength(80);
+        await asMachine.hostEnded({ reason: 'the daemon restarted' });
+        const info = await session().get();
+        expect(info.openRequests).toEqual([]);
+        const written = (await session().events()).slice(81);
+        // 80 cancelled requests, the error, the state, the turn end — each strictly after the one before.
+        expect(written).toHaveLength(83);
+        expect(written.every((e, i) => e.epoch === 1 && e.seq > 81 && e.seq < 82 && (i === 0 || e.seq > written[i - 1]!.seq))).toBe(true);
+        expect(isInterruptedTurnEnd(written.at(-1)!)).toBe(true);
+    });
+
+    it('hostEnded (#420): a record its runtime never named is closed — nothing to resume from — and says so; the code defaults to closed', async () => {
+        const asMachine = await runningRemote(false);
+        await asMachine.hostEnded({ reason: 'gone' });
+        const info = await session().get();
+        expect(info.status).toBe('closed');
+        expect(info.running).toBeUndefined();
+        const events = await session().events();
+        expect(isInterruptedTurnEnd(events.at(-1)!)).toBe(true);
+        expect(events.find((e) => e.type === 'error')).toMatchObject({ data: { interrupted: true, host: 'closed' } });
+        expect(received).toContainEqual(expect.objectContaining({ kind: 'status', status: 'session-ended' }));
+        await asMachine.hostEnded({ reason: 'gone' });
+        expect((await session().get()).status).toBe('closed');
+    });
+
+    it('hostEnded (#420): an idle record keeps its ref and stays idle; only its hosting machine may say it', async () => {
+        await session().open(remote);
+        const asMachine = app.as(machine).actor(Session, KEY);
+        await asMachine.noteRef({ agent: 'claude-code', v: 1, id: 'sess-real' });
+        expect(await statusOf(session().hostEnded({ reason: 'x' }))).toBe(403);
+        const other: Principal = { kind: 'machine', workspaceId: WS, machineId: 'machine_2' as MachineId };
+        expect(await statusOf(app.as(other).actor(Session, KEY).hostEnded({ reason: 'x' }))).toBe(403);
+        await asMachine.hostEnded({ reason: 'x' });
+        expect(await session().get()).toMatchObject({ status: 'idle', ref: { id: 'sess-real' } });
+        expect(await session().events()).toEqual([]);
+    });
+
     it('refuses a command it has nowhere to send', async () => {
         const noSink = defineSessionActor({ factory: () => null });
         const other = testActorApp([noSink]);

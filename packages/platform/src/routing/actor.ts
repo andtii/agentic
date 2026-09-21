@@ -802,6 +802,105 @@ export function defineRoutingActor(ports: RoutingPorts) {
             }
 
             /**
+             * Host the route's session on its machine (#393, #420): the Session record opened with `spec` first — the daemon's
+             * `session.opened` may arrive before `openSession` returns — then `Machine.openSession` with what the daemon runs.
+             * The record's `system` is that one: the instructions plus the memory block `open` retrieved (§8). A re-opened
+             * record resumes from the ref its runtime reported (#389); a fresh one from `resume`, what the task named (#285).
+             * Whatever the open or the machine throws is the caller's to judge.
+             */
+            async function hostSession(route: Route, sessionId: SessionId, spec: SessionOpenSpec, resume?: SessionOpenSpec['resume']): Promise<OpenSessionResult> {
+                const machineId = route.machineId!;
+                const opened = await session(sessionId).open(spec);
+                route.head = opened.head;
+                const limits = route.config.execution.limits;
+                const model = spec.config.execution.model;
+                const placed = daemonConnectors(route.plugins?.connectors ?? [], machineId);
+                return machine(machineId).openSession(
+                    sessionId,
+                    route.environmentId!,
+                    {
+                        agentId: route.agentId,
+                        cwd: route.cwd ?? '',
+                        system: opened.spec?.system ?? spec.system ?? route.config.instructions,
+                        ...(model ? { model } : {}),
+                        ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
+                        ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
+                        tools: grantedToolNames(route),
+                        policy: ctx.snapshot(openSpecPolicy(route)),
+                        ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
+                        ...(opened.ref !== undefined ? { resume: opened.ref } : resume !== undefined ? { resume } : {})
+                    },
+                    { taskId: route.taskId }
+                );
+            }
+
+            /**
+             * Re-open an interrupted route's session on its machine (#420): the machine lost it (a daemon restart) and a
+             * prompt would go nowhere. The record's own spec, its ref as `spec.resume` (`hostSession`); the route stays
+             * `interrupted`, `rehosting`, until the daemon acknowledges it — `sessionOpened` then resumes the turn
+             * (`resumeHosted`), a `session.closed` instead sends the task to a fresh session (`sessionClosed`). A machine
+             * that cannot take it now (offline, gone) leaves the route as it was and says why. A record its host closed
+             * (its runtime never named it: nothing to resume from) goes straight to a fresh session.
+             */
+            async function rehost(route: Route): Promise<void> {
+                const sessionId = route.sessionId!;
+                const info = await session(sessionId).get();
+                if (info.status === 'closed') return freshSession(route);
+                if (!info.spec) throw new ServerFnError(409, `task ${route.taskId}: session ${sessionId} has no spec to re-open`);
+                route.rehosting = true;
+                touch(route);
+                try {
+                    await hostSession(route, sessionId, ctx.snapshot(info.spec));
+                } catch (e) {
+                    delete route.rehosting;
+                    const status = isServerFnError(e) ? e.status : 500;
+                    throw new ServerFnError(status, `task ${route.taskId}: session ${sessionId} could not be re-opened on machine ${route.machineId}: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+
+            /**
+             * Resume an interrupted turn on a session its machine hosts (OPS-05): `Session.resume` prompts it anew with the
+             * cut turn's input over the intact transcript, the task's `waiting {input, resume:…}` resolves `active` and
+             * `follow` picks the new turn up. A refusal fails the task with the reply.
+             */
+            async function resumeHosted(route: Route): Promise<void> {
+                const sessionId = route.sessionId!;
+                const cut = route.turnId!;
+                const reply = await session(sessionId).resume();
+                if (reply.kind === 'error') {
+                    await fail(route, { code: `resume-${reply.code}`, message: reply.message, recoverable: false });
+                    return;
+                }
+                const t = await task(route.taskId).get();
+                if (t.status === 'waiting') await task(route.taskId).resolveWaiting(ROUTER, `resumed: a new prompt over the intact transcript (turn ${cut} was interrupted)`, sessionId);
+                route.turnId = resumeTurnId(cut);
+                route.status = 'running';
+                touch(route);
+                await ctx.tasks.start('follow');
+                wakers.get(ctx.key)?.();
+            }
+
+            /**
+             * A re-open the daemon refused (#420): the task goes on in a fresh session — a new id on the same machine and
+             * environment, placed as any task is, resuming the engine conversation from the lost session's ref where it can
+             * (`resumeFrom` → `resumable`) and prompted with the task's own input.
+             */
+            async function freshSession(route: Route): Promise<void> {
+                const from = route.sessionId!;
+                delete route.rehosting;
+                delete route.seenSeq;
+                delete route.turnId;
+                delete route.joined;
+                delete route.attempt;
+                delete route.head;
+                // Minted here, not bound: the chat's binding still names the lost session, and `bindSession` would take it again.
+                route.sessionId = newSessionId();
+                route.status = 'opening';
+                const t = await task(route.taskId).get();
+                await placeRemote(route, undefined, { ...t, resumeFrom: from });
+            }
+
+            /**
              * Open the route's Session on ITS machine (never another), or park it. A route no machine reported yet is
              * located first — and bound to that machine from then on; `run` hands in what it already located.
              */
@@ -874,33 +973,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(hooks.instructions ? { project: hooks.instructions } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
                     tools
                 };
-                // The Session record first: the daemon's `session.opened` may arrive before `openSession` returns — and the route
-                // is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
-                // The record's `system` is the one the daemon runs: the instructions plus the memory block `open` retrieved (§8).
-                const opened = await session(sessionId).open(spec);
-                route.head = opened.head;
+                // The route is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.
                 route.status = 'opening';
-                const limits = route.config.execution.limits;
                 let result: OpenSessionResult;
                 try {
-                    result = await machine(machineId).openSession(
-                        sessionId,
-                        environmentId,
-                        {
-                            agentId: route.agentId,
-                            cwd: route.cwd ?? '',
-                            system: opened.spec?.system ?? spec.system ?? route.config.instructions,
-                            ...(effective.execution.model ? { model: effective.execution.model } : {}),
-                            ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
-                            ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
-                            tools: grantedToolNames(route),
-                            policy: ctx.snapshot(openSpecPolicy(route)),
-                            ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
-                            // A re-opened record resumes from the ref its runtime reported (#393, #389); a fresh one from what the task named (#285).
-                            ...(opened.ref !== undefined ? { resume: opened.ref } : opening.resume !== undefined ? { resume: opening.resume } : {})
-                        },
-                        { taskId: route.taskId }
-                    );
+                    result = await hostSession(route, sessionId, spec, opening.resume);
                 } catch (e) {
                     if (isServerFnError(e) && e.status === 503) {
                         await offline(route, { ...m, online: false });
@@ -1095,25 +1172,18 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  * "Resume" on an interrupted turn (OPS-05): the session is prompted anew
                  * with the cut turn's input over its intact transcript (`Session.resume`),
                  * the task's `waiting {input, resume:…}` resolves `active` with a `resumed`
-                 * transition, and `follow` picks the new turn up. Nothing is replayed.
+                 * transition, and `follow` picks the new turn up. Nothing is replayed. A session its machine no longer
+                 * hosts (#420: the daemon restarted under the turn) is re-opened there first (`rehost`), and resumed once
+                 * the daemon acknowledges it; a second `resume` meanwhile changes nothing.
                  */
                 async resume(taskId: TaskId): Promise<TaskView> {
                     const s = ctx.state;
                     const route = s.routes[taskId];
                     if (!route || route.status !== 'interrupted' || !route.sessionId || !route.turnId) throw new ServerFnError(409, `task ${taskId} has no interrupted turn to resume`);
-                    const reply = await session(route.sessionId).resume();
-                    if (reply.kind === 'error') {
-                        await fail(route, { code: `resume-${reply.code}`, message: reply.message, recoverable: false });
-                        await ctx.save();
-                        return task(taskId).get();
-                    }
-                    const t = await task(taskId).get();
-                    if (t.status === 'waiting') await task(taskId).resolveWaiting(ROUTER, `resumed: a new prompt over the intact transcript (turn ${route.turnId} was interrupted)`, route.sessionId);
-                    route.turnId = resumeTurnId(route.turnId);
-                    route.status = 'running';
-                    touch(route);
-                    await ctx.tasks.start('follow');
-                    wakers.get(ctx.key)?.();
+                    if (route.rehosting) return task(taskId).get();
+                    const sessionId = route.sessionId;
+                    if (route.machineId && !(await machine(route.machineId).get()).activeSessions.some((h) => h.sessionId === sessionId)) await rehost(route);
+                    else await resumeHosted(route);
                     await ctx.save();
                     return task(taskId).get();
                 },
@@ -1131,11 +1201,17 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 /**
                  * Machine → router: the daemon acknowledged a session — a queued one included. Time to prompt every route
                  * waiting on it: a chat's session serves many tasks (#393), and the task the machine names is the one it was
-                 * opened for, which need not be any of them.
+                 * opened for, which need not be any of them. An interrupted route that re-opened it (#420, `rehosting`)
+                 * resumes its turn now.
                  */
                 async sessionOpened(sessionId: SessionId, _taskId?: TaskId): Promise<void> {
                     const s = ctx.state;
                     for (const route of Object.values(s.routes)) {
+                        if (route.sessionId === sessionId && route.status === 'interrupted' && route.rehosting) {
+                            delete route.rehosting;
+                            await resumeHosted(route);
+                            continue;
+                        }
                         if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity')) continue;
                         if (route.status === 'waiting-capacity') {
                             // The slot the dequeue saw may be gone to a prompt meanwhile (#394): then the route stays parked for `slotFreed`.
@@ -1195,11 +1271,20 @@ export function defineRoutingActor(ports: RoutingPorts) {
 
                 /**
                  * Machine → router: a session is gone. Every task still waiting for it — to open, or for the turn it ran to
-                 * end (#395) — fails with the daemon's reason (a running one hears its turn end).
+                 * end (#395) — fails with the daemon's reason. A running one is not failed here: the Machine told the
+                 * Session first (`hostEnded`, #420), which ended its turn as interrupted, and `follow` parks it for a
+                 * `resume`. A re-open that `resume` asked for and the daemon refused (`rehosting`) sends the task to a
+                 * fresh session (`freshSession`) — unless the machine hosts the session again, and this is the word
+                 * about the session it lost, arriving late.
                  */
                 async sessionClosed(sessionId: SessionId, reason: string, _taskId?: TaskId): Promise<void> {
                     const s = ctx.state;
                     for (const route of Object.values(s.routes)) {
+                        if (route.sessionId === sessionId && route.status === 'interrupted' && route.rehosting) {
+                            const hosted = route.machineId !== undefined && (await machine(route.machineId).get()).activeSessions.some((h) => h.sessionId === sessionId);
+                            if (!hosted) await freshSession(route);
+                            continue;
+                        }
                         if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity' && route.status !== 'waiting-turn' && route.status !== 'waiting-answer')) continue;
                         // A task waiting for the answer to its question (#396) fails here too: the answer, when it comes, starts the asker again in a fresh session.
                         const when = route.status === 'waiting-turn' ? 'while this task waited for its running turn to end' : route.status === 'waiting-answer' ? 'while this task waited for the answer to its question' : 'before it opened';
