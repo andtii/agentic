@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 import type { DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
@@ -22,13 +22,20 @@ describe('contract type tests', () => {
         type F = { readonly kind: 'event' };
         expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
         expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
-        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping' | 'fs.request' | 'env.request' | 'history.request' | 'update.request' | 'update.cancel' | 'harness.request'>();
+        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping' | 'fs.request' | 'env.request' | 'history.request' | 'update.request' | 'update.cancel' | 'harness.request' | 'policy.request' | 'log.request' | 'login.request' | 'login.answer' | 'login.cancel'>();
         expectTypeOf<Discriminant<DaemonFrame, 't'>>().toEqualTypeOf<(typeof DAEMON_FRAME_TYPES)[number]>();
         expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<(typeof PLATFORM_FRAME_TYPES)[number]>();
         expectTypeOf<Extract<DaemonFrame, { t: 'session.closed' }>['code']>().toEqualTypeOf<SessionClosedCode | undefined>();
-        expectTypeOf<Extract<PlatformFrame, { t: 'update.request' }>['target']>().toEqualTypeOf<ReleaseAsset | 'previous'>();
+        expectTypeOf<Extract<PlatformFrame, { t: 'update.request' }>['target']>().toEqualTypeOf<ReleaseAsset | 'previous' | 'restart'>();
         expectTypeOf<DaemonBuild['platform']>().toEqualTypeOf<string>();
         expectTypeOf<Discriminant<Extract<PlatformFrame, { t: 'env.request' }>, 'op'>>().toEqualTypeOf<'put' | 'remove'>();
+        // #355: the policy request is a closed union of ops, and a login answer is text only — nothing else rides it.
+        expectTypeOf<Discriminant<Extract<PlatformFrame, { t: 'policy.request' }>, 'op'>>().toEqualTypeOf<'set' | 'browse'>();
+        expectTypeOf<Discriminant<MachinePolicyOp, 'op'>>().toEqualTypeOf<'set' | 'browse'>();
+        expectTypeOf<keyof Extract<PlatformFrame, { t: 'login.answer' }>>().toEqualTypeOf<'v' | 't' | 'requestId' | 'text'>();
+        expectTypeOf<Extract<DaemonFrame, { t: 'login.status' }>['phase']>().toEqualTypeOf<LoginPhase>();
+        expectTypeOf<'policy' | 'log' | 'login'>().toMatchTypeOf<DaemonFeature>();
+        expectTypeOf<MachinePolicy['source']>().toEqualTypeOf<'local' | 'web' | undefined>();
     });
     it('fs operations and results are closed unions', () => {
         expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
@@ -40,6 +47,14 @@ describe('contract type tests', () => {
         expectTypeOf<Discriminant<EnvOp, 'op'>>().toEqualTypeOf<'put' | 'remove'>();
         expectTypeOf<'outside-allowed-roots'>().toMatchTypeOf<EnvErrorCode>();
         expectTypeOf<'profileDir'>().not.toMatchTypeOf<keyof EnvironmentInput>();
+        expectTypeOf<EnvironmentInput['allowBypassPermissions']>().toEqualTypeOf<boolean | undefined>();
+        expectTypeOf<'policy-locked'>().toMatchTypeOf<MachinePolicyErrorCode>();
+        expectTypeOf<'policy-locked'>().not.toMatchTypeOf<EnvErrorCode>();
+    });
+    it('a user principal may be elevated; no other kind is', () => {
+        expectTypeOf<Extract<Principal, { kind: 'user' }>['elevatedUntil']>().toEqualTypeOf<number | undefined>();
+        expectTypeOf<'elevatedUntil'>().not.toMatchTypeOf<keyof Extract<Principal, { kind: 'machine' }>>();
+        expectTypeOf<'elevatedUntil'>().not.toMatchTypeOf<keyof Extract<Principal, { kind: 'agent' }>>();
     });
     it('runtime drivers are generic over the session and policy types', () => {
         type S = { readonly id: string };

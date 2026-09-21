@@ -198,6 +198,43 @@ export function pathWithin(path: string, roots: readonly string[], os: HostOs): 
     });
 }
 
+/** `~` or `~/…` (`~\…`): a root the daemon expands to its user's home folder (#355). */
+export function isHomeRelativeRoot(root: string): boolean {
+    return /^~([\\/].*)?$/.test(root);
+}
+
+/**
+ * The comparable spelling of a requested policy root (#355): a `~` form with
+ * its separators unified and no trailing separator; anything else through
+ * `normalizePath` when it is absolute, else trimmed as typed. Case is folded
+ * on Windows. Only spellings are compared — links are the daemon's business.
+ */
+export function policyRootKey(root: string, os: HostOs): string {
+    const t = root.trim();
+    const sep = os === 'windows' ? '\\' : '/';
+    let key: string;
+    if (isHomeRelativeRoot(t)) key = t.replace(/[\\/]+/g, sep).replace(new RegExp(`\\${sep}+$`), '');
+    else key = normalizePath(t, os) ?? t;
+    return os === 'windows' ? key.toLowerCase() : key;
+}
+
+/**
+ * Whether a machine's reported policy is what the platform asked for (#355):
+ * it was set from the web and the roots it *requested* (`MachinePolicy.requested`,
+ * the input before `~` expansion) are the desired set, order aside. A policy
+ * set on the machine, or one a daemon predating #355 reports, never converges —
+ * the platform then sends the desired policy once more. No home directory is
+ * needed on this side: `~` stays `~`.
+ */
+export function policyConverged(desired: readonly string[], reported: { readonly source?: 'local' | 'web'; readonly requested?: readonly string[] } | undefined, os: HostOs): boolean {
+    if (!reported || reported.source !== 'web') return false;
+    const want = new Set(desired.map((r) => policyRootKey(r, os)));
+    const have = new Set((reported.requested ?? []).map((r) => policyRootKey(r, os)));
+    if (want.size !== have.size) return false;
+    for (const k of want) if (!have.has(k)) return false;
+    return true;
+}
+
 /**
  * Where a new worktree for `branch` of `repo` goes by default: beside the
  * other worktrees in the sigx layout (`<repo>/main` + `<repo>/branches/<slug>`;

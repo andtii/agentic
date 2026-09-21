@@ -5,7 +5,7 @@
  */
 
 export { LIMITS } from './limits.js';
-export { cursor, cursors, platformCursor, environment, modelOption, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot, resourceSample, machineTelemetry, releaseAsset, harnessReport, harnessReports, lifecycleError } from './common.js';
+export { cursor, cursors, platformCursor, environment, modelOption, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot, resourceSample, machineTelemetry, releaseAsset, harnessReport, harnessReports, lifecycleError, machinePolicyInput, machinePolicyError, machinePolicyResult, machineListing, daemonLogResult, daemonLogError, loginAction, loginError } from './common.js';
 export { sessionRef, agentCapabilities, agentEvent, promptPart, decision, outputSpec, wireFrame, wireEventFrame, wireReply, wireCommand } from './wire.js';
 export {
     helloFrame,
@@ -26,7 +26,10 @@ export {
     harnessStatusFrame,
     harnessesFrame,
     sessionRefFrame,
+    policyResponseFrame,
+    logResponseFrame,
+    loginStatusFrame,
     daemonFrameSchemas,
     daemonFrame
 } from './daemon.js';
-export { welcomeFrame, sessionOpenFrame, sessionCommandFrame, sessionCloseFrame, toolResultFrame, pingFrame, fsRequestFrame, envRequestFrame, historyRequestFrame, updateRequestFrame, updateCancelFrame, harnessRequestFrame, platformFrameSchemas, platformFrame } from './platform.js';
+export { welcomeFrame, sessionOpenFrame, sessionCommandFrame, sessionCloseFrame, toolResultFrame, pingFrame, fsRequestFrame, envRequestFrame, historyRequestFrame, updateRequestFrame, updateCancelFrame, harnessRequestFrame, policyRequestFrame, logRequestFrame, loginRequestFrame, loginAnswerFrame, loginCancelFrame, platformFrameSchemas, platformFrame } from './platform.js';

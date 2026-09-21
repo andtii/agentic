@@ -139,6 +139,21 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         valid: { v: V, t: 'harnesses', harnesses: [{ runtime: 'claude-code', installed: { version: '2.1.0', at: 1 }, status: 'ready', current: true }, { runtime: 'codex-cli', status: 'missing' }] },
         invalid: { v: V, t: 'harnesses', harnesses: [{ runtime: 'claude-code', status: 'gone' }] },
         path: 'harnesses.0.status'
+    },
+    'policy.response': {
+        valid: { v: V, t: 'policy.response', requestId: 'p_1', result: { policy: { webManaged: true, allowedRoots: ['/home/me'], source: 'web', requested: ['~'] } } },
+        invalid: { v: V, t: 'policy.response', requestId: 'p_1', result: { policy: { webManaged: true, allowedRoots: ['/home/me'] } }, error: { code: 'policy-locked', message: 'locked' } },
+        path: 'error'
+    },
+    'log.response': {
+        valid: { v: V, t: 'log.response', requestId: 'l_1', result: { lines: ['{"level":"info","msg":"daemon: started"}'], truncated: false } },
+        invalid: { v: V, t: 'log.response', requestId: 'l_1', error: { code: 'gone', message: 'no' } },
+        path: 'error.code'
+    },
+    'login.status': {
+        valid: { v: V, t: 'login.status', requestId: 'lg_1', environmentId: env.id, phase: 'action', action: { kind: 'device-code', url: 'https://github.com/login/device', code: 'ABCD-1234', expectsPaste: false } },
+        invalid: { v: V, t: 'login.status', requestId: 'lg_1', environmentId: env.id, phase: 'waiting', action: { kind: 'open-url', url: 'https://x.test', expectsPaste: true } },
+        path: 'action'
     }
 };
 
@@ -187,7 +202,17 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         valid: { v: V, t: 'harness.request', requestId: 'hr_1', op: 'remove', runtime: 'codex-cli', mode: 'now' },
         invalid: { v: V, t: 'harness.request', requestId: 'hr_1', op: 'upgrade', runtime: 'codex-cli', mode: 'now' },
         path: 'op'
-    }
+    },
+    'policy.request': {
+        valid: { v: V, t: 'policy.request', requestId: 'p_1', op: 'set', policy: { allowedRoots: ['~', 'C:\\src'] } },
+        // The input is strict: a key the contract does not name fails the frame.
+        invalid: { v: V, t: 'policy.request', requestId: 'p_1', op: 'set', policy: { allowedRoots: ['~'], locked: false } },
+        path: 'policy'
+    },
+    'log.request': { valid: { v: V, t: 'log.request', requestId: 'l_1', lines: 200 }, invalid: { v: V, t: 'log.request', requestId: 'l_1', lines: 0 }, path: 'lines' },
+    'login.request': { valid: { v: V, t: 'login.request', requestId: 'lg_1', environmentId: env.id }, invalid: { v: V, t: 'login.request', requestId: 'lg_1' }, path: 'environmentId' },
+    'login.answer': { valid: { v: V, t: 'login.answer', requestId: 'lg_1', text: 'code#state' }, invalid: { v: V, t: 'login.answer', requestId: 'lg_1', text: '' }, path: 'text' },
+    'login.cancel': { valid: { v: V, t: 'login.cancel', requestId: 'lg_1' }, invalid: { v: V, t: 'login.cancel' }, path: 'requestId' }
 };
 
 describe('daemon frame schemas', () => {
@@ -457,6 +482,7 @@ describe('daemon frame schemas', () => {
         it('an update target is a strict release asset over https with a 64-hex digest, or previous', () => {
             expect(request(asset)).toEqual({ success: true, data: { v: V, t: 'update.request', requestId: 'u_1', target: asset, mode: 'drain', drainTimeoutMs: 600_000 } });
             expect(request('previous').success).toBe(true);
+            expect(request('restart').success).toBe(true); // #355: the same build again, nothing downloaded
             expect(request({ ...asset, sha256: 'AB'.repeat(32) }).success).toBe(true);
             expect(request('latest').success).toBe(false);
             for (const bad of [
@@ -569,5 +595,107 @@ describe('daemon frame schemas', () => {
     it('refuse the wrong protocol version at the schema level too', () => {
         expect(daemonFrameSchemas.pong.safeParse({ v: V + 1, t: 'pong', at: 1 }).success).toBe(false);
         expect(platformFrameSchemas['session.command'].safeParse({ ...platformCases['session.command'].valid, command: { ...platformCases['session.command'].valid.command, v: W + 1 } }).success).toBe(false);
+    });
+});
+
+describe('machines managed from the web (#355)', () => {
+    const issues = (r: { success: boolean; error?: { issues: readonly { path: readonly PropertyKey[] }[] } }) => r.error?.issues.map((i) => i.path.join('.')) ?? [];
+
+    it('hello and env carry the policy with or without source, locked and requested', () => {
+        const bare = { webManaged: true, allowedRoots: ['/work'] };
+        const full = { webManaged: true, allowedRoots: ['/home/me/src'], source: 'web', locked: false, requested: ['~/src'] };
+        const off = { webManaged: false, allowedRoots: [], locked: true };
+        for (const policy of [bare, full, off]) {
+            expect(daemonFrameSchemas.hello.safeParse({ ...daemonCases.hello.valid, policy }).success, JSON.stringify(policy)).toBe(true);
+            expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy }).success, JSON.stringify(policy)).toBe(true);
+        }
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, source: 'cloud' } }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, requested: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) } }).success).toBe(false);
+        // A reported policy is bounded like a requested one: at most `policyRoots` folders of at most `policyRoot` characters.
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) } }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot)}`] } }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot - 1)}`] } }).success).toBe(true);
+    });
+
+    it('a policy request sets a bounded list of folders or browses one; the set input is strict', () => {
+        const set = (policy: unknown) => platformFrameSchemas['policy.request'].safeParse({ v: V, t: 'policy.request', requestId: 'p_1', op: 'set', policy });
+        expect(set({ allowedRoots: [] }).success).toBe(true);
+        expect(set({ allowedRoots: ['~'] }).success).toBe(true);
+        expect(set({ allowedRoots: Array.from({ length: LIMITS.policyRoots }, (_, i) => `/r${i}`) }).success).toBe(true);
+        expect(set({ allowedRoots: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) }).success).toBe(false);
+        expect(set({ allowedRoots: [''] }).success).toBe(false);
+        expect(set({ allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot)}`] }).success).toBe(false);
+        expect(set({ allowedRoots: ['~'], webManaged: true }).success).toBe(false);
+        expect(set({ allowedRoots: ['~'], profileDir: '/x' }).success).toBe(false);
+        const browse = (extra: Record<string, unknown>) => platformFrameSchemas['policy.request'].safeParse({ v: V, t: 'policy.request', requestId: 'p_1', op: 'browse', ...extra });
+        expect(browse({}).success).toBe(true);
+        expect(browse({ path: 'C:\\' }).success).toBe(true);
+        expect(browse({ path: '' }).success).toBe(false);
+        expect(platformFrameSchemas['policy.request'].safeParse({ v: V, t: 'policy.request', requestId: 'p_1', op: 'lock' }).success).toBe(false);
+    });
+
+    it('a policy response is exactly one of a policy, a listing or a named error', () => {
+        const answer = (f: Record<string, unknown>) => daemonFrameSchemas['policy.response'].safeParse({ v: V, t: 'policy.response', requestId: 'p_1', ...f });
+        expect(answer({ result: { policy: { webManaged: false, allowedRoots: [], source: 'web', requested: [] } } }).success).toBe(true);
+        expect(answer({ result: { listing: { path: '', entries: [{ name: 'C:', path: 'C:\\' }], truncated: false } } }).success).toBe(true);
+        expect(answer({ result: { listing: { path: '/home', parent: '/', entries: [], truncated: true } } }).success).toBe(true);
+        for (const code of ['policy-locked', 'invalid', 'not-found', 'not-a-directory', 'remote-path', 'protected', 'io', 'timeout', 'unsupported']) expect(answer({ error: { code, message: code } }).success, code).toBe(true);
+        expect(answer({ error: { code: 'nope', message: 'x' } }).success).toBe(false);
+        expect(answer({ result: { listing: { path: '', entries: Array.from({ length: FS_LIST_MAX_ENTRIES + 1 }, (_, i) => ({ name: `d${i}`, path: `/d${i}` })), truncated: true } } }).success).toBe(false);
+        expect(issues(answer({})).at(0)).toBe('result');
+        expect(answer({ result: { policy: { webManaged: false, allowedRoots: [] } }, error: { code: 'io', message: 'both' } }).success).toBe(false);
+    });
+
+    it('a log request and its answer are bounded, and the answer is result or error', () => {
+        const ask = (lines: unknown) => platformFrameSchemas['log.request'].safeParse({ v: V, t: 'log.request', requestId: 'l_1', lines });
+        expect(ask(1).success).toBe(true);
+        expect(ask(LIMITS.logLines).success).toBe(true);
+        expect(ask(LIMITS.logLines + 1).success).toBe(false);
+        expect(ask(1.5).success).toBe(false);
+        const answer = (f: Record<string, unknown>) => daemonFrameSchemas['log.response'].safeParse({ v: V, t: 'log.response', requestId: 'l_1', ...f });
+        expect(answer({ result: { lines: Array.from({ length: LIMITS.logLines }, () => 'x'), truncated: true } }).success).toBe(true);
+        expect(answer({ result: { lines: Array.from({ length: LIMITS.logLines + 1 }, () => 'x'), truncated: true } }).success).toBe(false);
+        expect(answer({ error: { code: 'no-log', message: 'the daemon runs in a terminal' } }).success).toBe(true);
+        expect(answer({}).success).toBe(false);
+    });
+
+    it('a login status carries its action exactly in the action phase and its error exactly when failed', () => {
+        const status = (f: Record<string, unknown>) => daemonFrameSchemas['login.status'].safeParse({ v: V, t: 'login.status', requestId: 'lg_1', environmentId: env.id, ...f });
+        const action = { kind: 'open-url', url: 'https://claude.ai/oauth/authorize?x=1', expectsPaste: true };
+        expect(status({ phase: 'started' }).success).toBe(true);
+        expect(status({ phase: 'action', action }).success).toBe(true);
+        expect(status({ phase: 'action' }).success).toBe(false);
+        expect(status({ phase: 'started', action }).success).toBe(false);
+        expect(status({ phase: 'waiting' }).success).toBe(true);
+        expect(status({ phase: 'done' }).success).toBe(true);
+        expect(status({ phase: 'failed', error: { code: 'cancelled', message: 'cancelled' } }).success).toBe(true);
+        expect(status({ phase: 'failed' }).success).toBe(false);
+        expect(status({ phase: 'done', error: { code: 'failed', message: 'x' } }).success).toBe(false);
+        expect(status({ phase: 'signing' }).success).toBe(false);
+        expect(status({ phase: 'action', action: { ...action, kind: 'sms' } }).success).toBe(false);
+    });
+
+    it('a login answer is bounded text and nothing else', () => {
+        const answer = (f: Record<string, unknown>) => platformFrameSchemas['login.answer'].safeParse({ v: V, t: 'login.answer', requestId: 'lg_1', ...f });
+        expect(answer({ text: 'x'.repeat(LIMITS.loginAnswer) }).success).toBe(true);
+        expect(answer({ text: 'x'.repeat(LIMITS.loginAnswer + 1) }).success).toBe(false);
+        expect(answer({ text: '' }).success).toBe(false);
+        expect(answer({}).success).toBe(false);
+        // Unknown keys are stripped like on every frame: a value could not smuggle a second field through.
+        expect(answer({ text: 'code', profileDir: '/x' })).toEqual({ success: true, data: { v: V, t: 'login.answer', requestId: 'lg_1', text: 'code' } });
+    });
+
+    it('an environment input may set allowBypassPermissions and still never a profile directory', () => {
+        const put = (environment: Record<string, unknown>) => platformFrameSchemas['env.request'].safeParse({ v: V, t: 'env.request', requestId: 'env_1', op: 'put', environment: { name: 'Work', runtime: 'in-memory', cwdRoots: ['/work'], ...environment } });
+        expect(put({ allowBypassPermissions: true }).success).toBe(true);
+        expect(put({ allowBypassPermissions: false }).success).toBe(true);
+        expect(put({ allowBypassPermissions: 'yes' }).success).toBe(false);
+        expect(put({ allowBypassPermissions: true, profileDir: '/home/me/.claude' }).success).toBe(false);
+    });
+
+    it('hello.features lists the new families and drops what this end does not know', () => {
+        const hello = daemonFrameSchemas.hello.safeParse({ ...daemonCases.hello.valid, features: ['update', 'policy', 'log', 'login', 'teleport'] });
+        expect(hello.success).toBe(true);
+        if (hello.success) expect(hello.data.features).toEqual(['update', 'policy', 'log', 'login']);
     });
 });

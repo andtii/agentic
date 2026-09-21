@@ -5,7 +5,7 @@ import type { ChatId, EnvironmentId, MachineId, MessageId, ScheduleId, SessionId
 import type { ReleaseChannel, UpdatePolicy } from './release.js';
 
 /** The notification kinds the Inbox delivers (architecture §4 Inbox). */
-export const NOTIFICATION_KINDS = ['reminder', 'task-done', 'task-failed', 'approval', 'input', 'update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available', 'resource-pressure'] as const;
+export const NOTIFICATION_KINDS = ['reminder', 'task-done', 'task-failed', 'approval', 'input', 'update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available', 'resource-pressure', 'machine-security'] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

@@ -150,7 +150,8 @@ export interface UpdateOutcome {
     readonly requestId?: string;
     readonly from: string;
     readonly to: string;
-    readonly outcome: 'applied' | 'failed' | 'rolled-back' | 'timeout' | 'cancelled';
+    /** `restarted`: the daemon came back after `target: 'restart'` (#355) — no version to compare. */
+    readonly outcome: 'applied' | 'failed' | 'rolled-back' | 'timeout' | 'cancelled' | 'restarted';
     readonly at: number;
     readonly error?: string;
 }

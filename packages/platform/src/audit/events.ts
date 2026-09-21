@@ -32,6 +32,12 @@ export const AUDIT_KINDS = [
     'machine.update-failed',
     'machine.channel-set',
     'machine.update-policy-set',
+    'machine.policy-set',
+    'machine.renamed',
+    'machine.restart-requested',
+    'machine.restarted',
+    'machine.login',
+    'auth.elevated',
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
@@ -222,6 +228,48 @@ export interface MachineUpdatePolicySetData {
     readonly policy: UpdatePolicy | null;
 }
 
+/**
+ * The owner set the folders the web may use on a machine (#355): what was asked (`~` forms included — the machine
+ * expands them), what the policy named before, and where the request came from — the page, or the pairing preset.
+ */
+export interface MachinePolicySetData {
+    readonly machineId: MachineId;
+    readonly allowedRoots: readonly string[];
+    readonly previous: readonly string[];
+    readonly source: 'web' | 'pairing';
+}
+
+export interface MachineRenamedData {
+    readonly machineId: MachineId;
+    readonly from: string;
+    readonly to: string;
+}
+
+/** The owner asked a machine's daemon to restart (#355): `update.request { target: 'restart' }`. */
+export interface MachineRestartRequestedData {
+    readonly machineId: MachineId;
+    readonly mode: 'drain' | 'now';
+}
+
+/** The daemon came back after a requested restart (#355). */
+export interface MachineRestartedData {
+    readonly machineId: MachineId;
+}
+
+/** A sign-in relayed from the web ended (#355); never the code that was pasted. */
+export interface MachineLoginData {
+    readonly machineId: MachineId;
+    readonly environmentId: EnvironmentId;
+    readonly outcome: 'done' | 'failed' | 'cancelled' | 'timeout';
+    readonly error?: string;
+}
+
+/** The user re-confirmed through the login provider and made a security-sensitive change with it (#355): recorded once per elevation window, by the first change. */
+export interface AuthElevatedData {
+    readonly userId: string;
+    readonly until: number;
+}
+
 export interface PluginToggledData {
     readonly pluginId: string;
 }
@@ -351,6 +399,12 @@ export interface AuditDataByKind {
     readonly 'machine.update-failed': MachineUpdateFailedData;
     readonly 'machine.channel-set': MachineChannelSetData;
     readonly 'machine.update-policy-set': MachineUpdatePolicySetData;
+    readonly 'machine.policy-set': MachinePolicySetData;
+    readonly 'machine.renamed': MachineRenamedData;
+    readonly 'machine.restart-requested': MachineRestartRequestedData;
+    readonly 'machine.restarted': MachineRestartedData;
+    readonly 'machine.login': MachineLoginData;
+    readonly 'auth.elevated': AuthElevatedData;
     readonly 'harness.changed': HarnessChangedData;
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;

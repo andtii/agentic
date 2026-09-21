@@ -255,7 +255,8 @@ describe('the audit trail of a scripted scenario', () => {
         // `session.interrupted` / `session.resumed` / `task.machine-lost` need a daemon that goes away: covered by the Routing tests (#366).
         // The `machine.update*` / `machine.channel-set` kinds need a daemon that updates: covered by the Machine update tests (#365).
         // `harness.changed` needs a daemon that changes a harness: covered by the Machine harness tests (#370).
-        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed' | 'chat.project-set' | 'chat.machine-set' | 'project.changed' | 'session.interrupted' | 'session.resumed' | 'task.machine-lost' | 'machine.update-requested' | 'machine.updated' | 'machine.update-failed' | 'machine.channel-set' | 'machine.update-policy-set' | 'harness.changed'>, number> = {
+        // The #355 kinds (`machine.policy-set`, `machine.renamed`, `machine.restart-requested`, `machine.restarted`, `machine.login`, `auth.elevated`) land with their Machine methods (#480, #481, #484) and the elevation (#478).
+        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed' | 'chat.project-set' | 'chat.machine-set' | 'project.changed' | 'session.interrupted' | 'session.resumed' | 'task.machine-lost' | 'machine.update-requested' | 'machine.updated' | 'machine.update-failed' | 'machine.channel-set' | 'machine.update-policy-set' | 'harness.changed' | 'machine.policy-set' | 'machine.renamed' | 'machine.restart-requested' | 'machine.restarted' | 'machine.login' | 'auth.elevated'>, number> = {
             'config.versioned': 3, // agent_api v1, agent_cc v1, agent_api v2 (the accepted proposal)
             'environment.chosen': 3, // t1 (api), t3 (E1), t3 fallback
             'task.transition': 9, // t1 ×4, t2 ×2, t3 ×3

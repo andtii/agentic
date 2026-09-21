@@ -92,6 +92,12 @@ export interface EnvironmentInput {
     /** Sessions at once; the daemon's default when absent. */
     readonly concurrency?: number;
     readonly accountLabel?: string;
+    /**
+     * Let sessions here run in a mode that asks about nothing (#450, #355): `true` sets it, `false` clears it, absent
+     * keeps what the environment has. Turning it on is a security-sensitive change the platform admits only to an
+     * elevated owner; the daemon keeps the flag on the row.
+     */
+    readonly allowBypassPermissions?: boolean;
 }
 
 /** What `env.request` asks a daemon to do. */
@@ -130,12 +136,125 @@ export interface EnvError {
 }
 
 /**
- * The machine-local policy a daemon reports in `hello` / `env` so the web can
- * explain itself. It is only ever edited on the machine; nothing on the wire
- * changes it. Absent → the daemon predates web-managed environments.
+ * The policy for web-managed environments as a daemon reports it in `hello` /
+ * `env`: which folders the web may place working roots in. It is set from the
+ * web with `policy.request` (#355; decisions 2026-09-22) or on the machine
+ * with `agentic-daemon policy …`, and `locked` on the machine makes it local-only
+ * again. Absent → the daemon predates web-managed environments.
+ *
+ * The platform keeps the roots it *asked for* (`MachinePolicyInput`) and reads
+ * `requested` back to tell whether the machine converged (`policyConverged`):
+ * a `~` in the request is expanded on the machine and never leaves it.
  */
 export interface MachinePolicy {
     readonly webManaged: boolean;
-    /** Absolute, machine-native; empty when `webManaged` is off. */
+    /** Absolute, machine-native, links resolved; empty when `webManaged` is off. */
+    readonly allowedRoots: readonly string[];
+    /** Who wrote the policy last: the web (`policy.request`) or a command on the machine. Absent from a daemon that predates #355. */
+    readonly source?: 'local' | 'web';
+    /** `agentic-daemon policy lock`: the web may read the policy but every `policy.request` is refused `policy-locked`. */
+    readonly locked?: boolean;
+    /** The roots exactly as the web asked for them, before `~` expansion and link resolution; present when `source` is `web`. */
+    readonly requested?: readonly string[];
+}
+
+/**
+ * What the platform asks a daemon to make its policy (`policy.request { op: 'set' }`, #355): the folders the web may use,
+ * each absolute and machine-native or `~` / `~/…` for the daemon user's home. Empty turns web management off.
+ */
+export interface MachinePolicyInput {
     readonly allowedRoots: readonly string[];
 }
+
+/** A policy names at most this many folders. */
+export const POLICY_MAX_ROOTS = 32;
+
+export type MachinePolicyErrorCode =
+    /** The machine's owner locked the policy on the machine; only `agentic-daemon policy unlock` there lets the web set it again. */
+    | 'policy-locked'
+    /** A root is not an absolute local path, or a browse path is malformed. */
+    | 'invalid'
+    /** A root does not exist on the machine. */
+    | 'not-found'
+    /** A root exists but is not a folder. */
+    | 'not-a-directory'
+    /** A root is a network share or a device path — never a working root. */
+    | 'remote-path'
+    /** A root is inside the daemon's own folders (its configuration, state or an account profile). */
+    | 'protected'
+    /** Reading or writing `policy.json` failed, or a folder could not be read. */
+    | 'io'
+    /** The daemon did not answer in time — set by the platform, never sent by a daemon. */
+    | 'timeout'
+    /** The daemon does not answer the request (no port for it). */
+    | 'unsupported';
+
+export interface MachinePolicyError {
+    readonly code: MachinePolicyErrorCode;
+    readonly message: string;
+}
+
+/**
+ * What `policy.request { op: 'browse' }` answers (#355): the immediate subfolders of a folder anywhere on the machine —
+ * or, without a path, the machine's roots (drives, `/`, the home folder) — for picking allowed folders. Folders only,
+ * no git badges, never the daemon's own folders.
+ */
+export interface MachineListing {
+    /** The listed folder, absolute and machine-native; empty for the roots listing. */
+    readonly path: string;
+    /** Its parent — absent for a root of the machine and for the roots listing. */
+    readonly parent?: string;
+    readonly entries: readonly { readonly name: string; readonly path: string }[];
+    /** More than `FS_LIST_MAX_ENTRIES` subfolders: only the first ones are listed. */
+    readonly truncated: boolean;
+}
+
+/** What `policy.response` answers: the policy as applied, a listing, or nothing more than success for an op that changes nothing. */
+export type MachinePolicyResult = { readonly policy: MachinePolicy; readonly listing?: undefined } | { readonly listing: MachineListing; readonly policy?: undefined };
+
+/** What `policy.request` asks a daemon to do. */
+export type MachinePolicyOp =
+    /** Replace the policy: web-managed inside these roots, or off when empty. */
+    | { readonly op: 'set'; readonly policy: MachinePolicyInput }
+    /** List a folder's subfolders (or the machine's roots without a path) for the folder picker. */
+    | { readonly op: 'browse'; readonly path?: string };
+
+/** The log tail a daemon answers `log.request` with (#355): the last lines of its own log, every one redacted. */
+export interface DaemonLogResult {
+    readonly lines: readonly string[];
+    /** The file holds more than what was read. */
+    readonly truncated: boolean;
+}
+
+export interface DaemonLogError {
+    /** `no-log`: the daemon runs without a log file (a foreground `run`). */
+    readonly code: 'no-log' | 'io' | 'timeout' | 'unsupported';
+    readonly message: string;
+}
+
+/** `log.request` asks for at most this many lines. */
+export const DAEMON_LOG_MAX_LINES = 500;
+
+/**
+ * A sign-in relayed from the web (#355, the `login` feature): what the daemon reports about a login it runs for an
+ * environment. `action` is what the person must do — open a URL (and paste a code back when `expectsPaste`), or enter
+ * a device code at a URL. The pasted text travels in `login.answer` and is stored nowhere.
+ */
+export type LoginPhase = 'started' | 'action' | 'waiting' | 'done' | 'failed';
+
+export interface LoginAction {
+    readonly kind: 'open-url' | 'device-code';
+    readonly url: string;
+    /** The device code to enter, for `device-code`. */
+    readonly code?: string;
+    /** The runtime wants a code pasted back once the browser flow ends. */
+    readonly expectsPaste: boolean;
+}
+
+export interface LoginError {
+    readonly code: 'busy' | 'unknown-environment' | 'unsupported' | 'cancelled' | 'timeout' | 'failed';
+    readonly message: string;
+}
+
+/** `login.answer.text` is at most this long. */
+export const LOGIN_ANSWER_MAX_CHARS = 2048;

@@ -7,7 +7,7 @@
  * in-memory queue, a WebSocket pair, a relay.
  */
 
-import type { Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, MachinePolicy, ReleaseAsset, RuntimeId, SessionId } from '@agentic/core';
+import type { Cursor, EnvironmentDescriptor, EnvironmentId, LoginAction, MachineId, MachinePolicy, ReleaseAsset, RuntimeId, SessionId } from '@agentic/core';
 import type { PlatformFrame } from '../frames.js';
 
 /** What the scripted runtime behind the daemon must do. */
@@ -27,7 +27,7 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness' | 'policy' | 'log' | 'login' | 'restart';
 
 export interface DaemonConformanceHarness {
     /**
@@ -39,7 +39,11 @@ export interface DaemonConformanceHarness {
      * `'build'`: `hello` carries `build` and `features` (#359); `'resume'`: the daemon implements `restart`, answers a `wanted` session it
      * lost with `session.closed { code: 'restart' }` and re-opens it from `spec.resume` on a later epoch (#363); `'update'`: the daemon
      * answers `update.request` / `update.cancel` (#364) and the harness names an `updateTarget`; `'harness'`: the daemon answers
-     * `harness.request` (#369) and the harness names a `harnessTarget`.
+     * `harness.request` (#369) and the harness names a `harnessTarget`; `'policy'`: the daemon answers `policy.request` (#355) —
+     * `set` with `~` expanded to its user's home and its own folder refused, `browse` — and implements `lock`; `'log'`: the daemon
+     * answers `log.request` from a log that holds at least `logLines` lines; `'login'`: the daemon relays a sign-in for the suite
+     * environment (`login.request`, the `loginAction` it will show, and `loginAnswer` when the action expects a paste); `'restart'`:
+     * the daemon restarts on `update.request { target: 'restart' }` — no download, `session.closed { code: 'restart' }`.
      */
     readonly features?: readonly ConformanceFeature[];
     /**
@@ -51,6 +55,13 @@ export interface DaemonConformanceHarness {
     readonly updateTarget?: ReleaseAsset;
     /** Feature `'harness'`: a harness build the daemon can install, for a runtime it has a driver for. */
     readonly harnessTarget?: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset };
+    /** Feature `'policy'`: a folder of the daemon's own (its configuration, say) that a policy must refuse `protected` and a browse must never list. */
+    readonly protectedFolder?: string;
+    /** Feature `'log'`: how many lines the daemon's log holds at least, so the suite can ask for fewer and see `truncated`. */
+    readonly logLines?: number;
+    /** Feature `'login'`: the action the daemon will show for the suite environment's sign-in, and the text that completes it when it expects a paste. */
+    readonly loginAction?: LoginAction;
+    readonly loginAnswer?: string;
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;
 }
@@ -66,6 +77,8 @@ export interface ConformanceDaemon {
     setEnvironments?(environments: readonly EnvironmentDescriptor[]): void | Promise<void>;
     /** Feature `'env-manage'`: change the machine-local policy the way its owner would, on the machine; the daemon must announce it with `env`. */
     setPolicy?(policy: MachinePolicy): void | Promise<void>;
+    /** Feature `'policy'`: `agentic-daemon policy lock` / `unlock` on the machine (#355); the daemon must announce it with `env`. */
+    lock?(locked: boolean): void | Promise<void>;
     /** Feature `'gap'`: forget the session log before `keepFrom`, so a `wanted` cursor older than that cannot be replayed. */
     truncateLog?(sessionId: SessionId, keepFrom: Cursor): void | Promise<void>;
     /**

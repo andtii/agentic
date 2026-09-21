@@ -1,4 +1,4 @@
-import { normalizePath, originKey, pathWithin, sameOrigin, suggestWorktreePath } from '../src/index';
+import { normalizePath, originKey, pathWithin, sameOrigin, suggestWorktreePath, isHomeRelativeRoot, policyConverged, policyRootKey } from '../src/index';
 
 describe('originKey / sameOrigin (#330)', () => {
     it.each([
@@ -107,5 +107,39 @@ describe('suggestWorktreePath', () => {
     });
     it('is null for a relative repo', () => {
         expect(suggestWorktreePath('app', 'x', 'linux')).toBeNull();
+    });
+});
+
+describe('policyConverged (#355)', () => {
+    const web = (requested: readonly string[]) => ({ webManaged: requested.length > 0, allowedRoots: requested.map((r) => (r === '~' ? '/home/me' : r)), source: 'web' as const, requested });
+
+    it('holds when the machine echoes the requested roots, order and spelling aside', () => {
+        expect(policyConverged(['~', '/src'], web(['/src', '~']), 'linux')).toBe(true);
+        expect(policyConverged(['~/src/'], web(['~\\src']), 'linux')).toBe(true);
+        expect(policyConverged(['C:/Src', 'c:\\work\\'], web(['c:\\src', 'C:\\Work']), 'windows')).toBe(true);
+        expect(policyConverged(['/Src'], web(['/src']), 'linux')).toBe(false);
+        expect(policyConverged([], web([]), 'linux')).toBe(true);
+    });
+
+    it('never holds for a policy the machine set, a daemon that predates it, or a missing one', () => {
+        expect(policyConverged(['~'], { source: 'local' }, 'linux')).toBe(false);
+        expect(policyConverged(['~'], {}, 'linux')).toBe(false);
+        expect(policyConverged(['~'], undefined, 'linux')).toBe(false);
+    });
+
+    it('is a set comparison: a missing or an extra root breaks it', () => {
+        expect(policyConverged(['~', '/src'], web(['~']), 'linux')).toBe(false);
+        expect(policyConverged(['~'], web(['~', '/src']), 'linux')).toBe(false);
+        expect(policyConverged(['~', '~'], web(['~']), 'linux')).toBe(true);
+    });
+
+    it('keeps ~ literal: no home directory is needed on the platform', () => {
+        expect(policyRootKey('~', 'linux')).toBe('~');
+        expect(policyRootKey('~/src/', 'windows')).toBe('~\\src');
+        expect(policyRootKey('~\\Src', 'windows')).toBe('~\\src');
+        expect(isHomeRelativeRoot('~')).toBe(true);
+        expect(isHomeRelativeRoot('~/x')).toBe(true);
+        expect(isHomeRelativeRoot('~x')).toBe(false);
+        expect(isHomeRelativeRoot('/home/~')).toBe(false);
     });
 });

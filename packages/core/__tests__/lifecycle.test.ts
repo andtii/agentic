@@ -5,8 +5,8 @@ import type { DaemonFrame, ExecutionDefaults, MachineId, NotificationRef, Platfo
 
 describe('daemon lifecycle contract', () => {
     it('lists the update and harness frames in both directions', () => {
-        expect(DAEMON_FRAME_TYPES.slice(-3)).toEqual(['update.status', 'harness.status', 'harnesses']);
-        expect(PLATFORM_FRAME_TYPES.slice(-3)).toEqual(['update.request', 'update.cancel', 'harness.request']);
+        expect(DAEMON_FRAME_TYPES.slice(-6)).toEqual(['update.status', 'harness.status', 'harnesses', 'policy.response', 'log.response', 'login.status']);
+        expect(PLATFORM_FRAME_TYPES.slice(-8)).toEqual(['update.request', 'update.cancel', 'harness.request', 'policy.request', 'log.request', 'login.request', 'login.answer', 'login.cancel']);
         expect(new Set(DAEMON_FRAME_TYPES).size).toBe(DAEMON_FRAME_TYPES.length);
         expect(new Set(PLATFORM_FRAME_TYPES).size).toBe(PLATFORM_FRAME_TYPES.length);
     });
@@ -26,7 +26,7 @@ describe('daemon lifecycle contract', () => {
     });
 
     it('names the update notifications and points them at a machine', () => {
-        expect(NOTIFICATION_KINDS).toEqual(expect.arrayContaining(['update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available']));
+        expect(NOTIFICATION_KINDS).toEqual(expect.arrayContaining(['update-available', 'update-applied', 'update-failed', 'daemon-crash-loop', 'harness-update-available', 'machine-security']));
         const ref: NotificationRef = { kind: 'machine', machineId: 'm1' as MachineId };
         expect(ref.kind).toBe('machine');
     });

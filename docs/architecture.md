@@ -177,6 +177,9 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    history.response {requestId, exactly one of result: {events: event WireFrame[], more?} | error: {code: unknown-session | gap | internal, message, earliest?}}   (#397)
                    update.status {requestId, phase: UpdatePhase, progress?: {bytes, total}, error?: {code, message}}   (#359, `update` feature)
                    harness.status {requestId, phase: HarnessPhase, error?} · harnesses {harnesses: HarnessReport[]}   (#359, `harness` feature)
+                   policy.response {requestId, exactly one of result: {policy: MachinePolicy} | {listing: MachineListing} | error: MachinePolicyError}   (#355, `policy` feature; a set's `env` frame comes before or after it)
+                   log.response {requestId, exactly one of result: {lines, truncated} | error: {code: no-log | io | unsupported | timeout}}   (#355, `log` feature; `timeout` is the platform's, never sent by a daemon)
+                   login.status {requestId, environmentId, phase: started | action | waiting | done | failed, action?: {kind: open-url | device-code, url, code?, expectsPaste}, error?}   (#355, `login` feature)
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}, platform?: {version, minDaemonVersion?, latest?: {stable?, latest?}}}   (#359: platform? optional)
                    session.open {sessionId, environmentId, spec}   (spec.resume = the ref the runtime reported through session.ref)
                    session.command {sessionId, command: WireCommand} · session.close {sessionId}
@@ -184,9 +187,14 @@ platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}, platfo
                    fs.request {requestId, environmentId, op: list {path} | worktree {repo, branch, base?, path} | locate {origin, depth?}}
                    env.request {requestId, op: 'put', environment: EnvironmentInput} | {requestId, op: 'remove', environmentId}
                    history.request {requestId, sessionId, from: Cursor (exclusive; may be platform-stamped, fractional), to?: Cursor (inclusive), limit?}   (#397)
-                   update.request {requestId, target: ReleaseAsset | 'previous', mode: drain | now, drainTimeoutMs} · update.cancel {requestId}   (#359)
+                   update.request {requestId, target: ReleaseAsset | 'previous' | 'restart', mode: drain | now, drainTimeoutMs} · update.cancel {requestId}   (#359; 'restart' #355: nothing downloaded, drain, exit for the supervisor)
                    harness.request {requestId, op: install | update | remove, runtime, target?: ReleaseAsset, mode: drain | now}   (#359)
+                   policy.request {requestId, op: 'set', policy: {allowedRoots}} | {requestId, op: 'browse', path?}   (#355; the folders the web may use — `~` expanded on the machine — or a listing for the picker)
+                   log.request {requestId, lines ≤ 500}   (#355)
+                   login.request {requestId, environmentId} · login.answer {requestId, text} · login.cancel {requestId}   (#355; a sign-in relayed from the web)
 ```
+
+**Machines managed from the web** (#355, contract; the security model is on the tracking issue and will be decisions 2026-09-22): `MachinePolicy` gains `source: 'local' | 'web'`, `locked` and `requested` (the roots as the web asked, before `~` expansion — `policyConverged(desired, reported, os)` in core compares those strings, so no home directory reaches the platform); `MachinePolicyInput { allowedRoots }` (empty = off, ≤ `POLICY_MAX_ROOTS`), `MachinePolicyError` (`policy-locked`, `invalid`, `not-found`, `not-a-directory`, `remote-path`, `protected`, `io`, `timeout`, `unsupported`), `MachineListing`; `EnvironmentInput.allowBypassPermissions`; the user principal's `elevatedUntil`; the `machine-security` notification kind; the audit kinds `machine.policy-set`, `machine.renamed`, `machine.restart-requested`, `machine.restarted`, `machine.login`, `auth.elevated`; `UpdateOutcome.outcome` `restarted`. Features `policy`, `log`, `login` gate the new frames; a restart rides `update`. `daemonConformance` has `policy-set`, `policy-locked`, `policy-browse`, `log-tail`, `login-relay` and `restart`; `inMemoryHarness()` implements them all. The daemon (#479, #481, #484), the Machine actor (#480, #481, #484), elevation (#478) and the page (#482) follow.
 
 **Lifecycle frames** (#359, contract; tracking #358): `update.*` and `harness.*` reach only a daemon whose `hello.features` lists `update` / `harness` — an older daemon drops a frame it cannot decode and keeps the socket. `ReleaseManifest`, `ReleaseAsset`, `UpdatePhase`, `HarnessPhase`, `HarnessReport` and `UpdatePolicy` are types in `@agentic/core` (`release.ts`); `compareVersions` / `platformKey` are runtime helpers in `@agentic/daemon-protocol` (#360). A host-side end is a `session.closed` with a `code` — no separate suspend frame: resume is the platform's, from the last `session.ref`. The schemas here are minimal; #360 bounds them.
 
