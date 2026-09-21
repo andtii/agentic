@@ -2,8 +2,9 @@
 # Installs agentic-daemon from this folder (macOS / Linux): checks Node, pairs the machine (optional),
 # runs doctor, registers the background service for the current user.
 #
-# Run from the unpacked zip. Nothing is downloaded: the folder holds the daemon and every dependency.
-# Node.js 22.12 or newer must be on PATH (https://nodejs.org), or passed with --node.
+# Run from the unpacked zip: the folder holds the daemon and every dependency but the runtimes' native
+# builds, the harnesses, which it installs from the release (--harness). Node.js 22.12 or newer must be
+# on PATH (https://nodejs.org), or passed with --node.
 #
 # Pairing needs a code from the platform (Machines > Pair a machine). Pass it with --code and the
 # platform URL with --url, or pair first by hand: node bin/agentic-daemon.mjs pair <code> --url <url>.
@@ -16,6 +17,9 @@
 #
 # Usage: sh install.sh [--url <platform origin> --code <pairing code>] [--name <machine name>]
 #                      [--node <path to node>] [--no-service] [--no-path] [--service-name <name>]
+#                      [--harness <runtime>,...|none] [--manifest <release manifest url>]
+#   --harness   the runtime harnesses to install (default claude-code,copilot-cli,codex-cli; none: none)
+#   --manifest  the release manifest to take them from (default: the release this daemon came from)
 #   sh install.sh --url https://agentic.example --code ABC234
 #   sh install.sh                                   # already paired: doctor + service only
 set -eu
@@ -26,6 +30,7 @@ bin="$here/bin/agentic-daemon.mjs"
 [ -f "$bin" ] || fail "bin/agentic-daemon.mjs not found next to install.sh - run this script from the unpacked zip."
 
 url=""; code=""; name=""; node=""; no_service=""; no_path=""; service_name=agentic-daemon
+harness=claude-code,copilot-cli,codex-cli; manifest=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --url) url=$2; shift 2 ;;
@@ -35,6 +40,8 @@ while [ $# -gt 0 ]; do
         --no-service) no_service=1; shift ;;
         --no-path) no_path=1; shift ;;
         --service-name) service_name=$2; shift 2 ;;
+        --harness) harness=$2; shift 2 ;;
+        --manifest) manifest=$2; shift 2 ;;
         *) fail "install.sh: unknown argument $1" ;;
     esac
 done
@@ -74,10 +81,25 @@ else
     echo "already paired ($credentials)"
 fi
 
-# 4. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
+# 4. The harnesses (#369): each runtime's native build, from the release. Not fatal - install one later with
+# `agentic-daemon harness install <runtime>`; until then its environments refuse sessions.
+runtimes=$(echo "$harness" | tr ',' ' ')
+[ "$runtimes" = "none" ] && runtimes=""
+# The selection: what the daemon installs by itself when it starts without it (an update, a failed download here).
+# shellcheck disable=SC2086 # one word per runtime
+"$node" "$bin" harness select ${runtimes:-none} || echo "warning: could not record the harness selection" >&2
+if [ -n "$runtimes" ]; then
+    # shellcheck disable=SC2086 # one word per runtime
+    if [ -n "$manifest" ]; then set -- $runtimes --manifest "$manifest"; else set -- $runtimes; fi
+    "$node" "$bin" harness install "$@" || echo "warning: a harness did not install (see above); retry with: agentic-daemon harness install $runtimes" >&2
+else
+    echo "no harnesses installed (--harness none): install one with agentic-daemon harness install <runtime>"
+fi
+
+# 5. Doctor - environments.json, drivers, harnesses, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
 "$node" "$bin" doctor || echo "warning: doctor found problems (see above). The daemon still starts; sessions on a failing environment are refused until it passes: node bin/agentic-daemon.mjs doctor" >&2
 
-# 5. Background service
+# 6. Background service
 if [ -n "$no_service" ]; then
     echo "Skipping the background service (--no-service). Run in the foreground with: \"$node\" \"$bin\" run"
     exit 0

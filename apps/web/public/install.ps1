@@ -7,9 +7,9 @@
 # is downloaded from nodejs.org into the install folder. Then it reads the release manifest of the
 # channel (or pinned version) asked for, downloads the daemon zip it names for win32-x64
 # (agentic-daemon-win32-x64.zip) from that GitHub release, checks its sha256, unpacks it to
-# %LOCALAPPDATA%\agentic\daemon and runs the zip's install.ps1: pair (when AGENTIC_CODE is set),
-# doctor, the `agentic-daemon` command (on the user PATH) and the per-user Scheduled Task that keeps
-# the daemon running.
+# %LOCALAPPDATA%\agentic\daemon and runs the zip's install.ps1: pair (when AGENTIC_CODE is set), the
+# runtime harnesses from the same release (%LOCALAPPDATA%\agentic\harnesses), doctor, the
+# `agentic-daemon` command (on the user PATH) and the per-user Scheduled Task that keeps the daemon running.
 #
 # Re-run without AGENTIC_CODE to upgrade an already paired machine (the task is stopped, the folder
 # replaced, the task re-registered). Environment overrides:
@@ -20,6 +20,8 @@
 #                        no sha256 check)
 #   AGENTIC_RELEASES     the GitHub releases URL the manifest is read from (default
 #                        https://github.com/andtii/agentic/releases): a fork, or a test server
+#   AGENTIC_HARNESSES    the runtime harnesses to install, comma-separated (default
+#                        claude-code,copilot-cli,codex-cli); none installs none
 #   AGENTIC_INSTALL_DIR  the install root (default %LOCALAPPDATA%\agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
 #   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching your user PATH
@@ -137,5 +139,8 @@ $params = @{ NodePath = $nodeExe }   # a hashtable: an array splat would bind th
 if ($env:AGENTIC_CODE) { $params.Url = $env:AGENTIC_URL; $params.Code = $env:AGENTIC_CODE }
 if ($env:AGENTIC_NAME) { $params.Name = $env:AGENTIC_NAME }
 if ($env:AGENTIC_NO_PATH) { $params.NoPath = $true }
+# The harnesses come from the manifest the daemon came from (with AGENTIC_DAEMON_ZIP: the daemon's own release).
+$params.Harness = if ($env:AGENTIC_HARNESSES) { $env:AGENTIC_HARNESSES } else { 'claude-code,copilot-cli,codex-cli' }
+if ($manifestUrl) { $params.Manifest = $manifestUrl }
 Step 'installing'
 & (Join-Path $daemonDir 'install.ps1') @params

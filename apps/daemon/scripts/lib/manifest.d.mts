@@ -14,7 +14,8 @@ export interface Manifest {
     readonly protocol: number;
     readonly notesUrl: string;
     readonly assets: Readonly<Record<string, ManifestAsset>>;
-    readonly harnesses: Readonly<Record<string, never>>;
+    /** By runtime: the harness zips of the release (#369). */
+    readonly harnesses: Readonly<Record<string, { readonly version: string; readonly assets: Readonly<Record<string, ManifestAsset>> }>>;
 }
 export function readSidecar(file: string): string;
 export function buildManifest(input: {

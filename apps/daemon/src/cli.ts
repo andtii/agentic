@@ -7,6 +7,7 @@
  * `agentic-daemon launcher install | remove | show` (`launcher.ts`)
  * `agentic-daemon policy show | allow-root | deny-root | off` (`policy-cli.ts`)
  * `agentic-daemon update [--channel stable|latest] [--version daemon-v…] [--check] [--now]` (`update-cli.ts`)
+ * `agentic-daemon harness list | install | update | rm` (`harness-cli.ts`)
  * `agentic-daemon --version` (also `version`)
  *
  * Everything the CLI touches — paths, fetch, drivers, the output streams, the
@@ -23,6 +24,8 @@ import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
 import { builtinRuntimes, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
 import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.js';
+import { harnessCommand, HARNESS_USAGE } from './harness-cli.js';
+import { DEFAULT_RELEASES, harnessRoot, harnessStore, releaseManifestUrl, type HarnessStore } from './harness.js';
 import { watchEnvironments } from './env-store.js';
 import { loadEnvironments } from './environments.js';
 import { ndjsonEventLog } from './event-log.js';
@@ -34,11 +37,17 @@ import { daemonPaths, installPaths, type DaemonPaths, type InstallPaths } from '
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
 import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
 import { isSupervised, updateCommand, UPDATE_USAGE, type UpdateTestOptions } from './update-cli.js';
-import { DAEMON_VERSION, versionLine } from './version.js';
+import { DAEMON_CHANNEL, DAEMON_VERSION, versionLine } from './version.js';
 
 export interface CliContext {
     readonly paths?: DaemonPaths;
     readonly drivers?: readonly DaemonDriver[];
+    /**
+     * The harness store (#369). Default: `<install root>/harnesses` with the built-in drivers (which are built from it),
+     * none with injected drivers or with `paths` and no `install` — then the SDKs find their native builds their own way,
+     * `run` answers no `harness.request` and `harness` has nothing to act on.
+     */
+    readonly harnesses?: HarnessStore;
     /** The `quota` sources `run` reads provider limits with; the built-in set's with the built-in drivers, none with injected ones. */
     readonly quotaSources?: readonly QuotaSource[];
     readonly fetch?: typeof fetch;
@@ -103,6 +112,7 @@ Usage:
                        (start a chat in this folder: prints the link, opens the browser; --env picks
                         the environment when the folder is under several; --no-browser only prints)
 ${ENV_USAGE}
+${HARNESS_USAGE}
 ${POLICY_USAGE}
 ${LAUNCHER_USAGE}
 ${UPDATE_USAGE}
@@ -217,10 +227,14 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     const out = context.out ?? ((t: string) => process.stdout.write(`${t}\n`));
     const err = context.err ?? ((t: string) => process.stderr.write(`${t}\n`));
     const paths = context.paths ?? daemonPaths(context.platform ? { platform: context.platform } : {});
+    const pathContext = { ...(context.platform ? { platform: context.platform } : {}), ...(context.env ? { env: context.env } : {}) };
+    // Where the harnesses are (#369): the built-in drivers run what the store locates. Like `install`, none by default when `paths` is injected (tests).
+    const installation = context.install ?? (context.paths ? undefined : installPaths(pathContext));
+    const harnesses = context.harnesses ?? (context.drivers || !installation ? undefined : harnessStore({ root: harnessRoot(installation) }));
     // One set, so a quota source that asks a runtime shares the driver's process for it. Only with the built-in
     // drivers: sources over drivers `run` does not own would hold processes nothing disposes. Building the set
     // starts nothing — a driver spawns its runtime on first use.
-    const builtin = context.drivers ? undefined : builtinRuntimes();
+    const builtin = context.drivers ? undefined : builtinRuntimes(harnesses ? { harnesses } : {});
     const drivers = context.drivers ?? builtin!.drivers;
     const args = parseArgs(argv);
     let secrets: string[] = [];
@@ -298,7 +312,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     for (const e of loaded.errors) log.error('environments.json is invalid', { problem: e });
                     return exiting('config', 1, { problem: 'environments.json is invalid' });
                 }
-                const install = context.install ?? (context.paths ? undefined : installPaths({ ...(context.platform ? { platform: context.platform } : {}), ...(context.env ? { env: context.env } : {}) }));
+                const install = installation;
                 const state = install ? await readSupervisorState(install) : {};
                 if (Object.keys(state).length > 0) log.info('supervisor state', { ...state });
                 // Updates need the supervisor to swap the staged build in (#364): without it the daemon does not offer them.
@@ -332,6 +346,14 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 // An unreadable policy is off: web management fails closed.
                 const loadedPolicy = await loadPolicy(paths.policyFile);
                 if (!loadedPolicy.ok) for (const e of loadedPolicy.errors) log.error('policy.json is invalid; the web manages nothing on this machine', { problem: e });
+                if (harnesses) {
+                    for (const report of harnesses.reports(drivers.map((d) => d.runtime))) log.info('harness', { ...report });
+                    // Versions a terminal install left behind: nothing runs them now.
+                    for (const d of drivers) {
+                        const leftovers = await harnesses.prune(d.runtime).catch(() => []);
+                        if (leftovers.length) log.warn('harness: old versions could not be removed', { runtime: d.runtime, leftovers });
+                    }
+                }
                 const daemon = createDaemon({
                     credentials,
                     environments: loaded.environments,
@@ -347,6 +369,20 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     ...(context.platform ? { platform: context.platform } : {}),
                     onWelcome,
                     lifecycle: helloLifecycle(state),
+                    ...(harnesses && builtin
+                        ? {
+                              harnesses: {
+                                  store: harnesses,
+                                  rebuild: builtin.rebuild,
+                                  ...(context.fetch ? { fetch: context.fetch } : {}),
+                                  // Under an install root, the selected harnesses this machine lacks come from its own channel (#369): the
+                                  // migration from builds that bundled the runtimes, and a retry of whatever failed last time.
+                                  ...(install
+                                      ? { heal: { manifestUrl: releaseManifestUrl({ releases: (context.env ?? process.env).AGENTIC_RELEASES || DEFAULT_RELEASES, channel: DAEMON_CHANNEL === 'stable' ? 'stable' : 'latest' }) } }
+                                      : {})
+                              }
+                          }
+                        : {}),
                     ...(supervised && install
                         ? {
                               update: {
@@ -409,7 +445,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 await daemon.stop({ reason: reason === 'signal' ? 'restart' : reason === 'update' ? 'update' : 'stop' });
                 // The supervisor waits for the swapped-in version's own `ready` (#362, #364).
                 if (reason === 'update' && install) await rm(install.readyFile, { force: true }).catch(() => {});
-                for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
+                // The drivers as they are now: a harness change rebuilt some (#369).
+                for (const driver of builtin?.current() ?? drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
                 host?.off('uncaughtException', onUncaught);
@@ -465,6 +502,21 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     err,
                     secure,
                     ...(context.login ? { login: context.login } : {}),
+                    ...(context.env ? { env: context.env } : {}),
+                    ...(harnesses ? { harnesses } : {})
+                });
+            case 'harness':
+                if (!harnesses) {
+                    err('this daemon manages no harnesses');
+                    return 1;
+                }
+                return await harnessCommand(args.positional[0], args.positional.slice(1), args.flags, {
+                    store: harnesses,
+                    runtimes: drivers.map((d) => d.runtime),
+                    paths,
+                    out,
+                    err,
+                    ...(context.fetch ? { fetch: context.fetch } : {}),
                     ...(context.env ? { env: context.env } : {})
                 });
             case 'policy':
@@ -512,7 +564,10 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     ...(context.update ? { test: context.update } : {})
                 });
             case 'doctor': {
-                const report = await runDoctor({ paths, drivers });
+                const report = await runDoctor({ paths, drivers, ...(harnesses ? { harnesses } : {}) });
+                // The checks may have started runtimes (a Copilot client, a Codex app-server): none may keep the process alive.
+                for (const driver of builtin?.current() ?? []) if (isDisposable(driver)) await driver.dispose().catch(() => undefined);
+                for (const child of registeredChildren()) killTreeSync(child);
                 out(formatDoctorReport(report));
                 return report.ok ? 0 : 1;
             }

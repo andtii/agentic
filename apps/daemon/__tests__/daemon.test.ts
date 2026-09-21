@@ -1,15 +1,18 @@
 // @vitest-environment node
 import type { ApprovalRule, CapabilityReport, EnvironmentId, LocalEnvironment, OpenSpecPolicy, SessionId } from '@agentic/core';
 import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
-import { decodeDaemonFrame, DAEMON_PROTOCOL_VERSION as V, type DaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
+import { decodeDaemonFrame, isDrainingReply, DAEMON_PROTOCOL_VERSION as V, type DaemonFrame, type DaemonFrameOf, type DaemonFrameType } from '@agentic/daemon-protocol';
 import type { PlatformSeat } from '@agentic/daemon-protocol/testing';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCapabilitiesOf, createDaemon, follows, sameRefIdentity, type Daemon, type DaemonDriver } from '../src/daemon';
+import { agentCapabilitiesOf, createDaemon, follows, sameRefIdentity, type Daemon, type DaemonDriver, type DaemonOptions } from '../src/daemon';
+import { harnessMissingDriver } from '../src/drivers';
+import { harnessStore } from '../src/harness';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
 import { agentDriver, namingDriver, scriptedDriver } from './helpers/drivers';
+import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
 async function next(seat: PlatformSeat): Promise<DaemonFrame> {
@@ -42,7 +45,7 @@ describe('daemon', () => {
 
     const env = (id: string, extra: Partial<LocalEnvironment> = {}): LocalEnvironment => ({ id: id as EnvironmentId, name: id, runtime: 'scripted', cwdRoots: [dir], concurrency: 1, ...extra });
 
-    async function start(environments: LocalEnvironment[], drivers: DaemonDriver[] = [scriptedDriver({ events: 5, heartbeatMs: 1_000 })], toolTimeoutMs?: number) {
+    async function start(environments: LocalEnvironment[], drivers: DaemonDriver[] = [scriptedDriver({ events: 5, heartbeatMs: 1_000 })], toolTimeoutMs?: number, extra: Partial<DaemonOptions> = {}) {
         const daemon = createDaemon({
             credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
             environments,
@@ -50,7 +53,8 @@ describe('daemon', () => {
             eventLog: ndjsonEventLog(join(dir, 'sessions')),
             backoff: { initialMs: 5, maxMs: 20 },
             heartbeatMs: 1_000,
-            ...(toolTimeoutMs ? { toolTimeoutMs } : {})
+            ...(toolTimeoutMs ? { toolTimeoutMs } : {}),
+            ...extra
         });
         daemons.push(daemon);
         await daemon.start();
@@ -354,6 +358,244 @@ describe('daemon', () => {
             ]);
             if (!code) expect(closed.every((c) => !('code' in c))).toBe(true);
         }
+    });
+
+    describe('harnesses (#369)', () => {
+        /** Frames until `done` says it has seen everything it waits for; heartbeats and session traffic pass by. */
+        async function collect(seat: PlatformSeat, done: (seen: readonly DaemonFrame[]) => boolean): Promise<DaemonFrame[]> {
+            const seen: DaemonFrame[] = [];
+            while (!done(seen)) seen.push(await next(seat));
+            return seen;
+        }
+        const phases = (frames: readonly DaemonFrame[], requestId: string) => frames.flatMap((f) => (f.t === 'harness.status' && f.requestId === requestId ? [f.phase] : []));
+        const replyOf = (frames: readonly DaemonFrame[], commandId: string) => frames.find((f): f is DaemonFrameOf<'session.reply'> => f.t === 'session.reply' && f.reply.commandId === commandId)?.reply;
+        const closedOf = (frames: readonly DaemonFrame[], sessionId: string) => frames.find((f): f is DaemonFrameOf<'session.closed'> => f.t === 'session.closed' && f.sessionId === sessionId);
+        /** A harness request's end: its `done` (or `failed`) and, after a change, the `harnesses` frame that follows it. */
+        const settled = (requestId: string) => (seen: readonly DaemonFrame[]) => {
+            const end = seen.findIndex((f) => f.t === 'harness.status' && f.requestId === requestId && (f.phase === 'done' || f.phase === 'failed'));
+            if (end < 0) return false;
+            const last = seen[end] as DaemonFrameOf<'harness.status'>;
+            return last.phase === 'failed' || seen.slice(end).some((f) => f.t === 'harnesses');
+        };
+        const prompt = (seat: PlatformSeat, sessionId: string, n: number) => seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+
+        /** Harness builds at `https://releases.test/…`, and the `fetch` the daemon downloads them with. */
+        async function withHarnessServer<T>(run: (target: (runtime: string, version: string) => Promise<import('@agentic/core').ReleaseAsset>, fetch: typeof globalThis.fetch) => Promise<T>): Promise<T> {
+            const releases = fakeReleases();
+            return await run(async (runtime, version) => {
+                const zip = await fakeHarnessZip(dir, runtime, version);
+                releases.put(`${runtime}-${version}.zip`, zip.bytes);
+                return zip.asset(releases.url(`${runtime}-${version}.zip`));
+            }, releases.fetch);
+        }
+
+        it('an update drains only its runtime: its prompts are answered draining and its opens refused, the rest runs; its sessions close harness-update once its turns end', async () => {
+            await withHarnessServer(async (target, fetch) => {
+                let release!: () => void;
+                const held = new Promise<void>((r) => (release = r));
+                const holding = mockAgent({ respond: async () => (await held, [{ text: 'done' }]) });
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                const rebuilt: string[] = [];
+                const scripted = scriptedDriver({ events: 3, heartbeatMs: 1_000 });
+                const { daemon, seat, hello } = await start([env('env_mock', { runtime: 'mock', concurrency: 4 }), env('env_s')], [agentDriver('mock', holding), scripted], undefined, {
+                    harnesses: {
+                        store,
+                        fetch,
+                        rebuild: (runtime) => (rebuilt.push(runtime), runtime === 'mock' ? agentDriver('mock', mockAgent({ respond: async () => [{ text: 'new' }] })) : scripted)
+                    }
+                });
+                expect(hello.features).toEqual(['harness']);
+                expect(hello.harnesses).toEqual([
+                    { runtime: 'mock', status: 'missing' },
+                    { runtime: 'scripted', status: 'missing' }
+                ]);
+                for (const [id, environmentId] of [['s1', 'env_mock'], ['s2', 'env_mock'], ['s3', 'env_s']] as const) {
+                    open(seat, id, environmentId);
+                    await expectFrame(seat, 'session.opened');
+                }
+                prompt(seat, 's1', 1);
+                expect(replyOf(await collect(seat, (f) => !!replyOf(f, 'c1')), 'c1')).toMatchObject({ kind: 'ack' });
+
+                seat.send({ v: V, t: 'harness.request', requestId: 'h1', op: 'update', runtime: 'mock', target: await target('mock', '2.0.0'), mode: 'drain' });
+                expect(phases(await collect(seat, (f) => phases(f, 'h1').includes('draining')), 'h1')).toEqual(['downloading', 'verifying', 'staged', 'draining']);
+
+                // Draining mock: a new turn is refused, a new session too; the scripted runtime is untouched.
+                prompt(seat, 's2', 2);
+                open(seat, 's4', 'env_mock');
+                prompt(seat, 's3', 3);
+                const during = await collect(seat, (f) => !!replyOf(f, 'c2') && !!closedOf(f, 's4') && !!replyOf(f, 'c3'));
+                expect(isDrainingReply(replyOf(during, 'c2')!)).toBe(true);
+                expect(replyOf(during, 'c2')).toMatchObject({ message: 'draining: the mock harness is being updated to 2.0.0' });
+                expect(closedOf(during, 's4')).toMatchObject({ code: 'draining' });
+                expect(replyOf(during, 'c3')).toMatchObject({ kind: 'ack' });
+                expect(phases(during, 'h1')).toEqual([]);
+                expect([...daemon.activeSessions].sort()).toEqual(['s1', 's2', 's3']);
+
+                // s1's turn ends: the drain is over, mock's sessions close for the update, the switch is reported.
+                release();
+                const after = await collect(seat, settled('h1'));
+                expect(phases(after, 'h1')).toEqual(['applying', 'done']);
+                expect(closedOf(after, 's1')).toMatchObject({ code: 'harness-update' });
+                expect(closedOf(after, 's2')).toMatchObject({ code: 'harness-update' });
+                expect(closedOf(after, 's3')).toBeUndefined();
+                expect(after.find((f) => f.t === 'harnesses')).toMatchObject({ harnesses: [{ runtime: 'mock', installed: { version: '2.0.0' }, status: 'ready' }, { runtime: 'scripted', status: 'missing' }] });
+                // The rebuilt driver reports the environment as before: no `env` frame.
+                expect(after.some((f) => f.t === 'env')).toBe(false);
+                expect(daemon.activeSessions).toEqual(['s3']);
+                expect(rebuilt).toEqual(['mock']);
+                expect(store.locate('mock')?.version).toBe('2.0.0');
+
+                // The rebuilt driver takes the re-open (the platform's, from spec.resume).
+                open(seat, 's1', 'env_mock');
+                expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s1');
+            });
+        });
+
+        it('mode now does not wait for running turns; a harness an environment uses is not removed; the old version is gone after the switch', async () => {
+            await withHarnessServer(async (target, fetch) => {
+                let release!: () => void;
+                const held = new Promise<void>((r) => (release = r));
+                const never = mockAgent({ respond: async () => (await held, [{ text: 'late' }]) });
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                const { daemon, seat } = await start([env('env_mock', { runtime: 'mock', concurrency: 2 })], [agentDriver('mock', never)], undefined, {
+                    harnesses: { store, fetch, rebuild: () => agentDriver('mock', never) }
+                });
+                seat.send({ v: V, t: 'harness.request', requestId: 'h1', op: 'install', runtime: 'mock', target: await target('mock', '1.0.0'), mode: 'drain' });
+                // Nothing runs on mock: no draining phase.
+                expect(phases(await collect(seat, settled('h1')), 'h1')).toEqual(['downloading', 'verifying', 'staged', 'applying', 'done']);
+
+                open(seat, 's1', 'env_mock');
+                await expectFrame(seat, 'session.opened');
+                prompt(seat, 's1', 1);
+                await collect(seat, (f) => !!replyOf(f, 'c1'));
+                seat.send({ v: V, t: 'harness.request', requestId: 'h2', op: 'update', runtime: 'mock', target: await target('mock', '1.1.0'), mode: 'now' });
+                // Applying while the turn still runs: `now` never waits for it (the session's close is the runtime's to end the turn).
+                const applying = await collect(seat, (f) => phases(f, 'h2').includes('applying'));
+                expect(phases(applying, 'h2')).toEqual(['downloading', 'verifying', 'staged', 'draining', 'applying']);
+                release();
+                const now = [...applying, ...(await collect(seat, settled('h2')))];
+                expect(phases(now, 'h2')).toEqual(['downloading', 'verifying', 'staged', 'draining', 'applying', 'done']);
+                expect(closedOf(now, 's1')).toMatchObject({ code: 'harness-update' });
+                expect(daemon.activeSessions).toEqual([]);
+                expect((await readdir(join(dir, 'harnesses', 'mock'))).sort()).toEqual(['1.1.0', 'current.json']);
+
+                seat.send({ v: V, t: 'harness.request', requestId: 'h3', op: 'remove', runtime: 'mock', mode: 'now' });
+                const removal = await collect(seat, (f) => phases(f, 'h3').includes('failed'));
+                expect(removal.find((f) => f.t === 'harness.status' && f.requestId === 'h3' && f.phase === 'failed')).toMatchObject({ error: { code: 'in-use' } });
+                expect(store.locate('mock')?.version).toBe('1.1.0');
+
+                // A request for a runtime without a driver, and an install without a target, are named failures.
+                seat.send({ v: V, t: 'harness.request', requestId: 'h4', op: 'install', runtime: 'nope', mode: 'now' });
+                seat.send({ v: V, t: 'harness.request', requestId: 'h5', op: 'install', runtime: 'mock', mode: 'now' });
+                const refused = await collect(seat, (f) => phases(f, 'h4').includes('failed') && phases(f, 'h5').includes('failed'));
+                const errorOf = (id: string) => refused.find((f): f is DaemonFrameOf<'harness.status'> => f.t === 'harness.status' && f.requestId === id)?.error?.code;
+                expect([errorOf('h4'), errorOf('h5')]).toEqual(['invalid', 'invalid']);
+            });
+        });
+
+        describe('the heal on start: an update from a build that bundled the runtimes', () => {
+            const BUILTIN = ['claude-code', 'copilot-cli', 'codex-cli'];
+            /** The three harness builds and a manifest naming them, at `https://releases.test/manifest.json`. */
+            async function servedRelease() {
+                const releases = fakeReleases();
+                const harnesses: Record<string, { version: string; assets: Record<string, import('@agentic/core').ReleaseAsset> }> = {};
+                for (const runtime of BUILTIN) {
+                    const zip = await fakeHarnessZip(dir, runtime, '1.0.0');
+                    releases.put(`harness-${runtime}.zip`, zip.bytes);
+                    harnesses[runtime] = { version: '1.0.0', assets: { [`${process.platform}-${process.arch}`]: zip.asset(releases.url(`harness-${runtime}.zip`)) } };
+                }
+                releases.put('manifest.json', JSON.stringify({ version: '0.2.0', channel: 'stable', publishedAt: 0, commit: 'abcdef0', protocol: 1, assets: {}, harnesses }));
+                return releases;
+            }
+            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) =>
+                start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map((r) => harnessMissingDriver(r)), undefined, {
+                    harnesses: {
+                        store,
+                        fetch: releases.fetch,
+                        rebuild: (runtime) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime)),
+                        heal: { manifestUrl: releases.url('manifest.json') }
+                    }
+                });
+            const until = async (check: () => boolean) => {
+                for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
+                expect(check()).toBe(true);
+            };
+
+            it('no harnesses and no selection file: all three are installed from the channel manifest, a harnesses frame after each, and the sessions open', async () => {
+                const releases = await servedRelease();
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                const { seat, hello } = await startHealing(releases, store);
+                expect(hello.harnesses?.map((h) => h.status)).toEqual(['missing', 'missing', 'missing']);
+                const frames = await collect(seat, (f) => f.filter((x) => x.t === 'harnesses').length === 3);
+                const last = frames.filter((f): f is DaemonFrameOf<'harnesses'> => f.t === 'harnesses').at(-1)!;
+                expect(last.harnesses.map((h) => [h.runtime, h.status, h.installed?.version])).toEqual(BUILTIN.map((r) => [r, 'ready', '1.0.0']));
+                expect(frames.find((f) => f.t === 'env')).toMatchObject({ environments: [{ id: 'env_c', doctor: { ok: true } }] });
+                for (const runtime of BUILTIN) expect(store.locate(runtime)?.version).toBe('1.0.0');
+                expect(store.selection()).toBeUndefined();
+                expect(store.failures()).toEqual({});
+                open(seat, 's1', 'env_c');
+                expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s1');
+            });
+
+            it('an empty selection installs nothing; a failed install is recorded for doctor and tried again on the next start', async () => {
+                const releases = await servedRelease();
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                await store.setSelection([]);
+                const first = await startHealing(releases, store);
+                await new Promise((r) => setTimeout(r, 300));
+                expect(releases.requests).toEqual([]);
+                expect(BUILTIN.map((r) => store.state(r).status)).toEqual(['missing', 'missing', 'missing']);
+                open(first.seat, 's1', 'env_c');
+                expect(await expectFrame(first.seat, 'session.closed')).toMatchObject({ code: 'harness-missing' });
+                await first.daemon.stop();
+
+                // Selected, but the release is unreachable: named, never fatal.
+                await store.setSelection(['codex-cli']);
+                const offline = fakeReleases();
+                const second = await startHealing(offline, store);
+                await until(() => 'codex-cli' in store.failures());
+                expect(Object.keys(store.failures())).toEqual(['codex-cli']);
+                expect(store.failures()['codex-cli']!.message).toMatch(/no release manifest at https:\/\/releases\.test\/manifest\.json/);
+                expect(second.daemon.connected).toBe(true);
+                await second.daemon.stop();
+
+                // The next start: the release is back, codex-cli is installed and its failure cleared; the others stay unselected.
+                const third = await startHealing(releases, store);
+                await collect(third.seat, (f) => f.some((x) => x.t === 'harnesses'));
+                expect(store.locate('codex-cli')?.version).toBe('1.0.0');
+                expect(store.locate('claude-code')).toBeUndefined();
+                expect(store.failures()).toEqual({});
+            });
+        });
+
+        it('removes a harness no environment uses, and a runtime without one refuses its sessions with harness-missing', async () => {
+            await withHarnessServer(async (target, fetch) => {
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false });
+                const { seat, hello } = await start([env('env_mock', { runtime: 'mock' })], [harnessMissingDriver('mock'), harnessMissingDriver('spare')], undefined, {
+                    harnesses: { store, fetch, rebuild: (runtime) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime)) }
+                });
+                expect(hello.environments[0]!.doctor).toMatchObject({ ok: false, findings: [{ code: 'harness-missing' }] });
+                open(seat, 's1', 'env_mock');
+                expect(await expectFrame(seat, 'session.closed')).toMatchObject({ sessionId: 's1', code: 'harness-missing', reason: expect.stringMatching(/agentic-daemon harness install mock/) });
+
+                seat.send({ v: V, t: 'harness.request', requestId: 'h1', op: 'install', runtime: 'spare', target: await target('spare', '1.0.0'), mode: 'now' });
+                await collect(seat, settled('h1'));
+                seat.send({ v: V, t: 'harness.request', requestId: 'h2', op: 'remove', runtime: 'spare', mode: 'drain' });
+                const removed = await collect(seat, settled('h2'));
+                expect(phases(removed, 'h2')).toEqual(['applying', 'done']);
+                expect(removed.find((f) => f.t === 'harnesses')).toMatchObject({ harnesses: [{ runtime: 'mock', status: 'missing' }, { runtime: 'spare', status: 'missing' }] });
+                seat.send({ v: V, t: 'harness.request', requestId: 'h3', op: 'remove', runtime: 'spare', mode: 'drain' });
+                const again = await collect(seat, (f) => phases(f, 'h3').includes('failed'));
+                expect(again.find((f) => f.t === 'harness.status' && f.requestId === 'h3')).toMatchObject({ phase: 'failed', error: { code: 'not-installed' } });
+
+                // Installing the missing one changes what its environment reports: `env` goes out, and the session opens.
+                seat.send({ v: V, t: 'harness.request', requestId: 'h4', op: 'install', runtime: 'mock', target: await target('mock', '1.0.0'), mode: 'drain' });
+                const installed = await collect(seat, settled('h4'));
+                expect(installed.find((f) => f.t === 'env')).toMatchObject({ environments: [{ id: 'env_mock', doctor: { ok: true } }] });
+                open(seat, 's2', 'env_mock');
+                expect((await expectFrame(seat, 'session.opened')).sessionId).toBe('s2');
+            });
+        });
     });
 
     it('re-opens from spec.resume on the same log: the head continues on the next epoch, not at (0, 0) (#363)', async () => {

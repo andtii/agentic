@@ -4,8 +4,9 @@
     registers the background task for the current user.
 
 .DESCRIPTION
-    Run from the unpacked zip. Nothing is downloaded: the folder holds the daemon and every dependency.
-    Node.js 22.12 or newer must be on PATH (https://nodejs.org).
+    Run from the unpacked zip: the folder holds the daemon and every dependency but the runtimes' native
+    builds, the harnesses, which it installs from the release (-Harness). Node.js 22.12 or newer must be on
+    PATH (https://nodejs.org).
 
     Pairing needs a code from the platform (Machines > Pair machine). Pass it with -Code and the
     platform URL with -Url, or pair first by hand: node bin\agentic-daemon.mjs pair <code> --url <url>.
@@ -31,6 +32,13 @@
 .PARAMETER NodePath
     The node.exe to run the daemon with (default: the `node` on PATH). The one-line installer passes the
     portable Node it downloaded when the machine has none.
+.PARAMETER Harness
+    The runtime harnesses to install, comma-separated (default: claude-code,copilot-cli,codex-cli); `none`
+    installs none. Each is `agentic-daemon harness install <runtime>`: a runtime without one keeps its
+    environments, which refuse sessions until it is installed.
+.PARAMETER Manifest
+    The release manifest to install the harnesses from (the one-line installer passes the one it read).
+    Default: the release this daemon came from (`agentic-daemon harness install` decides).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install.ps1 -Url https://agentic.example -Code ABC234
@@ -45,7 +53,9 @@ param(
     [switch] $NoService,
     [switch] $NoPath,
     [string] $TaskName = 'agentic-daemon',
-    [string] $NodePath
+    [string] $NodePath,
+    [string] $Harness = 'claude-code,copilot-cli,codex-cli',
+    [string] $Manifest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,13 +95,28 @@ if ($Code) {
     Write-Host "already paired ($credentials)"
 }
 
-# 4. Doctor - environments.json, drivers, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
+# 4. The harnesses (#369): each runtime's native build, from the release. Not fatal - install one later with
+# `agentic-daemon harness install <runtime>`; until then its environments refuse sessions.
+$runtimes = @($Harness -split '[,\s]+' | Where-Object { $_ -and $_ -ne 'none' })
+# The selection: what the daemon installs by itself when it starts without it (an update, a failed download here).
+$selectArgs = @('harness', 'select') + $(if ($runtimes.Count -gt 0) { $runtimes } else { @('none') })
+& $node.Source $bin @selectArgs
+if ($runtimes.Count -gt 0) {
+    $harnessArgs = @('harness', 'install') + $runtimes
+    if ($Manifest) { $harnessArgs += @('--manifest', $Manifest) }
+    & $node.Source $bin @harnessArgs
+    if ($LASTEXITCODE -ne 0) { Write-Warning "a harness did not install (see above); retry with: agentic-daemon harness install $($runtimes -join ' ')" }
+} else {
+    Write-Host 'no harnesses installed (-Harness none): install one with agentic-daemon harness install <runtime>'
+}
+
+# 5. Doctor - environments.json, drivers, harnesses, profiles. A failing check is reported, not fatal: fix it and re-run doctor.
 & $node.Source $bin doctor
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "doctor found problems (see above). The daemon still starts; sessions on a failing environment are refused until it passes: node bin\agentic-daemon.mjs doctor"
 }
 
-# 5. Background task
+# 6. Background task
 if ($NoService) {
     Write-Host "Skipping the background task (-NoService). Run in the foreground with: node bin\agentic-daemon.mjs run"
     return

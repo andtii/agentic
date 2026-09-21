@@ -14,13 +14,16 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { CODEX_TRIPLES, HARNESSES, isNativeHarnessPackage } from '../scripts/lib/harness.mjs';
 import { buildManifest, readSidecar } from '../scripts/lib/manifest.mjs';
 import { buildStamp, commitTime, protocolVersion, releaseTagFrom, stampFor } from '../scripts/lib/stamp.mjs';
 import { extractZip, readZip, writeZip } from '../scripts/lib/zip.mjs';
-import { packageDaemon, resolveClosure } from '../scripts/package.mjs';
+import { packageDaemon, packageHarness, resolveClosure } from '../scripts/package.mjs';
 import { DAEMON_PROTOCOL_VERSION, type ReleaseManifest } from '@agentic/core';
 import { compareVersions, isVersion } from '@agentic/daemon-protocol';
 import { SUPERVISOR_VERSION } from '../scripts/supervise.mjs';
+import { BUILTIN_HARNESSES, extractZipFile, harnessStore, sdkVersion, treeHashOf } from '../src/harness';
+import { serveFiles } from './helpers/harness';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const built = existsSync(join(DAEMON_DIR, 'dist', 'cli.js')) && existsSync(join(DAEMON_DIR, '../../packages/runtimes/dist/index.js'));
@@ -142,6 +145,33 @@ describe('release manifest', () => {
         });
     });
 
+    it('lists each harness zip under harnesses[runtime] with the version its .json sidecar names, one version per runtime (#369)', async () => {
+        await zip('agentic-daemon-win32-x64.zip', 'daemon');
+        const harness = async (runtime: string, key: string, version: string) => {
+            const name = `harness-${runtime}-${key}.zip`;
+            await zip(name, `${runtime} ${key}`);
+            await writeFile(join(dir, `${name}.json`), JSON.stringify({ runtime, version, platform: key, binary: 'x', packages: [], sha256: '0'.repeat(64) }));
+        };
+        await harness('claude-code', 'win32-x64', '0.3.274');
+        await harness('claude-code', 'linux-x64', '0.3.274');
+        await harness('codex-cli', 'win32-x64', '0.155.1');
+        const manifest = buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 });
+        const contract: ReleaseManifest = manifest;
+        expect(Object.keys(contract.harnesses).sort()).toEqual(['claude-code', 'codex-cli']);
+        expect(manifest.harnesses['claude-code']).toEqual({
+            version: '0.3.274',
+            assets: {
+                'linux-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-linux-x64.zip', sha256: createHash('sha256').update('claude-code linux-x64').digest('hex'), bytes: 'claude-code linux-x64'.length, version: '0.3.274' },
+                'win32-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-win32-x64.zip', sha256: createHash('sha256').update('claude-code win32-x64').digest('hex'), bytes: 'claude-code win32-x64'.length, version: '0.3.274' }
+            }
+        });
+        expect(Object.keys(manifest.assets)).toEqual(['win32-x64']);
+        await harness('codex-cli', 'linux-x64', '0.156.0');
+        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/codex-cli is 0\.156\.0 on one platform and 0\.155\.1 on win32-x64/);
+        await writeFile(join(dir, 'harness-codex-cli-linux-x64.zip.json'), JSON.stringify({ runtime: 'claude-code', version: '0.155.1', platform: 'linux-x64' }));
+        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/does not describe codex-cli/);
+    });
+
     it('reads versioned zip names too, and refuses a zip without a sidecar, a bad sidecar or an empty folder', async () => {
         expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/no agentic-daemon/);
         await zip('agentic-daemon-0.1.0-main.1790000000.abc1234-win32-x64.zip', 'w');
@@ -168,16 +198,83 @@ describe('release manifest', () => {
     });
 });
 
+describe('harness packages (#369)', () => {
+    const key = `${process.platform}-${process.arch}`;
+
+    it('the daemon locates harnesses by the same table the packaging script builds them with', () => {
+        expect(Object.keys(BUILTIN_HARNESSES)).toEqual(Object.keys(HARNESSES));
+        for (const [runtime, spec] of Object.entries(HARNESSES)) {
+            const ours = BUILTIN_HARNESSES[runtime]!;
+            expect(ours.sdk, runtime).toBe(spec.sdk);
+            for (const platform of Object.keys(CODEX_TRIPLES)) {
+                expect(ours.native(platform), `${runtime} ${platform}`).toBe(spec.native(platform));
+                expect(ours.binary(platform), `${runtime} ${platform}`).toBe(spec.binary(platform));
+                // Every native package is one the daemon zip leaves out.
+                expect(isNativeHarnessPackage(spec.native(platform)), spec.native(platform)).toBe(true);
+            }
+        }
+        for (const name of ['@anthropic-ai/claude-agent-sdk', '@github/copilot-sdk', '@openai/codex', 'koffi']) expect(isNativeHarnessPackage(name), name).toBe(false);
+    });
+
+    describe('a harness zip built from the workspace', () => {
+        let dir: string;
+        beforeEach(async () => {
+            dir = await mkdtemp(join(tmpdir(), 'agentic-harness-pkg-'));
+        });
+        afterEach(async () => {
+            await rm(dir, { recursive: true, force: true });
+        });
+
+        it('holds the native package, a manifest the unpacked tree matches, and installs through the store', async () => {
+            const lines: string[] = [];
+            const result = packageHarness({ runtime: 'copilot-cli', outDir: dir, unversioned: true, sha256: true, log: (l) => lines.push(l) });
+            expect(basename(result.zipFile)).toBe(`harness-copilot-cli-${key}.zip`);
+            expect(result.version).toBe(sdkVersion('copilot-cli'));
+            expect(result.binary).toBe(`node_modules/@github/copilot-sdk-${key}/${HARNESSES['copilot-cli']!.binary(key)}`);
+            expect(lines[0]).toMatch(new RegExp(`copilot-cli ${result.version.replace(/\./g, '\\.')}, \\d+ files`));
+            const described = JSON.parse(readFileSync(`${result.zipFile}.json`, 'utf8')) as Record<string, unknown>;
+            expect(described).toEqual({ runtime: 'copilot-cli', version: result.version, platform: key, binary: result.binary, packages: [`@github/copilot-sdk-${key}`], sha256: result.tree });
+            expect(readSidecar(`${result.zipFile}.sha256`)).toBe(result.sha256);
+
+            const unpacked = join(dir, 'unpacked');
+            await extractZipFile(result.zipFile, unpacked);
+            expect(JSON.parse(readFileSync(join(unpacked, 'manifest.json'), 'utf8'))).toEqual(described);
+            expect(await treeHashOf(unpacked)).toBe(result.tree);
+            expect(existsSync(join(unpacked, ...result.binary.split('/')))).toBe(true);
+            // Only the native package: no JavaScript SDK, nothing of another platform.
+            expect(readZip(readFileSync(result.zipFile)).every((e) => e.name === 'manifest.json' || e.name.startsWith(`node_modules/@github/copilot-sdk-${key}/`))).toBe(true);
+
+            // The store downloads, verifies and installs it.
+            const server = await serveFiles();
+            try {
+                server.put('h.zip', readFileSync(result.zipFile));
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false, allowLoopbackHttp: true });
+                await store.stage('copilot-cli', { url: server.url('h.zip'), sha256: result.sha256!, bytes: result.bytes, version: result.version });
+                await store.activate('copilot-cli', result.version);
+                expect(store.locate('copilot-cli')).toMatchObject({ version: result.version, source: 'store', binary: join(dir, 'harnesses', 'copilot-cli', result.version, ...result.binary.split('/')) });
+                expect(existsSync(store.locate('copilot-cli')!.binary)).toBe(true);
+            } finally {
+                await server.close();
+            }
+        }, 300_000);
+
+        it('refuses a runtime it does not know', () => {
+            expect(() => packageHarness({ runtime: 'nope', outDir: dir, log: () => {} })).toThrow(/no harness "nope"/);
+        });
+    });
+});
+
 describe('installer', () => {
-    it('resolves the production closure: workspace packages, the Claude Code and Copilot SDKs and the Codex CLI with this platform’s binaries, no dev dependencies', () => {
+    it('resolves the production closure: workspace packages and the runtime SDKs’ JavaScript — never a native runtime (#369), no dev dependencies', () => {
         const closure = resolveClosure(DAEMON_DIR);
         const names = new Set([...closure.values()].map((s) => s.name));
-        for (const name of ['@agentic/core', '@agentic/daemon-protocol', '@agentic/runtimes', '@sigx/ai-agent-claude-code', '@anthropic-ai/claude-agent-sdk', `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`, '@github/copilot-sdk', `@github/copilot-sdk-${process.platform}-${process.arch}`, '@openai/codex', 'ws']) {
+        for (const name of ['@agentic/core', '@agentic/daemon-protocol', '@agentic/runtimes', '@sigx/ai-agent-claude-code', '@anthropic-ai/claude-agent-sdk', '@github/copilot-sdk', '@openai/codex', 'ws']) {
             expect(names, name).toContain(name);
         }
         for (const name of ['vite', 'typescript', 'vitest', '@sigx/vite', '@types/ws']) expect(names, name).not.toContain(name);
-        // The Codex binary is an npm alias of `@openai/codex` itself: placed under the alias, where its launcher looks.
-        expect(closure.get(`node_modules/@openai/codex-${process.platform}-${process.arch}`)?.name).toBe('@openai/codex');
+        // The native runtimes are harness packages: no platform's is placed, not even under the Codex alias.
+        for (const target of closure.keys()) expect(isNativeHarnessPackage(target.replace(/^.*node_modules\//, '')), target).toBe(false);
+        expect(closure.has(`node_modules/@openai/codex-${process.platform}-${process.arch}`)).toBe(false);
         expect(closure.get('node_modules/@agentic/core')?.workspace).toBe(true);
         expect(closure.get('node_modules/ws')?.workspace).toBe(false);
         // the daemon's own dependencies always win the top level, at the instance the daemon itself resolves
@@ -204,6 +301,8 @@ describe('installer', () => {
             const lines: string[] = [];
             const result = packageDaemon({ outDir: dir, log: (l) => lines.push(l) });
             expect(basename(result.zipFile)).toBe(`agentic-daemon-${result.version}-${process.platform}-${process.arch}.zip`);
+            // Without the native runtimes (#369): tens of MB, not hundreds.
+            expect(result.bytes).toBeLessThan(50 * 1024 * 1024);
             // the version the build stamped (dist/build.json), not a hand-edited twin of package.json
             const stamp = JSON.parse(readFileSync(join(DAEMON_DIR, 'dist', 'build.json'), 'utf8')) as { version: string; commit: string; channel: string };
             expect(result.version).toBe(stamp.version);
@@ -235,7 +334,9 @@ describe('installer', () => {
             expect(Object.values(shipped.dependencies).some((range) => range.startsWith('workspace:') || range.startsWith('catalog:'))).toBe(false);
 
             // A clean environment: no PATH to the repo, no NODE_PATH — only the unpacked folder.
-            const run = (args: string[]) => spawnSync(process.execPath, ['bin/agentic-daemon.mjs', ...args], { cwd: unpacked, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', AGENTIC_DAEMON_HOME: join(dir, 'home') } });
+            expect(files.some((f) => isNativeHarnessPackage(f.replace(/^node_modules\//, '')))).toBe(false);
+            const run = (args: string[]) =>
+                spawnSync(process.execPath, ['bin/agentic-daemon.mjs', ...args], { cwd: unpacked, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', AGENTIC_DAEMON_HOME: join(dir, 'home'), AGENTIC_INSTALL_DIR: join(dir, 'install') } });
             const version = run(['--version']);
             expect(version.stderr).toBe('');
             expect(version.status).toBe(0);
@@ -250,6 +351,11 @@ describe('installer', () => {
             const doctor = run(['doctor']);
             expect(doctor.status).toBe(1);
             expect(doctor.stdout).toMatch(/not paired/);
+            // No harness is installed and none ships in the zip: each runtime says how to install one.
+            for (const runtime of ['claude-code', 'copilot-cli', 'codex-cli']) expect(doctor.stdout).toContain(`no ${runtime} harness in ${join(dir, 'install', 'harnesses')} — install it with \`agentic-daemon harness install ${runtime}\``);
+            const list = run(['harness', 'list']);
+            expect(list.status, list.stderr).toBe(0);
+            expect(list.stdout).toContain('claude-code\tnot installed');
         }, 300_000);
 
         it('--unversioned names the zip like the release asset the installers fetch; --sha256 writes the sidecar the manifest reads', () => {

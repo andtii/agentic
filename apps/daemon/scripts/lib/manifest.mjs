@@ -9,6 +9,11 @@
  * `<zip>.sha256` sidecar `package.mjs --sha256` wrote beside it, so nothing is
  * re-hashed here; a missing or malformed sidecar is an error.
  *
+ * Each `harness-<runtime>-<os>-<arch>.zip` (#369, `package.mjs --harness`) goes under
+ * `harnesses[runtime]`: its `.sha256` sidecar, and the version from its `<zip>.json`
+ * sidecar (the zip's own `manifest.json`), which is never uploaded. One runtime has
+ * one version across the platforms of a release.
+ *
  * Usage: node scripts/lib/manifest.mjs --dir <release folder> --tag <release tag> --repo <owner/name> [--out <file>]
  *   (version, commit and channel from the build stamp of this checkout: scripts/lib/stamp.mjs)
  */
@@ -16,6 +21,7 @@
 import { readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HARNESS_ZIP } from './harness.mjs';
 import { protocolVersion, stampFor } from './stamp.mjs';
 
 const ZIP = /^agentic-daemon-(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-)?((?:win32|darwin|linux)-(?:x64|arm64))\.zip$/;
@@ -49,6 +55,19 @@ export function buildManifest({ dir, tag, repo, stamp, protocol, publishedAt }) 
         assets[key] = { url: `${download}/${name}`, sha256: readSidecar(join(dir, `${name}.sha256`)), bytes: statSync(join(dir, name)).size, version: stamp.version };
     }
     if (!Object.keys(assets).length) throw new Error(`manifest: no agentic-daemon-<os>-<arch>.zip in ${dir}`);
+    /** @type {Record<string, { version: string; assets: Record<string, { url: string; sha256: string; bytes: number; version: string }> }>} */
+    const harnesses = {};
+    for (const name of readdirSync(dir).sort()) {
+        const m = HARNESS_ZIP.exec(name);
+        if (!m) continue;
+        const runtime = /** @type {string} */ (m[1]);
+        const key = /** @type {string} */ (m[2]);
+        const described = JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8'));
+        if (described.runtime !== runtime || described.platform !== key || typeof described.version !== 'string') throw new Error(`manifest: ${name}.json does not describe ${runtime} for ${key}`);
+        const entry = (harnesses[runtime] ??= { version: described.version, assets: {} });
+        if (entry.version !== described.version) throw new Error(`manifest: ${runtime} is ${entry.version} on one platform and ${described.version} on ${key}`);
+        entry.assets[key] = { url: `${download}/${name}`, sha256: readSidecar(join(dir, `${name}.sha256`)), bytes: statSync(join(dir, name)).size, version: described.version };
+    }
     return {
         version: stamp.version,
         channel: stamp.channel,
@@ -57,7 +76,7 @@ export function buildManifest({ dir, tag, repo, stamp, protocol, publishedAt }) 
         protocol,
         notesUrl: `https://github.com/${repo}/releases/tag/${tag}`,
         assets,
-        harnesses: {}
+        harnesses
     };
 }
 

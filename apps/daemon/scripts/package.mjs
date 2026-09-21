@@ -6,21 +6,27 @@
  * (`<version>` is the build stamp `dist/build.json` records: `scripts/lib/stamp.mjs`)
  * holding the built daemon (`bin/`, `dist/`), its production dependency
  * closure copied into a plain `node_modules/` (the `@agentic/*` workspace
- * packages as their built `dist/`, the Claude Code SDK with the native CLI
- * for THIS platform), `install.ps1` / `uninstall.ps1` (Windows scheduled
+ * packages as their built `dist/`, the runtime SDKs' JavaScript — never their
+ * native executables, #369), `install.ps1` / `uninstall.ps1` (Windows scheduled
  * task), `install.sh` / `uninstall.sh` (launchd agent on macOS, systemd user
  * unit on Linux), the `scripts/` they call and a README. Node ≥ 22.12 on the
- * target machine is the only prerequisite; nothing is fetched at install time.
+ * target machine is the only prerequisite.
  * The one-line installers the platform serves (`/install.ps1`, `/install.sh`)
- * download this zip from the `daemon-latest` GitHub release and run its
- * install script (`.github/workflows/daemon-release.yml`).
+ * download this zip from the channel's GitHub release, run its install script
+ * and install the harnesses it asks for (`.github/workflows/daemon-release.yml`).
+ *
+ * `--harness <runtime>` builds a harness package instead (#369, `scripts/lib/harness.mjs`):
+ * `release/harness-<runtime>-<version>-<os>-<arch>.zip` with the runtime's native
+ * package for THIS platform under `node_modules/` and a `manifest.json` (runtime,
+ * upstream version, the executable, the tree's digest). `--harness all` builds the three.
  *
  * Run `pnpm build` at the repo root first — the zip is assembled from `dist/`
  * directories and refuses to run without them.
  *
- * Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256]
- *   --unversioned  name the zip `agentic-daemon-<os>-<arch>.zip` (the release asset name the installers fetch)
- *   --sha256       also write `<zip>.sha256` (`<hex>  <zip name>`) beside it, for the release manifest
+ * Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256] [--harness <runtime>|all ...]
+ *   --unversioned  name the zip `agentic-daemon-<os>-<arch>.zip` / `harness-<runtime>-<os>-<arch>.zip` (the release asset names)
+ *   --sha256       also write `<zip>.sha256` (`<hex>  <zip name>`) beside it, for the release manifest — and for a
+ *                  harness `<zip>.json`, its `manifest.json`, which the release manifest takes the version from
  * See `docs/runbook.md` → "Daemon on a Windows machine".
  */
 
@@ -28,6 +34,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HARNESSES, isNativeHarnessPackage, treeHash } from './lib/harness.mjs';
 import { stampFor } from './lib/stamp.mjs';
 import { writeZip } from './lib/zip.mjs';
 
@@ -102,7 +109,8 @@ function listFiles(dir, only) {
  * Lay the production dependency closure out as a plain `node_modules` tree:
  * every package at the top level unless the top level already holds another
  * instance of that name, in which case it nests under the package that needs
- * it — exactly what Node's resolver will find at runtime.
+ * it — exactly what Node's resolver will find at runtime. The runtimes' native
+ * packages (`isNativeHarnessPackage`) are left out: they are harness packages (#369).
  *
  * @param {string} rootDir the package whose `dependencies` seed the closure (apps/daemon)
  * @returns {Map<string, { real: string; name: string; version: string; workspace: boolean }>} target path (posix, relative to the zip root) → source
@@ -130,6 +138,7 @@ export function resolveClosure(rootDir) {
             ? { hard: Object.keys(pkg.dependencies ?? {}), soft: [] }
             : { hard: Object.keys(pkg.dependencies ?? {}), soft: [...Object.keys(pkg.optionalDependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})] };
         for (const [name, hard] of [...wanted.hard.map((n) => [n, true]), ...wanted.soft.map((n) => [n, false])]) {
+            if (isNativeHarnessPackage(/** @type {string} */ (name))) continue;
             const depReal = findPackage(real, /** @type {string} */ (name));
             if (!depReal) {
                 if (hard) problems.push(`${pkg.name}@${pkg.version} depends on ${name}, which is not installed`);
@@ -210,7 +219,15 @@ export function packageDaemon(options = {}) {
     const result = writeZip(zipFile, entries());
     log(`package: ${relative(process.cwd(), zipFile) || zipFile} — ${result.entries} files, ${(result.bytes / 1024 / 1024).toFixed(1)} MB, ${closure.size} packages`);
     if (!options.sha256) return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size };
-    // In chunks: the zip is hundreds of MB.
+    return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size, sha256: writeSidecar(zipFile) };
+}
+
+/**
+ * Hash `zipFile` and write `<zip>.sha256` (`<hex>  <zip name>`) beside it.
+ * @param {string} zipFile @returns {string} the hex digest
+ */
+function writeSidecar(zipFile) {
+    // In chunks: a zip is up to hundreds of MB.
     const hash = createHash('sha256');
     const fd = openSync(zipFile, 'r');
     try {
@@ -221,7 +238,52 @@ export function packageDaemon(options = {}) {
     }
     const sha256 = hash.digest('hex');
     writeFileSync(`${zipFile}.sha256`, `${sha256}  ${basename(zipFile)}\n`);
-    return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size, sha256 };
+    return sha256;
+}
+
+/**
+ * A harness package (#369): the runtime's native package for this platform, found through the SDK the daemon
+ * depends on (the version pnpm installed, which is the version the SDK pins), under `node_modules/<package>/`,
+ * and `manifest.json` — `{ runtime, version, platform, binary, packages, sha256 }`, `binary` relative to the zip
+ * root and `sha256` the tree's digest (`treeHash`) over every other file.
+ *
+ * @param {{ runtime: string; outDir?: string; unversioned?: boolean; sha256?: boolean; log?: (line: string) => void }} options
+ * @returns {{ zipFile: string; runtime: string; version: string; platform: string; binary: string; entries: number; bytes: number; tree: string; sha256?: string }}
+ */
+export function packageHarness(options) {
+    const log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
+    const { runtime } = options;
+    const spec = HARNESSES[runtime];
+    if (!spec) throw new Error(`package: no harness "${runtime}" (there are: ${Object.keys(HARNESSES).join(', ')})`);
+    const platform = `${process.platform}-${process.arch}`;
+    const sdkDir = findPackage(DAEMON_DIR, spec.sdk);
+    if (!sdkDir) throw new Error(`package: ${spec.sdk} is not installed — run \`pnpm install\` first`);
+    const nativeName = spec.native(platform);
+    const nativeDir = findPackage(sdkDir, nativeName);
+    if (!nativeDir) throw new Error(`package: ${nativeName} is not installed beside ${spec.sdk} — does ${spec.sdk} ship a build for ${platform}?`);
+    const version = readPackage(sdkDir).version;
+    const binary = `node_modules/${nativeName}/${spec.binary(platform)}`;
+
+    /** @type {[string, string][]} */
+    const files = listFiles(nativeDir).map(([rel, abs]) => [`node_modules/${nativeName}/${rel}`, abs]);
+    if (!files.some(([name]) => name === binary)) throw new Error(`package: ${nativeName} has no ${spec.binary(platform)}`);
+    const manifest = { runtime, version, platform, binary, packages: [nativeName], sha256: treeHash(files) };
+
+    const outDir = resolve(options.outDir ?? join(DAEMON_DIR, 'release'));
+    const zipFile = join(outDir, options.unversioned ? `harness-${runtime}-${platform}.zip` : `harness-${runtime}-${version}-${platform}.zip`);
+    const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
+    const entries = function* () {
+        yield { name: 'manifest.json', data: Buffer.from(manifestJson, 'utf8') };
+        // The executable is executable whatever the build machine reports (Windows reports no exec bit).
+        for (const [name, abs] of files) yield { name, data: readFileSync(abs), mode: name === binary || statSync(abs).mode & 0o111 ? 0o755 : 0o644 };
+    };
+    const result = writeZip(zipFile, entries());
+    log(`package: ${relative(process.cwd(), zipFile) || zipFile} — ${runtime} ${version}, ${result.entries} files, ${(result.bytes / 1024 / 1024).toFixed(1)} MB`);
+    const out = { zipFile, runtime, version, platform, binary, entries: result.entries, bytes: result.bytes, tree: manifest.sha256 };
+    if (!options.sha256) return out;
+    const sha256 = writeSidecar(zipFile);
+    writeFileSync(`${zipFile}.json`, manifestJson);
+    return { ...out, sha256 };
 }
 
 /** @param {readonly string[]} argv */
@@ -229,12 +291,17 @@ function main(argv) {
     let outDir;
     let unversioned = false;
     let sha256 = false;
+    /** @type {string[]} */
+    const harnesses = [];
     for (let i = 0; i < argv.length; i++) {
         if (argv[i] === '--out' && argv[i + 1]) outDir = argv[++i];
         else if (argv[i] === '--unversioned') unversioned = true;
         else if (argv[i] === '--sha256') sha256 = true;
-        else if (argv[i] === '--help' || argv[i] === '-h') {
-            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256]\n');
+        else if (argv[i] === '--harness' && argv[i + 1]) {
+            const runtime = /** @type {string} */ (argv[++i]);
+            harnesses.push(...(runtime === 'all' ? Object.keys(HARNESSES) : [runtime]));
+        } else if (argv[i] === '--help' || argv[i] === '-h') {
+            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256] [--harness <runtime>|all ...]\n');
             return 0;
         } else {
             process.stderr.write(`package: unknown argument ${argv[i]}\n`);
@@ -242,7 +309,8 @@ function main(argv) {
         }
     }
     try {
-        packageDaemon({ ...(outDir ? { outDir } : {}), unversioned, sha256 });
+        if (harnesses.length === 0) packageDaemon({ ...(outDir ? { outDir } : {}), unversioned, sha256 });
+        for (const runtime of harnesses) packageHarness({ runtime, ...(outDir ? { outDir } : {}), unversioned, sha256 });
         return 0;
     } catch (e) {
         process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
