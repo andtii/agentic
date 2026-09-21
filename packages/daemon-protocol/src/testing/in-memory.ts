@@ -121,7 +121,7 @@ export interface InMemoryHarnessOptions {
     readonly deltaChars?: number;
     /** The lines its log holds for `log.request` (#355); absent → the daemon has no log file and answers `no-log`. */
     readonly log?: readonly string[];
-    /** The scripted sign-in a `login.request` relays (#355); absent → the runtime has no relay and the daemon answers `unsupported`. */
+    /** The scripted sign-in a `login.request` relays (#355); absent → `IN_MEMORY_LOGIN`, a device code that completes on its own. */
     readonly login?: InMemoryLogin;
     readonly faults?: InMemoryFaults;
 }

@@ -611,6 +611,10 @@ describe('machines managed from the web (#355)', () => {
         }
         expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, source: 'cloud' } }).success).toBe(false);
         expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, requested: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) } }).success).toBe(false);
+        // A reported policy is bounded like a requested one: at most `policyRoots` folders of at most `policyRoot` characters.
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) } }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot)}`] } }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [env], policy: { ...bare, allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot - 1)}`] } }).success).toBe(true);
     });
 
     it('a policy request sets a bounded list of folders or browses one; the set input is strict', () => {
@@ -620,6 +624,7 @@ describe('machines managed from the web (#355)', () => {
         expect(set({ allowedRoots: Array.from({ length: LIMITS.policyRoots }, (_, i) => `/r${i}`) }).success).toBe(true);
         expect(set({ allowedRoots: Array.from({ length: LIMITS.policyRoots + 1 }, (_, i) => `/r${i}`) }).success).toBe(false);
         expect(set({ allowedRoots: [''] }).success).toBe(false);
+        expect(set({ allowedRoots: [`/${'x'.repeat(LIMITS.policyRoot)}`] }).success).toBe(false);
         expect(set({ allowedRoots: ['~'], webManaged: true }).success).toBe(false);
         expect(set({ allowedRoots: ['~'], profileDir: '/x' }).success).toBe(false);
         const browse = (extra: Record<string, unknown>) => platformFrameSchemas['policy.request'].safeParse({ v: V, t: 'policy.request', requestId: 'p_1', op: 'browse', ...extra });

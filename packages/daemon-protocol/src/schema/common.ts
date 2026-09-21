@@ -83,17 +83,23 @@ export const envError: z.ZodType<EnvError> = z.object({
     message: text
 });
 
-/** The policy a daemon reports in `hello` / `env`; `source`, `locked` and `requested` are #355's and optional, so a daemon predating them still parses. */
+/** One folder of a policy: at most `LIMITS.policyRoot` characters, so the requested and the applied roots are bounded alike. */
+const policyRoot = z.string().min(1).max(LIMITS.policyRoot);
+
+/**
+ * The policy a daemon reports in `hello` / `env`: at most `LIMITS.policyRoots` folders either way; `source`, `locked` and
+ * `requested` are #355's and optional, so a daemon predating them still parses.
+ */
 export const machinePolicy: z.ZodType<MachinePolicy> = z.object({
     webManaged: z.boolean(),
-    allowedRoots: z.array(text.min(1)).max(LIMITS.list),
+    allowedRoots: z.array(policyRoot).max(LIMITS.policyRoots),
     source: z.enum(['local', 'web']).optional(),
     locked: z.boolean().optional(),
-    requested: z.array(text.min(1)).max(LIMITS.policyRoots).optional()
+    requested: z.array(policyRoot).max(LIMITS.policyRoots).optional()
 });
 
 /** What the platform asks a policy to be (#355): at most `LIMITS.policyRoots` non-empty folders; empty turns web management off. */
-export const machinePolicyInput: z.ZodType<MachinePolicyInput> = z.strictObject({ allowedRoots: z.array(text.min(1)).max(LIMITS.policyRoots) });
+export const machinePolicyInput: z.ZodType<MachinePolicyInput> = z.strictObject({ allowedRoots: z.array(policyRoot).max(LIMITS.policyRoots) });
 
 export const machinePolicyError: z.ZodType<MachinePolicyError> = z.object({
     code: z.enum(['policy-locked', 'invalid', 'not-found', 'not-a-directory', 'remote-path', 'protected', 'io', 'timeout', 'unsupported']),

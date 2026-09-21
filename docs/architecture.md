@@ -178,7 +178,7 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    update.status {requestId, phase: UpdatePhase, progress?: {bytes, total}, error?: {code, message}}   (#359, `update` feature)
                    harness.status {requestId, phase: HarnessPhase, error?} · harnesses {harnesses: HarnessReport[]}   (#359, `harness` feature)
                    policy.response {requestId, exactly one of result: {policy: MachinePolicy} | {listing: MachineListing} | error: MachinePolicyError}   (#355, `policy` feature; a set's `env` frame comes before or after it)
-                   log.response {requestId, exactly one of result: {lines, truncated} | error: {code: no-log | io | unsupported}}   (#355, `log` feature)
+                   log.response {requestId, exactly one of result: {lines, truncated} | error: {code: no-log | io | unsupported | timeout}}   (#355, `log` feature; `timeout` is the platform's, never sent by a daemon)
                    login.status {requestId, environmentId, phase: started | action | waiting | done | failed, action?: {kind: open-url | device-code, url, code?, expectsPaste}, error?}   (#355, `login` feature)
 platform → daemon: welcome {serverTime, wanted: {sessionId → cursor}, platform?: {version, minDaemonVersion?, latest?: {stable?, latest?}}}   (#359: platform? optional)
                    session.open {sessionId, environmentId, spec}   (spec.resume = the ref the runtime reported through session.ref)

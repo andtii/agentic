@@ -18,8 +18,9 @@ export const LIMITS = {
     harnesses: 16,
     /** How long an `update.request` may drain before it restarts anyway: a day (#360). */
     drainTimeoutMs: 24 * 60 * 60 * 1000,
-    /** Folders a policy names (#355; core's `POLICY_MAX_ROOTS`). */
+    /** Folders a policy names (#355; core's `POLICY_MAX_ROOTS`), and the length of each. */
     policyRoots: 32,
+    policyRoot: 1024,
     /** Lines a `log.request` may ask for and a `log.response` carry (#355; core's `DAEMON_LOG_MAX_LINES`). */
     logLines: 500,
     /** Characters a `login.answer` may carry (#355; core's `LOGIN_ANSWER_MAX_CHARS`). */
