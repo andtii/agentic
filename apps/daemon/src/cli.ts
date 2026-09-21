@@ -6,6 +6,7 @@
  * `agentic-daemon env add | list | rm | login` (`env-cli.ts`)
  * `agentic-daemon launcher install | remove | show` (`launcher.ts`)
  * `agentic-daemon policy show | allow-root | deny-root | off` (`policy-cli.ts`)
+ * `agentic-daemon update [--channel stable|latest] [--version daemon-v…] [--check] [--now]` (`update-cli.ts`)
  * `agentic-daemon --version` (also `version`)
  *
  * Everything the CLI touches — paths, fetch, drivers, the output streams, the
@@ -13,9 +14,9 @@
  * a real profile directory or a real process exit.
  */
 
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import type { QuotaSource } from '@agentic/core';
+import type { DaemonExit, DaemonUpdateOutcome, QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
 import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner, type Credentials } from './credentials.js';
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
@@ -32,6 +33,7 @@ import { pair, PairingError } from './pair.js';
 import { daemonPaths, installPaths, type DaemonPaths, type InstallPaths } from './paths.js';
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
 import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
+import { isSupervised, updateCommand, UPDATE_USAGE, type UpdateTestOptions } from './update-cli.js';
 import { DAEMON_VERSION, versionLine } from './version.js';
 
 export interface CliContext {
@@ -78,6 +80,8 @@ export interface CliContext {
     /** `open`'s default folder; default `process.cwd()`. */
     readonly cwd?: string;
     readonly env?: Readonly<Record<string, string | undefined>>;
+    /** `update` and the update client in `run` (#364): tests only — timings, the staged `--version` run, `http:` on the loopback. */
+    readonly update?: UpdateTestOptions;
 }
 
 const LAUNCHER_USAGE = `  agentic-daemon launcher install [--node <path>] [--entry <path>] [--bin-dir <dir>] [--no-profile]
@@ -101,6 +105,7 @@ Usage:
 ${ENV_USAGE}
 ${POLICY_USAGE}
 ${LAUNCHER_USAGE}
+${UPDATE_USAGE}
   agentic-daemon --version
 `;
 
@@ -139,6 +144,22 @@ export async function readSupervisorState(install: Pick<InstallPaths, 'superviso
         ...(typeof supervisor?.restarts === 'number' ? { restarts: supervisor.restarts } : {}),
         ...(supervisor?.lastExit && typeof supervisor.lastExit === 'object' ? { lastExit: supervisor.lastExit as SupervisorState['lastExit'] } : {}),
         ...(failed && typeof failed.reason === 'string' ? { lastUpdate: failed as unknown as SupervisorState['lastUpdate'] } : {})
+    };
+}
+
+/**
+ * What `hello` reports of the supervisor's state (#364): the restart count, the last exit (`update` for 75, `signal`,
+ * `stop` for 0, `crash` otherwise) and a rolled-back update.
+ */
+export function helloLifecycle(state: SupervisorState): { restarts?: number; lastExit?: DaemonExit; lastUpdate?: DaemonUpdateOutcome } {
+    const exit = state.lastExit;
+    const failed = state.lastUpdate;
+    return {
+        ...(state.restarts !== undefined ? { restarts: state.restarts } : {}),
+        ...(exit && typeof exit.at === 'number'
+            ? { lastExit: { at: exit.at, reason: exit.code === EXIT_UPDATE ? 'update' : exit.signal ? `signal ${exit.signal}` : exit.code === 0 ? 'stop' : 'crash', ...(typeof exit.code === 'number' ? { code: exit.code } : {}) } }
+            : {}),
+        ...(failed && typeof failed.at === 'number' ? { lastUpdate: { from: failed.from ?? 'unknown', to: failed.to ?? 'unknown', outcome: 'rolled-back' as const, at: failed.at, error: failed.reason } } : {})
     };
 }
 
@@ -278,10 +299,12 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     return exiting('config', 1, { problem: 'environments.json is invalid' });
                 }
                 const install = context.install ?? (context.paths ? undefined : installPaths({ ...(context.platform ? { platform: context.platform } : {}), ...(context.env ? { env: context.env } : {}) }));
-                if (install) {
-                    const state = await readSupervisorState(install);
-                    if (Object.keys(state).length > 0) log.info('supervisor state', { ...state });
-                }
+                const state = install ? await readSupervisorState(install) : {};
+                if (Object.keys(state).length > 0) log.info('supervisor state', { ...state });
+                // Updates need the supervisor to swap the staged build in (#364): without it the daemon does not offer them.
+                const supervised = install !== undefined && (await isSupervised(install, context.env ?? process.env));
+                let requestUpdate!: () => void;
+                const updateRequested = new Promise<'update'>((resolve) => (requestUpdate = () => resolve('update')));
                 // A crash anywhere logs why before the process goes: the #353 exit left no line at all.
                 const host = context.host ?? (context.until ? undefined : (process as unknown as CrashHost));
                 const crash = (reason: 'uncaught' | 'unhandled-rejection') => (e: unknown) => {
@@ -297,6 +320,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 const onWelcome = (): void => {
                     if (welcomed || !install) return;
                     welcomed = true;
+                    // A rolled-back update is reported on this process's `hello`s, once: the next start does not repeat it.
+                    if (state.lastUpdate) void rm(install.updateFailedFile, { force: true }).catch(() => {});
                     // The supervisor's go-ahead for a swapped-in version: this one reaches the platform.
                     void mkdir(install.stateDir, { recursive: true })
                         .then(() => writeFile(install.readyFile, `${JSON.stringify({ version: DAEMON_VERSION, pid: process.pid, at: Date.now() })}\n`))
@@ -320,7 +345,20 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     ...(context.backoff ? { backoff: context.backoff } : {}),
                     ...(context.reinspectMs !== undefined ? { reinspectMs: context.reinspectMs } : {}),
                     ...(context.platform ? { platform: context.platform } : {}),
-                    onWelcome
+                    onWelcome,
+                    lifecycle: helloLifecycle(state),
+                    ...(supervised && install
+                        ? {
+                              update: {
+                                  root: install.root,
+                                  restart: requestUpdate,
+                                  ...(context.fetch ? { fetch: context.fetch } : {}),
+                                  ...(context.update?.allowLoopbackHttp ? { allowLoopbackHttp: true } : {}),
+                                  ...(context.update?.check ? { check: context.update.check } : {}),
+                                  ...(context.update?.pollMs !== undefined ? { pollMs: context.update.pollMs } : {})
+                              }
+                          }
+                        : {})
                 });
                 await daemon.start();
                 // `env add` / `env rm` / an edit reach the platform without a restart. An invalid file keeps the running set.
@@ -362,13 +400,15 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     return undefined;
                 });
                 context.onStarted?.(daemon);
-                const ended = await (context.until ?? stopSignal());
+                const ended = await Promise.race([context.until ?? stopSignal(), updateRequested]);
                 const reason: ExitReason = ended === 'signal' ? 'signal' : ended === 'update' ? 'update' : 'stop';
                 const code = exiting(reason, reason === 'update' ? EXIT_UPDATE : 0);
                 watcher?.close();
                 policyWatcher?.close();
                 // SIGINT / SIGTERM: the supervisor (or the service manager) brings the daemon back, so the platform re-opens its sessions (#363).
                 await daemon.stop({ reason: reason === 'signal' ? 'restart' : reason === 'update' ? 'update' : 'stop' });
+                // The supervisor waits for the swapped-in version's own `ready` (#362, #364).
+                if (reason === 'update' && install) await rm(install.readyFile, { force: true }).catch(() => {});
                 for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);
@@ -462,6 +502,15 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                         return 2;
                 }
             }
+            case 'update':
+                return await updateCommand(args.flags, {
+                    install: context.install ?? installPaths({ ...(context.platform ? { platform: context.platform } : {}), ...(context.env ? { env: context.env } : {}) }),
+                    out,
+                    err,
+                    env: context.env ?? process.env,
+                    ...(context.fetch ? { fetch: context.fetch } : {}),
+                    ...(context.update ? { test: context.update } : {})
+                });
             case 'doctor': {
                 const report = await runDoctor({ paths, drivers });
                 out(formatDoctorReport(report));

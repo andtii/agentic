@@ -50,6 +50,9 @@
  *   asks here for anything older — a session it no longer has a log for, or a
  *   range retention already forgot, is a named error, never silence. After
  *   every turn the log is trimmed to `retention.maxBytes` of whole turns.
+ * - Updates (#364): `hello` carries the build, `features: ['update']` when an update client is configured, and what
+ *   the supervisor recorded (`restarts`, `lastExit`, `lastUpdate`). `update.request` / `update.cancel` go to
+ *   `./update.ts`; while it drains, a turn-starting `prompt` is answered `drainingReply` and `session.open` still works.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -61,6 +64,9 @@ import {
     toEnvironmentDescriptor,
     type CapabilityReport,
     type Cursor,
+    type DaemonExit,
+    type DaemonFeature,
+    type DaemonUpdateOutcome,
     type DoctorReport,
     type EnvironmentDescriptor,
     type EnvironmentId,
@@ -74,7 +80,7 @@ import {
     type SessionClosedCode,
     type SessionId
 } from '@agentic/core';
-import { decodePlatformFrame, encodeFrame, LIMITS, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
+import { decodePlatformFrame, drainingReply, encodeFrame, LIMITS, platformKey, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
 import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy, type SessionRef } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireFrame } from '@sigx/ai-agent/wire';
@@ -88,7 +94,8 @@ import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
 import { POLICY_OFF, reportedPolicy } from './policy.js';
 import { createQuotaMonitor } from './quota.js';
-import { DAEMON_VERSION } from './version.js';
+import { createUpdateClient, type UpdateClientOptions } from './update.js';
+import { DAEMON_CHANNEL, DAEMON_COMMIT, DAEMON_VERSION } from './version.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
 const W = WIRE_PROTOCOL_VERSION;
@@ -144,6 +151,12 @@ export interface DaemonOptions {
     readonly retention?: Partial<RetentionPolicy>;
     /** Called after every `welcome` from the platform (the CLI writes the supervisor's `ready` marker on the first, #362). */
     readonly onWelcome?: () => void;
+    /** The update client (#364): with it `hello.features` lists `update`; without it (no supervisor) `update.request` is refused `unsupported`. */
+    readonly update?: UpdateClientOptions;
+    /** What the supervisor recorded, reported on every `hello` (#364). */
+    readonly lifecycle?: { readonly restarts?: number; readonly lastExit?: DaemonExit; readonly lastUpdate?: DaemonUpdateOutcome };
+    /** `hello.build.platform` is `<platform>-<arch>`; default `process.arch`. */
+    readonly arch?: string;
 }
 
 /**
@@ -329,6 +342,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
         ...(options.quota?.turnEndDebounceMs !== undefined ? { turnEndDebounceMs: options.quota.turnEndDebounceMs } : {}),
         ...(options.quota?.refreshMs !== undefined ? { refreshMs: options.quota.refreshMs } : {})
     });
+    const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
+    const features: DaemonFeature[] = updater ? ['update'] : [];
+    const version = options.daemonVersion ?? DAEMON_VERSION;
+    const build = { version, commit: DAEMON_COMMIT, protocol: V, channel: DAEMON_CHANNEL, platform: platformKey(platform, options.arch ?? process.arch) };
 
     function send(frame: DaemonFrame): boolean {
         if (!socket) return false;
@@ -424,7 +441,20 @@ export function createDaemon(options: DaemonOptions): Daemon {
         // The later of the served head and what was last sent: the served head (and the log behind it) advances
         // only as appends reach disk, so it can trail frames already on the wire.
         for (const s of sessions.values()) resume[s.id] = cursorBefore(headOf(s), s.lastSent) ? s.lastSent : headOf(s);
-        send({ v: V, t: 'hello', machineId, daemonVersion: options.daemonVersion ?? DAEMON_VERSION, os: options.os ?? osOf(platform), environments: descriptors(), capabilities: runtimeReports(), resume, policy: announcedPolicy() });
+        send({
+            v: V,
+            t: 'hello',
+            machineId,
+            daemonVersion: version,
+            os: options.os ?? osOf(platform),
+            environments: descriptors(),
+            capabilities: runtimeReports(),
+            resume,
+            policy: announcedPolicy(),
+            build,
+            features,
+            ...options.lifecycle
+        });
     }
 
     function onClose(): void {
@@ -469,6 +499,13 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 return;
             case 'history.request':
                 void historyRequest(frame);
+                return;
+            case 'update.request':
+                if (updater) updater.request(frame);
+                else send({ v: V, t: 'update.status', requestId: frame.requestId, phase: 'failed', error: { code: 'unsupported', message: 'this daemon does not run under the supervisor; reinstall it to update from the platform' } });
+                return;
+            case 'update.cancel':
+                updater?.cancel(frame.requestId);
                 return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
@@ -730,6 +767,11 @@ export function createDaemon(options: DaemonOptions): Daemon {
         // (a steer, or its own `busy`). The slot is taken before the reply is known so two prompts cannot share it.
         const starts = command.type === 'prompt' && !s.running;
         if (starts) {
+            // Draining for an update (#364): no new turns; the platform parks the task and prompts again, as for `busy`.
+            if (updater?.draining) {
+                send({ v: V, t: 'session.reply', sessionId, reply: drainingReply(command.commandId) });
+                return;
+            }
             const env = environments.find((e) => e.id === s.environmentId);
             const running = runningOn(s.environmentId);
             if (env && running >= env.concurrency) {
@@ -805,6 +847,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     return {
         async start() {
             stopped = false;
+            await updater?.start();
             await inspectAll();
             const url = options.socketUrl ?? daemonSocketUrl(options.credentials.url, options.credentials.machineId);
             connection = reconnectingConnection({
@@ -837,6 +880,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         async stop(stopOptions) {
             stopped = true;
             quota.stop();
+            updater?.stop();
             if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
             reinspectTimer = undefined;
             // While the socket is still up: each session closes with the code its reason maps to (#363).
