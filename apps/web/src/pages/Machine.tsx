@@ -2,7 +2,7 @@ import { component, signal, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, StatusPill, TextField } from '@agentic/ui';
-import { doctorChecks, doctorFootnote, environmentsOf, machinePolicyOf, opsMachine, opsQuota, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
+import { doctorChecks, doctorFootnote, environmentsOf, machinePolicyOf, opsAgent, opsMachine, opsQuota, opsTelemetry, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { CommandWell } from './machines/CommandWell';
 import { EnvironmentDialog } from './machines/EnvironmentDialog';
@@ -13,7 +13,7 @@ import { MockHarnessCard } from './machines/MockHarnessCard';
 import { MockUpdateCard } from './machines/MockUpdateCard';
 import { SessionsTable } from './machines/SessionsTable';
 import { buildLabel } from './machines/update';
-import type { DefaultForAgent } from './machines/live';
+import { loadText, loadTone, machineLoadOf, sessionLoadOf, warningText, type DefaultForAgent, type MachineLoad } from './machines/live';
 import { allowRootCommand, fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
@@ -64,7 +64,9 @@ export type MachineViewProps =
     /** The daemon update card (#367) under the header: the live page's or the mock's. */
     & Define.Slot<'update'>
     /** "Runtimes on this machine" (#370) under the environments: the live page's or the mock's. */
-    & Define.Slot<'harness'>;
+    & Define.Slot<'harness'>
+    /** The machine's own CPU and memory (#400): in the caption, and an alert under the hero while a limit is crossed. */
+    & Define.Prop<'machineLoad', MachineLoad>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -129,16 +131,22 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
         const removeSessions = removing ? props.sessions.filter((s) => s.environment === removing.name) : [];
         const removeQueued = removing ? props.queued[removing.id] ?? 0 : 0;
         const removeFailure = failure('remove');
+        const load = props.machineLoad;
         return (
             <OpsPage page="machine" title={m.name}>
                 <header data-machine-hero data-machine={m.id} data-revoked={revoked ? '' : undefined}>
                     <span data-machine-glyph data-size="52" aria-hidden="true"><Icon name="machines" size={24} /></span>
                     <div data-machine-title>
                         <span data-machine-name data-size="lg">{m.name}</span>
-                        <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · paired {m.pairedOn} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
+                        <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · paired {m.pairedOn} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}{load ? <> · <span data-machine-load data-tone={loadTone(load)} title={load.reason ?? (load.stale ? 'Last reported before the daemon went quiet' : undefined)}>{loadText(load)}</span></> : null}</span>
                     </div>
                     <StatusPill status={m.online ? 'online' : 'offline'} label={revoked ? 'REVOKED' : undefined} />
                 </header>
+                {load?.warnings.length ? (
+                    <p data-machine-pressure role="alert">
+                        {load.warnings.map((w) => <span>{warningText(w, props.sessions, (id) => (props.agents ?? opsAgent)(id).name)}</span>)}
+                    </p>
+                ) : null}
 
                 {slots.update?.()}
 
@@ -162,7 +170,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                         </div>
                     ) : null}
                     {props.environments.length
-                        ? <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} actions={actions} />
+                        ? <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} load={props.load} actions={actions} />
                         : <EmptyState caption={m.online ? (manageable ? 'No environment yet. Add one to run agents on this machine.' : 'The daemon reported no environment.') : 'The daemon has not connected yet: its environments arrive with its first hello.'} />}
                 </section>
 
@@ -308,6 +316,8 @@ const mockEnvId = (machineId: string, name: string): string => `env_${machineId.
 const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props }) => {
     const router = useRouter();
     const policy = machinePolicyOf(props.machine.id);
+    const telemetry = opsTelemetry[props.machine.id];
+    const now = Date.now();
     const st = signal({ environments: [...environmentsOf(props.machine.id)], name: props.machine.name, request: null as EnvRequestState | null, seq: 0 });
     const answer = (r: Omit<EnvRequestState, 'seq'>): void => {
         st.seq += 1;
@@ -345,11 +355,12 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
         <MachineView
             machine={{ ...props.machine, name: st.name }}
             environments={st.environments}
-            sessions={sessionsOn(props.machine.id)}
+            sessions={sessionsOn(props.machine.id).map((s) => (telemetry ? { ...s, load: sessionLoadOf(telemetry, s.id) } : s))}
             doctor={doctorChecks}
             queued={queuedFor}
             defaultFor={mockDefaultFor}
             quota={opsQuota}
+            {...(telemetry ? { load: telemetry.environments, machineLoad: machineLoadOf(telemetry, now) } : {})}
             {...(policy ? { policy } : {})}
             runtimes={runtimesOf([], st.environments)}
             envRequest={st.request}

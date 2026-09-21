@@ -8,7 +8,7 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, DaemonBuild, DaemonFeature, EnvironmentDescriptor, EnvironmentId, HarnessReport, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
+import type { AgentId, DaemonBuild, DaemonFeature, EnvironmentDescriptor, EnvironmentId, HarnessReport, MachineId, MachineInfo, MachinePolicy, MachineTelemetry, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ResourceSample, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
 import type { AvailableHarness, Dependents, HarnessResultView, MachineUpdateView, PluginView } from '@agentic/platform';
 import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
@@ -114,6 +114,8 @@ export interface OpsSession {
     /** A pill status: `waiting` (awaiting approval), `active` (running). */
     readonly status: 'waiting' | 'active';
     readonly age: string;
+    /** What it costs the machine (#400): `null` = the daemon could not attribute a process (unknown); absent = no telemetry. */
+    readonly load?: ResourceSample | null;
 }
 
 export const opsSessions: readonly OpsSession[] = [
@@ -122,6 +124,33 @@ export const opsSessions: readonly OpsSession[] = [
 ];
 
 export const sessionsOn = (machineId: string): readonly OpsSession[] => opsSessions.filter(s => s.machineId === machineId);
+
+const GiB = 2 ** 30;
+/**
+ * What each machine's sessions cost it (#400), as `alien01`'s daemon last reported: `s_41aa` holds a dev server (over the 2 GiB
+ * warning level), `s_41ab` is light, the Copilot environment cannot be seen and the Codex one is charged as a whole. `nuc-lab`
+ * is offline and has reported none.
+ */
+export const opsTelemetry: Readonly<Record<string, MachineTelemetry>> = {
+    alien01: {
+        observedAt: Date.parse('2026-09-17T14:20:04Z'),
+        intervalMs: 30_000,
+        cpus: 16,
+        machine: { cpu: 0.34, memoryUsed: 21 * GiB, memoryTotal: 32 * GiB },
+        daemon: { cpu: 0.002, rss: 68 * 2 ** 20, processes: 1 },
+        environments: {
+            [envId('alien01', 'work')]: { sample: { cpu: 0.21, rss: 2_576_980_378, processes: 7 }, attribution: 'session' },
+            [envId('alien01', 'personal')]: { sample: { cpu: 0.03, rss: 410 * 2 ** 20, processes: 2 }, attribution: 'session' },
+            [envId('alien01', 'copilot')]: { sample: null, attribution: 'none' },
+            [envId('alien01', 'codex')]: { sample: { cpu: 0, rss: 96 * 2 ** 20, processes: 1 }, attribution: 'environment' }
+        },
+        sessions: {
+            ['s_41aa' as SessionId]: { cpu: 0.21, rss: 2_576_980_378, processes: 7 },
+            ['s_41ab' as SessionId]: { cpu: 0.03, rss: 410 * 2 ** 20, processes: 2 }
+        },
+        availability: 'partial'
+    }
+};
 
 export interface DoctorCheck {
     readonly text: string;

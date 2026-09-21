@@ -33,7 +33,7 @@ import { LinkButton } from '../ops/LinkButton';
 import { OpsPage } from '../ops/OpsPage';
 import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { machineHead } from './head';
-import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
+import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineLoadOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
 import { LiveHarnessCard } from './LiveHarnessCard';
 import { LiveUpdateCard } from './LiveUpdateCard';
@@ -177,6 +177,7 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     queued={queuedByEnvironment(routing.value ?? undefined, v.machineId)}
                     defaultFor={defaultForByEnvironment(agents, v.environments)}
                     quota={v.quota ?? {}}
+                    {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, now) } : {})}
                     revokedAt={v.revokedAt}
                     agents={(agentId) => { const a = directory.lookup(agentId); return { name: a.name, hue: a.hue }; }}
                     onRevoke={() => { void revoke(); }}

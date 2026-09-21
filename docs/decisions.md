@@ -217,3 +217,13 @@ The chat list named every untitled chat by its members, so ten chats with Atlas 
 - **A person's word is final, and runtimes do not fight.** A `rename` (or `createChat({ title })`) carries no `auto`, and no generated title ever replaces it. A runtime title is replaced only by the same session's next one, so two members' runtimes in a group chat never rename it back and forth; the provenance lives on the entry (`auto: {source, sessionId?}`), so a replay reaches the same answer.
 - **Read the transcript, not the SDK.** `getSessionInfo` reads exactly the rows we want, but from the calling process's `CLAUDE_CONFIG_DIR`, not the environment's; the driver already isolates each environment by config dir, so it reads the tail of the session file itself.
 - **The title call is not ledgered.** ~40 output tokens on the cheapest model, once or twice per chat, under the workspace's own key; the Registry audits every `openSecret` like a session's, and the plugin's secret and permission texts say so. A ledger row per title would cost more than the title.
+
+## 2026-09-21 — resource pressure is shown and warned, never enforced (#400)
+
+#387 keeps a chat's runtime session alive for the life of the chat and refused a session cap, an idle timeout and eviction: agents hold dev servers and watchers. The answer to resource pressure is to see it.
+
+- **The daemon charges process trees, not processes.** A session's cost is its runtime process and everything under it — the dev server the agent started is that session's — sampled from one process-table read per heartbeat. Claude Code keeps one process per session, so its sessions are attributed (the driver runs each `prompt` in an async context its `spawn` reads); Codex keeps one app-server per environment, so its environments are and its sessions read unknown; Copilot's SDK starts its own runtime, so both read unknown. **Unknown is `null`, never zero.**
+- **Memory warns; CPU is only shown.** A session over 2 GiB resident, or a machine over 90 % of its memory, is told to the Inbox once as `resource-pressure` and shown amber on the Machine page, and told again only after it fell under 80 % of the limit (or the session closed). A build pegging every core for a while is normal work: no CPU warning, ever.
+- **Nothing is ended, throttled or moved.** The warning names the agent, the session and the number, says nothing is stopped, and leaves the decision to a person. Enforcement would break exactly the dev flow #387 protects.
+- **macOS memory is what Activity Monitor calls "Memory Used"** (wired + compressed + anonymous pages from `vm_stat`), not `os.freemem()`: free pages alone read every Mac as full.
+

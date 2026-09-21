@@ -336,6 +336,7 @@ const envCard: RecipeInput = {
         },
         count: { base: { whiteSpace: 'nowrap' } },
         queued: { base: { color: 'var(--color-warning)', whiteSpace: 'nowrap' } },
+        load: { base: { whiteSpace: 'nowrap', marginInlineStart: 'auto' }, selectors: { '&[data-tone="warning"]': { color: 'var(--color-warning)' } } },
         facts: {
             base: { margin: '0', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: 'var(--space-md)', rowGap: 'var(--space-2xs)', fontSize: 'var(--text-sm)' },
             selectors: {

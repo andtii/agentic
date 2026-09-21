@@ -86,6 +86,8 @@ export const agEnvCardAnatomy = defineAnatomy('ag-env-card', {
     slot: { element: 'span', parent: 'meter', tokens: ['color'] },
     count: { element: 'span', parent: 'capacity', tokens: ['text'] },
     queued: { element: 'span', parent: 'capacity', tokens: ['color', 'text'] },
+    /** What the environment's sessions cost the machine (#400): `CPU 12 % · 1.8 GB`, or why it is unknown. */
+    load: { element: 'span', parent: 'capacity', tokens: ['color', 'text'] },
     facts: { element: 'dl', parent: 'root', tokens: ['text'] },
     'default-for': { element: 'dd', parent: 'facts' },
     fix: { element: 'p', parent: 'root', tokens: ['color', 'text'] },

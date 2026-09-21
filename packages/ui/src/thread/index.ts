@@ -24,6 +24,6 @@ export { toolCallState, agentState } from './tool-state.js';
 export type { ToolCallView, ToolCallPhase, LifecycleState } from './tool-state.js';
 export { windowRows, unitCount, followRange, frozenRange, DEFAULT_WINDOW } from './window.js';
 export type { ThreadRow, WindowRange } from './window.js';
-export { nonBlank, oneLine, signature, elide } from './text.js';
+export { nonBlank, oneLine, signature, elide, formatBytes } from './text.js';
 export { QuestionPrompt, QuestionPrompt as AiQuestion, questionFields, questionAnswers, answerText } from './QuestionPrompt.js';
 export type { QuestionPromptProps, QuestionField } from './QuestionPrompt.js';

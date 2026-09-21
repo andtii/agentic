@@ -23,7 +23,7 @@ import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
-import { LIVE_PLATFORM_ROW, defaultForByEnvironment, machineOf, platformAgents, queuedByEnvironment } from './live';
+import { LIVE_PLATFORM_ROW, defaultForByEnvironment, machineLoadOf, machineOf, platformAgents, queuedByEnvironment } from './live';
 import type { AgentIdentity } from '../chat/live';
 import { MachineGroup, PlatformRow } from './MachineGroup';
 import { UpdateAll, type UpdateAllEntry, type UpdateAllResult } from './UpdateAll';
@@ -41,7 +41,7 @@ const LiveMachineGroup = component<{ id: string; name: string; workspaceId: stri
         const v = view.value;
         if (!v) return <section data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />;
         // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
-        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} />;
+        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, Date.now()) } : {})} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} />;
     };
 });
 
