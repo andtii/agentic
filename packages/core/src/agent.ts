@@ -1,5 +1,6 @@
 /** Agent identity and configuration (requirements AGT-01..09, COL-10/11). */
 
+import type { AccountRef } from './account.js';
 import type { AgentId, EnvironmentId } from './ids.js';
 
 /** The runtime that executes an agent's sessions. Extended by runtime plugins. */
@@ -55,6 +56,13 @@ export type OfflinePolicy = 'queue' | 'fail' | 'fallback-api';
 
 export interface ExecutionDefaults {
     readonly runtime: RuntimeId;
+    /**
+     * The account the agent runs as, on whichever machine the chat or task names (#414): the
+     * router resolves `(machine, account)` to that machine's environment once per task. Absent,
+     * the agent is pinned to `defaultEnvironmentId` — which also supplies the account when a
+     * task names a machine but the agent names no account.
+     */
+    readonly account?: AccountRef;
     readonly defaultEnvironmentId?: EnvironmentId;
     /** The folder work runs in when it runs in `defaultEnvironmentId` (#185); within that environment's `cwdRoots`. */
     readonly defaultWorkdir?: string;

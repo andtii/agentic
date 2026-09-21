@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, FsErrorCode, FsOp, FsResult, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, RuntimeDriver, RuntimeOpenContext, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, RuntimeDriver, RuntimeOpenContext, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -54,6 +54,14 @@ describe('contract type tests', () => {
         // @ts-expect-error a ChatId is not an AgentId
         const wrong: AgentId = 'chat_1' as ChatId;
         void wrong;
+    });
+    it('accounts are refs an agent binds to, and a task, a chat note and a roster name the machine (#414)', () => {
+        expectTypeOf<ExecutionDefaults['account']>().toEqualTypeOf<AccountRef | undefined>();
+        expectTypeOf<AccountRef>().toEqualTypeOf<{ readonly identity?: string; readonly label?: string }>();
+        expectTypeOf<TaskContract['machineId']>().toEqualTypeOf<MachineId | undefined>();
+        expectTypeOf<Extract<ChatEntry, { t: 'msg' }>['machine']>().toEqualTypeOf<{ readonly id: MachineId | null } | undefined>();
+        expectTypeOf<ChatRoster['machine']>().toEqualTypeOf<{ readonly id: MachineId; readonly name: string } | undefined>();
+        expectTypeOf<QuotaAccount['key']>().toEqualTypeOf<AccountKey | undefined>();
     });
     it('instruction proposals always require review', () => {
         expectTypeOf<Extract<Proposal, { kind: 'instruction' }>['requiresReview']>().toEqualTypeOf<true>();

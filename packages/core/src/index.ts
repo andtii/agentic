@@ -22,4 +22,5 @@ export * from './quota.js';
 export * from './workspace.js';
 export * from './workdir.js';
 export * from './project.js';
+export * from './account.js';
 export * from './files.js';
