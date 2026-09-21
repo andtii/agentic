@@ -112,6 +112,7 @@ import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
 import { POLICY_OFF, reportedPolicy } from './policy.js';
 import { createQuotaMonitor } from './quota.js';
+import { createTelemetrySampler, telemetryOff, type Exec } from './telemetry.js';
 import { createUpdateClient, type UpdateClientOptions } from './update.js';
 import { DAEMON_CHANNEL, DAEMON_COMMIT, DAEMON_VERSION } from './version.js';
 
@@ -165,6 +166,11 @@ export interface DaemonOptions {
      * probe after a turn ends (default 30 s later) and how long an unchanged snapshot is not sent again (default 15 min).
      */
     readonly quota?: { readonly sources?: readonly QuotaSource[]; readonly probe?: boolean; readonly pollMs?: number; readonly turnEndDebounceMs?: number; readonly refreshMs?: number };
+    /**
+     * What the sessions cost the machine (#400): sampled on the heartbeat cadence and sent as `telemetry`. `enabled`
+     * false (`--telemetry off`) sends a `not-reported` snapshot instead; `exec` reads the process table (a fake in tests).
+     */
+    readonly telemetry?: { readonly enabled?: boolean; readonly exec?: Exec };
     /**
      * How much of a session's history the machine keeps (#397): the newest whole turns under `maxBytes` of NDJSON, trimmed
      * after every turn end. Default `DEFAULT_LOG_MAX_BYTES`; `0` keeps everything. What is trimmed becomes a named `gap`
@@ -268,6 +274,8 @@ interface LiveSession {
     sentRef: SessionRef;
     /** The runtime's title for the conversation (#460): the driver's probe, when the runtime keeps one. */
     readonly title?: () => Promise<string | undefined>;
+    /** The session's own OS process (#400), when the runtime keeps one per session; what telemetry charges to it. */
+    readonly pid?: () => number | undefined;
     /** The title the probe last found, and the one the platform last heard: `session.title` goes out when they differ. */
     knownTitle?: string;
     sentTitle?: string;
@@ -406,6 +414,29 @@ export function createDaemon(options: DaemonOptions): Daemon {
         ...(options.quota?.turnEndDebounceMs !== undefined ? { turnEndDebounceMs: options.quota.turnEndDebounceMs } : {}),
         ...(options.quota?.refreshMs !== undefined ? { refreshMs: options.quota.refreshMs } : {})
     });
+    const telemetry = options.telemetry?.enabled === false ? undefined : createTelemetrySampler({ platform, logger, ...(options.telemetry?.exec ? { exec: options.telemetry.exec } : {}) });
+    let sampling = false;
+    /** One `telemetry` frame per heartbeat (#400): the sample runs off the heartbeat's tick, never two at once. */
+    async function tickTelemetry(): Promise<void> {
+        if (!welcomed || sampling) return;
+        if (!telemetry) {
+            send({ v: V, t: 'telemetry', snapshot: telemetryOff(Date.now()) });
+            return;
+        }
+        sampling = true;
+        try {
+            const snapshot = await telemetry.sample({
+                daemonPid: process.pid,
+                sessions: [...sessions.values()].map((s) => ({ id: s.id, environmentId: s.environmentId, pid: s.pid?.(), attributable: s.pid !== undefined })),
+                environments: environments.map((env) => ({ id: env.id, pids: drivers.get(env.runtime)?.pids?.(env.id) ?? [] }))
+            });
+            if (welcomed) send({ v: V, t: 'telemetry', snapshot });
+        } catch (e) {
+            logger.warn('telemetry: sample failed', { error: e instanceof Error ? e.message : String(e) });
+        } finally {
+            sampling = false;
+        }
+    }
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
     const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : [])];
@@ -626,7 +657,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
         for (const [id, cursor] of Object.entries(wanted)) if (!sessions.has(id as SessionId)) void replayArchived(id as SessionId, cursor);
         for (const pending of pendingTools.values()) send(pending.frame);
         if (heartbeat === undefined) {
-            heartbeat = setInterval(() => send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] }), heartbeatMs);
+            heartbeat = setInterval(() => {
+                send({ v: V, t: 'heartbeat', at: Date.now(), active: [...sessions.keys()] });
+                void tickTelemetry();
+            }, heartbeatMs);
         }
         quota.welcomed();
         void refreshModels();
@@ -770,7 +804,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
             const base = spec.resume !== undefined ? await reopenedBase(sessionId, ref) : served.head;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, ...(opened.title ? { title: opened.title } : {}), lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, ...(opened.title ? { title: opened.title } : {}), ...(opened.pid ? { pid: opened.pid } : {}), lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
             sessions.set(sessionId, live);
             watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });

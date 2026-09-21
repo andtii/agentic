@@ -22,7 +22,7 @@ import { bridgedPlatformTools } from '../harness/tools.js';
 import { CODEX_CLI_PLUGIN_ID } from '../plugins.js';
 import { codexCli, type CodexSessionOptions, type ServeTools } from './agent.js';
 import { readCodexAuth } from './auth.js';
-import { spawnCodexAppServer, type CodexConnect, type SpawnCodexOptions } from './client.js';
+import { spawnCodexAppServer, type CodexConnect, type CodexConnection, type SpawnCodexOptions } from './client.js';
 import { codexCliDoctor, type CodexDoctorInput } from './doctor.js';
 import type { AskForApproval, SandboxMode } from './protocol.js';
 
@@ -81,13 +81,29 @@ export function codexCliDriver(options: CodexCliDriverOptions = {}): CodexCliDri
     const assertRuntime = (env: LocalEnvironment) => assertRuntimeOf(RUNTIME, env);
     const homeOf = (env: LocalEnvironment) => env.profileDir ?? joinPath(options.home ?? homedir(), '.codex');
 
+    /** The app-server each environment's agent runs on (#400) — one process per environment, its sessions are threads in it. */
+    const serverPids = new Map<string, number>();
+    const agentConnect = async (env: LocalEnvironment): Promise<CodexConnection> => {
+        const connection = await connect(env);
+        if (connection.pid === undefined) return connection;
+        const pid = connection.pid;
+        serverPids.set(env.id, pid);
+        return {
+            ...connection,
+            close: async () => {
+                if (serverPids.get(env.id) === pid) serverPids.delete(env.id);
+                await connection.close();
+            }
+        };
+    };
+
     const agentFor = (env: LocalEnvironment) => {
         assertRuntime(env);
         let agent = agents.get(env.id);
         if (!agent) {
             agent = codexCli({
                 id: `${RUNTIME}:${env.id}`,
-                connect: () => connect(env),
+                connect: () => agentConnect(env),
                 ...(options.serveTools ? { serveTools: options.serveTools } : {}),
                 ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
                 ...(options.sandbox ? { sandbox: options.sandbox } : {})
@@ -128,6 +144,10 @@ export function codexCliDriver(options: CodexCliDriverOptions = {}): CodexCliDri
         homeOf,
         connect,
         inspect,
+        pids: (environmentId) => {
+            const pid = serverPids.get(environmentId);
+            return pid === undefined ? [] : [pid];
+        },
 
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);

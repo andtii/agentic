@@ -24,7 +24,7 @@ async function expectFrame<T extends DaemonFrameType>(seat: PlatformSeat, t: T):
     for (;;) {
         const frame = await next(seat);
         if (frame.t === t) return frame as DaemonFrameOf<T>;
-        if (frame.t !== 'heartbeat') throw new Error(`expected ${t}, got ${frame.t}`);
+        if (frame.t !== 'heartbeat' && frame.t !== 'telemetry') throw new Error(`expected ${t}, got ${frame.t}`);
     }
 }
 
@@ -775,7 +775,7 @@ describe('daemon', () => {
             const refs: DaemonFrameOf<'session.ref'>[] = [];
             for (;;) {
                 const frame = await next(seat);
-                if (frame.t === 'heartbeat') continue;
+                if (frame.t === 'heartbeat' || frame.t === 'telemetry') continue;
                 order.push(frame.t === 'session.frame' && frame.frame.kind === 'event' ? `event:${frame.frame.event.type}` : frame.t);
                 if (frame.t === 'session.ref') refs.push(frame);
                 if (frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end') return { order, refs };
@@ -863,7 +863,7 @@ describe('daemon', () => {
             for (;;) {
                 const frame = await next(seat);
                 if (frame.t === 'session.opened') return;
-                if (frame.t !== 'session.frame' && frame.t !== 'heartbeat') throw new Error(`expected session.opened, got ${frame.t}`);
+                if (frame.t !== 'session.frame' && frame.t !== 'heartbeat' && frame.t !== 'telemetry') throw new Error(`expected session.opened, got ${frame.t}`);
             }
         }
 

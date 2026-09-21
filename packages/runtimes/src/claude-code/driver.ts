@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
-import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
+import { claudeCode, spawnForSdk, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
 import { BYPASS_PERMISSIONS_MODE, type DoctorReport, type EnvironmentInspection, type LocalEnvironment, type ModelOption, type OpenedRuntimeSession, type OpenSpec, type RuntimeDriver, type RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
@@ -26,6 +26,7 @@ import { bridgedPlatformTools } from '../harness/tools.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
 import { claudeCodeModels, type ModelsQueryFn } from './models.js';
+import { sessionPids } from './pids.js';
 import { withPlanReview } from './plan.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
 import { readSessionTitle } from './title.js';
@@ -114,6 +115,15 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
 
     const assertRuntime = (env: LocalEnvironment) => assertRuntimeOf(RUNTIME, env);
 
+    /**
+     * Each session's CLI process (#400), charged to it by the spawn that starts it. The adapter's own default spawn is
+     * kept as is for a `.cmd` shim (it resolves the shim first, asynchronously — the daemon never passes one: it names
+     * `claude(.exe)` itself); every other case spawns as the adapter would, through `spawnForSdk`.
+     */
+    const pids = sessionPids();
+    const cmdShim = options.pathToClaudeCodeExecutable !== undefined && /\.(cmd|bat)$/i.test(options.pathToClaudeCodeExecutable);
+    const spawn = options.spawn ?? (cmdShim ? undefined : spawnForSdk);
+
     const configDirOf = (env: LocalEnvironment) => env.profileDir ?? joinPath(home(), '.claude');
 
     /** Removes what could select another account; sets this environment's config dir (or none: the default). */
@@ -134,7 +144,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 query: withoutCrossSessionTools(options.query ?? sdkQuery),
                 ...(options.listen ? { listen: options.listen } : {}),
                 ...(options.listSessions ? { listSessions: options.listSessions } : {}),
-                ...(options.spawn ? { spawn: options.spawn } : {}),
+                ...(spawn ? { spawn: pids.spawning(spawn) } : {}),
                 ...(options.pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable } : {})
             });
             agents.set(env.id, agent);
@@ -212,7 +222,8 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 const cwd = typeof ref.data?.cwd === 'string' && ref.data.cwd ? ref.data.cwd : spec.cwd;
                 return readSessionTitle({ configDir: configDirOf(env), cwd, sessionId: ref.id });
             };
-            return { session: closingWith(session, connectors.close), capabilities, title };
+            const tracked = pids.track(ctx.sessionId, session);
+            return { session: closingWith(tracked.session, connectors.close), capabilities, title, pid: tracked.pid };
         },
 
         models(env: LocalEnvironment): Promise<readonly ModelOption[] | null> {
