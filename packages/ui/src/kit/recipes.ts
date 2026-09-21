@@ -721,13 +721,14 @@ const quotaPanel: RecipeInput = {
 
 /**
  * A member's limits as rings (#452): a 28 px ring per window, its arc the status ink over a line-coloured track, the
- * mono percent over a small uppercase label beside it; the rings share one row (#470). A reached limit is amber like
+ * mono percent over a small uppercase label beside it; the rings share one row in thirds (#470, #472): Session, Week,
+ * the model's week — two rings leave the last third empty rather than spreading to the edges. A reached limit is amber like
  * the card's limit line, its percent too.
  */
 const quotaRings: RecipeInput = {
     component: 'ag-quota-rings',
     parts: {
-        root: { base: { display: 'flex', alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'space-between', gap: 'var(--space-sm)', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
+        root: { base: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center', justifyItems: 'start', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
         item: {
             // The ring on the left across both rows, the percent over the label beside it.
             base: { '--ag-ink': 'var(--color-primary)', display: 'grid', gridTemplateColumns: '28px auto', gridTemplateRows: 'auto auto', columnGap: 'var(--space-xs)', alignItems: 'center', minInlineSize: '0' },
