@@ -9,7 +9,9 @@ import { EnvironmentDialog } from './machines/EnvironmentDialog';
 import { EnvironmentGrid, mockDefaultFor, type EnvironmentFacts } from './machines/MachineGroup';
 import { machineHead } from './machines/head';
 import { LiveMachine } from './machines/LiveMachine';
+import { MockUpdateCard } from './machines/MockUpdateCard';
 import { SessionsTable } from './machines/SessionsTable';
+import { buildLabel } from './machines/update';
 import type { DefaultForAgent } from './machines/live';
 import { allowRootCommand, fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
 import { LinkButton } from './ops/LinkButton';
@@ -57,7 +59,9 @@ export type MachineViewProps =
     & Define.Event<'removeEnvironment', string>
     & Define.Event<'rename', string>
     /** Revoke, then leave the workspace. */
-    & Define.Event<'removeMachine'>;
+    & Define.Event<'removeMachine'>
+    /** The daemon update card (#367) under the header: the live page's or the mock's. */
+    & Define.Slot<'update'>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -76,7 +80,7 @@ const likelyRoot = (environments: readonly EnvironmentDescriptor[]): string | un
  * leave the machine. "This machine" renames it or removes it from the
  * workspace (revoked first).
  */
-export const MachineView = component<MachineViewProps>(({ props, emit }) => {
+export const MachineView = component<MachineViewProps>(({ props, emit, slots }) => {
     const ui = signal({ revoking: false, envOpen: false, editing: '', removing: '', removeOpen: false, renaming: false, name: '', renameAttempted: false, removingMachine: false });
     // A finished request closes the dialog it came from; a refusal keeps it open with the reason.
     watch(() => props.envRequest?.seq, () => {
@@ -128,10 +132,12 @@ export const MachineView = component<MachineViewProps>(({ props, emit }) => {
                     <span data-machine-glyph data-size="52" aria-hidden="true"><Icon name="machines" size={24} /></span>
                     <div data-machine-title>
                         <span data-machine-name data-size="lg">{m.name}</span>
-                        <span data-machine-caption>{m.osLabel} · daemon {m.daemonVersion} · paired {m.pairedOn} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
+                        <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · paired {m.pairedOn} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
                     </div>
                     <StatusPill status={m.online ? 'online' : 'offline'} label={revoked ? 'REVOKED' : undefined} />
                 </header>
+
+                {slots.update?.()}
 
                 <section aria-label="Environments" data-machine-envs>
                     <div data-label-row>
@@ -346,6 +352,7 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
             onRemoveEnvironment={remove}
             onRename={(name: string) => { st.name = name; }}
             onRemoveMachine={() => { void router.push('/machines'); }}
+            slots={{ update: () => <MockUpdateCard machineId={props.machine.id} name={st.name} os={props.machine.os} daemonVersion={props.machine.daemonVersion} /> }}
         />
     );
 });

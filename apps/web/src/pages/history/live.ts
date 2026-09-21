@@ -21,7 +21,7 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created'] },
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
-    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed'] },
+    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set'] },
     { id: 'plugins', label: 'Plugins and secrets', kinds: ['plugin.enabled', 'plugin.disabled', 'plugin.activated', 'plugin.granted', 'secret.opened'] }
 ] as const satisfies readonly { id: string; label: string; kinds?: readonly AuditKind[] }[];
 
@@ -71,9 +71,15 @@ export const KIND_TONE: Partial<Record<AuditKind, Tone>> = {
     'plugin.activated': 'live',
     'machine.paired': 'live',
     'machine.revoked': 'failed',
+    'machine.updated': 'live',
+    'machine.update-failed': 'failed',
+    'machine.update-requested': 'working',
     'workdir.worktree-created': 'live',
     'secret.opened': 'needs-you'
 };
+
+/** The audit kinds of a daemon update and its settings (#365); each row leads to its machine. */
+const MACHINE_UPDATE_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>(['machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set']);
 
 /** The kind as the tag prints it: `approval requested`; a transition that parked the work as interrupted says so. */
 export function kindLabel(e: AuditEvent): string {
@@ -82,6 +88,8 @@ export function kindLabel(e: AuditEvent): string {
         return e.data.to === 'failed' ? 'failed' : e.data.to === 'cancelled' ? 'cancelled' : 'transition';
     }
     if (e.kind === 'workdir.worktree-created') return 'worktree created';
+    // A daemon update (#367): `update requested`, `updated`, `channel set`…
+    if (MACHINE_UPDATE_KINDS.has(e.kind)) return e.kind.slice('machine.'.length).replace(/-/g, ' ');
     return e.kind.replace('.', ' ');
 }
 
@@ -142,6 +150,7 @@ export function refOf(e: AuditEvent): HistoryRef | null {
     if (e.kind === 'environment.put') return { label: e.data.name, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'environment.removed') return { label: e.data.environmentId, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'workdir.worktree-created') return { label: e.data.branch, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'machine.update-requested' || e.kind === 'machine.updated' || e.kind === 'machine.update-failed' || e.kind === 'machine.channel-set' || e.kind === 'machine.update-policy-set') return { label: e.data.machineId, href: `/machines/${e.data.machineId}` };
     if (e.taskId) return { label: e.taskId, href: `/tasks/${e.taskId}` };
     if (e.sessionId) return { label: e.sessionId, href: `/sessions/${e.sessionId}` };
     if (e.agentId) return { label: e.agentId, href: `/agents/${e.agentId}` };

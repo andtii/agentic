@@ -31,6 +31,7 @@ import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { interruptionCause, interruptionOf, useInterruptionReads, useMachineNames } from '../../components/status';
 import { inboxKeyOf, routingKeyOf, sessionKeyOf } from '../../actors/keys';
 import { clockNow, zoneFormat } from '../../time';
+import { isMachineNotice } from '../machines/MachineNotice';
 import type { NeedsRow, NeedsSource, RequestRef, RequestState } from './source';
 
 export type LiveNeedsDefs = Pick<ActorDefs, 'Inbox' | 'Session' | 'Routing' | 'Audit' | 'Workspace'>;
@@ -47,7 +48,12 @@ export function hueOf(id: string): AgentHue {
 
 /** An inbox notification as a row, or `null` when it is not something a person answers. */
 export function rowOf(n: InboxNotification): NeedsRow | null {
-    if ((n.kind !== 'approval' && n.kind !== 'input') || n.read) return null;
+    if (n.read) return null;
+    // A daemon's update or crash notice (#367): it points at its machine.
+    if (isMachineNotice(n.kind) && n.ref?.kind === 'machine') {
+        return { id: n.id, kind: 'machine', title: n.title, at: n.at, notice: { kind: n.kind, machineId: n.ref.machineId, ...(n.body ? { body: n.body } : {}) }, href: `/machines/${n.ref.machineId}`, hrefLabel: 'Open machine' };
+    }
+    if (n.kind !== 'approval' && n.kind !== 'input') return null;
     if (n.ref?.kind !== 'session' || !n.ref.requestId) return null;
     return {
         id: n.id,
@@ -117,6 +123,10 @@ export function liveNeedsSource(defs: LiveNeedsDefs, viewer: Pick<ViewerState, '
             if (!key) throw new Error('not signed in');
             const reply = await actor(defs.Session, key).respond(ref.requestId, decision);
             if (reply.kind === 'error') throw new Error(reply.message);
+        },
+        async dismiss(row) {
+            if (!viewer.workspaceId) throw new Error('not signed in');
+            await actor(defs.Inbox, inboxKeyOf(viewer.workspaceId)).ack([row.id]);
         },
         async resume(row) {
             if (!row.taskId) return;

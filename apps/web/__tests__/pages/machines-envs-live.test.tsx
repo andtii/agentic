@@ -322,7 +322,7 @@ describe('the machine setup model', () => {
     });
 
     it('files the environment audit kinds under Machines, linked to the machine and toned by outcome', () => {
-        expect(HISTORY_KIND_FILTERS.find((f) => f.id === 'machines')!.kinds).toEqual(['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed']);
+        expect(HISTORY_KIND_FILTERS.find((f) => f.id === 'machines')!.kinds).toEqual(['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set']);
         const put = { key: 'k', seq: 1, at: 0, by: 'user:u', summary: '', kind: 'environment.put', data: { machineId: 'm1', environmentId: 'env_b', name: 'client-b', runtime: 'claude-code', cwdRoots: ['C:\\Dev\\b'], outcome: 'ok' } } as never;
         const refused = { key: 'k2', seq: 2, at: 0, by: 'user:u', summary: '', kind: 'environment.removed', data: { machineId: 'm1', environmentId: 'env_b', outcome: 'in-use' } } as never;
         expect(refOf(put)).toEqual({ label: 'client-b', href: '/machines/m1' });
