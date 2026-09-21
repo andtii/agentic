@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actorKey, type AgentId, type ChatId, type EnvironmentId, type MachineId, type MessageId, type Principal, type PromptPart, type RuntimeId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { drainingReply, isDrainingReply } from '@agentic/daemon-protocol';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
 
@@ -375,12 +376,6 @@ describe('a re-open the daemon refuses (#366, carried over from #420)', () => {
 });
 
 describe('a daemon draining (#366, #360)', () => {
-    /**
-     * The daemon's refusal of a prompt while it drains before an update or a restart (#360: `drainingReply` — the wire's
-     * `busy` with a `draining:` message), played on the socket as the daemon sends it.
-     */
-    const drainingReply = (commandId: string) => ({ v: 1, kind: 'error', commandId, code: 'busy', message: 'draining: the daemon is updating; no new turns' });
-
     it('a prompt the draining daemon refuses parks the route as busy does — never fails the task — and goes out again when a slot frees', async () => {
         const m1 = await pairMachine('laptop');
         connect(m1, daemon(m1, false));
@@ -396,7 +391,10 @@ describe('a daemon draining (#366, #360)', () => {
         const sid = second.sessionId!;
         await until(async () => (await route('t2'))?.status === 'running', 'the prompt to go out');
         sockets.swallowCommands.clear();
-        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: sid, reply: drainingReply('t2:turn:1') }));
+        // The daemon's refusal while it drains before an update (#360): the wire's `busy`, with a `draining:` message.
+        const refusal = drainingReply('t2:turn:1');
+        expect(isDrainingReply(refusal)).toBe(true);
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: sid, reply: refusal }));
         await until(async () => (await route('t2'))?.status === 'waiting-capacity', 'the route to park');
         expect(await route('t2')).toMatchObject({ status: 'waiting-capacity', attempt: 1 });
         const t = await task('t2').get();
