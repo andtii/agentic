@@ -64,6 +64,14 @@ describe('/machines/:id', () => {
         const table = root.querySelector('.ag-sessions')!;
         expect(colWidths(table)).toEqual(SESSIONS_COLS.split(' ').map(t => (t.endsWith('fr') ? 'auto' : t)));
         expect(table.querySelectorAll('tbody tr').length).toBe(2);
+        // The fixture's daemon reports its load (#400): the caption, an over-limit session in amber, the alert, the cards.
+        expect(root.querySelector('[data-machine-hero] [data-machine-load]')!.textContent).toBe('CPU 34\u00a0% · 23 GB of 34 GB in use');
+        expect([...table.querySelectorAll('[data-session-load="memory"]')].map((c) => [c.textContent, c.getAttribute('data-tone')])).toEqual([
+            ['2.6 GB', 'warning'],
+            ['430 MB', null]
+        ]);
+        expect(root.querySelector('[data-machine-pressure]')!.textContent).toContain("Forge's session s_41aa and what it started hold 2.6 GB");
+        expect([...root.querySelectorAll('[data-scope="ag-env-card"][data-part="load"]')].map((c) => c.textContent)).toEqual(['CPU 21\u00a0% · 2.6 GB', 'CPU 3\u00a0% · 430 MB', 'idle', 'load unknown', 'CPU 0\u00a0% · 101 MB']);
         expect(root.querySelectorAll('[data-doctor-check]').length).toBe(4);
         expect(root.querySelectorAll('[data-doctor-check][data-ok]').length).toBe(3);
         // The revoke card says disconnected, not failed.

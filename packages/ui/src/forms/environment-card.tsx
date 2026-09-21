@@ -15,12 +15,13 @@
 
 import { component, type Define } from '@sigx/runtime-core';
 import { Status } from '@sigx/zero';
-import type { EnvironmentDescriptor, EnvironmentId, MachineInfo, QuotaSnapshot } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, EnvironmentTelemetry, MachineInfo, QuotaSnapshot } from '@agentic/core';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { agEnvCardAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
 import { QuotaPanel } from '../kit/QuotaMeter.js';
 import { StatusPill } from '../kit/StatusPill.js';
+import { formatBytes } from '../thread/text.js';
 import type { Tone } from '../kit/vocabulary.js';
 
 const SCOPE = agEnvCardAnatomy.scope;
@@ -96,8 +97,30 @@ export type EnvironmentCardProps = Define.Prop<'environment', EnvironmentDescrip
     Define.Prop<'defaultFor', readonly DefaultForAgent[]> &
     /** The account's provider limits (#270); `null` shows "No usage reported yet", absent shows nothing. */
     Define.Prop<'quota', QuotaSnapshot | null> &
+    /** What its sessions cost the machine (#400), as the daemon attributed it; `null`: the daemon reports load but none for this environment (idle); absent shows nothing. */
+    Define.Prop<'load', EnvironmentTelemetry | null> &
     Define.Event<'select', EnvironmentId> &
     Define.Event<'recheck', EnvironmentId>;
+
+/** `CPU 12 % · 1.8 GB` for a sample; `idle` with no sample entry; `load unknown` when the daemon could not attribute it. */
+export function environmentLoadText(load: EnvironmentTelemetry | null): string {
+    if (load === null) return 'idle';
+    if (load.sample === null) return 'load unknown';
+    return `CPU ${load.sample.cpu === null ? '—' : `${Math.round(load.sample.cpu * 100)}\u00a0%`} · ${formatBytes(load.sample.rss)}`;
+}
+
+/** The tooltip: how the number was made, or why there is none. */
+export function environmentLoadTitle(load: EnvironmentTelemetry | null, runtime: string): string {
+    if (load === null) return 'No session runs here';
+    switch (load.attribution) {
+        case 'session':
+            return load.sample ? `The sessions here and everything they started (${load.sample.processes} processes)` : 'No session here has started its process yet';
+        case 'environment':
+            return `${runtime} keeps one process per environment; its sessions are not told apart`;
+        case 'none':
+            return `${runtime} starts its own runtime; the daemon cannot see its process`;
+    }
+}
 
 export const EnvironmentCard = component<EnvironmentCardProps>(
     ({ props, emit }) =>
@@ -133,6 +156,7 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
                             {env.concurrency.active} of {env.concurrency.max}
                         </span>
                         {props.queued ? <span data-scope={SCOPE} data-part="queued">{props.queued} queued</span> : null}
+                        {props.load !== undefined ? <span data-scope={SCOPE} data-part="load" title={environmentLoadTitle(props.load, env.runtime)}>{environmentLoadText(props.load)}</span> : null}
                     </div>
                     <dl data-scope={SCOPE} data-part="facts">
                         <dt>Machine</dt>

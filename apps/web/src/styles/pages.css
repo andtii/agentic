@@ -903,6 +903,8 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-machine-envs] { display: flex; flex-direction: column; gap: var(--space-md); }
 [data-machine-grid] { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: var(--ag-space-8); align-items: start; }
 [data-machine-sessions] { display: flex; flex-direction: column; gap: var(--space-md); }
+/* the task column takes the slack (#400 added CPU and Memory): its ellipsised text asks for no width of its own, so the table fits its column instead of scrolling */
+.ag-sessions [data-ellipsis] { inline-size: 0; min-inline-size: 100%; }
 [data-machine-rail] { display: flex; flex-direction: column; gap: var(--space-lg); }
 [data-doctor-list] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 [data-doctor-check] { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; gap: var(--space-sm); padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); font-size: var(--text-md); }
@@ -926,6 +928,11 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-update-card] p { margin: 0; }
 [data-update-running] { font-family: var(--font-mono); font-size: var(--text-md); }
 [data-update-banner], [data-update-error], [data-update-last][data-tone="failed"] { font-size: var(--text-md); color: var(--color-error); }
+/* the machine's load in the caption (#400): amber while a limit is crossed, dim when the sample is stale */
+[data-session-load] { white-space: nowrap; }
+[data-machine-load][data-tone="warning"], [data-session-load][data-tone="warning"] { color: var(--color-warning); }
+[data-machine-load][data-tone="dim"] { color: var(--ag-text-dim); }
+[data-machine-pressure] { display: grid; gap: var(--space-2xs); margin: 0; padding: var(--space-sm) var(--space-md); border: var(--border) solid var(--color-warning); border-radius: var(--radius-box); font-size: var(--text-sm); color: var(--color-base-content); }
 [data-update-restarts] { font-size: var(--text-md); color: var(--color-warning); }
 [data-update-last] { font-size: var(--text-md); color: var(--ag-text-muted); }
 [data-update-checked] { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; font-size: var(--text-sm); color: var(--ag-text-muted); }

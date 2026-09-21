@@ -14,7 +14,7 @@ import { AgentActor, Workspace, machineKey, workspaceKey, type MachineDoctorView
 import { agentKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { machineHead } from '../../src/pages/machines/head';
-import { defaultForByEnvironment, doctorChecksOf, environmentOptions, machineOf, pairCommands, queuedByEnvironment, secondsLeft, seenLabel, sessionsOf } from '../../src/pages/machines/live';
+import { defaultForByEnvironment, doctorChecksOf, environmentOptions, loadText, loadTone, machineLoadOf, machineOf, pairCommands, queuedByEnvironment, secondsLeft, seenLabel, sessionCpuText, sessionMemoryText, sessionsOf, warningText } from '../../src/pages/machines/live';
 import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
 
 let h: LiveHarness;
@@ -205,6 +205,67 @@ describe('/pair on the live pages', () => {
     });
 });
 
+describe('machine load on the live pages (#400)', () => {
+    const GiB = 2 ** 30;
+    const snapshot = (sessions: Record<string, unknown>, memoryUsed: number) => ({
+        observedAt: Date.now(),
+        intervalMs: 30_000,
+        cpus: 8,
+        machine: { cpu: 0.34, memoryUsed, memoryTotal: 32 * GiB },
+        daemon: { cpu: 0.01, rss: 70_000_000, processes: 1 },
+        environments: { env_work: { sample: { cpu: 0.21, rss: Math.round(2.4 * GiB), processes: 7 }, attribution: 'session' }, env_personal: { sample: null, attribution: 'none' } },
+        sessions,
+        availability: 'partial'
+    });
+
+    it('a telemetry frame reaches the hero, the alert, the environment cards, the sessions table and the Machines list', { timeout: 15_000 }, async () => {
+        const m = await pairMachine('alien01');
+        await m.daemon.socketMessage(hello(m.machineId, [env(m.machineId, 'env_work', 'work', 'ok'), env(m.machineId, 'env_personal', 'personal', 'ok')]));
+        await m.user.openSession('s_heavy' as never, 'env_work' as EnvironmentId, { agentId: 'agent_forge', cwd: '/work', system: '', tools: [] });
+        await m.user.openSession('s_unknown' as never, 'env_personal' as EnvironmentId, { agentId: 'agent_forge', cwd: '/work', system: '', tools: [] });
+        await m.daemon.socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'telemetry', snapshot: snapshot({ s_heavy: { cpu: 0.21, rss: Math.round(2.4 * GiB), processes: 7 }, s_unknown: null }, 30 * GiB) }));
+
+        const page = await mountLive(`/machines/${m.machineId}`, h);
+        const load = () => page.querySelector('[data-machine-hero] [data-machine-load]');
+        await until(() => load() !== null, 'the hero load');
+        expect(load()!.textContent).toBe('CPU 34\u00a0% · 32 GB of 34 GB in use');
+        expect(load()!.getAttribute('data-tone')).toBe('warning');
+        const alert = page.querySelector('[data-machine-pressure]')!;
+        expect(alert.textContent).toContain('This machine is at 94 % memory');
+        expect(alert.textContent).toContain('session s_heavy and what it started hold 2.6 GB');
+        expect(page.querySelector('[aria-label="work"] [data-scope="ag-env-card"][data-part="load"]')!.textContent).toBe('CPU 21\u00a0% · 2.6 GB');
+        expect(page.querySelector('[aria-label="personal"] [data-scope="ag-env-card"][data-part="load"]')!.textContent).toBe('load unknown');
+        const rows = [...page.querySelectorAll<HTMLElement>('.ag-sessions tbody tr')];
+        const cells = (row: HTMLElement) => [row.querySelector('[data-session-load="cpu"]')!.textContent, row.querySelector('[data-session-load="memory"]')!.textContent, row.querySelector('[data-session-load="memory"]')!.getAttribute('data-tone')];
+        expect(rows.map(cells)).toEqual([
+            ['21\u00a0%', '2.6 GB', 'warning'],
+            ['unknown', 'unknown', null]
+        ]);
+
+        // Under the limits again: the tone and the alert go, the numbers stay.
+        await m.daemon.socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'telemetry', snapshot: snapshot({ s_heavy: { cpu: 0.05, rss: 0.5 * GiB, processes: 3 }, s_unknown: null }, 12 * GiB) }));
+        await until(() => load()!.textContent === 'CPU 34\u00a0% · 13 GB of 34 GB in use', 'the lighter sample');
+        expect(load()!.getAttribute('data-tone')).toBeNull();
+        expect(page.querySelector('[data-machine-pressure]')).toBeNull();
+
+        const machines = await mountLive('/machines', h);
+        await until(() => groupOf(machines, m.machineId)?.querySelector('[data-machine-load]') !== null, 'the group load');
+        expect(groupOf(machines, m.machineId)!.querySelector('[data-machine-load]')!.textContent).toBe('CPU 34\u00a0% · 13 GB of 34 GB in use');
+    });
+
+    it('a daemon with telemetry off says so, and a machine that never reported shows nothing', { timeout: 15_000 }, async () => {
+        const m = await pairMachine('alien01');
+        await m.daemon.socketMessage(hello(m.machineId, [env(m.machineId, 'env_work', 'work', 'ok')]));
+        const page = await mountLive(`/machines/${m.machineId}`, h);
+        await until(() => page.querySelector('[data-machine-caption]') !== null, 'the hero');
+        expect(page.querySelector('[data-machine-load]')).toBeNull();
+        await m.daemon.socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'telemetry', snapshot: { ...snapshot({}, 0), machine: { cpu: null, memoryUsed: null, memoryTotal: 32 * GiB }, environments: {}, availability: 'not-reported', reason: 'telemetry is off on this machine (agentic-daemon run --telemetry off)' } }));
+        await until(() => page.querySelector('[data-machine-load]') !== null, 'the off note');
+        expect(page.querySelector('[data-machine-load]')!.textContent).toBe('load not reported');
+        expect(page.querySelector('[data-machine-load]')!.getAttribute('title')).toContain('--telemetry off');
+    });
+});
+
 describe('provider limits on the live pages (#270)', () => {
     it('a quota frame from the daemon reaches the environment card and the /usage Limits', { timeout: 15_000 }, async () => {
         const m = await pairMachine('alien01');
@@ -291,6 +352,29 @@ describe('the machine view model', () => {
     it('rows the hosted sessions with their objective and environment name', () => {
         expect(sessionsOf(base, { t1: 'Fix the drawer' }, now)).toEqual([{ id: 's1', task: 'Fix the drawer', agentId: 'forge', environment: 'work', machineId: 'm1', status: 'active', age: '10m ago' }]);
         expect(sessionsOf({ ...base, activeSessions: [{ ...base.activeSessions[0]!, status: 'opening' }] }, {}, now)).toMatchObject([{ task: 't1', status: 'waiting' }]);
+    });
+
+    it('folds telemetry into the load, the session rows and their cells (#400)', () => {
+        const GiB = 2 ** 30;
+        const telemetry = { observedAt: now - 10_000, intervalMs: 30_000, cpus: 8, machine: { cpu: 0.34, memoryUsed: 30 * GiB, memoryTotal: 32 * GiB }, daemon: { cpu: 0.01, rss: 1, processes: 1 }, environments: {}, sessions: { s1: { cpu: 0.21, rss: 2.4 * GiB, processes: 7 } }, availability: 'reported' } as const;
+        expect(machineLoadOf(undefined, now)).toBeUndefined();
+        const load = machineLoadOf(telemetry, now)!;
+        expect(load).toMatchObject({ cpu: 0.34, stale: false, availability: 'reported' });
+        expect(load.warnings.map((w) => w.kind)).toEqual(['machine-memory', 'session-memory']);
+        expect(loadText(load)).toBe('CPU 34\u00a0% · 32 GB of 34 GB in use');
+        expect(loadTone(load)).toBe('warning');
+        expect(loadTone(machineLoadOf({ ...telemetry, observedAt: now - 120_000, machine: { ...telemetry.machine, memoryUsed: 8 * GiB }, sessions: {} }, now)!)).toBe('dim');
+        expect(loadText(machineLoadOf({ ...telemetry, machine: { cpu: null, memoryUsed: null, memoryTotal: 32 * GiB }, sessions: {} }, now)!)).toBe('CPU — · 34 GB memory');
+        expect(loadText(machineLoadOf({ ...telemetry, availability: 'not-reported', reason: 'off' }, now)!)).toBe('load not reported');
+        const rows = sessionsOf({ ...base, telemetry, activeSessions: [base.activeSessions[0]!, { ...base.activeSessions[0]!, sessionId: 's2' as never }] }, {}, now);
+        expect(rows.map((r) => r.load)).toEqual([{ cpu: 0.21, rss: 2.4 * GiB, processes: 7 }, undefined]);
+        expect(sessionsOf(base, {}, now)[0]).not.toHaveProperty('load');
+        expect([sessionCpuText(undefined), sessionCpuText(null), sessionCpuText({ cpu: null, rss: 5, processes: 1 }), sessionCpuText(rows[0]!.load)]).toEqual(['—', 'unknown', '—', '21\u00a0%']);
+        expect([sessionMemoryText(undefined), sessionMemoryText(null), sessionMemoryText(rows[0]!.load)]).toEqual(['—', 'unknown', '2.6 GB']);
+        const names = (id: string) => (id === 'forge' ? 'Forge' : id);
+        expect(warningText(load.warnings[0]!, rows, names)).toBe('This machine is at 94 % memory (the warning level is 90 %). Nothing is stopped: see which sessions hold it below.');
+        expect(warningText(load.warnings[1]!, rows, names)).toBe("Forge's session s1 and what it started hold 2.6 GB (the warning level is 2.1 GB). Nothing is stopped: check what it is running.");
+        expect(warningText(load.warnings[1]!, [], names)).toContain('Session s1 and what it started');
     });
 
     it('turns Machine.doctor into the checklist, never passing an unverified environment', () => {
