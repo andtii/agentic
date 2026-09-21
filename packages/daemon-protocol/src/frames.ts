@@ -33,6 +33,7 @@ export type PongFrame = DaemonFrameOf<'pong'>;
 export type FsResponseFrame = DaemonFrameOf<'fs.response'>;
 export type EnvResponseFrame = DaemonFrameOf<'env.response'>;
 export type QuotaFrame = DaemonFrameOf<'quota'>;
+export type TelemetryFrame = DaemonFrameOf<'telemetry'>;
 export type HistoryResponseFrame = DaemonFrameOf<'history.response'>;
 export type UpdateStatusFrame = DaemonFrameOf<'update.status'>;
 export type HarnessStatusFrame = DaemonFrameOf<'harness.status'>;

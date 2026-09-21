@@ -173,6 +173,7 @@ daemon → platform: hello {machineId, daemonVersion, os, environments[], capabi
                    fs.response {requestId, exactly one of result: FsResult | error: {code, message}}
                    env.response {requestId, exactly one of result: {environmentId} | error: {code, message}}
                    quota {environmentId, snapshot: QuotaSnapshot}   (unsolicited, #261: provider limits; stream snapshots are partial → mergeQuota)
+                   telemetry {snapshot: MachineTelemetry}   (unsolicited, #400: what the machine's sessions cost it, on the heartbeat cadence; a full snapshot, a session the daemon cannot attribute reads null — never zero)
                    history.response {requestId, exactly one of result: {events: event WireFrame[], more?} | error: {code: unknown-session | gap | internal, message, earliest?}}   (#397)
                    update.status {requestId, phase: UpdatePhase, progress?: {bytes, total}, error?: {code, message}}   (#359, `update` feature)
                    harness.status {requestId, phase: HarnessPhase, error?} · harnesses {harnesses: HarnessReport[]}   (#359, `harness` feature)

@@ -34,6 +34,17 @@ const week = { id: 'seven_day', label: 'Current week (all models)', period: 'wee
 const quotaOf = (windows: readonly unknown[]) =>
     ({ sourceId: 'agentic.quota.claude-code', runtime: 'claude-code', environmentId: env.id, plan: 'max', availability: 'reported', windows, observedAt: 1, via: 'probe' }) as never;
 
+const telemetryOf = (sessions: Readonly<Record<string, unknown>>) => ({
+    observedAt: 1,
+    intervalMs: 30_000,
+    cpus: 8,
+    machine: { cpu: 0.34, memoryUsed: 12_000_000_000, memoryTotal: 32_000_000_000 },
+    daemon: { cpu: 0.01, rss: 90_000_000, processes: 1 },
+    environments: { [env.id]: { sample: { cpu: 0.12, rss: 1_500_000_000, processes: 3 }, attribution: 'session' } },
+    sessions,
+    availability: 'partial'
+});
+
 type Case<T> = { readonly valid: T; readonly invalid: unknown; readonly path: string };
 
 const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, { t: T }>> } = {
@@ -103,6 +114,11 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         valid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 0.76 }]) },
         invalid: { v: V, t: 'quota', environmentId: env.id, snapshot: quotaOf([{ ...week, utilization: 76 }]) },
         path: 'snapshot.windows.0.utilization'
+    },
+    telemetry: {
+        valid: { v: V, t: 'telemetry', snapshot: telemetryOf({ s1: { cpu: 0.12, rss: 1_500_000_000, processes: 3 }, s2: null }) as never },
+        invalid: { v: V, t: 'telemetry', snapshot: telemetryOf({ s1: { cpu: 12, rss: 1_500_000_000, processes: 3 } }) },
+        path: 'snapshot.sessions.s1.cpu'
     },
     'history.response': {
         valid: { v: V, t: 'history.response', requestId: 'h_1', result: { events: [{ v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } }], more: true } },
@@ -279,6 +295,17 @@ describe('daemon frame schemas', () => {
         expect(daemonFrame.safeParse({ ...ok, snapshot: { ...(quotaOf([]) as object), environmentId: 'env_other' } }).success).toBe(false);
         expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, resetsAt: 'next tuesday' }]) }).success).toBe(false);
         expect(daemonFrame.safeParse({ ...ok, snapshot: quotaOf([{ ...week, status: 'fine' }]) }).success).toBe(false);
+    });
+
+    it('a telemetry frame says what it could not attribute, and a not-reported one why (#400)', () => {
+        const ok = { v: V, t: 'telemetry', snapshot: telemetryOf({ s1: { cpu: 0.12, rss: 1_500_000_000, processes: 3 }, s2: null }) };
+        expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
+        const none = { v: V, t: 'telemetry', snapshot: { ...telemetryOf({}), availability: 'not-reported', reason: 'telemetry is off (--telemetry off)' } };
+        expect(daemonFrame.safeParse(none).success).toBe(true);
+        expect(daemonFrame.safeParse({ ...none, snapshot: { ...none.snapshot, reason: undefined } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: { ...ok.snapshot, environments: { [env.id]: { sample: null, attribution: 'guess' } } } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: { ...ok.snapshot, machine: { ...ok.snapshot.machine, memoryTotal: -1 } } }).success).toBe(false);
+        expect(daemonFrame.safeParse({ ...ok, snapshot: telemetryOf({ s1: { cpu: null, rss: 1.5, processes: 1 } }) }).success).toBe(false);
     });
 
     it('are Standard Schemas', async () => {

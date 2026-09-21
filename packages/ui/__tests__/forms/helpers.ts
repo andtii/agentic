@@ -85,7 +85,7 @@ export function fullAgentConfig(): AgentConfig {
 export function fullSettings(): SettingsFormValue {
     return {
         timeZone: 'Europe/Stockholm',
-        notifications: { kinds: { reminder: true, 'task-done': false, 'task-failed': true, approval: true, input: false, 'update-available': false, 'update-applied': false, 'update-failed': false, 'daemon-crash-loop': false, 'harness-update-available': false }, push: true },
+        notifications: { kinds: { reminder: true, 'task-done': false, 'task-failed': true, approval: true, input: false, 'update-available': false, 'update-applied': false, 'update-failed': false, 'daemon-crash-loop': false, 'harness-update-available': false, 'resource-pressure': false }, push: true },
         defaultEnvironmentId: 'env_1' as EnvironmentId
     };
 }

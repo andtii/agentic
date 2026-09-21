@@ -9,7 +9,7 @@
  */
 
 import type { HarnessPhase, HarnessReport, ReleaseAsset, UpdatePhase } from './release.js';
-import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, QuotaSnapshot, RuntimeId, SessionId, ToolGrant } from './index.js';
+import type { ApprovalRule, CapabilityReport, EnvError, EnvironmentDescriptor, EnvOp, EnvResult, EnvironmentId, FsError, FsOp, FsResult, MachineId, MachinePolicy, MachineTelemetry, QuotaSnapshot, RuntimeId, SessionId, ToolGrant } from './index.js';
 
 export const DAEMON_PROTOCOL_VERSION = 1 as const;
 
@@ -242,6 +242,11 @@ export type DaemonFrame<F = unknown, R = unknown> =
      * signal. A stream snapshot carries only the windows it saw; the platform merges it (`mergeQuota`).
      */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'quota'; readonly environmentId: EnvironmentId; readonly snapshot: QuotaSnapshot }
+    /**
+     * What the machine's sessions cost it (#400): pushed unsolicited on the heartbeat cadence, a full snapshot
+     * that replaces the previous one. A session the daemon cannot attribute a process to reads `null`.
+     */
+    | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'telemetry'; readonly snapshot: MachineTelemetry }
     /** The answer to `history.request` (#397): exactly one of `result` (event frames, `F` = the wire `event` frame) / `error`. */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'history.response'; readonly requestId: string; readonly result?: HistoryResult<F>; readonly error?: HistoryError }
     /** Progress of an `update.request` (#359): `progress` while downloading, `error` when `failed`. */
@@ -280,5 +285,5 @@ export type PlatformFrame<C = unknown> =
     /** Install, update or remove a runtime harness (#359; the `harness` feature); progress comes back as `harness.status`. */
     | { readonly v: typeof DAEMON_PROTOCOL_VERSION; readonly t: 'harness.request'; readonly requestId: string; readonly op: 'install' | 'update' | 'remove'; readonly runtime: RuntimeId; readonly target?: ReleaseAsset; readonly mode: 'drain' | 'now' };
 
-export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.title', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
+export const DAEMON_FRAME_TYPES = ['hello', 'env', 'heartbeat', 'session.opened', 'session.ref', 'session.title', 'session.frame', 'session.reply', 'session.closed', 'tool.call', 'pong', 'fs.response', 'env.response', 'quota', 'telemetry', 'history.response', 'update.status', 'harness.status', 'harnesses'] as const;
 export const PLATFORM_FRAME_TYPES = ['welcome', 'session.open', 'session.command', 'session.close', 'tool.result', 'ping', 'fs.request', 'env.request', 'history.request', 'update.request', 'update.cancel', 'harness.request'] as const;

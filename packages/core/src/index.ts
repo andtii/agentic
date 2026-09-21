@@ -20,6 +20,7 @@ export * from './release.js';
 export * from './runtime.js';
 export * from './usage.js';
 export * from './quota.js';
+export * from './telemetry.js';
 export * from './session-options.js';
 export * from './workspace.js';
 export * from './workdir.js';

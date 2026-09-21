@@ -71,6 +71,13 @@ export interface OpenedRuntimeSession<S = unknown> {
      * the runtime never does — the platform then titles the chat itself.
      */
     readonly title?: () => Promise<string | undefined>;
+    /**
+     * The OS process this session runs in (#400), when the runtime keeps one per session (Claude Code's CLI):
+     * read by the daemon at every telemetry sample, which charges the process and everything under it to the
+     * session. `undefined` while the runtime has not started it or after it exited; absent when the runtime has
+     * no per-session process — the session's cost is then unknown, never zero.
+     */
+    readonly pid?: () => number | undefined;
 }
 
 export interface RuntimeDriver<S = unknown, P = unknown> {
@@ -80,6 +87,12 @@ export interface RuntimeDriver<S = unknown, P = unknown> {
     doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport>;
     /** The models the environment's account may use (#450), as it reports them; `null` when it cannot say. */
     models?(env: LocalEnvironment): Promise<readonly ModelOption[] | null>;
+    /**
+     * The OS processes the driver keeps for an environment as a whole (#400) — Codex's one app-server per
+     * environment — so telemetry can charge them to the environment when its sessions have no process of their
+     * own. Absent when the driver keeps none it can name.
+     */
+    pids?(environmentId: EnvironmentId): readonly number[];
 }
 
 /** The platform-facing descriptor of a local environment, as sent in `hello` / `env`. */

@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
 import { LIMITS } from './limits.js';
@@ -205,6 +205,31 @@ export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z
     })
     // PLG-09: "not reported" is said, with its reason, and carries no numbers.
     .refine((s) => s.availability !== 'not-reported' || (s.windows.length === 0 && !!s.reason), { message: 'a not-reported snapshot has a reason and no windows', path: ['reason'] });
+
+/** One process tree's cost (#400): `cpu` is 0..1 of the whole machine, or `null` on a first sample with no interval to measure over. */
+export const resourceSample: z.ZodType<ResourceSample> = z.object({
+    cpu: z.number().min(0).max(1).nullable(),
+    rss: nonNegativeInt,
+    processes: nonNegativeInt
+});
+
+/** A bounded record keyed by id: at most `LIMITS.list` entries, each key at most `LIMITS.id` long. */
+const boundedRecord = <V extends z.ZodType>(value: V) => z.record(z.string().min(1).max(LIMITS.id), value).refine((r) => Object.keys(r).length <= LIMITS.list, { message: `at most ${LIMITS.list} entries` });
+
+/** A machine's load snapshot (#400): a session the daemon could not attribute reads `null`, never zero; "not reported" is said, with its reason. */
+export const machineTelemetry: z.ZodType<MachineTelemetry> = z
+    .object({
+        observedAt: nonNegativeInt,
+        intervalMs: nonNegativeInt,
+        cpus: nonNegativeInt,
+        machine: z.object({ cpu: z.number().min(0).max(1).nullable(), memoryUsed: nonNegativeInt.nullable(), memoryTotal: nonNegativeInt }),
+        daemon: resourceSample,
+        environments: boundedRecord(z.object({ sample: resourceSample.nullable(), attribution: z.enum(['session', 'environment', 'none']) })),
+        sessions: boundedRecord(resourceSample.nullable()),
+        availability: z.enum(['reported', 'partial', 'not-reported']),
+        reason: text.optional()
+    })
+    .refine((t) => t.availability !== 'not-reported' || !!t.reason, { message: 'a not-reported snapshot has a reason', path: ['reason'] });
 
 /**
  * A release build a daemon downloads (#359, #360): strict — a key the contract does not name fails it — with an `https:`

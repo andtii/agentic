@@ -40,7 +40,8 @@ const KIND_LABELS: Record<NotificationKind, string> = {
     'update-applied': 'Daemon updates applied',
     'update-failed': 'Failed daemon updates',
     'daemon-crash-loop': 'Daemons restarting in a loop',
-    'harness-update-available': 'Harness updates available'
+    'harness-update-available': 'Harness updates available',
+    'resource-pressure': 'Machines under memory pressure'
 };
 
 /** How many zones the picker lists at once; typing narrows. */
