@@ -22,9 +22,12 @@ describe('accountRefOf / accountKeyOf', () => {
     it('keys carry the runtime, so the same email on two runtimes is two accounts', () => {
         expect(accountKeyOf(env('a', 'x', 'me@x', 'ok', 'claude-code'))).not.toBe(accountKeyOf(env('a', 'x', 'me@x', 'ok', 'codex-cli')));
     });
-    it('accountKeyFor refuses an empty ref', () => {
+    it('accountKeyFor refuses an empty ref, and a runtime id the key could not be parsed back from', () => {
         expect(() => accountKeyFor('claude-code', {})).toThrow(/identity or a label/);
         expect(() => accountKeyFor('claude-code', { label: '' })).toThrow();
+        expect(() => accountKeyFor('odd|runtime', { identity: 'me@x' })).toThrow(/cannot be keyed/);
+        expect(() => accountKeyFor('', { identity: 'me@x' })).toThrow(/cannot be keyed/);
+        expect(() => accountKeyOf(env('a', 'x', 'me@x', 'ok', 'a|b'))).toThrow(/cannot be keyed/);
     });
 });
 

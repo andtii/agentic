@@ -48,8 +48,13 @@ export function accountRefOf(env: EnvAccount): AccountRef {
     return identity ? { identity } : { label: env.account.label };
 }
 
-/** The key of `ref` on `runtime`; an identity wins over a label. Throws on an empty ref (a contract error, never user input). */
+/**
+ * The key of `ref` on `runtime`; an identity wins over a label. Throws on an empty ref, and on a
+ * runtime id that contains the separator (`RuntimeId` is open, and `parseAccountKey` splits at
+ * the first `|`) — contract errors, never user input.
+ */
 export function accountKeyFor(runtime: RuntimeId, ref: AccountRef): AccountKey {
+    if (runtime === '' || runtime.includes('|')) throw new Error(`accountKeyFor: runtime id "${runtime}" cannot be keyed`);
     const identity = ref.identity?.trim();
     if (identity) return `${runtime}|id:${identity.toLowerCase()}`;
     if (ref.label !== undefined && ref.label !== '') return `${runtime}|label:${ref.label}`;
