@@ -6,4 +6,4 @@ export { SessionPage, sessionPageKey, SESSION_PAGE_TYPE, type SessionPageState }
 export type { SessionStoreContext } from './store.js';
 export { appendEntry, boundTranscript, createEventLogStore, createTranscriptStore, TRANSCRIPT_BYTES } from './store.js';
 export type { SessionCommandResult, SessionInfo, SessionActor, CorrectionResult, SessionRequestView, PlatformInputRequest, PlatformRequestRef, DetachedInput } from './actor.js';
-export { defineSessionActor, isInterruptedTurnEnd, interruptedTurn, resumeTurnId, resumeCommandId, INTERRUPTED_CODE, INTERRUPTED_MESSAGE, platformRequestId } from './actor.js';
+export { ANSWER_ATTEMPTS, ANSWER_RETRY_MS, defineSessionActor, isInterruptedTurnEnd, interruptedTurn, resumeTurnId, resumeCommandId, INTERRUPTED_CODE, INTERRUPTED_MESSAGE, platformRequestId } from './actor.js';

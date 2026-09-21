@@ -162,6 +162,17 @@ export const resumeTurnId = (turnId: string): string => `${turnId}:resume`;
 export const resumeCommandId = (turnId: string): string => `resume:${turnId}`;
 
 /**
+ * How long a failed hand-over of a late answer waits before the next attempt (#396; OPS-06), by attempt — the last
+ * value repeats. A reminder fires it (at or after: the host's tick is the resolution), so the answer outlives a
+ * transient failure — a chat, a task or a router that could not be reached — without anyone re-answering.
+ */
+export const ANSWER_RETRY_MS: readonly number[] = [5_000, 30_000, 120_000, 600_000];
+/** Hand-overs of one answer before it is given up and said in the chat as `answer-not-delivered:{step}:{cause}`. */
+export const ANSWER_ATTEMPTS = 5;
+/** The reminder that runs the next due hand-over. */
+const ANSWERS_REMINDER = 'answers';
+
+/**
  * The turn a `resume()` would re-prompt (OPS-05): the log's last turn is closed as
  * interrupted and nothing has started since. `null` when the session is not in that state.
  */
@@ -236,6 +247,8 @@ function newCommandId(type: string): string {
  */
 export function defineSessionActor(ports: SessionPorts) {
     const now = ports.now ?? Date.now;
+    const answerDelays = ports.answerRetry?.delaysMs?.length ? ports.answerRetry.delaysMs : ANSWER_RETRY_MS;
+    const answerAttempts = ports.answerRetry?.attempts ?? ANSWER_ATTEMPTS;
     /** The live runtime session per activation, by actor key. Never outlives the activation that opened it. */
     const lives = new Map<string, Live>();
 
@@ -437,7 +450,7 @@ export function defineSessionActor(ports: SessionPorts) {
         const parsed = parseSessionKey(key);
         if (!ports.answered || !spec?.chatId || !parsed) return null;
         const record = requestRecordIn(s, answer.requestId);
-        if (!record?.resolved || record.resolved.outcome !== 'input') return null;
+        if (!record?.resolved || record.resolved.outcome !== (answer.cancelled ? 'cancel' : 'input')) return null;
         const choices = record.request.options?.map((o) => o.label);
         const taskId = currentTaskId(s);
         return {
@@ -450,9 +463,18 @@ export function defineSessionActor(ports: SessionPorts) {
             requestId: answer.requestId,
             question: record.request.message ?? '',
             ...(choices?.length ? { choices } : {}),
-            answer: answerText(record.resolved.answers),
-            answeredBy: answer.answeredBy
+            answer: answer.cancelled ? '' : answerText(record.resolved.answers),
+            answeredBy: answer.answeredBy,
+            ...(answer.cancelled ? { cancelled: true as const } : {}),
+            ...(answer.posted ? { posted: answer.posted } : {})
         };
+    }
+
+    /** Arm the reminder for the earliest hand-over still to come (#396), or clear it when none is waiting. */
+    async function armAnswers(c: ActorContext<SessionState>): Promise<void> {
+        const due = (c.state.answeredDetached ?? []).flatMap((a) => (a.nextAt !== undefined ? [a.nextAt] : []));
+        if (due.length) await c.reminders.set(ANSWERS_REMINDER, { due: Math.max(0, Math.min(...due) - now()) });
+        else await c.reminders.clear(ANSWERS_REMINDER);
     }
 
     function info(c: ActorContext<SessionState>): SessionInfo {
@@ -781,6 +803,11 @@ export function defineSessionActor(ports: SessionPorts) {
         // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
         applyEntry: (state: SessionState, entry: unknown) => applySessionEntry(state, entry as SessionEntry),
         onDeactivate: (ctx) => dispose(ctx.key),
+        /** The answers reminder (#396): a hand-over that failed is due again — `deliverAnswers` runs the ones whose time has come. */
+        onReminder: async (ctx, name) => {
+            if (name !== ANSWERS_REMINDER) return;
+            await ctx.tasks.start('deliverAnswers', {});
+        },
         methods: (ctx) => {
             // A fresh activation starts with no live session — whatever a previous one left here is stale.
             void dispose(ctx.key);
@@ -892,11 +919,12 @@ export function defineSessionActor(ports: SessionPorts) {
                         ...(d.ruleId ? { ruleId: d.ruleId } : {}),
                         at: now()
                     });
-                    if (detached && d.type === 'input') {
-                        // Nobody waits on the call any more (#285): park the answer; the asker is started again once no turn
-                        // runs — now, or when its turn is over (a live chat session stays open between turns, #393) —
-                        // outside this turn (`deliverAnswers`).
-                        const answer: DetachedAnswer = { requestId: command.requestId, answeredBy: answererOf(ctx.principal as Principal | null, parsed!.workspaceId) };
+                    if (detached) {
+                        // Nobody waits on the call any more (#285): park the answer; the asker hears it once no turn runs —
+                        // now, or when its turn is over (a live chat session stays open between turns, #393) — outside
+                        // this turn (`deliverAnswers`). A dismissed question is parked too (#396): the task waiting on it
+                        // is released by the same hand-over, and nobody is prompted.
+                        const answer: DetachedAnswer = { requestId: command.requestId, answeredBy: answererOf(ctx.principal as Principal | null, parsed!.workspaceId), ...(d.type === 'input' ? {} : { cancelled: true as const }) };
                         await appendEntry(ctx, set({ answeredDetached: [...(s.answeredDetached ?? []), answer] }));
                         if (s.status === 'closed' || !s.running) await ctx.tasks.start('deliverAnswers', {});
                     }
@@ -1220,28 +1248,49 @@ export function defineSessionActor(ports: SessionPorts) {
         }),
         tasks: (ctx) => ({
             /**
-             * Start the askers of parked answers again (#285), one at a time, outside any turn — the follow-up places a
-             * task that reads this session back (its `ref`), so it can never run inside a turn of this actor. Restarted by
-             * the task ledger after an eviction; an answer leaves the queue only once handed over (or said as failed).
+             * Hand parked answers to their askers (#285, #396), one at a time, outside any turn — the hand-over prompts
+             * this session back (or places a task that does), so it can never run inside a turn of this actor. Restarted
+             * by the task ledger after an eviction. An answer leaves the queue once handed over; one whose hand-over threw
+             * stays, with the attempt counted and its next try due after `ANSWER_RETRY_MS` (the `answers` reminder runs
+             * it), until `ANSWER_ATTEMPTS` are spent — only then is it dropped and the failure said in the chat, as the
+             * hand-over named it (`answer-not-delivered:{step}:{cause}`).
              */
             async deliverAnswers(): Promise<void> {
                 for (;;) {
                     const snap = ctx.snapshot();
                     // Closed, or idle between turns (#393): the asker's next turn runs in this same session, so never while one does.
-                    const next = snap.status === 'closed' || !snap.running ? snap.answeredDetached?.[0] : undefined;
-                    if (!next) return;
+                    const at = now();
+                    const next = snap.status === 'closed' || !snap.running ? snap.answeredDetached?.find((a) => (a.nextAt ?? 0) <= at) : undefined;
+                    if (!next) {
+                        await ctx.turn((c) => armAnswers(c));
+                        return;
+                    }
                     const followUp = followUpOf(snap, ctx.key, next);
-                    let failed: string | undefined;
+                    let failed: { readonly message: string; readonly posted?: MessageId } | undefined;
                     if (followUp) {
                         try {
                             await ports.answered!(followUp);
                         } catch (e) {
-                            failed = e instanceof Error ? e.message : String(e);
+                            const posted = (e as { posted?: unknown } | null)?.posted;
+                            failed = { message: e instanceof Error ? e.message : String(e), ...(typeof posted === 'string' ? { posted: posted as MessageId } : {}) };
                         }
                     }
                     await ctx.turn(async (c) => {
-                        await appendEntry(c, set({ answeredDetached: (c.state.answeredDetached ?? []).filter((a) => a.requestId !== next.requestId) }));
-                        if (failed !== undefined) await publishChat(c, { kind: 'status', status: 'task', ref: `answer-not-delivered:${failed}` });
+                        const attempts = (next.attempts ?? 0) + 1;
+                        const rest = (c.state.answeredDetached ?? []).filter((a) => a.requestId !== next.requestId);
+                        if (failed && attempts < answerAttempts) {
+                            const delay = answerDelays[Math.min(attempts, answerDelays.length) - 1]!;
+                            console.warn(`[session] answer to ${next.requestId} of ${c.key} not delivered (attempt ${attempts} of ${answerAttempts}; next in ${delay} ms): ${failed.message}`);
+                            const posted = failed.posted ?? next.posted;
+                            await appendEntry(c, set({ answeredDetached: [...rest, { ...next, attempts, nextAt: now() + delay, ...(posted ? { posted } : {}) }] }));
+                        } else {
+                            await appendEntry(c, set({ answeredDetached: rest }));
+                            if (failed) {
+                                console.warn(`[session] answer to ${next.requestId} of ${c.key} not delivered after ${attempts} attempts: ${failed.message}`);
+                                await publishChat(c, { kind: 'status', status: 'task', ref: `answer-not-delivered:${failed.message}` });
+                            }
+                        }
+                        await armAnswers(c);
                     });
                 }
             },

@@ -65,6 +65,12 @@
  *   through its routing port). The routes on it fail `session-reset`, the Session is
  *   closed, the binding dropped, and the record and its pages purged through
  *   `RoutingPorts.store`. A person's call, never an agent's.
+ * - a chat task whose turn ends with its `ask_user` question still open
+ *   (#396; CHT-09, COL-06) stays `waiting {input}` on a route parked
+ *   `waiting-answer`; the Session hands the late answer to `deliverAnswer`,
+ *   which prompts the same session under that task through the same seam —
+ *   no new task. Only when no route waits on the question does the answer
+ *   start the asker again with a follow-up task (`routing/answers.ts`).
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -83,7 +89,7 @@ import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
 import { asPrincipal, mintAgentPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { freeSlots, machineKey, runningIn, type FsResultView, type MachineView, type OpenSessionResult } from '../machine/index.js';
-import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, sessionPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec } from '../session/index.js';
+import { isInterruptedTurnEnd, resumeTurnId, SESSION_PAGE_TYPE, sessionPageKey, type SessionCommandResult, type SessionInfo, type SessionOpenSpec, type SessionRequestView } from '../session/index.js';
 import { TaskActor, taskKey, type TaskOutcome, type TaskView } from '../task/index.js';
 import { Workspace } from '../workspace/index.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
@@ -145,9 +151,27 @@ interface SessionClient {
     get(): Promise<SessionInfo>;
     transcript(): Promise<AgentTranscript | undefined>;
     tail(from?: { epoch: number; seq: number }): AsyncIterable<AgentEvent>;
+    request(requestId: string): Promise<SessionRequestView | null>;
     cancel(): Promise<SessionCommandResult>;
     close(): Promise<SessionCommandResult>;
 }
+
+/**
+ * The turn a late `ask_user` answer starts under the asking task (#396): deterministic per question, so a delivery
+ * retried after an eviction runs once (the Session's `prompt` is idempotent by turn id).
+ */
+export function answerTurnId(taskId: TaskId, requestId: string): string {
+    return `${taskId}:turn:answer:${requestId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
+/** What `Routing.deliverAnswer` answers (#396). */
+export type AnswerDelivery =
+    /** The answer is the router's now: prompted into the asking task's turn (`turnId`), or held for it until the session's running turn ends (`parked`). */
+    | { readonly delivered: true; readonly taskId?: TaskId; readonly turnId?: string; readonly parked?: true }
+    /** No route waits an answer to this question on this session (the task settled, or the session was ended): the caller starts the asker again. */
+    | { readonly delivered: false; readonly reason: 'no-route' }
+    /** The session refused the prompt; the asking task failed with the reply. */
+    | { readonly delivered: false; readonly reason: 'refused'; readonly code: string; readonly message: string };
 
 /** The slice of the Machine actor the router drives (`defineMachineActor`). */
 interface MachineClient {
@@ -278,7 +302,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, machineOnline: machineOnly, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
         state: (): RoutingState => initialRoutingState(),
         methods: (ctx) => {
             const ids = parseRoutingKey(ctx.key);
@@ -442,11 +466,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
              *   `waiting-turn` and the task waits `{turn, sessionId, turnId}` until that turn ends (`turnEnded`), when
              *   it is prompted again.
              * A `busy` the wire answers after that is the environment's (#394), not this session's, and is left to the
-             * caller with every other refusal.
+             * caller with every other refusal. `requested` is the turn the prompt starts when the session is idle: the
+             * route's own `{taskId}:turn:1`, or a later turn of the same task (a late `ask_user` answer, #396).
              */
-            async function steerOrPrompt(route: Route, input: readonly PromptPart[]): Promise<{ readonly turnId: string } | 'busy' | Extract<SessionCommandResult, { kind: 'error' }>> {
+            async function steerOrPrompt(route: Route, input: readonly PromptPart[], requested = `${route.taskId}:turn:1`): Promise<{ readonly turnId: string } | 'busy' | Extract<SessionCommandResult, { kind: 'error' }>> {
                 const sessionId = route.sessionId!;
-                const requested = `${route.taskId}:turn:1`;
                 const info = await session(sessionId).get();
                 // A record already running THIS route's turn is a retry: `dispatch` answers with the remembered ack.
                 const running = info.running && info.running.turnId !== requested ? info.running : undefined;
@@ -473,7 +497,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 return { turnId: route.turnId };
             }
 
-            /** The one prompt of a route: `steerOrPrompt`, then `follow` picks the turn up; a refusal fails the task. */
+            /**
+             * The one prompt of a route: `steerOrPrompt`, then `follow` picks the turn up; a refusal fails the task. A
+             * route holding an answer (#396: handed over while its session ran another turn) sends that, into the
+             * answer's own turn, instead of the task's input.
+             */
             async function prompt(route: Route): Promise<void> {
                 if (!route.sessionId) return;
                 const t = await task(route.taskId).get();
@@ -488,8 +516,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await parkOnCapacity(route, m!);
                     return;
                 }
-                const input = await promptInput(route, t);
-                const sent = await steerOrPrompt(route, input);
+                const answer = route.answer ? ctx.snapshot(route.answer) : undefined;
+                const input = answer ? answer.input : await promptInput(route, t);
+                const sent = await steerOrPrompt(route, input, answer?.turnId);
                 if (sent === 'busy') return;
                 if ('kind' in sent) {
                     // The environment is busy after all (#394): wait for a turn to end there. A local route's `busy` is its own session's (#395).
@@ -501,6 +530,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await fail(route, { code: `prompt-${sent.code}`, message: sent.message, recoverable: sent.code === 'busy' });
                     return;
                 }
+                delete route.answer;
                 route.status = 'running';
                 touch(route);
                 await ctx.tasks.start('follow');
@@ -1151,8 +1181,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 async sessionClosed(sessionId: SessionId, reason: string, _taskId?: TaskId): Promise<void> {
                     const s = ctx.state;
                     for (const route of Object.values(s.routes)) {
-                        if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity' && route.status !== 'waiting-turn')) continue;
-                        const when = route.status === 'waiting-turn' ? 'while this task waited for its running turn to end' : 'before it opened';
+                        if (route.sessionId !== sessionId || (route.status !== 'opening' && route.status !== 'waiting-capacity' && route.status !== 'waiting-turn' && route.status !== 'waiting-answer')) continue;
+                        // A task waiting for the answer to its question (#396) fails here too: the answer, when it comes, starts the asker again in a fresh session.
+                        const when = route.status === 'waiting-turn' ? 'while this task waited for its running turn to end' : route.status === 'waiting-answer' ? 'while this task waited for the answer to its question' : 'before it opened';
                         await fail(route, { code: 'session-refused', message: `machine ${route.machineId} closed the session ${when}: ${reason}`, recoverable: true });
                     }
                     await ctx.save();
@@ -1167,6 +1198,95 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (route.sessionId !== sessionId || route.status !== 'waiting-turn') continue;
                         await activate(route, `turn ${turnId} ended`, sessionId);
                         await prompt(route);
+                    }
+                    await ctx.save();
+                },
+
+                /**
+                 * Session → router (through `SessionPorts.answered`, #396; CHT-09, COL-06): a late answer to the `ask_user`
+                 * question `requestId` raised on `sessionId`. The asking task's route waits `waiting-answer` on that
+                 * question, with the task `waiting {input}`: the task goes `active` (`request …: input`) and `input` — the
+                 * answer as a user message — is prompted under it through the same seam a chat message takes
+                 * (`steerOrPrompt`), into the turn `answerTurnId(taskId, requestId)`; `follow` settles the task at its end.
+                 * No new task, and the engine conversation the question lives in carries on. A session running another
+                 * turn takes the answer into it, or the route holds it (`Route.answer`) and sends it when that turn ends
+                 * (`turnEnded`); a refusal fails the task with the reply. Every other route waiting on the same question
+                 * (two tasks that shared the asking turn, #395) joins the answer's turn. With no route waiting on the
+                 * question — the task settled, the session was ended — nothing is sent: the caller starts the asker again
+                 * with a follow-up task, as before (`createAnswerFollowUp`).
+                 */
+                async deliverAnswer(sessionId: SessionId, requestId: string, input: readonly PromptPart[]): Promise<AnswerDelivery> {
+                    const s = ctx.state;
+                    // A hand-over retried after the router already took it: held for the running turn, or prompted.
+                    if (Object.values(s.routes).some((r) => r.sessionId === sessionId && r.answer?.requestId === requestId)) return { delivered: true };
+                    const waiting = Object.values(s.routes).filter((r) => r.sessionId === sessionId && r.status === 'waiting-answer' && r.question === requestId);
+                    let first: Route | undefined;
+                    for (const route of waiting) {
+                        const t = await task(route.taskId).get();
+                        if (isTerminal(t.status)) {
+                            drop(route.taskId);
+                            continue;
+                        }
+                        first = route;
+                        break;
+                    }
+                    if (!first) {
+                        await ctx.save();
+                        return { delivered: false, reason: 'no-route' };
+                    }
+                    const turnId = answerTurnId(first.taskId, requestId);
+                    // `follow` tails from here: the log before the answer's turn is the asking turn's, already settled.
+                    const head = (await session(sessionId).get()).head;
+                    first.head = head;
+                    delete first.question;
+                    first.answer = { requestId, turnId, input: structuredClone(input) };
+                    await activate(first, `request ${requestId}: input`, sessionId);
+                    // The one prompt every route takes: the environment's capacity (#394), then the seam (#395). The route
+                    // comes out `running` on the answer's turn, parked with the answer still on it (`waiting-turn`,
+                    // `waiting-capacity` — prompted again when the turn ends or a slot frees), or gone, the task failed.
+                    await prompt(first);
+                    const after = s.routes[first.taskId];
+                    if (!after) {
+                        const failed = (await task(first.taskId).get()).error;
+                        await ctx.save();
+                        return { delivered: false, reason: 'refused', code: failed?.code ?? 'prompt-refused', message: failed?.message ?? `session ${sessionId} refused the prompt` };
+                    }
+                    if (after.status !== 'running') {
+                        await ctx.save();
+                        return { delivered: true, taskId: first.taskId, parked: true };
+                    }
+                    const started = after.turnId ?? turnId;
+                    // A task that shared the asking turn (#395) waits on the same question: it joins the answer's turn.
+                    for (const other of waiting) {
+                        if (other === first || s.routes[other.taskId] !== other) continue;
+                        await activate(other, `request ${requestId}: input; joined turn ${started}`, sessionId);
+                        delete other.question;
+                        other.head = head;
+                        other.turnId = started;
+                        other.joined = true;
+                        other.status = 'running';
+                        touch(other);
+                    }
+                    wakers.get(ctx.key)?.();
+                    await ctx.save();
+                    return { delivered: true, taskId: first.taskId, turnId: started };
+                },
+
+                /**
+                 * Session → router (#396): the question `requestId` was dismissed, not answered. Every task waiting on it
+                 * (`waiting-answer`) is released as it stands — completed with what its asking turn said, as a turn that
+                 * ends with no question open would be — and nobody is prompted.
+                 */
+                async questionCancelled(sessionId: SessionId, requestId: string): Promise<void> {
+                    for (const route of Object.values(ctx.state.routes)) {
+                        if (route.sessionId !== sessionId || route.status !== 'waiting-answer' || route.question !== requestId) continue;
+                        const t = await task(route.taskId).get();
+                        if (!isTerminal(t.status)) {
+                            if (t.status === 'waiting') await task(route.taskId).resolveWaiting(ROUTER, `request ${requestId}: cancel`, sessionId);
+                            const text = route.turnId ? finalText(await session(sessionId).transcript(), route.turnId) : '';
+                            await task(route.taskId).complete({ ...(text ? { text } : {}), artifacts: [], verified: false }, ROUTER);
+                        }
+                        drop(route.taskId);
                     }
                     await ctx.save();
                 },
@@ -1283,6 +1403,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         // A transition the task no longer allows (settled meanwhile, cancelled): the record stands as it is.
                     }
                 };
+                /** A platform question the turn left open and nobody's call waits on (#285): its answer is still to come. */
+                const stillOpen = async (requestId: string): Promise<boolean> => {
+                    const q = await sessionClient.request(requestId).catch(() => null);
+                    return !!q && !q.resolved && q.detached === true;
+                };
 
                 // From the head the placement saw (#393): a chat session's log outlives this turn, and what came before it is not replayed. The follower ends itself at the turn's end below — a live session never closes the tail.
                 const it = sessionClient.tail(route.head ?? { epoch: 0, seq: 0 })[Symbol.asyncIterator]();
@@ -1378,8 +1503,22 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 }
                 const wait = t.status === 'waiting' ? t.wait : undefined;
                 if (wait && (wait.kind === 'input' || wait.kind === 'approval') && wait.sessionId === sessionId) {
-                    // The turn ended with its question still open (#285: `ask_user` answered `pending`): nothing waits on it in
-                    // this task any more — the answer starts a new one — so the task leaves `waiting` and completes.
+                    // The turn ended with its question still open (#285: `ask_user` answered `pending`). In a chat the task keeps
+                    // waiting for it (#396): the route parks `waiting-answer` — followed by nobody — and `deliverAnswer` prompts this
+                    // same session, under this same task, when the answer comes. Anywhere else nothing waits on it in this task any
+                    // more — the answer starts a new one — so the task leaves `waiting` and completes.
+                    if (route.chatId && wait.kind === 'input' && (await stillOpen(wait.requestId))) {
+                        await ctx.turn(async (c) => {
+                            const parked = c.state.routes[route.taskId];
+                            if (parked && parked.turnId === turnId && parked.status === 'running') {
+                                parked.status = 'waiting-answer';
+                                parked.question = wait.requestId;
+                                delete parked.joined;
+                            }
+                            await c.save();
+                        });
+                        return;
+                    }
                     await tryTask(() => taskClient.resolveWaiting(ROUTER, `turn ${turnId} ended; request ${wait.requestId} stays open`));
                 }
                 const transcript = await sessionClient.transcript();

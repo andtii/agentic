@@ -8,7 +8,7 @@
  * `@agentic/runtimes` and the Machine actor.
  */
 
-import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, Principal, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
+import type { AgentId, ApprovalRule, ChatId, ChatRoster, EnvironmentId, FrozenAgentConfig, MachineId, MemoryEntry, MemoryScope, MessageId, Principal, PromptPart, RuntimeId, SessionId, TaskId, Usage, UsageRow, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AgentCapabilities, AgentSession, SessionRef, TranscriptStore } from '@sigx/ai-agent';
 import type { WireCommand } from '@sigx/ai-agent/wire';
@@ -131,24 +131,29 @@ export interface CommandSink {
 }
 
 /**
- * A late answer to a detached `ask_user` (#285): the question outlived its tool call and the session is closed,
- * so the asker is started again with the answer — `createAnswerFollowUp` in the app.
+ * A late answer to a detached `ask_user` (#285, #396): the question outlived its tool call, so the answer is handed
+ * to the asker as a new message in its own live session under the asking task, or — when no task waits on the
+ * question any more — the asker is started again with it (`createAnswerFollowUp` in the app).
  */
 export interface AnswerFollowUp {
     readonly workspaceId: WorkspaceId;
-    /** The session that asked — closed by now; its `ref` is what a resume continues. */
+    /** The session that asked — idle between turns, or closed; its `ref` is what a resume continues. */
     readonly sessionId: SessionId;
     readonly agentId: AgentId;
     /** Detached asks only happen in a chat: that is where the answer is posted and the asker started again. */
     readonly chatId: ChatId;
+    /** The chat message an earlier attempt posted the answer as (#396): a retried hand-over posts nothing twice. */
+    readonly posted?: MessageId;
     readonly taskId?: TaskId;
     readonly environmentId?: EnvironmentId;
     readonly requestId: string;
     readonly question: string;
     readonly choices?: readonly string[];
-    /** The answer as the model reads it. */
+    /** The answer as the model reads it; empty when the question was dismissed (`cancelled`). */
     readonly answer: string;
     readonly answeredBy: Principal;
+    /** The question was dismissed rather than answered (#396): the task waiting on it is released and nobody is started. */
+    readonly cancelled?: true;
 }
 
 export interface SessionPorts {
@@ -172,11 +177,15 @@ export interface SessionPorts {
      */
     readonly inbox?: () => AnyActorDefinition;
     /**
-     * Start the asker again with a late answer (#285): called once per detached `ask_user` answered, when the
-     * session is closed — at the answer, or at the close when the answer came first. Without it the answer is
-     * recorded (and shown in the chat and the Inbox) but nobody is started. A throw is said in the chat.
+     * Hand a late answer to the asker (#285, #396): called per detached `ask_user` answered, once no turn runs on
+     * the session — at the answer, or when the turn that was running ends. Without it the answer is recorded (and
+     * shown in the chat and the Inbox) but nobody hears it. A throw is retried on a reminder (`ANSWER_RETRY_MS`,
+     * `ANSWER_ATTEMPTS`) and, once the attempts are spent, said in the chat as `answer-not-delivered:{message}` —
+     * `createAnswerFollowUp` names the step and the cause (`AnswerDeliveryError`) and what it already did.
      */
     readonly answered?: (followUp: AnswerFollowUp) => Promise<void>;
+    /** The retry schedule of a hand-over that threw (#396): the delays by attempt (the last repeats) and the attempts before giving up. Defaults `ANSWER_RETRY_MS` / `ANSWER_ATTEMPTS`; tests shorten it. */
+    readonly answerRetry?: { readonly delaysMs?: readonly number[]; readonly attempts?: number };
     /** Clock, for timestamps on records that are not events. Default `Date.now`. */
     readonly now?: () => number;
 }
