@@ -32,9 +32,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is many times slower with its progress bar
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set. 'latest' until the first
-# stable daemon release exists, then 'stable'.
-$DefaultChannel = 'latest'
+# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set: 'stable' since the first
+# stable daemon release (daemon-v0.1.1).
+$DefaultChannel = 'stable'
 $NodeVersion = '22.22.0'
 $NodeMinimum = [Version]'22.12.0'
 $Releases = if ($env:AGENTIC_RELEASES) { $env:AGENTIC_RELEASES } else { 'https://github.com/andtii/agentic/releases' }
