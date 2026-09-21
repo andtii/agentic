@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -32,7 +32,7 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneQuota, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -196,6 +196,8 @@ export interface MachineView {
     readonly policy?: MachinePolicy;
     /** Provider limits by environment id, as last reported (#261); absent until the daemon reports any, and an environment without an entry has reported none yet. */
     readonly quota?: Readonly<Record<string, QuotaSnapshot>>;
+    /** What the sessions cost the machine, as last reported (#400): per session (`null` = unknown), per environment, the daemon, the machine; absent until the daemon reports any. */
+    readonly telemetry?: MachineTelemetry;
     readonly activeSessions: readonly HostedSession[];
     readonly queued: readonly QueuedSession[];
     readonly pending: readonly PendingCommand[];
@@ -445,6 +447,7 @@ export function defineMachineActor(ports: MachinePorts) {
             environments: rest.environments,
             ...(rest.policy ? { policy: rest.policy } : {}),
             ...(rest.quota && Object.keys(rest.quota).length > 0 ? { quota: rest.quota } : {}),
+            ...(rest.telemetry ? { telemetry: rest.telemetry } : {}),
             activeSessions: Object.values(rest.activeSessions),
             queued: rest.queued,
             pending: Object.values(rest.pending),
@@ -806,7 +809,7 @@ export function defineMachineActor(ports: MachinePorts) {
             await autoUpdate();
         }
 
-        return { directory, readDefaults, compare, close, request, autoUpdate, onHello, releaseDrain, onStatus, tick, harnessEnded };
+        return { directory, readDefaults, compare, close, request, autoUpdate, onHello, releaseDrain, onStatus, tick, harnessEnded, inbox, named };
     }
 
     return defineActor({
@@ -917,6 +920,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 // A session that held a slot (a turn running, or a prompt out) frees it by closing (#394).
                 const held = hosted !== undefined && runningIn(s, hosted.environmentId).some((h) => h.sessionId === sessionId);
                 delete s.activeSessions[sessionId];
+                pruneTelemetry(s);
                 const before = s.queued.length;
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
                 const known = wasHosted || s.queued.length !== before;
@@ -958,6 +962,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
                 else delete s.policy;
                 pruneQuota(s);
+                pruneTelemetry(s);
                 // Sessions the daemon still runs, or once ran, replay from the last cursor this machine holds;
                 // ones it never heard of (a restart before `session.opened`) are opened again.
                 const wanted: Record<string, { epoch: number; seq: number }> = {};
@@ -1224,6 +1229,44 @@ export function defineMachineActor(ports: MachinePorts) {
                 quota[frame.environmentId] = mergeQuota(quota[frame.environmentId], ctx.snapshot(frame.snapshot) as QuotaSnapshot);
             }
 
+            /**
+             * The machine's load as the daemon sampled it (#400): a full snapshot replacing the last, pruned to what this
+             * machine hosts. A limit crossed (`telemetryWarnings`: memory only) is told to the Inbox once, and again only
+             * after its value cleared (`telemetryWarningCleared`). Nothing here ends a session (#387).
+             */
+            async function onTelemetry(frame: DaemonFrameOf<'telemetry'>): Promise<void> {
+                const s = ctx.state;
+                s.lastSeen = now();
+                s.telemetry = ctx.snapshot(frame.snapshot) as MachineTelemetry;
+                pruneTelemetry(s);
+                const t = s.telemetry;
+                const warned = (s.telemetryWarned ??= {});
+                for (const key of Object.keys(warned)) if (telemetryWarningCleared(key, t)) delete warned[key];
+                const gb = (bytes: number) => `${(bytes / 2 ** 30).toFixed(1)} GB`;
+                for (const w of telemetryWarnings(t)) {
+                    const key = telemetryWarningKey(w);
+                    if (warned[key] !== undefined) continue;
+                    warned[key] = now();
+                    if (w.kind === 'machine-memory') {
+                        await lifecycle.inbox({
+                            kind: 'resource-pressure',
+                            title: `${lifecycle.named()} is at ${Math.round(w.value * 100)} % memory`,
+                            body: `${gb(t.machine.memoryUsed ?? 0)} of ${gb(t.machine.memoryTotal)} in use; the warning level is ${Math.round(w.limit * 100)} %. Nothing is stopped — see which sessions hold it on the machine's page.`,
+                            ref: { kind: 'machine', machineId }
+                        });
+                    } else {
+                        const hosted = s.activeSessions[w.sessionId];
+                        await lifecycle.inbox({
+                            kind: 'resource-pressure',
+                            title: `A session on ${lifecycle.named()} holds ${gb(w.value)}`,
+                            body: `${hosted ? `Agent ${hosted.agentId}'s session` : 'A session'} and what it started hold ${gb(w.value)} resident; the warning level is ${gb(w.limit)}. Nothing is stopped — check what it is running.`,
+                            ref: { kind: 'session', sessionId: w.sessionId }
+                        });
+                    }
+                }
+                if (Object.keys(warned).length === 0) delete s.telemetryWarned;
+            }
+
             async function handle(frame: DaemonFrame): Promise<void> {
                 const s = ctx.state;
                 switch (frame.t) {
@@ -1234,6 +1277,7 @@ export function defineMachineActor(ports: MachinePorts) {
                         // The policy is edited on the machine while the daemon runs; an `env` without one says nothing about it.
                         if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
                         pruneQuota(s);
+                        pruneTelemetry(s);
                         s.lastSeen = now();
                         dequeue();
                         return;
@@ -1264,6 +1308,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onEnvResponse(frame);
                     case 'quota':
                         return onQuota(frame);
+                    case 'telemetry':
+                        return onTelemetry(frame);
                     case 'history.response':
                         return onHistoryResponse(frame);
                     case 'update.status':

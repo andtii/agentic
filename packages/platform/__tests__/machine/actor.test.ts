@@ -1015,6 +1015,79 @@ describe('Machine quota (#268, OPS-07)', () => {
     });
 });
 
+describe('Machine telemetry (#400)', () => {
+    const GiB = 2 ** 30;
+    const sample = (rss: number, cpu: number | null = 0.1) => ({ cpu, rss, processes: 2 });
+    const snapshot = (sessions: Record<string, unknown>, environments: Record<string, unknown> = {}, extra: object = {}) => ({
+        observedAt: Date.now(),
+        intervalMs: 30_000,
+        cpus: 8,
+        machine: { cpu: 0.3, memoryUsed: 8 * GiB, memoryTotal: 32 * GiB },
+        daemon: sample(80_000_000, 0.01),
+        environments,
+        sessions,
+        availability: 'reported',
+        ...extra
+    });
+    const hello = (environments = [inMemoryEnvironment(M1, E1), inMemoryEnvironment(M1, E2)]) => JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments, capabilities: [], resume: {} });
+    const spec: OpenSpec = { agentId: 'agent_1', cwd: '/work', system: '', tools: [] };
+
+    /** A daemon this test speaks for by hand, hosting `s1` in E1 (asked for, not yet acknowledged) and `s2` in E2. */
+    async function rawDaemon() {
+        sockets.connected.add(K1);
+        const asDaemon = machine(K1, asMachine(M1));
+        await asDaemon.socketMessage(hello());
+        expect(await machine().openSession('s1' as SessionId, E1, spec)).toBe('opened');
+        expect(await machine().openSession('s2' as SessionId, E2, spec)).toBe('opened');
+        const telemetry = (sessions: Record<string, unknown>, environments: Record<string, unknown> = {}, extra: object = {}) => asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'telemetry', snapshot: snapshot(sessions, environments, extra) }));
+        return { asDaemon, telemetry };
+    }
+
+    it('stores the snapshot as a whole, unknowns as null, and saves in the turn', async () => {
+        const { telemetry } = await rawDaemon();
+        expect((await machine().get()).telemetry).toBeUndefined();
+        expect(await telemetry({ s1: sample(GiB), s2: null }, { [E1]: { sample: sample(GiB), attribution: 'session' }, [E2]: { sample: null, attribution: 'none' } }, { availability: 'partial' })).toMatchObject({ ok: true, t: 'telemetry' });
+        const stored = (await machine().get()).telemetry!;
+        expect(stored).toMatchObject({ availability: 'partial', cpus: 8, sessions: { s1: { rss: GiB }, s2: null }, environments: { [E2]: { sample: null, attribution: 'none' } } });
+        expect(stored.machine).toEqual({ cpu: 0.3, memoryUsed: 8 * GiB, memoryTotal: 32 * GiB });
+        const saved = (await app.storage.load('machine', K1))!.state as { telemetry?: unknown };
+        expect(saved.telemetry).toEqual(stored);
+        // The next snapshot replaces, never merges.
+        await telemetry({ s1: sample(2 * GiB) }, {});
+        expect((await machine().get()).telemetry!.sessions).toEqual({ s1: sample(2 * GiB) });
+    });
+
+    it('prunes sessions the machine no longer hosts and environments it no longer reports', async () => {
+        const { asDaemon, telemetry } = await rawDaemon();
+        await telemetry({ s1: sample(GiB), s2: sample(GiB), s_nope: sample(GiB) }, { [E1]: { sample: sample(GiB), attribution: 'session' }, [E2]: { sample: sample(GiB), attribution: 'environment' }, env_nope: { sample: null, attribution: 'none' } });
+        let stored = (await machine().get()).telemetry!;
+        expect(Object.keys(stored.sessions).sort()).toEqual(['s1', 's2']);
+        expect(Object.keys(stored.environments).sort()).toEqual([E1, E2]);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: 's2', reason: 'done' }));
+        stored = (await machine().get()).telemetry!;
+        expect(Object.keys(stored.sessions)).toEqual(['s1']);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'env', environments: [inMemoryEnvironment(M1, E1)] }));
+        stored = (await machine().get()).telemetry!;
+        expect(Object.keys(stored.environments)).toEqual([E1]);
+        expect(stored.machine.memoryTotal).toBe(32 * GiB);
+    });
+
+    it('keeps the last snapshot while the machine is offline, and get() carries it', async () => {
+        const { asDaemon, telemetry } = await rawDaemon();
+        await telemetry({ s1: sample(GiB), s2: null });
+        await asDaemon.socketClosed();
+        const view = await machine().get();
+        expect(view.online).toBe(false);
+        expect(view.telemetry?.sessions).toEqual({ s1: sample(GiB), s2: null });
+    });
+
+    it('a real daemon reports its load once welcomed', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine().get()).telemetry !== undefined, 'the in-memory daemon telemetry frame');
+        expect((await machine().get()).telemetry).toMatchObject({ availability: 'not-reported', reason: expect.stringContaining('in-memory') });
+    });
+});
+
 describe('Machine offline and closed sessions (#366)', () => {
     const S1 = 'session_1' as SessionId;
     const sessionSpec: SessionOpenSpec = { agentId: config.agentId, runtime: 'in-memory', environmentId: E1, machineId: M1, config };
