@@ -17,11 +17,16 @@ name: Daemon release
 # its `.sha256`); the version is in the manifest and inside the zip
 # (`agentic-daemon --version`, stamped by apps/daemon/scripts/lib/stamp.mjs).
 #
-# The daemon zip carries no native runtime (#369): every OS also builds the three
-# harness packages, harness-<runtime>-<os>-<arch>.zip (the runtime's native npm
-# package at the version the lockfile pins — package.mjs --harness), which the
-# manifest lists under `harnesses[runtime]` and the installers and the daemon
-# install from. docs/runbook.md §5.1, §5.3.
+# The daemon zip carries no native runtime (#369): the three harness packages,
+# harness-<runtime>-<version>-<os>-<arch>.zip (the runtime's native npm package at
+# the version the lockfile pins — package.mjs --harness), are listed by the
+# manifest under `harnesses[runtime]`, and the installers and the daemon install
+# from them. They are named by version and uploaded once (#441): a main run
+# packages only a harness whose zip for that version is not on daemon-latest yet
+# (`manifest.mjs plan`), the manifest carries the others over from the previous
+# manifest, and the zips no manifest uses any more are deleted (`manifest.mjs
+# stale`). A tag release packages and uploads every harness itself.
+# docs/runbook.md §5.1, §5.3.
 
 on:
   push:
@@ -54,6 +59,9 @@ env:
 jobs:
   package:
     runs-on: ${{ matrix.os }}
+    # Read daemon-latest's assets (which harness zips are already there).
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -78,10 +86,37 @@ jobs:
         run: node scripts/package.mjs --unversioned --sha256
         working-directory: apps/daemon
 
+      # The version each harness would be packaged at, and which of them daemon-latest already has for this
+      # platform (#441). A release packages them all. harness-versions.json travels to the publish job.
+      - name: Which harnesses to package
+        id: harnesses
+        shell: bash
+        working-directory: apps/daemon
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p release
+          node scripts/package.mjs --harness-versions > release/harness-versions.json
+          cat release/harness-versions.json
+          if [ -z "$AGENTIC_DAEMON_TAG" ]; then
+            gh release view daemon-latest --json assets --jq '[.assets[].name]' > existing.json 2>/dev/null || echo '[]' > existing.json
+          else
+            echo '[]' > existing.json
+          fi
+          runtimes=$(node scripts/lib/manifest.mjs plan --versions release/harness-versions.json --existing existing.json)
+          echo "to package: ${runtimes:-none}"
+          echo "runtimes=$runtimes" >> "$GITHUB_OUTPUT"
+
       # One zip per harness runtime, each with its .sha256 and its .json (the zip's manifest.json, read by the manifest step).
       - name: Package the harnesses
-        run: node scripts/package.mjs --unversioned --sha256 --harness all
+        if: steps.harnesses.outputs.runtimes != ''
+        shell: bash
         working-directory: apps/daemon
+        run: |
+          args=()
+          for runtime in ${{ steps.harnesses.outputs.runtimes }}; do args+=(--harness "$runtime"); done
+          node scripts/package.mjs --sha256 "${args[@]}"
 
       - name: Version
         run: node apps/daemon/bin/agentic-daemon.mjs --version
@@ -95,6 +130,7 @@ jobs:
             apps/daemon/release/harness-*.zip
             apps/daemon/release/harness-*.zip.sha256
             apps/daemon/release/harness-*.zip.json
+            apps/daemon/release/harness-versions.json
           if-no-files-found: error
           retention-days: 3
 
@@ -131,7 +167,20 @@ jobs:
       # Every zip against its sidecar before anything is published.
       - name: Check the hashes
         working-directory: release
-        run: cat agentic-daemon-*.zip.sha256 harness-*.zip.sha256 | sha256sum -c -
+        run: cat *.zip.sha256 | sha256sum -c -
+
+      # What daemon-latest has now: its asset names and the manifest the last run uploaded, from which the
+      # manifest step carries over the harnesses this run did not package (#441). A release starts from nothing.
+      - name: Read daemon-latest
+        run: |
+          if [ -z "$AGENTIC_DAEMON_TAG" ]; then
+            gh release view daemon-latest --json assets --jq '[.assets[].name]' > existing.json 2>/dev/null || echo '[]' > existing.json
+            gh release download daemon-latest --pattern manifest.json --output previous.json 2>/dev/null || echo '{}' > previous.json
+          else
+            echo '[]' > existing.json
+            echo '{}' > previous.json
+          fi
+          cat existing.json
 
       # The pre-release exists once; every run replaces its assets and moves the tag to this commit.
       - name: Upload to the daemon-latest pre-release
@@ -141,7 +190,7 @@ jobs:
           if ! gh release view daemon-latest >/dev/null 2>&1; then
             gh release create daemon-latest --prerelease --title "Daemon (latest main)" --notes "$notes" --target "$GITHUB_SHA"
           fi
-          gh release upload daemon-latest release/agentic-daemon-*.zip release/agentic-daemon-*.zip.sha256 release/harness-*.zip release/harness-*.zip.sha256 --clobber
+          gh release upload daemon-latest release/*.zip release/*.zip.sha256 --clobber
           gh release edit daemon-latest --notes "$notes Built from $GITHUB_SHA."
 
       # A release: notes from release-drafter's newest draft when there is one, else generated.
@@ -164,15 +213,29 @@ jobs:
           # "latest release" belongs to the app's release-drafter releases.
           case "$AGENTIC_DAEMON_TAG" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest=false ;; esac
           gh release create "$AGENTIC_DAEMON_TAG" --title "Daemon ${AGENTIC_DAEMON_TAG#daemon-v}" --target "$GITHUB_SHA" "$@" \
-            release/agentic-daemon-*.zip release/agentic-daemon-*.zip.sha256 release/harness-*.zip release/harness-*.zip.sha256
+            release/*.zip release/*.zip.sha256
 
-      # After the upload: the manifest names the uploaded assets, hashed from the sidecars (the harnesses' versions from their .json).
+      # After the upload: the manifest names the uploaded assets, hashed from the sidecars (the harnesses' versions from
+      # their .json), and every harness this run did not package from the previous manifest — the same version, still on
+      # the release. A harness in neither fails the step.
       - name: Upload the manifest
         run: |
           tag=${AGENTIC_DAEMON_TAG:-daemon-latest}
-          node apps/daemon/scripts/lib/manifest.mjs --dir release --tag "$tag" --repo "$GITHUB_REPOSITORY" --out manifest.json
+          node apps/daemon/scripts/lib/manifest.mjs --dir release --tag "$tag" --repo "$GITHUB_REPOSITORY" --out manifest.json \
+            --harness-versions release/harness-versions.json --previous previous.json --existing existing.json
           cat manifest.json
           gh release upload "$tag" manifest.json --clobber
+
+      # The harness zips the new manifest no longer names (an older version, the unversioned names from before #441).
+      - name: Delete the harness zips nothing uses
+        if: env.AGENTIC_DAEMON_TAG == ''
+        run: |
+          node apps/daemon/scripts/lib/manifest.mjs stale --existing existing.json --manifest manifest.json > stale.txt
+          while read -r name; do
+            [ -n "$name" ] || continue
+            echo "deleting $name"
+            gh release delete-asset daemon-latest "$name" --yes
+          done < stale.txt
 
       # The stable channel: the same manifest on the rolling daemon-stable pre-release (its asset urls
       # point at the versioned release). A semver pre-release (-rc.1) never moves it.
