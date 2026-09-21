@@ -120,6 +120,43 @@ export function namingDriver(script: ConformanceScript): ScriptedDriver {
     };
 }
 
+/**
+ * `namingDriver` whose runtime titles its conversation (#460): `answers[i]` is what the i-th probe of the session's
+ * title finds (the last one repeats), like a CLI whose auto-title lands some time after a turn and moves on with the
+ * work. `probes` counts the turns each probe was made after.
+ */
+export function titlingDriver(script: ConformanceScript, answers: readonly (string | undefined)[]): ScriptedDriver & { readonly probes: number[] } {
+    const base = namingDriver(script);
+    const probes: number[] = [];
+    return {
+        ...base,
+        probes,
+        async open(env, spec, ctx) {
+            const opened = await base.open(env, spec, ctx);
+            let turns = 0;
+            const session: AgentSession = {
+                ...opened.session,
+                get ref() {
+                    return opened.session.ref;
+                },
+                prompt(input, options) {
+                    turns++;
+                    return opened.session.prompt(input, options);
+                }
+            };
+            return {
+                ...opened,
+                session,
+                async title() {
+                    const answer = answers[Math.min(probes.length, answers.length - 1)];
+                    probes.push(turns);
+                    return answer;
+                }
+            };
+        }
+    };
+}
+
 export const MOCK_REPORT: CapabilityReport = { ...SCRIPTED_REPORT, runtime: 'mock', supported: ['prompt', 'cancel', 'close', 'configure'], unsupported: [] };
 
 /** Any `@sigx/ai-agent` `Agent` (e.g. `mockAgent`) as a driver: one agent per runtime, sessions opened with the spec. */

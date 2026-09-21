@@ -24,6 +24,7 @@ export type EnvFrame = DaemonFrameOf<'env'>;
 export type HeartbeatFrame = DaemonFrameOf<'heartbeat'>;
 export type SessionOpenedFrame = DaemonFrameOf<'session.opened'>;
 export type SessionRefFrame = DaemonFrameOf<'session.ref'>;
+export type SessionTitleFrame = DaemonFrameOf<'session.title'>;
 export type SessionFrameFrame = DaemonFrameOf<'session.frame'>;
 export type SessionReplyFrame = DaemonFrameOf<'session.reply'>;
 export type SessionClosedFrame = DaemonFrameOf<'session.closed'>;

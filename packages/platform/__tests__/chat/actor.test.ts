@@ -86,25 +86,26 @@ describe('activation (CHT-06)', () => {
 describe('history access (CHT-04, MEM-11)', () => {
     it('a from-now member cannot read entries before its join; an all member reads everything', async () => {
         const chat = chatAs(user);
+        // seq 0 m1, 1 the rename the first user message writes (#460), 2 m2, 3 B joins, 4 m3, 5 A joins.
         await chat.post('m1');
         await chat.post('m2');
         const member = await chat.addAgent(B, 'from-now');
-        expect(member.historyFrom).toBe(2);
+        expect(member.historyFrom).toBe(3);
         await chat.post('m3');
         await chat.addAgent(A, 'all');
 
         const asB = await chatAs(agent(B)).history();
         expect(asB.next).toBeNull();
-        expect(asB.entries.map((e) => e.seq)).toEqual([2, 3, 4]);
+        expect(asB.entries.map((e) => e.seq)).toEqual([3, 4, 5]);
         expect(asB.entries.map((e) => text(e.entry))).toEqual([undefined, 'm3', undefined]);
         expect(await chatAs(agent(B)).search('m1')).toEqual([]);
-        expect((await chatAs(agent(B)).search('m3')).map((h) => h.seq)).toEqual([3]);
+        expect((await chatAs(agent(B)).search('m3')).map((h) => h.seq)).toEqual([4]);
 
         const asA = await chatAs(agent(A)).history();
-        expect(asA.entries.map((e) => e.seq)).toEqual([0, 1, 2, 3, 4]);
-        expect((await chatAs(agent(A)).search('M')).map((h) => h.seq)).toEqual([3, 1, 0]);
+        expect(asA.entries.map((e) => e.seq)).toEqual([0, 1, 2, 3, 4, 5]);
+        expect((await chatAs(agent(A)).search('M')).map((h) => h.seq)).toEqual([4, 2, 0]);
 
-        expect((await chat.history()).entries).toHaveLength(5);
+        expect((await chat.history()).entries).toHaveLength(6);
     });
 
     it('an agent that is not a member sees nothing, and a removed member loses its view', async () => {
@@ -119,17 +120,18 @@ describe('history access (CHT-04, MEM-11)', () => {
 
     it('pages backwards with an exclusive cursor and clamps the limit', async () => {
         const chat = chatAs(user);
+        // Eight entries: m0, the rename the first user message writes (#460), m1 … m6.
         for (let i = 0; i < 7; i++) await chat.post(`m${i}`);
         const first = await chat.history(null, 3);
-        expect(first.entries.map((e) => e.seq)).toEqual([4, 5, 6]);
-        expect(first.next).toBe(4);
+        expect(first.entries.map((e) => e.seq)).toEqual([5, 6, 7]);
+        expect(first.next).toBe(5);
         const second = await chat.history(first.next, 3);
-        expect(second.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+        expect(second.entries.map((e) => e.seq)).toEqual([2, 3, 4]);
         const third = await chat.history(second.next, 3);
-        expect(third.entries.map((e) => e.seq)).toEqual([0]);
+        expect(third.entries.map((e) => e.seq)).toEqual([0, 1]);
         expect(third.next).toBeNull();
-        expect((await chat.history(null, 0)).entries).toHaveLength(7);
-        expect((await chat.history(99, 2)).entries.map((e) => e.seq)).toEqual([5, 6]);
+        expect((await chat.history(null, 0)).entries).toHaveLength(8);
+        expect((await chat.history(99, 2)).entries.map((e) => e.seq)).toEqual([6, 7]);
     });
 });
 
@@ -146,17 +148,19 @@ describe('persistence', () => {
 
         const chatWrites = writes.filter((w) => w.type === 'Chat');
         const pageWrites = writes.filter((w) => w.type === 'ChatPage');
-        // One write per entry, plus one compaction per archived page — never a rewrite of the whole history.
-        const archived = Math.floor((posts + 1 - WINDOW) / PAGE);
+        // The join, the posts and the rename the first post writes (#460): one write per entry, plus one compaction
+        // per archived page — never a rewrite of the whole history.
+        const entries = posts + 2;
+        const archived = Math.floor((entries - WINDOW) / PAGE);
         expect(archived).toBeGreaterThan(0);
-        expect(chatWrites).toHaveLength(posts + 1 + archived);
+        expect(chatWrites).toHaveLength(entries + archived);
         expect(pageWrites).toHaveLength(archived);
         expect(Math.max(...chatWrites.map((w) => w.entries))).toBeLessThanOrEqual(WINDOW + PAGE);
         expect(chatWrites.at(-1)!.entries).toBeLessThan(posts);
 
         // The archived entries are still the chat's history, in order.
         const summary = await chat.get();
-        expect(summary.seq).toBe(posts + 1);
+        expect(summary.seq).toBe(entries);
         const seen: number[] = [];
         let cursor: number | null = null;
         do {
@@ -164,7 +168,7 @@ describe('persistence', () => {
             seen.unshift(...page.entries.map((e) => e.seq));
             cursor = page.next;
         } while (cursor !== null);
-        expect(seen).toEqual(Array.from({ length: posts + 1 }, (_, i) => i));
+        expect(seen).toEqual(Array.from({ length: entries }, (_, i) => i));
         // seq 0 is the join entry; the first post is seq 1, read back from page 0.
         const oldest = await chat.history(2, 1);
         expect(oldest.entries.map((e) => e.seq)).toEqual([1]);
@@ -184,7 +188,8 @@ describe('persistence', () => {
         app = await startChatApp(storage);
         const after = await chatAs(user).get();
         expect(after).toEqual(before);
-        expect((await chatAs(user).history()).entries).toHaveLength(3);
+        // The join, the message, the rename it wrote (#460), the coordinator.
+        expect((await chatAs(user).history()).entries).toHaveLength(4);
     });
 });
 

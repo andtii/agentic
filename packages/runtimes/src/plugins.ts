@@ -47,11 +47,11 @@ export const anthropicApiPlugin: PluginManifest = {
         {
             name: ANTHROPIC_API_KEY_SECRET,
             title: 'Anthropic API key',
-            description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session.',
+            description: 'A key from console.anthropic.com (sk-ant-…). Stored sealed; opened only to start a session or to title a chat.',
             required: true
         }
     ],
-    permissions: [{ scope: `secret:${ANTHROPIC_API_KEY_SECRET}`, reason: 'Calls the Anthropic API with your key when a session starts.' }],
+    permissions: [{ scope: `secret:${ANTHROPIC_API_KEY_SECRET}`, reason: 'Calls the Anthropic API with your key when a session starts, and once or twice per chat to title it.' }],
     compat: { platform: '*', core: '*' }
 };
 

@@ -229,7 +229,7 @@ describe('/plugins/:id', () => {
         expect(root.querySelector<HTMLSelectElement>('select')!.value).toBe('claude-opus-5');
         const row = root.querySelector('[data-permission="secret:anthropic-api-key"]')!;
         expect(row.hasAttribute('data-granted')).toBe(true);
-        expect(row.querySelector('[data-permission-reason]')!.textContent).toBe('Calls the Anthropic API with your key when a session starts.');
+        expect(row.querySelector('[data-permission-reason]')!.textContent).toBe('Calls the Anthropic API with your key when a session starts, and once or twice per chat to title it.');
         expect(texts([...root.querySelectorAll('[data-dependent-via]')])).toEqual(['runtime', 'runtime', 'fallback']);
 
         // The field hydrates enabled; the value leaves through `save` once and the page keeps the NAME only.

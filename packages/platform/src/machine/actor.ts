@@ -374,6 +374,7 @@ interface SessionClient {
     forwardFrames(frames: readonly WireFrame[]): Promise<void>;
     commandReplied(reply: WireReply): Promise<void>;
     noteRef(ref: SessionRef): Promise<void>;
+    noteTitle(title: string): Promise<void>;
     hostEnded(ended: { readonly reason: string; readonly code?: SessionClosedCode }): Promise<void>;
 }
 
@@ -995,6 +996,12 @@ export function defineMachineActor(ports: MachinePorts) {
                 await session(frame.sessionId)?.noteRef(frame.ref as SessionRef);
             }
 
+            /** The runtime's own title for a hosted session's conversation (#460): handed to the record, which tells its chat. */
+            async function onSessionTitle(frame: DaemonFrameOf<'session.title'>): Promise<void> {
+                if (!ctx.state.activeSessions[frame.sessionId]) return; // not ours
+                await toSession(() => session(frame.sessionId)?.noteTitle(frame.title));
+            }
+
             /**
              * Hand a daemon's word about a session to its record, and keep the socket whatever the record says (#393):
              * a Session refuses a frame for a session it is not hosted on by this machine (a stale one after a restart,
@@ -1233,6 +1240,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onSessionOpened(frame);
                     case 'session.ref':
                         return onSessionRef(frame);
+                    case 'session.title':
+                        return onSessionTitle(frame);
                     case 'session.frame':
                         return onSessionFrame(frame);
                     case 'session.reply':

@@ -914,7 +914,7 @@ export function defineSessionActor(ports: SessionPorts) {
     return defineActor({
         type: 'session',
         authorize: [sameWorkspace, sessionsScope],
-        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, noteRef: internalPolicy, hostEnded: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
+        methodAuthorize: { forwardFrames: internalPolicy, commandReplied: internalPolicy, noteRef: internalPolicy, noteTitle: internalPolicy, hostEnded: internalPolicy, correct: correctorPolicy, raiseInput: ownAgentPolicy, detachInput: ownAgentPolicy },
         reads: { request: { maxAge: 0 }, requests: { maxAge: 0 } },
         state: (): SessionState => initialSessionState(),
         // `ctx.append` (@sigx/actors 0.10, #312): an event is one O(entry) write, folded by the same reducer on load.
@@ -1339,6 +1339,18 @@ export function defineSessionActor(ports: SessionPorts) {
                     const s = ctx.state;
                     if (s.ref && sameRefIdentity(s.ref, ref)) return;
                     await appendEntry(ctx, set({ ref: ctx.snapshot(ref) }));
+                },
+
+                /**
+                 * Daemon path (internal, #460): the runtime's own title for the conversation, reported once the runtime titles
+                 * it and on every change (`session.title`). Nothing is kept here — the chat owns titles: it is told as a
+                 * `title` session event and takes it unless a person named the chat.
+                 */
+                async noteTitle(title: string): Promise<void> {
+                    assertHostingMachine();
+                    const next = title.replace(/\s+/g, ' ').trim();
+                    if (!next) return;
+                    await publishChat(ctx, { kind: 'title', title: next });
                 },
 
                 /**

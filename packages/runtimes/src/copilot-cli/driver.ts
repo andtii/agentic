@@ -18,7 +18,7 @@ import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener }
 import { assertCwdInRoots, assertRuntime, closingWith } from '../harness/session.js';
 import { withPlatformMemoryLabel, withUnavailableConnectors } from '../harness/system.js';
 import { bridgedPlatformTools } from '../harness/tools.js';
-import { COPILOT_CLI_CAPABILITIES, copilotCli, type CopilotSessionOptions } from './agent.js';
+import { COPILOT_CLI_CAPABILITIES, copilotCli, copilotSessionTitle, type CopilotSessionOptions } from './agent.js';
 import { readCopilotAuth } from './auth.js';
 import { copilotCliDoctor, type CopilotDoctorInput } from './doctor.js';
 import { copilotAccountEnv } from './env.js';
@@ -150,7 +150,8 @@ export function copilotCliDriver(options: CopilotCliDriverOptions = {}): Copilot
             }
             // A connector tool the agent is granted is not a platform tool the daemon failed to serve: `__` names are connectors'.
             const capabilities = report({ tools: tools.map((t) => t.name), unknownTools: unknown.filter((name) => !name.includes('__')), unavailableConnectors: connectors.unavailable });
-            return { session: closingWith(session, connectors.close), capabilities };
+            // The CLI's own title for the conversation (#460), kept from its `session.title_changed` events.
+            return { session: closingWith(session, connectors.close), capabilities, title: async () => copilotSessionTitle(session) };
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

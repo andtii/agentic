@@ -136,6 +136,8 @@ export interface DaemonOptions {
     readonly logger?: Logger;
     /** Default 30 s. */
     readonly heartbeatMs?: number;
+    /** How long after a turn that brought no new title the runtime is asked once more (#460). Default `TITLE_RECHECK_MS`. */
+    readonly titleRecheckMs?: number;
     readonly backoff?: BackoffOptions;
     /**
      * How often environments that are not signed in are inspected again, so a
@@ -200,6 +202,9 @@ export interface DaemonHarnesses {
 /** How long a harness drain waits for running turns by default. */
 export const HARNESS_DRAIN_TIMEOUT_MS = 10 * 60_000;
 
+/** The one re-probe for a runtime title after a turn that brought none (#460): a CLI titles from a background call. */
+export const TITLE_RECHECK_MS = 10_000;
+
 /**
  * Why the daemon stops (#363): each live session is closed with the matching `session.closed` code, so the platform knows
  * to re-open it — `restart` (SIGINT / SIGTERM: the supervisor brings the daemon back), `update` (the update client, #364),
@@ -261,6 +266,13 @@ interface LiveSession {
      * on its own terms (a CLI with its first stream event), so `session.ref` goes out only when the identity moved on.
      */
     sentRef: SessionRef;
+    /** The runtime's title for the conversation (#460): the driver's probe, when the runtime keeps one. */
+    readonly title?: () => Promise<string | undefined>;
+    /** The title the probe last found, and the one the platform last heard: `session.title` goes out when they differ. */
+    knownTitle?: string;
+    sentTitle?: string;
+    /** One re-probe after a turn that found no new title: the CLI writes its title from a background call. */
+    titleRecheck?: ReturnType<typeof setTimeout>;
     /** The last frame this daemon handed to a socket. */
     lastSent: Cursor;
     /** The last event shown to the quota monitor: a replay after a reconnect is not news. */
@@ -345,6 +357,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const platform = options.platform ?? process.platform;
     const machineId = options.credentials.machineId as MachineId;
     const heartbeatMs = options.heartbeatMs ?? 30_000;
+    const titleRecheckMs = options.titleRecheckMs ?? TITLE_RECHECK_MS;
     const reinspectMs = options.reinspectMs ?? 30_000;
     const toolTimeoutMs = options.toolTimeoutMs ?? 10 * 60_000;
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
@@ -638,6 +651,39 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (send({ v: V, t: 'session.ref', sessionId: s.id, ref })) s.sentRef = ref;
     }
 
+    /** The runtime's title moved on since the platform last heard: `session.title` (#460). */
+    function reportTitle(s: LiveSession): void {
+        const title = s.knownTitle;
+        if (title === undefined || title === s.sentTitle) return;
+        if (send({ v: V, t: 'session.title', sessionId: s.id, title })) s.sentTitle = title;
+    }
+
+    /**
+     * Ask the driver what the runtime calls the conversation (#460) — after every turn, off the served stream, so a
+     * title lands even while the platform is away; and once more `TITLE_RECHECK_MS` later when the turn brought no new
+     * one, since a CLI titles from a background call that a short first turn can outrun. Never fails the session.
+     */
+    async function probeTitle(s: LiveSession, recheck = true): Promise<void> {
+        if (!s.title || !sessions.has(s.id)) return;
+        // This probe supersedes a re-probe still pending from the last turn.
+        clearTimeout(s.titleRecheck);
+        s.titleRecheck = undefined;
+        let title: string | undefined;
+        try {
+            title = await s.title();
+        } catch (e) {
+            logger.warn('session: title probe failed', { session: s.id, error: e });
+            return;
+        }
+        const changed = title !== undefined && title !== s.knownTitle;
+        if (changed) s.knownTitle = title;
+        reportTitle(s);
+        if (!changed && recheck && sessions.has(s.id)) {
+            s.titleRecheck = setTimeout(() => void probeTitle(s, false), titleRecheckMs);
+            s.titleRecheck.unref?.();
+        }
+    }
+
     function startPump(s: LiveSession, from: Cursor): void {
         stopPump(s);
         const controller = new AbortController();
@@ -647,6 +693,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             try {
                 // A pump starts on `welcome`: after a reconnect this is where a ref learned while the socket was down goes out.
                 reportRef(s);
+                reportTitle(s);
                 for await (const frame of s.served.events(from, { signal: controller.signal })) {
                     if (controller.signal.aborted) return;
                     // `session.opened` already told the platform what the wire hello would.
@@ -723,12 +770,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
             const base = spec.resume !== undefined ? await reopenedBase(sessionId, ref) : served.head;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, ...(opened.title ? { title: opened.title } : {}), lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
             sessions.set(sessionId, live);
             watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });
             send({ v: V, t: 'session.opened', sessionId, ref, capabilities: opened.capabilities, head: headOf(live) });
             if (welcomed) startPump(live, served.head);
+            // A re-opened conversation may be titled already (#460); a fresh one has nothing to read before its first turn.
+            if (spec.resume !== undefined) void probeTitle(live, false);
         } catch (e) {
             refuse(`the runtime could not open a session: ${(e as Error).message}`);
         } finally {
@@ -811,7 +860,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
                     if (s.turns.signal.aborted) return;
                     if (frame.kind !== 'event') continue;
                     if (frame.event.type === 'turn-start') s.running = true;
-                    else if (frame.event.type === 'turn-end') s.running = false;
+                    else if (frame.event.type === 'turn-end') {
+                        s.running = false;
+                        void probeTitle(s);
+                    }
                 }
             } catch (e) {
                 if (!s.turns.signal.aborted) logger.warn('session: turn watch failed', { session: s.id, error: e });
@@ -890,6 +942,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         sessions.delete(sessionId);
         stopPump(s);
         s.turns.abort();
+        clearTimeout(s.titleRecheck);
         s.running = false;
         for (const [callId, pending] of pendingTools) {
             if (pending.frame.sessionId !== sessionId) continue;

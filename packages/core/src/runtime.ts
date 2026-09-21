@@ -64,6 +64,13 @@ export interface RuntimeOpenContext<P = unknown> {
 export interface OpenedRuntimeSession<S = unknown> {
     readonly session: S;
     readonly capabilities: CapabilityReport;
+    /**
+     * The runtime's current title for the conversation (#460), when the runtime keeps one (Claude Code's own
+     * auto-title, Copilot's `session.title_changed`): read by the daemon after every turn and sent as
+     * `session.title` when it changes. Resolves `undefined` while the runtime has not titled it yet; absent when
+     * the runtime never does — the platform then titles the chat itself.
+     */
+    readonly title?: () => Promise<string | undefined>;
 }
 
 export interface RuntimeDriver<S = unknown, P = unknown> {

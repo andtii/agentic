@@ -45,6 +45,7 @@ import type {
     CopilotReasoningDelta,
     CopilotSessionConfig,
     CopilotSessionLike,
+    CopilotTitleChanged,
     CopilotTool,
     CopilotToolComplete,
     CopilotToolStart,
@@ -146,6 +147,14 @@ const errorCodeOf = (error: CopilotError): AgentErrorCode => {
 
 const toolText = (output: unknown): string => (typeof output === 'string' ? output : JSON.stringify(output ?? null));
 
+/** How to read the title the CLI last gave each session's conversation (#460); `copilotSessionTitle` asks it. */
+const titles = new WeakMap<AgentSession, () => string | undefined>();
+
+/** The conversation's title as Copilot last reported it (`session.title_changed`), or `undefined` before it has. */
+export function copilotSessionTitle(session: AgentSession): string | undefined {
+    return titles.get(session)?.();
+}
+
 export function copilotCli(options: CopilotCliOptions): Agent<CopilotSessionOptions> {
     const id = options.id ?? COPILOT_CLI_AGENT_ID;
     const abortGraceMs = options.abortGraceMs ?? 5_000;
@@ -154,6 +163,8 @@ export function copilotCli(options: CopilotCliOptions): Agent<CopilotSessionOpti
     async function session(opts: CopilotSessionOptions): Promise<AgentSession> {
         const client = await options.client();
         let turn: RunningTurn | undefined;
+        /** What the CLI last called the conversation (#460): kept here, since the event can land before the session object exists. */
+        let title: string | undefined;
 
         const tools: CopilotTool[] = (opts.tools ?? []).map((tool: AnyTool) => ({
             name: tool.name,
@@ -246,6 +257,12 @@ export function copilotCli(options: CopilotCliOptions): Agent<CopilotSessionOpti
         };
 
         const onEvent = (event: CopilotEvent) => {
+            // The title is the session's, not a turn's (#460): it lands whenever the CLI computes it, a turn running or not.
+            if (event.type === 'session.title_changed') {
+                const next = (event.data as Partial<CopilotTitleChanged> | undefined)?.title;
+                if (typeof next === 'string' && next.trim()) title = next.replace(/\s+/g, ' ').trim();
+                return;
+            }
             const running = turn;
             if (!running || running.driver.ended) return;
             const data = event.data;
@@ -401,6 +418,7 @@ export function copilotCli(options: CopilotCliOptions): Agent<CopilotSessionOpti
             }
         };
         sessions.add(agentSession);
+        titles.set(agentSession, () => title);
         return agentSession;
     }
 

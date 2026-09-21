@@ -150,6 +150,20 @@ describe('Session authorization', () => {
         expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).forwardFrames([]))).toBe(403);
         expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).commandReplied(reply))).toBe(403);
         expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).noteRef(ref))).toBe(403);
+        expect(await statusOf(app.as(other).actor(Session, REMOTE_KEY).noteTitle('theirs'))).toBe(403);
+    });
+
+    it("tells its chat the runtime's title for the conversation (#460): a title session event from the hosting machine, nothing kept", async () => {
+        const REMOTE_KEY = actorKey(WS, 'session', 'session_2');
+        await app.as(owner).actor(Session, REMOTE_KEY).open({ ...spec, runtime: 'claude-code', machineId: 'machine_1' as MachineId });
+        const asMachine = app.as(machine).actor(Session, REMOTE_KEY);
+        expect(await statusOf(session().noteTitle('local'))).toBe(403);
+        await asMachine.noteTitle('  Chat list  titles ');
+        expect(received.at(-1)).toMatchObject({ kind: 'title', agentId: AGENT, sessionId: 'session_2', title: 'Chat list titles' });
+        const count = received.length;
+        await asMachine.noteTitle('   ');
+        expect(received).toHaveLength(count);
+        expect(JSON.stringify(await asMachine.get())).not.toContain('Chat list titles');
     });
 });
 

@@ -28,6 +28,7 @@ import { accountEnv } from './env.js';
 import { claudeCodeModels, type ModelsQueryFn } from './models.js';
 import { withPlanReview } from './plan.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
+import { readSessionTitle } from './title.js';
 
 export interface ClaudeCodeDriverOptions {
     /** The SDK's `query`; a fake in tests. */
@@ -203,7 +204,15 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 unknownTools: unknown.filter((name) => !name.includes('__')),
                 unavailableConnectors: connectors.unavailable
             });
-            return { session: closingWith(session, connectors.close), capabilities };
+            // The CLI's own title for the conversation (#460), read from the transcript it files under this environment's config
+            // dir. The ref carries the CLI's id once the first stream event names it (#389); before that there is nothing to read.
+            const title = async (): Promise<string | undefined> => {
+                const ref = session.ref as { readonly id?: unknown; readonly data?: { readonly cwd?: unknown } };
+                if (typeof ref.id !== 'string' || !ref.id) return undefined;
+                const cwd = typeof ref.data?.cwd === 'string' && ref.data.cwd ? ref.data.cwd : spec.cwd;
+                return readSessionTitle({ configDir: configDirOf(env), cwd, sessionId: ref.id });
+            };
+            return { session: closingWith(session, connectors.close), capabilities, title };
         },
 
         models(env: LocalEnvironment): Promise<readonly ModelOption[] | null> {
