@@ -4,15 +4,22 @@
 #   $env:AGENTIC_URL='<platform origin>'; $env:AGENTIC_CODE='<code>'; $env:AGENTIC_NAME='<machine name>'; irm '<platform origin>/install.ps1' | iex
 #
 # It needs nothing installed: Node.js 22.12+ on PATH is used when present, otherwise a portable Node
-# is downloaded from nodejs.org into the install folder. Then it downloads the daemon zip
-# (agentic-daemon-win32-x64.zip from the daemon-latest GitHub release), unpacks it to
+# is downloaded from nodejs.org into the install folder. Then it reads the release manifest of the
+# channel (or pinned version) asked for, downloads the daemon zip it names for win32-x64
+# (agentic-daemon-win32-x64.zip) from that GitHub release, checks its sha256, unpacks it to
 # %LOCALAPPDATA%\agentic\daemon and runs the zip's install.ps1: pair (when AGENTIC_CODE is set),
 # doctor, the `agentic-daemon` command (on the user PATH) and the per-user Scheduled Task that keeps
 # the daemon running.
 #
 # Re-run without AGENTIC_CODE to upgrade an already paired machine (the task is stopped, the folder
 # replaced, the task re-registered). Environment overrides:
-#   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release
+#   AGENTIC_CHANNEL      the release channel: latest (the newest main build) or stable (the newest
+#                        daemon-v<semver> release); default below
+#   AGENTIC_VERSION      a pinned release instead of a channel: daemon-v<semver> (or just <semver>)
+#   AGENTIC_DAEMON_ZIP   a local path or URL of the zip to install instead of the release (no manifest,
+#                        no sha256 check)
+#   AGENTIC_RELEASES     the GitHub releases URL the manifest is read from (default
+#                        https://github.com/andtii/agentic/releases): a fork, or a test server
 #   AGENTIC_INSTALL_DIR  the install root (default %LOCALAPPDATA%\agentic)
 #   AGENTIC_DAEMON_HOME  where the daemon keeps credentials, environments and sessions (see the README)
 #   AGENTIC_NO_PATH      set to 1 to write the `agentic-daemon` command without touching your user PATH
@@ -23,10 +30,14 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is many times slower with its progress bar
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
+# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set. 'latest' until the first
+# stable daemon release exists, then 'stable'.
+$DefaultChannel = 'latest'
 $NodeVersion = '22.22.0'
 $NodeMinimum = [Version]'22.12.0'
-$Release = 'https://github.com/andtii/agentic/releases/download/daemon-latest'
-$Asset = 'agentic-daemon-win32-x64.zip'
+$Releases = if ($env:AGENTIC_RELEASES) { $env:AGENTIC_RELEASES } else { 'https://github.com/andtii/agentic/releases' }
+$AssetKey = 'win32-x64'
+$Asset = "agentic-daemon-$AssetKey.zip"
 
 function Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 # Never `exit` here: piped through `iex` this runs in the caller's console and exit would close it.
@@ -65,16 +76,43 @@ if (-not $nodeExe) {
 }
 Write-Host "node: $nodeExe ($(& $nodeExe --version))"
 
-# 2. The daemon zip: the release asset, or AGENTIC_DAEMON_ZIP.
+# 2. The daemon zip: the win32-x64 asset in the release manifest, checked against its sha256 - or AGENTIC_DAEMON_ZIP.
 $zip = Join-Path $downloads $Asset
 if ($env:AGENTIC_DAEMON_ZIP -and -not ($env:AGENTIC_DAEMON_ZIP -match '^https?://')) {
     if (-not (Test-Path $env:AGENTIC_DAEMON_ZIP)) { Fail "AGENTIC_DAEMON_ZIP not found: $env:AGENTIC_DAEMON_ZIP" }
     $zip = (Resolve-Path $env:AGENTIC_DAEMON_ZIP).Path
     Step "installing $zip"
+} elseif ($env:AGENTIC_DAEMON_ZIP) {
+    Step "downloading $env:AGENTIC_DAEMON_ZIP"
+    Invoke-WebRequest -UseBasicParsing -Uri $env:AGENTIC_DAEMON_ZIP -OutFile $zip
 } else {
-    $url = if ($env:AGENTIC_DAEMON_ZIP) { $env:AGENTIC_DAEMON_ZIP } else { "$Release/$Asset" }
-    Step "downloading $url"
-    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
+    if ($env:AGENTIC_VERSION) {
+        $tag = 'daemon-v' + ($env:AGENTIC_VERSION -replace '^daemon-v', '')
+        $manifestUrl = "$Releases/download/$tag/manifest.json"
+    } else {
+        $channel = if ($env:AGENTIC_CHANNEL) { $env:AGENTIC_CHANNEL } else { $DefaultChannel }
+        $manifestUrl = switch ($channel) {
+            'latest' { "$Releases/download/daemon-latest/manifest.json" }
+            'stable' { "$Releases/latest/download/manifest.json" }
+            default { Fail "unknown AGENTIC_CHANNEL $channel (latest or stable)" }
+        }
+    }
+    Step "reading $manifestUrl"
+    try { $manifest = Invoke-RestMethod -UseBasicParsing -Uri $manifestUrl } catch { Fail "no release manifest at ${manifestUrl}: $_" }
+    $entry = if ($manifest.assets) { $manifest.assets.$AssetKey } else { $null }
+    if (-not $entry) { Fail "the release at $manifestUrl has no daemon for $AssetKey." }
+    $version = if ($entry.version) { $entry.version } else { $manifest.version }
+    Step "downloading agentic-daemon ${version}: $($entry.url)"
+    Invoke-WebRequest -UseBasicParsing -Uri $entry.url -OutFile $zip
+    $expected = ([string]$entry.sha256).ToLowerInvariant()
+    # .NET rather than Get-FileHash: that cmdlet is missing when Windows PowerShell inherits a PowerShell 7 module path.
+    $stream = [IO.File]::OpenRead($zip)
+    try { $actual = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($stream)) -replace '-', '').ToLowerInvariant() } finally { $stream.Dispose() }
+    if ($actual -ne $expected) {
+        Remove-Item -Force $zip
+        Fail "sha256 mismatch for $($entry.url)`n  expected $expected (the release manifest)`n  actual   $actual (the download)"
+    }
+    Write-Host "sha256: $actual (matches the manifest)"
 }
 
 # 3. Stop a running daemon (its files are about to be replaced), unpack, swap the folder in.

@@ -32,7 +32,7 @@ import { pair, PairingError } from './pair.js';
 import { daemonPaths, type DaemonPaths } from './paths.js';
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
 import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
-import { DAEMON_VERSION } from './version.js';
+import { DAEMON_VERSION, versionLine } from './version.js';
 
 export interface CliContext {
     readonly paths?: DaemonPaths;
@@ -155,13 +155,13 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
     const secure = { ...(context.platform ? { platform: context.platform } : {}), ...(context.run ? { run: context.run } : {}) };
 
     if (args.command === undefined && args.flags.version === true) {
-        out(`agentic-daemon ${DAEMON_VERSION}`);
+        out(versionLine());
         return 0;
     }
     try {
         switch (args.command) {
             case 'version':
-                out(`agentic-daemon ${DAEMON_VERSION}`);
+                out(versionLine());
                 return 0;
             case 'pair': {
                 const code = args.positional[0];

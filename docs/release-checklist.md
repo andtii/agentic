@@ -53,5 +53,7 @@ Each must be open with a label, linked from the release notes, and — where it 
 ## Release
 
 - [ ] Tag `v0.1.0` on the release commit; release-drafter's notes reviewed, the known issues above listed under "Known issues".
-- [ ] Attach `agentic-daemon-<version>-win32-x64.zip` (built on Windows from the tagged commit) to the GitHub release.
+- [ ] Tag the daemon: `git tag daemon-v<semver> && git push origin daemon-v<semver>` (or **Actions → Daemon release → Run workflow** with `tag: daemon-v<semver>`). The tag workflow attaches the five zips and their `.sha256` files and a `manifest.json` to the release `daemon-v<semver>` — nothing is attached by hand (`docs/runbook.md` §5.1).
+- [ ] Check the manifest: `version` is the tag's semver, `channel` is `stable`, five `assets` (`win32-x64`, `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`), each `sha256` equal to its `.sha256` file; `agentic-daemon --version` from one zip prints the same version and commit.
+- [ ] Once the first stable daemon release exists, switch `DEFAULT_CHANNEL` in `apps/web/public/install.sh` and `$DefaultChannel` in `install.ps1` to `stable`.
 - [ ] Tracking issue #11 updated with the per-sub-issue status and closed, or kept open with the follow-up list as its last comment.
