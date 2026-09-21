@@ -4,6 +4,7 @@ import type { RuntimeId } from './agent.js';
 import type { DaemonBuild } from './daemon.js';
 import type { EnvironmentId, MachineId } from './ids.js';
 import type { HarnessReport } from './release.js';
+import type { ModelOption } from './session-options.js';
 
 export type AuthStatus = 'ok' | 'missing' | 'expired' | 'unknown';
 
@@ -42,6 +43,10 @@ export interface EnvironmentDescriptor {
     readonly isolation: IsolationMechanism;
     /** The runtime's verdict on this environment; absent when the daemon ran no `doctor`. */
     readonly doctor?: EnvironmentVerdict;
+    /** The models its account may use, as the runtime reported them (#450); absent until reported. */
+    readonly models?: readonly ModelOption[];
+    /** Sessions here may run in a mode that asks about nothing (#450); set on the machine only. */
+    readonly allowBypassPermissions?: boolean;
 }
 
 /** The operations an integration supports; unsupported ones are listed, never implied (AGT-09, PLG-09, AC-15). */

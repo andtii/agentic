@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
 import { LIMITS } from './limits.js';
@@ -39,6 +39,9 @@ const doctorFinding = z.object({
 /** A runtime's verdict on one environment (EXE-07); a daemon that ran no `doctor` leaves it out. */
 export const environmentVerdict = z.object({ ok: z.boolean(), findings: z.array(doctorFinding).max(LIMITS.list), checkedAt: nonNegativeInt });
 
+/** One model an account offers (#450). */
+export const modelOption: z.ZodType<ModelOption> = z.object({ id: name, label: text.optional(), description: text.optional() });
+
 export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
     id: environmentId,
     machineId,
@@ -52,7 +55,9 @@ export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
     cwdRoots: z.array(text).max(LIMITS.list),
     concurrency: z.object({ max: nonNegativeInt, active: nonNegativeInt }),
     isolation: z.enum(['config-dir', 'profile', 'os-user', 'container', 'none']),
-    doctor: environmentVerdict.optional()
+    doctor: environmentVerdict.optional(),
+    models: z.array(modelOption).max(LIMITS.list).optional(),
+    allowBypassPermissions: z.boolean().optional()
 });
 
 export const environments = z.array(environment).max(LIMITS.list);
@@ -131,6 +136,7 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     cwd: text,
     system: z.string().max(LIMITS.system),
     model: name.optional(),
+    permissionMode: name.optional(),
     maxTurns: z.number().int().min(1).optional(),
     maxBudgetUsd: z.number().min(0).optional(),
     tools: z.array(name).max(LIMITS.list),

@@ -116,6 +116,17 @@ describe('runtime seam', () => {
         const verdict = { ok: false, findings: [{ level: 'error' as const, code: 'shared-config-dir', message: 'shared', environmentIds: [env.id] }], checkedAt: 5 };
         expect(toEnvironmentDescriptor(env, 'machine_1' as MachineId, inspection, 0, verdict).doctor).toEqual(verdict);
     });
+    it('toEnvironmentDescriptor carries the account’s models as a copy and the bypass flag only when set (#450)', () => {
+        const inspection = { authStatus: 'ok' as const, isolation: 'config-dir' as const, capabilities };
+        const bare = toEnvironmentDescriptor(env, 'machine_1' as MachineId, inspection);
+        expect(bare).not.toHaveProperty('models');
+        expect(bare).not.toHaveProperty('allowBypassPermissions');
+        expect(toEnvironmentDescriptor({ ...env, allowBypassPermissions: false }, 'machine_1' as MachineId, inspection)).not.toHaveProperty('allowBypassPermissions');
+        const models = [{ id: 'claude-fable-5-1', label: 'Fable' }];
+        const d = toEnvironmentDescriptor({ ...env, allowBypassPermissions: true }, 'machine_1' as MachineId, inspection, 0, undefined, models);
+        expect(d).toMatchObject({ models, allowBypassPermissions: true });
+        expect(d.models).not.toBe(models);
+    });
     it('environmentVerdict keeps the findings naming the environment and fails on an error among them', () => {
         const a = 'environment_a' as EnvironmentId;
         const b = 'environment_b' as EnvironmentId;
