@@ -182,8 +182,11 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         /** Whether each picked member has a login on `m` (#414): a flag, never a block — the router explains at run. */
         const signedIn = (m: MachineEntry): { agent: AgentIdentity; environmentId: string | undefined }[] =>
             st.picked.map((id) => props.agents.find((a) => a.id === id)).filter((a): a is AgentIdentity => a !== undefined && a.environment.runtime !== 'anthropic-api').map((agent) => ({ agent, environmentId: memberEnvironmentOn(agent, m, machinesOf()) }));
-        /** Where a picked member's quota is read from on the chosen machine (#414), for the cards. */
+        /** Where a picked member's quota is read from on the chosen machine (#414), for the cards — and the machine, so a member with no login there says so. */
         const quotaEnvironmentOf = (agent: AgentIdentity): string | undefined => (machine ? memberEnvironmentOn(agent, machine, machinesOf()) : undefined);
+        const quotaMachine = machine
+            ? { machineId: machine.id, machineName: machine.name, accountEnvironment: (id: string, runtime: string, ref: AccountRef) => { const m = machinesOf().find((x) => x.id === id); return m ? environmentsForAccount(m.environments, runtime, ref)[0]?.id : undefined; } }
+            : undefined;
         const envLabel = (id: string): string => props.environments?.find((e) => e.id === id)?.label ?? id;
         const folders = project ? Object.entries(project.folders).filter((e): e is [string, string] => typeof e[1] === 'string') : [];
         const prefill = props.prefill;
@@ -287,7 +290,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         })}
                     </fieldset>
                 ) : null}
-                <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} quotaEnvironmentOf={machine ? quotaEnvironmentOf : undefined} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
+                <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} quotaEnvironmentOf={machine ? quotaEnvironmentOf : undefined} {...(quotaMachine ? { quotaMachine } : {})} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
                 <p data-new-chat-summary aria-live="polite">
                     {!st.picked.length
                         ? (st.attempted ? <span data-new-chat-required role="alert">Pick at least one agent.</span> : 'Nobody picked yet.')

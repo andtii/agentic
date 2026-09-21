@@ -253,6 +253,9 @@ describe('New chat on a machine (#414)', () => {
         pc.dispatchEvent(new Event('change', { bubbles: true }));
         await tick();
         expect(document.querySelector('[data-new-chat-machine-warning]')!.textContent).toMatch(/Homer has no login on pc/);
+        // The cards' quota badges follow the chosen machine: Homer has no login on the pc, Forge's account is there.
+        expect(d.card('homer').querySelector('[data-new-chat-quota]')!.textContent).toBe('Not signed in on pc');
+        expect(d.card('forge').querySelector('[data-new-chat-quota] [data-scope="ag-quota"]')).not.toBeNull();
         await d.create();
         expect(d.created).toEqual([{ agentIds: ['homer'], coordinator: null, projectId: null, machineId: 'm_pc' }]);
     });
