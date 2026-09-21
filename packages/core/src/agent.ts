@@ -69,6 +69,11 @@ export interface ExecutionDefaults {
     readonly model?: string;
     readonly limits: Limits;
     readonly offlinePolicy: OfflinePolicy;
+    /**
+     * A turn the machine dropped mid-way (#359; EXE-08): `ask` (the default) parks the task for the user, `auto`
+     * resumes it once the machine is back.
+     */
+    readonly onInterrupt?: 'ask' | 'auto';
 }
 
 /** What the user configures (AGT-02). */

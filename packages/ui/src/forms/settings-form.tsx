@@ -35,7 +35,12 @@ const KIND_LABELS: Record<NotificationKind, string> = {
     'task-done': 'Completed tasks',
     'task-failed': 'Failed tasks',
     approval: 'Approval requests',
-    input: 'Requests for input'
+    input: 'Requests for input',
+    'update-available': 'Daemon updates available',
+    'update-applied': 'Daemon updates applied',
+    'update-failed': 'Failed daemon updates',
+    'daemon-crash-loop': 'Daemons restarting in a loop',
+    'harness-update-available': 'Harness updates available'
 };
 
 /** How many zones the picker lists at once; typing narrows. */

@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest';
-import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, RuntimeDriver, RuntimeOpenContext, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, MachineId, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -7,7 +8,7 @@ type Discriminant<T, K extends keyof T> = T[K];
 describe('contract type tests', () => {
     it('task status and wait reasons are closed unions', () => {
         expectTypeOf<TaskStatus>().toEqualTypeOf<'queued' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled'>();
-        expectTypeOf<Discriminant<WaitReason, 'kind'>>().toEqualTypeOf<'approval' | 'input' | 'environment-offline' | 'child' | 'capacity' | 'budget' | 'project-feature' | 'turn'>();
+        expectTypeOf<Discriminant<WaitReason, 'kind'>>().toEqualTypeOf<'approval' | 'input' | 'environment-offline' | 'child' | 'capacity' | 'budget' | 'project-feature' | 'turn' | 'machine-offline'>();
         expectTypeOf<Discriminant<TaskOrigin, 'kind'>>().toEqualTypeOf<'user' | 'agent' | 'schedule' | 'trigger' | 'external'>();
     });
     it('chat entries and principals are discriminated', () => {
@@ -21,7 +22,11 @@ describe('contract type tests', () => {
         type F = { readonly kind: 'event' };
         expectTypeOf<Extract<DaemonFrame<F>, { t: 'session.frame' }>['frame']>().toEqualTypeOf<F>();
         expectTypeOf<DaemonFrame['v']>().toEqualTypeOf<1>();
-        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping' | 'fs.request' | 'env.request' | 'history.request'>();
+        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<'welcome' | 'session.open' | 'session.command' | 'session.close' | 'tool.result' | 'ping' | 'fs.request' | 'env.request' | 'history.request' | 'update.request' | 'update.cancel' | 'harness.request'>();
+        expectTypeOf<Discriminant<DaemonFrame, 't'>>().toEqualTypeOf<(typeof DAEMON_FRAME_TYPES)[number]>();
+        expectTypeOf<Discriminant<PlatformFrame, 't'>>().toEqualTypeOf<(typeof PLATFORM_FRAME_TYPES)[number]>();
+        expectTypeOf<Extract<DaemonFrame, { t: 'session.closed' }>['code']>().toEqualTypeOf<SessionClosedCode | undefined>();
+        expectTypeOf<Extract<PlatformFrame, { t: 'update.request' }>['target']>().toEqualTypeOf<ReleaseAsset | 'previous'>();
         expectTypeOf<Discriminant<Extract<PlatformFrame, { t: 'env.request' }>, 'op'>>().toEqualTypeOf<'put' | 'remove'>();
     });
     it('fs operations and results are closed unions', () => {

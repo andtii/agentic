@@ -69,7 +69,7 @@ describe('SettingsForm', () => {
         expect(submitted).toHaveLength(1);
         expect(state.settings).toEqual({
             timeZone: 'Europe/London',
-            notifications: { kinds: { reminder: true, 'task-done': true, 'task-failed': true, approval: true, input: false }, push: false },
+            notifications: { kinds: { ...fullSettings().notifications.kinds, 'task-done': true }, push: false },
             defaultEnvironmentId: 'env_1'
         });
         expect(fromSettingsDraft(settingsDraftFromFormData(new FormData(form)))).toEqual(state.settings);

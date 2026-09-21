@@ -84,6 +84,21 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
         valid: { v: V, t: 'history.response', requestId: 'h_1', result: { events: [{ v: W, kind: 'event', epoch: 0, seq: 1, event: { type: 'part-delta', partId: 'p', delta: 'x', sessionId: 's1', epoch: 0, seq: 1 } }], more: true } },
         invalid: { v: V, t: 'history.response', requestId: 'h_1', result: { events: [] }, error: { code: 'gap', message: 'forgotten', earliest: cursor } },
         path: 'error'
+    },
+    'update.status': {
+        valid: { v: V, t: 'update.status', requestId: 'u_1', phase: 'downloading', progress: { bytes: 10, total: 100 } },
+        invalid: { v: V, t: 'update.status', requestId: 'u_1', phase: 'installing' },
+        path: 'phase'
+    },
+    'harness.status': {
+        valid: { v: V, t: 'harness.status', requestId: 'hr_1', phase: 'failed', error: { code: 'checksum', message: 'digest mismatch' } },
+        invalid: { v: V, t: 'harness.status', requestId: 'hr_1', phase: 'restarting' },
+        path: 'phase'
+    },
+    harnesses: {
+        valid: { v: V, t: 'harnesses', harnesses: [{ runtime: 'claude-code', installed: { version: '2.1.0', at: 1 }, status: 'ready', current: true }, { runtime: 'codex-cli', status: 'missing' }] },
+        invalid: { v: V, t: 'harnesses', harnesses: [{ runtime: 'claude-code', status: 'gone' }] },
+        path: 'harnesses.0.status'
     }
 };
 
@@ -121,6 +136,17 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         valid: { v: V, t: 'history.request', requestId: 'h_1', sessionId: 's1' as never, from: cursor, to: { epoch: 0, seq: 9 }, limit: 100 },
         invalid: { v: V, t: 'history.request', requestId: 'h_1', sessionId: 's1', from: cursor, limit: 0 },
         path: 'limit'
+    },
+    'update.request': {
+        valid: { v: V, t: 'update.request', requestId: 'u_1', target: { url: 'https://example.test/d.zip', sha256: 'ab12', bytes: 100, version: '1.2.0' }, mode: 'drain', drainTimeoutMs: 600000 },
+        invalid: { v: V, t: 'update.request', requestId: 'u_1', target: 'previous', mode: 'later', drainTimeoutMs: 0 },
+        path: 'mode'
+    },
+    'update.cancel': { valid: { v: V, t: 'update.cancel', requestId: 'u_1' }, invalid: { v: V, t: 'update.cancel', requestId: '' }, path: 'requestId' },
+    'harness.request': {
+        valid: { v: V, t: 'harness.request', requestId: 'hr_1', op: 'remove', runtime: 'codex-cli', mode: 'now' },
+        invalid: { v: V, t: 'harness.request', requestId: 'hr_1', op: 'upgrade', runtime: 'codex-cli', mode: 'now' },
+        path: 'op'
     }
 };
 
@@ -194,6 +220,25 @@ describe('daemon frame schemas', () => {
         expect(daemonFrame.safeParse(ok)).toEqual({ success: true, data: ok });
         expect(daemonFrame.safeParse({ ...ok, error: { code: 'io', message: 'disk' } }).success).toBe(false);
         expect(daemonFrame.safeParse({ v: V, t: 'env.response', requestId: 'env_1', error: { code: 'nope', message: 'x' } }).success).toBe(false);
+    });
+
+    it('hello, welcome and session.closed keep the lifecycle fields (#359); an older frame still parses', () => {
+        const hello = {
+            ...daemonCases.hello.valid,
+            build: { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable' },
+            features: ['update', 'harness'],
+            restarts: 2,
+            lastExit: { at: 1, reason: 'crashed', code: 1 },
+            lastUpdate: { from: '1.1.0', to: '1.2.0', outcome: 'applied', at: 2 },
+            harnesses: [{ runtime: 'claude-code', status: 'ready' }]
+        };
+        expect(daemonFrame.safeParse(hello)).toEqual({ success: true, data: hello });
+        expect(daemonFrame.safeParse({ ...hello, features: ['suspend'] }).success).toBe(false);
+        const welcome = { ...platformCases.welcome.valid, platform: { version: '1.3.0', minDaemonVersion: '1.0.0', latest: { stable: '1.2.0', latest: '1.3.0-rc.1' } } };
+        expect(platformFrame.safeParse(welcome)).toEqual({ success: true, data: welcome });
+        const closed = { v: V, t: 'session.closed', sessionId: 's1', reason: 'the daemon is updating', code: 'update' };
+        expect(daemonFrame.safeParse(closed)).toEqual({ success: true, data: closed });
+        expect(daemonFrame.safeParse({ ...closed, code: 'suspended' }).success).toBe(false);
     });
 
     it('a quota frame carries a normalized snapshot for its own environment (#261)', () => {

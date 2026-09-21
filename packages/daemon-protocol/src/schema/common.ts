@@ -1,7 +1,7 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
-import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, SessionId, ToolGrant } from '@agentic/core';
+import type { ApprovalRule, CapabilityReport, Cursor, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, MachineId, MachinePolicy, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { LIMITS } from './limits.js';
 
@@ -198,3 +198,18 @@ export const quotaSnapshot: z.ZodType<QuotaSnapshot> = z
     })
     // PLG-09: "not reported" is said, with its reason, and carries no numbers.
     .refine((s) => s.availability !== 'not-reported' || (s.windows.length === 0 && !!s.reason), { message: 'a not-reported snapshot has a reason and no windows', path: ['reason'] });
+
+/** A release build (#359); minimal here — #360 bounds the URL and the digest. */
+export const releaseAsset: z.ZodType<ReleaseAsset> = z.object({ url: text.min(1), sha256: name, bytes: nonNegativeInt, version: name });
+
+/** A harness as a daemon reports it (#359). */
+export const harnessReport: z.ZodType<HarnessReport> = z.object({
+    runtime: name,
+    installed: z.object({ version: name, at: nonNegativeInt }).optional(),
+    status: z.enum(['ready', 'missing', 'broken']),
+    current: z.boolean().optional()
+});
+export const harnessReports = z.array(harnessReport).max(LIMITS.list);
+
+/** A named failure of an update or a harness change (#359). */
+export const lifecycleError = z.object({ code: name, message: text });
