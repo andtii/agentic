@@ -13,7 +13,7 @@ const REPOS = [
 describe('daemonConformance × inMemoryHarness', () => {
     const cases = daemonConformance(inMemoryHarness({ repos: REPOS }), { timeoutMs: 2_000 });
 
-    it('has every scenario the issue names, none skipped but session-reopen (#363 teaches the fake to resume)', () => {
+    it('has every scenario the issue names; only session-reopen is skipped, until #363 teaches the fake to resume', () => {
         expect(cases.map((c) => c.name)).toEqual([
             'hello-welcome',
             'malformed-input',
