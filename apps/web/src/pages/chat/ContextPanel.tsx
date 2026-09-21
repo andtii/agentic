@@ -1,7 +1,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import type { AccountRef, EnvironmentId, ProjectRecord, RuntimeId, WorkdirRef } from '@agentic/core';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WorkdirField, type WorkdirEnvironment } from '@agentic/ui';
+import { tightestWindow, type AccountRef, type EnvironmentId, type ProjectRecord, type RuntimeId, type WorkdirRef } from '@agentic/core';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WORKDIR_EMPTY, resetsText, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { effectiveWorkdir } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
@@ -46,12 +46,23 @@ const historyLine = (member: MockChatSummary['members'][number], time: TimeText)
     return member.coordinator ? `Coordinator · ${base}` : base.charAt(0).toUpperCase() + base.slice(1);
 };
 
+/** The line under a member's usage meter once the account is out: when the tightest window opens again. */
+const limitLine = (quota: ReturnType<typeof memberQuota>): string | undefined => {
+    const w = quota.snapshot ? tightestWindow(quota.snapshot) : undefined;
+    if (w?.status !== 'exhausted') return undefined;
+    const resets = resetsText(w.resetsAt);
+    return resets ? `Limit reached · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : 'Limit reached';
+};
+
 /**
- * The chat's right column: members with status, environment and history
- * access — each with "New session" (#399), confirmed before the member's
- * session is ended — the tasks in this chat, "Stop task chain", and the
- * memory privacy note (MEM-11). The add-agent dialog asks for history
- * access (CHT-04).
+ * The chat's right column: the members as cards — name and status, then one
+ * bordered group of rows in mono (where it runs, the folder it works in, the
+ * model its config names), its account's usage as one line, and a footer with
+ * its history access and "New session" (#399, confirmed before the member's
+ * session is ended) — the tasks in this chat, "Stop task chain", and the
+ * memory privacy note (MEM-11). The add-agent dialog asks for history access
+ * (CHT-04). Only the folder row switches today: the environment follows the
+ * agent's config and the chat's machine, the model the agent's config.
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
     const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '' });
@@ -80,32 +91,58 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             const stale = !!(member.workdir && machineId && props.hosted && !props.hosted(machineId, member.workdir.environmentId));
                             // The folder it runs in: its override for this chat, else the project's for its environment (#333).
                             const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
-                            const quota = memberQuota(a, folder.ref?.environmentId, props.environments ?? [], machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined);
+                            const environments = props.environments;
+                            const quota = environments ? memberQuota(a, folder.ref?.environmentId, environments, machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined) : undefined;
+                            const limit = quota ? limitLine(quota) : undefined;
                             return (
                                 <li data-member>
-                                    <AgentTile name={a.name} hue={a.hue} size={28} />
-                                    <span data-member-name>{a.name}</span>
-                                    <span data-member-role>{a.role}</span>
-                                    <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
-                                    <EnvironmentLine tone="muted" {...a.environment} />
-                                    {props.environments ? <span data-member-quota><QuotaBadge {...quota} /></span> : null}
-                                    <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
-                                    {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}. <button type="button" data-link-button data-member-workdir-clear onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}>Clear</button></span> : null}
-                                    {props.environments && a.environment.runtime !== 'anthropic-api' ? (
-                                        <span data-member-workdir data-inherited={folder.inherited ? '' : undefined}>
-                                            <WorkdirField
-                                                compact
-                                                value={folder.ref}
-                                                environments={props.environments}
-                                                label={`Working folder for ${a.name}`}
-                                                onOpen={() => { st.pickFor = member.agentId; st.picking = true; }}
-                                                onClear={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}
-                                            />
-                                            {folder.inherited ? <span data-member-workdir-from>from project</span> : null}
-                                            {member.workdir ? <button type="button" data-link-button data-member-workdir-clear onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}>Clear</button> : null}
+                                    <header data-member-head>
+                                        <AgentTile name={a.name} hue={a.hue} size={28} />
+                                        <span data-member-who>
+                                            <span data-member-name>{a.name}</span>
+                                            <span data-member-role>{a.role}</span>
                                         </span>
-                                    ) : null}
-                                    <button type="button" data-link-button data-member-reset aria-label={`New session for ${a.name}`} onClick={() => { st.resetFor = member.agentId; }}>New session</button>
+                                        <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
+                                    </header>
+                                    <div data-member-rows>
+                                        <span data-member-row data-row="environment">
+                                            <Icon name="machines" size={14} />
+                                            <EnvironmentLine tone="live" {...a.environment} />
+                                        </span>
+                                        {environments && a.environment.runtime !== 'anthropic-api' ? (
+                                            <span data-member-row data-row="folder" data-member-workdir data-inherited={folder.inherited ? '' : undefined}>
+                                                <button
+                                                    type="button"
+                                                    data-member-workdir-open
+                                                    aria-label={`Working folder for ${a.name}: ${workdirLabel(folder.ref, environments)}`}
+                                                    title={folder.ref ? workdirLabel(folder.ref, environments) : undefined}
+                                                    onClick={() => { st.pickFor = member.agentId; st.picking = true; }}
+                                                >
+                                                    <Icon name="folder" size={14} />
+                                                    <span data-member-row-value>
+                                                        {folder.ref ? <span data-member-workdir-from>{folder.inherited ? 'project' : 'this chat'}</span> : null}
+                                                        {folder.ref ? <span data-member-row-sep aria-hidden="true">·</span> : null}
+                                                        <span data-member-workdir-path>{folder.ref ? workdirPath(folder.ref, environments) : WORKDIR_EMPTY}</span>
+                                                    </span>
+                                                    <Icon name="chevron-right" size={14} />
+                                                </button>
+                                                {member.workdir ? <button type="button" data-member-workdir-clear aria-label={`Use the project folder for ${a.name}`} title="Back to the project folder" onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}><Icon name="close" size={14} /></button> : null}
+                                            </span>
+                                        ) : null}
+                                        {a.model ? (
+                                            <span data-member-row data-row="model">
+                                                <Icon name="settings" size={14} />
+                                                <span data-member-row-value data-member-model>{a.model}</span>
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}.</span> : null}
+                                    {quota ? <span data-member-quota data-limit={limit ? '' : undefined}><QuotaBadge {...quota} /></span> : null}
+                                    {limit ? <span data-member-limit>{limit}</span> : null}
+                                    <footer data-member-foot>
+                                        <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
+                                        <button type="button" data-link-button data-member-reset aria-label={`New session for ${a.name}`} onClick={() => { st.resetFor = member.agentId; }}>New session</button>
+                                    </footer>
                                 </li>
                             );
                         })}

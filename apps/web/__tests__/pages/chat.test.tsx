@@ -98,9 +98,10 @@ describe('/chats/:id (Chat)', () => {
 
 describe('/chats/:id — working folders (#193)', () => {
     const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
-    const chipOf = (dom: ParentNode, i: number): HTMLElement => [...dom.querySelectorAll<HTMLElement>('[data-chat-context] [data-member-workdir] [data-scope="ag-workdir"][data-part="chip"]')][i]!;
+    /** The folder row's button — the member card's own, not a `WorkdirField` chip. */
+    const chipOf = (dom: ParentNode, i: number): HTMLElement => [...dom.querySelectorAll<HTMLElement>('[data-chat-context] [data-member-workdir] [data-member-workdir-open]')][i]!;
 
-    it('shows a folder chip per member that runs on a machine, none for a platform agent', async () => {
+    it('shows a folder row per member that runs on a machine, none for a platform agent', async () => {
         const dom = await mountRoute('/chats/c1');
         const panel = dom.querySelector('[data-chat-context]')!;
         const rows = [...panel.querySelectorAll('[data-member]')];
@@ -109,7 +110,7 @@ describe('/chats/:id — working folders (#193)', () => {
         expect(chipOf(dom, 0).textContent).toContain('Environment default');
     });
 
-    it('picks a folder from the mock machine and shows it on the chip', async () => {
+    it('picks a folder from the mock machine and shows it on the row', async () => {
         const dom = await mountRoute('/chats/c1');
         chipOf(dom, 0).click();
         await settle();
@@ -124,7 +125,9 @@ describe('/chats/:id — working folders (#193)', () => {
         // The footer sits beside the picker's root, in the dialog.
         [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Use this folder' && !b.disabled)!.click();
         await settle();
-        expect(chipOf(dom, 0).textContent).toContain('alien01 / work');
-        expect(chipOf(dom, 0).getAttribute('title') ?? chipOf(dom, 0).textContent).toContain('Dev');
+        // The row names the source and the path's tail; the environment and full path are its title (the environment row above shows where it runs).
+        expect(chipOf(dom, 0).textContent).toContain('this chat');
+        expect(chipOf(dom, 0).textContent).toContain('Dev');
+        expect(chipOf(dom, 0).getAttribute('title')).toContain('alien01 / work');
     });
 });

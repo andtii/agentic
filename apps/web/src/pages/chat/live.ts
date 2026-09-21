@@ -30,6 +30,8 @@ export interface AgentIdentity {
     readonly environmentId?: string;
     /** The account it runs as on whichever machine the chat names (`execution.account`, #414); absent for a platform runtime or a pinned agent. */
     readonly account?: AccountRef;
+    /** The model its config names (`execution.model`); absent when the runtime defaults. */
+    readonly model?: string;
     readonly configVersion: number;
 }
 
@@ -67,6 +69,7 @@ export function identityOf(view: AgentView, index: number): AgentIdentity {
         },
         ...(!platform && config.execution.defaultEnvironmentId ? { environmentId: config.execution.defaultEnvironmentId } : {}),
         ...(account ? { account } : {}),
+        ...(config.execution.model ? { model: config.execution.model } : {}),
         configVersion: view.configVersion
     };
 }

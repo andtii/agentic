@@ -74,13 +74,13 @@ describe('projects on the live pages (#333)', () => {
         const dom = await mountLive(`/chats/${chatId}`, h);
         const chips = () => [...dom.querySelectorAll<HTMLElement>('[data-page="chat"] > [data-chat-context] [data-member-workdir]')];
         await until(() => chips().length === 2 && chips().every((c) => c.hasAttribute('data-inherited')), 'both members on the project folders');
-        const chipText = chips().map((c) => c.querySelector('[data-scope="ag-workdir"][data-part="chip"]')!.textContent ?? '');
-        // Each member's own machine and the project's folder there — nobody touched a chip.
-        expect(chipText[0]).toContain('laptop / work');
-        expect(chipText[0]).toContain('agentic');
-        expect(chipText[1]).toContain('studio / work');
-        expect(chipText[1]).toContain('agentic');
-        expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-workdir-from]'))).toEqual(['from project', 'from project']);
+        // Each member's own machine and the project's folder there — nobody touched a row; the row's title carries environment and path.
+        const chipTitle = chips().map((c) => c.querySelector('[data-member-workdir-open]')!.getAttribute('title') ?? '');
+        expect(chipTitle[0]).toContain('laptop / work');
+        expect(chipTitle[0]).toContain('agentic');
+        expect(chipTitle[1]).toContain('studio / work');
+        expect(chipTitle[1]).toContain('agentic');
+        expect(texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-workdir-from]'))).toEqual(['project', 'project']);
         expect(dom.querySelector('[data-page="chat"] > [data-chat-context] [data-member-workdir-clear]')).toBeNull();
         // The header carries the project chip, linking to its page.
         await until(() => chatHead.value?.project?.name === 'agentic', 'the head to carry the project');
