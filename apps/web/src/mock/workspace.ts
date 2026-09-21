@@ -8,7 +8,7 @@
  * replace the body of each loader with actor reads; the pages keep the
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
-import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskError, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
+import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, SessionOptions, TaskError, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
@@ -215,6 +215,8 @@ export interface MockChatMember {
     readonly history: { readonly access: 'all' } | { readonly access: 'from'; readonly at: number };
     /** The folder this agent works in for this chat (`Chat.setWorkdir`, #193); absent: its default. */
     readonly workdir?: WorkdirRef;
+    /** Its model and permission mode for this chat (`ChatMember.options`, #450); absent: its config's. */
+    readonly options?: SessionOptions;
 }
 
 export interface MockChatSummary {

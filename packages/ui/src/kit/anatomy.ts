@@ -202,7 +202,17 @@ export const agQuotaPanelAnatomy = defineAnatomy('ag-quota-panel', {
     header: { element: 'div', parent: 'root' },
     title: { element: 'span', parent: 'header', tokens: ['text'] },
     age: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    zone: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     reason: { element: 'p', parent: 'root', tokens: ['text'] }
+});
+
+/** A member's limits at a glance (#452): one ring per window that limits its model, the percent beside it and a one-word label. */
+export const agQuotaRingsAnatomy = defineAnatomy('ag-quota-rings', {
+    root: { element: 'div', tokens: ['color'] },
+    item: { element: 'span', parent: 'root', tokens: ['color'] },
+    ring: { element: 'svg', parent: 'item', tokens: ['color'] },
+    value: { element: 'span', parent: 'item', tokens: ['text'] },
+    label: { element: 'span', parent: 'item', tokens: ['text'] }
 });
 
 export const kitAnatomies = [
@@ -223,5 +233,6 @@ export const kitAnatomies = [
     agSecretAnatomy,
     agMapFieldAnatomy,
     agQuotaAnatomy,
-    agQuotaPanelAnatomy
+    agQuotaPanelAnatomy,
+    agQuotaRingsAnatomy
 ] as const;

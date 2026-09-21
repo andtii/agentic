@@ -85,11 +85,17 @@ describe('fromSignal — the streamed rate_limit_event', () => {
         expect(quotaFromRateLimit(env, { status: 'allowed', rateLimitType: 'overage', utilization: 0.1 }, AT)!.windows[0]).toMatchObject({ id: 'extra_usage', unit: 'usd' });
     });
 
+    it('the Fable week (seven_day_overage_included) is its own model-scoped window, the probe’s model_scoped Fable — never the shared week (#452)', () => {
+        const s = source.fromSignal!({ ns: 'error', name: 'rate_limited', data: { status: 'rejected', rateLimitType: 'seven_day_overage_included', resetsAt: 1790589600 } }, env)!;
+        expect(s.windows).toEqual([{ id: 'seven_day:fable', label: 'Current week (Fable)', period: 'week', scope: { model: 'Fable' }, utilization: null, unit: 'percent', resetsAt: new Date(1790589600 * 1000).toISOString(), status: 'exhausted' }]);
+        const probed = quotaFromUsage(env, usageMax as unknown as SDKControlGetUsageResponse, undefined, AT);
+        expect(probed.windows.map((w) => w.id)).toContain(s.windows[0]!.id);
+    });
+
     it('ignores what carries no known window: other exts, a rate_limited error without info, no rateLimitType, another runtime', () => {
         expect(source.fromSignal!({ ns: 'claude-code', name: 'auth-status', data: {} }, env)).toBeNull();
         expect(source.fromSignal!({ ns: 'error', name: 'rate_limited', data: undefined }, env)).toBeNull();
         expect(source.fromSignal!(rateLimitExt({ status: 'allowed' }), env)).toBeNull();
-        expect(source.fromSignal!(rateLimitExt({ status: 'allowed', rateLimitType: 'seven_day_overage_included' }), env)).toBeNull();
         expect(source.fromSignal!(rateLimitExt({ status: 'allowed', rateLimitType: 'five_hour' }), { ...env, runtime: 'anthropic-api' })).toBeNull();
     });
 });

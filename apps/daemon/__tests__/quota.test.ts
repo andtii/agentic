@@ -162,6 +162,33 @@ describe('QuotaMonitor', () => {
         expect(sent).toHaveLength(2);
     });
 
+    it('probes right away after a rejection, once however many arrive while it is queued (#452)', async () => {
+        const base = testSource((env) => snap(env.id, [win('five_hour', 0.2), win('seven_day', 0.5), { ...win('seven_day:fable', 1), scope: { model: 'Fable' }, status: 'exhausted' }]));
+        const source: QuotaSource = {
+            ...base,
+            fromSignal(signal, env) {
+                if (signal.ns !== 'error' || signal.name !== 'rate_limited') return null;
+                const d = signal.data as { id: string; status: 'ok' | 'exhausted' };
+                return snap(env.id, [{ ...win(d.id, 1), status: d.status }], { availability: 'partial', via: 'stream' });
+            }
+        };
+        const m = monitor(source);
+        const rejected = { type: 'error', code: 'rate_limited', message: 'limit', recoverable: false, data: { id: 'seven_day', status: 'exhausted' } } as never;
+        m.observe(E1, rejected);
+        m.observe(E1, rejected);
+        // Not rejected: a rate_limited error without an exhausted window schedules nothing.
+        m.observe(E2, { type: 'error', code: 'rate_limited', message: 'x', recoverable: true, data: { id: 'seven_day', status: 'ok' } } as never);
+        expect(sent[0]!.snapshot.windows.map((w) => [w.id, w.status])).toEqual([['seven_day', 'exhausted']]);
+        await flush();
+        expect(base.probes).toEqual([E1]);
+        // The probe's per-model windows replace the bare week the stream reported.
+        expect(sent.at(-1)!.snapshot.windows.map((w) => [w.id, w.status])).toEqual([
+            ['seven_day', 'ok'],
+            ['five_hour', 'ok'],
+            ['seven_day:fable', 'exhausted']
+        ]);
+    });
+
     it('with probe off it never probes — not when welcomed, not on the poll, not after a turn — and still follows the stream', async () => {
         const source = testSource();
         const m = monitor(source, { probe: false, pollMs: 1_000, turnEndDebounceMs: 10 });

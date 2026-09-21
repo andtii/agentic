@@ -6,8 +6,10 @@
  *   `error`, as `{ ns: 'error', name: <code> }`) that the environment's source
  *   maps (`fromSignal`) is merged into what is known and sent.
  * - Probes, when `probe` is on: every environment once welcomed, idle ones
- *   every `pollMs`, and one `turnEndDebounceMs` after a turn ends. One probe
- *   at a time — each starts a CLI process.
+ *   every `pollMs`, one `turnEndDebounceMs` after a turn ends, and one right
+ *   away after a rejection (`error rate_limited` naming an exhausted window,
+ *   #452): the stream names one window, the probe every per-model one. One
+ *   probe at a time — each starts a CLI process.
  * - A snapshot equal to the last one sent (ignoring when and how it was
  *   observed) is dropped, unless that send is older than `refreshMs`: the
  *   platform judges staleness from `observedAt`, so a quiet account is still
@@ -165,7 +167,10 @@ export function createQuotaMonitor(options: QuotaMonitorOptions): QuotaMonitor {
             const source = env && sourceOf(env);
             if (!env || !source?.fromSignal) return;
             const snapshot = source.fromSignal(signal, env);
-            if (snapshot) record(environmentId, snapshot);
+            if (!snapshot) return;
+            record(environmentId, snapshot);
+            // A rejection: which limit ran out is the probe's to say — it replaces a bare window the stream named with the account's per-model ones.
+            if (signal.ns === 'error' && signal.name === 'rate_limited' && snapshot.windows.some((w) => w.status === 'exhausted')) void probe(environmentId);
         },
         environmentsChanged() {
             const ids = new Set(options.environments().map((e) => e.id));
