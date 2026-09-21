@@ -209,7 +209,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             const rings = !!snapshot && ringWindows(snapshot, model).length > 0;
                             const open = st.details.includes(member.agentId);
                             const details = snapshot?.windows.length ? (
-                                <button type="button" data-link-button data-member-details-toggle aria-expanded={open ? 'true' : 'false'} aria-label={`Usage details for ${a.name}`} onClick={() => { st.details = open ? st.details.filter((id) => id !== member.agentId) : [...st.details, member.agentId]; }}>
+                                <button type="button" data-member-details-toggle aria-expanded={open ? 'true' : 'false'} aria-label={`Usage details for ${a.name}`} onClick={() => { st.details = open ? st.details.filter((id) => id !== member.agentId) : [...st.details, member.agentId]; }}>
                                     Details <Icon name="chevron-down" size={12} />
                                 </button>
                             ) : null;
@@ -255,11 +255,9 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                     {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}.</span> : null}
                                     {quota ? (
                                         <div data-member-usage data-limit={limit ? '' : undefined}>
-                                            <div data-member-usage-line>
-                                                <span data-member-quota>{rings && snapshot ? <QuotaRings snapshot={snapshot} {...(model ? { model } : {})} /> : <QuotaBadge {...quota} {...(model ? { model } : {})} />}</span>
-                                                {limit ? null : details}
-                                            </div>
-                                            {limit ? <div data-member-usage-line><span data-member-limit>{limit}</span>{details}</div> : null}
+                                            <span data-member-quota>{rings && snapshot ? <QuotaRings snapshot={snapshot} {...(model ? { model } : {})} /> : <QuotaBadge {...quota} {...(model ? { model } : {})} />}</span>
+                                            {/* Under the rings (#470): the limit that ran out on the left, Details on the right. */}
+                                            {limit || details ? <div data-member-usage-line>{limit ? <span data-member-limit title={limit}>{limit}</span> : <span aria-hidden="true" />}{details}</div> : null}
                                             {open && snapshot ? <div data-member-details><QuotaPanel snapshot={snapshot} zoneInHeader /></div> : null}
                                         </div>
                                     ) : null}
