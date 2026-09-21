@@ -46,9 +46,10 @@ export interface CliContext {
     readonly log?: (line: string) => void;
     /**
      * `run` stops when this resolves — with `'update'` it exits `EXIT_UPDATE` (the supervisor applies the staged
-     * update); default SIGINT / SIGTERM.
+     * update), with `'signal'` it stops the way SIGINT / SIGTERM do (sessions closed with code `restart`, #363);
+     * default SIGINT / SIGTERM.
      */
-    readonly until?: Promise<void | 'update'>;
+    readonly until?: Promise<void | 'update' | 'signal'>;
     /**
      * Where `run` hears `uncaughtException` / `unhandledRejection` and how it exits on one: it logs
      * `daemon: exiting` and exits 1. Default `process` — unless `until` is injected (tests), then none.
@@ -366,7 +367,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 const code = exiting(reason, reason === 'update' ? EXIT_UPDATE : 0);
                 watcher?.close();
                 policyWatcher?.close();
-                await daemon.stop();
+                // SIGINT / SIGTERM: the supervisor (or the service manager) brings the daemon back, so the platform re-opens its sessions (#363).
+                await daemon.stop({ reason: reason === 'signal' ? 'restart' : reason === 'update' ? 'update' : 'stop' });
                 for (const driver of drivers) if (isDisposable(driver)) await driver.dispose().catch((e: unknown) => log.warn('driver dispose failed', { runtime: driver.runtime, error: e }));
                 // Runtime processes are spawned through @sigx/ai-agent-node and registered there: none may outlive the daemon.
                 for (const child of registeredChildren()) killTreeSync(child);

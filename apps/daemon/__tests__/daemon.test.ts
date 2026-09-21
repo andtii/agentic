@@ -290,25 +290,126 @@ describe('daemon', () => {
         await first.daemon.stop();
         daemons.length = 0;
 
-        const second = await (async () => {
-            const daemon = createDaemon({ credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token }, environments: [env('env_a')], drivers: [scriptedDriver({ events: 5, heartbeatMs: 1_000 })], eventLog: ndjsonEventLog(join(dir, 'sessions')), backoff: { initialMs: 5, maxMs: 20 } });
-            daemons.push(daemon);
-            await daemon.start();
-            return { daemon, seat: await relay.nextSeat() };
-        })();
+        const second = await restarted();
         const hello = await expectFrame(second.seat, 'hello');
         expect(hello.resume).toEqual({});
-        second.seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: { session_1: { epoch: opened.head.epoch, seq: 2 } } });
+        second.seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: { session_1: { epoch: opened.head.epoch, seq: 2 }, session_never: { epoch: 0, seq: 0 } } });
         const seqs: number[] = [];
-        for (;;) {
+        const closed = new Map<string, DaemonFrameOf<'session.closed'>>();
+        while (closed.size < 2) {
             const frame = await next(second.seat);
             if (frame.t === 'session.frame' && frame.frame.kind === 'event') seqs.push(frame.frame.seq);
-            if (frame.t === 'session.closed') {
-                expect(frame.reason).toMatch(/daemon restarted/);
-                break;
-            }
+            if (frame.t === 'session.closed') closed.set(frame.sessionId, frame);
         }
         expect(seqs).toEqual([3, 4, 5]);
+        // A log on disk: this machine ran it, so the platform re-opens it (#363). No log: an unknown session, no code.
+        expect(closed.get('session_1')).toMatchObject({ reason: expect.stringMatching(/daemon restarted/), code: 'restart' });
+        expect(closed.get('session_never')).toEqual({ v: V, t: 'session.closed', sessionId: 'session_never', reason: 'unknown session' });
+    });
+
+    /** A second daemon over the same state dir, as the supervisor starts it after a restart; the caller reads its hello. */
+    async function restarted(drivers: DaemonDriver[] = [scriptedDriver({ events: 5, heartbeatMs: 1_000 })]) {
+        const daemon = createDaemon({ credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token }, environments: [env('env_a')], drivers, eventLog: ndjsonEventLog(join(dir, 'sessions')), backoff: { initialMs: 5, maxMs: 20 } });
+        daemons.push(daemon);
+        await daemon.start();
+        return { daemon, seat: await relay.nextSeat() };
+    }
+
+    /** The next `count` session.closed frames, passing over the rest. */
+    async function closedFrames(seat: PlatformSeat, count: number) {
+        const out: DaemonFrameOf<'session.closed'>[] = [];
+        while (out.length < count) {
+            const frame = await next(seat);
+            if (frame.t === 'session.closed') out.push(frame);
+        }
+        return out;
+    }
+
+    /** Prompt a session and take its events up to `turn-end`. */
+    async function wholeTurn(seat: PlatformSeat, sessionId: string, n: number) {
+        seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, commandId: `c${n}`, type: 'prompt', turnId: `t${n}`, input: [{ type: 'text', text: 'go' }] } });
+        const events: { epoch: number; seq: number }[] = [];
+        for (;;) {
+            const frame = await next(seat);
+            if (frame.t !== 'session.frame' || frame.frame.kind !== 'event') continue;
+            events.push({ epoch: frame.frame.epoch, seq: frame.frame.seq });
+            if (frame.frame.event.type === 'turn-end') return events;
+        }
+    }
+
+    it('stop closes every live session with the code its reason maps to; a plain stop with none (#363)', async () => {
+        for (const [reason, code] of [['restart', 'restart'], ['update', 'update'], ['harness-update', 'harness-update'], ['stop', undefined]] as const) {
+            const { daemon, seat } = await start([env('env_a')]);
+            for (const id of ['session_1', 'session_2']) {
+                open(seat, id, 'env_a');
+                await expectFrame(seat, 'session.opened');
+            }
+            // Read while stopping: the frames go out before the socket closes, and a closed seat forgets what it buffered.
+            const closing = closedFrames(seat, 2);
+            await daemon.stop({ reason });
+            const closed = await closing;
+            expect(closed.map((c) => [c.sessionId, c.code])).toEqual([
+                ['session_1', code],
+                ['session_2', code]
+            ]);
+            if (!code) expect(closed.every((c) => !('code' in c))).toBe(true);
+        }
+    });
+
+    it('re-opens from spec.resume on the same log: the head continues on the next epoch, not at (0, 0) (#363)', async () => {
+        const driver = scriptedDriver({ events: 5, heartbeatMs: 1_000 });
+        const first = await start([env('env_a')], [driver]);
+        open(first.seat, 'session_1', 'env_a');
+        const opened = await expectFrame(first.seat, 'session.opened');
+        expect(opened.head).toEqual({ epoch: 0, seq: 0 });
+        expect(await wholeTurn(first.seat, 'session_1', 1)).toEqual([1, 2, 3, 4, 5].map((seq) => ({ epoch: 0, seq })));
+        const closing = closedFrames(first.seat, 1);
+        await first.daemon.stop({ reason: 'restart' });
+        expect((await closing)[0]).toMatchObject({ sessionId: 'session_1', code: 'restart' });
+        daemons.length = 0;
+
+        const second = await restarted([driver]);
+        await expectFrame(second.seat, 'hello');
+        second.seat.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted: { session_1: { epoch: 0, seq: 5 } } });
+        expect(await expectFrame(second.seat, 'session.closed')).toMatchObject({ sessionId: 'session_1', code: 'restart' });
+
+        // The platform re-opens it with the ref it recorded. This one names no epoch: the head goes on after the log's.
+        const reopen = (seat: PlatformSeat, resume: unknown) => seat.send({ v: V, t: 'session.open', sessionId: 'session_1' as SessionId, environmentId: 'env_a', spec: { agentId: 'agent_1', cwd: dir, system: 's', tools: [], resume } });
+        reopen(second.seat, opened.ref);
+        const reopened = await expectFrame(second.seat, 'session.opened');
+        expect(driver.opened.at(-1)!.spec.resume).toEqual(opened.ref);
+        expect(reopened.head).toEqual({ epoch: 1, seq: 0 });
+        expect(reopened.ref).toMatchObject({ data: { epoch: 1 } });
+        expect(await wholeTurn(second.seat, 'session_1', 2)).toEqual([1, 2, 3, 4, 5].map((seq) => ({ epoch: 1, seq })));
+
+        // Once more, from a ref that names its epoch: the runtime's next one is the head's.
+        second.seat.send({ v: V, t: 'session.close', sessionId: 'session_1' as SessionId });
+        await expectFrame(second.seat, 'session.closed');
+        reopen(second.seat, reopened.ref);
+        expect((await expectFrame(second.seat, 'session.opened')).head).toEqual({ epoch: 2, seq: 0 });
+        expect((await wholeTurn(second.seat, 'session_1', 3))[0]).toEqual({ epoch: 2, seq: 1 });
+
+        // One log across the three runs, in order.
+        second.seat.send({ v: V, t: 'history.request', requestId: 'h1', sessionId: 'session_1' as SessionId, from: { epoch: 0, seq: 0 } });
+        const history = await expectFrame(second.seat, 'history.response');
+        expect(history.result!.events.map((f) => (f.kind === 'event' ? `${f.epoch}:${f.seq}` : f.kind))).toEqual([0, 1, 2].flatMap((epoch) => [1, 2, 3, 4, 5].map((seq) => `${epoch}:${seq}`)));
+    });
+
+    it('a runtime that refuses the resume is answered resume-failed; a failed fresh open carries no code (#363)', async () => {
+        const base = scriptedDriver({ events: 1, heartbeatMs: 1_000 });
+        const refusing: DaemonDriver = {
+            ...base,
+            async open(e, spec, ctx) {
+                if (spec.resume !== undefined) throw new Error('no conversation with that id');
+                if (spec.system === 'broken') throw new Error('the CLI did not start');
+                return base.open(e, spec, ctx);
+            }
+        };
+        const { seat } = await start([env('env_a')], [refusing]);
+        seat.send({ v: V, t: 'session.open', sessionId: 'session_1' as SessionId, environmentId: 'env_a', spec: { agentId: 'agent_1', cwd: dir, system: 's', tools: [], resume: { agent: 'scripted', v: 1, id: 'gone' } } });
+        expect(await expectFrame(seat, 'session.closed')).toEqual({ v: V, t: 'session.closed', sessionId: 'session_1', reason: 'the runtime could not resume the session: no conversation with that id', code: 'resume-failed' });
+        seat.send({ v: V, t: 'session.open', sessionId: 'session_2' as SessionId, environmentId: 'env_a', spec: { agentId: 'agent_1', cwd: dir, system: 'broken', tools: [] } });
+        expect(await expectFrame(seat, 'session.closed')).toEqual({ v: V, t: 'session.closed', sessionId: 'session_2', reason: 'the runtime could not open a session: the CLI did not start' });
     });
 
     it('answers history.request from its log — live, bounded, unknown — and after a restart from the file on disk (#397)', async () => {

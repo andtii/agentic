@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDaemon } from '../src/daemon';
 import { writeEnvironments } from '../src/env-store';
-import { ndjsonEventLog } from '../src/event-log';
+import { ndjsonEventLog, type NdjsonEventLog } from '../src/event-log';
 import { namingDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE } from './helpers/relay';
 
@@ -26,7 +26,9 @@ const KNOWN_ORIGIN = 'https://github.com/andtii/agentic.git';
 const harness: DaemonConformanceHarness = {
     // `session-ref` (#389): the scripted runtime names its session on the first prompt, so the daemon's `session.ref` is proven here too.
     // `history` (#397): answered from the NDJSON log on disk; `truncateLog` is the log's own `truncate`, so the gap case is real.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history'],
+    // `resume` (#363): `restart` stops the daemon the way SIGTERM does and starts a new one over the same state dir, so the
+    // wanted session is answered from the NDJSON log with code `restart` and re-opened from `spec.resume` on the next epoch.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume'],
     knownOrigin: KNOWN_ORIGIN,
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
@@ -36,23 +38,26 @@ const harness: DaemonConformanceHarness = {
         await writeFile(join(dir, 'work', 'agentic', '.git', 'HEAD'), 'ref: refs/heads/main\n');
         await writeFile(join(dir, 'work', 'agentic', '.git', 'config'), `[remote "origin"]\n\turl = ${KNOWN_ORIGIN}\n`);
         const work = await realpath(join(dir, 'work'));
-        const relay = await startRelay();
+        let relay = await startRelay();
         const driver = namingDriver(script);
-        const log = ndjsonEventLog(join(paths.stateDir, 'sessions'));
+        let log: NdjsonEventLog;
         const environments: LocalEnvironment[] = [{ id: 'env_scripted' as EnvironmentId, name: 'scripted', runtime: 'scripted', cwdRoots: [work], concurrency: 4 }];
         const secure = { run: async () => ({ code: 0, stderr: '' }) };
         await writeEnvironments(paths.environmentsFile, environments, secure);
         const policy: MachinePolicy = { webManaged: true, allowedRoots: [work] };
-        const daemon = createDaemon({
-            credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
-            environments,
-            policy,
-            manage: { paths, secure },
-            drivers: [driver],
-            eventLog: log,
-            heartbeatMs: script.heartbeatMs,
-            backoff: { initialMs: 5, maxMs: 20 }
-        });
+        // A new process each time: a fresh log handle over the same files.
+        const create = () =>
+            createDaemon({
+                credentials: { url: relay.url, machineId: TEST_MACHINE, token: relay.token },
+                environments,
+                policy,
+                manage: { paths, secure },
+                drivers: [driver],
+                eventLog: (log = ndjsonEventLog(join(paths.stateDir, 'sessions'))),
+                heartbeatMs: script.heartbeatMs,
+                backoff: { initialMs: 5, maxMs: 20 }
+            });
+        let daemon = create();
         let started = false;
         return {
             machineId: TEST_MACHINE as ConformanceDaemon['machineId'],
@@ -73,6 +78,15 @@ const harness: DaemonConformanceHarness = {
             },
             async truncateLog(sessionId: SessionId, keepFrom) {
                 await log.truncate(sessionId, keepFrom);
+            },
+            async restart() {
+                // The old process goes (closing its sessions with code `restart`) and a new one starts over the same dirs. A fresh
+                // relay, so the suite's next dial is the new daemon's connection and never the old one's last redial.
+                await daemon.stop({ reason: 'restart' });
+                await relay.close();
+                relay = await startRelay();
+                daemon = create();
+                started = false;
             },
             async stop() {
                 await daemon.stop();
