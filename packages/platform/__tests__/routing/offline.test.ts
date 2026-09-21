@@ -455,6 +455,8 @@ describe('a message parked on a live session across a daemon restart or update (
         await until(async () => (await route('t2'))?.status === 'waiting-turn', 'the message to wait for the running turn');
 
         await restart(m1, sid, false);
+        // The turn it waited for went with the session: the task's wait says capacity, not that turn.
+        await until(async () => (await task('t2').get()).transitions.some((t) => t.wait?.kind === 'capacity'), 'the task to wait for a slot');
         await settled('t2');
         expect(await task('t2').get()).toMatchObject({ status: 'completed', sessionId: sid });
         expect(opens(m1, sid)).toHaveLength(2);

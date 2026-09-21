@@ -1617,6 +1617,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         // A message parked on the live session — for a slot, or for its running turn — outlives a daemon restart or
                         // update (#433): the record keeps its ref, and the session is re-opened with it rather than the task failed.
                         if ((route.status === 'waiting-capacity' || route.status === 'waiting-turn') && route.machineId && (await resumable())) {
+                            // The turn it waited for is gone with the session: the task now waits for a slot on the re-opened one.
+                            if (route.status === 'waiting-turn') await parkOnCapacity(route, await machine(route.machineId).get());
                             route.status = 'waiting-capacity';
                             route.reopen = true;
                             touch(route);
