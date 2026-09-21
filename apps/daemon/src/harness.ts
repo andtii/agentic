@@ -1,6 +1,6 @@
 /**
  * The harness store (#369; EXE-08, PLG-02, PLG-09): each harness runtime's native build lives apart from the daemon,
- * installed from a `harness-<runtime>-<os>-<arch>.zip` (`scripts/package.mjs --harness`) into
+ * installed from a `harness-<runtime>-<version>-<os>-<arch>.zip` (`scripts/package.mjs --harness`, #441) into
  *
  *     <install root>/harnesses/<runtime>/<version>/   the unpacked zip: node_modules/<native package>/…, manifest.json
  *     <install root>/harnesses/<runtime>/current.json { version, installedAt }

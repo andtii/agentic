@@ -8,7 +8,8 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 
 - [ ] CI green on `main` for the release commit: `lint`, `verify:catalog`, `typecheck`, `build`, `test`, `test:workers` (Node 22, Windows + Linux), `test:acceptance`, Playwright e2e, bundle size (`pnpm size`), coverage upload.
 - [ ] `pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm size` green locally on Windows and Linux (contributors run both).
-- [ ] Release notes reviewed in the release-drafter draft (from PR titles; `CHANGELOG.md` files are frozen history, not updated per PR), and `version` bumped consistently (`@agentic/daemon` and `DAEMON_VERSION` in `apps/daemon/src/version.ts` — the installer zip and `hello.daemonVersion` carry it).
+- [ ] Release notes reviewed in the release-drafter draft (from PR titles; `CHANGELOG.md` files are frozen history, not updated per PR). The daemon's version is not hand-edited: the `daemon-v<semver>` tag stamps it (`scripts/lib/stamp.mjs` → `DAEMON_VERSION`, `hello.build`, the zip and the manifest). After tagging `daemon-v<x.y.z>`, bump `apps/daemon/package.json` to the next patch so `main` builds (`<x.y.z+1>-main.<commit time>.<sha7>`) order above the release, not below it.
+- [ ] The daemon zip size gate holds: `apps/daemon/__tests__/package.test.ts` keeps a packaged daemon zip under 50 MB (≈ 8 MB without the native runtimes, #369). A zip that grows past it means a native harness package slipped back into the closure (`isNativeHarnessPackage`).
 - [ ] `pnpm verify:catalog` passes: every `@sigx/*` package on one core minor; no local checkout linked.
 
 ### Acceptance
@@ -19,12 +20,13 @@ The gates for tagging the first release of the Unified Agent Platform (tracking 
 ### Demos
 
 - [ ] Demo 1 recorded (#35): `smoke:demo1` against the preview Worker, a real `ANTHROPIC_API_KEY` in the shell running it (stored as the workspace key, #231) — `apps/web/test-results/demo1/**/video.webm` attached to the issue (`docs/runbook.md` §6).
-- [ ] Demo 2 recorded (#38): the manual run of `docs/runbook.md` §7 on a paired Windows machine — approval round trip, deny, cancel, restart mid-turn — screen recording linked from the issue. `smoke:demo2` with the mock driver in CI, or the issue re-scoped to say why not.
+- [ ] Demo 2 recorded (#38): the manual run of `docs/runbook.md` §7 on a paired Windows machine — approval round trip, deny, cancel, suspend and resume (step 8) — screen recording linked from the issue. `smoke:demo2` with the mock driver in CI, or the issue re-scoped to say why not.
 
 ### Deploy
 
 - [ ] A fresh production deploy from `docs/runbook.md` §2 by someone other than the author reaches §2.7 step 5 (an agent answers in a chat) without reading anything else; every gap found is fixed in the runbook, not worked around.
-- [ ] The daemon installer built by `pnpm --filter @agentic/daemon package` installs on a clean Windows machine with only Node present (`docs/runbook.md` §5): `install.ps1 -Url … -Code …` pairs, `doctor` is green, the machine is online within a minute, `uninstall.ps1` removes the task.
+- [ ] The one-line installer from the Pair page installs the tagged release on a clean Windows machine with nothing installed (`docs/runbook.md` §5.3, `AGENTIC_VERSION=daemon-v<semver>`): the sha256 is checked, the three harnesses install, `doctor` is green, the machine is online within a minute with `hello.build` naming the tag, the Scheduled Task runs the supervisor (`<root>\supervisor\supervise.mjs`), and `uninstall.ps1` removes the task and the supervisor. The same on macOS and Linux (launchd agent, systemd user unit).
+- [ ] Manual checks M5–M8 in `docs/acceptance.md` run on a real machine (suspend and resume, an update with a running session, a machine offline, a rolled-back update) and the results recorded in the release PR.
 - [ ] `apps/web/wrangler.jsonc` top-level `vars.APP_ORIGIN` is the production origin (not `http://localhost:8787`) and the GitHub OAuth app's callback matches it.
 - [ ] `AGENTIC_DEV_LOGIN` is **not** set on production (`wrangler secret list` shows no such name; `POST /auth/dev-login` → the HTML shell, never JSON or a `set-cookie`; runbook §2.7).
 
@@ -57,5 +59,7 @@ Each must be open with a label, linked from the release notes, and — where it 
 - [ ] Check the manifest: `version` is the tag's semver, `channel` is `stable`, five `assets` (`win32-x64`, `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`), each `sha256` equal to its `.sha256` file; `harnesses` lists `claude-code`, `copilot-cli` and `codex-cli`, each at the version the lockfile pins with the same five platforms, every url on `daemon-v<semver>` and every `sha256` equal to its `.sha256` file; `agentic-daemon --version` from one zip prints the same version and commit.
 - [ ] `daemon-latest` after the last `main` run: its `manifest.json` lists all three harnesses, and its harness zips are exactly the ones that manifest names (older versions deleted by the run, #441).
 - [ ] Check the channel: `daemon-stable`'s `manifest.json` is the same file (a `-rc` tag leaves it alone), and its notes name the new version.
-- [ ] Once the first stable daemon release exists, switch `DEFAULT_CHANNEL` in `apps/web/public/install.sh` and `$DefaultChannel` in `install.ps1` to `stable`.
+- [ ] Once the first stable daemon release exists, switch `DEFAULT_CHANNEL` in `apps/web/public/install.sh` and `$DefaultChannel` in `install.ps1` to `stable`. (The platform's update default is already `stable` — `DEFAULT_UPDATE_SETTINGS` — so before this release machines on the default channel are offered nothing; runbook §5.5.)
+- [ ] The platform sees the release: within the hour (or after `ReleaseDirectory.refresh()`) a machine on `stable` running an older build shows "update available" on its page, and one update from the page ends "Updated to <semver>" (runbook §5.5).
+- [ ] `MIN_DAEMON_VERSION` (`packages/platform/src/releases/directory.ts`) is raised only when this platform release depends on something older daemons lack, only to a version already on `stable`, and in the same PR as that dependency; the release notes say which machines will read "update required" (runbook §9).
 - [ ] Tracking issue #11 updated with the per-sub-issue status and closed, or kept open with the follow-up list as its last comment.
