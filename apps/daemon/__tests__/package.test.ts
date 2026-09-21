@@ -260,6 +260,8 @@ describe('release manifest', () => {
             expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: {}, existing: [] })).toThrow(/harness-claude-code-0\.3\.274-linux-x64\.zip was neither packaged/);
             // The previous manifest names it, but the zip is gone from the release.
             expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS).filter((n) => !n.startsWith('harness-copilot-cli-1.0.14-win32-x64.zip')) })).toThrow(/copilot-cli-1\.0\.14-win32-x64\.zip was neither/);
+            // The zip is there but not its .sha256 (plan would package it again).
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS).filter((n) => n !== 'harness-codex-cli-0.155.1-linux-x64.zip.sha256') })).toThrow(/codex-cli-0\.155\.1-linux-x64\.zip was neither/);
             // The previous manifest is of another version.
             expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: { ...VERSIONS, 'claude-code': '0.3.275' }, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS) })).toThrow(/claude-code-0\.3\.275-linux-x64\.zip was neither/);
             // A tag release carries nothing from daemon-latest: its own url base never matches.

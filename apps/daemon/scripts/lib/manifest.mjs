@@ -135,7 +135,7 @@ export function buildManifest({ dir, tag, repo, stamp, protocol, publishedAt, ha
                 if (entry.assets[key]) continue;
                 const name = harnessZipName(runtime, version, key);
                 const carried = before?.version === version ? before.assets?.[key] : undefined;
-                if (!carried || carried.url !== `${download}/${name}` || carried.version !== version || !have.has(name)) {
+                if (!carried || carried.url !== `${download}/${name}` || carried.version !== version || !have.has(name) || !have.has(`${name}.sha256`)) {
                     throw new Error(`manifest: ${name} was neither packaged in this run nor is it on ${tag} with a previous manifest entry`);
                 }
                 entry.assets[key] = { url: carried.url, sha256: carried.sha256, bytes: carried.bytes, version };
