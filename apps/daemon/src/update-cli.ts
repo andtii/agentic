@@ -60,9 +60,6 @@ export function manifestUrl(releases: string, pick: { readonly version: string }
     return 'version' in pick ? `${base}/download/daemon-v${pick.version.replace(/^daemon-v/, '')}/manifest.json` : `${base}/download/daemon-${pick.channel}/manifest.json`;
 }
 
-/** `x.y.z` of a version, without its prerelease or build suffix. */
-const coreOf = (version: string): string => version.replace(/[-+].*$/, '');
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function readJson(file: string): Promise<Record<string, unknown> | undefined> {
@@ -114,18 +111,15 @@ export async function updateCommand(flags: ParsedArgs['flags'], context: UpdateC
         err(`the release at ${url} names no https: download with a sha256 for ${key}`);
         return 1;
     }
-    // Two builds off main differ only in their `-main.<sha7>` suffix, which says nothing about which is newer: the
-    // channel's build is the one to run. Only a lower release (x.y.z) is older.
-    const same = asset.version === DAEMON_VERSION;
-    const release = compareVersions(coreOf(asset.version), coreOf(DAEMON_VERSION));
-    const order = release === 0 && !same && asset.version.includes('-') && DAEMON_VERSION.includes('-') ? 'another build of this release' : compareVersions(asset.version, DAEMON_VERSION) > 0 ? 'newer' : same ? 'the installed version' : 'older';
-    out(`available: agentic-daemon ${asset.version} (${String(manifest.channel ?? channel)}, ${String(manifest.commit ?? 'unknown')}) — ${order}`);
+    // Main builds carry their commit time (`-main.<unix seconds>.<sha7>`, `g<sha7>` for a digits-only one with a leading zero; #437), so they order like releases do.
+    const order = compareVersions(asset.version, DAEMON_VERSION);
+    out(`available: agentic-daemon ${asset.version} (${String(manifest.channel ?? channel)}, ${String(manifest.commit ?? 'unknown')}) — ${order > 0 ? 'newer' : order === 0 ? 'the installed version' : 'older'}`);
     if (flags.check) return 0;
-    if (!pinned && same) {
+    if (!pinned && order === 0) {
         out('already up to date');
         return 0;
     }
-    if (!pinned && release < 0) {
+    if (!pinned && order < 0) {
         out(`the installed version is newer than the ${channel} channel's; pass --version to go back to ${asset.version}`);
         return 0;
     }

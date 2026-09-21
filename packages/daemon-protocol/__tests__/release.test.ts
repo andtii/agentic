@@ -13,6 +13,22 @@ describe('compareVersions', () => {
         expect(order(['0.2.0', '0.1.9', '0.2.0-main.abc1234'])).toEqual(['0.1.9', '0.2.0-main.abc1234', '0.2.0']);
     });
 
+    // #437: a main build is `x.y.z-main.<commit unix seconds>.<sha7>`; the time is a numeric identifier, so it decides.
+    it('orders main builds of one release by commit time, never by sha, and all of them below the release', () => {
+        const older = '0.2.0-main.1790000000.fffffff';
+        const newer = '0.2.0-main.1790000060.0000abc';
+        expect(compareVersions(newer, older)).toBeGreaterThan(0);
+        expect(compareVersions(older, newer)).toBeLessThan(0);
+        expect(compareVersions('0.2.0', newer)).toBeGreaterThan(0);
+        expect(compareVersions(older, '0.1.9')).toBeGreaterThan(0);
+        // A ten-digit time against an eleven-digit one: numerically, not as text.
+        expect(compareVersions('0.2.0-main.10000000000.abc1234', '0.2.0-main.9999999999.abc1234')).toBeGreaterThan(0);
+        expect(order(['0.2.0', newer, '0.2.0-main.0.abc1234', older, '0.1.9'])).toEqual(['0.1.9', '0.2.0-main.0.abc1234', older, newer, '0.2.0']);
+        expect(isVersion(newer)).toBe(true);
+        expect(isVersion('0.2.0-main.1790000000.g0123456')).toBe(true);
+        expect(isVersion('0.2.0-main.1790000000.0123456')).toBe(false);
+    });
+
     it('is semver: numeric parts numerically, equal versions 0, build metadata ignored', () => {
         expect(compareVersions('1.10.0', '1.9.0')).toBeGreaterThan(0);
         expect(compareVersions('2.0.0', '10.0.0')).toBeLessThan(0);

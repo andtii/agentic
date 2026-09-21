@@ -202,15 +202,15 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 `.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` (Windows x64, macOS arm64 and x64, Linux x64 and arm64), each with a `<zip>.sha256` sidecar, and publishes them with a **`manifest.json`** (#361):
 
 ```json
-{ "version": "0.1.0-main.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
+{ "version": "0.1.1-main.1790000000.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
   "notesUrl": "https://github.com/andtii/agentic/releases/tag/daemon-latest",
-  "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.0-main.16c7d40" }, … },
+  "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.1-main.1790000000.16c7d40" }, … },
   "harnesses": {} }
 ```
 
 Two channels:
 
-- **`latest`** — every push to `main` that touches `apps/daemon` or `packages/` (and `workflow_dispatch` without a `tag`) replaces the assets of the rolling **`daemon-latest`** pre-release (https://github.com/andtii/agentic/releases/tag/daemon-latest). The version is `<apps/daemon/package.json version>-main.<sha7>`.
+- **`latest`** — every push to `main` that touches `apps/daemon` or `packages/` (and `workflow_dispatch` without a `tag`) replaces the assets of the rolling **`daemon-latest`** pre-release (https://github.com/andtii/agentic/releases/tag/daemon-latest). The version is `<apps/daemon/package.json version>-main.<commit time>.<sha7>` (#437): the commit time is its unix seconds (`git log -1 --format=%ct`), a numeric semver identifier, so main builds order by when their commit was made and all of them below the `x.y.z` release; a sha7 of digits only with a leading zero is written `g0123456` so the version stays valid semver. Builds stamped before #437 (`-main.<sha7>`) order above the new ones of the same `x.y.z` (semver ranks an alphanumeric identifier above a numeric one), which is why the format change came with `apps/daemon/package.json` at `0.1.1`: a `0.1.0-main.<sha7>` machine sees every `0.1.1-main.*` build as newer.
 - **`stable`** — pushing a tag `daemon-v<semver>` creates the GitHub release `daemon-v<semver>` (notes from release-drafter's newest draft when there is one, else generated). The version is the tag's semver. The run then uploads the same `manifest.json` to the rolling **`daemon-stable`** pre-release (created on first use; its notes name the current stable version), whose asset urls point at the versioned release. A semver pre-release tag (`daemon-v0.2.0-rc.1`) becomes a GitHub pre-release and leaves `daemon-stable` alone: its manifest still says `stable`, but only `AGENTIC_VERSION=daemon-v0.2.0-rc.1` installs it.
 
   Each channel's manifest is at a fixed URL — `releases/download/daemon-latest/manifest.json` and `releases/download/daemon-stable/manifest.json` — and the installers (and later the platform) read only those or a pinned `releases/download/daemon-v<semver>/manifest.json`. Nothing depends on GitHub's "latest release", which the app's release-drafter releases own.

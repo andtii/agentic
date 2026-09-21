@@ -1,5 +1,6 @@
 // Stamped by the build (`vite.config.ts` → `scripts/lib/stamp.mjs`): on a `daemon-v<semver>` tag the tag's
-// semver and channel `stable`, otherwise `<package.json version>-main.<sha7>` and channel `latest`.
+// semver and channel `stable`, otherwise `<package.json version>-main.<commit unix seconds>.<sha7>` (`g<sha7>` for a digits-only sha7
+// with a leading zero, which semver forbids) and channel `latest`.
 // Run from source (vitest) nothing is stamped: `0.0.0-dev`, commit `unknown`, channel `dev`.
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/core';
 

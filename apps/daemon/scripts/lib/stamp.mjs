@@ -7,7 +7,12 @@
  *
  * - A release tag `daemon-v<semver>` (`AGENTIC_DAEMON_TAG`, or the pushed
  *   tag `GITHUB_REF_NAME` on a tag run): version `<semver>`, channel `stable`.
- * - Anything else: `<package.json version>-main.<sha7>`, channel `latest`.
+ * - Anything else: `<package.json version>-main.<commit time>.<sha7>`, channel
+ *   `latest`. The commit time (unix seconds, `git log -1 --format=%ct`) is a
+ *   numeric prerelease identifier, so semver orders main builds by when their
+ *   commit was made, and all of them below the `x.y.z` release (#437). A sha7
+ *   of digits only with a leading zero is not a valid semver identifier; it
+ *   gets a `g` in front (`g0123456`), as `git describe` writes it.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -18,17 +23,19 @@ import { join } from 'node:path';
 export const RELEASE_TAG = /^daemon-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 
 /**
- * @param {{ tag?: string | undefined; packageVersion: string; commit: string }} input
+ * @param {{ tag?: string | undefined; packageVersion: string; commit: string; committedAt?: number | undefined }} input
  * @returns {{ version: string; commit: string; channel: 'stable' | 'latest'; tag: string | null }}
  */
-export function buildStamp({ tag, packageVersion, commit }) {
+export function buildStamp({ tag, packageVersion, commit, committedAt }) {
     const short = commit.slice(0, 7);
     if (tag) {
         const m = RELEASE_TAG.exec(tag);
         if (!m) throw new Error(`stamp: ${tag} is not a release tag (daemon-v<semver>)`);
         return { version: /** @type {string} */ (m[1]), commit: short, channel: 'stable', tag };
     }
-    return { version: `${packageVersion}-main.${short}`, commit: short, channel: 'latest', tag: null };
+    const time = Number.isSafeInteger(committedAt) && /** @type {number} */ (committedAt) > 0 ? committedAt : 0;
+    const id = /^0\d*$/.test(short) && short.length > 1 ? `g${short}` : short;
+    return { version: `${packageVersion}-main.${time}.${id}`, commit: short, channel: 'latest', tag: null };
 }
 
 /**
@@ -57,12 +64,28 @@ export function currentCommit(cwd, env) {
 }
 
 /**
+ * When `commit` was made, unix seconds (`git log -1 --format=%ct`); 0 when git cannot say (no git, a shallow
+ * checkout without it, `unknown`).
+ * @param {string} cwd @param {string} commit
+ */
+export function commitTime(cwd, commit) {
+    if (!/^[0-9a-f]{7,40}$/i.test(commit)) return 0;
+    try {
+        const out = execFileSync('git', ['log', '-1', '--format=%ct', commit], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return /^\d+$/.test(out) ? Number(out) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/**
  * The stamp for a build of `daemonDir` (apps/daemon) in this environment.
  * @param {string} daemonDir @param {Record<string, string | undefined>} [env]
  */
 export function stampFor(daemonDir, env = process.env) {
     const packageVersion = JSON.parse(readFileSync(join(daemonDir, 'package.json'), 'utf8')).version;
-    return buildStamp({ tag: releaseTagFrom(env), packageVersion, commit: currentCommit(daemonDir, env) });
+    const commit = currentCommit(daemonDir, env);
+    return buildStamp({ tag: releaseTagFrom(env), packageVersion, commit, committedAt: commitTime(daemonDir, commit) });
 }
 
 /**
