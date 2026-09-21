@@ -86,7 +86,9 @@ export const Chat = component(() => {
     };
     const setWorkdir = (e: { readonly agentId: string; readonly ref: WorkdirRef | null }): void => { folders.value = { ...folders.value, [e.agentId]: e.ref }; };
     return () => {
-        if (dataMode() === 'live') return <LiveChat id={String(route.params.id)} />;
+        // Keyed by the chat: the page holds the entries it has read (`held`), the feeds, the draft and the chips per
+        // chat, so another chat picked from the list mounts a fresh page rather than merging into the last one's.
+        if (dataMode() === 'live') return <LiveChat key={String(route.params.id)} id={String(route.params.id)} />;
         const v = view();
         if (!v) {
             return (
