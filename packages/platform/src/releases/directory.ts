@@ -161,7 +161,8 @@ const directoryPolicy: ActorPolicy = (principal: Principal | null, _rq, op) => {
 /** Build the ReleaseDirectory over its fetch. The default export {@link ReleaseDirectory} uses the global `fetch`. */
 export function defineReleaseDirectory(options: ReleaseDirectoryOptions = {}) {
     const doFetch = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-    const sources: Record<ReleaseChannel, string> = { ...RELEASE_SOURCES, ...options.sources };
+    // Only a URL that is given overrides the default: `{ stable: undefined }` keeps it.
+    const sources: Record<ReleaseChannel, string> = { stable: options.sources?.stable ?? RELEASE_SOURCES.stable, latest: options.sources?.latest ?? RELEASE_SOURCES.latest };
     const now = options.now ?? Date.now;
     const refreshMs = options.refreshMs ?? RELEASE_REFRESH_MS;
     const timeoutMs = options.timeoutMs ?? RELEASE_FETCH_TIMEOUT_MS;

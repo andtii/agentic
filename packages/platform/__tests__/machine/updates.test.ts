@@ -343,6 +343,7 @@ describe('crash loops and settings (#365)', () => {
     it('Workspace.updateSettings validates and keeps updates', async () => {
         const ws = app.as(owner).actor(Workspace, workspaceKey(WS));
         expect((await ws.updateSettings({ timeZone: 'UTC' })).updates).toBeUndefined();
+        expect((await ws.updateSettings({ updates: {} })).updates).toBeUndefined();
         expect(await statusOf(ws.updateSettings({ updates: { defaultChannel: 'nightly' as never } }))).toBe(400);
         expect(await statusOf(ws.updateSettings({ updates: { defaultPolicy: { kind: 'window', cron: 'nope', tz: 'UTC', durationMs: 60_000 } } }))).toBe(400);
         const settings = await ws.updateSettings({ updates: { defaultPolicy: { kind: 'auto-when-idle' } } });

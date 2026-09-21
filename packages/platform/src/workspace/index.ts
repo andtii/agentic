@@ -569,7 +569,8 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const defaults = { ...s.defaults, ...patch.defaults };
                 // Updates (#365): kept only once set, so a workspace that never chose follows `DEFAULT_UPDATE_SETTINGS` as it moves.
                 let updates = s.updates;
-                if (patch.updates) {
+                // Only a patch that names a field sets them: an empty `updates: {}` keeps the workspace on the defaults.
+                if (patch.updates && (patch.updates.defaultChannel !== undefined || patch.updates.defaultPolicy !== undefined)) {
                     const base = s.updates ?? DEFAULT_UPDATE_SETTINGS;
                     try {
                         updates = {

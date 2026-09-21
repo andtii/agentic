@@ -29,6 +29,12 @@ describe('update policy (#365)', () => {
         expect(isIdle(s)).toBe(true);
         s.activeSessions['s1']!.running = { turnId: 't', since: 0 };
         expect(isIdle(s)).toBe(false);
+        delete s.activeSessions['s1']!.running;
+        s.pending['s1:c1'] = { sessionId: 's1' as SessionId, command: { v: 1, type: 'prompt', commandId: 'c1', turnId: 't', input: [] } as never, sentAt: 0, deadline: 1 };
+        expect(isIdle(s)).toBe(false); // a prompt out holds the slot
+        s.pending = { 'q:c1': { ...s.pending['s1:c1']!, sessionId: 'q' as SessionId } };
+        expect(isIdle(s)).toBe(true); // not for a session this machine does not host
+        s.activeSessions['s1']!.running = { turnId: 't', since: 0 };
         expect(freeSlots(s, E1)).toBeGreaterThan(0);
         expect(freeSlots({ ...s, draining: { requestId: 'u', since: 0 } }, E1)).toBe(0);
         expect(freeSlots({ ...s, draining: { requestId: 'u', since: 0, runtime: 'claude-code' } }, E1)).toBeGreaterThan(0);

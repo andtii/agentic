@@ -319,7 +319,10 @@ export function freeSlots(view: CapacityView, environmentId: EnvironmentId | str
 
 /** Whether no turn runs anywhere on the machine (#365) — a live session with no turn does not count. What an update policy waits for. */
 export function isIdle(view: CapacityView): boolean {
-    return Object.values(view.activeSessions).every((s) => activeIn(view, s.environmentId) === 0);
+    // One pass: a session holds a slot with a turn running or a prompt out (`runningIn`'s rule).
+    const prompted = new Set<string>();
+    for (const p of Object.values(view.pending)) if (p.command.type === 'prompt') prompted.add(p.sessionId);
+    return Object.values(view.activeSessions).every((s) => s.running === undefined && !prompted.has(s.sessionId));
 }
 
 /** `true` when `at` is strictly after `cursor` (or there is no cursor). */

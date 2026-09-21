@@ -131,6 +131,21 @@ describe('ReleaseDirectory (#365)', () => {
         expect(await statusOf(directory(asMachine).get())).toBeUndefined();
     });
 
+    it('a source given as undefined keeps the default URL', async () => {
+        const Other = defineReleaseDirectory({ fetch: fakeFetch, sources: { stable: undefined, latest: 'https://example.test/latest.json' } });
+        const other = testActorApp([Other]);
+        await other.start();
+        try {
+            answers['https://example.test/latest.json'] = json(manifest('0.5.0', 'latest'));
+            const view = await other.as(owner).actor(Other, RELEASE_DIRECTORY_KEY).refresh();
+            expect(view.channels.stable?.version).toBe('0.2.0');
+            expect(view.channels.latest?.version).toBe('0.5.0');
+            expect(fetched).toContain(RELEASE_SOURCES.stable);
+        } finally {
+            await other.stop();
+        }
+    });
+
     it('parseReleaseManifest rebuilds a valid manifest and names the bad field', () => {
         const m = manifest('1.0.0');
         expect(parseReleaseManifest({ ...m, extra: true })).toEqual(m);
