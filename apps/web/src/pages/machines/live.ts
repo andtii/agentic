@@ -6,7 +6,7 @@
  * the sessions table and the doctor card already render from the mock
  * workspace. Nothing here touches a hook or the DOM.
  */
-import type { EnvironmentDescriptor, MachineId } from '@agentic/core';
+import { accountKeyFor, accountKeyOf, type EnvironmentDescriptor, type MachineId } from '@agentic/core';
 import type { AgentHue, FieldOption } from '@agentic/ui';
 import type { MachineDoctorView, MachineIndexEntry, MachineOs, MachineView, RoutingView } from '@agentic/platform';
 import type { DoctorCheck, OpsMachine, OpsSession } from '../../mock/ops';
@@ -132,12 +132,19 @@ export function queuedByEnvironment(routing: RoutingView | undefined, machineId:
 /**
  * Which agents default to which environment, from the directory's identities:
  * a daemon runtime's `environment.machine` is its `defaultEnvironmentId`
- * (`identityOf`), the platform runtime's is `platform`.
+ * (`identityOf`), the platform runtime's is `platform`. An account-bound
+ * agent (#414) lands under every one of `environments` whose login is its
+ * account — where a chat naming this machine would run it.
  */
-export function defaultForByEnvironment(agents: readonly AgentIdentity[]): Record<string, DefaultForAgent[]> {
+export function defaultForByEnvironment(agents: readonly AgentIdentity[], environments: readonly EnvironmentDescriptor[] = []): Record<string, DefaultForAgent[]> {
     const out: Record<string, DefaultForAgent[]> = {};
     for (const a of agents) {
         if (a.environment.runtime === 'anthropic-api') continue;
+        if (a.account) {
+            const key = accountKeyFor(a.environment.runtime, a.account);
+            for (const e of environments) if (accountKeyOf(e) === key) (out[e.id] ??= []).push({ name: a.name, hue: a.hue });
+            continue;
+        }
         const id = a.environment.machine;
         if (!id || id === 'unassigned' || id === '—') continue;
         (out[id] ??= []).push({ name: a.name, hue: a.hue });

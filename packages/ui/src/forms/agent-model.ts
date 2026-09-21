@@ -13,7 +13,7 @@
  * with ids `category:<name>`, then every other rule unchanged.
  */
 
-import type { AgentConfig, AgentId, ApprovalRule, EnvironmentId, Limits, OfflinePolicy, SkillRef, ToolGrant } from '@agentic/core';
+import { accountKeyFor, parseAccountKey, type AgentConfig, type AgentId, type ApprovalRule, type EnvironmentId, type Limits, type OfflinePolicy, type SkillRef, type ToolGrant } from '@agentic/core';
 import { flag, json, list, number, text } from './form-data.js';
 
 export type ApprovalCategory = NonNullable<ApprovalRule['match']['categories']>[number];
@@ -42,6 +42,7 @@ export const AGENT_FIELDS = {
     memoryShared: 'memory-shared',
     autoLearn: 'auto-learn',
     runtime: 'runtime',
+    account: 'account',
     environment: 'environment',
     workdir: 'workdir',
     model: 'model',
@@ -100,6 +101,8 @@ export interface AgentDraft {
     memoryShared: string[];
     autoLearn: boolean;
     runtime: string;
+    /** The account the agent runs as (#414), as an account key (`accountKeyFor`); `''` = none, pinned to `defaultEnvironmentId` or unassigned. */
+    account: string;
     defaultEnvironmentId: string;
     /** The folder work runs in in `defaultEnvironmentId` (#193); `''` = the environment's first root. */
     defaultWorkdir: string;
@@ -172,6 +175,7 @@ export function toAgentDraft(config: AgentConfig): AgentDraft {
         memoryShared: [...config.memoryPolicy.shared],
         autoLearn: config.memoryPolicy.autoLearn === 'lessons',
         runtime: config.execution.runtime,
+        account: config.execution.account ? accountKeyFor(config.execution.runtime, config.execution.account) : '',
         defaultEnvironmentId: config.execution.defaultEnvironmentId ?? '',
         defaultWorkdir: config.execution.defaultWorkdir ?? '',
         model: config.execution.model ?? '',
@@ -210,6 +214,8 @@ export function fromAgentDraft(draft: AgentDraft): AgentConfig {
         memoryPolicy: { shared: [...draft.memoryShared], autoLearn: draft.autoLearn ? 'lessons' : 'off' },
         execution: {
             runtime: draft.runtime,
+            // The account (#414): its key parsed back; a key of another runtime, or no key, binds nothing.
+            ...(accountOf(draft) ? { account: accountOf(draft)! } : {}),
             ...(draft.defaultEnvironmentId ? { defaultEnvironmentId: draft.defaultEnvironmentId as EnvironmentId } : {}),
             // A folder only means something in its environment: without one it is dropped.
             ...(draft.defaultEnvironmentId && draft.defaultWorkdir.trim() ? { defaultWorkdir: draft.defaultWorkdir.trim() } : {}),
@@ -219,6 +225,12 @@ export function fromAgentDraft(draft: AgentDraft): AgentConfig {
         },
         collaborators: draft.collaborateAll ? 'all' : (draft.collaborators as AgentId[])
     };
+}
+
+/** The `AccountRef` a draft's account key names for its runtime, or `undefined`. */
+export function accountOf(draft: Pick<AgentDraft, 'account' | 'runtime'>): AgentConfig['execution']['account'] {
+    const parsed = draft.account ? parseAccountKey(draft.account) : null;
+    return parsed && parsed.runtime === draft.runtime ? parsed.ref : undefined;
 }
 
 const isOutcome = (v: string): v is ApprovalOutcome => (APPROVAL_OUTCOMES as readonly string[]).includes(v);
@@ -256,6 +268,7 @@ export function agentDraftFromFormData(fd: FormData): AgentDraft {
         memoryShared: list(fd, F.memoryShared),
         autoLearn: flag(fd, F.autoLearn),
         runtime: text(fd, F.runtime),
+        account: text(fd, F.account),
         defaultEnvironmentId: text(fd, F.environment),
         defaultWorkdir: text(fd, F.workdir),
         model: model === CUSTOM_MODEL ? text(fd, F.modelCustom).trim() : model,

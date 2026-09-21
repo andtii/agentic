@@ -61,6 +61,11 @@ export interface AgentFormRailProps extends AgentFormApi {
 
 export type AgentFormLayout = 'stack' | 'sections';
 
+/** An account the form offers (#414): the key as the value, the label naming the login and the machines it is on. */
+export interface AccountOption extends FieldOption {
+    readonly runtime: string;
+}
+
 /**
  * What the `workdir` slot is handed (#193): the default environment and
  * folder as drafted, and `set` to change both at once — a folder belongs to
@@ -79,6 +84,8 @@ export type AgentFormProps = Define.Model<AgentConfig> &
     Define.Prop<'connectors', readonly FieldOption[]> &
     Define.Prop<'agents', readonly FieldOption[]> &
     Define.Prop<'environments', readonly FieldOption[]> &
+    /** The accounts to offer (#414): one per login the machines report, each `value` an account key and `runtime` the runtime it belongs to. */
+    Define.Prop<'accounts', readonly AccountOption[]> &
     /** The runtimes to offer (#234): each may carry why it is not ready yet and the models it names. */
     Define.Prop<'runtimes', readonly RuntimeOption[]> &
     Define.Prop<'memoryScopes', readonly FieldOption[]> &
@@ -212,6 +219,26 @@ export const AgentForm = component<AgentFormProps>(
                 else if (next !== prev && draft.defaultWorkdir) draft.defaultWorkdir = '';
             }
         );
+        // An account binds the agent to a login on whichever machine the chat names (#414): a pin and its folder go with it.
+        watch(
+            () => draft.account,
+            (next, prev) => {
+                if (next && next !== prev && (draft.defaultEnvironmentId || draft.defaultWorkdir)) {
+                    batch(() => {
+                        draft.defaultEnvironmentId = '';
+                        draft.defaultWorkdir = '';
+                    });
+                }
+            }
+        );
+        // The other way round: a pin picked while an account is set unbinds the account.
+        watch(
+            () => draft.defaultEnvironmentId,
+            (next, prev) => {
+                if (next && next !== prev && draft.account) draft.account = '';
+            }
+        );
+        const accountOptions = (): FieldOption[] => (props.accounts ?? []).filter((a) => a.runtime === draft.runtime).map(({ value, label }) => ({ value, label }));
         const setWorkdir = (ref: { readonly environmentId: string; readonly path: string } | null): void => {
             batch(() => {
                 if (ref && ref.environmentId !== draft.defaultEnvironmentId) {
@@ -371,7 +398,17 @@ export const AgentForm = component<AgentFormProps>(
                                 <SelectField model={() => draft.runtime} name={F.runtime} label="Runtime" options={runtimeFieldOptions(runtimes())} required error={err.runtime} description={chosenRuntime()?.hint} />
                                 {runtimeFix(chosenRuntime())}
                             </div>
-                            <SelectField model={() => draft.defaultEnvironmentId} name={F.environment} label="Default environment" options={props.environments ?? []} placeholder="Any available" />
+                            {draft.runtime !== 'anthropic-api' ? (
+                                <SelectField
+                                    model={() => draft.account}
+                                    name={F.account}
+                                    label="Account"
+                                    options={accountOptions()}
+                                    placeholder={accountOptions().length ? 'None — pinned to one environment' : 'No account reported for this runtime yet'}
+                                    description={draft.account && !accountOptions().some((o) => o.value === draft.account) ? 'No environment reports this account any more — sign it in on a machine, or pick another.' : 'The login the agent runs as, on whichever machine a chat names. Sign in on each machine with agentic-daemon env login.'}
+                                />
+                            ) : null}
+                            <SelectField model={() => draft.defaultEnvironmentId} name={F.environment} label={draft.account ? 'Pin to one environment (advanced)' : 'Default environment'} options={props.environments ?? []} placeholder="Any available" description={draft.account ? 'Pinning drops the account: the agent then runs in this one environment only.' : undefined} />
                             <input type="hidden" name={F.workdir} value={draft.defaultWorkdir} />
                             {slots.workdir ? slots.workdir({ environmentId: draft.defaultEnvironmentId, path: draft.defaultWorkdir, set: setWorkdir }) : null}
                             {models().length ? (

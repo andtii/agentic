@@ -1,9 +1,10 @@
 import { component, signal, watch, type Define } from 'sigx';
-import type { ProjectRecord } from '@agentic/core';
+import { accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
 import { ConfirmDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { MemberPicker } from './MemberPicker';
 import { projectForOrigin, type NewChatPrefill } from './new-chat-prefill';
+import type { MachineEntry } from '../ops/environments';
 
 /** What the picker needs of a project: `ProjectRecord` fits. `features` names the repo (#336) when the project has the git feature. */
 export type NewChatProject = Pick<ProjectRecord, 'id' | 'name' | 'members' | 'folders' | 'connectors'> & { readonly features?: ProjectRecord['features'] };
@@ -20,8 +21,41 @@ export interface NewChatCreate {
     readonly agentIds: readonly string[];
     readonly coordinator: string | null;
     readonly projectId: string | null;
+    /** The machine the chat runs on (#414): every member's account is resolved there; `null` when the workspace has no machine to pick. */
+    readonly machineId: string | null;
     /** Only from a prefilled opening. */
     readonly workdir?: NewChatWorkdir;
+}
+
+/** The account a member runs as (#414): its own, else the login of its pinned environment as the machines report it; `undefined` for a platform runtime or an unassigned agent. */
+export function memberAccount(agent: Pick<AgentIdentity, 'environment' | 'environmentId' | 'account'>, machines: readonly MachineEntry[]): AccountRef | undefined {
+    if (agent.environment.runtime === 'anthropic-api') return undefined;
+    if (agent.account) return agent.account;
+    const pinned = agent.environmentId ? machines.flatMap((m) => m.environments).find((e) => e.id === agent.environmentId) : undefined;
+    return pinned ? accountRefOf(pinned) : undefined;
+}
+
+/** Where a member would run on `machine` (#414): the pin as the machine reports it, else its account's environment there, else nothing. */
+export function memberEnvironmentOn(agent: Pick<AgentIdentity, 'environment' | 'environmentId' | 'account'>, machine: MachineEntry, machines: readonly MachineEntry[]): string | undefined {
+    if (agent.environment.runtime === 'anthropic-api') return undefined;
+    if (!agent.account && agent.environmentId && machine.environments.some((e) => e.id === agent.environmentId)) return agent.environmentId;
+    const ref = memberAccount(agent, machines);
+    return ref ? environmentsForAccount(machine.environments, agent.environment.runtime, ref)[0]?.id : undefined;
+}
+
+/** The machines a New chat offers (#414): online first, index order within; `null` when there is none to pick. */
+export function machineChoices(machines: readonly MachineEntry[]): MachineEntry[] {
+    return [...machines].sort((a, b) => Number(b.online) - Number(a.online));
+}
+
+/** The machine an opening starts on (#414): the prefill's environment's, else the last used one, else the first online — or none. */
+export function openingMachine(machines: readonly MachineEntry[], lastMachineId: string | null | undefined, prefillEnvironmentId?: string): string {
+    if (prefillEnvironmentId) {
+        const reporting = machines.find((m) => m.environments.some((e) => e.id === prefillEnvironmentId));
+        if (reporting) return reporting.id;
+    }
+    if (lastMachineId && machines.some((m) => m.id === lastMachineId)) return lastMachineId;
+    return machineChoices(machines)[0]?.id ?? '';
 }
 
 export type NewChatDialogProps =
@@ -34,6 +68,10 @@ export type NewChatDialogProps =
     & Define.Prop<'projects', readonly NewChatProject[]>
     /** The project used last (`Workspace.get().lastProjectId`): preselected when the dialog opens. */
     & Define.Prop<'lastProjectId', string | null>
+    /** The paired machines and what they report (#414): the "Machine" choice; absent or empty, the dialog offers none and `create` carries `machineId: null`. */
+    & Define.Prop<'machines', readonly MachineEntry[]>
+    /** The machine used last (`Workspace.get().lastMachineId`): preselected when the dialog opens. */
+    & Define.Prop<'lastMachineId', string | null>
     /** The folder the chat starts in (#336, `/chats/new?env=&path=&origin=`): its project preselected when the origin matches one. */
     & Define.Prop<'prefill', NewChatPrefill>
     & Define.Prop<'busy', boolean>
@@ -78,9 +116,10 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         const picked = p.members.agentIds.filter((a) => props.agents.some((x) => x.id === a));
         return { picked, coordinator: p.members.coordinator && picked.includes(p.members.coordinator) ? p.members.coordinator : '' };
     };
+    const machinesOf = (): readonly MachineEntry[] => props.machines ?? [];
     // Mounted open (the tests): already on the opening project and its roster.
     const first = props.model?.value === true ? openingProject() : '';
-    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project' });
+    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project', machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';
@@ -102,7 +141,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     // runs inside setup must not read `st` (it would become a dependency of the key).
     let syncing = false;
     watch(
-        () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}\n${props.prefill?.environmentId ?? ''}\n${props.prefill?.origin ?? ''}\n${props.prefill?.path ?? ''}` : ''),
+        () => (props.model?.value === true ? `open\n${props.lastProjectId ?? ''}\n${props.projects?.length ?? 0}\n${props.agents.length}\n${props.prefill?.environmentId ?? ''}\n${props.prefill?.origin ?? ''}\n${props.prefill?.path ?? ''}\n${props.lastMachineId ?? ''}\n${machinesOf().map((m) => m.id).join(',')}` : ''),
         (key, prev) => {
             if (!key) return;
             const opening = openingProject();
@@ -116,6 +155,8 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                 st.saveFolder = true;
                 st.mode = 'chat';
             }
+            // The machine (#414): the opening one until a person picks another; a pick that the machines no longer list restarts.
+            if (!prev || !st.machine || !machinesOf().some((m) => m.id === st.machine)) st.machine = openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId);
         }
     );
     // A person's pick in the select fills the roster; the opening sync already did.
@@ -136,6 +177,13 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     return () => {
         const group = st.picked.length > 1;
         const project = projectOf(st.project);
+        const machines = machineChoices(machinesOf());
+        const machine = machines.find((m) => m.id === st.machine);
+        /** Whether each picked member has a login on `m` (#414): a flag, never a block — the router explains at run. */
+        const signedIn = (m: MachineEntry): { agent: AgentIdentity; environmentId: string | undefined }[] =>
+            st.picked.map((id) => props.agents.find((a) => a.id === id)).filter((a): a is AgentIdentity => a !== undefined && a.environment.runtime !== 'anthropic-api').map((agent) => ({ agent, environmentId: memberEnvironmentOn(agent, m, machinesOf()) }));
+        /** Where a picked member's quota is read from on the chosen machine (#414), for the cards. */
+        const quotaEnvironmentOf = (agent: AgentIdentity): string | undefined => (machine ? memberEnvironmentOn(agent, machine, machinesOf()) : undefined);
         const envLabel = (id: string): string => props.environments?.find((e) => e.id === id)?.label ?? id;
         const folders = project ? Object.entries(project.folders).filter((e): e is [string, string] => typeof e[1] === 'string') : [];
         const prefill = props.prefill;
@@ -160,7 +208,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         return;
                     }
                     const workdir = workdirOf(project);
-                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null, projectId: st.project || null, ...(workdir ? { workdir } : {}) });
+                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null, projectId: st.project || null, machineId: st.machine || null, ...(workdir ? { workdir } : {}) });
                 }}
                 onCancel={() => emit('cancel')}
             >
@@ -213,7 +261,33 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         )}
                     </div>
                 ) : null}
-                <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
+                {machines.length ? (
+                    <fieldset data-new-chat-machine>
+                        <legend>Machine</legend>
+                        <p data-new-chat-machine-note>Where the chat's members run: each one under its account on that machine. Change it later from the chat's settings.</p>
+                        {machines.map((m) => {
+                            const flags = st.picked.length ? signedIn(m) : [];
+                            const missing = flags.filter((f) => f.environmentId === undefined);
+                            return (
+                                <label key={m.id} data-new-chat-machine-choice={m.id} data-online={m.online ? '' : undefined} data-selected={st.machine === m.id ? '' : undefined}>
+                                    <input type="radio" name="chat-machine" value={m.id} checked={st.machine === m.id} onChange={() => { st.machine = m.id; }} />
+                                    <span data-new-chat-machine-name>{m.name}{m.os ? ` · ${m.os}` : ''}{m.online ? '' : ' · offline'}</span>
+                                    {flags.length ? (
+                                        <span data-new-chat-machine-accounts>
+                                            {flags.map((f) => (
+                                                <span key={f.agent.id} data-new-chat-machine-account={f.agent.id} data-tone={f.environmentId === undefined ? 'needs-you' : 'live'}>
+                                                    {f.agent.name}: {f.environmentId === undefined ? 'not signed in here' : `${f.agent.environment.account} signed in`}
+                                                </span>
+                                            ))}
+                                        </span>
+                                    ) : null}
+                                    {missing.length && st.machine === m.id ? <span data-new-chat-machine-warning role="status">{missing.length === 1 ? `${missing[0]!.agent.name} has no login on ${m.name} — its messages will fail until it signs in there.` : `${missing.length} members have no login on ${m.name}.`}</span> : null}
+                                </label>
+                            );
+                        })}
+                    </fieldset>
+                ) : null}
+                <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} quotaEnvironmentOf={machine ? quotaEnvironmentOf : undefined} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
                 <p data-new-chat-summary aria-live="polite">
                     {!st.picked.length
                         ? (st.attempted ? <span data-new-chat-required role="alert">Pick at least one agent.</span> : 'Nobody picked yet.')

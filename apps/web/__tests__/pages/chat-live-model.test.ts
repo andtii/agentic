@@ -1,11 +1,12 @@
 /** The live chat's pure view model (#34): entries → rows, summaries, composition, addressing, activation, the session wire adapter. */
 import { describe, it, expect } from 'vitest';
-import type { AgentId, ChatId, MessageId, ProjectId, TaskId } from '@agentic/core';
+import type { AccountRef, AgentId, ChatId, MachineId, MessageId, ProjectId, TaskId } from '@agentic/core';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { createTranscript } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
 import {
     activationContract,
+    activationWorkdir,
     actorSessionTransport,
     attachmentPart,
     chatRow,
@@ -47,6 +48,15 @@ describe('identities', () => {
         expect(id).toMatchObject({ id: 'a7', name: 'Scout', role: 'Researches', hue: 2, environment: { machine: 'env_lab', runtime: 'claude-code', account: 'machine' }, configVersion: 2 });
         expect(unknownAgent('zz')).toMatchObject({ name: 'zz', hue: 1 });
         expect(lookup('nobody').name).toBe('nobody');
+    });
+
+    it('an account-bound agent reads as its login on any machine (#414); a platform agent never carries an account', () => {
+        const config = { name: 'Two', description: '', role: '', instructions: '', skills: [], tools: [], connectors: [], approvalPolicy: [], memoryPolicy: { scope: 'agent:a8', shared: [], autoLearn: false }, execution: { runtime: 'claude-code', account: { identity: 'me@work' } as AccountRef, limits: {}, offlinePolicy: 'queue' }, collaborators: 'all' };
+        const viewOf = (c: typeof config) => ({ id: 'a8' as AgentId, workspaceId: 'u1' as never, configVersion: 1, memoryScope: 'agent:a8' as never, pendingProposals: 0, config: c }) as never;
+        expect(identityOf(viewOf(config), 0)).toMatchObject({ environment: { machine: 'any machine', runtime: 'claude-code', account: 'me@work' }, account: { identity: 'me@work' } });
+        expect(identityOf(viewOf(config), 0)).not.toHaveProperty('environmentId');
+        expect(identityOf(viewOf({ ...config, execution: { ...config.execution, account: { label: 'claude-2' } } }), 0).environment.account).toBe('claude-2');
+        expect(identityOf(viewOf({ ...config, execution: { runtime: 'anthropic-api', account: { identity: 'x' }, limits: {}, offlinePolicy: 'fail' } }), 0)).not.toHaveProperty('account');
     });
 });
 
@@ -182,6 +192,23 @@ describe('addressing and activation', () => {
         expect(inProject[1]).toMatchObject({ projectId: 'p_1', workdir: 'C:\\src\\app' });
         expect(chatRow('c1', { ...withFolder, projectId: 'p_1' as ProjectId }, [], lookup).projectId).toBe('p_1');
         expect(chatRow('c1', withFolder, [], lookup)).not.toHaveProperty('projectId');
+
+        // The chat's machine rides into every task (#414); a member's folder on an environment that machine does not report is left out.
+        const pc = 'machine_pc' as MachineId;
+        expect(activationContract('a2' as AgentId, 'c1' as ChatId, 'm3' as MessageId, 'do it', [], lookup, workdir, [], undefined, pc)).toMatchObject({ machineId: pc, environmentId: 'env_work', workdir: 'C:\\src\\app' });
+        expect(activationWorkdir(withFolder.members.a2, pc, (m, e) => m === pc && e === 'env_work')).toEqual(workdir);
+        expect(activationWorkdir(withFolder.members.a2, pc, () => false)).toBeUndefined();
+        expect(activationWorkdir(withFolder.members.a2, undefined, () => false)).toEqual(workdir);
+        expect(activationWorkdir(withFolder.members.a2, pc)).toEqual(workdir);
+        const onMachine: unknown[] = [];
+        await runActivation(
+            { post: async () => ({ messageId: 'm9' as MessageId, activated: ['a1' as AgentId, 'a2' as AgentId] }), createTask: async (_id, contract) => { onMachine.push(contract); }, run: async () => undefined, newTaskId: () => 't' as never },
+            { chatId: 'c1' as ChatId, text: 'go', mentions: [], summary: { ...withFolder, machineId: pc }, entries, lookup, hosted: () => false }
+        );
+        expect(onMachine[0]).toMatchObject({ machineId: pc });
+        expect(onMachine[1]).toMatchObject({ machineId: pc });
+        expect(onMachine[1]).not.toHaveProperty('workdir');
+        expect(onMachine[1]).not.toHaveProperty('environmentId');
 
         const note = { seq: 5, entry: { t: 'msg', id: 'm5' as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text: 'Working folder for a2 → C:\\src\\app on env_work' }], at: 5000, mentions: [], workdir: { agentId: 'a2' as AgentId, ref: workdir } } } as IndexedEntry;
         const cleared = { seq: 6, entry: { ...note.entry, id: 'm6', workdir: { agentId: 'a2', ref: null } } } as IndexedEntry;

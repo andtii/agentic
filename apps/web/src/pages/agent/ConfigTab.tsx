@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
-import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
+import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
 import type { AgentConfig, AgentConfigVersion, EnvironmentId } from '@agentic/core';
 import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
 import { WorkdirInput } from '../workdir/WorkdirInput';
@@ -33,6 +33,8 @@ export type ConfigTabProps =
     & Define.Prop<'collaborators', readonly FieldOption[]>
     /** The environment picker's options (`execution.defaultEnvironmentId`, #144); default: the mock workspace's. */
     & Define.Prop<'environments', readonly FieldOption[]>
+    /** The accounts the machines report (#414), for the "Account" select; default: none. */
+    & Define.Prop<'accounts', readonly AccountOption[]>
     /** The other pickers' options on the platform (`./catalog`); a list it leaves out keeps the design track's. */
     & Define.Prop<'catalog', AgentCatalog>
     /** Where the default working folder can be picked (#193); default: the mock machines' environments. */
@@ -209,6 +211,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 tools={props.catalog?.tools ?? TOOLS}
                 connectors={props.catalog?.connectors ?? CONNECTORS}
                 environments={props.environments ?? props.catalog?.environments ?? ENVIRONMENTS}
+                accounts={props.accounts ?? []}
                 memoryScopes={props.catalog?.memoryScopes ?? SCOPES}
                 runtimes={props.store ? props.catalog?.runtimes : mockRuntimes(state.config.execution.runtime)}
                 agents={props.collaborators ?? agents.filter((a) => a.id !== p.id).map((a) => ({ value: a.id, label: a.name }))}

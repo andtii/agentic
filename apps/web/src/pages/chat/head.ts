@@ -12,7 +12,7 @@ import type { NewChatPrefill } from './new-chat-prefill';
  * chat is never shown. Module-level like `context-drawer.ts`: on the
  * server the SSR render of the page sets it before the App reads it.
  */
-export const chatHead = signal<{ value: { id: string; title: string; members: MockChatMember[]; identities: Record<string, AgentIdentity>; project?: { id: string; name: string } } | null }>({ value: null });
+export const chatHead = signal<{ value: { id: string; title: string; members: MockChatMember[]; identities: Record<string, AgentIdentity>; project?: { id: string; name: string }; machine?: { id: string; name: string; online: boolean } } | null }>({ value: null });
 
 /**
  * The "New chat" request: the topbar's button raises it, the page's dialog answers it (client-only interaction, like

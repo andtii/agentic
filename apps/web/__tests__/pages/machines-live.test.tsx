@@ -324,6 +324,11 @@ describe('the machine view model', () => {
             { id: 'new', name: 'New', role: '', hue: 3 as const, configVersion: 1, environment: { machine: 'unassigned', runtime: 'claude-code', account: 'machine' } }
         ];
         expect(defaultForByEnvironment(agents)).toEqual({ 'm1:work': [{ name: 'Forge', hue: 2 }] });
+        // An account-bound agent (#414) lands under every environment of this machine whose login is its account.
+        const bound = { id: 'two', name: 'Two', role: '', hue: 4 as const, configVersion: 1, environment: { machine: 'any machine', runtime: 'claude-code', account: 'me@work' }, account: { identity: 'me@work' } };
+        const envs = [{ ...base.environments[0]!, account: { label: 'work', authStatus: 'ok' as const, identity: 'Me@Work' } }, { ...base.environments[0]!, id: 'm1:home' as never, account: { label: 'home', authStatus: 'ok' as const, identity: 'me@home' } }];
+        expect(defaultForByEnvironment([...agents, bound], envs)).toEqual({ 'm1:work': [{ name: 'Forge', hue: 2 }, { name: 'Two', hue: 4 }] });
+        expect(defaultForByEnvironment([bound])).toEqual({});
         expect(environmentOptions([{ name: 'alien01', environments: base.environments }])).toEqual([{ value: 'm1:work', label: 'alien01 / claude-code / work' }]);
     });
 

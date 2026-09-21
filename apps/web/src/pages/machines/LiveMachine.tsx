@@ -169,7 +169,7 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     doctor={doctor.value ? doctorChecksOf(doctor.value) : []}
                     footnote={LIVE_DOCTOR_FOOTNOTE}
                     queued={queuedByEnvironment(routing.value ?? undefined, v.machineId)}
-                    defaultFor={defaultForByEnvironment(agents)}
+                    defaultFor={defaultForByEnvironment(agents, v.environments)}
                     quota={v.quota ?? {}}
                     revokedAt={v.revokedAt}
                     agents={(agentId) => { const a = directory.lookup(agentId); return { name: a.name, hue: a.hue }; }}
