@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -32,6 +32,9 @@ export const AUDIT_KINDS = [
     'plugin.activated',
     'project.changed',
     'secret.opened',
+    'session.interrupted',
+    'session.resumed',
+    'task.machine-lost',
     'workdir.worktree-created'
 ] as const;
 
@@ -242,6 +245,36 @@ export interface ProjectChangedData {
     readonly op: 'created' | 'updated' | 'removed';
 }
 
+/**
+ * `session.interrupted` (#366; OPS-05, OPS-06): the machine stopped hosting a session mid-turn and the turn was cut
+ * short (`Session.hostEnded`). `host` is the daemon's close code (`restart`, `update`, …), `closed` when it gave none.
+ */
+export interface SessionInterruptedData {
+    readonly sessionId: SessionId;
+    readonly taskId?: TaskId;
+    readonly turnId: string;
+    readonly host: SessionClosedCode | 'closed';
+}
+
+/**
+ * `session.resumed` (#366): an interrupted task went on — in the same session re-opened or still hosted (`re-host`),
+ * or in a fresh one after the daemon refused the re-open (`fresh`; `sessionId` is the new one). `by` is who asked:
+ * a person's Resume, or `system:routing` for an agent whose `onInterrupt` is `auto`.
+ */
+export interface SessionResumedData {
+    readonly sessionId: SessionId;
+    readonly taskId: TaskId;
+    readonly how: 're-host' | 'fresh';
+    readonly by: string;
+}
+
+/** `task.machine-lost` (#366; OPS-04): the task's machine stayed offline past `MACHINE_LOST_MS`, `since` epoch ms; the task failed recoverable. */
+export interface TaskMachineLostData {
+    readonly taskId: TaskId;
+    readonly machineId: MachineId;
+    readonly since: number;
+}
+
 /** The per-kind payload. */
 export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
@@ -263,6 +296,9 @@ export interface AuditDataByKind {
     readonly 'plugin.activated': PluginActivatedData;
     readonly 'project.changed': ProjectChangedData;
     readonly 'secret.opened': SecretOpenedData;
+    readonly 'session.interrupted': SessionInterruptedData;
+    readonly 'session.resumed': SessionResumedData;
+    readonly 'task.machine-lost': TaskMachineLostData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
 }
 

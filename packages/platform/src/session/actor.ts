@@ -24,7 +24,7 @@
  * approval card all read the same log.
  */
 
-import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatId, type Correction, hasScope, type LearningPlugin, type MessageId, type Principal, type Proposal, SESSION_EVENTS_TOPIC, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type TaskResult, type UsageRow, type WorkspaceId } from '@agentic/core';
 import { defineActor, topic, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { createTranscript, reduceAgentEvent, toPromptParts, type AgentEvent, type AgentTranscript, type Decision, type EventCursor, type PromptInput, type PromptPart, type RequestOption, type SessionRef, type UnstampedEvent } from '@sigx/ai-agent';
@@ -172,10 +172,14 @@ export function isInterruptedTurnEnd(ev: AgentEvent): boolean {
     return ev.type === 'turn-end' && ev.stopReason === 'error' && ev.error?.code === INTERRUPTED_CODE && !!ev.error.message?.startsWith(INTERRUPTED_PREFIX);
 }
 
-/** What `Session.hostEnded` is told (#420): the machine no longer hosts the session. `code` is the daemon's close code (#359 narrows it). */
+/**
+ * What `Session.hostEnded` is told (#420): the machine no longer hosts the session. `code` is the daemon's close code
+ * (#359, `session.closed.code`); absent, the host closed it for no reason the platform acts on (`closed`). A
+ * `resume-failed` — the daemon refused to re-open it — closes the record, ref or not (#366).
+ */
 export interface HostEnded {
     readonly reason: string;
-    readonly code?: string;
+    readonly code?: SessionClosedCode;
 }
 
 /**
@@ -1335,14 +1339,36 @@ export function defineSessionActor(ports: SessionPorts) {
                  * {reason}`, `data.host` the close code): the chat hears `interrupted:{turnId}` and the router parks the
                  * task on `resume:{turnId}`. The record then waits `idle` with its `opened`, `spec` and `ref`, so the next
                  * activation — a message, or `resume` — re-opens it on the machine with the ref as `spec.resume` (#393).
-                 * A record whose runtime never named it has nothing to resume from: it is `closed`. Idempotent.
+                 * A record whose runtime never named it has nothing to resume from: it is `closed` — and so is one whose
+                 * re-open the daemon refused (`resume-failed`, #366), so the chat's next message binds a fresh session
+                 * instead of re-opening this one again. Every interruption is audited with its cause (`session.interrupted`).
+                 * Idempotent.
                  */
                 async hostEnded(ended: HostEnded): Promise<void> {
                     assertHostingMachine();
                     const s = ctx.state;
                     if (s.status === 'closed') return;
-                    if (s.running) await finishInterrupted(ctx, s.running.turnId, { message: `${INTERRUPTED_PREFIX}${ended.reason}`, data: { host: ended.code ?? 'closed' } });
-                    if (!s.ref) {
+                    const host = ended.code ?? 'closed';
+                    const cut = s.running ? { turnId: s.running.turnId, taskId: s.running.taskId } : undefined;
+                    if (cut) {
+                        await finishInterrupted(ctx, cut.turnId, { message: `${INTERRUPTED_PREFIX}${ended.reason}`, data: { host } });
+                        const spec = s.spec;
+                        if (parsed && spec) {
+                            const taskId = cut.taskId ?? spec.taskId;
+                            await audit.record(ctx, parsed.workspaceId, {
+                                key: `${ctx.key}:interrupted:${cut.turnId}`,
+                                kind: 'session.interrupted',
+                                at: now(),
+                                by: `machine:${spec.machineId ?? 'unknown'}`,
+                                summary: `turn ${cut.turnId} interrupted (${host}): ${ended.reason}`,
+                                agentId: spec.agentId,
+                                sessionId: parsed.sessionId,
+                                ...(taskId ? { taskId } : {}),
+                                data: { sessionId: parsed.sessionId, ...(taskId ? { taskId } : {}), turnId: cut.turnId, host }
+                            });
+                        }
+                    }
+                    if (!s.ref || ended.code === 'resume-failed') {
                         await appendEntry(ctx, set({ status: 'closed', closedAt: now() }));
                         await publishChat(ctx, { kind: 'status', status: 'session-ended' });
                         return;

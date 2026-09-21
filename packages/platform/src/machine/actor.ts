@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, hasScope, mergeQuota, type AgentId, type CapabilityReport, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -272,12 +272,14 @@ interface SessionClient {
     forwardFrames(frames: readonly WireFrame[]): Promise<void>;
     commandReplied(reply: WireReply): Promise<void>;
     noteRef(ref: SessionRef): Promise<void>;
-    hostEnded(ended: { readonly reason: string; readonly code?: string }): Promise<void>;
+    hostEnded(ended: { readonly reason: string; readonly code?: SessionClosedCode }): Promise<void>;
 }
 
 /** The Routing actor's machine-facing entry points (`defineRoutingActor`). */
 interface RoutingClient {
     machineOnline(machineId: MachineId): Promise<void>;
+    /** The machine went offline (#366): its running routes wait `machine-offline` until it is back, or fail `machine-lost`. */
+    machineOffline(machineId: MachineId): Promise<void>;
     sessionOpened(sessionId: SessionId, taskId?: TaskId): Promise<void>;
     sessionClosed(sessionId: SessionId, reason: string, taskId?: TaskId): Promise<void>;
     /** A turn ended in the environment, or a session running one closed (#394): a slot is free for a route parked `waiting-capacity` there. */
@@ -433,10 +435,15 @@ export function defineMachineActor(ports: MachinePorts) {
              * Forget a hosted or queued session; answer its open commands with `closed`. A session the daemon had opened is
              * handed to its record first (#420, `Session.hostEnded`): a turn still running there is interrupted — never left
              * `running` for a session nobody hosts — and the record waits `idle` for a re-open. Before the router hears it.
+             * `code` is the daemon's (`session.closed.code`, #359), carried to the record as the cause. A re-open the
+             * daemon refused (#366: `refused` — its `session.closed` came while the entry was still `opening` — with
+             * `resume-failed`, or for a record that opened before and is resumed from its ref) closes the record, so the
+             * chat's next message binds a fresh session instead of asking the daemon for this one again.
              */
-            async function sessionGone(sessionId: SessionId, reason: string): Promise<void> {
+            async function sessionGone(sessionId: SessionId, reason: string, code?: SessionClosedCode, refused = false): Promise<void> {
                 const s = ctx.state;
                 const hosted = s.activeSessions[sessionId];
+                const reopenRefused = refused && hosted?.status === 'opening' && (code === 'resume-failed' || hosted.spec.resume !== undefined);
                 const wasHosted = hosted !== undefined;
                 const taskId = hosted?.taskId ?? s.queued.find((q) => q.sessionId === sessionId)?.taskId;
                 // A session that held a slot (a turn running, or a prompt out) frees it by closing (#394).
@@ -446,9 +453,9 @@ export function defineMachineActor(ports: MachinePorts) {
                 s.queued = s.queued.filter((q) => q.sessionId !== sessionId);
                 const known = wasHosted || s.queued.length !== before;
                 if (known) record({ sessionId, reason, at: now() });
-                if (hosted?.status === 'open') {
+                if (hosted?.status === 'open' || reopenRefused) {
                     try {
-                        await session(sessionId)?.hostEnded({ reason });
+                        await session(sessionId)?.hostEnded({ reason, ...(reopenRefused ? { code: 'resume-failed' as const } : code ? { code } : {}) });
                     } catch (e) {
                         // The record's word, never the socket's: a refusal or a failure here must not take the daemon's connection down.
                         console.warn(`[machine] session ${sessionId} of ${ctx.key} could not be told its host ended (${reason}): ${e instanceof Error ? e.message : String(e)}`);
@@ -751,7 +758,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     case 'session.reply':
                         return onSessionReply(frame);
                     case 'session.closed':
-                        return sessionGone(frame.sessionId, frame.reason);
+                        return sessionGone(frame.sessionId, frame.reason, frame.code, true);
                     case 'tool.call':
                         return onToolCall(frame);
                     case 'fs.response':
@@ -918,9 +925,13 @@ export function defineMachineActor(ports: MachinePorts) {
                     return { ok: true, t: decoded.frame.t };
                 },
 
-                /** The daemon socket closed or failed: offline at once, before any heartbeat window (acceptance). */
+                /**
+                 * The daemon socket closed or failed: offline at once, before any heartbeat window (acceptance). The router
+                 * hears it (#366): the turns running here wait `machine-offline` for the daemon to come back.
+                 */
                 async socketClosed(): Promise<void> {
                     const s = ctx.state;
+                    const was = s.online;
                     s.online = false;
                     // No socket, no answer: a folder request never outlives the connection it was sent on.
                     failPendingFs(s, now(), 'machine went offline');
@@ -928,6 +939,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     failPendingHistory(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
+                    if (was) await notify((r) => r.machineOffline(machineId));
                 },
 
                 /**
@@ -958,11 +970,18 @@ export function defineMachineActor(ports: MachinePorts) {
                     return 'queued';
                 },
 
-                /** Tell the daemon to close the session (or drop it from the queue). The daemon's `session.closed` frees the slot. */
+                /**
+                 * Tell the daemon to close the session (or drop it from the queue). The daemon's `session.closed` frees the slot.
+                 * With the daemon offline nobody would answer (#366: the router lets go of a machine-lost task's session): the
+                 * session is forgotten here, its record told the host ended (`hostEnded`) — a running turn interrupted, the
+                 * record left `idle` with its ref for a re-open once the machine is back.
+                 */
                 async closeSession(sessionId: SessionId): Promise<void> {
                     const s = ctx.state;
-                    if (sessionId in s.activeSessions) send({ v: V, t: 'session.close', sessionId });
-                    else if (s.queued.some((q) => q.sessionId === sessionId)) await sessionGone(sessionId, 'closed while queued');
+                    if (sessionId in s.activeSessions) {
+                        if (s.online) send({ v: V, t: 'session.close', sessionId });
+                        else await sessionGone(sessionId, `machine ${machineId} is offline; the session was let go`);
+                    } else if (s.queued.some((q) => q.sessionId === sessionId)) await sessionGone(sessionId, 'closed while queued');
                     await ctx.save();
                 },
 
@@ -1175,7 +1194,14 @@ export function defineMachineActor(ports: MachinePorts) {
             const s = ctx.state;
             const at = now();
             const ids = parseMachineKey(ctx.key);
-            if (s.online && (s.lastSeen ?? 0) + heartbeatWindowMs <= at) s.online = false;
+            // A silent daemon past the heartbeat window is offline, and the router hears it (#366) as it does a closed socket.
+            const silent = s.online && (s.lastSeen ?? 0) + heartbeatWindowMs <= at;
+            if (silent) s.online = false;
+            const routing = ports.routing?.();
+            if (silent && routing && ids) {
+                const client = actor(routing, routingKey(ids.workspaceId)).with({ context: asPrincipal(machinePrincipal(ids.workspaceId, ids.machineId)), oneWay: true }) as unknown as RoutingClient;
+                await client.machineOffline(ids.machineId).catch(() => undefined);
+            }
             const def = ports.sessions?.();
             for (const [key, p] of Object.entries(s.pending)) {
                 if (p.deadline > at) continue;

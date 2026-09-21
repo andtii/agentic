@@ -102,6 +102,19 @@ export interface Route {
      * it instead sends the task to a fresh session (`sessionClosed`).
      */
     rehosting?: boolean;
+    /**
+     * While `running` (#366): when the route's machine went offline (`Routing.machineOffline`). The task waits
+     * `machine-offline` and the route stays `running` — its turn goes on when the daemon comes back (`machineOnline`
+     * clears it); past `MACHINE_LOST_MS` the task fails `machine-lost`.
+     */
+    offlineSince?: number;
+    /**
+     * The interrupted turn `onInterrupt: 'auto'` resumed on its own (#366), by the turn it cut (`baseTurnId`): once per
+     * turn — a second interruption of the same turn waits for a person.
+     */
+    autoResumed?: string;
+    /** Who asked the resume under way (#366; `session.resumed.by`): a person's Resume, or `system:routing` for `auto`. */
+    resumedBy?: string;
     /** While `waiting-answer` (#396): the platform request the turn left open — the question this task waits an answer to. */
     question?: string;
     /** While `waiting-turn` after a `deliverAnswer` (#396): the answer to send when the turn ends, in place of the task's own input. */
