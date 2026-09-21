@@ -19,6 +19,7 @@ import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, chatTitleModel, gene
 import { actor, type AnyActorDefinition } from '@sigx/actors';
 import { asPrincipal, userPrincipal } from '../auth/index.js';
 import { registryKey } from '../registry/key.js';
+import { registryCode } from '../routing/factory.js';
 import type { ChatState } from './state.js';
 
 /** A heuristic title is at most this long: one line of the list. */
@@ -109,10 +110,11 @@ interface RegistrySecrets {
     openSecret(name: string, pluginId: string): Promise<string>;
 }
 
-/** A Registry refusal that means "no title right now", not "something broke": no secret, no plugin, plugin off. */
+/** A Registry refusal that means "no title right now", not "something broke": no secret, no plugin, plugin off — by its stable code. */
+const NO_KEY_CODES: ReadonlySet<string> = new Set(['secret-missing', 'plugin-missing', 'plugin-disabled']);
 const noKey = (error: unknown): boolean => {
-    const message = error instanceof Error ? error.message : '';
-    return /\[registry\] (no secret "|plugin ".*" is (not installed|disabled))/.test(message);
+    const code = registryCode(error);
+    return code !== undefined && NO_KEY_CODES.has(code);
 };
 
 /**

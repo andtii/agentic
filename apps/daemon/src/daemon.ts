@@ -626,6 +626,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
      */
     async function probeTitle(s: LiveSession, recheck = true): Promise<void> {
         if (!s.title || !sessions.has(s.id)) return;
+        // This probe supersedes a re-probe still pending from the last turn.
+        clearTimeout(s.titleRecheck);
+        s.titleRecheck = undefined;
         let title: string | undefined;
         try {
             title = await s.title();
@@ -636,8 +639,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         const changed = title !== undefined && title !== s.knownTitle;
         if (changed) s.knownTitle = title;
         reportTitle(s);
-        if (!changed && recheck) {
-            clearTimeout(s.titleRecheck);
+        if (!changed && recheck && sessions.has(s.id)) {
             s.titleRecheck = setTimeout(() => void probeTitle(s, false), titleRecheckMs);
             s.titleRecheck.unref?.();
         }

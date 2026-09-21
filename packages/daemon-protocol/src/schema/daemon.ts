@@ -47,7 +47,7 @@ const env = z.object({ v, t: z.literal('env'), environments, policy: machinePoli
 const heartbeat = z.object({ v, t: z.literal('heartbeat'), at: nonNegativeInt, active: z.array(sessionId).max(LIMITS.list) });
 const sessionOpened = z.object({ v, t: z.literal('session.opened'), sessionId, ref: sessionRef, capabilities: capabilityReport, head: cursor });
 const sessionNamed = z.object({ v, t: z.literal('session.ref'), sessionId, ref: sessionRef });
-const sessionTitled = z.object({ v, t: z.literal('session.title'), sessionId, title: text.min(1) });
+const sessionTitled = z.object({ v, t: z.literal('session.title'), sessionId, title: text.refine((s) => s.trim().length > 0, { message: 'a title has words' }) });
 const sessionFrame = z.object({ v, t: z.literal('session.frame'), sessionId, frame: wireFrame });
 const sessionReply = z.object({ v, t: z.literal('session.reply'), sessionId, reply: wireReply });
 const sessionClosed = z.object({

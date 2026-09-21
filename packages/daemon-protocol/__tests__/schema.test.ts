@@ -60,7 +60,7 @@ const daemonCases: { readonly [T in DaemonFrameType]: Case<Extract<DaemonFrame, 
     },
     'session.title': {
         valid: { v: V, t: 'session.title', sessionId: 's1' as never, title: 'Chat list auto-generated titles' },
-        invalid: { v: V, t: 'session.title', sessionId: 's1', title: '' },
+        invalid: { v: V, t: 'session.title', sessionId: 's1', title: '   ' },
         path: 'title'
     },
     'session.frame': {
