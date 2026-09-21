@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
  */
 const ROUTES: { path: string; page: string; table?: { selector: string; cols: string[] } }[] = [
     { path: '/machines', page: 'machines' },
-    { path: '/machines/alien01', page: 'machine', table: { selector: '.ag-sessions', cols: ['110px', 'auto', '140px', '140px', '120px'] } },
+    { path: '/machines/alien01', page: 'machine', table: { selector: '.ag-sessions', cols: ['96px', 'auto', '120px', '104px', '56px', '76px', '100px'] } },
     { path: '/pair', page: 'pair' },
     { path: '/schedules', page: 'schedules', table: { selector: '.ag-schedules', cols: ['110px', 'auto', '140px', '140px', '310px', '44px'] } },
     { path: '/plugins', page: 'plugins' },
