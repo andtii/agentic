@@ -48,6 +48,7 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
         const concurrency = row.concurrency ?? 1;
         if (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1) errors.push(`${at}.concurrency must be a whole number ≥ 1`);
         if (row.accountLabel !== undefined && !isText(row.accountLabel, 256)) errors.push(`${at}.accountLabel must be text`);
+        if (row.allowBypassPermissions !== undefined && typeof row.allowBypassPermissions !== 'boolean') errors.push(`${at}.allowBypassPermissions must be true or false`);
         if (errors.length !== before) return;
         seen.add(row.id as string);
         out.push({
@@ -57,7 +58,9 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
             ...(row.profileDir === undefined ? {} : { profileDir: row.profileDir as string }),
             cwdRoots: row.cwdRoots as string[],
             concurrency: concurrency as number,
-            ...(row.accountLabel === undefined ? {} : { accountLabel: row.accountLabel as string })
+            ...(row.accountLabel === undefined ? {} : { accountLabel: row.accountLabel as string }),
+            // Machine-local (#453): only this file sets it — `env.request` cannot, and a replace keeps it (`addEnvironment`).
+            ...(row.allowBypassPermissions === true ? { allowBypassPermissions: true } : {})
         });
     });
     return errors.length ? { ok: false, errors } : { ok: true, environments: out };

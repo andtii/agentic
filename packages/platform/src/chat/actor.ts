@@ -38,6 +38,7 @@ import {
     type PromptPart,
     type SessionEvent,
     type SessionId,
+    type SessionOptionsPatch,
     type TaskId,
     type WorkdirRef,
     type WorkspaceId
@@ -369,6 +370,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             setCoordinator: [userOrExternal],
             rename: [userOrExternal],
             setWorkdir: [userOrExternal],
+            setOptions: [userOrExternal],
             // Users, external clients and member agents; a non-member agent is refused inside the method (a policy sees no state).
             setProject: [notMachine],
             setMachine: [notMachine],
@@ -493,6 +495,35 @@ export function defineChatActor(ports: ChatOptions = {}) {
                 const text = next === null ? `Working folder for ${agentId} cleared` : `Working folder for ${agentId} → ${next.path} on ${next.environmentId}`;
                 await archive(ctx);
                 await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at: Date.now(), mentions: [], workdir: { agentId, ref: next } });
+                return ctx.snapshot(ctx.state.members[agentId]!);
+            },
+
+            /**
+             * Set a member's model or permission mode for this chat (#453), or clear one back to the agent's config with
+             * `null`: folded onto the member (`get().members[agentId].options`). The router reads it when it places the
+             * member's next turn — a fresh session opens with it, a live one is configured to it before the prompt, a
+             * turn already running keeps what it runs with (AGT-07). Written as a visible note (a user message carrying
+             * `options`, activating nobody). Members only (404); a key other than `model` / `permissionMode`, or a value
+             * that is not text, is 400. Whether the environment allows the mode is judged where it runs.
+             */
+            async setOptions(agentId: AgentId, patch: SessionOptionsPatch): Promise<ChatMember> {
+                const member = ctx.state.members[agentId];
+                if (!member) throw new ServerFnError(404, `Chat.setOptions: ${agentId} is not a member`);
+                const next: Record<string, string | null> = {};
+                for (const [key, value] of Object.entries(patch ?? {})) {
+                    if (key !== 'model' && key !== 'permissionMode') throw new ServerFnError(400, `Chat.setOptions: unknown option ${key}`);
+                    if (value === undefined) continue;
+                    if (value !== null && (typeof value !== 'string' || !value.trim() || value.length > 256)) throw new ServerFnError(400, `Chat.setOptions: ${key} must be a name or null`);
+                    // Unchanged keys are left out, so an idempotent call writes nothing.
+                    if ((value === null ? undefined : value.trim()) !== member.options?.[key]) next[key] = value === null ? null : value.trim();
+                }
+                if (!Object.keys(next).length) return ctx.snapshot(member);
+                const label = (key: string) => (key === 'model' ? 'Model' : 'Permission mode');
+                const text = Object.entries(next)
+                    .map(([key, value]) => (value === null ? `${label(key)} for ${agentId} back to its default` : `${label(key)} for ${agentId} → ${value}`))
+                    .join('; ');
+                await archive(ctx);
+                await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at: Date.now(), mentions: [], options: { agentId, patch: next } });
                 return ctx.snapshot(ctx.state.members[agentId]!);
             },
 

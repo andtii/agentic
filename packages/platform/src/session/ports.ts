@@ -41,6 +41,8 @@ export interface SessionOpenSpec {
     readonly cwd?: string;
     /** The agent configuration this session runs with (AGT-06/07). */
     readonly config: FrozenAgentConfig;
+    /** The runtime's permission mode it opens in (#453): the chat member's, else the runtime plugin's default. */
+    readonly permissionMode?: string;
     /**
      * Set by the router on a delegated task's session: the approval rules of every ancestor task's
      * agent, oldest first. The session's policy is its own constrained by these — never wider (AC-12).
