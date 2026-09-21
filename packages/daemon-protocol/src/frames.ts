@@ -33,6 +33,9 @@ export type FsResponseFrame = DaemonFrameOf<'fs.response'>;
 export type EnvResponseFrame = DaemonFrameOf<'env.response'>;
 export type QuotaFrame = DaemonFrameOf<'quota'>;
 export type HistoryResponseFrame = DaemonFrameOf<'history.response'>;
+export type UpdateStatusFrame = DaemonFrameOf<'update.status'>;
+export type HarnessStatusFrame = DaemonFrameOf<'harness.status'>;
+export type HarnessesFrame = DaemonFrameOf<'harnesses'>;
 
 export type WelcomeFrame = PlatformFrameOf<'welcome'>;
 export type SessionOpenFrame = PlatformFrameOf<'session.open'>;
@@ -43,6 +46,9 @@ export type PingFrame = PlatformFrameOf<'ping'>;
 export type FsRequestFrame = PlatformFrameOf<'fs.request'>;
 export type EnvRequestFrame = PlatformFrameOf<'env.request'>;
 export type HistoryRequestFrame = PlatformFrameOf<'history.request'>;
+export type UpdateRequestFrame = PlatformFrameOf<'update.request'>;
+export type UpdateCancelFrame = PlatformFrameOf<'update.cancel'>;
+export type HarnessRequestFrame = PlatformFrameOf<'harness.request'>;
 
 /** Either direction. */
 export type AnyFrame = DaemonFrame | PlatformFrame;

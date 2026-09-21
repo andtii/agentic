@@ -4,8 +4,10 @@
  * daemon in tests of the platform side (a Machine actor, a relay). It keeps a
  * per-session log so a reconnect replays from the platform's `wanted`
  * cursors, bridges the scripted tool call as `tool.call`, and ignores
- * malformed input the way a daemon must. `faults` breaks it on purpose so a
- * test can check that the suite notices.
+ * malformed input the way a daemon must. It reports a build, updates itself
+ * (drain, cancel, restart) and installs harnesses without downloading
+ * anything (#360). `faults` breaks it on purpose so a test can check that
+ * the suite notices.
  */
 
 import {
@@ -19,6 +21,7 @@ import {
     sameOrigin,
     type CapabilityReport,
     type Cursor,
+    type DaemonBuild,
     type EnvError,
     type EnvironmentDescriptor,
     type EnvironmentId,
@@ -26,14 +29,22 @@ import {
     type FsGitInfo,
     type FsOp,
     type FsResult,
+    type HarnessPhase,
+    type HarnessReport,
+    type LifecycleError,
     type MachineId,
     type MachinePolicy,
-    type SessionId
+    type ReleaseAsset,
+    type RuntimeId,
+    type SessionClosedCode,
+    type SessionId,
+    type UpdatePhase
 } from '@agentic/core';
 import type { AgentEvent, SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, cursorBefore, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, EnvRequestFrame, HistoryRequestFrame, PlatformFrame } from '../frames.js';
+import type { DaemonFrame, EnvRequestFrame, HarnessRequestFrame, HistoryRequestFrame, PlatformFrame, UpdateRequestFrame } from '../frames.js';
 import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
+import { drainingReply } from '../lifecycle.js';
 import { LIMITS } from '../schema/limits.js';
 import type { ConformanceDaemon, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
 
@@ -58,6 +69,12 @@ export interface InMemoryFaults {
     readonly sameRef?: boolean;
     /** Answer a `history.request` the log no longer reaches with what is left, instead of a named `gap` (#397). */
     readonly historyHole?: boolean;
+    /** Start a turn while an update drains, instead of refusing the prompt with `draining` (#360). */
+    readonly acceptWhileDraining?: boolean;
+    /** Ignore `update.cancel`: the drain goes on to a restart (#360). */
+    readonly ignoreCancel?: boolean;
+    /** Remove a harness an environment still uses (#360). */
+    readonly removeHarnessInUse?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -91,6 +108,21 @@ export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     steer: false,
     permissions: 'none',
     tools: 'mcp'
+};
+
+/** The build the fake reports (#359): a prerelease, so any real release orders above it. */
+export const IN_MEMORY_BUILD: DaemonBuild = { version: '0.0.0-fake', commit: '0000000', protocol: V, channel: 'stable', platform: 'linux-x64' };
+
+/** The harness it starts with: its own runtime, installed. */
+export const IN_MEMORY_HARNESSES: readonly HarnessReport[] = [{ runtime: 'in-memory', installed: { version: '1.0.0', at: 0 }, status: 'ready', current: true }];
+
+/** A release it "updates" to — nothing is downloaded. */
+export const IN_MEMORY_RELEASE: ReleaseAsset = { url: 'https://releases.example.test/agentic-daemon-0.0.1-linux-x64.zip', sha256: 'a'.repeat(64), bytes: 1024, version: '0.0.1' };
+
+/** A harness build it "installs" — nothing is downloaded. */
+export const IN_MEMORY_HARNESS_TARGET: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset } = {
+    runtime: 'in-memory',
+    asset: { url: 'https://releases.example.test/harness-in-memory-1.1.0-linux-x64.zip', sha256: 'b'.repeat(64), bytes: 2048, version: '1.1.0' }
 };
 
 export function inMemoryEnvironment(machineId: MachineId = IN_MEMORY_MACHINE, id: EnvironmentId = IN_MEMORY_ENVIRONMENT): EnvironmentDescriptor {
@@ -153,6 +185,13 @@ interface FakeSession {
     named: boolean;
 }
 
+/** A self-update in flight: its request, its phase, and the timer that ends a drain that takes too long. */
+interface FakeUpdate {
+    readonly requestId: string;
+    phase: UpdatePhase;
+    timer?: ReturnType<typeof setTimeout>;
+}
+
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /** The log reaches back to `from` (exclusive): its oldest frame is at or before it, or is the very next stamp — `from` may be platform-stamped, a fractional seq. */
@@ -172,6 +211,9 @@ export class InMemoryDaemon implements ConformanceDaemon {
     private link: Link | undefined;
     private heartbeat: ReturnType<typeof setInterval> | undefined;
     private calls = 0;
+    private harnesses: readonly HarnessReport[] = IN_MEMORY_HARNESSES;
+    /** The self-update in flight. */
+    private update: FakeUpdate | undefined;
     /** Malformed messages seen — a daemon counts and moves on. */
     rejected = 0;
 
@@ -191,7 +233,20 @@ export class InMemoryDaemon implements ConformanceDaemon {
         this.link = link;
         const resume: Record<string, Cursor> = {};
         for (const s of this.sessions.values()) if (!s.closed) resume[s.id] = { epoch: s.epoch, seq: s.seq };
-        this.emit({ v: V, t: 'hello', machineId: this.machineId, daemonVersion: '0.0.0-fake', os: 'linux', environments: this.environments, capabilities: [IN_MEMORY_CAPABILITIES], resume, policy: this.policy });
+        this.emit({
+            v: V,
+            t: 'hello',
+            machineId: this.machineId,
+            daemonVersion: IN_MEMORY_BUILD.version,
+            os: 'linux',
+            environments: this.environments,
+            capabilities: [IN_MEMORY_CAPABILITIES],
+            resume,
+            policy: this.policy,
+            build: IN_MEMORY_BUILD,
+            features: ['update', 'harness'],
+            harnesses: this.harnesses
+        });
         return {
             send: (frame) => this.receive(encodeFrame(frame)),
             sendRaw: (text) => this.receive(text),
@@ -219,6 +274,8 @@ export class InMemoryDaemon implements ConformanceDaemon {
     }
 
     stop(): void {
+        if (this.update?.timer !== undefined) clearTimeout(this.update.timer);
+        this.update = undefined;
         this.disconnect();
         for (const resolve of this.pendingTools.values()) resolve({ error: { code: 'closed', message: 'daemon stopped' } });
         this.pendingTools.clear();
@@ -276,6 +333,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 if (!session || session.closed) return reply({ v: W, kind: 'error', commandId, code: 'closed', message: 'no such session' });
                 if (frame.command.type === 'prompt') {
                     if (session.busy) return reply({ v: W, kind: 'error', commandId, code: 'busy', message: 'a turn is running' });
+                    if (this.update?.phase === 'draining' && !this.options.faults?.acceptWhileDraining) return reply(drainingReply(commandId, `update ${this.update.requestId} waits for the running turns`));
                     reply({ v: W, kind: 'ack', commandId, turnId: frame.command.turnId });
                     void this.turn(session, frame.command.turnId);
                     return;
@@ -323,7 +381,83 @@ export class InMemoryDaemon implements ConformanceDaemon {
             case 'history.request':
                 this.emit({ v: V, t: 'history.response', requestId: frame.requestId, ...this.history(frame) });
                 return;
+            case 'update.request':
+                void this.selfUpdate(frame);
+                return;
+            case 'update.cancel': {
+                const update = this.update;
+                if (!update || update.requestId !== frame.requestId || update.phase === 'restarting' || this.options.faults?.ignoreCancel) return;
+                if (update.timer !== undefined) clearTimeout(update.timer);
+                this.update = undefined;
+                this.emit({ v: V, t: 'update.status', requestId: update.requestId, phase: 'failed', error: { code: 'cancelled', message: 'the update was cancelled' } });
+                return;
+            }
+            case 'harness.request':
+                void this.changeHarness(frame);
+                return;
         }
+    }
+
+    /**
+     * A self-update (#364's phases, faked): download, verify and stage one tick apart, then — `drain` — refuse new turns until
+     * none runs or `drainTimeoutMs` passes, or — `now` — restart at once. A second request while one runs fails `busy`.
+     */
+    private async selfUpdate(frame: UpdateRequestFrame): Promise<void> {
+        const status = (phase: UpdatePhase, extra: { progress?: { bytes: number; total: number }; error?: LifecycleError } = {}) => this.emit({ v: V, t: 'update.status', requestId: frame.requestId, phase, ...extra });
+        if (this.update) return status('failed', { error: { code: 'busy', message: `update ${this.update.requestId} is in progress` } });
+        const update: FakeUpdate = { requestId: frame.requestId, phase: 'staged' };
+        this.update = update;
+        const { target } = frame;
+        const steps: readonly UpdatePhase[] = target === 'previous' ? ['staged'] : ['downloading', 'verifying', 'staged'];
+        for (const phase of steps) {
+            if (this.update !== update) return;
+            update.phase = phase;
+            status(phase, phase === 'downloading' && target !== 'previous' ? { progress: { bytes: target.bytes, total: target.bytes } } : {});
+            await tick();
+        }
+        if (this.update !== update) return;
+        if (frame.mode === 'now') return this.restartFor(update);
+        update.phase = 'draining';
+        status('draining');
+        update.timer = setTimeout(() => this.restartFor(update), frame.drainTimeoutMs);
+        this.drained();
+    }
+
+    /** A drain ends when no turn runs any more. */
+    private drained(): void {
+        const update = this.update;
+        if (update?.phase === 'draining' && ![...this.sessions.values()].some((s) => !s.closed && s.busy)) this.restartFor(update);
+    }
+
+    /** `restarting`: every live session is closed with code `update` — the platform re-opens them — and the fake carries on as the new build. */
+    private restartFor(update: FakeUpdate): void {
+        if (this.update !== update) return;
+        if (update.timer !== undefined) clearTimeout(update.timer);
+        update.phase = 'restarting';
+        this.emit({ v: V, t: 'update.status', requestId: update.requestId, phase: 'restarting' });
+        for (const s of this.sessions.values()) if (!s.closed) this.close(s, 'the daemon is restarting for an update', 'update');
+        this.update = undefined;
+    }
+
+    /** `harness.request` (#369's phases, faked): install or update one tick per phase, remove at once — never under an environment that uses it. */
+    private async changeHarness(frame: HarnessRequestFrame): Promise<void> {
+        const status = (phase: HarnessPhase, error?: LifecycleError) => this.emit({ v: V, t: 'harness.status', requestId: frame.requestId, phase, ...(error ? { error } : {}) });
+        const { runtime } = frame;
+        if (frame.op === 'remove') {
+            if (this.environments.some((e) => e.runtime === runtime) && !this.options.faults?.removeHarnessInUse) return status('failed', { code: 'in-use', message: `an environment runs on ${runtime}` });
+            if (!this.harnesses.some((h) => h.runtime === runtime && h.installed)) return status('failed', { code: 'not-installed', message: `${runtime} is not installed` });
+            this.harnesses = this.harnesses.map((h) => (h.runtime === runtime ? { runtime, status: 'missing' } : h));
+        } else {
+            const { target } = frame;
+            if (!target) return status('failed', { code: 'invalid', message: `${frame.op} names a target` });
+            for (const phase of ['downloading', 'verifying', 'staged', 'applying'] as const) {
+                status(phase);
+                await tick();
+            }
+            this.harnesses = [...this.harnesses.filter((h) => h.runtime !== runtime), { runtime, installed: { version: target.version, at: Date.now() }, status: 'ready', current: true }];
+        }
+        status('done');
+        this.emit({ v: V, t: 'harnesses', harnesses: this.harnesses });
     }
 
     /**
@@ -419,9 +553,9 @@ export class InMemoryDaemon implements ConformanceDaemon {
         return [...this.sessions.values()].filter((s) => !s.closed).map((s) => s.id);
     }
 
-    private close(session: FakeSession, reason: string): void {
+    private close(session: FakeSession, reason: string, code?: SessionClosedCode): void {
         session.closed = true;
-        this.emit({ v: V, t: 'session.closed', sessionId: session.id, reason });
+        this.emit({ v: V, t: 'session.closed', sessionId: session.id, reason, ...(code ? { code } : {}) });
     }
 
     private async turn(session: FakeSession, turnId: string): Promise<void> {
@@ -452,6 +586,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
             }
         } finally {
             session.busy = false;
+            this.drained();
         }
     }
 
@@ -475,8 +610,11 @@ export class InMemoryDaemon implements ConformanceDaemon {
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
     return {
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history'],
+        // `resume` (re-opening from `spec.resume` after a restart) lands with #363.
+        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'update', 'harness'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
+        updateTarget: IN_MEMORY_RELEASE,
+        harnessTarget: IN_MEMORY_HARNESS_TARGET,
         start: (script) => new InMemoryDaemon(script, options)
     };
 }

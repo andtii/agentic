@@ -11,8 +11,10 @@
 export const PACKAGE = '@agentic/daemon-protocol';
 
 export { DAEMON_PROTOCOL_VERSION, DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '@agentic/core';
-export type { Cursor, OpenSpec } from '@agentic/core';
+export type { Cursor, OpenSpec, DaemonBuild, DaemonFeature, SessionClosedCode, ReleaseAsset, ReleaseManifest, HarnessReport, UpdatePhase, HarnessPhase } from '@agentic/core';
 
 export type * from './frames.js';
 export * from './schema/index.js';
 export * from './framing/index.js';
+export { compareVersions, isVersion, platformKey, isHttpsUrl, isHttpsAsset, SHA256_HEX } from './release.js';
+export { SESSION_CLOSED_CODES, DAEMON_FEATURES, UPDATE_PHASES, HARNESS_PHASES, DRAINING, drainingReply, isDrainingReply } from './lifecycle.js';

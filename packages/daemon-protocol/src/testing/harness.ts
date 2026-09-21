@@ -7,7 +7,7 @@
  * in-memory queue, a WebSocket pair, a relay.
  */
 
-import type { Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, MachinePolicy, SessionId } from '@agentic/core';
+import type { Cursor, EnvironmentDescriptor, EnvironmentId, MachineId, MachinePolicy, ReleaseAsset, RuntimeId, SessionId } from '@agentic/core';
 import type { PlatformFrame } from '../frames.js';
 
 /** What the scripted runtime behind the daemon must do. */
@@ -25,7 +25,7 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref' | 'history';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness';
 
 export interface DaemonConformanceHarness {
     /**
@@ -33,7 +33,11 @@ export interface DaemonConformanceHarness {
      * `'env-manage'`: the daemon answers `env.request` (#236), starts with a policy that has `webManaged` on and at least one allowed root
      * that exists, and implements `setPolicy`; `'session-ref'`: the daemon reports the runtime's own id for a session with
      * `session.ref` once the runtime names it (#388), an id other than the placeholder `session.opened` carried; `'history'`: the daemon
-     * answers `history.request` from its own log (#397) — and, with `truncateLog`, a range the log no longer reaches with a named `gap`.
+     * answers `history.request` from its own log (#397) — and, with `truncateLog`, a range the log no longer reaches with a named `gap`;
+     * `'build'`: `hello` carries `build` and `features` (#359); `'resume'`: the daemon implements `restart`, answers a `wanted` session it
+     * lost with `session.closed { code: 'restart' }` and re-opens it from `spec.resume` on a later epoch (#363); `'update'`: the daemon
+     * answers `update.request` / `update.cancel` (#364) and the harness names an `updateTarget`; `'harness'`: the daemon answers
+     * `harness.request` (#369) and the harness names a `harnessTarget`.
      */
     readonly features?: readonly ConformanceFeature[];
     /**
@@ -41,6 +45,10 @@ export interface DaemonConformanceHarness {
      * so `fs-locate` can prove a match (#331). Without it the case only checks the shape of an empty answer.
      */
     readonly knownOrigin?: string;
+    /** Feature `'update'`: a release the daemon can update to — what it downloads is the harness's business. */
+    readonly updateTarget?: ReleaseAsset;
+    /** Feature `'harness'`: a harness build the daemon can install, for a runtime it has a driver for. */
+    readonly harnessTarget?: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset };
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;
 }
@@ -58,6 +66,11 @@ export interface ConformanceDaemon {
     setPolicy?(policy: MachinePolicy): void | Promise<void>;
     /** Feature `'gap'`: forget the session log before `keepFrom`, so a `wanted` cursor older than that cannot be replayed. */
     truncateLog?(sessionId: SessionId, keepFrom: Cursor): void | Promise<void>;
+    /**
+     * Feature `'resume'`: restart the daemon process the way a crash and its supervisor would — the connection and every live
+     * session are lost, the session logs on disk are kept. The suite dials again afterwards.
+     */
+    restart?(): void | Promise<void>;
     stop(): void | Promise<void>;
 }
 

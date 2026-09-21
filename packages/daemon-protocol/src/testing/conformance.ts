@@ -8,7 +8,9 @@
  * `locate` of an origin's checkouts under those roots (#331), and
  * environments managed from the platform only inside the machine-local
  * policy (#236), the runtime's own session id reported once it is known (#388), and a session's history answered
- * from the daemon's own log — a range it no longer holds as a named gap (#397). No test-runner
+ * from the daemon's own log — a range it no longer holds as a named gap (#397), and the lifecycle (#360): the build a
+ * daemon reports, a session it lost across a restart re-opened from its ref, an update that drains running turns and
+ * can be cancelled, and harnesses installed but never removed from under an environment. No test-runner
  * import: consumers wire the cases into theirs, e.g.
  *
  * ```ts
@@ -18,10 +20,12 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, normalizePath, pathWithin, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type PlatformInfo, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
-import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HelloFrame, PlatformFrame, SessionFrameFrame, SessionRefFrame } from '../frames.js';
+import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HarnessesFrame, HarnessStatusFrame, HelloFrame, PlatformFrame, SessionClosedFrame, SessionFrameFrame, SessionRefFrame, UpdateStatusFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
+import { HARNESS_PHASES, isDrainingReply, UPDATE_PHASES } from '../lifecycle.js';
+import { isVersion } from '../release.js';
 import { LIMITS } from '../schema/limits.js';
 import { sessionRef } from '../schema/wire.js';
 import { assert, assertEqual, fail, withTimeout } from './assert.js';
@@ -47,10 +51,29 @@ export interface DaemonConformanceOptions {
 
 const V = DAEMON_PROTOCOL_VERSION;
 
-/** Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), and a runtime naming its session (#388). */
-const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref'];
+/**
+ * Frames a daemon may push at any time after `hello`: liveness, an environment's provider limits (#261), a runtime naming
+ * its session (#388), and the harnesses when the daemon finds they changed (#359).
+ */
+const UNSOLICITED: readonly DaemonFrameType[] = ['heartbeat', 'quota', 'session.ref', 'harnesses'];
 /** Cases that need an optional harness feature. */
-const NEEDS: Record<string, ConformanceFeature> = { env: 'env', gap: 'gap', 'fs-list': 'fs', 'fs-locate': 'fs', 'env-put': 'env-manage', 'env-remove': 'env-manage', 'env-policy': 'env-manage', 'session-ref': 'session-ref', history: 'history' };
+const NEEDS: Record<string, ConformanceFeature> = {
+    env: 'env',
+    gap: 'gap',
+    'fs-list': 'fs',
+    'fs-locate': 'fs',
+    'env-put': 'env-manage',
+    'env-remove': 'env-manage',
+    'env-policy': 'env-manage',
+    'session-ref': 'session-ref',
+    history: 'history',
+    'hello-build': 'build',
+    'session-reopen': 'resume',
+    'update-drain': 'update',
+    'update-cancel': 'update',
+    'harness-install': 'harness',
+    'harness-remove-in-use': 'harness'
+};
 
 type EventFrame = Extract<SessionFrameFrame['frame'], { readonly kind: 'event' }>;
 
@@ -122,6 +145,16 @@ function assertFollows(f: EventFrame, last: Cursor, what: string): void {
     assertEqual({ epoch: f.event.epoch, seq: f.event.seq }, cursorOf(f), `${what}: the event stamp matches the frame`);
 }
 
+/** `seen` passes `order` forwards: a phase may repeat (a download reports progress), never go back. */
+function assertPhases(seen: readonly string[], order: readonly string[], what: string): void {
+    let at = 0;
+    for (const phase of seen) {
+        const i = order.indexOf(phase);
+        assert(i >= at, `${what}: phase ${phase} came after ${order[at]} (${seen.join(' → ')})`);
+        at = i;
+    }
+}
+
 /** A whole turn: the last frame ends it. */
 function assertTurn(frames: readonly EventFrame[], what: string): void {
     assert(frames.length > 0 && frames[frames.length - 1]!.event.type === 'turn-end', `${what}: the last event ends the turn`);
@@ -146,8 +179,8 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
         }
     };
 
-    /** Dial and complete the handshake: hello in, welcome out. */
-    const handshake = async (daemon: ConformanceDaemon, wanted: Readonly<Record<string, Cursor>> = {}): Promise<{ peer: Peer; hello: HelloFrame }> => {
+    /** Dial and complete the handshake: hello in, welcome out (with the platform's own versions when `platform` is given). */
+    const handshake = async (daemon: ConformanceDaemon, wanted: Readonly<Record<string, Cursor>> = {}, platform?: PlatformInfo): Promise<{ peer: Peer; hello: HelloFrame }> => {
         const peer = new Peer(await daemon.dial(), timeoutMs);
         const hello = await peer.expect('hello', []);
         assertEqual(hello.machineId, daemon.machineId, 'hello.machineId is the paired machine (USR-04)');
@@ -156,7 +189,7 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
             `hello.environments lists the environment the suite was given (${daemon.environmentId})`
         );
         for (const e of hello.environments) assertEqual(e.machineId, daemon.machineId, `environment ${e.id} belongs to the machine`);
-        peer.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted });
+        peer.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted, ...(platform ? { platform } : {}) });
         return { peer, hello };
     };
 
@@ -182,6 +215,69 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
     };
 
     const S1 = 'session_conformance_1' as SessionId;
+    const S2 = 'session_conformance_2' as SessionId;
+
+    /**
+     * One whole turn from a prompt sent by hand: its ack, its events after `after` up to `turn-end`, and the last
+     * `session.ref` the runtime sent while it ran — that may come before, between or after the turn's frames.
+     */
+    const turn = async (peer: Peer, sessionId: SessionId, n: number, after: Cursor): Promise<{ events: EventFrame[]; ref?: SessionRefFrame }> => {
+        const commandId = `cmd_${n}`;
+        peer.send({ v: V, t: 'session.command', sessionId, command: { v: WIRE_PROTOCOL_VERSION, commandId, type: 'prompt', turnId: `turn_${n}`, input: [{ type: 'text', text: `Prompt ${n}.` }] } });
+        let acked = false;
+        let ref: SessionRefFrame | undefined;
+        const events: EventFrame[] = [];
+        let last = after;
+        let deadline = Date.now() + timeoutMs;
+        while (!acked || events[events.length - 1]?.event.type !== 'turn-end') {
+            const frame = await peer.next(acked ? `the rest of turn ${n}` : `the ack of prompt ${n}`, Math.max(1, deadline - Date.now()));
+            if (!UNSOLICITED.includes(frame.t)) deadline = Date.now() + timeoutMs;
+            if (frame.t === 'session.ref' && frame.sessionId === sessionId) ref = frame;
+            else if (frame.t === 'session.reply') {
+                assertEqual([frame.sessionId, frame.reply.commandId], [sessionId, commandId], 'session.reply answers the prompt it was sent');
+                assert(frame.reply.kind === 'ack', `prompt ${n} was acknowledged, not refused (${frame.reply.kind === 'error' ? frame.reply.message : ''})`);
+                acked = true;
+            } else if (frame.t === 'session.frame') {
+                assertEqual(frame.sessionId, sessionId, 'session.frame.sessionId');
+                if (frame.frame.kind === 'gap') fail(`turn ${n}: the daemon reported a gap on a live stream`);
+                if (frame.frame.kind !== 'event') continue;
+                assertFollows(frame.frame, last, `turn ${n}`);
+                last = cursorOf(frame.frame);
+                events.push(frame.frame);
+            } else if (!UNSOLICITED.includes(frame.t)) fail(`expected the ack or the events of prompt ${n}, got ${frame.t}`);
+        }
+        return { events, ...(ref ? { ref } : {}) };
+    };
+
+    /**
+     * Take the `frameType` status frames of `requestId` until `stop` says the last one ends it; any other frame goes to
+     * `other`, which by default passes over the unsolicited ones and fails on the rest.
+     */
+    const statuses = async <T extends 'update.status' | 'harness.status'>(
+        peer: Peer,
+        frameType: T,
+        requestId: string,
+        stop: (phase: DaemonFrameOf<T>['phase']) => boolean,
+        other: (frame: DaemonFrame) => void = (f) => {
+            if (!UNSOLICITED.includes(f.t)) fail(`expected a ${frameType} frame, got ${f.t}`);
+        }
+    ): Promise<{ phases: DaemonFrameOf<T>['phase'][]; last: DaemonFrameOf<T> }> => {
+        const phases: DaemonFrameOf<T>['phase'][] = [];
+        let deadline = Date.now() + timeoutMs;
+        for (;;) {
+            const frame = await peer.next(frameType, Math.max(1, deadline - Date.now()));
+            if (!UNSOLICITED.includes(frame.t)) deadline = Date.now() + timeoutMs;
+            if (frame.t !== frameType) {
+                other(frame);
+                continue;
+            }
+            const status = frame as UpdateStatusFrame | HarnessStatusFrame;
+            const phase = status.phase as DaemonFrameOf<T>['phase'];
+            assertEqual(status.requestId, requestId, `${frameType} answers the request it was sent`);
+            phases.push(phase);
+            if (stop(phase)) return { phases, last: status as DaemonFrameOf<T> };
+        }
+    };
 
     /** Send one `env.request` and take its answer, plus the `env` frame that came with it — before or after, whichever the daemon chose. */
     const manage = async (peer: Peer, requestId: string, op: { op: 'put'; environment: EnvironmentInput } | { op: 'remove'; environmentId: EnvironmentDescriptor['id'] }) => {
@@ -331,6 +427,25 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                 })
         },
         {
+            name: 'hello-build',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    // The platform tells a daemon its own versions on welcome (#359); the daemon keeps the socket and answers on.
+                    const { peer, hello } = await handshake(daemon, {}, { version: '9.9.9', minDaemonVersion: '0.0.0', latest: { stable: '9.9.9', latest: '9.9.10-main.abc1234' } });
+                    const build = hello.build;
+                    assert(build !== undefined, 'hello.build reports the build (the harness declared "build")');
+                    assert(isVersion(build.version), `hello.build.version ${build.version} is a semver version compareVersions can order`);
+                    assertEqual(hello.daemonVersion, build.version, 'hello.daemonVersion is the build version');
+                    assertEqual(build.protocol, V, 'hello.build.protocol is the protocol the daemon speaks');
+                    assert(/^[a-z0-9]+-[a-z0-9]+$/.test(build.platform), `hello.build.platform ${build.platform} is a release asset key, <platform>-<arch> (platformKey)`);
+                    assert(hello.features !== undefined, 'hello.features lists the optional frame families the daemon answers');
+                    for (const f of ['update', 'harness'] as const) if (features.has(f)) assert(hello.features.includes(f), `hello.features lists "${f}" (the harness declared it)`);
+                    if (features.has('harness')) assert(hello.harnesses !== undefined, 'hello.harnesses reports the installed harnesses (the harness declared "harness")');
+                    peer.send({ v: V, t: 'ping' });
+                    await peer.expect('pong');
+                })
+        },
+        {
             name: 'reconnect-replay',
             run: () =>
                 withDaemon(script, async (daemon) => {
@@ -374,6 +489,35 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     assertEqual(frame.frame.from, wanted, 'gap.from is the cursor the platform asked for');
                     assert(cursorBefore(frame.frame.from, frame.frame.resumeAt), 'gap.resumeAt is after gap.from');
                     assert(!cursorBefore(head, frame.frame.resumeAt), 'gap.resumeAt is not beyond the head');
+                })
+        },
+        {
+            name: 'session-reopen',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const opened = await open(peer, hello, daemon, S1);
+                    // A re-open resumes from the last ref the daemon named (#388), or else from the one the open carried.
+                    const first = await turn(peer, S1, 1, opened.head);
+                    const ref = first.ref?.ref ?? opened.ref;
+                    const head = cursorOf(first.events[first.events.length - 1]!);
+                    assert(daemon.restart !== undefined, 'the harness implements restart (it declared "resume")');
+                    peer.drop();
+                    await daemon.restart();
+
+                    // The platform still wants the session; the restarted daemon no longer hosts it and says so, by code.
+                    const again = await handshake(daemon, { [S1]: head });
+                    assertEqual(again.hello.resume[S1], undefined, 'a session the daemon lost is not offered in hello.resume');
+                    const closed = await again.peer.expect('session.closed');
+                    assertEqual(closed.sessionId, S1, 'session.closed names the session the platform wanted');
+                    assertEqual(closed.code, 'restart', 'a wanted session lost to a restart is closed with code restart, so the platform re-opens it');
+
+                    again.peer.send({ v: V, t: 'session.open', sessionId: S1, environmentId: daemon.environmentId, spec: { ...openSpec(again.hello, daemon, []), resume: ref } });
+                    const reopened = await again.peer.expect('session.opened');
+                    assertEqual(reopened.sessionId, S1, 'session.opened.sessionId');
+                    assert(reopened.head.epoch > head.epoch, `a re-opened session starts a new epoch (${reopened.head.epoch} after ${head.epoch})`);
+                    assert(cursorBefore(head, reopened.head), 'the re-opened head continues after the old one');
+                    assertTurn((await turn(again.peer, S1, 2, reopened.head)).events, 'the turn after the re-open');
                 })
         },
         {
@@ -538,6 +682,150 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     assert(failing.callId !== call.callId, 'every tool call has its own callId');
                     peer.send({ v: V, t: 'tool.result', callId: failing.callId, error: { code: 'boom', message: 'the tool failed on purpose' } });
                     assertTurn(await peer.events(S1, events, cursorOf(first[first.length - 1]!), 'the turn after a tool error'), 'the turn after a tool error');
+                })
+        },
+        {
+            name: 'update-drain',
+            run: () =>
+                // The first session's turn is held on its tool call, so it runs for as long as the case needs it to.
+                withDaemon({ ...script, tool: { name: 'echo', input: { x: 1 } } }, async (daemon) => {
+                    const target = harness.updateTarget;
+                    assert(target !== undefined, 'the harness names an updateTarget (it declared "update")');
+                    const { peer, hello } = await handshake(daemon);
+                    const opened = await open(peer, hello, daemon, S1, ['echo']);
+                    await prompt(peer, S1, 1);
+                    const call = await peer.expect('tool.call');
+                    const requestId = 'update_drain';
+                    peer.send({ v: V, t: 'update.request', requestId, target, mode: 'drain', drainTimeoutMs: 10 * timeoutMs });
+
+                    const phases: UpdateStatusFrame['phase'][] = [];
+                    const closed = new Map<string, SessionClosedFrame>();
+                    let draining = false;
+                    let opened2 = false;
+                    let refused = false;
+                    let ended = false;
+                    let last = opened.head;
+                    // Heartbeats are not progress: the deadline moves only with a frame the case is waiting for.
+                    let deadline = Date.now() + timeoutMs;
+                    while (!phases.includes('restarting') || !closed.has(S1) || (draining && !closed.has(S2))) {
+                        const frame = await peer.next(phases.includes('restarting') ? 'session.closed { code: update }' : 'update.status', Math.max(1, deadline - Date.now()));
+                        if (!UNSOLICITED.includes(frame.t)) deadline = Date.now() + timeoutMs;
+                        if (frame.t === 'update.status') {
+                            assertEqual(frame.requestId, requestId, 'update.status answers the request it was sent');
+                            assert(frame.phase !== 'failed', `the update did not fail (${frame.error?.code ?? ''}: ${frame.error?.message ?? ''})`);
+                            if (frame.phase === 'restarting') {
+                                assert(refused, 'while draining, a turn-starting prompt was refused before the daemon restarted');
+                                assert(ended, 'a drain lets the running turn finish before the daemon restarts');
+                            }
+                            // Draining: a session still opens, but its first prompt would start a turn and is refused.
+                            if (frame.phase === 'draining' && !draining) {
+                                draining = true;
+                                peer.send({ v: V, t: 'session.open', sessionId: S2, environmentId: daemon.environmentId, spec: openSpec(hello, daemon, []) });
+                            }
+                            phases.push(frame.phase);
+                        } else if (frame.t === 'session.opened') {
+                            assertEqual(frame.sessionId, S2, 'session.opened while draining is the session the suite opened');
+                            opened2 = true;
+                            peer.send({ v: V, t: 'session.command', sessionId: S2, command: { v: WIRE_PROTOCOL_VERSION, commandId: 'cmd_drain', type: 'prompt', turnId: 'turn_drain', input: [{ type: 'text', text: 'Prompt while draining.' }] } });
+                        } else if (frame.t === 'session.reply') {
+                            assertEqual([frame.sessionId, frame.reply.commandId], [S2, 'cmd_drain'], 'session.reply answers the prompt sent while draining');
+                            assert(isDrainingReply(frame.reply), `a turn-starting prompt while draining is refused with the wire error draining, not ${frame.reply.kind === 'error' ? `${frame.reply.code} (${frame.reply.message})` : 'an ack'}`);
+                            refused = true;
+                            // Now let the running turn end: the drain waits for it.
+                            peer.send({ v: V, t: 'tool.result', callId: call.callId, output: { x: 1 } });
+                        } else if (frame.t === 'session.frame') {
+                            assertEqual(frame.sessionId, S1, 'only the running session streams while draining');
+                            if (frame.frame.kind !== 'event') fail(`the running turn streams events, not a ${frame.frame.kind}`);
+                            assertFollows(frame.frame, last, 'the turn running through the drain');
+                            last = cursorOf(frame.frame);
+                            if (frame.frame.event.type === 'turn-end') ended = true;
+                        } else if (frame.t === 'session.closed') {
+                            assert(!closed.has(frame.sessionId), `session ${frame.sessionId} is closed once`);
+                            assertEqual(frame.code, 'update', `session ${frame.sessionId} is closed with code update, so the platform re-opens it after the restart`);
+                            closed.set(frame.sessionId, frame);
+                        } else if (!UNSOLICITED.includes(frame.t)) fail(`expected update.status or the traffic of a draining daemon, got ${frame.t}`);
+                    }
+                    assert(draining && opened2, 'a session.open while draining is accepted');
+                    assertPhases(phases, UPDATE_PHASES, 'update.status');
+                })
+        },
+        {
+            name: 'update-cancel',
+            run: () =>
+                withDaemon({ ...script, tool: { name: 'echo', input: { x: 1 } } }, async (daemon) => {
+                    const target = harness.updateTarget;
+                    assert(target !== undefined, 'the harness names an updateTarget (it declared "update")');
+                    const { peer, hello } = await handshake(daemon);
+                    const opened = await open(peer, hello, daemon, S1, ['echo']);
+                    await prompt(peer, S1, 1);
+                    const call = await peer.expect('tool.call');
+                    const requestId = 'update_cancel';
+                    peer.send({ v: V, t: 'update.request', requestId, target, mode: 'drain', drainTimeoutMs: 10 * timeoutMs });
+                    const drained = await statuses(peer, 'update.status', requestId, (p) => p === 'draining' || p === 'failed' || p === 'restarting');
+                    assertEqual(drained.last.phase, 'draining', `a drain-mode update with a turn running waits in draining (${drained.phases.join(' → ')})`);
+
+                    peer.send({ v: V, t: 'update.cancel', requestId });
+                    const cancelled = await statuses(peer, 'update.status', requestId, (p) => p === 'failed' || p === 'restarting');
+                    assertEqual(cancelled.last.phase, 'failed', 'a cancelled update ends failed, it does not restart');
+                    assertEqual(cancelled.last.error?.code, 'cancelled', 'a cancelled update names the cancel');
+
+                    // Nothing restarts: the running turn ends normally, and a new turn is accepted again.
+                    peer.send({ v: V, t: 'tool.result', callId: call.callId, output: { x: 1 } });
+                    assertTurn(await peer.events(S1, events, opened.head, 'the turn that ran through the cancelled drain'), 'the turn that ran through the cancelled drain');
+                    const next = await open(peer, hello, daemon, S2, ['echo']);
+                    await prompt(peer, S2, 2);
+                    const second = await peer.expect('tool.call');
+                    peer.send({ v: V, t: 'tool.result', callId: second.callId, output: { x: 1 } });
+                    assertTurn(await peer.events(S2, events, next.head, 'a turn after the cancel'), 'a turn after the cancel');
+                })
+        },
+        {
+            name: 'harness-install',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const target = harness.harnessTarget;
+                    assert(target !== undefined, 'the harness names a harnessTarget (it declared "harness")');
+                    const { peer } = await handshake(daemon);
+                    const requestId = 'harness_install';
+                    peer.send({ v: V, t: 'harness.request', requestId, op: 'install', runtime: target.runtime, target: target.asset, mode: 'drain' });
+                    const installed = (f: HarnessesFrame) => f.harnesses.find((h) => h.runtime === target.runtime && h.installed?.version === target.asset.version);
+                    // The `harnesses` frame may come before `done` or after it.
+                    let reported: HarnessesFrame | undefined;
+                    const done = await statuses(
+                        peer,
+                        'harness.status',
+                        requestId,
+                        (p) => p === 'done' || p === 'failed',
+                        (f) => {
+                            if (f.t === 'harnesses') {
+                                if (installed(f)) reported = f;
+                            } else if (!UNSOLICITED.includes(f.t)) fail(`expected harness.status or harnesses, got ${f.t}`);
+                        }
+                    );
+                    assert(done.last.phase === 'done', `the install is done, not failed (${done.last.error?.code ?? ''}: ${done.last.error?.message ?? ''})`);
+                    assertPhases(done.phases, HARNESS_PHASES, 'harness.status');
+                    while (!reported) {
+                        const f = await peer.expect('harnesses');
+                        if (installed(f)) reported = f;
+                    }
+                    assertEqual(installed(reported)!.status, 'ready', `a harnesses frame reports ${target.runtime} ${target.asset.version} ready`);
+                })
+        },
+        {
+            name: 'harness-remove-in-use',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { peer, hello } = await handshake(daemon);
+                    const runtime = hello.environments.find((e) => e.id === daemon.environmentId)!.runtime;
+                    const opened = await open(peer, hello, daemon, S1);
+                    const requestId = 'harness_remove';
+                    peer.send({ v: V, t: 'harness.request', requestId, op: 'remove', runtime, mode: 'now' });
+                    const answer = await statuses(peer, 'harness.status', requestId, (p) => p === 'done' || p === 'failed');
+                    assertEqual(answer.last.phase, 'failed', `a harness an environment uses is not removed, even with mode now (${answer.phases.join(' → ')})`);
+                    assertEqual(answer.last.error?.code, 'in-use', 'the refusal names in-use');
+                    // The session on it still runs.
+                    await prompt(peer, S1, 1);
+                    assertTurn(await peer.events(S1, events, opened.head, 'a turn after the refused removal'), 'a turn after the refused removal');
                 })
         },
         {

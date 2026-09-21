@@ -3,7 +3,26 @@
 import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, PLATFORM_FRAME_TYPES } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameType, PlatformFrame, PlatformFrameType } from '../src/index';
-import { LIMITS, daemonFrame, daemonFrameSchemas, platformFrame, platformFrameSchemas } from '../src/index';
+import {
+    HARNESS_PHASES,
+    LIMITS,
+    SESSION_CLOSED_CODES,
+    UPDATE_PHASES,
+    daemonFrame,
+    daemonFrameSchemas,
+    harnessReport,
+    harnessReports,
+    harnessRequestFrame,
+    harnessStatusFrame,
+    harnessesFrame,
+    lifecycleError,
+    platformFrame,
+    platformFrameSchemas,
+    releaseAsset,
+    updateCancelFrame,
+    updateRequestFrame,
+    updateStatusFrame
+} from '../src/index';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '../src/testing/index';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -138,7 +157,7 @@ const platformCases: { readonly [T in PlatformFrameType]: Case<Extract<PlatformF
         path: 'limit'
     },
     'update.request': {
-        valid: { v: V, t: 'update.request', requestId: 'u_1', target: { url: 'https://example.test/d.zip', sha256: 'ab12', bytes: 100, version: '1.2.0' }, mode: 'drain', drainTimeoutMs: 600000 },
+        valid: { v: V, t: 'update.request', requestId: 'u_1', target: { url: 'https://example.test/d.zip', sha256: 'ab12'.repeat(16), bytes: 100, version: '1.2.0' }, mode: 'drain', drainTimeoutMs: 600000 },
         invalid: { v: V, t: 'update.request', requestId: 'u_1', target: 'previous', mode: 'later', drainTimeoutMs: 0 },
         path: 'mode'
     },
@@ -233,7 +252,8 @@ describe('daemon frame schemas', () => {
             harnesses: [{ runtime: 'claude-code', status: 'ready' }]
         };
         expect(daemonFrame.safeParse(hello)).toEqual({ success: true, data: hello });
-        expect(daemonFrame.safeParse({ ...hello, features: ['suspend'] }).success).toBe(false);
+        // A feature this end does not know is dropped (#360): a newer daemon still pairs.
+        expect(daemonFrame.safeParse({ ...hello, features: ['suspend'] })).toMatchObject({ success: true, data: { features: [] } });
         // The asset key the platform picks a release asset by is required on a build.
         expect(daemonFrame.safeParse({ ...hello, build: { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable' } }).success).toBe(false);
         const welcome = { ...platformCases.welcome.valid, platform: { version: '1.3.0', minDaemonVersion: '1.0.0', latest: { stable: '1.2.0', latest: '1.3.0-rc.1' } } };
@@ -382,6 +402,123 @@ describe('daemon frame schemas', () => {
         expect(neither.success).toBe(false);
         expect(neither.error?.issues[0]?.path).toEqual(['result']);
         expect(response({ result: { events: [] }, error: { code: 'internal', message: 'both' } }).success).toBe(false);
+    });
+
+    describe('lifecycle frames (#360)', () => {
+        const asset = { url: 'https://releases.example.test/agentic-daemon-1.2.0-win32-x64.zip', sha256: 'ab'.repeat(32), bytes: 100, version: '1.2.0' };
+        const request = (target: unknown, extra: Record<string, unknown> = {}) => platformFrameSchemas['update.request'].safeParse({ v: V, t: 'update.request', requestId: 'u_1', target, mode: 'drain', drainTimeoutMs: 600_000, ...extra });
+        const issues = (r: { success: boolean; error?: { issues: readonly { path: readonly PropertyKey[] }[] } }) => r.error?.issues.map((i) => i.path.join('.')) ?? [];
+
+        it('an update target is a strict release asset over https with a 64-hex digest, or previous', () => {
+            expect(request(asset)).toEqual({ success: true, data: { v: V, t: 'update.request', requestId: 'u_1', target: asset, mode: 'drain', drainTimeoutMs: 600_000 } });
+            expect(request('previous').success).toBe(true);
+            expect(request({ ...asset, sha256: 'AB'.repeat(32) }).success).toBe(true);
+            expect(request('latest').success).toBe(false);
+            for (const bad of [
+                { ...asset, url: 'http://releases.example.test/d.zip' },
+                { ...asset, url: 'file:///C:/d.zip' },
+                { ...asset, url: 'not a url' },
+                { ...asset, url: `https://x.test/${'x'.repeat(LIMITS.text)}` },
+                { ...asset, sha256: 'ab12' },
+                { ...asset, sha256: 'zz'.repeat(32) },
+                { ...asset, sha256: 'ab'.repeat(33) },
+                { ...asset, bytes: 0 },
+                { ...asset, bytes: 1.5 },
+                { ...asset, version: '' },
+                { ...asset, token: 'secret' }
+            ])
+                expect(request(bad).success, JSON.stringify(bad).slice(0, 120)).toBe(false);
+            expect(issues(request({ ...asset, url: 'http://x.test/d.zip' }))).toContain('target.url');
+            expect(request(asset, { drainTimeoutMs: LIMITS.drainTimeoutMs }).success).toBe(true);
+            expect(request(asset, { drainTimeoutMs: LIMITS.drainTimeoutMs + 1 }).success).toBe(false);
+            expect(request(asset, { drainTimeoutMs: -1 }).success).toBe(false);
+        });
+
+        it('a harness request names a runtime, an op, a mode and at most a strict asset', () => {
+            const harness = (f: Record<string, unknown>) => platformFrameSchemas['harness.request'].safeParse({ v: V, t: 'harness.request', requestId: 'hr_1', op: 'install', runtime: 'claude-code', mode: 'drain', ...f });
+            expect(harness({ target: asset }).success).toBe(true);
+            expect(harness({ op: 'remove', mode: 'now' }).success).toBe(true);
+            expect(harness({ target: { ...asset, url: 'http://x.test/h.zip' } }).success).toBe(false);
+            expect(harness({ target: 'previous' }).success).toBe(false);
+            expect(harness({ runtime: '' }).success).toBe(false);
+            expect(harness({ runtime: 'x'.repeat(LIMITS.id + 1) }).success).toBe(false);
+            expect(harness({ mode: 'later' }).success).toBe(false);
+            expect(platformFrameSchemas['update.cancel'].safeParse({ v: V, t: 'update.cancel', requestId: 'x'.repeat(LIMITS.id + 1) }).success).toBe(false);
+        });
+
+        it('a status carries an error exactly when it failed, and progress never passes its total', () => {
+            const update = (f: Record<string, unknown>) => daemonFrameSchemas['update.status'].safeParse({ v: V, t: 'update.status', requestId: 'u_1', ...f });
+            for (const phase of UPDATE_PHASES.filter((p) => p !== 'failed')) expect(update({ phase }).success, phase).toBe(true);
+            expect(update({ phase: 'failed', error: { code: 'checksum', message: 'digest mismatch' } }).success).toBe(true);
+            expect(issues(update({ phase: 'failed' }))).toContain('error');
+            expect(issues(update({ phase: 'staged', error: { code: 'x', message: 'y' } }))).toContain('error');
+            expect(update({ phase: 'failed', error: { code: '', message: 'y' } }).success).toBe(false);
+            expect(update({ phase: 'failed', error: { code: 'x', message: 'y'.repeat(LIMITS.text + 1) } }).success).toBe(false);
+            expect(update({ phase: 'downloading', progress: { bytes: 100, total: 100 } }).success).toBe(true);
+            expect(issues(update({ phase: 'downloading', progress: { bytes: 101, total: 100 } }))).toContain('progress.bytes');
+            expect(update({ phase: 'downloading', progress: { bytes: -1, total: 100 } }).success).toBe(false);
+
+            const harness = (f: Record<string, unknown>) => daemonFrameSchemas['harness.status'].safeParse({ v: V, t: 'harness.status', requestId: 'hr_1', ...f });
+            for (const phase of HARNESS_PHASES.filter((p) => p !== 'failed')) expect(harness({ phase }).success, phase).toBe(true);
+            expect(harness({ phase: 'failed', error: { code: 'in-use', message: 'an environment runs on it' } }).success).toBe(true);
+            expect(harness({ phase: 'failed' }).success).toBe(false);
+            expect(harness({ phase: 'done', error: { code: 'x', message: 'y' } }).success).toBe(false);
+        });
+
+        it('a daemon reports at most 16 harnesses, each bounded', () => {
+            const report = (i: number) => ({ runtime: `runtime-${i}`, installed: { version: '1.0.0', at: 1 }, status: 'ready' });
+            const frame = (harnesses: unknown[]) => daemonFrameSchemas.harnesses.safeParse({ v: V, t: 'harnesses', harnesses });
+            expect(LIMITS.harnesses).toBe(16);
+            expect(frame(Array.from({ length: 16 }, (_, i) => report(i))).success).toBe(true);
+            expect(frame(Array.from({ length: 17 }, (_, i) => report(i))).success).toBe(false);
+            expect(frame([{ runtime: 'claude-code', status: 'missing' }]).success).toBe(true);
+            expect(frame([{ ...report(0), installed: { version: '', at: 1 } }]).success).toBe(false);
+            expect(frame([{ ...report(0), installed: { version: '1.0.0', at: -1 } }]).success).toBe(false);
+            expect(daemonFrame.safeParse({ ...daemonCases.hello.valid, harnesses: Array.from({ length: 17 }, (_, i) => report(i)) }).success).toBe(false);
+        });
+
+        it('hello: the build and the lifecycle history are bounded; a feature this end does not know is dropped, not fatal', () => {
+            const build = { version: '1.2.0', commit: 'abc1234', protocol: V, channel: 'stable', platform: 'darwin-arm64' };
+            const hello = (f: Record<string, unknown>) => daemonFrame.safeParse({ ...daemonCases.hello.valid, build, ...f });
+            expect(hello({})).toEqual({ success: true, data: { ...daemonCases.hello.valid, build } });
+            expect(hello({ features: ['update', 'suspend', 'harness'] })).toMatchObject({ success: true, data: { features: ['update', 'harness'] } });
+            expect(hello({ features: Array.from({ length: 17 }, () => 'update') }).success).toBe(false);
+            expect(hello({ features: [''] }).success).toBe(false);
+            expect(hello({ build: { ...build, platform: '' } }).success).toBe(false);
+            expect(hello({ build: { ...build, commit: 'x'.repeat(LIMITS.id + 1) } }).success).toBe(false);
+            expect(hello({ build: { ...build, protocol: -1 } }).success).toBe(false);
+            expect(hello({ restarts: -1 }).success).toBe(false);
+            expect(hello({ restarts: 1.5 }).success).toBe(false);
+            expect(hello({ lastExit: { at: 1, reason: 'x'.repeat(LIMITS.text + 1) } }).success).toBe(false);
+            expect(hello({ lastExit: { at: 1, reason: 'killed', code: 1.5 } }).success).toBe(false);
+            expect(hello({ lastUpdate: { from: '1.1.0', to: '1.2.0', outcome: 'skipped', at: 1 } }).success).toBe(false);
+            expect(hello({ lastUpdate: { from: '1.1.0', to: '1.2.0', outcome: 'rolled-back', at: 1, error: 'y'.repeat(LIMITS.text + 1) } }).success).toBe(false);
+        });
+
+        it('welcome.platform is bounded; session.closed takes every SessionClosedCode and nothing else', () => {
+            const welcome = (platform: unknown) => platformFrameSchemas.welcome.safeParse({ ...platformCases.welcome.valid, platform });
+            expect(welcome({ version: '1.3.0' }).success).toBe(true);
+            expect(welcome({ version: '' }).success).toBe(false);
+            expect(welcome({ version: '1.3.0', minDaemonVersion: 'x'.repeat(LIMITS.id + 1) }).success).toBe(false);
+            expect(welcome({ version: '1.3.0', latest: { stable: '' } }).success).toBe(false);
+            const closed = (code: unknown) => daemonFrameSchemas['session.closed'].safeParse({ v: V, t: 'session.closed', sessionId: 's1', reason: 'r', code });
+            for (const code of SESSION_CLOSED_CODES) expect(closed(code).success, code).toBe(true);
+            expect(closed('suspended').success).toBe(false);
+            expect(closed(1).success).toBe(false);
+        });
+
+        it('are exported by name, next to the building blocks', () => {
+            expect(updateStatusFrame).toBe(daemonFrameSchemas['update.status']);
+            expect(harnessStatusFrame).toBe(daemonFrameSchemas['harness.status']);
+            expect(harnessesFrame).toBe(daemonFrameSchemas.harnesses);
+            expect(updateRequestFrame).toBe(platformFrameSchemas['update.request']);
+            expect(updateCancelFrame).toBe(platformFrameSchemas['update.cancel']);
+            expect(harnessRequestFrame).toBe(platformFrameSchemas['harness.request']);
+            expect(releaseAsset.safeParse(asset).success).toBe(true);
+            expect(harnessReports.safeParse([{ runtime: 'codex-cli', status: 'broken' }]).success).toBe(true);
+            expect(harnessReport.safeParse({ runtime: 'codex-cli', status: 'gone' }).success).toBe(false);
+            expect(lifecycleError.safeParse({ code: 'cancelled', message: 'the update was cancelled' }).success).toBe(true);
+        });
     });
 
     it('refuse the wrong protocol version at the schema level too', () => {

@@ -13,5 +13,9 @@ export const LIMITS = {
     /** `OpenSpec.system` — instructions + skills + retrieved memory. */
     system: 512 * 1024,
     /** Entries in any list or record (environments, cursors, tools, prompt parts). */
-    list: 4096
+    list: 4096,
+    /** Harnesses a daemon reports, and optional features it declares (#360). */
+    harnesses: 16,
+    /** How long an `update.request` may drain before it restarts anyway: a day (#360). */
+    drainTimeoutMs: 24 * 60 * 60 * 1000
 } as const;

@@ -5,4 +5,4 @@ export type { ConformanceCase, DaemonConformanceOptions } from './conformance.js
 export { daemonConformance } from './conformance.js';
 export { ConformanceError } from './assert.js';
 export type { InMemoryFaults, InMemoryHarnessOptions } from './in-memory.js';
-export { InMemoryDaemon, inMemoryHarness, inMemoryEnvironment, IN_MEMORY_MACHINE, IN_MEMORY_ENVIRONMENT, IN_MEMORY_CAPABILITIES } from './in-memory.js';
+export { InMemoryDaemon, inMemoryHarness, inMemoryEnvironment, IN_MEMORY_MACHINE, IN_MEMORY_ENVIRONMENT, IN_MEMORY_CAPABILITIES, IN_MEMORY_BUILD, IN_MEMORY_HARNESSES, IN_MEMORY_RELEASE, IN_MEMORY_HARNESS_TARGET } from './in-memory.js';
