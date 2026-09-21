@@ -55,6 +55,16 @@ export const anthropicApiPlugin: PluginManifest = {
     compat: { platform: '*', core: '*' }
 };
 
+/**
+ * The models a Claude Code member can switch to before its account reports its own (#453): the adapter's
+ * `CLAUDE_CODE_MODELS` plus the ones it leaves out that a subscription may have. Spelled out, not imported: this entry
+ * runs in the Worker and the adapter is Node's (a test keeps the two in step). An environment's `models` replace it.
+ */
+export const CLAUDE_CODE_MODEL_IDS: readonly string[] = ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
+
+/** Claude Code's permission modes (#453), the adapter's `PERMISSION_MODES`; `bypassPermissions` only runs where the environment allows it. */
+export const CLAUDE_CODE_PERMISSION_MODES: readonly string[] = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions'];
+
 export const claudeCodePlugin: PluginManifest = {
     id: CLAUDE_CODE_PLUGIN_ID,
     version: RUNTIME_PLUGIN_VERSION,
@@ -63,7 +73,25 @@ export const claudeCodePlugin: PluginManifest = {
     description: 'Agents run in Claude Code on a paired machine, signed in with the account of the chosen environment, and each account reports its plan usage limits. Credentials stay on the machine.',
     // A harness runtime (its own loop, driven through the Agent SDK) that reports its accounts' usage limits (#261, #313).
     capabilities: [DAEMON_HOSTED_CAPABILITY, HARNESS_RUNTIME_CAPABILITY, USAGE_LIMITS_CAPABILITY],
-    config: { type: 'object', properties: {}, additionalProperties: false },
+    // No `default`s: without a configured value Claude Code picks its own model and asks in its `default` mode.
+    config: {
+        type: 'object',
+        properties: {
+            defaultModel: {
+                type: 'string',
+                title: 'Default model',
+                description: 'The model an agent runs on when its own config names none. An account that reports its own models lists those in a chat.',
+                enum: CLAUDE_CODE_MODEL_IDS
+            },
+            defaultPermissionMode: {
+                type: 'string',
+                title: 'Default permission mode',
+                description: 'How Claude Code asks before it runs a tool, when a chat sets no mode for the member. bypassPermissions runs only in environments that allow it.',
+                enum: CLAUDE_CODE_PERMISSION_MODES
+            }
+        },
+        additionalProperties: false
+    },
     permissions: [{ scope: 'machine:*', reason: 'Starts sessions on your paired machines, inside the folders their environments allow.' }],
     compat: { platform: '*', core: '*' }
 };

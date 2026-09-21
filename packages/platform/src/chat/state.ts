@@ -9,7 +9,7 @@
  * `applyEntry` hook of `ctx.append`.
  */
 
-import { isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MachineId, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
+import { applySessionOptions, isChatFilePart, parseChatFileUri, type AgentId, type ChatEntry, type ChatFile, type ChatMember, type MachineId, type MessageId, type Principal, type ProjectId, type SessionId } from '@agentic/core';
 
 /** Entries kept in state before the oldest page is archived. */
 export const WINDOW = 200;
@@ -134,6 +134,13 @@ export function applyChatEntry(state: ChatState, entry: ChatEntry): void {
             if (entry.workdir && member) {
                 const { workdir: _old, ...rest } = member;
                 state.members[entry.workdir.agentId] = entry.workdir.ref ? { ...rest, workdir: entry.workdir.ref } : rest;
+            }
+            // The note `setOptions` writes (#453): the member's model / permission mode for this chat.
+            const optioned = entry.options ? state.members[entry.options.agentId] : undefined;
+            if (entry.options && optioned) {
+                const { options: old, ...rest } = optioned;
+                const options = applySessionOptions(old, entry.options.patch);
+                state.members[entry.options.agentId] = options ? { ...rest, options } : rest;
             }
             // The note `setProject` writes (#332): the chat's project from here on, or none.
             if (entry.project) {

@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -158,6 +158,7 @@ interface SessionClient {
     tail(from?: { epoch: number; seq: number }): AsyncIterable<AgentEvent>;
     request(requestId: string): Promise<SessionRequestView | null>;
     cancel(): Promise<SessionCommandResult>;
+    configure(patch: Readonly<Record<string, string>>, commandId?: string): Promise<SessionCommandResult>;
     close(): Promise<SessionCommandResult>;
 }
 
@@ -258,13 +259,44 @@ interface RegistryClient {
 }
 
 /**
- * The config a session opens with: the agent's own, with the runtime plugin's `defaultModel` where the agent names no
- * model (§9). Only when the gate answered for the route's current runtime — after a `fallback-api` that is `anthropic-api`.
+ * The model and permission mode a session runs with (#453): `over` (the chat member's, else the task's), else the
+ * agent's config, else the runtime plugin's `defaultModel` / `defaultPermissionMode` (§9). The plugin's only when the
+ * gate answered for the route's current runtime — after a `fallback-api` that is `anthropic-api`.
  */
-function withDefaultModel(config: FrozenAgentConfig, plugins: RegistryGate | undefined): FrozenAgentConfig {
-    const model = plugins?.runtime?.config['defaultModel'];
-    if (config.execution.model || typeof model !== 'string' || !model) return config;
-    return { ...config, execution: { ...config.execution, model } };
+function sessionOptionsOf(config: FrozenAgentConfig, plugins: RegistryGate | undefined, over: SessionOptions = {}): SessionOptions {
+    const plugin = (key: string): string | undefined => {
+        const value = plugins?.runtime?.config[key];
+        return typeof value === 'string' && value ? value : undefined;
+    };
+    const model = over.model ?? config.execution.model ?? plugin('defaultModel');
+    const permissionMode = over.permissionMode ?? plugin('defaultPermissionMode');
+    return { ...(model ? { model } : {}), ...(permissionMode ? { permissionMode } : {}) };
+}
+
+/** The config a session opens with: the agent's own, on the model its options settled (#453). */
+function withModel(config: FrozenAgentConfig, options: SessionOptions | undefined): FrozenAgentConfig {
+    if (!options?.model || options.model === config.execution.model) return config;
+    return { ...config, execution: { ...config.execution, model: options.model } };
+}
+
+/**
+ * What a runtime takes to go back to its own choice (#453): Claude Code's alias for its default model and its default
+ * permission mode. Only sent to a session that was set to something and should now run with nothing named.
+ */
+const RUNTIME_DEFAULT = 'default';
+
+/**
+ * The keys a session running with `has` must change to run with `want` (#453): what `Session.configure` sets. A key
+ * `want` leaves out (an override cleared, nothing in the config or the plugin) resets a session that was set to
+ * something back to the runtime's default — a clear never leaves the old value running.
+ */
+function optionsDrift(has: SessionOptions | undefined, want: SessionOptions | undefined): Record<string, string> {
+    const patch: Record<string, string> = {};
+    for (const key of ['model', 'permissionMode'] as const) {
+        const target = want?.[key] ?? (has?.[key] !== undefined ? RUNTIME_DEFAULT : undefined);
+        if (target !== undefined && target !== has?.[key]) patch[key] = target;
+    }
+    return patch;
 }
 
 const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
@@ -518,6 +550,17 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         return 'busy';
                     }
                 }
+                // Between turns only (#453, AGT-07): a reused session takes the member's model / mode before its next prompt; a
+                // turn running now keeps what it runs with, and a steered prompt joins it as it is.
+                const drift = running ? {} : optionsDrift(info.options, route.options);
+                if (Object.keys(drift).length) {
+                    const commandId = `${requested}:configure${route.attempt ? `#${route.attempt}` : ''}`;
+                    if (!info.capabilities?.config) {
+                        return { v: 1, kind: 'error', commandId, code: 'unsupported', message: `session ${sessionId} cannot switch ${Object.keys(drift).join(' and ')} while it lives: start a new session for the member` } as Extract<SessionCommandResult, { kind: 'error' }>;
+                    }
+                    const configured = await session(sessionId).configure(drift, commandId);
+                    if (configured.kind === 'error') return configured;
+                }
                 // After a `busy` the machine answered (#394) the prompt goes out again under a fresh command id: `dispatch` would answer a known one with the refusal it remembers.
                 const reply = await session(sessionId).prompt(input, requested, undefined, route.attempt ? `${requested}#${route.attempt}` : undefined, { taskId: route.taskId });
                 if (reply.kind === 'error') return reply;
@@ -729,6 +772,20 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * Idempotent: a route already bound (a retry) keeps its id. Called once the placement is final (the folder
              * included), since that is what reuse is judged on.
              */
+            /**
+             * The route's session options (#453): the chat member's (`Chat.setOptions`) over the task's, over the agent's
+             * config and the plugin's defaults — read when the turn is placed, so a change made after the task was created
+             * still applies to it. A chat that cannot be read leaves the member's out.
+             */
+            async function settleOptions(route: Route, t?: TaskView): Promise<SessionOptions> {
+                const member = route.chatId
+                    ? await chat(route.chatId)
+                          .get()
+                          .then((summary) => summary.members[route.agentId]?.options, () => undefined)
+                    : undefined;
+                return sessionOptionsOf(route.config, route.plugins, { ...t?.options, ...member });
+            }
+
             async function bindSession(route: Route): Promise<SessionId> {
                 if (route.sessionId) return route.sessionId;
                 if (route.chatId) {
@@ -756,6 +813,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const hooks = await projectHooks(route, 'local');
                 if (!hooks) return;
                 const sessionId = await bindSession(route);
+                route.options = await settleOptions(route, t);
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
@@ -763,7 +821,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
                     ...(await work(route, t)),
-                    config: ctx.snapshot(withDefaultModel(route.config, route.plugins)),
+                    config: ctx.snapshot(withModel(route.config, route.options)),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     tools: grantedToolNames(route),
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
@@ -859,6 +917,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         cwd: route.cwd ?? '',
                         system: opened.spec?.system ?? spec.system ?? route.config.instructions,
                         ...(model ? { model } : {}),
+                        ...(spec.permissionMode ? { permissionMode: spec.permissionMode } : {}),
                         ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                         ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
                         tools: grantedToolNames(route),
@@ -1076,9 +1135,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     route.cwd = hooks.cwd;
                 }
                 const sessionId = await bindSession(route);
+                const options = (route.options = await settleOptions(route, t));
+                // A mode that asks about nothing runs only where the machine allows it (#453) — never silently another mode (EXE-12).
+                if (options.permissionMode === BYPASS_PERMISSIONS_MODE && !env.allowBypassPermissions) {
+                    await fail(route, { code: 'permission-mode-not-allowed', message: `permission mode ${BYPASS_PERMISSIONS_MODE} is not allowed in environment ${environmentId} on machine ${machineId}: set allowBypassPermissions on it in environments.json there, or pick another mode`, recoverable: true });
+                    return;
+                }
                 const opening = await work(route, t);
                 const tools = grantedToolNames(route);
-                const effective = withDefaultModel(route.config, route.plugins);
+                const effective = withModel(route.config, options);
                 // The agent's MCP connectors (#280): the ready ones go to the daemon, secret names only; the rest are named in the prompt.
                 const placed = daemonConnectors(route.plugins?.connectors ?? [], machineId);
                 const spec: SessionOpenSpec = {
@@ -1091,6 +1156,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.cwd !== undefined ? { cwd: route.cwd } : {}),
                     ...opening,
                     config: ctx.snapshot(effective),
+                    ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
                     ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {}),

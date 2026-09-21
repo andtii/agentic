@@ -49,7 +49,7 @@ export function harnessCapabilityReport(subject: HarnessReportSubject, c: AgentC
     flag(c.fork, HARNESS_OPS.fork, `${name} cannot fork a session`);
     flag(c.cancel, HARNESS_OPS.cancel, `${name} cannot cancel a running turn`);
     flag(c.steer, HARNESS_OPS.steer, 'a message sent mid-turn is not folded into the running turn; it waits for the next one');
-    flag(c.config, HARNESS_OPS.configure, 'the model cannot be switched in a running session');
+    flag(c.config, HARNESS_OPS.configure, 'the model and permission mode cannot be switched in a running session');
     flag(c.structuredOutput, HARNESS_OPS.structured, `${name} cannot constrain a reply to a schema`);
     flag(c.subagents !== 'none', HARNESS_OPS.subagents, `${name} runs no sub-agents`);
     flag(c.listSessions, HARNESS_OPS.listSessions, `${name} cannot list its sessions`);

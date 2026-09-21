@@ -98,7 +98,8 @@ export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = N
         status: waiting.has(agentId) ? 'waiting' : working.has(agentId) ? 'active' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
-        ...(m.workdir ? { workdir: m.workdir } : {})
+        ...(m.workdir ? { workdir: m.workdir } : {}),
+        ...(m.options ? { options: m.options } : {})
     }));
 }
 

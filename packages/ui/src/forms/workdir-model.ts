@@ -6,7 +6,7 @@
  * same label server-side.
  */
 
-import { normalizePath, pathWithin, type EnvironmentDescriptor, type EnvironmentId, type FsError, type FsErrorCode, type HostOs, type MachineInfo, type QuotaSnapshot, type WorkdirRef } from '@agentic/core';
+import { normalizePath, pathWithin, type EnvironmentDescriptor, type EnvironmentId, type FsError, type FsErrorCode, type HostOs, type MachineInfo, type ModelOption, type QuotaSnapshot, type WorkdirRef } from '@agentic/core';
 import { environmentStatus } from './environment-card.js';
 
 /** One environment the picker can browse. */
@@ -20,6 +20,10 @@ export interface WorkdirEnvironment {
     readonly unavailable?: string;
     /** Its account's provider limits (#315): `null` before the first report; absent when the caller has none to show. */
     readonly quota?: QuotaSnapshot | null;
+    /** The models its account reports (#453, `EnvironmentDescriptor.models`); absent until reported. */
+    readonly models?: readonly ModelOption[];
+    /** Sessions here may run in a mode that asks about nothing (#453); set on the machine only. */
+    readonly allowBypassPermissions?: boolean;
 }
 
 export interface WorkdirRecent {
