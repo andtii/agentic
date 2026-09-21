@@ -22,6 +22,7 @@
  */
 import type { AuthStatus, EnvironmentVerdict, TaskError, TaskStatus, WaitReason } from '@agentic/core';
 import type { FailureKind } from '@agentic/ui';
+import { interruptionCause, lostMachineOf, MACHINE_LOST_CODE, MACHINE_LOST_HOURS, type Interruption } from './interruption';
 
 export type ClientConnection = 'live' | 'reconnecting';
 
@@ -44,6 +45,10 @@ export interface FailureSignals {
     } | null;
     /** The task record (`Task.get()`). */
     readonly task?: { readonly id: string; readonly status: TaskStatus; readonly error?: TaskError; readonly wait?: WaitReason } | null;
+    /** Why the turn was cut and where its resume stands (#368, `interruptionOf`), when the page knows. */
+    readonly interruption?: Interruption | null;
+    /** A machine id → its name, for a failure that names a machine by id (`machine-lost`). */
+    readonly machineName?: (id: string) => string | undefined;
 }
 
 export interface FailureState {
@@ -60,6 +65,10 @@ export interface FailureState {
     readonly link?: { readonly href: string; readonly label: string };
     /** Interrupted work is uncertain (OPS-05): what ran before the cut may or may not have taken effect. */
     readonly uncertain?: boolean;
+    /** For `interrupted` (#368): the resume is under way — the route re-opens the session, or `onInterrupt: 'auto'` resumes it — so Resume is disabled. */
+    readonly resume?: 'resuming' | 'auto';
+    /** The failure is recoverable by sending the work again (`machine-lost`): the page's Retry, where it has one. */
+    readonly retry?: boolean;
 }
 
 /** The `requestId` the router parks an interrupted task under: `resume:{turnId}`. */
@@ -141,7 +150,7 @@ const age = (lastSeen: number | undefined, now: number): string => {
  * machine's last-seen age; tests pass a fixed clock.
  */
 export function failureOf(signals: FailureSignals, now: number = Date.now()): FailureState | null {
-    const { client, machine, auth, session, task } = signals;
+    const { client, machine, auth, session, task, interruption } = signals;
 
     // 1. The reader cannot see: everything else may be stale.
     if (client === 'reconnecting') return { kind: 'client-offline', detail: 'Your agents keep working. What you see may be out of date until the connection returns.' };
@@ -162,11 +171,16 @@ export function failureOf(signals: FailureSignals, now: number = Date.now()): Fa
 
     // 4. A turn cut short: marked, never replayed; uncertain until a person resumes (OPS-05).
     if (session?.interrupted || (task && task.status === 'waiting' && isResumeWait(task.wait))) {
+        const resume = interruption?.resume === 'resuming' || interruption?.resume === 'auto' ? interruption.resume : undefined;
+        const next = resume === 'auto' ? 'The agent resumes it automatically, once.' : resume === 'resuming' ? 'Resuming: the session re-opens on its machine.' : 'Resume sends a new prompt over the intact transcript.';
         return {
             kind: 'interrupted',
-            detail: 'The platform restarted mid-turn. Nothing was replayed — what ran before the cut may or may not have taken effect. Resume sends a new prompt over the intact transcript.',
+            detail: `Interrupted: ${interruptionCause(interruption)}. Nothing was replayed — what ran before the cut may or may not have taken effect. ${next}`,
+            ...(interruption?.host ? { signal: `session.closed ${interruption.host}` } : {}),
             uncertain: true,
-            ...(task ? { taskId: task.id } : {})
+            ...(task ? { taskId: task.id } : {}),
+            ...(interruption?.machineId ? { machineId: interruption.machineId } : {}),
+            ...(resume ? { resume } : {})
         };
     }
 
@@ -185,6 +199,12 @@ export function failureOf(signals: FailureSignals, now: number = Date.now()): Fa
         }
         if (error.code === REGISTRY_UNAVAILABLE_CODE) {
             return { kind: 'runtime', signal, detail: `${error.message} The platform could not check its plugins; nothing about the work is wrong. Send it again.`, taskId: task.id };
+        }
+        if (error.code === MACHINE_LOST_CODE) {
+            // The machine stayed offline past MACHINE_LOST_MS (#366): named, and sent again when the task allows it.
+            const id = machine?.id ?? lostMachineOf(error.message);
+            const name = machine?.name ?? (id ? (signals.machineName?.(id) ?? id) : 'The machine');
+            return { kind: 'machine', signal, detail: `${name} stayed offline for ${MACHINE_LOST_HOURS} h, so the turn is lost. Nothing was replayed.${error.recoverable ? ' Retry sends the work again once it is back.' : ''}`, taskId: task.id, ...(id ? { machineId: id } : {}), ...(error.recoverable ? { retry: true } : {}) };
         }
         if (error.code === UNKNOWN_RUNTIME_CODE) {
             return { kind: 'task', signal, detail: `${error.message} Pick a runtime this workspace has in the agent's config.`, taskId: task.id, link: { href: '/plugins', label: 'Open plugins' } };

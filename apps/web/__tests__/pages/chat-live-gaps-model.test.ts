@@ -295,8 +295,15 @@ describe('memberQuota on the chat’s machine (#414)', () => {
 describe('configPatch (#414)', () => {
     it('clears an account or a pin the form dropped by name, since a patch merges execution one level deep', () => {
         const config = { ...fullConfig, execution: { runtime: 'claude-code', limits: {}, offlinePolicy: 'queue' as const } };
-        expect(configPatch(config as never).execution).toEqual({ runtime: 'claude-code', limits: {}, offlinePolicy: 'queue', account: null, defaultEnvironmentId: null });
+        expect(configPatch(config as never).execution).toEqual({ runtime: 'claude-code', limits: {}, offlinePolicy: 'queue', account: null, defaultEnvironmentId: null, onInterrupt: 'ask' });
         const bound = { ...config, execution: { ...config.execution, account: { identity: 'me@work' } } };
         expect(configPatch(bound as never).execution).toMatchObject({ account: { identity: 'me@work' }, defaultEnvironmentId: null });
+    });
+
+    it('names onInterrupt every time (#368): switching back to Ask clears an auto the merge would keep', () => {
+        const config = { ...fullConfig, execution: { runtime: 'claude-code', limits: {}, offlinePolicy: 'queue' as const } };
+        expect(configPatch(config as never).execution?.onInterrupt).toBe('ask');
+        const auto = { ...config, execution: { ...config.execution, onInterrupt: 'auto' as const } };
+        expect(configPatch(auto as never).execution?.onInterrupt).toBe('auto');
     });
 });

@@ -45,8 +45,8 @@ export interface NeedsRow {
     /** Where the row leads besides the session: `Open chat`, `Open task`. */
     readonly href?: string;
     readonly hrefLabel?: string;
-    /** An `interrupted` row's action (`Resume`). */
-    readonly primary?: { readonly label: string };
+    /** An `interrupted` row's action (`Resume`); disabled while the resume is already under way (#368). */
+    readonly primary?: { readonly label: string; readonly disabled?: boolean };
     /** Behind an `interrupted` row: the task the router resumes. */
     readonly taskId?: string;
 }

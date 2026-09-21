@@ -35,6 +35,8 @@ export function failureAction(state: FailureState, handlers: { onResume?: () => 
         case 'client-offline':
             return {};
         case 'machine':
+            // A lost turn (`machine-lost`) is sent again where the page can; otherwise the machine is where to look.
+            if (state.retry && handlers.onRetry) return { onAction: handlers.onRetry, loading, label: 'Retry' };
             return { href: state.machineId ? `/machines/${state.machineId}` : '/machines' };
         case 'auth':
             return handlers.onRecheck ? { onAction: handlers.onRecheck, loading } : { href: state.machineId ? `/machines/${state.machineId}` : '/machines', label: 'Open machine' };
@@ -43,7 +45,10 @@ export function failureAction(state: FailureState, handlers: { onResume?: () => 
         case 'task':
             return state.link ? { href: state.link.href, label: state.link.label } : state.taskId ? { href: `/tasks/${state.taskId}` } : null;
         case 'interrupted':
-            // Resume is the one action; a page that cannot issue it shows it disabled rather than pretending.
+            // Resume is the one action; a page that cannot issue it shows it disabled rather than pretending — and so
+            // does one whose resume is already under way (#368): the route re-opening the session, or `onInterrupt: 'auto'`.
+            if (state.resume === 'auto') return { disabled: true, label: 'Resuming automatically' };
+            if (state.resume === 'resuming') return { disabled: true, loading: true, label: 'Resuming…' };
             return handlers.onResume ? { onAction: handlers.onResume, loading } : { disabled: true };
     }
 }

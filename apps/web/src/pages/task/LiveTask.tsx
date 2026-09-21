@@ -7,6 +7,11 @@
  * failed task names its cause (OPS-04) and interrupted work is marked
  * uncertain until a person resumes it (OPS-05). "Resume" is
  * `Routing.resume(taskId)`; "Stop chain" is `Task.cancel`.
+ *
+ * #368: the card names why the turn was cut (the Audit's `session.interrupted`
+ * row) and where the resume stands (the router's route: re-opening, or
+ * resuming automatically), a resumed task says so, and a task waiting on its
+ * machine reads as a wait with the machine, since when and the deadline.
  */
 import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
@@ -18,11 +23,12 @@ import { AgentTile, ConfirmDialog, EmptyState, EnvironmentLine, Label, StatusPil
 import { KeyValue } from '../../components/KeyValue';
 import { Page } from '../../components/Page';
 import { Panel } from '../../components/Panel';
-import { FailureNotice, failureOf, isResumeWait } from '../../components/status';
+import { FailureNotice, failureOf, interruptionLine, interruptionOf, isResumeWait, machineOfflineDetail, machineOfflineText, useInterruptionReads, type ClockText } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { routingKeyOf, taskKeyOf } from '../../actors/keys';
 import { formatTime } from '../../mock/workspace';
 import { useAgentDirectory } from '../chat/directory';
+import { useEnvironmentDirectory } from '../ops/environments';
 
 /** What the live page tells the topbar: the record for the crumb and the two actions. */
 export const taskHead = signal<{ value: { id: string; task: TaskView; stop: () => void } | null }>({ value: null });
@@ -47,8 +53,16 @@ export function transitionText(t: TaskTransition): string {
     return `${t.to}${why}${wait}`;
 }
 
-/** The wait line under a node (`TaskNode.waitDetail`): a resume wait says the work is uncertain. */
-export const waitDetailOf = (wait: WaitReason | undefined): string | undefined => (isResumeWait(wait) ? 'interrupted · uncertain' : wait?.kind === 'environment-offline' ? `${wait.environmentId} offline · ${wait.policy}` : undefined);
+/**
+ * The wait line under a node (`TaskNode.waitDetail`): a resume wait says the work is uncertain; a machine-offline
+ * wait (#366) names the machine, since when, and when it fails.
+ */
+export function waitDetailOf(wait: WaitReason | undefined, machineName?: (id: string) => string | undefined, time: ClockText = formatTime): string | undefined {
+    if (isResumeWait(wait)) return 'interrupted · uncertain';
+    if (wait?.kind === 'environment-offline') return `${wait.environmentId} offline · ${wait.policy}`;
+    if (wait?.kind === 'machine-offline') return machineOfflineDetail(wait, machineName?.(wait.machineId), time);
+    return undefined;
+}
 
 const originText = (t: TaskView): string => {
     switch (t.origin.kind) {
@@ -74,6 +88,9 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
     const key = (): string | null => (viewer.workspaceId ? taskKeyOf(viewer.workspaceId, props.id) : null);
     const task = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
     const tree = useActorState(defs.TaskActor, () => { const k = key(); return k && ([k, 'tree'] as const); }, { live: true });
+    const cuts = useInterruptionReads(defs, viewer, () => props.id);
+    const machines = useEnvironmentDirectory(defs, viewer);
+    const machineName = (id: string): string | undefined => machines.machines().find((m) => m.id === id)?.name;
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
 
@@ -118,7 +135,10 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
         }
         const assignee = directory.lookup(t.assignee);
         const nodes = tree.value ? flattenTree(tree.value) : [{ id: t.id, status: t.status, ...(t.wait ? { wait: t.wait } : {}), owner: t.owner, assignee: t.assignee, objective: t.objective, depth: t.depth, children: [] } satisfies TaskTree];
-        const failure = failureOf({ task: { id: t.id, status: t.status, ...(t.error ? { error: t.error } : {}), ...(t.wait ? { wait: t.wait } : {}) } });
+        const route = cuts.routes().find((r) => r.taskId === t.id) ?? null;
+        const interruption = interruptionOf({ audit: cuts.audit(), taskId: t.id, route, machineName });
+        const failure = failureOf({ task: { id: t.id, status: t.status, ...(t.error ? { error: t.error } : {}), ...(t.wait ? { wait: t.wait } : {}) }, interruption, machineName });
+        const offline = t.wait?.kind === 'machine-offline' ? t.wait : undefined;
         const uncertain = failure?.uncertain ?? false;
         const result = t.result;
         return (
@@ -130,7 +150,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     <div data-tree-nodes>
                         {nodes.map((n) => {
                             const a = directory.lookup(n.assignee);
-                            const detail = waitDetailOf(n.wait);
+                            const detail = waitDetailOf(n.wait, machineName);
                             return (
                                 <TaskNode
                                     id={n.id}
@@ -149,6 +169,8 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     </div>
                     {t.notStopped.length ? <p data-not-stopped role="status">Could not be stopped: {t.notStopped.join(', ')}</p> : null}
                     {failure ? <FailureNotice state={failure} onResume={() => { void resume(); }} busy={st.recovering} /> : null}
+                    {offline ? <p data-task-wait role="status">{machineOfflineText(offline, machineName(offline.machineId), formatTime)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link></p> : null}
+                    {!failure && interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(interruption)}</p> : null}
                     {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
                 </section>
 

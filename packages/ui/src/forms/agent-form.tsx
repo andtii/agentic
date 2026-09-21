@@ -123,6 +123,10 @@ const OFFLINE_OPTIONS: readonly FieldOption[] = [
     { value: 'fail', label: 'Fail the task' },
     { value: 'fallback-api', label: 'Fall back to the API runtime' }
 ];
+const INTERRUPT_OPTIONS: readonly FieldOption[] = [
+    { value: 'ask', label: 'Ask me' },
+    { value: 'auto', label: 'Resume automatically, once' }
+];
 const CATEGORY_LABELS: Record<ApprovalCategory, string> = {
     read: 'Read',
     write: 'Write',
@@ -420,6 +424,7 @@ export const AgentForm = component<AgentFormProps>(
                                 <TextField model={() => draft.model} name={F.model} label="Model" description="Leave blank for the runtime's default." />
                             )}
                             <SelectField model={() => draft.offlinePolicy} name={F.offlinePolicy} label="When the environment is offline" options={OFFLINE_OPTIONS} error={err.offlinePolicy} />
+                            <SelectField model={() => draft.onInterrupt} name={F.onInterrupt} label="When a turn is interrupted" options={INTERRUPT_OPTIONS} description="A machine that restarts or updates mid-turn cuts the turn short. Nothing is replayed, and what ran before the cut is uncertain. Automatic resumes once when the machine is back; check side effects first." />
                             {LIMIT_KEYS.map((k) => (
                                 <NumberField key={k} model={() => draft.limits[k]} name={F.limit(k)} label={LIMIT_LABELS[k]} min={k === 'maxCostUsd' ? 0 : 1} step={k === 'maxCostUsd' ? 0.01 : 1} placeholder="No limit" error={err[`limit:${k}`]} />
                             ))}

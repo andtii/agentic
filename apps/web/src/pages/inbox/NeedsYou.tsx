@@ -121,7 +121,7 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                         onRespond={(_, decision) => respond(decision)}
                     />
                 ) : null}
-                {row.kind === 'interrupted' && row.primary && source.resume ? <Button intent="wait" icon="play" loading={st.busy} disabled={st.busy} onClick={resume}>{row.primary.label}</Button> : null}
+                {row.kind === 'interrupted' && row.primary && source.resume ? <Button intent="wait" icon="play" loading={st.busy} disabled={st.busy || !!row.primary.disabled} onClick={resume}>{row.primary.label}</Button> : null}
                 {r?.loading && !view ? <p data-panel-note>Loading the request…</p> : null}
                 {r?.error ? <p data-needs-error role="alert">{`Could not load the request: ${r.error.message}`}</p> : null}
                 {st.error && row.kind === 'interrupted' ? <p data-needs-error role="alert">{`Could not resume: ${st.error}`}</p> : null}

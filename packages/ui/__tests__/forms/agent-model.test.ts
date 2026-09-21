@@ -7,6 +7,15 @@ describe('AgentConfig ⇄ draft', () => {
         expect(fromAgentDraft(toAgentDraft(config))).toEqual(config);
     });
 
+    it('maps execution.onInterrupt (#368): absent reads ask, and only auto is written back', () => {
+        const blank = defaultAgentConfig();
+        expect(toAgentDraft(blank).onInterrupt).toBe('ask');
+        const auto = { ...blank, execution: { ...blank.execution, onInterrupt: 'auto' as const } };
+        expect(toAgentDraft(auto).onInterrupt).toBe('auto');
+        expect(fromAgentDraft(toAgentDraft(auto)).execution.onInterrupt).toBe('auto');
+        expect(fromAgentDraft({ ...toAgentDraft(auto), onInterrupt: 'ask' }).execution).not.toHaveProperty('onInterrupt');
+    });
+
     it('round-trips the blank default', () => {
         expect(fromAgentDraft(toAgentDraft(defaultAgentConfig()))).toEqual(defaultAgentConfig());
     });
@@ -71,6 +80,7 @@ describe('agentDraftFromFormData', () => {
         fd.set(F.environment, d.defaultEnvironmentId);
         fd.set(F.model, d.model);
         fd.set(F.offlinePolicy, d.offlinePolicy);
+        fd.set(F.onInterrupt, d.onInterrupt);
         for (const [k, v] of Object.entries(d.limits)) if (v !== null) fd.set(F.limit(k as never), String(v));
         if (d.collaborateAll) fd.set(F.collaborateAll, 'on');
         for (const a of d.collaborators) fd.append(F.collaborators, a);
@@ -98,6 +108,15 @@ describe('agentDraftFromFormData', () => {
         expect(d.limits.maxTurns).toBeNull();
         expect(d.offlinePolicy).toBe('queue');
         expect(d.approvalExtra).toEqual([]);
+    });
+
+    it('reads onInterrupt: auto when posted, ask for anything else (#368)', () => {
+        const fd = post();
+        fd.set(F.onInterrupt, 'auto');
+        expect(parseAgentFormData(fd).config.execution.onInterrupt).toBe('auto');
+        fd.set(F.onInterrupt, 'sometimes');
+        expect(agentDraftFromFormData(fd).onInterrupt).toBe('ask');
+        expect(parseAgentFormData(fd).config.execution.onInterrupt).toBeUndefined();
     });
 
     it('reports errors on a bad post instead of throwing', () => {

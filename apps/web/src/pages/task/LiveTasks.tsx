@@ -17,6 +17,7 @@ import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { useAgentDirectory, type AgentDirectory } from '../chat/directory';
+import { useEnvironmentDirectory } from '../ops/environments';
 import { chainRoots, countTasks, filterTasks, isActiveRow, TASK_FILTERS, TASK_TABLE_COLS, TASK_TABLE_COLUMNS, taskListRow, type TaskFilter, type TaskListRow } from './live';
 import { LiveStartTask } from './LiveStartTask';
 
@@ -30,8 +31,11 @@ export interface TaskRows {
 /** Called in a component's setup: the index as a live read, joined with the directory at render. */
 export function useTaskRows(defs: ActorDefs, viewer: ViewerState, directory: AgentDirectory): TaskRows {
     const index = useActorState(defs.TaskIndex, () => viewer.workspaceId && ([taskIndexKeyOf(viewer.workspaceId), 'list'] as const), { live: true });
+    // A row waiting on its machine (#366) names it in the wait column.
+    const machines = useEnvironmentDirectory(defs, viewer);
+    const machineName = (id: string): string | undefined => machines.machines().find((m) => m.id === id)?.name;
     return {
-        all: () => (index.value ?? []).map((row) => taskListRow(row, directory.lookup)),
+        all: () => (index.value ?? []).map((row) => taskListRow(row, directory.lookup, machineName)),
         get loading() {
             return index.loading || directory.loading;
         },
