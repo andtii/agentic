@@ -193,10 +193,10 @@
 /* Usage (#452): the rings (or one slim line for a note) with "Details" at the end; out of limit, the amber limit line under them; Details opens the account's panel inline. */
 [data-member-usage] { display: flex; flex-direction: column; gap: var(--space-sm); min-inline-size: 0; }
 [data-member-usage-line] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); min-inline-size: 0; }
-[data-member-usage-line] > [data-member-quota] { flex: 1 1 auto; }
 [data-member-quota] > [data-scope="ag-quota"][data-mod-compact] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; inline-size: 100%; }
 [data-member-limit] { min-inline-size: 0; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }
-[data-member-details-toggle] { flex: none; display: inline-flex; align-items: center; gap: var(--space-2xs); font-size: var(--text-xs); text-decoration: none; }
+[data-member-details-toggle] { flex: none; display: inline-flex; align-items: center; gap: var(--space-2xs); padding: 2px var(--space-sm); border: var(--border) solid var(--ag-line-strong); border-radius: var(--radius-field); background: none; font-size: var(--text-xs); color: var(--color-base-content); text-decoration: none; cursor: pointer; }
+[data-member-details-toggle]:hover { background: var(--color-base-200); }
 [data-member-details-toggle][aria-expanded="true"] > svg { transform: rotate(180deg); }
 [data-member-details] { padding: var(--space-sm); border: var(--border) solid var(--ag-line); border-radius: var(--radius-field); background: var(--color-base-100); }
 [data-member-foot] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
