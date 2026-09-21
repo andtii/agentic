@@ -101,6 +101,8 @@ export interface WorkspaceState {
     projects?: ProjectRecord[];
     /** The project last chosen for a chat (`createChat({ projectId })`, `noteProject`): what the New chat picker preselects. Absent until one is; cleared when that project is removed. */
     lastProjectId?: ProjectId;
+    /** The machine last chosen for a chat (`createChat({ machineId })`, `noteMachine`, #414): what the New chat picker preselects. Absent until one is; cleared when that machine is removed. */
+    lastMachineId?: MachineId;
 }
 
 /** What `get` returns: the state, detached from the actor. */
@@ -114,6 +116,8 @@ export interface CreateChatInput {
     readonly title?: string;
     /** The project the new chat belongs to (#332): written to the chat over a hop (`Chat.setProject`) after the index save, and noted as the last used. */
     readonly projectId?: ProjectId;
+    /** The machine the new chat runs on (#414): written over a hop (`Chat.setMachine`) after the project, and noted as the last used. */
+    readonly machineId?: MachineId;
 }
 
 export interface RegisterMachineInput {
@@ -295,7 +299,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
         authorize,
         persistence: 'explicit',
         // `projects` interleaves: `Chat.setProject` reads it back over a hop inside `createChat`'s own turn.
-        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always' },
+        methodReentrancy: { get: 'always', recentWorkdirs: 'always', projects: 'always', listMachines: 'always' },
         state: (key): WorkspaceState => ({
             v: WORKSPACE_STATE_VERSION,
             owner: ownerOfWorkspaceKey(key),
@@ -325,14 +329,18 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
              * Records the id in the index and, when a title is given, writes it to
              * the Chat actor over a hop (#124) — the chat's own `rename` entry, so
              * `Chat.get().title` carries it; a project (#332) goes the same way
-             * (`Chat.setProject`, after the title) and is noted as the last used.
+             * (`Chat.setProject`, after the title) and is noted as the last used,
+             * and so does a machine (#414, `Chat.setMachine`, after the project).
              * The index entry is saved first: a hop that fails leaves an untitled,
-             * project-less chat, never an orphan. An unknown project is a 400
-             * before anything is written.
+             * project-less, machine-less chat, never an orphan. An unknown project,
+             * or a machine the index does not list as paired, is a 400 before
+             * anything is written.
              */
             async createChat(input: CreateChatInput = {}): Promise<{ chatId: ChatId }> {
                 const projectId = input.projectId;
                 if (projectId !== undefined && !(ctx.state.projects ?? []).some((p) => p.id === projectId)) throw new ServerFnError(400, `Workspace.createChat: no project ${String(projectId)} in this workspace`);
+                const machineId = input.machineId;
+                if (machineId !== undefined && !ctx.state.machines.some((m) => m.id === machineId && m.status === 'paired')) throw new ServerFnError(400, `Workspace.createChat: no paired machine ${String(machineId)} in this workspace`);
                 const chatId = createId('chat') as ChatId;
                 ctx.state.chats.push(chatId);
                 await ctx.save();
@@ -343,6 +351,11 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     await chat.setProject(projectId);
                     // Noted only once the chat is in the project: a failed hop must not preselect a project no chat got.
                     ctx.state.lastProjectId = projectId;
+                    await ctx.save();
+                }
+                if (machineId !== undefined) {
+                    await chat.setMachine(machineId);
+                    ctx.state.lastMachineId = machineId;
                     await ctx.save();
                 }
                 return { chatId };
@@ -442,6 +455,14 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 await ctx.save();
             },
 
+            /** Remember the machine last used for a chat (#414) — `get().lastMachineId` — or forget it with `null`. 400 for a machine the index does not list as paired. */
+            async noteMachine(machineId: MachineId | null): Promise<void> {
+                if (machineId !== null && !ctx.state.machines.some((m) => m.id === machineId && m.status === 'paired')) throw new ServerFnError(400, `Workspace.noteMachine: no paired machine ${String(machineId)} in this workspace`);
+                if (machineId === null) delete ctx.state.lastMachineId;
+                else ctx.state.lastMachineId = machineId;
+                await ctx.save();
+            },
+
             /** Allocates and indexes a schedule id; the caller then `create`s the Schedule actor under it. */
             async createSchedule(): Promise<{ scheduleId: ScheduleId }> {
                 const scheduleId = createId('schedule') as ScheduleId;
@@ -506,10 +527,12 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 });
             },
 
+            /** Drops the index entry; clears `lastMachineId` when it was this one (chats keep the dangling id, as with a removed project). */
             async removeMachine(machineId: MachineId): Promise<boolean> {
                 const i = ctx.state.machines.findIndex((m) => m.id === machineId);
                 if (i < 0) return false;
                 ctx.state.machines.splice(i, 1);
+                if (ctx.state.lastMachineId === machineId) delete ctx.state.lastMachineId;
                 await ctx.save();
                 return true;
             },

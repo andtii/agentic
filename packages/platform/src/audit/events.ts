@@ -16,6 +16,7 @@ export const AUDIT_KINDS = [
     'approval.requested',
     'approval.resolved',
     'chat.project-set',
+    'chat.machine-set',
     'delegation.created',
     'environment.chosen',
     'environment.put',
@@ -220,6 +221,14 @@ export interface ChatProjectSetData {
     readonly name?: string;
 }
 
+/** `chat.machine-set` (#414): the chat runs on this machine from now on, or on none. */
+export interface ChatMachineSetData {
+    readonly chatId: ChatId;
+    readonly machineId: MachineId | null;
+    /** The machine's name when it was set. */
+    readonly name?: string;
+}
+
 /** `Workspace.upsertProject` / `removeProject` changed the workspace's projects (#332). `by` is the owner. */
 export interface ProjectChangedData {
     readonly projectId: ProjectId;
@@ -232,6 +241,7 @@ export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
     readonly 'approval.resolved': ApprovalResolvedData;
     readonly 'chat.project-set': ChatProjectSetData;
+    readonly 'chat.machine-set': ChatMachineSetData;
     readonly 'delegation.created': DelegationCreatedData;
     readonly 'environment.chosen': EnvironmentChosenData;
     readonly 'environment.put': EnvironmentPutData;

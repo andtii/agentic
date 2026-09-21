@@ -21,7 +21,15 @@ export interface AgentConfigPatch {
     readonly connectors?: AgentConfig['connectors'];
     readonly approvalPolicy?: AgentConfig['approvalPolicy'];
     readonly memoryPolicy?: Partial<MemoryPolicy>;
-    readonly execution?: Partial<Omit<ExecutionDefaults, 'limits'>> & { readonly limits?: Limits };
+    /**
+     * `execution` merges one level deep; `account` and `defaultEnvironmentId` also take `null` to clear
+     * the binding (#414) — a plain patch cannot remove a field, and unbinding an agent is a real change.
+     */
+    readonly execution?: Partial<Omit<ExecutionDefaults, 'limits' | 'account' | 'defaultEnvironmentId'>> & {
+        readonly limits?: Limits;
+        readonly account?: ExecutionDefaults['account'] | null;
+        readonly defaultEnvironmentId?: ExecutionDefaults['defaultEnvironmentId'] | null;
+    };
     readonly collaborators?: AgentConfig['collaborators'];
 }
 
@@ -78,11 +86,14 @@ export function mergeAgentConfig(base: AgentConfig, patch: AgentConfigPatch): Ag
             next.memoryPolicy = { ...base.memoryPolicy, ...(value as Partial<MemoryPolicy>) };
         } else if (key === 'execution') {
             const { limits, ...rest } = value as NonNullable<AgentConfigPatch['execution']>;
-            next.execution = {
+            const execution: Record<string, unknown> = {
                 ...base.execution,
                 ...rest,
                 limits: limits === undefined ? base.execution.limits : { ...base.execution.limits, ...limits }
             };
+            // `null` clears a binding (#414); `clone` would otherwise keep it as a JSON null.
+            for (const field of ['account', 'defaultEnvironmentId'] as const) if (execution[field] === null) delete execution[field];
+            next.execution = execution;
         } else {
             next[key] = value;
         }

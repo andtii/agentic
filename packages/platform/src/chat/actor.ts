@@ -30,6 +30,7 @@ import {
     type ChatId,
     type ChatMember,
     type HistoryAccess,
+    type MachineId,
     type MessageId,
     type PostResult,
     type Principal,
@@ -127,6 +128,10 @@ export interface ChatSummary {
     readonly projectId?: ProjectId;
     /** `projectId` with the project's name, when the Workspace still has it — a removed project leaves `projectId` alone. */
     readonly project?: { readonly id: ProjectId; readonly name: string };
+    /** The machine the chat runs on (#414, `setMachine`); absent when it names none. */
+    readonly machineId?: MachineId;
+    /** `machineId` with the machine's name from the Workspace index, while it is listed there — a removed machine leaves `machineId` alone. */
+    readonly machine?: { readonly id: MachineId; readonly name: string };
 }
 
 /** A title is one line of at most this many characters; `rename` trims and rejects the rest. */
@@ -273,18 +278,32 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
 
 /**
  * `get()`: the summary, copied before the first await. The project's name rides along while the Workspace
- * still has the project (#332); a removed one — or a Workspace that cannot be read — leaves `projectId` alone.
+ * still has the project (#332), the machine's while the index lists it (#414); a removed one — or a
+ * Workspace that cannot be read — leaves the id alone. Both are read on the Workspace, never on the
+ * Machine actor: whether the machine is online is the caller's to read.
  */
 async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
-    const { seq, members, coordinator, sessions, title, projectId } = ctx.state;
-    const summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }) });
-    if (projectId === undefined) return summary;
-    try {
-        const project = (await ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId)).projects()).find((p) => p.id === projectId);
-        return project ? { ...summary, project: { id: project.id, name: project.name } } : summary;
-    } catch {
-        return summary;
+    const { seq, members, coordinator, sessions, title, projectId, machineId } = ctx.state;
+    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }) });
+    if (projectId === undefined && machineId === undefined) return summary;
+    const workspace = ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId));
+    if (projectId !== undefined) {
+        try {
+            const project = (await workspace.projects()).find((p) => p.id === projectId);
+            if (project) summary = { ...summary, project: { id: project.id, name: project.name } };
+        } catch {
+            // The id stays; the name is a courtesy.
+        }
     }
+    if (machineId !== undefined) {
+        try {
+            const machine = (await workspace.listMachines()).find((m) => m.id === machineId);
+            if (machine) summary = { ...summary, machine: { id: machine.id, name: machine.name } };
+        } catch {
+            // Likewise.
+        }
+    }
+    return summary;
 }
 
 /** Entries `[start, end)` oldest first — the window part copied synchronously, older ones read from pages. */
@@ -352,6 +371,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             setWorkdir: [userOrExternal],
             // Users, external clients and member agents; a non-member agent is refused inside the method (a policy sees no state).
             setProject: [notMachine],
+            setMachine: [notMachine],
             registerUpload: [userOrExternal],
             fileAccess: [notMachine]
         },
@@ -510,6 +530,46 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     by: principalLabel(principal),
                     summary: projectId === null ? `chat ${chatId} left its project` : `chat ${chatId} put in project ${name} (${projectId})`,
                     data: { chatId, projectId, ...(name !== undefined ? { name } : {}) }
+                });
+                return summaryOf(ctx);
+            },
+
+            /**
+             * Run the chat on a machine (#414), or on none with `null`: the activation contract
+             * copies it into each member's next task as `machineId`, where the router resolves
+             * the member's account on that machine. Applies from the next activation — a
+             * session running elsewhere finishes its turn there, and the placement move gives the
+             * member a fresh session on the new machine (#393). Written as a visible note in the
+             * thread (a user message carrying `machine`, activating nobody), so the fold keeps
+             * the last one. Users, external clients and member agents (a non-member agent is
+             * 403); a machine the Workspace index does not list as paired is 400. Idempotent.
+             * Recorded as `chat.machine-set`.
+             */
+            async setMachine(machineId: MachineId | null): Promise<ChatSummary> {
+                const principal = principalOf(ctx);
+                if (!principal) throw new Error('Chat.setMachine: no principal');
+                if (principal.kind === 'agent' && !ctx.state.members[principal.agentId]) throw new ServerFnError(403, `Chat.setMachine: ${principal.agentId} is not a member of this chat`);
+                if (machineId !== null && (typeof machineId !== 'string' || !machineId.trim())) throw new ServerFnError(400, 'Chat.setMachine: a machine id or null is required');
+                const workspaceId = workspaceOfKey(ctx.key) as WorkspaceId;
+                let name: string | undefined;
+                if (machineId !== null) {
+                    const machine = (await ctx.actor(Workspace, workspaceKey(workspaceId)).listMachines()).find((m) => m.id === machineId && m.status === 'paired');
+                    if (!machine) throw new ServerFnError(400, `Chat.setMachine: no paired machine ${machineId} in this workspace`);
+                    name = machine.name;
+                }
+                if ((ctx.state.machineId ?? null) === machineId) return summaryOf(ctx);
+                const text = machineId === null ? 'Machine cleared' : `Machine → ${name}`;
+                await archive(ctx);
+                const at = Date.now();
+                await appendEntry(ctx, { t: 'msg', id: createId('msg') as MessageId, author: { kind: 'user' }, parts: [{ type: 'text', text }], at, mentions: [], machine: { id: machineId } });
+                const chatId = chatIdOfKey(ctx.key);
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:machine:${ctx.state.seq - 1}`,
+                    kind: 'chat.machine-set',
+                    at,
+                    by: principalLabel(principal),
+                    summary: machineId === null ? `chat ${chatId} runs on no particular machine` : `chat ${chatId} runs on machine ${name} (${machineId})`,
+                    data: { chatId, machineId, ...(name !== undefined ? { name } : {}) }
                 });
                 return summaryOf(ctx);
             },
