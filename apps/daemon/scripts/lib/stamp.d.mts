@@ -8,7 +8,7 @@ export interface BuildStamp {
     readonly tag: string | null;
 }
 export const RELEASE_TAG: RegExp;
-/** `committedAt`: the commit's unix seconds; a main build's version is `<package version>-main.<committedAt>.<sha7>` (0 when absent). */
+/** `committedAt`: the commit's unix seconds; a main build's version is `<package version>-main.<committedAt>.<sha7>` (0 when absent; `g<sha7>` for a digits-only sha7 with a leading zero). */
 export function buildStamp(input: { readonly tag?: string | undefined; readonly packageVersion: string; readonly commit: string; readonly committedAt?: number | undefined }): BuildStamp;
 export function releaseTagFrom(env: Readonly<Record<string, string | undefined>>): string | undefined;
 export function currentCommit(cwd: string, env: Readonly<Record<string, string | undefined>>): string;

@@ -111,7 +111,7 @@ export async function updateCommand(flags: ParsedArgs['flags'], context: UpdateC
         err(`the release at ${url} names no https: download with a sha256 for ${key}`);
         return 1;
     }
-    // Main builds carry their commit time (`-main.<unix seconds>.<sha7>`, #437), so they order like releases do.
+    // Main builds carry their commit time (`-main.<unix seconds>.<sha7>`, `g<sha7>` for a digits-only one with a leading zero; #437), so they order like releases do.
     const order = compareVersions(asset.version, DAEMON_VERSION);
     out(`available: agentic-daemon ${asset.version} (${String(manifest.channel ?? channel)}, ${String(manifest.commit ?? 'unknown')}) — ${order > 0 ? 'newer' : order === 0 ? 'the installed version' : 'older'}`);
     if (flags.check) return 0;
