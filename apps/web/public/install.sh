@@ -33,9 +33,9 @@
 # Source: apps/web/public/install.sh in https://github.com/andtii/agentic (docs/runbook.md section 5).
 set -eu
 
-# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set. `latest` until the first
-# stable daemon release exists, then `stable`.
-DEFAULT_CHANNEL=latest
+# The channel installed when neither AGENTIC_CHANNEL nor AGENTIC_VERSION is set: `stable` since the first
+# stable daemon release (daemon-v0.1.1).
+DEFAULT_CHANNEL=stable
 NODE_VERSION=22.22.0
 RELEASES=${AGENTIC_RELEASES:-https://github.com/andtii/agentic/releases}
 

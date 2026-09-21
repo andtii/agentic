@@ -211,7 +211,8 @@ jobs:
           fi
           # A semver pre-release (daemon-v0.2.0-rc.1) is a GitHub pre-release. Never --latest: GitHub's
           # "latest release" belongs to the app's release-drafter releases.
-          case "$AGENTIC_DAEMON_TAG" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest=false ;; esac
+          # Tested on the semver alone: the tag's own `daemon-` prefix has a hyphen (daemon-v0.1.1 went out a pre-release).
+          case "${AGENTIC_DAEMON_TAG#daemon-v}" in *-*) set -- "$@" --prerelease ;; *) set -- "$@" --latest=false ;; esac
           gh release create "$AGENTIC_DAEMON_TAG" --title "Daemon ${AGENTIC_DAEMON_TAG#daemon-v}" --target "$GITHUB_SHA" "$@" \
             release/*.zip release/*.zip.sha256
 
@@ -240,8 +241,10 @@ jobs:
       # The stable channel: the same manifest on the rolling daemon-stable pre-release (its asset urls
       # point at the versioned release). A semver pre-release (-rc.1) never moves it.
       - name: Move daemon-stable to this release
-        if: env.AGENTIC_DAEMON_TAG != '' && !contains(env.AGENTIC_DAEMON_TAG, '-')
+        if: env.AGENTIC_DAEMON_TAG != ''
         run: |
+          # The semver alone decides: `contains(tag, '-')` matched the `daemon-` prefix and skipped daemon-v0.1.1.
+          case "${AGENTIC_DAEMON_TAG#daemon-v}" in *-*) echo "a pre-release: daemon-stable stays where it is"; exit 0 ;; esac
           notes="The stable channel of the machine daemon: its manifest.json names the current stable release, ${AGENTIC_DAEMON_TAG} (https://github.com/${GITHUB_REPOSITORY}/releases/tag/${AGENTIC_DAEMON_TAG}). Not a release of its own."
           if ! gh release view daemon-stable >/dev/null 2>&1; then
             gh release create daemon-stable --prerelease --title "Daemon (stable)" --notes "$notes" --target "$GITHUB_SHA"
