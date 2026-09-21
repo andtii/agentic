@@ -13,7 +13,7 @@
  * the daemon reports, or the outcome — and a client timer says so when the
  * daemon has not answered in `CLIENT_TIMEOUT_MS`. No polling.
  */
-import { component, effect, onUnmounted, signal, type Define, type JSXElement } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, type Define, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { DEFAULT_UPDATE_SETTINGS, type HostOs, type ReleaseChannel } from '@agentic/core';
@@ -56,7 +56,8 @@ export const LiveUpdateCard = component<LiveUpdateCardProps>(({ props }) => {
             st.checking = false;
         }
     };
-    void check();
+    // Once the card is on the page, never during setup (SSR, hydration).
+    onMounted(() => { void check(); });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const clearTimer = (): void => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
     onUnmounted(clearTimer);

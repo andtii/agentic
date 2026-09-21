@@ -397,8 +397,8 @@ interface RoutingClient {
 /** The ReleaseDirectory's read (`global:releases`, #365). */
 interface ReleasesClient {
     get(): Promise<ReleasesView>;
-    /** Read now unless the last read is fresh (#468). */
-    check(): Promise<ReleasesView>;
+    /** Read now unless the last read is younger than `minAgeMs` (never below `RELEASE_CHECK_MIN_MS`, #468). */
+    check(minAgeMs?: number): Promise<ReleasesView>;
 }
 
 /** The slice of the Inbox a machine notifies (#365). */
