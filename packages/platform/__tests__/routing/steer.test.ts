@@ -330,7 +330,8 @@ describe('a message arriving mid-turn — a runtime that cannot steer (the in-me
         expect((await routing().get()).routes).toEqual([]);
     });
 
-    it('a session the daemon closes while a message waits for its turn fails that task with the reason', async () => {
+    // A restart or an update re-opens the session for the waiting message instead (#433, `offline.test.ts`).
+    it('a session the daemon closes for good while a message waits for its turn fails that task with the reason', async () => {
         const m1 = await pairMachine('laptop');
         connect(m1, daemon(m1));
         await online(m1);
@@ -342,7 +343,7 @@ describe('a message arriving mid-turn — a runtime that cannot steer (the in-me
         await message(chatId, cc, 'two', 't2');
         expect(await routeOf('t2')).toMatchObject({ status: 'waiting-turn' });
 
-        expect(await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: sid, reason: 'restarted' }))).toMatchObject({ ok: true });
+        expect(await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: sid, reason: 'restarted', code: 'harness-missing' }))).toMatchObject({ ok: true });
         await settled('t2');
         expect((await task('t2').get())).toMatchObject({ status: 'failed', error: { code: 'session-refused', message: `machine ${m1} closed the session while this task waited for its running turn to end: restarted`, recoverable: true } });
         expect(await routeOf('t2')).toBeUndefined();
