@@ -860,9 +860,10 @@ export function defineSessionActor(ports: SessionPorts) {
     /**
      * A turn cut short — by an eviction, or by its host going away (`hostEnded`, #420): close what is open (calls,
      * requests), end the turn with the interrupted error and settle the session state. A local turn is stamped in the
-     * epoch the events were in, gapless after the head. A remote one is stamped the way a platform-raised request is
-     * (`platformCursor`, fractional): the daemon may hold events past the head that never arrived, and a session it
-     * re-opens goes on from its own cursor — an integer stamp here could shadow either.
+     * epoch the events were in, gapless after the head. A remote one is stamped the way a platform-raised request is —
+     * fractional, strictly between the head and the next integer seq, spread evenly over what is written: the daemon
+     * may hold events past the head that never arrived, and a session it re-opens goes on from its own cursor, so an
+     * integer stamp here could shadow either.
      */
     async function finishInterrupted(c: ActorContext<SessionState>, turnId: string, cut: { readonly message: string; readonly data?: Readonly<Record<string, unknown>> } = { message: INTERRUPTED_MESSAGE }): Promise<void> {
         const s = c.state;
@@ -871,30 +872,34 @@ export function defineSessionActor(ports: SessionPorts) {
         const input = c.snapshot(run.input);
         const taskId = run.taskId;
         const sessionId = sessionIdOf(c);
-        const epoch = Math.max(1, s.head.epoch);
-        let seq = s.head.epoch === 0 ? 0 : s.head.seq;
-        const stamp = (): EventCursor => (s.mode === 'remote' ? platformCursor(s.head) : { epoch, seq: ++seq });
-        const emit = (payload: UnstampedEvent) => appendEvent(c, { ...payload, sessionId, ...stamp() });
         const { message } = cut;
         const before = await snapshotTranscript(c);
-        if (!findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId)) await emit({ type: 'turn-start', turnId, input });
+        const out: UnstampedEvent[] = [];
+        if (!findEvent(s, (e) => e.type === 'turn-start' && e.turnId === turnId)) out.push({ type: 'turn-start', turnId, input });
         for (const m of before.messages) {
             if (m.turnId !== turnId) continue;
             for (const p of m.parts) {
                 if (p.type === 'tool' && (p.status === 'pending' || p.status === 'in_progress')) {
-                    await emit({ type: 'tool-update', turnId, ...(m.parentCallId ? { parentCallId: m.parentCallId } : {}), callId: p.callId, status: 'cancelled', error: message });
+                    out.push({ type: 'tool-update', turnId, ...(m.parentCallId ? { parentCallId: m.parentCallId } : {}), callId: p.callId, status: 'cancelled', error: message });
                 }
             }
         }
         for (const r of Object.values(before.requests)) {
             // A detached question outlives its turn (#285): its answer starts the asker again.
             if (r.turnId !== turnId || s.detachedRequests?.includes(r.requestId)) continue;
-            await emit({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: message, at: now() });
+            out.push({ type: 'request-resolved', turnId, requestId: r.requestId, outcome: 'cancel', by: 'cancel', reason: message, at: now() });
         }
-        await emit({ type: 'error', turnId, code: INTERRUPTED_CODE, message, recoverable: true, data: { ...cut.data, interrupted: true } });
+        out.push({ type: 'error', turnId, code: INTERRUPTED_CODE, message, recoverable: true, data: { ...cut.data, interrupted: true } });
         // The session settles before the turn closes, so the `turn-end` is the last word — what a resumer reads first.
-        if (s.status !== 'closed') await emit({ type: 'state', value: 'idle' });
-        await emit({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message } });
+        if (s.status !== 'closed') out.push({ type: 'state', value: 'idle' });
+        out.push({ type: 'turn-end', turnId, stopReason: 'error', error: { code: INTERRUPTED_CODE, message } });
+        const head = { epoch: s.head.epoch, seq: s.head.seq };
+        const remote = s.mode === 'remote';
+        const epoch = remote ? head.epoch : Math.max(1, head.epoch);
+        const base = remote || head.epoch !== 0 ? head.seq : 0;
+        // Remote: the room up to the next integer seq in equal steps, one per event, touching neither end.
+        const step = remote ? (Math.floor(head.seq) + 1 - head.seq) / (out.length + 1) : 1;
+        for (const [i, payload] of out.entries()) await appendEvent(c, { ...payload, sessionId, epoch, seq: base + step * (i + 1) } as AgentEvent);
         await finishTurn(c, turnId, taskId);
         await publishChat(c, { kind: 'status', status: 'task', ref: `interrupted:${turnId}` });
     }

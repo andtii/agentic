@@ -480,6 +480,24 @@ describe('Session on the daemon path', () => {
         expect(sent).toEqual([expect.objectContaining({ type: 'prompt', turnId: 't1:resume', input: [{ type: 'text', text: 'hello' }] })]);
     });
 
+    it('hostEnded (#420): however much is open, every event it writes lands, in order, before the daemon’s next integer seq', async () => {
+        const asMachine = await runningRemote();
+        const asks: WireFrame[] = Array.from({ length: 80 }, (_, i) => {
+            const event: AgentEvent = { type: 'request', requestId: `r${i}`, kind: 'input', message: `q${i}`, turnId: 't1', sessionId: 'sess-real', epoch: 1, seq: 2 + i };
+            return { v: 1, kind: 'event', epoch: 1, seq: 2 + i, event } as WireFrame;
+        });
+        await asMachine.forwardFrames(asks);
+        expect((await session().get()).openRequests).toHaveLength(80);
+        await asMachine.hostEnded({ reason: 'the daemon restarted' });
+        const info = await session().get();
+        expect(info.openRequests).toEqual([]);
+        const written = (await session().events()).slice(81);
+        // 80 cancelled requests, the error, the state, the turn end — each strictly after the one before.
+        expect(written).toHaveLength(83);
+        expect(written.every((e, i) => e.epoch === 1 && e.seq > 81 && e.seq < 82 && (i === 0 || e.seq > written[i - 1]!.seq))).toBe(true);
+        expect(isInterruptedTurnEnd(written.at(-1)!)).toBe(true);
+    });
+
     it('hostEnded (#420): a record its runtime never named is closed — nothing to resume from — and says so; the code defaults to closed', async () => {
         const asMachine = await runningRemote(false);
         await asMachine.hostEnded({ reason: 'gone' });
