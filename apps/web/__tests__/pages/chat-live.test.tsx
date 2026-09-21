@@ -82,6 +82,28 @@ describe('/chats/:id (live)', () => {
         expect(texts(b.querySelectorAll('[data-scope="ai-message"][data-part="body"]'))).toEqual(['first']);
     });
 
+    it('opening another chat from the list shows only that chat: the first chat’s entries do not stay on screen', async () => {
+        const { chatId: first, chat: chatA } = await seedChat();
+        await chatA.post('only in the first chat');
+        const { chatId: second } = await h.app.as(owner).actor(Workspace, workspaceKey(WS)).createChat({});
+        await h.app.as(owner).actor(Chat, chatKeyOf(USER, second)).post('only in the second chat');
+        const dom = await mountLive(`/chats/${first}`, h);
+        const bodies = () => texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="body"]'));
+        await until(() => bodies().length === 1, 'the first chat');
+        // A click on the list's link — the route changes under the same page (jsdom's `click()` on an anchor never reaches the router).
+        const open = (id: string) => dom.querySelector<HTMLAnchorElement>(`[data-chat-list] a[href="/chats/${id}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+        open(second);
+        await until(() => bodies().includes('only in the second chat'), 'the second chat');
+        await tick(50);
+        expect(bodies()).toEqual(['only in the second chat']);
+        expect(dom.querySelector('[data-chat-row][data-current] a')!.getAttribute('href')).toBe(`/chats/${second}`);
+        // And back: the first alone again.
+        open(first);
+        await until(() => bodies().includes('only in the first chat'), 'the first chat again');
+        await tick(50);
+        expect(bodies()).toEqual(['only in the first chat']);
+    });
+
     it('posting from the composer activates the coordinator: a task is created and routed, the session runs and the answer lands in the chat', async () => {
         const { chatId, chat, atlas } = await seedChat();
         const dom = await mountLive(`/chats/${chatId}`, h);
