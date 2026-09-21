@@ -43,6 +43,8 @@ const runtimes: RuntimeCatalogue = {
 
 const actors = platformActors({
     ...defaultPorts,
+    // Offline: no daemon release manifest is fetched (#365).
+    releasesFetch: async () => new Response('offline', { status: 404 }),
     catalogue: [...pluginCatalogue, inMemoryRuntime],
     runtimes,
     factory: async (runtime, c) => {

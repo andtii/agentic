@@ -6,9 +6,10 @@ import { KeyValue } from '../components/KeyValue';
 import { Page } from '../components/Page';
 import { Panel } from '../components/Panel';
 import { defineTopbar, routeId } from '../components/topbar';
-import { FailureNotice, failureOf } from '../components/status';
+import { FailureNotice, failureOf, interruptionLine, machineOfflineText } from '../components/status';
 import { dataMode } from '../data-mode';
 import { agentNamed, formatTime, loadTask, sessionsOf } from '../mock/workspace';
+import { opsMachine } from '../mock/ops';
 import { LiveTask, taskHead } from './task/LiveTask';
 
 /** The stop-chain dialog is opened from the topbar, which lives outside the page. */
@@ -69,7 +70,9 @@ export const Task = component(() => {
         const result = v.results[selected.id]!;
         const depth = Math.max(...v.tree.map((t) => t.depth)) + 1;
         // The selected node's one named failure (OPS-04); interrupted work is marked uncertain (OPS-05).
-        const failure = failureOf({ task: { id: selected.id, status: selected.status, ...(selected.wait ? { wait: selected.wait } : {}) } });
+        const machineName = (id: string): string | undefined => opsMachine(id)?.name;
+        const failure = failureOf({ task: { id: selected.id, status: selected.status, ...(selected.wait ? { wait: selected.wait } : {}), ...(selected.error ? { error: selected.error } : {}) }, ...(selected.interruption ? { interruption: selected.interruption } : {}), machineName });
+        const offline = selected.wait?.kind === 'machine-offline' ? selected.wait : undefined;
         return (
             <Page title={v.root.objective} page="task" hideTitle>
                 <section data-task-tree aria-label="Delegation tree">
@@ -100,6 +103,8 @@ export const Task = component(() => {
                     ) : null}
                     {approval ? <ApprovalPrompt request={approval.request} {...approval.context} onRespond={() => undefined} /> : null}
                     {failure ? <FailureNotice state={failure} /> : null}
+                    {offline ? <p data-task-wait role="status">{machineOfflineText(offline, machineName(offline.machineId), formatTime)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link></p> : null}
+                    {!failure && selected.interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(selected.interruption)}</p> : null}
                 </section>
 
                 <aside data-task-rail aria-label="Selected task">

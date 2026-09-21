@@ -409,3 +409,69 @@ describe('a daemon draining (#366, #360)', () => {
         expect(prompts.map((f) => (f.command as { commandId: string }).commandId)).toEqual(['t1:turn:1', 't2:turn:1', 't2:turn:1#1']);
     });
 });
+
+describe('a message parked on a live session across a daemon restart or update (#433)', () => {
+    const closed = (m1: MachineId, sessionId: string, code: string, reason = 'the daemon is going away') => machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId, reason, code }));
+
+    it('waiting-capacity across code update: re-opened in the same session with its ref once the daemon is back, and delivered', async () => {
+        const m1 = await pairMachine('laptop');
+        connect(m1, daemon(m1, false));
+        await online(m1);
+        const cc = await agent('agent_cc', 'in-memory');
+        const chatId = await room(cc);
+        // The machine drains for an update: the member's session opens, its prompt is refused and the message parks.
+        sockets.swallowCommands.add('t1:turn:1');
+        const sid = (await message(chatId, cc, 'one', 't1')).sessionId!;
+        await until(async () => (await route('t1'))?.status === 'running', 'the prompt to go out');
+        sockets.swallowCommands.clear();
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: sid, reply: drainingReply('t1:turn:1') }));
+        await until(async () => (await route('t1'))?.status === 'waiting-capacity', 'the message to park on capacity');
+        // The runtime had named the session (the in-memory daemon names one only with a turn, #363).
+        const ref = { agent: 'in-memory', v: 1, id: `${sid}.run` };
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.ref', sessionId: sid, ref }));
+        await until(async () => (await session(sid).get()).ref?.id === ref.id, 'the record to hold the ref');
+
+        // The update: the daemon closes the session with code update and stops; a new one says hello.
+        await closed(m1, sid, 'update');
+        await until(async () => (await route('t1'))?.reopen === true, 'the router to keep the message for the re-open');
+        expect(await route('t1')).toMatchObject({ status: 'waiting-capacity', reopen: true, sessionId: sid });
+        expect((await task('t1').get()).status).toBe('waiting');
+        expect(opens(m1, sid)).toHaveLength(1);
+        daemons.at(-1)!.stop();
+        await online(m1, false);
+        connect(m1, daemon(m1, false));
+        await online(m1);
+
+        await settled('t1');
+        expect(await task('t1').get()).toMatchObject({ status: 'completed', sessionId: sid });
+        expect(opens(m1, sid)).toHaveLength(2);
+        expect(opens(m1, sid)[1]!.spec.resume).toEqual(ref);
+        expect((await chat(chatId).get()).sessions['agent_cc']?.sessionId).toBe(sid);
+    });
+
+    it('waiting-turn across code restart: re-opened in the same session with its ref, and delivered', async () => {
+        const { m1, cc, chatId, sid, ref } = await running();
+        await message(chatId, cc, 'two', 't2');
+        await until(async () => (await route('t2'))?.status === 'waiting-turn', 'the message to wait for the running turn');
+
+        await restart(m1, sid, false);
+        // The turn it waited for went with the session: the task's wait says capacity, not that turn.
+        await until(async () => (await task('t2').get()).transitions.some((t) => t.wait?.kind === 'capacity'), 'the task to wait for a slot');
+        await settled('t2');
+        expect(await task('t2').get()).toMatchObject({ status: 'completed', sessionId: sid });
+        expect(opens(m1, sid)).toHaveLength(2);
+        expect(opens(m1, sid)[1]!.spec.resume).toEqual(ref);
+        // The turn the restart cut waits for a person, as before.
+        await until(async () => (await route('t1'))?.status === 'interrupted', 'the cut turn to park interrupted');
+    });
+
+    it('resume-failed still fails the parked route, recoverable', async () => {
+        const { m1, cc, chatId, sid } = await running();
+        await message(chatId, cc, 'two', 't2');
+        await until(async () => (await route('t2'))?.status === 'waiting-turn', 'the message to wait for the running turn');
+        await closed(m1, sid, 'resume-failed', 'cannot resume');
+        await settled('t2');
+        expect((await task('t2').get()).error).toMatchObject({ code: 'session-refused', recoverable: true });
+        expect((await session(sid).get()).status).toBe('closed');
+    });
+});

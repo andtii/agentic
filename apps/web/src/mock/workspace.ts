@@ -8,10 +8,11 @@
  * replace the body of each loader with actor reads; the pages keep the
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
-import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
+import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, TaskError, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
+import { interruptionLine, type Interruption } from '../components/status/interruption';
 
 /** The workspace clock: every mock time is relative to this instant, so ages are stable. */
 export const MOCK_NOW = Date.parse('2026-09-17T12:16:00Z');
@@ -65,6 +66,10 @@ export interface MockTaskRow {
     readonly chatId?: string;
     readonly sessionId?: SessionId;
     readonly depth: number;
+    /** A failed task's error (`machine-lost`, #368). */
+    readonly error?: TaskError;
+    /** #368: why the task's turn was cut and where its resume stands. */
+    readonly interruption?: Interruption;
 }
 
 const minutesAgo = (m: number): number => MOCK_NOW - m * 60_000;
@@ -101,6 +106,38 @@ export const TASKS: readonly MockTaskRow[] = [
     {
         id: tid('t4'), ref: 't_61c0', objective: 'Weekly summary to inbox', agentId: 'atlas', status: 'completed',
         environment: agentNamed('atlas').environment, createdAt: hoursAgo(26), chatId: 'c3', sessionId: sid('s3'), depth: 0
+    },
+    // #368: every interruption state. A turn on a machine that went offline waits for it (never failed) ...
+    {
+        id: tid('t5'), ref: 't_4e10', objective: 'Rebuild the pairing fixtures', agentId: 'forge', status: 'waiting',
+        wait: { kind: 'machine-offline', machineId: 'nuc-lab' as MachineId, since: minutesAgo(40) }, waitDetail: 'nuc-lab offline since 13:36 · fails after 24 h',
+        environment: { machine: 'nuc-lab', runtime: 'claude-code', account: 'work' }, createdAt: hoursAgo(1), depth: 0
+    },
+    // ... and fails `machine-lost` once it stayed away 24 h, recoverable.
+    {
+        id: tid('t6'), ref: 't_4e0f', objective: 'Nightly link check', agentId: 'lint', status: 'failed',
+        error: { code: 'machine-lost', message: 'machine nuc-lab has been offline since 2026-09-16T11:20:00.000Z; the turn is lost', recoverable: true },
+        environment: { machine: 'nuc-lab', runtime: 'claude-code', account: 'work' }, createdAt: hoursAgo(27), depth: 0
+    },
+    // A daemon restart cut a turn: the task waits for a person's Resume ...
+    {
+        id: tid('t7'), ref: 't_52a1', objective: 'Update the release notes for 0.2', agentId: 'forge', status: 'waiting',
+        wait: { kind: 'input', requestId: 'resume:t7:turn:1', sessionId: sid('s6') }, waitDetail: 'interrupted · uncertain',
+        environment: agentNamed('forge').environment, createdAt: minutesAgo(35), chatId: 'c4', sessionId: sid('s6'), depth: 0,
+        interruption: { host: 'restart', machineId: 'alien01', machine: 'alien01', runtime: 'claude-code', resume: 'ask' }
+    },
+    // ... a harness update cut one whose agent resumes on its own (`onInterrupt: 'auto'`) ...
+    {
+        id: tid('t8'), ref: 't_52a2', objective: 'Lint the runbook links', agentId: 'lint', status: 'waiting',
+        wait: { kind: 'input', requestId: 'resume:t8:turn:1', sessionId: sid('s7') }, waitDetail: 'interrupted · uncertain',
+        environment: agentNamed('lint').environment, createdAt: minutesAgo(12), chatId: 'c4', sessionId: sid('s7'), depth: 0,
+        interruption: { host: 'harness-update', machineId: 'alien01', machine: 'alien01', runtime: 'claude-code', resume: 'auto' }
+    },
+    // ... and an update cut one that was resumed since.
+    {
+        id: tid('t9'), ref: 't_52a0', objective: 'Tidy the changelog headings', agentId: 'forge', status: 'completed',
+        environment: agentNamed('forge').environment, createdAt: hoursAgo(4), chatId: 'c4', sessionId: sid('s8'), depth: 0,
+        interruption: { host: 'update', machineId: 'alien01', machine: 'alien01', runtime: 'claude-code', resume: 'resumed' }
     }
 ];
 
@@ -157,7 +194,7 @@ const PUSH_CONTEXT: ApprovalContext = {
 export const NEEDS: readonly MockNeedsItem[] = [
     { id: 'n2', kind: 'input', title: 'Scout asks: which A2A clients should the interop note cover?', agentId: 'scout', at: minutesAgo(18), context: 'ask_user · task t_77b1 · chat "A2A landscape"', href: '/tasks/t2', hrefLabel: 'Open task', primary: { label: 'Answer' } },
     { id: 'n1', kind: 'approval', title: 'Forge wants to run git push origin 47-mobile-drawer', agentId: 'forge', at: minutesAgo(2), context: 'delegated by Atlas', environment: agentNamed('forge').environment, request: PUSH_REQUEST, approval: PUSH_CONTEXT, href: '/chats/c1', hrefLabel: 'Open chat' },
-    { id: 'n3', kind: 'interrupted', title: 'Atlas was interrupted mid-turn while drafting the weekly summary', agentId: 'atlas', at: minutesAgo(18), context: 'The platform restarted the session. Nothing was replayed. The transcript is intact.', href: '/sessions/s3', hrefLabel: 'Open session', primary: { label: 'Resume' } }
+    { id: 'n3', kind: 'interrupted', title: 'Atlas was interrupted mid-turn while drafting the weekly summary', agentId: 'atlas', at: minutesAgo(18), context: 'Interrupted: the platform restarted mid-turn. Nothing was replayed. The transcript is intact.', href: '/sessions/s3', hrefLabel: 'Open session', primary: { label: 'Resume' } }
 ];
 
 const NEEDS_ORDER: Record<NeedsKindMock, number> = { approval: 0, input: 1, interrupted: 2 };
@@ -323,6 +360,20 @@ function plainTranscript(id: string, agentId: string, minutes: number, text: str
     return { transcript, authors: text ? { m1: authorFor(agentId, minutes) } : {}, toolMeta: {}, approvals: {} };
 }
 
+/**
+ * #368: the chat's `interrupted:{turnId}` status rows as the live thread words them (`interruptionLine`): the
+ * cause, then where the resume stands. `null` is an eviction — the platform's wording.
+ */
+function withCuts(view: Omit<MockChatView, 'chat' | 'tasks'>, cuts: readonly (readonly [agentId: string, minutes: number, cut: Interruption | null])[]): Omit<MockChatView, 'chat' | 'tasks'> {
+    const authors = { ...view.authors };
+    cuts.forEach(([agentId, minutes, cut], i) => {
+        const id = `cut${i}`;
+        view.transcript.messages.push({ id, role: 'assistant', actor: agentId, parts: [{ type: 'text', id: `${id}:0`, text: `*${interruptionLine(cut)}*` }] });
+        authors[id] = authorFor(agentId, minutes);
+    });
+    return { ...view, authors };
+}
+
 // ---- sessions ---------------------------------------------------------------
 
 export interface MockEvent {
@@ -357,6 +408,10 @@ export interface MockSessionView {
     readonly grants: readonly { readonly key: string; readonly label: string }[];
     /** OPS-05: the last event is not `turn-end`. */
     readonly interrupted?: boolean;
+    /** #368: why the last cut turn was cut and where its resume stands. */
+    readonly interruption?: Interruption;
+    /** #368: an idle daemon session its machine no longer hosts — it re-opens with the next message. */
+    readonly hostLost?: boolean;
     /** OPS-04: the last non-recoverable adapter `error` event — the runtime failed. */
     readonly error?: { readonly code: string; readonly message: string; readonly recoverable: boolean };
     /** The machine's word on the environment's account (`authStatus`), when the machine record was read. */
@@ -449,12 +504,36 @@ function session(id: string, ref: string, agentId: string, taskId: TaskId, state
     };
 }
 
+/** #368: a daemon session a machine event cut short: the cause, and where the resume stands. */
+function cutSession(id: string, ref: string, agentId: string, taskId: TaskId, minutes: number, interruption: Interruption, extra: Partial<MockSessionView> = {}): MockSessionView {
+    const base = session(id, ref, agentId, taskId, 'idle', minutes, 'c4');
+    const resumed = interruption.resume === 'resumed';
+    return {
+        ...base,
+        events: [
+            { seq: 17, kind: 'tool-call', text: 'Edit docs/runbook.md' },
+            { seq: 18, kind: 'error', text: `process_exited: interrupted: session.closed ${interruption.host ?? 'closed'}` },
+            { seq: 19, kind: 'turn-end', text: 'error · interrupted: the session closed' },
+            ...(resumed ? [{ seq: 20, kind: 'text' as const, text: 'Picking up where the cut turn left off.' }, { seq: 21, kind: 'turn-end' as const, text: 'end_turn' }] : [])
+        ],
+        interruption,
+        ...(resumed ? {} : { interrupted: true }),
+        ...extra
+    };
+}
+
+const cutOf = (id: string): Interruption => TASKS.find((t) => t.id === id)!.interruption!;
+
 const SESSIONS: readonly MockSessionView[] = [
     forgeSession(),
     session('s2', 's_1a00', 'atlas', tid('t1'), 'awaiting', 15, 'c1'),
     atlasInterruptedSession(),
     session('s4', 's_41ab', 'lint', tid('t1-2'), 'running', 3, 'c1'),
-    session('s5', 's_77b1', 'scout', tid('t2'), 'awaiting', 21, 'c2')
+    session('s5', 's_77b1', 'scout', tid('t2'), 'awaiting', 21, 'c2'),
+    cutSession('s6', 's_52a1', 'forge', tid('t7'), 35, cutOf('t7')),
+    cutSession('s7', 's_52a2', 'lint', tid('t8'), 12, cutOf('t8')),
+    // Resumed since, and then its daemon came back without it: the machine lost the session, which re-opens with the next message.
+    cutSession('s8', 's_52a0', 'forge', tid('t9'), 240, cutOf('t9'), { hostLost: true })
 ];
 
 // ---- schedule and spend ------------------------------------------------------
@@ -532,9 +611,9 @@ export function loadChat(id: string): MockChatView | undefined {
         case 'c2':
             return { chat, tasks, ...a2aTranscript() };
         case 'c3':
-            return { chat, tasks, ...plainTranscript(id, 'atlas', 60, 'Drafting the weekly summary now.') };
+            return { chat, tasks, ...withCuts(plainTranscript(id, 'atlas', 60, 'Drafting the weekly summary now.'), [['atlas', 18, null]]) };
         case 'c4':
-            return { chat, tasks, ...plainTranscript(id, 'lint', 300, 'Runbook section 3 reads fine now.') };
+            return { chat, tasks, ...withCuts(plainTranscript(id, 'lint', 300, 'Runbook section 3 reads fine now.'), tasks.flatMap((t) => (t.interruption ? [[t.agentId, Math.round((MOCK_NOW - t.createdAt) / 60_000), t.interruption] as const] : []))) };
         case 'c5':
             return { chat, tasks, ...plainTranscript(id, 'atlas', 27 * 60, 'Reminder set for 15:00.') };
         default:
@@ -606,8 +685,10 @@ export function loadTask(id: string): TaskView | undefined {
         tree.map((t) => {
             const rows: Transition[] = [{ id: `${t.id}-q`, text: `queued · created by ${t.parentId ? agentNamed(taskRow(t.parentId)!.agentId).name : 'you'}`, at: t.createdAt, tone: 'muted' as const }];
             if (t.status !== 'queued') rows.push({ id: `${t.id}-a`, text: `active · session ${SESSIONS.find((s) => s.id === t.sessionId)?.ref ?? '—'} opened on ${t.environment.machine}`, at: t.createdAt + 1000, tone: 'working' as const });
-            if (t.status === 'waiting' && t.wait) rows.push({ id: `${t.id}-w`, text: `waiting · ${t.wait.kind}${t.waitDetail ? ` · Bash ${t.waitDetail}` : ''}`, at: MOCK_NOW - 2 * 60_000, tone: 'needs-you' as const });
+            if (t.status === 'waiting' && t.wait) rows.push({ id: `${t.id}-w`, text: `waiting · ${t.wait.kind}${t.waitDetail ? ` · ${t.wait.kind === 'approval' ? 'Bash ' : ''}${t.waitDetail}` : ''}`, at: MOCK_NOW - 2 * 60_000, tone: 'needs-you' as const });
+            if (t.interruption?.resume === 'resumed') rows.push({ id: `${t.id}-r`, text: 'active · resumed: a new prompt over the intact transcript', at: t.createdAt + 10 * 60_000, tone: 'working' as const });
             if (t.status === 'completed') rows.push({ id: `${t.id}-c`, text: 'completed · result claimed', at: t.createdAt + 25 * 60_000, tone: 'muted' as const });
+            if (t.status === 'failed' && t.error) rows.push({ id: `${t.id}-f`, text: `failed · ${t.error.code}`, at: t.createdAt + 24 * 3_600_000, tone: 'failed' as const });
             return [t.id, rows];
         })
     );

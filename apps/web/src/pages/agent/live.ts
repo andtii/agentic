@@ -50,8 +50,9 @@ export function configPatch(config: AgentConfig): AgentConfigPatch {
         connectors: config.connectors,
         approvalPolicy: config.approvalPolicy,
         memoryPolicy: config.memoryPolicy,
-        // A patch merges `execution` one level deep, so an account or a pin the form dropped is cleared by name (#414).
-        execution: { ...config.execution, account: config.execution.account ?? null, defaultEnvironmentId: config.execution.defaultEnvironmentId ?? null },
+        // A patch merges `execution` one level deep, so an account or a pin the form dropped is cleared by name (#414),
+        // and `onInterrupt` is always named: the form omits the default `ask`, which would otherwise keep an `auto` (#368).
+        execution: { ...config.execution, account: config.execution.account ?? null, defaultEnvironmentId: config.execution.defaultEnvironmentId ?? null, onInterrupt: config.execution.onInterrupt ?? 'ask' },
         collaborators: config.collaborators
     };
 }
