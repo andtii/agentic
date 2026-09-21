@@ -5,6 +5,7 @@
  * normalized snapshots; only these cross package boundaries and the wire.
  */
 
+import type { AccountKey } from './account.js';
 import type { RuntimeId } from './agent.js';
 import type { EnvironmentId, MachineId } from './ids.js';
 import type { PluginContext } from './memory.js';
@@ -73,6 +74,8 @@ export interface QuotaAccount {
     readonly environmentId: EnvironmentId;
     readonly runtime: RuntimeId;
     readonly account: { readonly label: string; readonly identity?: string };
+    /** The account's key across machines (#414, `accountKeyOf`): the same login on two machines shares it. */
+    readonly key?: AccountKey;
     /** `null` until the machine reports one. */
     readonly snapshot: QuotaSnapshot | null;
     /** How old the snapshot is, in ms; `null` without one. Weigh it with `resetsAt` before relying on a number. */
