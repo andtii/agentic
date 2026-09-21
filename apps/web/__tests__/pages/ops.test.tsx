@@ -280,7 +280,7 @@ describe('/settings', () => {
 
     it('renders the sections with the matrix, masked keys, budgets, retention and the data actions', async () => {
         const root = await mountAt('/settings', view(true));
-        expect([...root.querySelectorAll('[data-settings-section]')].map(s => s.getAttribute('aria-label'))).toEqual(['Time', 'Notifications', 'API keys', 'Budgets', 'Retention', 'Your data']);
+        expect([...root.querySelectorAll('[data-settings-section]')].map(s => s.getAttribute('aria-label'))).toEqual(['Time', 'Notifications', 'API keys', 'Machine updates', 'Budgets', 'Retention', 'Your data']);
         const matrix = root.querySelector('[data-notify-matrix]')!;
         expect([...matrix.querySelectorAll('thead th')].map(th => th.textContent?.trim())).toEqual(['Event', 'Inbox', 'Push']);
         expect(matrix.querySelectorAll('tbody tr').length).toBe(4);

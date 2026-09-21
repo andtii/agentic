@@ -16,6 +16,7 @@ import type { OpenRequest } from '@sigx/ai-agent/app';
 import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, NeedsItem, QuestionPrompt, SectionHeading, type ApprovalDecision } from '@agentic/ui';
 import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
+import { MachineNotice } from '../machines/MachineNotice';
 import { sortRows, type NeedsRow, type NeedsSource, type RequestState } from './source';
 
 /** The Session's request as the card takes it. */
@@ -83,6 +84,12 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
     };
 
     return () => {
+        // A machine notice (#367) is its own row: a link to the machine and Dismiss, nothing to answer.
+        if (row.kind === 'machine') {
+            const dismiss = source.dismiss;
+            if (!row.notice) return null;
+            return <MachineNotice kind={row.notice.kind} title={row.title} body={row.notice.body} machineId={row.notice.machineId} age={source.age(row.at)} dismiss={dismiss ? () => dismiss(row) : undefined} />;
+        }
         const r = request?.();
         const view = r?.value ?? null;
         const who = view?.requestedBy ?? row.agent;

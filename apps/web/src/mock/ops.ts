@@ -8,8 +8,8 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId } from '@agentic/core';
-import type { Dependents, PluginView } from '@agentic/platform';
+import type { AgentId, DaemonBuild, EnvironmentDescriptor, EnvironmentId, MachineId, MachineInfo, MachinePolicy, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
+import type { Dependents, MachineUpdateView, PluginView } from '@agentic/platform';
 import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
 
@@ -40,7 +40,7 @@ export interface OpsMachine extends MachineInfo {
 }
 
 export const opsMachines: readonly OpsMachine[] = [
-    { id: 'alien01' as MachineId, name: 'alien01', os: 'windows', osLabel: 'Windows 11', daemonVersion: '0.1.0', online: true, lastSeenAt: Date.parse('2026-09-17T14:20:04Z'), seen: '4s ago', pairedOn: '16 Sep' },
+    { id: 'alien01' as MachineId, name: 'alien01', os: 'windows', osLabel: 'Windows 11', daemonVersion: '0.1.0', build: { version: '0.1.0', commit: 'a1b2c3d4e5', protocol: 1, channel: 'stable', platform: 'win32-x64' }, online: true, lastSeenAt: Date.parse('2026-09-17T14:20:04Z'), seen: '4s ago', pairedOn: '16 Sep' },
     { id: 'nuc-lab' as MachineId, name: 'nuc-lab', os: 'windows', osLabel: 'Windows 11', daemonVersion: '0.1.0', online: false, lastSeenAt: Date.parse('2026-09-17T11:20:00Z'), seen: '3h ago', pairedOn: '12 Sep' }
 ];
 
@@ -138,6 +138,69 @@ export const doctorChecks: readonly DoctorCheck[] = [
 ];
 
 export const doctorFootnote = 'Validated for Windows. macOS and Linux stay disabled until the same check passes there.';
+
+/* ---------------------------------------------------------- daemon updates */
+
+/** alien01's daemon build (#359): it answers `update`, so its card offers the release. */
+export const opsBuild: DaemonBuild = { version: '0.1.0', commit: 'a1b2c3d4e5', protocol: 1, channel: 'stable', platform: 'win32-x64' };
+
+const MOCK_AT = Date.parse('2026-09-17T14:20:00Z');
+const release = (version: string): NonNullable<MachineUpdateView['available']> => ({
+    version,
+    notesUrl: `https://agentic.example/releases/daemon-v${version}`,
+    checkedAt: MOCK_AT - 5 * 60_000,
+    asset: { url: `https://agentic.example/releases/daemon-v${version}/agentic-daemon-win32-x64.zip`, sha256: 'c'.repeat(64), bytes: 48_000_000, version }
+});
+const updateBase: MachineUpdateView = {
+    machineId: 'alien01' as MachineId,
+    online: true,
+    build: opsBuild,
+    features: ['update', 'harness'],
+    outdated: false,
+    channel: 'stable',
+    policy: { kind: 'manual' },
+    inherited: { channel: true, policy: true },
+    impact: { runningTurns: [{ sessionId: 's_41ab' as SessionId, agentId: 'lint' }], liveSessions: 2 }
+};
+const pendingOf = (phase: UpdatePhase | undefined, mode: 'drain' | 'now' = 'drain', extra: Partial<NonNullable<MachineUpdateView['pending']>> = {}): Pick<MachineUpdateView, 'pending' | 'draining' | 'available'> => ({
+    available: release('0.2.0'),
+    pending: { requestId: 'upd_mock', target: '0.2.0', mode, from: '0.1.0', requestedAt: MOCK_AT - 60_000, deadline: MOCK_AT + 40 * 60_000, by: 'user:andy', ...(phase ? { phase } : {}), ...extra },
+    draining: { requestId: 'upd_mock', since: MOCK_AT - 60_000 }
+});
+
+/**
+ * Every state of the machine update card (#367), for `pnpm dev:mock`: the
+ * mock Machine page opens on the machine's own state and offers the rest
+ * in its "Preview" picker.
+ */
+export const opsUpdateStates = {
+    available: { label: 'Update available', view: { ...updateBase, available: release('0.2.0') } },
+    requested: { label: 'Requested (no report yet)', view: { ...updateBase, ...pendingOf(undefined) } },
+    downloading: { label: 'Downloading', view: { ...updateBase, ...pendingOf('downloading', 'drain', { progress: { bytes: 29_000_000, total: 48_000_000 } }) } },
+    verifying: { label: 'Verifying', view: { ...updateBase, ...pendingOf('verifying') } },
+    staged: { label: 'Staged', view: { ...updateBase, ...pendingOf('staged') } },
+    draining: { label: 'Draining', view: { ...updateBase, ...pendingOf('draining'), impact: { runningTurns: [{ sessionId: 's_41ab' as SessionId, agentId: 'lint' }, { sessionId: 's_41aa' as SessionId, taskId: 't1' as TaskId, agentId: 'forge' }], liveSessions: 2 } } },
+    restarting: { label: 'Restarting', view: { ...updateBase, ...pendingOf('restarting', 'now') } },
+    applied: { label: 'Updated (roll back offered)', view: { ...updateBase, build: { ...opsBuild, version: '0.2.0', commit: 'f00dfeed12' }, last: { requestId: 'upd_mock', from: '0.1.0', to: '0.2.0', outcome: 'applied', at: MOCK_AT - 2 * 60 * 60_000 } } },
+    'rolled-back': { label: 'Rolled back', view: { ...updateBase, available: release('0.2.0'), last: { requestId: 'upd_mock', from: '0.1.0', to: '0.2.0', outcome: 'rolled-back', at: MOCK_AT - 20 * 60_000, error: 'the new build did not say hello within 60 s' } } },
+    failed: { label: 'Failed', view: { ...updateBase, available: release('0.2.0'), last: { requestId: 'upd_mock', from: '0.1.0', to: '0.2.0', outcome: 'failed', at: MOCK_AT - 20 * 60_000, error: 'sha256 mismatch: the download does not match the release' } } },
+    current: { label: 'Up to date, own window policy', view: { ...updateBase, channel: 'latest', policy: { kind: 'window', cron: '0 3 * * *', tz: 'Europe/Stockholm', durationMs: 2 * 60 * 60_000 }, inherited: { channel: false, policy: false } } },
+    outdated: { label: 'Outdated (update required)', view: { ...updateBase, outdated: true, available: release('0.2.0') } },
+    'crash-loop': { label: 'Restarting in a loop', view: { ...updateBase, available: release('0.2.0'), restarts: 4, lastExit: { at: MOCK_AT - 3 * 60_000, reason: 'crashed', code: 1 } } },
+    'no-feature': { label: 'Predates updates (reinstall once)', view: { ...updateBase, machineId: 'nuc-lab' as MachineId, online: false, features: [], impact: { runningTurns: [], liveSessions: 0 } } }
+} as const satisfies Readonly<Record<string, { readonly label: string; readonly view: MachineUpdateView }>>;
+
+export type OpsUpdateState = keyof typeof opsUpdateStates;
+
+/** The state each sample machine opens on: alien01 has 0.2.0 waiting, nuc-lab's daemon predates updates. */
+export const opsUpdateStateOf: Readonly<Record<string, OpsUpdateState>> = { alien01: 'available', 'nuc-lab': 'no-feature' };
+
+/** The mock `MachineUpdateView` of a machine — its sample state, as that machine. */
+export function opsUpdate(machineId: string, state: OpsUpdateState = opsUpdateStateOf[machineId] ?? 'current'): MachineUpdateView {
+    const m = opsMachines.find((x) => x.id === machineId);
+    const view: MachineUpdateView = opsUpdateStates[state].view;
+    return { ...view, machineId: machineId as MachineId, online: m?.online ?? view.online };
+}
 
 /* ------------------------------------------------------------------ pairing */
 

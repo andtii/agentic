@@ -4,6 +4,7 @@ import { AgentTile, EnvironmentCard, Icon, StatusPill } from '@agentic/ui';
 import { defaultAgentsFor, opsAgent, type OpsMachine } from '../../mock/ops';
 import { LinkButton } from '../ops/LinkButton';
 import type { DefaultForAgent } from './live';
+import { BADGE_TEXT, buildLabel, type UpdateBadge } from './update';
 
 /** The mock workspace's "Default for" tiles by environment id. */
 export const mockDefaultFor: Readonly<Record<string, readonly DefaultForAgent[]>> = Object.fromEntries(Object.entries(defaultAgentsFor).map(([env, ids]) => [env, ids.map(id => ({ name: opsAgent(id).name, hue: opsAgent(id).hue }))]));
@@ -47,7 +48,9 @@ export function queuedLine(machine: OpsMachine, queued: number): string | undefi
     return `${queued} ${queued === 1 ? 'task is' : 'tasks are'} queued for this machine under its agent's offline policy. It will not move to another account or machine by itself.`;
 }
 
-export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Define.Prop<'environments', readonly EnvironmentDescriptor[], true> & EnvironmentFacts;
+export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Define.Prop<'environments', readonly EnvironmentDescriptor[], true> & EnvironmentFacts
+    /** The machine's daemon update, as a pill beside its status (#367): available, draining, updating, required. */
+    & Define.Prop<'update', UpdateBadge | null>;
 
 /** One bordered group per machine on `/machines`: glyph, name, OS and heartbeat, status, Details, then its environments. */
 export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
@@ -59,8 +62,9 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                 <span data-machine-glyph aria-hidden="true"><Icon name="machines" size={20} /></span>
                 <div data-machine-title>
                     <span data-machine-name>{m.name}</span>
-                    <span data-machine-caption>{m.osLabel} · daemon {m.daemonVersion} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
+                    <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}</span>
                 </div>
+                {props.update ? <StatusPill status={props.update} label={BADGE_TEXT[props.update].label} tone={BADGE_TEXT[props.update].tone} class="ag-update-badge" /> : null}
                 <StatusPill status={m.online ? 'online' : 'offline'} />
                 <LinkButton to={`/machines/${m.id}`}>Details</LinkButton>
             </header>

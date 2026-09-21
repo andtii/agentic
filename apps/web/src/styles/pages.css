@@ -879,6 +879,41 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-env-allowed] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); font-family: var(--font-mono); font-size: var(--text-xs); }
 [data-env-allowed-label] { color: var(--ag-text-dim); text-transform: uppercase; letter-spacing: var(--tracking-wider); margin-inline-end: var(--space-xs); }
 [data-env-failure] { margin: 0; font-size: var(--text-md); color: var(--color-error); }
+/* daemon updates (#367): the Machine page's card, the Machines list's "Update all", machine notices in "Needs you" */
+[data-update-card] p { margin: 0; }
+[data-update-running] { font-family: var(--font-mono); font-size: var(--text-md); }
+[data-update-banner], [data-update-error], [data-update-last][data-tone="failed"] { font-size: var(--text-md); color: var(--color-error); }
+[data-update-restarts] { font-size: var(--text-md); color: var(--color-warning); }
+[data-update-last] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-update-version] { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-md); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+[data-update-notes] { font-size: var(--text-md); font-weight: var(--weight-normal); }
+[data-update-pending], [data-update-available], [data-update-reinstall], [data-update-policy], [data-update-defaults] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
+[data-update-phases] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-xs); }
+[data-update-phase] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); padding-inline-start: var(--space-lg); position: relative; font-size: var(--text-md); color: var(--ag-text-dim); }
+[data-update-phase]::before { content: ''; position: absolute; inset-inline-start: 0; inset-block-start: 0.55em; inline-size: 8px; block-size: 8px; border-radius: 9999px; border: var(--border) solid currentColor; }
+[data-update-phase][data-state="done"] { color: var(--ag-text-muted); }
+[data-update-phase][data-state="done"]::before { background: currentColor; }
+[data-update-phase][data-state="current"] { color: var(--color-base-content); font-weight: var(--weight-semibold); }
+[data-update-phase][data-state="current"]::before { background: var(--color-primary); border-color: var(--color-primary); }
+[data-update-progress] { inline-size: min(220px, 100%); block-size: 8px; accent-color: var(--color-primary); }
+[data-update-draining] { display: flex; flex-direction: column; gap: var(--space-2xs); inline-size: 100%; font-weight: var(--weight-normal); color: var(--ag-text-muted); }
+[data-update-turns] { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); }
+[data-update-impact] { margin-block-end: var(--space-lg); }
+[data-update-impact-label] { margin: 0 0 var(--space-xs); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--ag-text-dim); }
+[data-update-defaults-status] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-update-defaults-status][role="alert"] { color: var(--color-error); }
+[data-update-all] { display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-update-all-row] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-md); font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-update-results] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2xs); font-size: var(--text-sm); color: var(--color-error); }
+[data-update-results] [data-ok] { color: var(--ag-text-muted); }
+[data-update-result-name] { font-family: var(--font-mono); color: var(--color-base-content); }
+[data-machine-notice] { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--space-xs) var(--space-md); padding: var(--space-lg); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); }
+[data-machine-notice-glyph] { grid-row: span 3; display: inline-grid; place-items: center; inline-size: 32px; block-size: 32px; border-radius: var(--radius-field); background: var(--color-base-100); border: var(--border) solid var(--ag-line-strong); color: var(--ag-text-muted); }
+[data-machine-notice-head] { display: flex; align-items: center; gap: var(--space-sm); min-inline-size: 0; }
+[data-machine-notice-title] { font-size: var(--text-md); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-machine-notice-context] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-machine-notice-actions] { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+[data-machine-notice] > [data-needs-error] { grid-column: 2; }
 
 /* ---- pair (#90): 620 + 360 ---- */
 /* 620 + 360 as drawn at 1440; the steps column gives way first so 1280 still fits without a sideways scroll */

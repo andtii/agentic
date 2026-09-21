@@ -17,11 +17,13 @@
  * resolves the one a page renders — the mock unless the entry provides the
  * live one.
  */
+import type { NotificationKind } from '@agentic/core';
 import type { SessionRequestView } from '@agentic/platform';
 import type { Decision } from '@sigx/ai-agent';
 import type { ApprovalRequester, EnvironmentParts } from '@agentic/ui';
 
-export type NeedsKind = 'approval' | 'input' | 'interrupted';
+/** `machine`: a daemon's update or crash notice (#367) — it links to the machine and is dismissed, not answered. */
+export type NeedsKind = 'approval' | 'input' | 'interrupted' | 'machine';
 
 /** The session and the request an inbox notification points at. */
 export interface RequestRef {
@@ -49,6 +51,8 @@ export interface NeedsRow {
     readonly primary?: { readonly label: string; readonly disabled?: boolean };
     /** Behind an `interrupted` row: the task the router resumes. */
     readonly taskId?: string;
+    /** Behind a `machine` row: the Inbox kind and the machine it is about. */
+    readonly notice?: { readonly kind: NotificationKind; readonly machineId: string; readonly body?: string };
 }
 
 /** The card's data: the Session's record plus how the page names the requester. */
@@ -76,13 +80,15 @@ export interface NeedsSource {
     respond(ref: RequestRef, decision: Decision): Promise<void>;
     /** `Routing.resume` for an `interrupted` row — the row leaves once the route runs again; rejects when it did not get through. */
     resume?(row: NeedsRow): Promise<void>;
+    /** Mark a `machine` row read (`Inbox.ack`) — it leaves the list with the live read. */
+    dismiss?(row: NeedsRow): Promise<void>;
     /** A relative age in the workspace zone. */
     age(at: number): string;
 }
 
-const KIND_ORDER: Record<NeedsKind, number> = { approval: 0, input: 1, interrupted: 2 };
+const KIND_ORDER: Record<NeedsKind, number> = { approval: 0, input: 1, interrupted: 2, machine: 3 };
 
-/** Approvals first, then input, then interrupted; oldest first inside each kind (`docs/design/HANDOFF.md` → Home). */
+/** Approvals first, then input, then interrupted, then machine notices; oldest first inside each kind (`docs/design/HANDOFF.md` → Home). */
 export function sortRows(rows: readonly NeedsRow[]): NeedsRow[] {
     return [...rows].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.at - b.at);
 }

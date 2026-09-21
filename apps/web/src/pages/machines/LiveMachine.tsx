@@ -31,6 +31,7 @@ import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { machineHead } from './head';
 import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
+import { LiveUpdateCard } from './LiveUpdateCard';
 
 export const LiveMachine = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
@@ -182,6 +183,17 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     onRemoveEnvironment={removeEnvironment}
                     onRename={(name: string) => { void rename(name); }}
                     onRemoveMachine={() => { void removeMachine(); }}
+                    slots={{
+                        update: () => (v.revoked ? null : (
+                            <LiveUpdateCard
+                                machineKey={key()!}
+                                name={v.name || id}
+                                os={v.os ?? 'linux'}
+                                daemonVersion={v.daemonVersion}
+                                turnLabel={(t) => `${directory.lookup(t.agentId).name} · ${t.sessionId}`}
+                            />
+                        ))
+                    }}
                 />
                 {st.error ? <p data-machine-error role="alert">{st.error}</p> : null}
             </>
