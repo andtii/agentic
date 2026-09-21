@@ -42,7 +42,8 @@ export const QuotaRings = component<QuotaRingsProps>(({ props }) => () => {
         <div data-scope={SCOPE} data-part="root" data-mod-stale={isQuotaStale(s, props.now ?? Date.now(), props.staleMs) ? '' : undefined} class={props.class}>
             {windows.map((w) => {
                 // A limit the provider reports without a number (Claude Code's limit message) is still full.
-                const percent = quotaPercent(w) ?? (w.status === 'exhausted' ? 100 : null);
+                const unnumbered = quotaPercent(w) === null && w.status === 'exhausted';
+                const percent = unnumbered ? 100 : quotaPercent(w);
                 const label = ringLabel(w);
                 return (
                     <span
@@ -56,7 +57,7 @@ export const QuotaRings = component<QuotaRingsProps>(({ props }) => () => {
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={percent ?? undefined}
-                        aria-valuetext={quotaUsedText(w)}
+                        aria-valuetext={unnumbered ? 'Limit reached' : quotaUsedText(w)}
                         title={w.label}
                     >
                         <svg data-scope={SCOPE} data-part="ring" viewBox="0 0 28 28" aria-hidden="true">

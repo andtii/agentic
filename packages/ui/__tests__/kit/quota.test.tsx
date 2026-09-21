@@ -161,6 +161,8 @@ describe('QuotaRings (#452)', () => {
     it('a limit with no number is a full ring; an old snapshot dims; nothing to draw renders nothing', () => {
         const root = mount(<QuotaRings snapshot={snapshot({ windows: [{ ...week, utilization: null, status: 'exhausted' }], observedAt: NOW - 2 * 3_600_000 })} now={NOW} />);
         expect(items(root)[0]!.getAttribute('aria-valuenow')).toBe('100');
+        // Announced as what it is, never as a full ring with an unknown number.
+        expect(items(root)[0]!.getAttribute('aria-valuetext')).toBe('Limit reached');
         expect(part(root, 'ag-quota-rings', 'root')!.hasAttribute('data-mod-stale')).toBe(true);
         expect(part(mount(<QuotaRings snapshot={snapshot({ windows: [extra] })} now={NOW} />), 'ag-quota-rings', 'root')).toBeNull();
     });
