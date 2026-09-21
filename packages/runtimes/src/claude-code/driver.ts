@@ -14,7 +14,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
 import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
 import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
@@ -62,6 +62,14 @@ export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
 }
 
 const RUNTIME = 'claude-code';
+
+/**
+ * The setting sources a session loads: the repository's own (`CLAUDE.md` and its imports,
+ * `.claude/settings.json`, hooks, skills) from `cwd` upward — what the interactive CLI reads in
+ * that folder (#461). `user` and `local` stay out: the account lives in `CLAUDE_CONFIG_DIR`, not in
+ * settings, and nothing of the daemon operator's own `~/.claude` reaches an agent (decision 3).
+ */
+export const SETTING_SOURCES: readonly SettingSource[] = ['project'];
 
 /**
  * Claude Code's own cross-session tools: they list and message OTHER Claude Code sessions on the
@@ -112,7 +120,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         if (!agent) {
             agent = claudeCode({
                 id: `${RUNTIME}:${env.id}`,
-                settingSources: [],
+                settingSources: SETTING_SOURCES,
                 env: childEnvFor(env),
                 ...(options.models ? { models: options.models } : {}),
                 ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
@@ -165,7 +173,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                     cwd: spec.cwd,
                     system: withUnavailableConnectors(claudeCodeSystemPrompt(spec.system), connectors.unavailable),
                     systemPromptPreset: true,
-                    settingSources: [],
+                    settingSources: SETTING_SOURCES,
                     interactive: true,
                     tools,
                     ...(spec.model !== undefined ? { model: spec.model } : {}),

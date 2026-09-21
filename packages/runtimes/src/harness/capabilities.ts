@@ -22,7 +22,7 @@ export interface HarnessReportSubject {
     readonly runtime: RuntimeId;
     /** Its display name, in the reasons: "Claude Code", "Copilot CLI". */
     readonly name: string;
-    /** Why the harness's own memory (instruction files, settings) is not loaded. */
+    /** Why the harness's own memory (instruction files, settings) is the project's, not platform memory. */
     readonly runtimeMemory: string;
     /** Whether the harness can put a question to the user mid-turn. Default `true`. */
     readonly inputRequest?: boolean;
