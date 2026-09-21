@@ -11,6 +11,7 @@ import type { RuntimeId } from './agent.js';
 import type { OpenSpec } from './daemon.js';
 import type { AuthStatus, CapabilityReport, DoctorFinding, EnvironmentDescriptor, EnvironmentVerdict, IsolationMechanism } from './environment.js';
 import type { EnvironmentId, MachineId, SessionId } from './ids.js';
+import type { ModelOption } from './session-options.js';
 
 /** One row of the daemon's `environments.json`; never leaves the machine as-is (EXE-03/04). */
 export interface LocalEnvironment {
@@ -23,6 +24,11 @@ export interface LocalEnvironment {
     /** Maximum concurrent sessions in this environment. */
     readonly concurrency: number;
     readonly accountLabel?: string;
+    /**
+     * Sessions here may run in a mode that asks about nothing (#450: Claude Code's `bypassPermissions`). Set on the
+     * machine only — never through `env.request` — and reported so the web offers the mode only where it is allowed.
+     */
+    readonly allowBypassPermissions?: boolean;
 }
 
 /** What a driver can tell about an environment without opening a session. */
@@ -65,6 +71,8 @@ export interface RuntimeDriver<S = unknown, P = unknown> {
     inspect(env: LocalEnvironment): Promise<EnvironmentInspection>;
     open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<P>): Promise<OpenedRuntimeSession<S>>;
     doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport>;
+    /** The models the environment's account may use (#450), as it reports them; `null` when it cannot say. */
+    models?(env: LocalEnvironment): Promise<readonly ModelOption[] | null>;
 }
 
 /** The platform-facing descriptor of a local environment, as sent in `hello` / `env`. */
@@ -73,7 +81,8 @@ export function toEnvironmentDescriptor(
     machineId: MachineId,
     inspection: EnvironmentInspection,
     active = 0,
-    doctor?: EnvironmentVerdict
+    doctor?: EnvironmentVerdict,
+    models?: readonly ModelOption[]
 ): EnvironmentDescriptor {
     return {
         id: env.id,
@@ -88,6 +97,8 @@ export function toEnvironmentDescriptor(
         cwdRoots: [...env.cwdRoots],
         concurrency: { max: env.concurrency, active },
         isolation: inspection.isolation,
-        ...(doctor === undefined ? {} : { doctor })
+        ...(doctor === undefined ? {} : { doctor }),
+        ...(models === undefined ? {} : { models: [...models] }),
+        ...(env.allowBypassPermissions ? { allowBypassPermissions: true } : {})
     };
 }

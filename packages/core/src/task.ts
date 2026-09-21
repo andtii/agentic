@@ -2,6 +2,7 @@
 
 import type { Limits } from './agent.js';
 import type { PromptPart } from './chat.js';
+import type { SessionOptions } from './session-options.js';
 import type { AgentId, ChatId, EnvironmentId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
 import type { Usage } from './usage.js';
 
@@ -69,6 +70,11 @@ export interface TaskContract {
      * session's engine conversation; otherwise it opens fresh and `context` carries on.
      */
     readonly resumeFrom?: SessionId;
+    /**
+     * The model and permission mode the task's session runs with (#450): copied from the chat member by the activation
+     * contract. Over the agent's config; a live session reused for the task is configured to them before its prompt.
+     */
+    readonly options?: SessionOptions;
 }
 
 export type JsonSchemaObject = { readonly type: 'object'; readonly [key: string]: unknown };

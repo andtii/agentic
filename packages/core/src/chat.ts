@@ -1,6 +1,7 @@
 /** Chats: attributed entries, membership, addressing (CHT-01..11). */
 
 import type { AgentId, ChatId, MachineId, MessageId, ProjectId, SessionId, TaskId } from './ids.js';
+import type { SessionOptions, SessionOptionsPatch } from './session-options.js';
 import type { TaskError } from './task.js';
 import type { WorkdirRef } from './workdir.js';
 
@@ -38,6 +39,11 @@ export type ChatEntry =
            * changed. Whoever folds the entries copies `ref` onto the member; `null` clears it.
            */
           readonly workdir?: { readonly agentId: AgentId; readonly ref: WorkdirRef | null };
+          /**
+           * Set on the note `Chat.setOptions` writes (#450): a member's model or permission mode for this chat changed.
+           * Whoever folds the entries applies `patch` to the member's `options` (`applySessionOptions`; `null` clears a key).
+           */
+          readonly options?: { readonly agentId: AgentId; readonly patch: SessionOptionsPatch };
           /**
            * Set on the note `Chat.setProject` writes (#330): the chat now belongs to this project,
            * or to none with `null`. Whoever folds the entries keeps the last one; the router reads
@@ -94,6 +100,8 @@ export interface ChatMember {
     readonly historyFrom: number;
     /** The folder this agent works in for this chat (#185): copied into every task the chat activates it for. */
     readonly workdir?: WorkdirRef;
+    /** Its model and permission mode for this chat (#450): copied into the task of every activation; its session takes them on its next turn. */
+    readonly options?: SessionOptions;
 }
 
 /** Result of posting: who the message activates (CHT-06). */

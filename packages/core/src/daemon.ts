@@ -173,6 +173,8 @@ export interface OpenSpec {
     readonly cwd: string;
     readonly system: string;
     readonly model?: string;
+    /** The runtime's permission mode (#450); the runtime's own default without it. */
+    readonly permissionMode?: string;
     readonly maxTurns?: number;
     readonly maxBudgetUsd?: number;
     /** Tool names the daemon must serve to the runtime and bridge back as `tool.call`. */

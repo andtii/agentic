@@ -5,7 +5,7 @@
  */
 
 export { LIMITS } from './limits.js';
-export { cursor, cursors, platformCursor, environment, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot, releaseAsset, harnessReport, harnessReports, lifecycleError } from './common.js';
+export { cursor, cursors, platformCursor, environment, modelOption, capabilityReport, openSpec, openSpecConnector, openSpecPolicy, approvalRule, toolGrant, fsOp, fsResult, fsError, environmentInput, envResult, envError, machinePolicy, quotaWindow, quotaSnapshot, releaseAsset, harnessReport, harnessReports, lifecycleError } from './common.js';
 export { sessionRef, agentCapabilities, agentEvent, promptPart, decision, outputSpec, wireFrame, wireEventFrame, wireReply, wireCommand } from './wire.js';
 export {
     helloFrame,

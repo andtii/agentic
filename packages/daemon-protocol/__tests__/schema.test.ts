@@ -304,6 +304,19 @@ describe('daemon frame schemas', () => {
         expect(platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec: { ...spec, policy: { rules: Array.from({ length: LIMITS.list + 1 }, (_, i) => ({ id: `r${i}`, match: {}, outcome: 'allow' })), grants: [] } } }).success).toBe(false);
     });
 
+    it('session.open carries the permission mode and env frames the account’s models and bypass flag (#450); both stay optional', () => {
+        const spec = { ...platformCases['session.open'].valid.spec, model: 'claude-fable-5-1', permissionMode: 'plan' };
+        const parsed = platformFrameSchemas['session.open'].safeParse({ ...platformCases['session.open'].valid, spec });
+        expect(parsed.success).toBe(true);
+        expect((parsed.data as { spec: unknown }).spec).toEqual(spec);
+        const described = { ...env, models: [{ id: 'claude-fable-5-1', label: 'Fable', description: 'most capable' }, { id: 'opus' }], allowBypassPermissions: true };
+        const frame = daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [described] });
+        expect(frame.success).toBe(true);
+        expect(frame.data?.environments[0]).toEqual(described);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [{ ...env, models: [{ label: 'no id' }] }] }).success).toBe(false);
+        expect(daemonFrameSchemas.env.safeParse({ v: V, t: 'env', environments: [{ ...env, allowBypassPermissions: 'yes' }] }).success).toBe(false);
+    });
+
     it('session.open carries the agent’s MCP connectors (#280) with secret names; a bad transport or a value-shaped auth is refused', () => {
         const connectors = [
             { id: 'acme', transport: 'streamable-http', url: 'https://mcp.acme.test/mcp', auth: { bearer: 'acme.token', headers: { 'X-Team': 'acme.team' } } },

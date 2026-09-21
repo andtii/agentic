@@ -109,8 +109,36 @@ export function mergeQuota(prev: QuotaSnapshot | undefined, next: QuotaSnapshot)
     return { ...prev, ...next, availability, windows };
 }
 
+/**
+ * Whether a model-scoped window is `model`'s (#450). The provider scopes a window by display name (`Fable`, `Opus`), a
+ * session names its model by id or alias (`claude-fable-5-1`, `opus`): the scope's first word must be one of the id's
+ * words, case-insensitively. An unscoped window is every model's.
+ */
+export function windowMatchesModel(w: Pick<QuotaWindow, 'scope'>, model: string | undefined): boolean {
+    const scoped = w.scope?.model?.trim().toLowerCase();
+    if (!scoped) return true;
+    if (!model) return false;
+    const family = scoped.split(/[^a-z0-9]+/).find(Boolean);
+    return !!family && model.toLowerCase().split(/[^a-z0-9]+/).includes(family);
+}
+
+const PERIOD_RANK: Readonly<Record<QuotaWindow['period'], number>> = { minute: 0, session: 1, day: 2, week: 3, month: 4, other: 5 };
+
+/**
+ * The windows that limit a member running `model` (#450): every window of the account's shared allowance plus the ones
+ * scoped to that model — another model's exhausted week is not this member's limit. Shortest period first, the shared
+ * window before the model's own (session → week → model week). Without a model, only the shared windows.
+ */
+export function memberWindows(s: Pick<QuotaSnapshot, 'windows'>, model?: string): readonly QuotaWindow[] {
+    return s.windows
+        .filter((w) => windowMatchesModel(w, model))
+        .map((w, i) => ({ w, i }))
+        .sort((a, b) => PERIOD_RANK[a.w.period] - PERIOD_RANK[b.w.period] || Number(!!a.w.scope?.model) - Number(!!b.w.scope?.model) || a.i - b.i)
+        .map(({ w }) => w);
+}
+
 /** The window closest to its limit (highest utilization); for compact UI and AI hints. */
-export function tightestWindow(s: QuotaSnapshot): QuotaWindow | undefined {
+export function tightestWindow(s: Pick<QuotaSnapshot, 'windows'>): QuotaWindow | undefined {
     let best: QuotaWindow | undefined;
     for (const w of s.windows) {
         if (w.utilization === null) continue;
