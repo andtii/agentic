@@ -17,7 +17,7 @@ import { homedir } from 'node:os';
 import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
 import { claudeCode, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
-import type { DoctorReport, EnvironmentInspection, LocalEnvironment, OpenedRuntimeSession, OpenSpec, RuntimeDriver, RuntimeOpenContext } from '@agentic/core';
+import { BYPASS_PERMISSIONS_MODE, type DoctorReport, type EnvironmentInspection, type LocalEnvironment, type ModelOption, type OpenedRuntimeSession, type OpenSpec, type RuntimeDriver, type RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
 import { openDaemonConnectors, withConnectorPolicy, type DaemonConnectorOpener } from '../harness/connectors.js';
@@ -25,6 +25,7 @@ import { assertCwdInRoots, assertRuntime as assertRuntimeOf, closingWith } from 
 import { bridgedPlatformTools } from '../harness/tools.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
+import { claudeCodeModels, type ModelsQueryFn } from './models.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
 
 export interface ClaudeCodeDriverOptions {
@@ -50,6 +51,8 @@ export interface ClaudeCodeDriverOptions {
      * connectors are left out of every session, and the agent is told why.
      */
     readonly connectors?: DaemonConnectorOpener;
+    /** The SDK's `query` for `models(env)`'s unprompted probe; a fake in tests. */
+    readonly modelsQuery?: ModelsQueryFn;
 }
 
 export interface ClaudeCodeDriver extends RuntimeDriver<AgentSession, Policy> {
@@ -116,6 +119,8 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 env: childEnvFor(env),
                 ...(options.models ? { models: options.models } : {}),
                 ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+                // Only where the machine allows it (#453): without it the adapter refuses `bypassPermissions` on open and configure.
+                ...(env.allowBypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),
                 query: withoutCrossSessionTools(options.query ?? sdkQuery),
                 ...(options.listen ? { listen: options.listen } : {}),
                 ...(options.listSessions ? { listSessions: options.listSessions } : {}),
@@ -148,6 +153,9 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);
             assertCwdInRoots(RUNTIME, env, spec.cwd);
+            if (spec.permissionMode === BYPASS_PERMISSIONS_MODE && !env.allowBypassPermissions) {
+                throw new Error(`${RUNTIME}: permission mode ${BYPASS_PERMISSIONS_MODE} is not allowed in environment ${env.id} (set allowBypassPermissions on it in environments.json)`);
+            }
             const { tools: platform, unknown } = bridgedPlatformTools(spec.tools, ctx.callTool);
             const connectors = await openDaemonConnectors({
                 connectors: spec.connectors ?? [],
@@ -169,6 +177,7 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                     interactive: true,
                     tools,
                     ...(spec.model !== undefined ? { model: spec.model } : {}),
+                    ...(spec.permissionMode !== undefined ? { permissionMode: spec.permissionMode as PermissionMode } : {}),
                     ...(spec.maxTurns !== undefined ? { maxTurns: spec.maxTurns } : {}),
                     ...(spec.maxBudgetUsd !== undefined ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
                     ...(policy !== undefined ? { policy } : {}),
@@ -185,6 +194,15 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 unavailableConnectors: connectors.unavailable
             });
             return { session: closingWith(session, connectors.close), capabilities };
+        },
+
+        models(env: LocalEnvironment): Promise<readonly ModelOption[] | null> {
+            assertRuntime(env);
+            return claudeCodeModels(env, {
+                parentEnv: options.parentEnv ?? process.env,
+                ...(options.modelsQuery ? { query: options.modelsQuery } : {}),
+                ...(options.pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable } : {})
+            });
         },
 
         async doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport> {

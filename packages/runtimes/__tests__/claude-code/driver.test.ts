@@ -65,6 +65,28 @@ describe('claudeCodeDriver', () => {
         await driver.dispose();
     });
 
+    it('opens in the spec’s permission mode (#453); bypassPermissions only where the environment allows it', async () => {
+        const { driver, fake } = driverWith(hello);
+        const { session } = await driver.open(envA, spec({ permissionMode: 'plan' }), ctx());
+        await drain(session.prompt('Hello'));
+        expect(fake.calls[0]!.permissionMode).toBe('plan');
+        await expect(driver.open(envA, spec({ permissionMode: 'bypassPermissions' }), ctx())).rejects.toThrow(/not allowed in environment environment_a/);
+        const allowed = { ...envB, id: 'environment_c' as EnvironmentId, cwdRoots: envA.cwdRoots, allowBypassPermissions: true };
+        const opened = await driver.open(allowed, spec({ permissionMode: 'bypassPermissions' }), ctx());
+        await drain(opened.session.prompt('Hello'));
+        expect(fake.calls[1]).toMatchObject({ permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true });
+    });
+
+    it('lists the account’s models from an unprompted query (#453), null when it cannot', async () => {
+        const closed: boolean[] = [];
+        const modelsQuery = () => ({ supportedModels: async () => [{ value: 'claude-fable-5-1', displayName: 'Fable', description: 'Most capable' }, { value: 'sonnet', displayName: 'Sonnet', description: '' }], close: () => void closed.push(true) });
+        const { driver } = driverWith(hello, { modelsQuery: modelsQuery as never });
+        expect(await driver.models!(envA)).toEqual([{ id: 'claude-fable-5-1', label: 'Fable', description: 'Most capable' }, { id: 'sonnet', label: 'Sonnet' }]);
+        expect(closed).toEqual([true]);
+        const failing = driverWith(hello, { modelsQuery: (() => ({ supportedModels: async () => { throw new Error('signed out'); }, close: () => {} })) as never }).driver;
+        expect(await failing.models!(envA)).toBeNull();
+    });
+
     it("takes Claude Code's cross-session tools out of every session: they reach the operator's own sessions, not chat members", async () => {
         const { driver, fake } = driverWith(hello);
         const { session } = await driver.open(envA, spec(), ctx());
@@ -195,5 +217,14 @@ describe('claudeCodeDriver isolation (EXE-04/05)', () => {
         await drain(session.prompt('one'));
         expect(spawned[0]!.env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
         await driver.dispose();
+    });
+});
+
+describe('claude-code plugin lists (#453)', () => {
+    it('keep in step with the adapter: every adapter model and mode is offered', async () => {
+        const { CLAUDE_CODE_MODELS, PERMISSION_MODES } = await import('@sigx/ai-agent-claude-code');
+        const { CLAUDE_CODE_MODEL_IDS, CLAUDE_CODE_PERMISSION_MODES } = await import('../../src/plugins');
+        expect(CLAUDE_CODE_MODEL_IDS).toEqual(expect.arrayContaining(CLAUDE_CODE_MODELS.map((m) => m.id)));
+        expect(CLAUDE_CODE_PERMISSION_MODES).toEqual([...PERMISSION_MODES]);
     });
 });

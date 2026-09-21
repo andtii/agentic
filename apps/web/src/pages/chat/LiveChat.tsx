@@ -36,7 +36,7 @@ import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
-import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type MachineId, type TaskId, type WorkdirRef } from '@agentic/core';
+import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type MachineId, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { IndexedEntry } from '@agentic/platform';
 import type { Decision } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor } from '@agentic/ui';
@@ -279,6 +279,13 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         void session(feed.sessionId).respond(requestId, decision).catch(fail);
     };
 
+    /** A member's model or permission mode for this chat (#453): its next turn runs with it; a running turn keeps its own. */
+    const setOptions = (agentId: string, patch: SessionOptionsPatch): void => {
+        const k = key();
+        if (!k) return;
+        void actor(defs.Chat, k).setOptions(agentId as AgentId, patch).catch(fail);
+    };
+
     /** A member's folder for this chat (#193): the next task the chat starts for it runs there; a running session keeps its own. */
     const setWorkdir = (agentId: string, ref: WorkdirRef | null): void => {
         const k = key();
@@ -460,11 +467,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} />
+                <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} />
+                            <ContextPanel chat={chat} tasks={tasks} lookup={directory.lookup} candidates={candidates} time={time} onAddAgent={(e) => addAgent(e.agentId, e.access)} onStopChain={() => { void stopChain(); }} environments={workdirs.list()} machineOf={workdirs.machineOf} project={project} {...(machineName ? { machineName } : {})} hosted={workdirs.hosted} accountEnvironment={workdirs.accountEnvironment} onSetWorkdir={(e) => setWorkdir(e.agentId, e.ref)} onResetSession={(e) => { void resetSession(e.agentId); }} onSetOptions={(e) => setOptions(e.agentId, e.patch)} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>

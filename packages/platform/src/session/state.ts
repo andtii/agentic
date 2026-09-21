@@ -28,7 +28,7 @@
  * no machine, so it keeps every page.
  */
 
-import type { Correction, MessageId, Principal, SessionId, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
+import type { Correction, MessageId, Principal, SessionId, SessionOptions, TaskId, TaskOutcome, WorkspaceId } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, AgentTranscript, EventCursor, PromptPart, SessionRef } from '@sigx/ai-agent';
 import type { WireCommand, WireReply } from '@sigx/ai-agent/wire';
 
@@ -199,6 +199,12 @@ export interface SessionState {
      */
     platformRequests?: string[];
     /**
+     * The model and permission mode the runtime session runs with (#453): what its first `open` named, then what each
+     * `configure` set — a re-open for the next task refreshes `spec`, never this. Read through `optionsOf`; the router
+     * configures a reused session to the member's options before its prompt.
+     */
+    options?: SessionOptions;
+    /**
      * Platform requests whose tool call stopped waiting (#285): `ask_user` answered `pending`. With the session
      * closed, every open platform request counts as detached too. An answer to one re-activates the asker.
      */
@@ -225,7 +231,19 @@ export interface DetachedAnswer {
 /** Replies remembered for idempotent retries (OPS-06); the same default as `serveSession`. */
 export const MAX_COMMANDS = 256;
 
-export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests' | 'detachedRequests' | 'answeredDetached'>>;
+/** The model and permission mode a spec opens a session with (#453). */
+export function specOptions(spec: SessionOpenSpec | undefined): SessionOptions {
+    const model = spec?.config.execution.model;
+    const permissionMode = spec?.permissionMode;
+    return { ...(model ? { model } : {}), ...(permissionMode ? { permissionMode } : {}) };
+}
+
+/** The model and permission mode the session runs with (#453): recorded at its first open and on each `configure`; a record from before either, its spec's. */
+export function optionsOf(s: Pick<SessionState, 'spec' | 'options'>): SessionOptions {
+    return s.options ?? specOptions(s.spec);
+}
+
+export type SessionPatch = Partial<Pick<SessionState, 'opened' | 'spec' | 'mode' | 'ref' | 'capabilities' | 'status' | 'head' | 'transcript' | 'running' | 'gap' | 'closedAt' | 'learning' | 'corrections' | 'platformRequests' | 'detachedRequests' | 'answeredDetached' | 'options'>>;
 
 export type SessionEntry =
     | { readonly t: 'ev'; readonly ev: AgentEvent }

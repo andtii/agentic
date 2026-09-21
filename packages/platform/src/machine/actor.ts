@@ -362,10 +362,11 @@ export function toAgentCapabilities(report: CapabilityReport): AgentCapabilities
         steer: report.steer,
         permissions: report.permissions,
         tools: report.tools,
-        fork: has('fork'),
-        config: has('configure', 'config'),
-        structuredOutput: has('structured-output', 'structuredOutput'),
-        listSessions: has('list-sessions', 'listSessions')
+        // A harness reports its ops under their own names (`HARNESS_OPS`, #453); the short ones are an in-memory runtime's.
+        fork: has('session.fork', 'fork'),
+        config: has('session.configure-model', 'configure', 'config'),
+        structuredOutput: has('turn.structured-output', 'structured-output', 'structuredOutput'),
+        listSessions: has('agent.list-sessions', 'list-sessions', 'listSessions')
     });
 }
 
