@@ -76,7 +76,8 @@ export async function deliverScheduleFired(event: ScheduleFired, hop: TriggerHop
         constraints: {},
         ...(event.environmentId !== undefined ? { environmentId: event.environmentId } : {}),
         ...(event.workdir !== undefined && event.environmentId !== undefined ? { workdir: event.workdir } : {}),
-        ...(event.projectId !== undefined ? { projectId: event.projectId } : {})
+        ...(event.projectId !== undefined ? { projectId: event.projectId } : {}),
+        ...(event.machineId !== undefined ? { machineId: event.machineId } : {})
     };
     let view = await task.create(contract, { owner: event.agentId });
     if (view.status !== 'queued') {

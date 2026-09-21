@@ -116,6 +116,7 @@ function toView(s: TaskState): TaskView {
         constraints: s.constraints,
         ...(s.expected !== undefined ? { expected: s.expected } : {}),
         ...(s.environmentId !== undefined ? { environmentId: s.environmentId } : {}),
+        ...(s.machineId !== undefined ? { machineId: s.machineId } : {}),
         ...(s.workdir !== undefined ? { workdir: s.workdir } : {}),
         ...(s.projectId !== undefined ? { projectId: s.projectId } : {}),
         ...(s.resumeFrom !== undefined ? { resumeFrom: s.resumeFrom } : {}),
@@ -380,6 +381,8 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                     constraints,
                     ...(spec.expected !== undefined ? { expected: spec.expected } : {}),
                     ...((spec.environmentId ?? s.environmentId) !== undefined ? { environmentId: spec.environmentId ?? s.environmentId } : {}),
+                    // The child runs on the parent's machine unless the spec names one (#414); the router also reads the parent route's.
+                    ...((spec.machineId ?? s.machineId) !== undefined ? { machineId: spec.machineId ?? s.machineId } : {}),
                     ...(spec.workdir !== undefined ? { workdir: spec.workdir } : {}),
                     // The child works in the parent's project unless the spec names its own (#332), as with the environment.
                     ...((spec.projectId ?? s.projectId) !== undefined ? { projectId: spec.projectId ?? s.projectId } : {})

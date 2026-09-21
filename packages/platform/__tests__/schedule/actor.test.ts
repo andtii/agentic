@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActorStorage, Host } from '@sigx/actors';
 import { defineActorApp, manualScheduler, memoryStorage, type ManualScheduler } from '@sigx/actors/host';
-import type { AgentId, EnvironmentId, ProjectId } from '@agentic/core';
+import type { AgentId, EnvironmentId, MachineId, ProjectId } from '@agentic/core';
 import { defineScheduleActor, FIRE, type ScheduleFired, type ScheduleLogEntry, type TriggerPort } from '../../src/schedule/index';
 
 const TZ = 'Europe/Stockholm';
@@ -419,5 +419,33 @@ describe('Schedule project (#332)', () => {
         expect(back.projectId).toBe(PROJECT);
         expect('environmentId' in back).toBe(false);
         expect('workdir' in back).toBe(false);
+    });
+});
+
+describe('Schedule machine (#414)', () => {
+    const ENV = 'env_laptop' as EnvironmentId;
+    const PC = 'machine_pc' as MachineId;
+
+    it('carries its machineId into the firing beside a project, refuses one beside an environment or a folder, and clears it with null', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const r = await rig();
+        const client = r.host.actor(r.Schedule, KEY);
+        const base = { kind: 'agent-task', title: 'digest', recurrence: { kind: 'at', at: T('2026-09-17T10:05:00Z') }, agentId: 'agent_a' as AgentId } as const;
+        // An environment names its machine already: a machine beside one, or beside a folder, is refused.
+        await expect(client.create({ ...base, machineId: PC, environmentId: ENV })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, machineId: PC, environmentId: ENV, workdir: 'C:/src/app' })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, machineId: '  ' as MachineId })).rejects.toMatchObject({ status: 400 });
+        const created = await client.create({ ...base, machineId: PC, projectId: 'project_1' as ProjectId });
+        expect(created).toMatchObject({ machineId: PC, projectId: 'project_1' });
+        await r.runTo(T('2026-09-17T10:05:00Z'));
+        expect(r.trigger.events[0]).toMatchObject({ machineId: PC, projectId: 'project_1' });
+        expect('environmentId' in r.trigger.events[0]!).toBe(false);
+        await expect(client.update({ environmentId: ENV })).rejects.toMatchObject({ status: 400 });
+        const cleared = await client.update({ machineId: null, projectId: null, environmentId: ENV });
+        expect('machineId' in cleared).toBe(false);
+        expect(cleared.environmentId).toBe(ENV);
+        const back = await client.update({ machineId: PC, environmentId: null });
+        expect(back.machineId).toBe(PC);
+        expect('environmentId' in back).toBe(false);
     });
 });
