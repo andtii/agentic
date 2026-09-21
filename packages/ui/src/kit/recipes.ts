@@ -722,16 +722,17 @@ const quotaPanel: RecipeInput = {
 /**
  * A member's limits as rings (#452): a 28 px ring per window, its arc the status ink over a line-coloured track, the
  * mono percent over a small uppercase label beside it; the rings share one row in thirds (#470, #472): Session, Week,
- * the model's week — two rings leave the last third empty rather than spreading to the edges. A reached limit is amber like
+ * the model's week — two rings leave the last third empty rather than spreading to the edges. A third grows to fit
+ * its ring and numbers ("SESSION" is the widest), 10 px between a ring and its numbers, 8 px between rings (#474). A reached limit is amber like
  * the card's limit line, its percent too.
  */
 const quotaRings: RecipeInput = {
     component: 'ag-quota-rings',
     parts: {
-        root: { base: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center', justifyItems: 'start', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
+        root: { base: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(max-content, 1fr))', columnGap: 'var(--space-sm)', alignItems: 'center', justifyItems: 'start', inlineSize: '100%', minInlineSize: '0', transition: `opacity ${motion}` } },
         item: {
             // The ring on the left across both rows, the percent over the label beside it.
-            base: { '--ag-ink': 'var(--color-primary)', display: 'grid', gridTemplateColumns: '28px auto', gridTemplateRows: 'auto auto', columnGap: 'var(--space-xs)', alignItems: 'center', minInlineSize: '0' },
+            base: { '--ag-ink': 'var(--color-primary)', display: 'grid', gridTemplateColumns: '28px auto', gridTemplateRows: 'auto auto', columnGap: 'calc(var(--space-sm) + var(--space-2xs))', rowGap: 'var(--space-2xs)', alignItems: 'center', minInlineSize: '0' },
             selectors: {
                 '&[data-tone="muted"]': { '--ag-ink': 'var(--ag-text-dim)' },
                 '&[data-tone="needs-you"]': { '--ag-ink': 'var(--color-warning)' },
@@ -742,7 +743,7 @@ const quotaRings: RecipeInput = {
         ring: {
             base: { gridRow: '1 / span 2', inlineSize: '28px', blockSize: '28px', transform: 'rotate(-90deg)' },
             selectors: {
-                '& > circle': { fill: 'none', strokeWidth: '3' },
+                '& > circle': { fill: 'none', strokeWidth: '3.5' },
                 '& > [data-track]': { stroke: 'var(--ag-line-strong)' },
                 '& > [data-arc]': { stroke: 'var(--ag-ink)', strokeLinecap: 'round', transition: `stroke-dasharray ${motion}` }
             }
