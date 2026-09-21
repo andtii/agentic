@@ -33,6 +33,8 @@ defineTopbar('chat', (route) => {
     const lookup = head && 'identities' in head ? lookupOver(head.identities) : undefined;
     // The project chip (#333): live from the chat's summary, mock from the sample workspace.
     const project = !head ? undefined : 'identities' in head ? head.project : head.projectId ? projectNamed(head.projectId) : undefined;
+    // The machine chip (#414): live from the chat's summary; the mock workspace names none.
+    const machine = head && 'identities' in head ? head.machine : undefined;
     return {
         crumb: chat?.title,
         // The member tiles at 16 px plus the status summary — the app bar's sub-line.
@@ -41,6 +43,7 @@ defineTopbar('chat', (route) => {
                 <MemberTiles agentIds={chat.members.map((m) => m.agentId)} size={18} lookup={lookup} />
                 <span data-chat-summary>{memberSummary(chat)}</span>
                 {project ? <Link to={`/projects/${project.id}`} data-chat-project><Tag tone="live">{project.name}</Tag></Link> : null}
+                {machine ? <Link to={`/machines/${machine.id}`} data-chat-machine data-online={machine.online ? '' : undefined}><Tag tone={machine.online ? 'live' : 'muted'}>{machine.name}</Tag></Link> : null}
             </>
         ) : undefined,
         // Below 1280 the tasks button reveals the context panel; on the phone it is the one right slot.

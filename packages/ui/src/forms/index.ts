@@ -53,7 +53,7 @@ export type { SchemaFormApi, SchemaFormProps } from './schema-form.js';
 export { MapField as AgMapField } from './fields.js';
 
 export { AgentForm } from './agent-form.js';
-export type { AgentFormApi, AgentFormProps, AgentFormRailProps, AgentFormLayout, AgentFormWorkdirProps } from './agent-form.js';
+export type { AccountOption, AgentFormApi, AgentFormProps, AgentFormRailProps, AgentFormLayout, AgentFormWorkdirProps } from './agent-form.js';
 
 export { ConfigVersions } from './config-versions.js';
 export type { ConfigVersionsProps } from './config-versions.js';

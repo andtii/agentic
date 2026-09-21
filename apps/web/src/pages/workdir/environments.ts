@@ -4,15 +4,26 @@
  * one `Machine.get()` per paired machine); on mock data, `mock/ops.ts`.
  * `machineOf` is where a folder request for an environment goes.
  */
+import { accountDirectory, environmentsForAccount, type AccountEntry, type AccountRef, type RuntimeId } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
-import { opsEnvironments, opsMachine, opsQuota } from '../../mock/ops';
-import { useEnvironmentDirectory, type EnvironmentEntry } from '../ops/environments';
+import { opsEnvironments, opsMachine, opsMachines, opsQuota } from '../../mock/ops';
+import { useEnvironmentDirectory, type EnvironmentEntry, type MachineEntry } from '../ops/environments';
 import { workdirEnvironmentsOf } from './model';
 
 export interface WorkdirEnvironments {
     list(): WorkdirEnvironment[];
     machineOf(environmentId: string): string | undefined;
+    /** The paired machines and what they report (#414): the New chat picker's choices. */
+    machines(): MachineEntry[];
+    /** The accounts across them (#414). */
+    accounts(): AccountEntry[];
+    /** Whether `machineId` reports environment `id` (#414). */
+    hosted(machineId: string, id: string): boolean;
+    /** The environment id of `ref` on `machineId` for `runtime` — the one the router takes (#414) — or `undefined`. */
+    accountEnvironment(machineId: string, runtime: RuntimeId, ref: AccountRef): string | undefined;
+    /** `Workspace.get().lastMachineId` (#414). */
+    lastMachineId(): string | null;
     readonly loading: boolean;
 }
 
@@ -21,6 +32,11 @@ export function useLiveWorkdirEnvironments(defs: Pick<ActorDefs, 'Workspace' | '
     return {
         list: () => workdirEnvironmentsOf(directory.all()),
         machineOf: (id) => directory.lookup(id)?.machineId,
+        machines: () => directory.machines(),
+        accounts: () => directory.accounts(),
+        hosted: (machineId, id) => directory.hosted(machineId, id),
+        accountEnvironment: (machineId, runtime, ref) => directory.accountEnvironment(machineId, runtime, ref)?.id,
+        lastMachineId: () => directory.lastMachineId(),
         get loading() {
             return directory.loading;
         }
@@ -43,8 +59,18 @@ const mockEntries: readonly EnvironmentEntry[] = opsEnvironments.map((d) => {
     };
 });
 
+const mockMachines: readonly MachineEntry[] = opsMachines.map((m) => ({ id: m.id, name: m.name, online: m.online, ...(m.os ? { os: m.os } : {}), environments: opsEnvironments.filter((d) => d.machineId === m.id) }));
+
 export const mockWorkdirEnvironments: WorkdirEnvironments = {
     list: () => workdirEnvironmentsOf(mockEntries),
     machineOf: (id) => mockEntries.find((e) => e.id === id)?.machineId,
+    machines: () => [...mockMachines],
+    accounts: () => accountDirectory(mockMachines.map((m) => ({ machineId: m.id as never, environments: m.environments }))),
+    hosted: (machineId, id) => mockEntries.some((e) => e.machineId === machineId && e.id === id),
+    accountEnvironment: (machineId, runtime, ref) => {
+        const m = mockMachines.find((x) => x.id === machineId);
+        return m ? environmentsForAccount(m.environments, runtime, ref)[0]?.id : undefined;
+    },
+    lastMachineId: () => null,
     loading: false
 };

@@ -14,17 +14,19 @@ import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
-import { LIVE_PLATFORM_ROW, defaultForByEnvironment, machineOf, platformAgents, queuedByEnvironment, type DefaultForAgent } from './live';
+import { LIVE_PLATFORM_ROW, defaultForByEnvironment, machineOf, platformAgents, queuedByEnvironment } from './live';
+import type { AgentIdentity } from '../chat/live';
 import { MachineGroup, PlatformRow } from './MachineGroup';
 
 /** One machine's group over a live read of its record; busy (and empty) until the first value. */
-const LiveMachineGroup = component<{ id: string; name: string; workspaceId: string; queued: Readonly<Record<string, number>>; defaultFor: Readonly<Record<string, readonly DefaultForAgent[]>> }>(({ props }) => {
+const LiveMachineGroup = component<{ id: string; name: string; workspaceId: string; queued: Readonly<Record<string, number>>; agents: readonly AgentIdentity[] }>(({ props }) => {
     const defs = useActorDefs();
     const view = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
     return (): JSXElement => {
         const v = view.value;
         if (!v) return <section data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />;
-        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={props.defaultFor} quota={v.quota ?? {}} />;
+        // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
+        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={v.environments} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} />;
     };
 });
 
@@ -39,10 +41,9 @@ export const LiveMachines = component(() => {
         const signedOut = !viewer.pending && !ws;
         const paired = (index.value ?? []).filter((m) => m.status === 'paired');
         const agents = directory.all();
-        const defaultFor = defaultForByEnvironment(agents);
         return (
             <OpsPage page="machines" title="Machines">
-                {ws ? paired.map((m) => <LiveMachineGroup id={m.id} name={m.name} workspaceId={ws} queued={queuedByEnvironment(routing.value ?? undefined, m.id)} defaultFor={defaultFor} />) : null}
+                {ws ? paired.map((m) => <LiveMachineGroup id={m.id} name={m.name} workspaceId={ws} queued={queuedByEnvironment(routing.value ?? undefined, m.id)} agents={agents} />) : null}
                 <PlatformRow defaultFor={platformAgents(agents)} caption={LIVE_PLATFORM_ROW.caption} keyStatus={LIVE_PLATFORM_ROW.key} keyLabel={LIVE_PLATFORM_ROW.keyLabel} />
                 {signedOut
                     ? <EmptyState variant="generic" title="Sign in to see your machines" caption="Machines belong to your workspace." />

@@ -91,6 +91,35 @@ describe('AgentForm', () => {
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution).not.toHaveProperty('defaultWorkdir');
     });
 
+    it('binds the agent to an account (#414): the key round-trips as execution.account, picking one drops the pin and its folder, pinning drops the account, and a key of another runtime binds nothing', () => {
+        const state = signal({ config: { ...fullAgentConfig(), execution: { ...fullAgentConfig().execution, defaultWorkdir: 'C:/work' } } as AgentConfig });
+        const accounts = [
+            { value: 'claude-code|id:me@work', label: 'work (me@work) — on pc, mac', runtime: 'claude-code' },
+            { value: 'codex-cli|id:me@work', label: 'work (me@work) — on pc', runtime: 'codex-cli' }
+        ];
+        const root = mount(<AgentForm model={() => state.config} environments={[{ value: 'env_1', label: 'Laptop' }, { value: 'env_2', label: 'Desktop' }]} accounts={accounts} />);
+        const form = root.querySelector('form')!;
+        const accountSelect = root.querySelector<HTMLSelectElement>(`select[name="${F.account}"]`)!;
+        // Only this runtime's accounts are offered.
+        expect([...accountSelect.options].map((o) => o.value)).toEqual(['', 'claude-code|id:me@work']);
+        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution).toMatchObject({ defaultEnvironmentId: 'env_1', defaultWorkdir: 'C:/work' });
+        setSelect(accountSelect, 'claude-code|id:me@work');
+        const bound = fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution;
+        expect(bound.account).toEqual({ identity: 'me@work' });
+        expect(bound).not.toHaveProperty('defaultEnvironmentId');
+        expect(bound).not.toHaveProperty('defaultWorkdir');
+        // Pinning again unbinds.
+        setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.environment}"]`)!, 'env_2');
+        const pinned = fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution;
+        expect(pinned).not.toHaveProperty('account');
+        expect(pinned.defaultEnvironmentId).toBe('env_2');
+        // The draft round-trips a bound config, and a stale key of another runtime binds nothing.
+        const cfg = { ...fullAgentConfig(), execution: { runtime: 'claude-code', account: { identity: 'Me@Work' }, limits: {}, offlinePolicy: 'queue' as const } } as AgentConfig;
+        expect(toAgentDraft(cfg).account).toBe('claude-code|id:me@work');
+        expect(fromAgentDraft(toAgentDraft(cfg)).execution.account).toEqual({ identity: 'me@work' });
+        expect(fromAgentDraft({ ...toAgentDraft(cfg), account: 'codex-cli|id:me@work' }).execution).not.toHaveProperty('account');
+    });
+
     it('blocks submit while invalid and shows an accessible error on the field', () => {
         const { form, root, state, api, submitted, invalid } = mountForm();
         const name = root.querySelector<HTMLInputElement>(`input[name="${F.name}"]`)!;

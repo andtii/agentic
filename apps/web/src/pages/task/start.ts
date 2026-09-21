@@ -10,7 +10,7 @@
  */
 import { signal } from 'sigx';
 import { actor } from '@sigx/actors';
-import { createId, type AgentId, type ChatId, type TaskId, type WorkdirRef } from '@agentic/core';
+import { createId, type AgentId, type ChatId, type MachineId, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { ActorDefs } from '../../actors/defs';
 import { chatKeyOf, routingKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { runActivation, type AgentLookup } from '../chat/live';
@@ -28,6 +28,8 @@ export interface StartTaskInput {
     readonly objective: string;
     /** Where it runs; `null` = the agent's default environment and folder. */
     readonly workdir: WorkdirRef | null;
+    /** The machine the chat runs on (#414): the folder's, else the last used one; `null` names none. */
+    readonly machineId?: string | null;
 }
 
 export type StartTaskErrors = Partial<Record<'agentId' | 'objective', string>>;
@@ -49,7 +51,7 @@ export function titleOf(objective: string): string {
 export async function startTaskWith(defs: ActorDefs, ws: string, input: StartTaskInput, lookup: AgentLookup): Promise<{ readonly chatId: string; readonly taskId: string | null }> {
     const agentId = input.agentId as AgentId;
     const objective = input.objective.trim();
-    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({ title: titleOf(objective) });
+    const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({ title: titleOf(objective), ...(input.machineId ? { machineId: input.machineId as MachineId } : {}) });
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     await chat.addAgent(agentId, 'all');
     await chat.setCoordinator(agentId);

@@ -7,9 +7,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { signal } from 'sigx';
-import type { EnvironmentId, QuotaSnapshot } from '@agentic/core';
+import type { EnvironmentDescriptor, EnvironmentId, QuotaSnapshot } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
-import { NewChatDialog, type NewChatCreate, type NewChatProject } from '../../src/pages/chat/NewChatDialog';
+import { NewChatDialog, memberEnvironmentOn, openingMachine, type NewChatCreate, type NewChatProject } from '../../src/pages/chat/NewChatDialog';
+import type { MachineEntry } from '../../src/pages/ops/environments';
 import type { AgentIdentity } from '../../src/pages/chat/live';
 import type { NewChatPrefill } from '../../src/pages/chat/new-chat-prefill';
 import { mountAt, tick } from './helpers';
@@ -27,11 +28,11 @@ const projects: NewChatProject[] = [
     { id: 'p2' as never, name: 'docs', members: { agentIds: ['atlas'] as never[], coordinator: null }, folders: {}, connectors: [], features: { 'agentic.feature.git': { origin: 'git@github.com:andtii/docs.git' } } }
 ];
 
-async function open(extra: { projects?: readonly NewChatProject[]; lastProjectId?: string | null; prefill?: NewChatPrefill } = {}) {
+async function open(extra: { projects?: readonly NewChatProject[]; lastProjectId?: string | null; prefill?: NewChatPrefill; machines?: readonly MachineEntry[]; lastMachineId?: string | null; agents?: readonly AgentIdentity[] } = {}) {
     const created: NewChatCreate[] = [];
     const projectsRequested: NewChatPrefill[] = [];
     const model = signal({ value: true });
-    const root = await mountAt('/chats', <NewChatDialog model={() => model.value} agents={agents} environments={environments} {...(extra.projects ? { projects: extra.projects } : {})} {...(extra.prefill ? { prefill: extra.prefill } : {})} lastProjectId={extra.lastProjectId ?? null} onCreate={(e) => created.push(e)} onCreateProject={(p) => projectsRequested.push(p)} />);
+    const root = await mountAt('/chats', <NewChatDialog model={() => model.value} agents={extra.agents ?? agents} environments={environments} {...(extra.projects ? { projects: extra.projects } : {})} {...(extra.prefill ? { prefill: extra.prefill } : {})} lastProjectId={extra.lastProjectId ?? null} {...(extra.machines ? { machines: extra.machines } : {})} lastMachineId={extra.lastMachineId ?? null} onCreate={(e) => created.push(e)} onCreateProject={(p) => projectsRequested.push(p)} />);
     const card = (id: string) => document.querySelector<HTMLElement>(`[data-new-chat-agent="${id}"]`)!;
     const pick = async (id: string) => {
         const box = card(id).querySelector<HTMLInputElement>('input[name="member"]')!;
@@ -86,7 +87,7 @@ describe('New chat (#315)', () => {
         await tick();
         expect(document.querySelector('[data-new-chat-summary]')!.textContent).toContain('Atlas answers unless you mention someone');
         await create();
-        expect(created).toEqual([{ agentIds: ['forge', 'atlas'], coordinator: 'atlas', projectId: null }]);
+        expect(created).toEqual([{ agentIds: ['forge', 'atlas'], coordinator: 'atlas', projectId: null, machineId: null }]);
     });
 });
 
@@ -102,7 +103,7 @@ describe('New chat from a folder (#336)', () => {
         expect(save.checked).toBe(true);
         expect(prefillBlock()!.textContent).toContain(`Save D:\\src\\agentic as this project's folder on ${OTHER}`);
         await create();
-        expect(created).toEqual([{ agentIds: ['forge', 'lint'], coordinator: 'lint', projectId: 'p1', workdir: { environmentId: OTHER, path: 'D:\\src\\agentic', saveToProject: true } }]);
+        expect(created).toEqual([{ agentIds: ['forge', 'lint'], coordinator: 'lint', projectId: 'p1', machineId: null, workdir: { environmentId: OTHER, path: 'D:\\src\\agentic', saveToProject: true } }]);
         // Unchecked: the chat runs there, the project is left alone.
         await check(save, false);
         await create();
@@ -129,7 +130,7 @@ describe('New chat from a folder (#336)', () => {
         expect(radios.map((r) => [r.value, r.checked])).toEqual([['chat', true], ['project', false]]);
         await pick('forge');
         await create();
-        expect(created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null, workdir: { environmentId: WORK, path: 'C:\\Dev\\thing', saveToProject: false } }]);
+        expect(created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null, machineId: null, workdir: { environmentId: WORK, path: 'C:\\Dev\\thing', saveToProject: false } }]);
         await check(radios[1]!, true);
         const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Create project');
         expect(confirm).toBeTruthy();
@@ -156,7 +157,7 @@ describe('New chat in a project (#333)', () => {
         expect(card('lint').querySelector<HTMLInputElement>('input[name="coordinator"]')!.checked).toBe(true);
         expect(document.querySelector('[data-new-chat-project-line]')!.textContent).toBe('Connectors: github-mcp · alien01 / work: C:\\Dev\\agentic\\main');
         await create();
-        expect(created).toEqual([{ agentIds: ['forge', 'lint'], coordinator: 'lint', projectId: 'p1' }]);
+        expect(created).toEqual([{ agentIds: ['forge', 'lint'], coordinator: 'lint', projectId: 'p1', machineId: null }]);
     });
 
     it('picking another project replaces the roster; "No project" keeps the roster editable and emits null; an unknown last project starts on none', async () => {
@@ -173,7 +174,7 @@ describe('New chat in a project (#333)', () => {
         await pick('lint');
         expect(picked()).toEqual(['forge']);
         await create();
-        expect(created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null }]);
+        expect(created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null, machineId: null }]);
     });
 
     it('each opening starts afresh: on the last used project’s roster, or on nobody when there is none', async () => {
@@ -204,5 +205,71 @@ describe('New chat in a project (#333)', () => {
         model.value = true;
         await tick();
         expect(picked()).toEqual([]);
+    });
+});
+
+// ---- the machine (#414) --------------------------------------------------------------------------------------------
+
+const env = (id: string, machineId: string, identity: string, authStatus: EnvironmentDescriptor['account']['authStatus'] = 'ok'): EnvironmentDescriptor => ({ id: id as EnvironmentId, machineId: machineId as never, name: id, runtime: 'claude-code', account: { label: id, authStatus, identity }, cwdRoots: ['C:\\Dev'], concurrency: { max: 1, active: 0 }, isolation: 'config-dir' });
+const MAC: MachineEntry = { id: 'm_mac', name: 'mac', online: false, os: 'darwin', environments: [env('env_work', 'm_mac', 'me@work'), env('env_home', 'm_mac', 'me@home')] };
+const PC: MachineEntry = { id: 'm_pc', name: 'pc', online: true, os: 'windows', environments: [env(WORK, 'm_pc', 'me@work')] };
+const withAccounts: AgentIdentity[] = [
+    { id: 'forge', name: 'Forge', role: 'Developer', hue: 2, environment: { machine: 'any machine', runtime: 'claude-code', account: 'me@work' }, account: { identity: 'me@work' }, configVersion: 1 },
+    { id: 'homer', name: 'Homer', role: 'Home', hue: 3, environment: { machine: 'any machine', runtime: 'claude-code', account: 'me@home' }, account: { identity: 'me@home' }, configVersion: 1 },
+    { id: 'pinned', name: 'Pinned', role: 'Legacy', hue: 4, environment: { machine: WORK, runtime: 'claude-code', account: 'machine' }, environmentId: WORK, configVersion: 1 },
+    { id: 'atlas', name: 'Atlas', role: 'Assistant', hue: 1, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, configVersion: 1 }
+];
+
+describe('New chat on a machine (#414)', () => {
+    it('openingMachine: the prefill\'s environment\'s machine, else the last used one, else the first online; memberEnvironmentOn: the pin as the machine reports it, else the account\'s login there', () => {
+        expect(openingMachine([MAC, PC], null)).toBe('m_pc');
+        expect(openingMachine([MAC, PC], 'm_mac')).toBe('m_mac');
+        expect(openingMachine([MAC, PC], 'm_gone')).toBe('m_pc');
+        expect(openingMachine([MAC, PC], 'm_mac', WORK)).toBe('m_pc');
+        expect(openingMachine([], 'm_mac')).toBe('');
+        expect(memberEnvironmentOn(withAccounts[0]!, MAC, [MAC, PC])).toBe('env_work');
+        expect(memberEnvironmentOn(withAccounts[0]!, PC, [MAC, PC])).toBe(WORK);
+        expect(memberEnvironmentOn(withAccounts[1]!, PC, [MAC, PC])).toBeUndefined();
+        // A pinned agent: its environment where the machine reports it, else the login of that environment as any machine reports it.
+        expect(memberEnvironmentOn(withAccounts[2]!, PC, [MAC, PC])).toBe(WORK);
+        expect(memberEnvironmentOn(withAccounts[2]!, MAC, [MAC, PC])).toBe('env_work');
+        expect(memberEnvironmentOn(withAccounts[3]!, PC, [MAC, PC])).toBeUndefined();
+    });
+
+    it('offers the paired machines online first, preselects the last used one, flags a picked member with no login there, and emits the choice', async () => {
+        const d = await open({ machines: [MAC, PC], lastMachineId: 'm_mac', agents: withAccounts });
+        const choices = () => [...document.querySelectorAll<HTMLElement>('[data-new-chat-machine-choice]')];
+        expect(choices().map((c) => c.getAttribute('data-new-chat-machine-choice'))).toEqual(['m_pc', 'm_mac']);
+        expect(choices().map((c) => c.querySelector('[data-new-chat-machine-name]')!.textContent)).toEqual(['pc · windows', 'mac · darwin · offline']);
+        expect(document.querySelector<HTMLInputElement>('input[name="chat-machine"][value="m_mac"]')!.checked).toBe(true);
+        // Picking Homer: signed in on the mac, not on the pc — a flag on the pc's row, no warning while the mac is chosen.
+        await d.pick('homer');
+        expect(document.querySelector('[data-new-chat-machine-choice="m_pc"] [data-new-chat-machine-account="homer"]')!.textContent).toBe('Homer: not signed in here');
+        expect(document.querySelector('[data-new-chat-machine-choice="m_mac"] [data-new-chat-machine-account="homer"]')!.textContent).toBe('Homer: me@home signed in');
+        expect(document.querySelector('[data-new-chat-machine-warning]')).toBeNull();
+        // Choosing the pc warns, and never blocks.
+        const pc = document.querySelector<HTMLInputElement>('input[name="chat-machine"][value="m_pc"]')!;
+        pc.checked = true;
+        pc.dispatchEvent(new Event('change', { bubbles: true }));
+        await tick();
+        expect(document.querySelector('[data-new-chat-machine-warning]')!.textContent).toMatch(/Homer has no login on pc/);
+        // The cards' quota badges follow the chosen machine: Homer has no login on the pc, Forge's account is there.
+        expect(d.card('homer').querySelector('[data-new-chat-quota]')!.textContent).toBe('Not signed in on pc');
+        expect(d.card('forge').querySelector('[data-new-chat-quota] [data-scope="ag-quota"]')).not.toBeNull();
+        await d.create();
+        expect(d.created).toEqual([{ agentIds: ['homer'], coordinator: null, projectId: null, machineId: 'm_pc' }]);
+    });
+
+    it('a prefilled folder preselects the machine that reports its environment', async () => {
+        await open({ machines: [MAC, PC], lastMachineId: 'm_mac', agents: withAccounts, prefill: { environmentId: WORK, path: 'C:\\Dev\\thing' } });
+        expect(document.querySelector<HTMLInputElement>('input[name="chat-machine"][value="m_pc"]')!.checked).toBe(true);
+    });
+
+    it('with no machines the choice is absent and null is emitted', async () => {
+        const bare = await open({ agents: withAccounts });
+        expect(document.querySelector('[data-new-chat-machine]')).toBeNull();
+        await bare.pick('forge');
+        await bare.create();
+        expect(bare.created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null, machineId: null }]);
     });
 });

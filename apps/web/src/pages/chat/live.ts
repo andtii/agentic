@@ -6,7 +6,7 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isChatFilePart, isTerminal, parseChatFileUri, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
+import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
@@ -28,6 +28,8 @@ export interface AgentIdentity {
     readonly environment: EnvironmentParts;
     /** The environment it runs in by default (`execution.defaultEnvironmentId`); absent for a platform runtime or none chosen. */
     readonly environmentId?: string;
+    /** The account it runs as on whichever machine the chat names (`execution.account`, #414); absent for a platform runtime or a pinned agent. */
+    readonly account?: AccountRef;
     readonly configVersion: number;
 }
 
@@ -43,12 +45,15 @@ export const unknownAgent = (id: string): AgentIdentity => ({ id, name: id, role
  * workspace (`hueFor`), so it is stable across pages; the environment line
  * is the agent's default execution (EXE-06: all three parts, always): the
  * platform runtime runs on the platform under the BYO key, a daemon
- * runtime in its default environment under that machine's account.
+ * runtime in its default environment under that machine's account — or,
+ * bound to an account (#414), as that login on whichever machine the chat
+ * names.
  */
 export function identityOf(view: AgentView, index: number): AgentIdentity {
     const { config } = view;
     const runtime = config.execution.runtime;
     const platform = runtime === 'anthropic-api';
+    const account = platform ? undefined : config.execution.account;
     return {
         id: view.id,
         name: config.name || view.id,
@@ -56,11 +61,12 @@ export function identityOf(view: AgentView, index: number): AgentIdentity {
         description: config.description,
         hue: hueFor(index),
         environment: {
-            machine: platform ? 'platform' : (config.execution.defaultEnvironmentId ?? 'unassigned'),
+            machine: platform ? 'platform' : account ? 'any machine' : (config.execution.defaultEnvironmentId ?? 'unassigned'),
             runtime,
-            account: platform ? 'byo-key' : 'machine'
+            account: platform ? 'byo-key' : account ? (account.identity ?? account.label ?? 'account') : 'machine'
         },
         ...(!platform && config.execution.defaultEnvironmentId ? { environmentId: config.execution.defaultEnvironmentId } : {}),
+        ...(account ? { account } : {}),
         configVersion: view.configVersion
     };
 }
@@ -726,7 +732,7 @@ export const CONTEXT_WINDOW = 50;
  * inlined, other files noted for `chat_file_read`). The objective stays
  * text; a message of attachments alone reads as their placeholders.
  */
-export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef, attachments: readonly PromptPart[] = [], projectId?: ProjectId): TaskContract {
+export function activationContract(agentId: AgentId, chatId: ChatId, messageId: MessageId, text: string, visible: readonly IndexedEntry[], lookup: AgentLookup, workdir?: WorkdirRef, attachments: readonly PromptPart[] = [], projectId?: ProjectId, machineId?: MachineId): TaskContract {
     const messages = visible.filter((e): e is IndexedEntry & { entry: Extract<ChatEntry, { t: 'msg' }> } => e.entry.t === 'msg').slice(-CONTEXT_WINDOW);
     const lines = messages.map((e) => entryLine(e.entry, lookup));
     const context: PromptPart[] = lines.length ? [{ type: 'text', text: `Chat so far:\n${lines.join('\n')}` }] : [];
@@ -738,7 +744,20 @@ export function activationContract(agentId: AgentId, chatId: ChatId, messageId: 
     }
     const objective = text || attachments.map(partText).join(' ');
     // The chat's project rides along (#333): the router resolves its folder for the environment unless the member has its own.
-    return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}), ...(projectId ? { projectId } : {}) };
+    // So does its machine (#414): the router resolves the member's account there — and leaves a folder aside whose environment that machine does not report.
+    return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}), ...(projectId ? { projectId } : {}), ...(machineId ? { machineId } : {}) };
+}
+
+/**
+ * A member's folder as the activation should carry it (#414): its own for this chat, unless the chat now runs on a
+ * machine that does not report the folder's environment — then nothing, and the project's folder or the first root
+ * applies there (the router would leave it aside too; dropping it here keeps the record clean).
+ */
+export function activationWorkdir(member: { readonly workdir?: WorkdirRef } | undefined, machineId: string | undefined, hosted?: (machineId: string, environmentId: string) => boolean): WorkdirRef | undefined {
+    const workdir = member?.workdir;
+    if (!workdir) return undefined;
+    if (machineId && hosted && !hosted(machineId, workdir.environmentId)) return undefined;
+    return workdir;
 }
 
 /** The entries `agentId` may read: from its `historyFrom` on (CHT-04). */
@@ -778,13 +797,14 @@ export function attachmentPart(file: { readonly name: string; readonly mediaType
  * session. The post is durable before any task exists; a task that fails
  * to route reports through its own record, never by un-posting.
  */
-export async function runActivation(ports: ActivationPorts, input: { chatId: ChatId; text: string; attachments?: readonly PromptPart[]; mentions: readonly AgentId[]; summary: ChatSummary; entries: readonly IndexedEntry[]; lookup: AgentLookup }): Promise<Activation> {
+export async function runActivation(ports: ActivationPorts, input: { chatId: ChatId; text: string; attachments?: readonly PromptPart[]; mentions: readonly AgentId[]; summary: ChatSummary; entries: readonly IndexedEntry[]; lookup: AgentLookup; hosted?: (machineId: string, environmentId: string) => boolean }): Promise<Activation> {
     const attachments = input.attachments ?? [];
     const { messageId, activated } = await ports.post(messageParts(input.text, attachments), input.mentions);
     const tasks: { agentId: AgentId; taskId: TaskId }[] = [];
     for (const agentId of activated) {
         const taskId = ports.newTaskId();
-        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, input.summary.members[agentId]?.workdir, attachments, input.summary.projectId);
+        const workdir = activationWorkdir(input.summary.members[agentId], input.summary.machineId, input.hosted);
+        const contract = activationContract(agentId, input.chatId, messageId, input.text, visibleTo(input.entries, input.summary, agentId), input.lookup, workdir, attachments, input.summary.projectId, input.summary.machineId);
         await ports.createTask(taskId, contract, agentId);
         await ports.run(taskId);
         tasks.push({ agentId, taskId });
