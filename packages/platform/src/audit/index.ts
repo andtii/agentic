@@ -24,6 +24,9 @@ export {
     type PluginToggledData,
     type ProposalReviewedData,
     type SecretOpenedData,
+    type SessionInterruptedData,
+    type SessionResumedData,
+    type TaskMachineLostData,
     type WorktreeCreatedData,
     type TaskTransitionData
 } from './events.js';

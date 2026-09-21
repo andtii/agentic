@@ -71,6 +71,10 @@
  *   which prompts the same session under that task through the same seam —
  *   no new task. Only when no route waits on the question does the answer
  *   start the asker again with a follow-up task (`routing/answers.ts`).
+ * - a machine that goes offline under running turns (#366; OPS-04) parks their tasks `waiting {machine-offline}`
+ *   (`machineOffline`) until its next `hello` (`machineOnline`), or fails them `machine-lost` (recoverable) past
+ *   `MACHINE_LOST_MS` (`expireOffline`, the `machine-lost` reminder). An interrupted turn whose agent's
+ *   `onInterrupt` is `auto` is resumed once on its own; every resume is audited `session.resumed`.
  *
  * Every mutation ends in `ctx.save()` inside the turn. Calls into Task,
  * Session, Machine and Agent are fresh `actor()` calls under the driver
@@ -84,7 +88,7 @@ import { actor, defineActor, topic, type ActorClientWith, type ActorContext, typ
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
 import { isServerFnError, ServerFnError } from '@sigx/server';
 
-import { AgentActor, agentKey } from '../agent/index.js';
+import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
 import type { EnvironmentChosenData } from '../audit/events.js';
 import { auditPort } from '../audit/port.js';
 import { Chat } from '../chat/index.js';
@@ -180,6 +184,7 @@ interface MachineClient {
     openSession(sessionId: SessionId, environmentId: EnvironmentId, spec: OpenSpec, options?: { taskId?: TaskId }): Promise<OpenSessionResult>;
     fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<{ readonly requestId: string }>;
     fsResult(requestId: string): Promise<FsResultView>;
+    closeSession(sessionId: SessionId): Promise<void>;
 }
 
 /** The `TaskError` a task in a project the Workspace no longer has fails with (#332): visible, never a guessed folder. */
@@ -190,6 +195,21 @@ export const SESSION_RESET_CODE = 'session-reset';
 
 /** How many of an ended session's pages `endSession` purges at once (#399): a long session has many, and one turn should not wait on them one by one. */
 const PURGE_BATCH = 8;
+
+/** How long a running route's machine may stay offline before its task fails `machine-lost` (#366; OPS-04): 24 h. */
+export const MACHINE_LOST_MS = 24 * 60 * 60 * 1000;
+
+/** The `TaskError` a task fails with when its machine stayed offline past `MACHINE_LOST_MS` (#366). Recoverable — the next message re-opens the session wherever the machine comes back. */
+export const MACHINE_LOST_CODE = 'machine-lost';
+
+/** The reminder that watches the routes waiting `machine-offline` (#366). */
+export const MACHINE_LOST_REMINDER = 'machine-lost';
+
+/** The reminder floor (architecture §2): nothing is checked more often. */
+const REMINDER_FLOOR_MS = 60_000;
+
+/** The turn a resume turn goes back to (`resumeTurnId` appends `:resume`): what `onInterrupt: 'auto'` counts once (#366). */
+const baseTurnId = (turnId: string): string => turnId.replace(/(?::resume)+$/, '');
 
 /** `Routing.get()`. */
 export interface RoutingView {
@@ -303,8 +323,16 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
         state: (): RoutingState => initialRoutingState(),
+        /** The machine-lost reminder (#366): `expireOffline` runs as its own turn under the driver, one-way. */
+        onReminder: async (ctx, name) => {
+            if (name !== MACHINE_LOST_REMINDER) return;
+            const ids = parseRoutingKey(ctx.key);
+            if (!ids) return;
+            const client = actor(self!, ctx.key).with({ context: asPrincipal(driverOf(ids.workspaceId)), oneWay: true }) as unknown as { expireOffline(): Promise<void> };
+            await client.expireOffline().catch(() => undefined);
+        },
         methods: (ctx) => {
             const ids = parseRoutingKey(ctx.key);
             if (!ids) throw new ServerFnError(404, `routing: "${ctx.key}" is not a {ws}:routing:main key`);
@@ -877,8 +905,66 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 route.turnId = resumeTurnId(cut);
                 route.status = 'running';
                 touch(route);
+                await resumed(route, 're-host', cut);
                 await ctx.tasks.start('follow');
                 wakers.get(ctx.key)?.();
+            }
+
+            /** `session.resumed` (#366): the interrupted turn `cut` went on — `how`, and who asked (`Route.resumedBy`). */
+            async function resumed(route: Route, how: 're-host' | 'fresh', cut: string): Promise<void> {
+                const by = route.resumedBy ?? ROUTER;
+                delete route.resumedBy;
+                const sessionId = route.sessionId!;
+                await audit.record(ctx, workspaceId, {
+                    key: `${taskKey(workspaceId, route.taskId)}:resumed:${cut}`,
+                    kind: 'session.resumed',
+                    at: now(),
+                    by,
+                    summary: how === 're-host' ? `interrupted turn ${cut} resumed in session ${sessionId}` : `interrupted turn ${cut} went on in a fresh session ${sessionId}: the machine refused to re-open the old one`,
+                    agentId: route.agentId,
+                    taskId: route.taskId,
+                    sessionId,
+                    data: { sessionId, taskId: route.taskId, how, by }
+                });
+            }
+
+            /**
+             * Resume an interrupted route (OPS-05) for `by`: re-opened on its machine first when the machine no longer hosts
+             * its session (`rehost`), else prompted at once (`resumeHosted`).
+             */
+            async function resumeRoute(route: Route, by: string): Promise<void> {
+                const sessionId = route.sessionId!;
+                route.resumedBy = by;
+                if (route.machineId && !(await machine(route.machineId).get()).activeSessions.some((h) => h.sessionId === sessionId)) await rehost(route);
+                else await resumeHosted(route);
+            }
+
+            /**
+             * `onInterrupt: 'auto'` (#366; EXE-08): an interrupted route on a machine that is online, whose agent says so,
+             * is resumed once on its own as `system:routing`. Once per cut turn (`autoResumed`): a second interruption of
+             * the same turn waits for a person, and so does a resume that fails.
+             */
+            async function autoResumeRoute(route: Route): Promise<void> {
+                if (route.status !== 'interrupted' || route.rehosting || !route.turnId || !route.sessionId || !route.machineId) return;
+                if (route.config.execution.onInterrupt !== 'auto') return;
+                const cut = baseTurnId(route.turnId);
+                if (route.autoResumed === cut) return;
+                if (!(await machine(route.machineId).get()).online) return;
+                route.autoResumed = cut;
+                touch(route);
+                try {
+                    await resumeRoute(route, ROUTER);
+                } catch {
+                    // The machine could not take it now: the task keeps waiting for a person's Resume.
+                    delete route.resumedBy;
+                }
+            }
+
+            /** The machine-lost reminder, due when the route offline longest reaches `MACHINE_LOST_MS` (#366) — or cleared when none is offline. */
+            async function armLost(): Promise<void> {
+                const since = Object.values(ctx.state.routes).flatMap((r) => (r.offlineSince === undefined ? [] : [r.offlineSince]));
+                if (!since.length) await ctx.reminders.clear(MACHINE_LOST_REMINDER);
+                else await ctx.reminders.set(MACHINE_LOST_REMINDER, { due: Math.max(REMINDER_FLOOR_MS, Math.min(...since) + MACHINE_LOST_MS - now()) });
             }
 
             /**
@@ -888,15 +974,19 @@ export function defineRoutingActor(ports: RoutingPorts) {
              */
             async function freshSession(route: Route): Promise<void> {
                 const from = route.sessionId!;
+                const cut = route.turnId;
                 delete route.rehosting;
                 delete route.seenSeq;
                 delete route.turnId;
                 delete route.joined;
                 delete route.attempt;
                 delete route.head;
-                // Minted here, not bound: the chat's binding still names the lost session, and `bindSession` would take it again.
+                // Minted here, not bound: the chat's binding may still name the lost session, and `bindSession` would take it
+                // again. The chat member is rebound to the new one by its first open (`session-started`), over the lost one's
+                // `session-ended` when the refusal closed it (#366).
                 route.sessionId = newSessionId();
                 route.status = 'opening';
+                if (cut) await resumed(route, 'fresh', cut);
                 const t = await task(route.taskId).get();
                 await placeRemote(route, undefined, { ...t, resumeFrom: from });
             }
@@ -1291,20 +1381,101 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     const route = s.routes[taskId];
                     if (!route || route.status !== 'interrupted' || !route.sessionId || !route.turnId) throw new ServerFnError(409, `task ${taskId} has no interrupted turn to resume`);
                     if (route.rehosting) return task(taskId).get();
-                    const sessionId = route.sessionId;
-                    if (route.machineId && !(await machine(route.machineId).get()).activeSessions.some((h) => h.sessionId === sessionId)) await rehost(route);
-                    else await resumeHosted(route);
+                    await resumeRoute(route, principalLabel(ctx.principal));
                     await ctx.save();
                     return task(taskId).get();
                 },
 
-                /** Machine → router: the daemon said hello. Every route parked on it is retried — on that machine, no other; a route no machine reported yet looks again. */
+                /**
+                 * Machine → router: the daemon said hello. Every route parked on it is retried — on that machine, no other; a
+                 * route no machine reported yet looks again. A running route that waited `machine-offline` (#366) goes on:
+                 * its task is active again and the daemon replays its turn from the `wanted` cursor — a session the daemon
+                 * lost is answered `session.closed` and interrupted (#420). An interrupted route whose agent's `onInterrupt`
+                 * is `auto` is resumed once (`autoResumeRoute`).
+                 */
                 async machineOnline(machineId: MachineId): Promise<void> {
                     const s = ctx.state;
                     for (const route of Object.values(s.routes)) {
                         if (route.status !== 'waiting-offline' || (route.machineId !== undefined && route.machineId !== machineId)) continue;
                         await placeRemote(route);
                     }
+                    for (const route of Object.values(s.routes)) {
+                        if (route.machineId !== machineId || route.offlineSince === undefined) continue;
+                        delete route.offlineSince;
+                        touch(route);
+                        const t = await task(route.taskId).get();
+                        if (t.status === 'waiting' && t.wait?.kind === 'machine-offline') await task(route.taskId).resolveWaiting(ROUTER, `machine ${machineId} is back; the turn goes on`, route.sessionId);
+                    }
+                    for (const route of Object.values(s.routes)) if (route.machineId === machineId) await autoResumeRoute(route);
+                    await armLost();
+                    await ctx.save();
+                },
+
+                /**
+                 * Machine → router (#366; OPS-04, EXE-11): the machine went offline — its socket closed, or its heartbeat
+                 * window passed. Every route running a turn there waits for it: the route stays `running` with
+                 * `offlineSince`, and its task — when active; a task waiting on an approval or a question keeps that wait —
+                 * waits `machine-offline`. Distinct from `environment-offline`, which is a placement that never started.
+                 * The machine-lost reminder is armed.
+                 */
+                async machineOffline(machineId: MachineId): Promise<void> {
+                    const at = now();
+                    for (const route of Object.values(ctx.state.routes)) {
+                        if (route.machineId !== machineId || route.status !== 'running' || route.offlineSince !== undefined) continue;
+                        route.offlineSince = at;
+                        touch(route);
+                        const t = await task(route.taskId).get();
+                        if (t.status === 'active') await task(route.taskId).reportWaiting({ kind: 'machine-offline', machineId, since: at }, ROUTER, route.sessionId);
+                    }
+                    await armLost();
+                    await ctx.save();
+                },
+
+                /**
+                 * The machine-lost reminder (#366; OPS-04): a route offline for `MACHINE_LOST_MS` fails `machine-lost`
+                 * (recoverable), audited `task.machine-lost`, and the chat is told. The machine lets go of its session
+                 * (`Machine.closeSession`): the record's turn is interrupted and it waits `idle` with its ref, so a chat
+                 * member's next message re-opens it wherever the machine comes back; a chatless session is closed.
+                 */
+                async expireOffline(): Promise<void> {
+                    const at = now();
+                    const letGo = new Set<SessionId>();
+                    for (const route of Object.values(ctx.state.routes)) {
+                        const since = route.offlineSince;
+                        if (since === undefined || !route.machineId || at - since < MACHINE_LOST_MS) continue;
+                        const { machineId, sessionId } = route;
+                        await audit.record(ctx, workspaceId, {
+                            key: `${taskKey(workspaceId, route.taskId)}:machine-lost`,
+                            kind: 'task.machine-lost',
+                            at,
+                            by: ROUTER,
+                            summary: `machine ${machineId} offline since ${new Date(since).toISOString()}; the task's turn is lost`,
+                            agentId: route.agentId,
+                            taskId: route.taskId,
+                            ...(sessionId ? { sessionId } : {}),
+                            data: { taskId: route.taskId, machineId, since }
+                        });
+                        // The session first, while the task still stands: a task settled from outside has its follower cancel the
+                        // turn — a Session command to the Machine — and the Machine, letting go, is waiting on that Session.
+                        const first = sessionId !== undefined && !letGo.has(sessionId);
+                        if (first) {
+                            letGo.add(sessionId);
+                            await machine(machineId)
+                                .closeSession(sessionId)
+                                .catch(() => undefined);
+                        }
+                        await fail(route, { code: MACHINE_LOST_CODE, message: `machine ${machineId} has been offline since ${new Date(since).toISOString()}; the turn is lost`, recoverable: true });
+                        if (first && !route.chatId) await session(sessionId).close().catch(() => undefined);
+                    }
+                    await armLost();
+                    await ctx.save();
+                },
+
+                /** Follower → router (#366): a route was just parked `interrupted` — resumed at once when its agent's `onInterrupt` is `auto` and its machine is online. */
+                async autoResume(taskId: TaskId): Promise<void> {
+                    const route = ctx.state.routes[taskId];
+                    if (!route) return;
+                    await autoResumeRoute(route);
                     await ctx.save();
                 },
 
@@ -1589,7 +1760,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${route.sessionId}`).with({ context }) as unknown as SessionClient;
                 const { turnId, sessionId } = route;
                 /** The router itself, for what a turn's end means to OTHER routes: a method turn, never `ctx.turn` (#395). */
-                const router = () => actor(self!, ctx.key).with({ context }) as unknown as { turnEnded(sessionId: SessionId, turnId: string): Promise<void> };
+                const router = () => actor(self!, ctx.key).with({ context }) as unknown as { turnEnded(sessionId: SessionId, turnId: string): Promise<void>; autoResume(taskId: TaskId): Promise<void> };
 
                 /**
                  * Settle the task and forget the route. A chatless session is closed here — it holds an environment slot
@@ -1681,18 +1852,29 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 // Settled from outside while the turn ran: the turn is over now, and the task gets the driver's word.
                 const stopped = async (): Promise<void> => settled(() => tryTask(() => taskClient.sessionStopped()));
                 if (settledOutside) return stopped();
-                const t = await taskClient.get();
+                let t = await taskClient.get();
                 if (isTerminal(t.status)) return stopped();
+                // Still waiting on its machine (#366): the machine is back — it sent this turn's end — whichever word the router heard first.
+                const offlineWait = t.status === 'waiting' && t.wait?.kind === 'machine-offline' ? t.wait : undefined;
+                if (offlineWait) {
+                    await tryTask(() => taskClient.resolveWaiting(ROUTER, `machine ${offlineWait.machineId} is back; turn ${turnId} ended`, sessionId));
+                    t = await taskClient.get();
+                }
                 if (end.stopReason === 'error') {
                     if (isInterruptedTurnEnd(end)) {
-                        // Cut short by an eviction: nothing was re-run (OPS-05/06); the user decides whether to resume.
-                        // The route parks as `interrupted` — not followed again until `resume` re-prompts it.
+                        // Cut short — by an eviction, or its host going away (#420): nothing was re-run (OPS-05/06); the user decides
+                        // whether to resume, unless the agent's `onInterrupt` is `auto` (#366). The route parks as `interrupted` —
+                        // not followed again until `resume` re-prompts it.
                         await ctx.turn(async (c) => {
                             await tryTask(() => taskClient.reportWaiting({ kind: 'input', requestId: `resume:${turnId}`, sessionId }, ROUTER));
                             const parked = c.state.routes[route.taskId];
-                            if (parked && parked.turnId === turnId) parked.status = 'interrupted';
+                            if (parked && parked.turnId === turnId) {
+                                parked.status = 'interrupted';
+                                delete parked.offlineSince;
+                            }
                             await c.save();
                         });
+                        if (route.machineId && route.config.execution.onInterrupt === 'auto') await router().autoResume(route.taskId).catch(() => undefined);
                         return;
                     }
                     const error: TaskError = { code: end.error?.code ?? 'turn-error', message: end.error?.message ?? 'the turn ended with an error', recoverable: false };

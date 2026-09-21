@@ -4,6 +4,7 @@ import { allowAll, createReducer, createTranscript, reduceAgentEvent, type Agent
 import { checkEventInvariants, checkReplayEquality, mockAgent, type MockAgent } from '@sigx/ai-agent/testing';
 import { serveSession, type WireCommand, type WireFrame } from '@sigx/ai-agent/wire';
 
+import { capturingAuditPort } from '../src/audit/index';
 import { defineSessionActor, isInterruptedTurnEnd, type CommandSink, type SessionFactory, type SessionOpenSpec } from '../src/session/index';
 import { applySessionEntry, type SessionEntry, type SessionState } from '../src/session/state';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
@@ -103,12 +104,14 @@ let agent: MockAgent;
 let Session: ReturnType<typeof defineSessionActor>;
 const sent: WireCommand[] = [];
 const sink: CommandSink = { send: async (_target, command) => void sent.push(command) };
+let audited: ReturnType<typeof capturingAuditPort>;
 
 beforeEach(() => {
     received.length = 0;
     sent.length = 0;
     agent = scriptedAgent();
-    Session = defineSessionActor({ factory: localFactory(agent), commands: sink });
+    audited = capturingAuditPort();
+    Session = defineSessionActor({ factory: localFactory(agent), commands: sink, audit: audited });
     app = testActorApp([Session, ChatStub]);
     return app.start();
 });
@@ -455,7 +458,7 @@ describe('Session on the daemon path', () => {
 
     it('hostEnded (#420): a running turn is interrupted with the host’s reason, stamped between the head and the daemon’s next event; the record waits idle with its ref, and resume re-prompts it', async () => {
         const asMachine = await runningRemote();
-        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restarted' });
+        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restart' });
         const info = await session().get();
         expect(info).toMatchObject({ status: 'idle', opened: true, ref: { id: 'sess-real' }, spec: { machineId: 'machine_1' } });
         expect(info.running).toBeUndefined();
@@ -463,15 +466,19 @@ describe('Session on the daemon path', () => {
         const end = events.at(-1)!;
         expect(isInterruptedTurnEnd(end)).toBe(true);
         expect(end).toMatchObject({ turnId: 't1', error: { message: 'interrupted: the daemon restarted' } });
-        expect(events.find((e) => e.type === 'error')).toMatchObject({ message: 'interrupted: the daemon restarted', data: { interrupted: true, host: 'restarted' } });
+        expect(events.find((e) => e.type === 'error')).toMatchObject({ message: 'interrupted: the daemon restarted', data: { interrupted: true, host: 'restart' } });
         // Never an integer the daemon could stamp: every platform event sits after (1, 1) and before (1, 2).
         for (const e of events.slice(1)) expect(e.epoch === 1 && e.seq > 1 && e.seq < 2).toBe(true);
         expect(received).toContainEqual(expect.objectContaining({ kind: 'status', status: 'task', ref: 'interrupted:t1' }));
+        // Audited with its cause (#366): the daemon's close code.
+        expect(audited.events.filter((e) => e.kind === 'session.interrupted')).toEqual([
+            expect.objectContaining({ key: `${KEY}:interrupted:t1`, by: 'machine:machine_1', sessionId: 'session_1', taskId: 'task_1', data: { sessionId: 'session_1', taskId: 'task_1', turnId: 't1', host: 'restart' } })
+        ]);
 
         // Idempotent: the same word again writes nothing.
         const writes = () => [...app.saves, ...app.appends].filter((w) => w.type === 'session').length;
         const written = writes();
-        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restarted' });
+        await asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restart' });
         expect(writes()).toBe(written);
 
         // The cut turn is resumable: a new prompt carrying its input.
@@ -510,6 +517,18 @@ describe('Session on the daemon path', () => {
         expect(received).toContainEqual(expect.objectContaining({ kind: 'status', status: 'session-ended' }));
         await asMachine.hostEnded({ reason: 'gone' });
         expect((await session().get()).status).toBe('closed');
+    });
+
+    it('hostEnded (#366): a re-open the daemon refused (resume-failed) closes the record, ref and all, and the chat hears session-ended', async () => {
+        await session().open(remote);
+        const asMachine = app.as(machine).actor(Session, KEY);
+        await asMachine.noteRef({ agent: 'claude-code', v: 1, id: 'sess-real' });
+        await asMachine.hostEnded({ reason: 'cannot resume sess-real', code: 'resume-failed' });
+        expect(await session().get()).toMatchObject({ status: 'closed', ref: { id: 'sess-real' } });
+        await until(() => received.some((e) => e.kind === 'status' && e.status === 'session-ended'), 'session-ended');
+        // No turn ran: nothing was interrupted, nothing audited.
+        expect(await session().events()).toEqual([]);
+        expect(audited.events.filter((e) => e.kind === 'session.interrupted')).toEqual([]);
     });
 
     it('hostEnded (#420): an idle record keeps its ref and stays idle; only its hosting machine may say it', async () => {

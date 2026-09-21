@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actorKey, type EnvironmentId, type FrozenAgentConfig, type MachineId, type MachinePolicy, type OpenSpec, type Principal, type SessionId, type WorkspaceId } from '@agentic/core';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
+import { defineActor } from '@sigx/actors';
 import { manualScheduler, type ManualScheduler } from '@sigx/actors/host';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/ai-agent/wire';
 
@@ -1011,5 +1012,120 @@ describe('Machine quota (#268, OPS-07)', () => {
         connect(K1, daemon(M1));
         await until(async () => (await machine().get()).quota?.[E1] !== undefined, 'the in-memory daemon quota frame');
         expect((await machine().get()).quota![E1]).toMatchObject({ availability: 'not-reported', via: 'probe' });
+    });
+});
+
+describe('Machine offline and closed sessions (#366)', () => {
+    const S1 = 'session_1' as SessionId;
+    const sessionSpec: SessionOpenSpec = { agentId: config.agentId, runtime: 'in-memory', environmentId: E1, machineId: M1, config };
+    const session = () => app.as(owner).actor(Session, actorKey(WS, 'session', S1));
+    /** What the router heard, in order. */
+    let heard: string[];
+
+    beforeEach(async () => {
+        await app.stop();
+        heard = [];
+        const Routing = defineActor({
+            type: 'routing',
+            state: () => ({}),
+            methods: () => ({
+                machineOnline: (id: MachineId) => void heard.push(`online:${id}`),
+                machineOffline: (id: MachineId) => void heard.push(`offline:${id}`),
+                sessionOpened: () => undefined,
+                sessionClosed: (id: SessionId, reason: string) => void heard.push(`closed:${id}:${reason}`),
+                slotFreed: () => undefined,
+                promptRefused: () => undefined
+            })
+        });
+        const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
+        Session = defineSessionActor({ factory: () => null, commands: sink });
+        Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, heartbeatWindowMs: 90_000, commandTimeoutMs: 120_000 });
+        app = testActorApp([Machine, Session, Workspace, PairingDirectory, AuditActor, Routing], { scheduler, defaults: { reminderTickMs: TICK, sweepIntervalMs: 0, callTimeoutMs: 0 } });
+        await app.start();
+    });
+
+    /** A daemon the test speaks for itself: its hello, then whatever frames the test sends. */
+    async function rawDaemon() {
+        sockets.connected.add(K1);
+        const asDaemon = machine(K1, asMachine(M1));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {} }));
+        return asDaemon;
+    }
+
+    /** `S1` opened on the raw daemon and named `real` by its runtime. */
+    async function opened(asDaemon: Awaited<ReturnType<typeof rawDaemon>>) {
+        await session().open(sessionSpec);
+        await machine(K1).openSession(S1, E1, openSpec);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.opened', sessionId: S1, ref: { agent: 'in-memory', v: 1, id: S1 }, capabilities: IN_MEMORY_CAPABILITIES, head: { epoch: 0, seq: 0 } }));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.ref', sessionId: S1, ref: { agent: 'in-memory', v: 1, id: 'real' } }));
+    }
+
+    it('tells the router it went offline: at once when the socket closes, and past the heartbeat window when the daemon falls silent', async () => {
+        const { seat } = connect(K1, daemon(M1));
+        await until(() => heard.includes(`online:${M1}`), 'the router to hear the hello');
+        seat.drop();
+        await until(() => heard.includes(`offline:${M1}`), 'the router to hear the close');
+        // Once per going away: a second close says nothing new.
+        await machine(K1, asMachine(M1)).socketClosed();
+
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online again');
+        sockets.seats.delete(K1); // frames stop flowing both ways; nothing tells the actor
+        await advance(TICK);
+        expect(heard.filter((h) => h === `offline:${M1}`)).toHaveLength(1);
+        await advance(TICK);
+        await until(() => heard.filter((h) => h === `offline:${M1}`).length === 2, 'the router to hear the silence');
+    });
+
+    it('carries the daemon’s close code to the record: the running turn is interrupted with it', async () => {
+        const asDaemon = await rawDaemon();
+        await opened(asDaemon);
+        await session().prompt('hello', 't1');
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: S1, reply: { v: WIRE_PROTOCOL_VERSION, kind: 'ack', commandId: 't1', turnId: 't1' } }));
+        expect((await session().get()).running?.turnId).toBe('t1');
+
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: S1, reason: 'updating', code: 'update' }));
+        expect(await session().get()).toMatchObject({ status: 'idle', ref: { id: 'real' } });
+        expect((await session().events()).find((e) => e.type === 'error')).toMatchObject({ message: 'interrupted: updating', data: { interrupted: true, host: 'update' } });
+        await until(() => heard.includes(`closed:${S1}:updating`), 'the router to hear the close');
+    });
+
+    it('a re-open the daemon refuses closes the record, ref and all — with resume-failed, or any close while a resume is opening', async () => {
+        const asDaemon = await rawDaemon();
+        await session().open(sessionSpec);
+        await app.as(asMachine(M1)).actor(Session, actorKey(WS, 'session', S1)).noteRef({ agent: 'in-memory', v: 1, id: 'real' });
+        // Re-opened from its ref (#393): the entry is `opening` until the daemon answers.
+        await machine(K1).openSession(S1, E1, { ...openSpec, resume: { agent: 'in-memory', v: 1, id: 'real' } });
+        expect((await machine(K1).get()).activeSessions[0]?.status).toBe('opening');
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: S1, reason: 'cannot resume real' }));
+        expect(await session().get()).toMatchObject({ status: 'closed', ref: { id: 'real' } });
+        expect((await machine(K1).get()).activeSessions).toEqual([]);
+
+        // A first open refused for another reason leaves the record as it was: nothing had opened.
+        const S2 = 'session_2' as SessionId;
+        const second = app.as(owner).actor(Session, actorKey(WS, 'session', S2));
+        await second.open(sessionSpec);
+        await machine(K1).openSession(S2, E1, openSpec);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: S2, reason: 'no room', code: 'draining' }));
+        expect((await second.get()).status).toBe('idle');
+
+        // `resume-failed` closes one opened without a ref too.
+        const S3 = 'session_3' as SessionId;
+        const third = app.as(owner).actor(Session, actorKey(WS, 'session', S3));
+        await third.open(sessionSpec);
+        await machine(K1).openSession(S3, E1, openSpec);
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.closed', sessionId: S3, reason: 'cannot resume', code: 'resume-failed' }));
+        expect((await third.get()).status).toBe('closed');
+    });
+
+    it('closing a session while the daemon is offline lets it go: the record is told its host ended', async () => {
+        const asDaemon = await rawDaemon();
+        await opened(asDaemon);
+        sockets.connected.delete(K1);
+        await asDaemon.socketClosed();
+        await machine(K1).closeSession(S1);
+        expect((await machine(K1).get()).activeSessions).toEqual([]);
+        expect(await session().get()).toMatchObject({ status: 'idle', ref: { id: 'real' } });
+        await until(() => heard.some((h) => h.startsWith(`closed:${S1}:`)), 'the router to hear the close');
     });
 });
