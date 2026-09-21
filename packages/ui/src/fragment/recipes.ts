@@ -387,6 +387,17 @@ const approval: RecipeInput = {
         header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-warning)' } },
         title: { base: { fontWeight: 'var(--weight-semibold, 600)', fontSize: 'var(--text-lg)' } },
         rule: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } },
+        plan: {
+            base: {
+                padding: 'var(--space-sm) var(--space-md)',
+                border: `var(--border) solid ${line}`,
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-base-100)',
+                maxBlockSize: '24rem',
+                overflow: 'auto',
+                fontSize: 'var(--text-sm)'
+            }
+        },
         request: {
             base: {
                 display: 'flex',

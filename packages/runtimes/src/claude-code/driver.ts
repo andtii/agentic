@@ -26,6 +26,7 @@ import { bridgedPlatformTools } from '../harness/tools.js';
 import { claudeCodeDoctor, type DoctorInput } from './doctor.js';
 import { accountEnv } from './env.js';
 import { claudeCodeModels, type ModelsQueryFn } from './models.js';
+import { withPlanReview } from './plan.js';
 import { claudeCodeSystemPrompt, withUnavailableConnectors } from './system.js';
 
 export interface ClaudeCodeDriverOptions {
@@ -174,7 +175,8 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
                 taken: platform.map((t) => t.name)
             });
             const tools = [...platform, ...connectors.tools];
-            const policy = withConnectorPolicy(ctx.policy, connectors.annotations);
+            // Plan mode's way out always reaches a person (#454), whatever the rules and grants say.
+            const policy = withPlanReview(withConnectorPolicy(ctx.policy, connectors.annotations));
             let session: AgentSession;
             try {
                 session = await agent.session({

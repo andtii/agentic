@@ -113,6 +113,8 @@ export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
     rule: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     request: { element: 'div', parent: 'root', tokens: ['color', 'radius-field', 'text'] },
     description: { element: 'p', parent: 'root', tokens: ['text'] },
+    /** Plan mode's way out (#454): the plan the agent asks to carry out, as markdown. */
+    plan: { element: 'div', parent: 'root', tokens: ['color', 'radius-field', 'text'] },
     context: { element: 'dl', parent: 'root', tokens: ['text'] },
     actions: { element: 'div', parent: 'root' },
     /** The session answer's label at full length, and the short one the phone shows instead ("Mobile specifics"). */
