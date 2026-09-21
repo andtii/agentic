@@ -215,12 +215,14 @@ export function ndjsonEventLog(dir: string, options: NdjsonEventLogOptions = {})
                 const at = cursorOf(event);
                 oldest ??= at;
                 if (!cursorBefore(range.from, at) || (range.to && cursorBefore(range.to, at))) continue;
-                if (events.length >= limit || (events.length > 0 && bytes + line.length > maxBytes)) {
+                // UTF-8 bytes, what the frame limit counts — `length` undercounts anything past ASCII.
+                const size = Buffer.byteLength(line, 'utf8');
+                if (events.length >= limit || (events.length > 0 && bytes + size > maxBytes)) {
                     more = true;
                     break;
                 }
                 events.push(event);
-                bytes += line.length;
+                bytes += size;
             }
             if (!oldest) return { error: { code: 'unknown-session', message: `no session log for ${sessionId} on this machine` } };
             if (!reachesBack(oldest, range.from)) return { error: { code: 'gap', message: `the log of ${sessionId} starts at (${oldest.epoch}, ${oldest.seq}); what came before was forgotten by retention`, earliest: oldest } };

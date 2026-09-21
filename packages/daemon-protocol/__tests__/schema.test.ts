@@ -313,6 +313,8 @@ describe('daemon frame schemas', () => {
         expect(request({ from: { epoch: 1, seq: 5.5 } }).success).toBe(true);
         expect(request({ from: { epoch: 1, seq: 5 }, to: { epoch: 1, seq: 7.5 } }).success).toBe(true);
         expect(request({ from: { epoch: 1, seq: -1 } }).success).toBe(false);
+        expect(request({ from: { epoch: 1, seq: Infinity } }).success).toBe(false);
+        expect(request({ from: { epoch: 1, seq: 1 }, to: { epoch: 1, seq: Number.NaN } }).success).toBe(false);
         expect(request({ from: { epoch: 1 } }).success).toBe(false);
         expect(request({}).success).toBe(false);
         expect(request({ from: cursor, limit: LIMITS.list + 1 }).success).toBe(false);

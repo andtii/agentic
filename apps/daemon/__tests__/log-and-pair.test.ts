@@ -88,12 +88,20 @@ describe('NDJSON session log', () => {
             expect(await log.slice('runtime_1', { from: { epoch: 1, seq: 10 } })).toEqual({ result: { events: [] } });
         });
 
-        it('cuts at about maxBytes of JSON, never at zero events', async () => {
+        it('cuts at about maxBytes of JSON — UTF-8 bytes, not code units — never at zero events', async () => {
             const log = ndjsonEventLog(dir);
             for (let i = 1; i <= 10; i++) void log.append(ev(i));
             const small = await log.slice('runtime_1', { from: { epoch: 1, seq: 0 } }, { maxBytes: 10 });
             expect('result' in small && small.result.events.map((e) => e.seq)).toEqual([1]);
             expect('result' in small && small.result.more).toBe(true);
+            // Two events of 40 three-byte characters: 120 bytes of text each, 40 code units — a budget between the two counts fits one, not both.
+            const wide = (seq: number): AgentEvent => ({ ...ev(seq, 'runtime_2'), delta: '你'.repeat(40) }) as AgentEvent;
+            void log.append(wide(1));
+            void log.append(wide(2));
+            const one = JSON.stringify(wide(1)).length; // code units: under the bytes of one line
+            const cut = await log.slice('runtime_2', { from: { epoch: 1, seq: 0 } }, { maxBytes: one * 2 });
+            expect('result' in cut && cut.result.events.map((e) => e.seq)).toEqual([1]);
+            expect('result' in cut && cut.result.more).toBe(true);
         });
 
         it('names a gap with the earliest cursor it still holds, and an unknown session', async () => {
