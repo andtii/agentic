@@ -12,7 +12,7 @@
 
 import { compareVersions, platformKey } from '@agentic/daemon-protocol';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import type { ParsedArgs } from './cli.js';
 import type { InstallPaths } from './paths.js';
 import { CLI_DRAIN_TIMEOUT_MS, downloadAsset, downloadFile, fetchableAsset, stageZip, unstage, updateLayout, UpdateError, verifyDownload, type LocalUpdateRequest, type StagedCheck } from './update.js';
@@ -168,7 +168,10 @@ export async function updateCommand(flags: ParsedArgs['flags'], context: UpdateC
     const requestedAt = Date.now();
     const request: LocalUpdateRequest = { mode, drainTimeoutMs: CLI_DRAIN_TIMEOUT_MS, version: asset.version, at: requestedAt };
     await mkdir(install.stateDir, { recursive: true });
-    await writeFile(layout.requestFile, `${JSON.stringify(request)}\n`);
+    // Temp file and rename: the running daemon never reads half a request.
+    const temp = `${layout.requestFile}.${process.pid}.tmp`;
+    await writeFile(temp, `${JSON.stringify(request)}\n`);
+    await rename(temp, layout.requestFile);
     out(mode === 'now' ? 'restarting the daemon now' : 'the daemon restarts once no turn is running (up to 10 minutes)');
 
     const pollMs = test.pollMs ?? 1_000;

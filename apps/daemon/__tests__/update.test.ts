@@ -66,6 +66,7 @@ describe('update client', () => {
         expect(fetchableAsset(a)).toBe(true);
         expect(fetchableAsset({ ...a, url: 'http://127.0.0.1:9/x.zip' })).toBe(false);
         expect(fetchableAsset({ ...a, url: 'http://127.0.0.1:9/x.zip' }, true)).toBe(true);
+        expect(fetchableAsset({ ...a, url: 'http://[::1]:9/x.zip' }, true)).toBe(true);
         expect(fetchableAsset({ ...a, url: 'http://example.com/x.zip' }, true)).toBe(false);
         expect(fetchableAsset({ ...a, url: 'file:///etc/passwd' }, true)).toBe(false);
         expect(fetchableAsset({ ...a, sha256: 'nope' })).toBe(false);
@@ -261,6 +262,11 @@ describe('update client', () => {
         await writeFile(join(staged, 'bin', 'agentic-daemon.mjs'), '// 0.2.0\n');
         running = 1;
         await mkdir(join(root, 'state'), { recursive: true });
+        // Half a request is left for the next poll, not dropped.
+        await writeFile(updateLayout(root).requestFile, '{"mode": "dr');
+        await new Promise((r) => setTimeout(r, 50));
+        expect(existsSync(updateLayout(root).requestFile)).toBe(true);
+        expect(c.draining).toBe(false);
         await writeFile(updateLayout(root).requestFile, JSON.stringify({ mode: 'drain', drainTimeoutMs: 60_000, version: '0.2.0', at: Date.now() }));
         await vi.waitFor(() => expect(c.draining).toBe(true));
         expect(existsSync(updateLayout(root).requestFile)).toBe(false);

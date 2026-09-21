@@ -391,9 +391,12 @@ export function createUpdateClient(host: UpdateHost, options: UpdateClientOption
             let request: LocalUpdateRequest;
             try {
                 request = JSON.parse(await readFile(layout.requestFile, 'utf8')) as LocalUpdateRequest;
-            } finally {
-                await unlink(layout.requestFile).catch(() => {});
+            } catch (e) {
+                // Left for the next poll: the CLI writes it atomically, and removes one nobody took.
+                logger.debug('update: the local update request is not readable yet', { file: layout.requestFile, error: e });
+                return;
             }
+            await unlink(layout.requestFile).catch(() => {});
             if (job) return;
             if (!existsSync(entryOf(layout.staged))) {
                 logger.warn('update: a local update request without a staged build; ignored', { file: layout.requestFile });
