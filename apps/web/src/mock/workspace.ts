@@ -29,12 +29,14 @@ export interface MockAgentIdentity {
     readonly environmentId: EnvironmentId;
     /** The account it runs as across machines (#414); the sample agents are pinned, so none carries one. */
     readonly account?: AccountRef;
+    /** The model its config names; absent when the runtime defaults. */
+    readonly model?: string;
     readonly configVersion: number;
 }
 
 export const AGENTS: readonly MockAgentIdentity[] = [
     { id: 'atlas', name: 'Atlas', role: 'Personal assistant', hue: 1, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, environmentId: 'env_platform' as EnvironmentId, configVersion: 12 },
-    { id: 'forge', name: 'Forge', role: 'Developer', hue: 2, environment: { machine: 'alien01', runtime: 'claude-code', account: 'work' }, environmentId: 'env_alien01_work' as EnvironmentId, configVersion: 7 },
+    { id: 'forge', name: 'Forge', role: 'Developer', hue: 2, environment: { machine: 'alien01', runtime: 'claude-code', account: 'work' }, environmentId: 'env_alien01_work' as EnvironmentId, model: 'claude-sonnet-4.5', configVersion: 7 },
     { id: 'lint', name: 'Lint', role: 'Reviewer', hue: 3, environment: { machine: 'alien01', runtime: 'claude-code', account: 'personal' }, environmentId: 'env_alien01_personal' as EnvironmentId, configVersion: 3 },
     { id: 'scout', name: 'Scout', role: 'Researcher', hue: 4, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, environmentId: 'env_platform' as EnvironmentId, configVersion: 5 }
 ];
