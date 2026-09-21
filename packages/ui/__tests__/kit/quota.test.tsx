@@ -4,7 +4,7 @@
  * why the provider reports nothing (OPS-07, PLG-09).
  */
 import type { EnvironmentId, QuotaSnapshot, QuotaWindow } from '@agentic/core';
-import { QuotaBadge, QuotaMeter, QuotaPanel, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsText } from '@agentic/ui';
+import { QuotaBadge, QuotaMeter, QuotaPanel, QuotaRings, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsShortText, resetsText } from '@agentic/ui';
 import { mount } from '../helpers';
 
 const TZ = 'Europe/Stockholm';
@@ -35,6 +35,14 @@ describe('quota text', () => {
         expect(resetsText(week.resetsAt, { now: NOW, timeZone: 'America/New_York' })).toBe('Resets Sep 22 at 2pm (America/New_York)');
         expect(resetsText(undefined)).toBeUndefined();
         expect(resetsText('not a date')).toBeUndefined();
+    });
+
+    it('the short form leaves the zone to the header: time only today, weekday, date and 24 h time later; `date: false` for one line (#452)', () => {
+        expect(resetsShortText(session.resetsAt, { now: NOW, timeZone: TZ })).toBe('Resets 13:10');
+        expect(resetsShortText(week.resetsAt, { now: NOW, timeZone: TZ })).toBe('Resets Tue 22 Sep 20:00');
+        expect(resetsShortText(week.resetsAt, { now: NOW, timeZone: TZ, date: false })).toBe('Resets Tue 20:00');
+        expect(resetsShortText(undefined)).toBeUndefined();
+        expect(resetsShortText('not a date')).toBeUndefined();
     });
 
     it('says the percent used, or that there is no number; maps status to tone', () => {
@@ -115,17 +123,67 @@ describe('QuotaPanel', () => {
         const root = mount(<QuotaPanel snapshot={snapshot()} compact now={NOW} />);
         expect(parts(root, 'ag-quota', 'label').map((l) => l.textContent)).toEqual(['Current week (Fable)']);
     });
+
+    it('zoneInHeader says the zone once in the header and each window resets in the short form (#452)', () => {
+        const root = mount(<QuotaPanel snapshot={snapshot()} zoneInHeader now={NOW} timeZone={TZ} />);
+        expect(part(root, 'ag-quota-panel', 'zone')!.textContent).toBe('Europe/Stockholm');
+        expect(parts(root, 'ag-quota', 'resets').map((l) => l.textContent)).toEqual(['Resets 13:10', 'Resets Tue 22 Sep 20:00', 'Resets Tue 22 Sep 20:00']);
+        expect(part(mount(<QuotaPanel snapshot={snapshot()} now={NOW} timeZone={TZ} />), 'ag-quota-panel', 'zone')).toBeNull();
+    });
+});
+
+describe('QuotaRings (#452)', () => {
+    const items = (root: ParentNode) => parts(root, 'ag-quota-rings', 'item');
+    const exhaustedFable: QuotaWindow = { ...fable, utilization: 1, status: 'exhausted' };
+    const extra: QuotaWindow = { id: 'extra_usage', label: 'Extra usage', period: 'month', utilization: 0.3, unit: 'usd', status: 'ok' };
+
+    it('draws one ring per window that limits the member’s model — session, week, the model’s own week — with percent and label', () => {
+        const root = mount(<QuotaRings snapshot={snapshot({ windows: [exhaustedFable, week, session, extra] })} model="claude-fable-5-1" now={NOW} />);
+        expect(items(root).map((i) => [i.getAttribute('data-window'), i.querySelector('[data-part="value"]')!.textContent, i.querySelector('[data-part="label"]')!.textContent])).toEqual([
+            ['five_hour', '19%', 'Session'],
+            ['seven_day', '76%', 'Week'],
+            ['seven_day:fable', '100%', 'Fable']
+        ]);
+        const fableRing = items(root)[2]!;
+        expect(fableRing.getAttribute('role')).toBe('progressbar');
+        expect(fableRing.getAttribute('aria-label')).toBe('Fable');
+        expect(fableRing.getAttribute('aria-valuenow')).toBe('100');
+        expect(fableRing.getAttribute('data-tone')).toBe('failed');
+        expect(items(root)[0]!.getAttribute('data-tone')).toBe('live');
+    });
+
+    it('another model’s week is not drawn; without a model only the shared windows', () => {
+        const sonnet = mount(<QuotaRings snapshot={snapshot({ windows: [session, week, exhaustedFable] })} model="claude-sonnet-5" now={NOW} />);
+        expect(items(sonnet).map((i) => i.getAttribute('data-window'))).toEqual(['five_hour', 'seven_day']);
+        expect(items(mount(<QuotaRings snapshot={snapshot()} now={NOW} />)).map((i) => i.getAttribute('data-window'))).toEqual(['five_hour', 'seven_day']);
+    });
+
+    it('a limit with no number is a full ring; an old snapshot dims; nothing to draw renders nothing', () => {
+        const root = mount(<QuotaRings snapshot={snapshot({ windows: [{ ...week, utilization: null, status: 'exhausted' }], observedAt: NOW - 2 * 3_600_000 })} now={NOW} />);
+        expect(items(root)[0]!.getAttribute('aria-valuenow')).toBe('100');
+        expect(part(root, 'ag-quota-rings', 'root')!.hasAttribute('data-mod-stale')).toBe(true);
+        expect(part(mount(<QuotaRings snapshot={snapshot({ windows: [extra] })} now={NOW} />), 'ag-quota-rings', 'root')).toBeNull();
+    });
 });
 
 describe('QuotaBadge (#315)', () => {
-    it('shows the tightest window as a one-line meter, with the reset time as its tooltip', () => {
-        const root = mount(<QuotaBadge snapshot={snapshot()} now={NOW} />);
+    it('shows the tightest window of the member’s model as a one-line meter, with the reset time as its tooltip', () => {
+        const root = mount(<QuotaBadge snapshot={snapshot()} model="claude-fable-5-1" now={NOW} />);
         const meter = part(root, 'ag-quota', 'root')!;
         expect(meter.hasAttribute('data-mod-compact')).toBe(true);
         expect(part(root, 'ag-quota', 'label')!.textContent).toBe('Week · Fable');
         expect(part(root, 'ag-quota', 'used')!.textContent).toBe('80% used');
         expect(part(root, 'ag-quota', 'resets')).toBeNull();
         expect(meter.getAttribute('title')).toMatch(/^Current week \(Fable\) · Resets /);
+    });
+
+    it('ignores another model’s week (#452): on Sonnet, or with no model, the shared week is the tightest', () => {
+        const exhaustedFable = { ...fable, utilization: 1, status: 'exhausted' } as const;
+        for (const model of ['claude-sonnet-5', undefined]) {
+            const root = mount(<QuotaBadge snapshot={snapshot({ windows: [session, week, exhaustedFable] })} {...(model ? { model } : {})} now={NOW} />);
+            expect(part(root, 'ag-quota', 'label')!.textContent).toBe('Week');
+            expect(part(root, 'ag-quota', 'used')!.textContent).toBe('76% used');
+        }
     });
 
     it('dims an old snapshot without being given staleMs (QUOTA_STALE_MS by default)', () => {

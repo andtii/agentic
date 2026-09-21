@@ -14,9 +14,9 @@ import { kitAnatomies, kitRecipes, kitScopes, NEEDS_KINDS } from '../../src/kit'
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
 
 describe('the ag-* kit', () => {
-    it('declares eighteen scopes, every one in the fragment with a recipe, and a vocabulary claim where it paints one', () => {
+    it('declares nineteen scopes, every one in the fragment with a recipe, and a vocabulary claim where it paints one', () => {
         const scopes = kitAnatomies.map((a) => a.scope);
-        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty', 'ag-workdir', 'ag-workdir-picker', 'ag-plugin-card', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel']);
+        expect(scopes).toEqual(['ag-pill', 'ag-agent-tile', 'ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-failure', 'ag-banner', 'ag-empty', 'ag-workdir', 'ag-workdir-picker', 'ag-plugin-card', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel', 'ag-quota-rings']);
         for (const scope of scopes) {
             expect(fragment.components.some((c) => c.scope === scope), scope).toBe(true);
             expect(kitRecipes.some((r) => r.component === scope), scope).toBe(true);

@@ -36,5 +36,7 @@ export const kitScopes: Record<string, ScopeVocabulary> = {
     'ag-plugin-card': { axes: { tone: ['dim', 'needs-you', 'failed'] }, modifiers: ['selected'] },
     // Provider limits (#270): ok is `live`, warning `needs-you`, exhausted `failed`, unknown `muted`; `stale` dims an old snapshot.
     'ag-quota': { axes: { tone: ['muted', 'live', 'needs-you', 'failed'] }, modifiers: ['stale', 'compact'] },
-    'ag-quota-panel': { modifiers: ['stale', 'compact'] }
+    'ag-quota-panel': { modifiers: ['stale', 'compact'] },
+    // A member's rings (#452): each ring carries its window's tone on its `item`; `stale` dims them all.
+    'ag-quota-rings': { modifiers: ['stale'] }
 };

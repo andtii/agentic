@@ -1,7 +1,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import type { AccountRef, EnvironmentId, ProjectRecord, RuntimeId, WorkdirRef } from '@agentic/core';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, StatusPill, WORKDIR_EMPTY, resetsText, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
+import { memberWindows, type AccountRef, type EnvironmentId, type ProjectRecord, type QuotaWindow, type RuntimeId, type WorkdirRef } from '@agentic/core';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, QuotaPanel, QuotaRings, StatusPill, WORKDIR_EMPTY, resetsShortText, ringWindows, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { effectiveWorkdir } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
@@ -46,21 +46,27 @@ const historyLine = (member: MockChatSummary['members'][number], time: TimeText)
     return member.coordinator ? `Coordinator · ${base}` : base.charAt(0).toUpperCase() + base.slice(1);
 };
 
+/** What a limit is called on the card (#452): `Session`, `Weekly`, the model a week is scoped to (`Fable`), else the provider's label. */
+const limitName = (w: QuotaWindow): string => w.scope?.model ?? (w.period === 'session' ? 'Session' : w.period === 'week' ? 'Weekly' : w.label);
+
 /**
- * The line under a member's usage meter once the account is out: when the exhausted window opens again. Picked by
- * `status`, not utilization — a runtime can report an exhausted window with no number (Claude Code's limit message).
+ * The line under a member's rings once it is out: which limit, and when it opens again — `Fable limit · resets Thu
+ * 12:00`. Only a window that limits the member's model counts (#452): another model's exhausted week is not its limit.
+ * Picked by `status`, not utilization — a runtime can report an exhausted window with no number (Claude Code's limit message).
  */
-const limitLine = (quota: ReturnType<typeof memberQuota>): string | undefined => {
-    const w = quota.snapshot?.windows.find((x) => x.status === 'exhausted');
+const limitLine = (quota: ReturnType<typeof memberQuota>, model: string | undefined): string | undefined => {
+    const w = quota.snapshot ? memberWindows(quota.snapshot, model).find((x) => x.status === 'exhausted') : undefined;
     if (!w) return undefined;
-    const resets = resetsText(w.resetsAt);
-    return resets ? `Limit reached · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : 'Limit reached';
+    const resets = resetsShortText(w.resetsAt, { date: false });
+    return resets ? `${limitName(w)} limit · ${resets.charAt(0).toLowerCase()}${resets.slice(1)}` : `${limitName(w)} limit reached`;
 };
 
 /**
  * The chat's right column: the members as cards — name and status, then one
  * bordered group of rows in mono (where it runs, the folder it works in, the
- * model its config names), its account's usage as one line, and a footer with
+ * model its config names), its usage as rings for the windows that limit its
+ * model — the limit line under them once one is out, and "Details" opening the
+ * account's full panel (#452) — and a footer with
  * its history access and "New session" (#399, confirmed before the member's
  * session is ended) — the tasks in this chat, "Stop task chain", and the
  * memory privacy note (MEM-11). The add-agent dialog asks for history access
@@ -68,7 +74,7 @@ const limitLine = (quota: ReturnType<typeof memberQuota>): string | undefined =>
  * agent's config and the chat's machine, the model the agent's config.
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
-    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '' });
+    const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '', details: [] as readonly string[] });
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
         const lookup = props.lookup ?? agentNamed;
@@ -96,7 +102,17 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
                             const environments = props.environments;
                             const quota = environments ? memberQuota(a, folder.ref?.environmentId, environments, machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined) : undefined;
-                            const limit = quota ? limitLine(quota) : undefined;
+                            // The model it runs here: its override for this chat, else its config's (#450).
+                            const model = member.options?.model ?? a.model;
+                            const limit = quota ? limitLine(quota, model) : undefined;
+                            const snapshot = quota?.snapshot;
+                            const rings = !!snapshot && ringWindows(snapshot, model).length > 0;
+                            const open = st.details.includes(member.agentId);
+                            const details = snapshot?.windows.length ? (
+                                <button type="button" data-link-button data-member-details-toggle aria-expanded={open ? 'true' : 'false'} aria-label={`Usage details for ${a.name}`} onClick={() => { st.details = open ? st.details.filter((id) => id !== member.agentId) : [...st.details, member.agentId]; }}>
+                                    Details <Icon name="chevron-down" size={12} />
+                                </button>
+                            ) : null;
                             return (
                                 <li data-member>
                                     <header data-member-head>
@@ -140,8 +156,16 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                         ) : null}
                                     </div>
                                     {stale && member.workdir ? <span data-member-workdir-stale data-tone="dim">Folder {member.workdir.path} is on another machine — not used on {props.machineName ?? machineId}.</span> : null}
-                                    {quota ? <span data-member-quota data-limit={limit ? '' : undefined}><QuotaBadge {...quota} /></span> : null}
-                                    {limit ? <span data-member-limit>{limit}</span> : null}
+                                    {quota ? (
+                                        <div data-member-usage data-limit={limit ? '' : undefined}>
+                                            <div data-member-usage-line>
+                                                <span data-member-quota>{rings && snapshot ? <QuotaRings snapshot={snapshot} {...(model ? { model } : {})} /> : <QuotaBadge {...quota} {...(model ? { model } : {})} />}</span>
+                                                {limit ? null : details}
+                                            </div>
+                                            {limit ? <div data-member-usage-line><span data-member-limit>{limit}</span>{details}</div> : null}
+                                            {open && snapshot ? <div data-member-details><QuotaPanel snapshot={snapshot} zoneInHeader /></div> : null}
+                                        </div>
+                                    ) : null}
                                     <footer data-member-foot>
                                         <span data-member-history>{historyLine(member, props.time ?? formatTime)}</span>
                                         <button type="button" data-link-button data-member-reset aria-label={`New session for ${a.name}`} onClick={() => { st.resetFor = member.agentId; }}>New session</button>

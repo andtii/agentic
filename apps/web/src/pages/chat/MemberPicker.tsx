@@ -49,7 +49,7 @@ export const MemberPicker = component<MemberPickerProps>(({ props, emit }) => ()
                                 <span data-new-chat-check aria-hidden="true">{picked ? <Icon name="check" size={12} /> : null}</span>
                             </span>
                             <EnvironmentLine tone="muted" {...a.environment} />
-                            {props.environments ? <span data-new-chat-quota><QuotaBadge {...memberQuota(a, props.quotaEnvironmentOf?.(a), props.environments, props.quotaMachine)} /></span> : null}
+                            {props.environments ? <span data-new-chat-quota><QuotaBadge {...memberQuota(a, props.quotaEnvironmentOf?.(a), props.environments, props.quotaMachine)} {...(a.model ? { model: a.model } : {})} /></span> : null}
                         </label>
                         {picked && group ? (
                             <label data-new-chat-coordinator-pick>

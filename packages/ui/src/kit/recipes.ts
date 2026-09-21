@@ -709,6 +709,8 @@ const quotaPanel: RecipeInput = {
         header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' } },
         title: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', flex: '1 1 auto', minInlineSize: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         age: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
+        // The zone the short reset lines are in (#452), once, at the header's end.
+        zone: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
         reason: { base: { margin: '0', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } }
     },
     modifiers: {
@@ -717,4 +719,36 @@ const quotaPanel: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel];
+/**
+ * A member's limits as rings (#452): a 28 px ring per window, its arc the status ink over a line-coloured track, the
+ * mono percent and a small uppercase label beside it; the rings wrap. A reached limit is amber like the card's limit line.
+ */
+const quotaRings: RecipeInput = {
+    component: 'ag-quota-rings',
+    parts: {
+        root: { base: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 'var(--space-lg)', rowGap: 'var(--space-sm)', minInlineSize: '0', transition: `opacity ${motion}` } },
+        item: {
+            base: { '--ag-ink': 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', minInlineSize: '0' },
+            selectors: {
+                '&[data-tone="muted"]': { '--ag-ink': 'var(--ag-text-dim)' },
+                '&[data-tone="needs-you"]': { '--ag-ink': 'var(--color-warning)' },
+                '&[data-tone="failed"]': { '--ag-ink': 'var(--color-warning)' }
+            }
+        },
+        ring: {
+            base: { flex: 'none', inlineSize: '28px', blockSize: '28px', transform: 'rotate(-90deg)' },
+            selectors: {
+                '& > circle': { fill: 'none', strokeWidth: '3' },
+                '& > [data-track]': { stroke: 'var(--ag-line-strong)' },
+                '& > [data-arc]': { stroke: 'var(--ag-ink)', strokeLinecap: 'round', transition: `stroke-dasharray ${motion}` }
+            }
+        },
+        value: { base: { fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-base-content)', whiteSpace: 'nowrap' } },
+        label: { base: { fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } }
+    },
+    modifiers: {
+        stale: { root: { base: { opacity: '0.6' } } }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel, quotaRings];

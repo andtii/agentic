@@ -137,8 +137,11 @@ Two components show what Claude Code's `/usage` shows, for any provider:
   - the windows, all of them or with `compact` only the tightest
   - a panel older than `QUOTA_STALE_MS` (30 min) is `stale`, which dims the meters and turns the age warning
   - `not-reported` reads "Not reported by provider — <reason>" and `null` reads "No usage reported yet", never an empty bar (OPS-07, PLG-09)
+  - with `zoneInHeader` (#452) the zone is said once at the header's end and each window reads "Resets Thu 25 Sep 12:00"
+- **`QuotaBadge`** is one compact line for wherever an account is chosen; given `model`, it picks the tightest window of `memberWindows` — another model's week is never the member's limit (#452).
+- **`QuotaRings`** (`ag-quota-rings`, #452) draws a chat member's limits as 28 px rings for the session and week windows of `memberWindows(snapshot, model)`, each with its percent and label (`12% SESSION`, `100% FABLE`); `role="progressbar"` per ring.
 - **`EnvironmentCard`** takes an optional `quota` prop and shows the panel under the facts.
-- The helpers `resetsText`, `quotaUsedText`, `quotaTone`, `ageText` and `isQuotaStale` are exported.
+- The helpers `resetsText`, `resetsShortText`, `quotaUsedText`, `quotaTone`, `ageText` and `isQuotaStale` are exported.
 
 ### States (`src/kit/states`)
 

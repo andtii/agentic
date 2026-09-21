@@ -56,6 +56,22 @@ export function resetsText(resetsAt: string | undefined, options: { readonly now
     return `Resets ${day} at ${time} (${timeZone})`;
 }
 
+/**
+ * The short form, for where the zone is said once nearby (#452): `Resets 13:10` today, `Resets Thu 25 Sep 12:00` later;
+ * `date: false` drops the date — `Resets Thu 12:00`, for a one-line limit. `undefined` without a reset time.
+ */
+export function resetsShortText(resetsAt: string | undefined, options: { readonly now?: number; readonly timeZone?: string; readonly date?: boolean } = {}): string | undefined {
+    if (!resetsAt) return undefined;
+    const at = new Date(resetsAt);
+    if (Number.isNaN(at.getTime())) return undefined;
+    const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).formatToParts(at);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    const time = `${get('hour')}:${get('minute')}`;
+    if (dayKey(at, timeZone) === dayKey(new Date(options.now ?? Date.now()), timeZone)) return `Resets ${time}`;
+    return options.date === false ? `Resets ${get('weekday')} ${time}` : `Resets ${get('weekday')} ${get('day')} ${get('month')} ${time}`;
+}
+
 /** `just now`, `5 min ago`, `3 h ago`, `2 d ago`. */
 export function ageText(ms: number): string {
     if (ms < 60_000) return 'just now';
