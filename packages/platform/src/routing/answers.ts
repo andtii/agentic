@@ -168,7 +168,8 @@ export function createAnswerFollowUp(options: AnswerFollowUpOptions): (followUp:
         const delivery = await step('deliver', () => router.deliverAnswer(f.sessionId, f.requestId, answerPrompt(f.question, f.answer)));
         if (delivery.delivered) return;
 
-        // No route waits on the question: the asker is started again with a follow-up task, from the post.
+        // The answer did not reach the asker — no route waits on the question, or the session refused the prompt and the
+        // asking task failed with it: the asker is started again with a follow-up task, from the post.
         await step('create', async () => {
             const summary = await as(Chat, agentChatKey(workspaceId, f.chatId)).get();
             const member = summary.members[f.agentId];

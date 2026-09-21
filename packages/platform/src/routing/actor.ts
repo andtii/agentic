@@ -170,7 +170,7 @@ export type AnswerDelivery =
     | { readonly delivered: true; readonly taskId?: TaskId; readonly turnId?: string; readonly parked?: true }
     /** No route waits an answer to this question on this session (the task settled, or the session was ended): the caller starts the asker again. */
     | { readonly delivered: false; readonly reason: 'no-route' }
-    /** The session refused the prompt; the asking task failed with the reply. */
+    /** The session refused the prompt (closed, unsupported, …); the asking task failed with the reply, so — as with `no-route` — the caller starts the asker again: the answer never reached it. */
     | { readonly delivered: false; readonly reason: 'refused'; readonly code: string; readonly message: string };
 
 /** The slice of the Machine actor the router drives (`defineMachineActor`). */
@@ -533,8 +533,27 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 delete route.answer;
                 route.status = 'running';
                 touch(route);
+                if (answer) await joinAnswerTurn(route, answer.requestId);
                 await ctx.tasks.start('follow');
                 wakers.get(ctx.key)?.();
+            }
+
+            /**
+             * The answer to `requestId` just went out under `route` (#396): every other route still waiting on that
+             * question — a task that shared the asking turn (#395) — joins the answer's turn, whenever it went out (at
+             * once, or after the route was parked on a running turn or on capacity with the answer on it).
+             */
+            async function joinAnswerTurn(route: Route, requestId: string): Promise<void> {
+                for (const other of Object.values(ctx.state.routes)) {
+                    if (other === route || other.sessionId !== route.sessionId || other.status !== 'waiting-answer' || other.question !== requestId) continue;
+                    await activate(other, `request ${requestId}: input; joined turn ${route.turnId}`, route.sessionId!);
+                    delete other.question;
+                    if (route.head) other.head = route.head;
+                    other.turnId = route.turnId;
+                    other.joined = true;
+                    other.status = 'running';
+                    touch(other);
+                }
             }
 
             /**
@@ -1210,10 +1229,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  * (`steerOrPrompt`), into the turn `answerTurnId(taskId, requestId)`; `follow` settles the task at its end.
                  * No new task, and the engine conversation the question lives in carries on. A session running another
                  * turn takes the answer into it, or the route holds it (`Route.answer`) and sends it when that turn ends
-                 * (`turnEnded`); a refusal fails the task with the reply. Every other route waiting on the same question
-                 * (two tasks that shared the asking turn, #395) joins the answer's turn. With no route waiting on the
-                 * question — the task settled, the session was ended — nothing is sent: the caller starts the asker again
-                 * with a follow-up task, as before (`createAnswerFollowUp`).
+                 * (`turnEnded`); a refusal fails the task with the reply (`refused`). Every other route waiting on the same
+                 * question (two tasks that shared the asking turn, #395) joins the answer's turn as it goes out
+                 * (`joinAnswerTurn`). With no route waiting on the question — the task settled, the session was ended —
+                 * nothing is sent (`no-route`). Either way the answer did not reach the asker, and the caller starts it
+                 * again with a follow-up task, as before (`createAnswerFollowUp`).
                  */
                 async deliverAnswer(sessionId: SessionId, requestId: string, input: readonly PromptPart[]): Promise<AnswerDelivery> {
                     const s = ctx.state;
@@ -1255,21 +1275,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await ctx.save();
                         return { delivered: true, taskId: first.taskId, parked: true };
                     }
-                    const started = after.turnId ?? turnId;
-                    // A task that shared the asking turn (#395) waits on the same question: it joins the answer's turn.
-                    for (const other of waiting) {
-                        if (other === first || s.routes[other.taskId] !== other) continue;
-                        await activate(other, `request ${requestId}: input; joined turn ${started}`, sessionId);
-                        delete other.question;
-                        other.head = head;
-                        other.turnId = started;
-                        other.joined = true;
-                        other.status = 'running';
-                        touch(other);
-                    }
-                    wakers.get(ctx.key)?.();
+                    // Every other route waiting on the question joined the turn as the answer went out (`prompt` → `joinAnswerTurn`).
                     await ctx.save();
-                    return { delivered: true, taskId: first.taskId, turnId: started };
+                    return { delivered: true, taskId: first.taskId, turnId: after.turnId ?? turnId };
                 },
 
                 /**
