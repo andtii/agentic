@@ -25,7 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stampFor } from './lib/stamp.mjs';
@@ -209,7 +209,16 @@ export function packageDaemon(options = {}) {
     const result = writeZip(zipFile, entries());
     log(`package: ${relative(process.cwd(), zipFile) || zipFile} — ${result.entries} files, ${(result.bytes / 1024 / 1024).toFixed(1)} MB, ${closure.size} packages`);
     if (!options.sha256) return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size };
-    const sha256 = createHash('sha256').update(readFileSync(zipFile)).digest('hex');
+    // In chunks: the zip is hundreds of MB.
+    const hash = createHash('sha256');
+    const fd = openSync(zipFile, 'r');
+    try {
+        const chunk = Buffer.allocUnsafe(1 << 20);
+        for (let n; (n = readSync(fd, chunk, 0, chunk.length, null)) > 0; ) hash.update(chunk.subarray(0, n));
+    } finally {
+        closeSync(fd);
+    }
+    const sha256 = hash.digest('hex');
     writeFileSync(`${zipFile}.sha256`, `${sha256}  ${basename(zipFile)}\n`);
     return { zipFile, version, entries: result.entries, bytes: result.bytes, packages: closure.size, sha256 };
 }
