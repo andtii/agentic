@@ -27,8 +27,6 @@ export function resolveClosure(rootDir: string): Map<string, ClosureSource>;
 export interface HarnessPackageOptions {
     readonly runtime: string;
     readonly outDir?: string;
-    /** Name the zip `harness-<runtime>-<os>-<arch>.zip` (no version): the release asset name. */
-    readonly unversioned?: boolean;
     /** Also write `<zip>.sha256` and `<zip>.json` (its `manifest.json`) beside the zip. */
     readonly sha256?: boolean;
     readonly log?: (line: string) => void;
@@ -48,4 +46,7 @@ export interface HarnessPackageResult {
     readonly tree: string;
     readonly sha256?: string;
 }
+/** Always `harness-<runtime>-<version>-<os>-<arch>.zip`, the release asset name (#441). */
 export function packageHarness(options: HarnessPackageOptions): HarnessPackageResult;
+/** runtime → the version its harness would be packaged at (the installed SDK's). */
+export function harnessVersions(): Record<string, string>;

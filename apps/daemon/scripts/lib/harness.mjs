@@ -1,6 +1,6 @@
 /**
  * The harness packages (#369): each harness runtime's native build ships apart from the daemon zip, as
- * `harness-<runtime>-<os>-<arch>.zip` — the runtime's native npm package for that platform laid out as
+ * `harness-<runtime>-<version>-<os>-<arch>.zip` — the runtime's native npm package for that platform laid out as
  * `node_modules/<package>/…` plus a `manifest.json` (`HarnessPackageManifest`). The daemon keeps the SDK's
  * JavaScript and runs the native executable from `<install root>/harnesses/<runtime>/<version>/`
  * (`apps/daemon/src/harness.ts`, which holds the same table for the daemon — `package.test.ts` keeps the two equal).
@@ -65,5 +65,14 @@ export function treeHash(files) {
     return tree.digest('hex');
 }
 
-/** `harness-<runtime>-<os>-<arch>.zip`, the release asset name. */
-export const HARNESS_ZIP = /^harness-([a-z0-9][a-z0-9-]*?)-((?:win32|darwin|linux)-(?:x64|arm64))\.zip$/;
+/**
+ * `harness-<runtime>-<version>-<os>-<arch>.zip`, the release asset name (#441): named by the upstream version, so a
+ * release run finds the zip it would build already uploaded and skips it. Groups: runtime, version, asset key.
+ */
+export const HARNESS_ZIP = /^harness-([a-z][a-z0-9-]*?)-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)-((?:win32|darwin|linux)-(?:x64|arm64))\.zip$/;
+
+/**
+ * The release asset name of a harness build.
+ * @param {string} runtime @param {string} version @param {string} key `<os>-<arch>`
+ */
+export const harnessZipName = (runtime, version, key) => `harness-${runtime}-${version}-${key}.zip`;

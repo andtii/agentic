@@ -14,8 +14,8 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { CODEX_TRIPLES, HARNESSES, isNativeHarnessPackage } from '../scripts/lib/harness.mjs';
-import { buildManifest, readSidecar } from '../scripts/lib/manifest.mjs';
+import { CODEX_TRIPLES, HARNESS_ZIP, HARNESSES, harnessZipName, isNativeHarnessPackage } from '../scripts/lib/harness.mjs';
+import { buildManifest, planHarnesses, readSidecar, staleHarnessAssets } from '../scripts/lib/manifest.mjs';
 import { buildStamp, commitTime, protocolVersion, releaseTagFrom, stampFor } from '../scripts/lib/stamp.mjs';
 import { extractZip, readZip, writeZip } from '../scripts/lib/zip.mjs';
 import { packageDaemon, packageHarness, resolveClosure } from '../scripts/package.mjs';
@@ -148,7 +148,7 @@ describe('release manifest', () => {
     it('lists each harness zip under harnesses[runtime] with the version its .json sidecar names, one version per runtime (#369)', async () => {
         await zip('agentic-daemon-win32-x64.zip', 'daemon');
         const harness = async (runtime: string, key: string, version: string) => {
-            const name = `harness-${runtime}-${key}.zip`;
+            const name = `harness-${runtime}-${version}-${key}.zip`;
             await zip(name, `${runtime} ${key}`);
             await writeFile(join(dir, `${name}.json`), JSON.stringify({ runtime, version, platform: key, binary: 'x', packages: [], sha256: '0'.repeat(64) }));
         };
@@ -161,15 +161,20 @@ describe('release manifest', () => {
         expect(manifest.harnesses['claude-code']).toEqual({
             version: '0.3.274',
             assets: {
-                'linux-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-linux-x64.zip', sha256: createHash('sha256').update('claude-code linux-x64').digest('hex'), bytes: 'claude-code linux-x64'.length, version: '0.3.274' },
-                'win32-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-win32-x64.zip', sha256: createHash('sha256').update('claude-code win32-x64').digest('hex'), bytes: 'claude-code win32-x64'.length, version: '0.3.274' }
+                'linux-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-0.3.274-linux-x64.zip', sha256: createHash('sha256').update('claude-code linux-x64').digest('hex'), bytes: 'claude-code linux-x64'.length, version: '0.3.274' },
+                'win32-x64': { url: 'https://github.com/andtii/agentic/releases/download/daemon-latest/harness-claude-code-0.3.274-win32-x64.zip', sha256: createHash('sha256').update('claude-code win32-x64').digest('hex'), bytes: 'claude-code win32-x64'.length, version: '0.3.274' }
             }
         });
         expect(Object.keys(manifest.assets)).toEqual(['win32-x64']);
         await harness('codex-cli', 'linux-x64', '0.156.0');
-        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/codex-cli is 0\.156\.0 on one platform and 0\.155\.1 on win32-x64/);
-        await writeFile(join(dir, 'harness-codex-cli-linux-x64.zip.json'), JSON.stringify({ runtime: 'claude-code', version: '0.155.1', platform: 'linux-x64' }));
-        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/does not describe codex-cli/);
+        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/codex-cli is 0\.155\.1 on one platform and 0\.156\.0 on linux-x64/);
+        await writeFile(join(dir, 'harness-codex-cli-0.156.0-linux-x64.zip.json'), JSON.stringify({ runtime: 'claude-code', version: '0.156.0', platform: 'linux-x64' }));
+        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/does not describe codex-cli 0\.156\.0/);
+        await rm(join(dir, 'harness-codex-cli-0.156.0-linux-x64.zip'));
+        // The .json names another version than the zip's name.
+        await harness('codex-cli', 'linux-x64', '0.155.1');
+        await writeFile(join(dir, 'harness-codex-cli-0.155.1-linux-x64.zip.json'), JSON.stringify({ runtime: 'codex-cli', version: '0.155.2', platform: 'linux-x64' }));
+        expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/does not describe codex-cli 0\.155\.1/);
     });
 
     it('reads versioned zip names too, and refuses a zip without a sidecar, a bad sidecar or an empty folder', async () => {
@@ -180,6 +185,115 @@ describe('release manifest', () => {
         expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1 })).toThrow(/ENOENT/);
         await writeFile(join(dir, 'agentic-daemon-linux-x64.zip.sha256'), 'not a hash\n');
         expect(() => readSidecar(join(dir, 'agentic-daemon-linux-x64.zip.sha256'))).toThrow(/no sha256/);
+    });
+
+    // #441: a harness zip is uploaded once per version; a run that packages none still lists them all.
+    describe('harness assets uploaded once', () => {
+        const VERSIONS = { 'claude-code': '0.3.274', 'copilot-cli': '1.0.14', 'codex-cli': '0.155.1' };
+        const KEYS = ['linux-x64', 'win32-x64'];
+        const LATEST = 'https://github.com/andtii/agentic/releases/download/daemon-latest';
+        const onRelease = (versions: Record<string, string>, keys = KEYS) => Object.entries(versions).flatMap(([runtime, version]) => keys.flatMap((key) => [`harness-${runtime}-${version}-${key}.zip`, `harness-${runtime}-${version}-${key}.zip.sha256`]));
+        const harness = async (runtime: string, key: string, version: string) => {
+            const name = harnessZipName(runtime, version, key);
+            await zip(name, `${runtime} ${version} ${key}`);
+            await writeFile(join(dir, `${name}.json`), JSON.stringify({ runtime, version, platform: key, binary: 'x', packages: [], sha256: '0'.repeat(64) }));
+        };
+        const daemons = async () => {
+            for (const key of KEYS) await zip(`agentic-daemon-${key}.zip`, `daemon ${key}`);
+        };
+        /** A previous manifest, as the last run uploaded it: every runtime at `versions` on both platforms. */
+        const previousOf = (versions: Record<string, string>) => ({
+            harnesses: Object.fromEntries(
+                Object.entries(versions).map(([runtime, version]) => [
+                    runtime,
+                    { version, assets: Object.fromEntries(KEYS.map((key) => [key, { url: `${LATEST}/${harnessZipName(runtime, version, key)}`, sha256: createHash('sha256').update(`${runtime} ${version} ${key}`).digest('hex'), bytes: `${runtime} ${version} ${key}`.length, version }])) }
+                ])
+            )
+        });
+
+        it('names a harness zip by its version', () => {
+            expect(harnessZipName('claude-code', '0.3.274', 'win32-x64')).toBe('harness-claude-code-0.3.274-win32-x64.zip');
+            expect(HARNESS_ZIP.exec('harness-codex-cli-0.155.1-rc.2-linux-arm64.zip')?.slice(1)).toEqual(['codex-cli', '0.155.1-rc.2', 'linux-arm64']);
+            expect(HARNESS_ZIP.test('harness-codex-cli-linux-arm64.zip')).toBe(false);
+        });
+
+        it('plan: packages only the runtimes whose zip for this version is not on the release', () => {
+            expect(planHarnesses({ versions: VERSIONS, existing: [], platform: 'win32-x64' })).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
+            expect(planHarnesses({ versions: VERSIONS, existing: onRelease(VERSIONS), platform: 'win32-x64' })).toEqual([]);
+            // A version bump: only that runtime.
+            expect(planHarnesses({ versions: { ...VERSIONS, 'codex-cli': '0.156.0' }, existing: onRelease(VERSIONS), platform: 'win32-x64' })).toEqual(['codex-cli']);
+            // A zip without its sidecar is packaged again; another platform's zip does not count.
+            expect(planHarnesses({ versions: VERSIONS, existing: onRelease(VERSIONS).filter((n) => n !== 'harness-copilot-cli-1.0.14-win32-x64.zip.sha256'), platform: 'win32-x64' })).toEqual(['copilot-cli']);
+            expect(planHarnesses({ versions: VERSIONS, existing: onRelease(VERSIONS), platform: 'darwin-arm64' })).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
+        });
+
+        it('a run that packages no harness lists every one from the previous manifest, with its hashes', async () => {
+            await daemons();
+            const previous = previousOf(VERSIONS);
+            const manifest = buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous, existing: onRelease(VERSIONS) });
+            expect(manifest.harnesses).toEqual(previous.harnesses);
+            expect(staleHarnessAssets({ existing: [...onRelease(VERSIONS), 'agentic-daemon-win32-x64.zip', 'manifest.json'], manifest })).toEqual([]);
+        });
+
+        it('a version bump packages that runtime only: the others are carried, its old zips are stale', async () => {
+            await daemons();
+            for (const key of KEYS) await harness('codex-cli', key, '0.156.0');
+            const versions = { ...VERSIONS, 'codex-cli': '0.156.0' };
+            const existing = [...onRelease(VERSIONS), 'harness-claude-code-linux-x64.zip', 'harness-claude-code-linux-x64.zip.sha256', 'agentic-daemon-linux-x64.zip'];
+            const manifest = buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: versions, previous: previousOf(VERSIONS), existing });
+            expect(manifest.harnesses['claude-code']).toEqual(previousOf(VERSIONS).harnesses['claude-code']);
+            expect(manifest.harnesses['codex-cli']).toEqual({
+                version: '0.156.0',
+                assets: Object.fromEntries(KEYS.map((key) => [key, { url: `${LATEST}/harness-codex-cli-0.156.0-${key}.zip`, sha256: createHash('sha256').update(`codex-cli 0.156.0 ${key}`).digest('hex'), bytes: `codex-cli 0.156.0 ${key}`.length, version: '0.156.0' }]))
+            });
+            // The uploaded zips are on the release by then: only the old codex ones and the pre-#441 names go.
+            expect(staleHarnessAssets({ existing: [...existing, ...onRelease({ 'codex-cli': '0.156.0' })], manifest })).toEqual([
+                ...onRelease({ 'codex-cli': '0.155.1' }),
+                'harness-claude-code-linux-x64.zip',
+                'harness-claude-code-linux-x64.zip.sha256'
+            ]);
+        });
+
+        it('refuses a harness neither packaged nor on the release, and a packaged one at another version', async () => {
+            await daemons();
+            // No previous manifest (the first run after #441), nothing packaged.
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: {}, existing: [] })).toThrow(/harness-claude-code-0\.3\.274-linux-x64\.zip was neither packaged/);
+            // The previous manifest names it, but the zip is gone from the release.
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS).filter((n) => !n.startsWith('harness-copilot-cli-1.0.14-win32-x64.zip')) })).toThrow(/copilot-cli-1\.0\.14-win32-x64\.zip was neither/);
+            // The zip is there but not its .sha256 (plan would package it again).
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS).filter((n) => n !== 'harness-codex-cli-0.155.1-linux-x64.zip.sha256') })).toThrow(/codex-cli-0\.155\.1-linux-x64\.zip was neither/);
+            // The previous manifest is of another version.
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: { ...VERSIONS, 'claude-code': '0.3.275' }, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS) })).toThrow(/claude-code-0\.3\.275-linux-x64\.zip was neither/);
+            // A tag release carries nothing from daemon-latest: its own url base never matches.
+            expect(() => buildManifest({ dir, tag: 'daemon-v0.2.0', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS) })).toThrow(/was neither packaged/);
+            await harness('claude-code', 'linux-x64', '0.3.273');
+            expect(() => buildManifest({ dir, tag: 'daemon-latest', repo: 'andtii/agentic', stamp, protocol: 1, harnessVersions: VERSIONS, previous: previousOf(VERSIONS), existing: onRelease(VERSIONS) })).toThrow(/claude-code was packaged at 0\.3\.273, but this build pins 0\.3\.274/);
+        });
+
+        it('runs plan and stale as scripts, and the manifest with the carry-over flags', async () => {
+            const script = join(DAEMON_DIR, 'scripts/lib/manifest.mjs');
+            await writeFile(join(dir, 'versions.json'), JSON.stringify({ ...VERSIONS, 'codex-cli': '0.156.0' }));
+            await writeFile(join(dir, 'existing.json'), JSON.stringify(onRelease(VERSIONS)));
+            const plan = spawnSync(process.execPath, [script, 'plan', '--versions', join(dir, 'versions.json'), '--existing', join(dir, 'existing.json'), '--platform', 'win32-x64'], { encoding: 'utf8' });
+            expect([plan.status, plan.stdout]).toEqual([0, 'codex-cli\n']);
+            // No release yet: the existing file is missing, everything is packaged.
+            const first = spawnSync(process.execPath, [script, 'plan', '--versions', join(dir, 'versions.json'), '--existing', join(dir, 'nope.json'), '--platform', 'win32-x64'], { encoding: 'utf8' });
+            expect(first.stdout).toBe('claude-code copilot-cli codex-cli\n');
+
+            await daemons();
+            await writeFile(join(dir, 'versions.json'), JSON.stringify(VERSIONS));
+            await writeFile(join(dir, 'previous.json'), JSON.stringify(previousOf(VERSIONS)));
+            const out = join(dir, 'manifest.out.json');
+            const env = { PATH: process.env.PATH ?? '', GITHUB_SHA: 'fedcba9876543210' };
+            const built = spawnSync(process.execPath, [script, '--dir', dir, '--tag', 'daemon-latest', '--repo', 'andtii/agentic', '--out', out, '--harness-versions', join(dir, 'versions.json'), '--previous', join(dir, 'previous.json'), '--existing', join(dir, 'existing.json')], { encoding: 'utf8', env });
+            expect(built.stderr).toBe('');
+            expect((JSON.parse(readFileSync(out, 'utf8')) as ReleaseManifest).harnesses).toEqual(previousOf(VERSIONS).harnesses);
+
+            await writeFile(join(dir, 'existing.json'), JSON.stringify([...onRelease(VERSIONS), 'harness-codex-cli-0.1.0-linux-x64.zip']));
+            const stale = spawnSync(process.execPath, [script, 'stale', '--existing', join(dir, 'existing.json'), '--manifest', out], { encoding: 'utf8' });
+            expect([stale.status, stale.stdout]).toEqual([0, 'harness-codex-cli-0.1.0-linux-x64.zip\n']);
+            expect(spawnSync(process.execPath, [script, 'plan', '--existing', join(dir, 'existing.json')], { encoding: 'utf8' }).status).toBe(2);
+        });
     });
 
     it('runs as a script: writes manifest.json for the release folder from this checkout\'s stamp', async () => {
@@ -227,8 +341,8 @@ describe('harness packages (#369)', () => {
 
         it('holds the native package, a manifest the unpacked tree matches, and installs through the store', async () => {
             const lines: string[] = [];
-            const result = packageHarness({ runtime: 'copilot-cli', outDir: dir, unversioned: true, sha256: true, log: (l) => lines.push(l) });
-            expect(basename(result.zipFile)).toBe(`harness-copilot-cli-${key}.zip`);
+            const result = packageHarness({ runtime: 'copilot-cli', outDir: dir, sha256: true, log: (l) => lines.push(l) });
+            expect(basename(result.zipFile)).toBe(`harness-copilot-cli-${result.version}-${key}.zip`);
             expect(result.version).toBe(sdkVersion('copilot-cli'));
             expect(result.binary).toBe(`node_modules/@github/copilot-sdk-${key}/${HARNESSES['copilot-cli']!.binary(key)}`);
             expect(lines[0]).toMatch(new RegExp(`copilot-cli ${result.version.replace(/\./g, '\\.')}, \\d+ files`));

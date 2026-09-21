@@ -199,7 +199,7 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 
 ### 5.1 Where the zip comes from
 
-`.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` (Windows x64, macOS arm64 and x64, Linux x64 and arm64), each with a `<zip>.sha256` sidecar. Beside them it builds the **harness packages** (#369), one `harness-<runtime>-<os>-<arch>.zip` per runtime (`claude-code`, `copilot-cli`, `codex-cli`) holding the runtime's native build at the version the lockfile pins, which the daemon zip no longer carries. It publishes them all with a **`manifest.json`** (#361):
+`.github/workflows/daemon-release.yml` builds `agentic-daemon-<os>-<arch>.zip` (Windows x64, macOS arm64 and x64, Linux x64 and arm64), each with a `<zip>.sha256` sidecar. Beside them it builds the **harness packages** (#369), one `harness-<runtime>-<version>-<os>-<arch>.zip` per runtime (`claude-code`, `copilot-cli`, `codex-cli`) holding the runtime's native build at the version the lockfile pins, which the daemon zip no longer carries. A harness zip is uploaded once per version (#441): a push to `main` packages only the harnesses whose zip for the pinned version is not on `daemon-latest` yet (`manifest.mjs plan`), the manifest carries the rest over from the previous `manifest.json` (same version, zip still on the release, same hashes), and afterwards the harness zips the new manifest no longer names are deleted (`manifest.mjs stale`). A tag release packages and uploads all of them. It publishes them all with a **`manifest.json`** (#361):
 
 ```json
 { "version": "0.1.1-main.1790000000.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,

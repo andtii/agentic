@@ -16,7 +16,7 @@
  * and install the harnesses it asks for (`.github/workflows/daemon-release.yml`).
  *
  * `--harness <runtime>` builds a harness package instead (#369, `scripts/lib/harness.mjs`):
- * `release/harness-<runtime>-<version>-<os>-<arch>.zip` with the runtime's native
+ * `release/harness-<runtime>-<version>-<os>-<arch>.zip` (always with the version: it is the release asset name, #441) with the runtime's native
  * package for THIS platform under `node_modules/` and a `manifest.json` (runtime,
  * upstream version, the executable, the tree's digest). `--harness all` builds the three.
  *
@@ -24,7 +24,7 @@
  * directories and refuses to run without them.
  *
  * Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256] [--harness <runtime>|all ...]
- *   --unversioned  name the zip `agentic-daemon-<os>-<arch>.zip` / `harness-<runtime>-<os>-<arch>.zip` (the release asset names)
+ *   --unversioned  name the daemon zip `agentic-daemon-<os>-<arch>.zip` (its release asset name)
  *   --sha256       also write `<zip>.sha256` (`<hex>  <zip name>`) beside it, for the release manifest — and for a
  *                  harness `<zip>.json`, its `manifest.json`, which the release manifest takes the version from
  * See `docs/runbook.md` → "Daemon on a Windows machine".
@@ -34,7 +34,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HARNESSES, isNativeHarnessPackage, treeHash } from './lib/harness.mjs';
+import { HARNESSES, harnessZipName, isNativeHarnessPackage, treeHash } from './lib/harness.mjs';
 import { stampFor } from './lib/stamp.mjs';
 import { writeZip } from './lib/zip.mjs';
 
@@ -247,7 +247,7 @@ function writeSidecar(zipFile) {
  * and `manifest.json` — `{ runtime, version, platform, binary, packages, sha256 }`, `binary` relative to the zip
  * root and `sha256` the tree's digest (`treeHash`) over every other file.
  *
- * @param {{ runtime: string; outDir?: string; unversioned?: boolean; sha256?: boolean; log?: (line: string) => void }} options
+ * @param {{ runtime: string; outDir?: string; sha256?: boolean; log?: (line: string) => void }} options
  * @returns {{ zipFile: string; runtime: string; version: string; platform: string; binary: string; entries: number; bytes: number; tree: string; sha256?: string }}
  */
 export function packageHarness(options) {
@@ -270,7 +270,7 @@ export function packageHarness(options) {
     const manifest = { runtime, version, platform, binary, packages: [nativeName], sha256: treeHash(files) };
 
     const outDir = resolve(options.outDir ?? join(DAEMON_DIR, 'release'));
-    const zipFile = join(outDir, options.unversioned ? `harness-${runtime}-${platform}.zip` : `harness-${runtime}-${version}-${platform}.zip`);
+    const zipFile = join(outDir, harnessZipName(runtime, version, platform));
     const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
     const entries = function* () {
         yield { name: 'manifest.json', data: Buffer.from(manifestJson, 'utf8') };
@@ -286,6 +286,22 @@ export function packageHarness(options) {
     return { ...out, sha256 };
 }
 
+/**
+ * The version each harness would be packaged at (#441): the installed SDK's, which the lockfile pins. The release
+ * workflow asks before it packages, so a harness whose zip for that version is already on the release is skipped.
+ * @returns {Record<string, string>} runtime → version
+ */
+export function harnessVersions() {
+    /** @type {Record<string, string>} */
+    const out = {};
+    for (const [runtime, spec] of Object.entries(HARNESSES)) {
+        const sdkDir = findPackage(DAEMON_DIR, spec.sdk);
+        if (!sdkDir) throw new Error(`package: ${spec.sdk} is not installed — run \`pnpm install\` first`);
+        out[runtime] = readPackage(sdkDir).version;
+    }
+    return out;
+}
+
 /** @param {readonly string[]} argv */
 function main(argv) {
     let outDir;
@@ -297,11 +313,14 @@ function main(argv) {
         if (argv[i] === '--out' && argv[i + 1]) outDir = argv[++i];
         else if (argv[i] === '--unversioned') unversioned = true;
         else if (argv[i] === '--sha256') sha256 = true;
-        else if (argv[i] === '--harness' && argv[i + 1]) {
+        else if (argv[i] === '--harness-versions') {
+            process.stdout.write(`${JSON.stringify(harnessVersions())}\n`);
+            return 0;
+        } else if (argv[i] === '--harness' && argv[i + 1]) {
             const runtime = /** @type {string} */ (argv[++i]);
             harnesses.push(...(runtime === 'all' ? Object.keys(HARNESSES) : [runtime]));
         } else if (argv[i] === '--help' || argv[i] === '-h') {
-            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256] [--harness <runtime>|all ...]\n');
+            process.stdout.write('Usage: node scripts/package.mjs [--out <dir>] [--unversioned] [--sha256] [--harness <runtime>|all ...] | --harness-versions\n');
             return 0;
         } else {
             process.stderr.write(`package: unknown argument ${argv[i]}\n`);
@@ -310,7 +329,7 @@ function main(argv) {
     }
     try {
         if (harnesses.length === 0) packageDaemon({ ...(outDir ? { outDir } : {}), unversioned, sha256 });
-        for (const runtime of harnesses) packageHarness({ runtime, ...(outDir ? { outDir } : {}), unversioned, sha256 });
+        for (const runtime of harnesses) packageHarness({ runtime, ...(outDir ? { outDir } : {}), sha256 });
         return 0;
     } catch (e) {
         process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
