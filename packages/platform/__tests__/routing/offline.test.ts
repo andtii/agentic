@@ -29,17 +29,22 @@ const E1 = 'env_1' as EnvironmentId;
 const TICK = 60_000;
 const asMachine = (id: MachineId): Principal => ({ kind: 'machine', workspaceId: WS, machineId: id });
 
-/** A fake socket layer bridged to `InMemoryDaemon` seats; a `session.open` for a session in `swallow` never reaches the daemon. */
+/**
+ * A fake socket layer bridged to `InMemoryDaemon` seats; a `session.open` for a session in `swallow`, and a command whose
+ * id is in `swallowCommands`, never reach the daemon.
+ */
 class FakeSockets implements MachineSocketPort {
     readonly seats = new Map<string, PlatformSeat>();
     readonly sent = new Map<string, string[]>();
     readonly swallow = new Set<string>();
+    readonly swallowCommands = new Set<string>();
     connected = new Set<string>();
     send(key: string, text: string): boolean {
         if (!this.connected.has(key)) return false;
         (this.sent.get(key) ?? this.sent.set(key, []).get(key)!).push(text);
-        const frame = JSON.parse(text) as { t: string; sessionId?: string };
-        if (!(frame.t === 'session.open' && frame.sessionId !== undefined && this.swallow.has(frame.sessionId))) this.seats.get(key)?.send(frame as never);
+        const frame = JSON.parse(text) as { t: string; sessionId?: string; command?: { commandId: string } };
+        const swallowed = (frame.t === 'session.open' && frame.sessionId !== undefined && this.swallow.has(frame.sessionId)) || (frame.t === 'session.command' && this.swallowCommands.has(frame.command!.commandId));
+        if (!swallowed) this.seats.get(key)?.send(frame as never);
         return true;
     }
     close(key: string): void {
@@ -366,5 +371,43 @@ describe('a re-open the daemon refuses (#366, carried over from #420)', () => {
         expect((await session(sid).get()).status).toBe('closed');
         await until(async () => (await chat(chatId).get()).sessions['agent_cc']?.sessionId === done.sessionId, 'the chat to bind the fresh session');
         expect(ofKind('session.resumed')).toEqual([expect.objectContaining({ by: 'user:u1', data: { sessionId: done.sessionId, taskId: 't1', how: 'fresh', by: 'user:u1' } })]);
+    });
+});
+
+describe('a daemon draining (#366, #360)', () => {
+    /**
+     * The daemon's refusal of a prompt while it drains before an update or a restart (#360: `drainingReply` — the wire's
+     * `busy` with a `draining:` message), played on the socket as the daemon sends it.
+     */
+    const drainingReply = (commandId: string) => ({ v: 1, kind: 'error', commandId, code: 'busy', message: 'draining: the daemon is updating; no new turns' });
+
+    it('a prompt the draining daemon refuses parks the route as busy does — never fails the task — and goes out again when a slot frees', async () => {
+        const m1 = await pairMachine('laptop');
+        connect(m1, daemon(m1, false));
+        await online(m1);
+        const cc = await agent('agent_cc', 'in-memory');
+        const chatId = await room(cc);
+        await message(chatId, cc, 'one', 't1');
+        await settled('t1');
+
+        // The daemon drains: the prompt never runs, its reply is the refusal.
+        sockets.swallowCommands.add('t2:turn:1');
+        const second = await message(chatId, cc, 'two', 't2');
+        const sid = second.sessionId!;
+        await until(async () => (await route('t2'))?.status === 'running', 'the prompt to go out');
+        sockets.swallowCommands.clear();
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: sid, reply: drainingReply('t2:turn:1') }));
+        await until(async () => (await route('t2'))?.status === 'waiting-capacity', 'the route to park');
+        expect(await route('t2')).toMatchObject({ status: 'waiting-capacity', attempt: 1 });
+        const t = await task('t2').get();
+        expect(t.status).toBe('waiting');
+        expect(t.wait).toMatchObject({ kind: 'capacity', environmentId: E1 });
+
+        // A slot frees there (a turn ended): the prompt goes out again under a fresh command id and the turn runs.
+        await app.as(asMachine(m1)).actor(Routing, routingKey(WS)).slotFreed(m1, E1, 'a turn ended');
+        await settled('t2');
+        expect((await task('t2').get()).status).toBe('completed');
+        const prompts = sockets.frames(machineKey(WS, m1)).filter((f) => f.t === 'session.command' && f.sessionId === sid && (f.command as { type: string }).type === 'prompt');
+        expect(prompts.map((f) => (f.command as { commandId: string }).commandId)).toEqual(['t1:turn:1', 't2:turn:1', 't2:turn:1#1']);
     });
 });
