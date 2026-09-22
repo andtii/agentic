@@ -101,6 +101,9 @@ describe('/machines on the live pages', () => {
 
 describe('/machines/:id on the live pages', () => {
     it('renders the hero, the environments, the doctor verdicts and revokes through the page — the next daemon message is refused', { timeout: 15_000 }, async () => {
+        // Revoking is elevated (#355): this tab confirmed with GitHub a moment ago.
+        await h.stop();
+        h = await startLive(undefined, { elevated: true });
         const m = await pairMachine('alien01');
         const checkedAt = Date.parse('2026-09-17T12:00:00Z');
         await m.daemon.socketMessage(hello(m.machineId, [

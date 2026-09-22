@@ -138,6 +138,11 @@ export function userPrincipal(userId: string): Principal {
     return { kind: 'user', userId, workspaceId: userId as Principal['workspaceId'] };
 }
 
+/** The same user, elevated (#355): what a request beside a live `__Host-elevated` cookie resolves to — for the owner-only methods that `requireElevated`. */
+export function elevatedPrincipal(userId: string, until: number = Date.now() + 10 * 60_000): Principal {
+    return { kind: 'user', userId, workspaceId: userId as Principal['workspaceId'], elevatedUntil: until };
+}
+
 /** The HTTP status a rejected call carries, or `undefined` when the error is not a policy rejection. */
 export function rejectionStatus(error: unknown): number | undefined {
     return isServerFnError(error) ? error.status : undefined;

@@ -11,7 +11,7 @@ import { SELF } from 'cloudflare:test';
 import type { EnvironmentId, MachineId, WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon } from '@agentic/daemon-protocol/testing';
 import { Workspace, defineMachineActor, machineKey, workspaceKey } from '@agentic/platform';
-import { overHttp, signIn } from './http';
+import { overHttp, signInElevated } from './http';
 
 const userId = 'gh_machines_pages';
 const WS = userId as WorkspaceId;
@@ -21,7 +21,7 @@ const Machine = defineMachineActor({ socket: { send: () => false, close: () => {
 
 let cookie = '';
 beforeAll(async () => {
-    cookie = await signIn(userId);
+    cookie = await signInElevated(userId);
 });
 
 async function until(check: () => Promise<boolean>, what: string, timeoutMs = 5_000): Promise<void> {

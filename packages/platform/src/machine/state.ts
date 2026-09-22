@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvOp, EnvResult, EnvironmentDescriptor, EnvironmentId, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -91,6 +91,39 @@ export interface EnvRequestRecord {
     finishedAt?: number;
     result?: EnvResult;
     error?: EnvError;
+}
+
+/**
+ * One `setPolicy` / `browseMachine` (#355, #480): sent as `policy.request`, answered by the daemon's `policy.response` in
+ * a later `socketMessage` turn — stored like an `envRequest`, read with `policyResult(requestId)`. `auto` marks the
+ * reconcile's own request (`by: system:setup`), whose answer updates `PolicyDesired.lastAuto`.
+ */
+export interface PolicyRequestRecord {
+    readonly requestId: string;
+    readonly op: MachinePolicyOp;
+    status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** After this the liveness reminder fails a pending request with `timeout`. */
+    readonly deadline: number;
+    /** Who asked (`principalLabel`, or `system:setup` for the reconcile). */
+    readonly by: string;
+    readonly auto?: true;
+    finishedAt?: number;
+    result?: MachinePolicyResult;
+    error?: MachinePolicyError;
+}
+
+/**
+ * The folders the web may use on this machine, as the owner wants them (#355, #480): set on the page (`setPolicy`) or
+ * preset on the Pair page and stored at `pair`. The daemon reports what it applied (`MachineState.policy`); the two are
+ * compared with `policyConverged`, and `lastAuto` records the reconcile's last attempt so it never loops.
+ */
+export interface PolicyDesired {
+    readonly allowedRoots: readonly string[];
+    readonly setAt: number;
+    /** Who set it (`principalLabel`). */
+    readonly by: string;
+    lastAuto?: { readonly at: number; readonly converged: boolean };
 }
 
 /**
@@ -242,6 +275,12 @@ export interface MachineState {
     fs?: Record<string, FsRequestRecord>;
     /** `putEnvironment` / `removeEnvironment` entries by request id, at most `MAX_ENV_REQUESTS`; absent on a record saved before #237. */
     envRequests?: Record<string, EnvRequestRecord>;
+    /** `setPolicy` / `browseMachine` entries by request id, at most `MAX_POLICY_REQUESTS`; absent on a record saved before #480. */
+    policyRequests?: Record<string, PolicyRequestRecord>;
+    /** The folders the web may use, as the owner wants them (#480); absent until set or preset. */
+    policyDesired?: PolicyDesired;
+    /** The `elevatedUntil` of the last elevation audited (`auth.elevated`, #355): one row per elevation window, by its first change. */
+    elevationAudited?: number;
     /** `historyRequest` entries by request id (#397), at most `MAX_HISTORY_REQUESTS` — statuses only, never the events. */
     history?: Record<string, HistoryRequestRecord>;
     /** The machine-local policy the daemon last reported (`hello` / `env`); absent when it reports none (it predates web-managed environments). */
@@ -292,6 +331,10 @@ export const MAX_FS_REQUESTS = 16;
 export const FS_RESULT_TTL_MS = 120_000;
 /** At most this many environment requests are kept; the oldest is evicted first. */
 export const MAX_ENV_REQUESTS = 16;
+/** At most this many policy requests are kept (#480). */
+export const MAX_POLICY_REQUESTS = 16;
+/** A finished policy request is kept this long. */
+export const POLICY_RESULT_TTL_MS = 120_000;
 /** A finished environment request is pruned this long after it finished. */
 export const ENV_RESULT_TTL_MS = 120_000;
 /** At most this many history requests are kept (#397); the oldest is evicted first. */
@@ -422,6 +465,11 @@ export function pruneQuota(s: MachineState): void {
 /** `pruneFs` for environment requests: the same TTL-then-oldest rule over `ENV_RESULT_TTL_MS` / `MAX_ENV_REQUESTS`. */
 export function pruneEnvRequests(requests: Record<string, EnvRequestRecord>, at: number, room = true): void {
     prune(requests, at, room, ENV_RESULT_TTL_MS, MAX_ENV_REQUESTS);
+}
+
+/** `pruneFs` for policy requests (#480): the same rule over `POLICY_RESULT_TTL_MS` / `MAX_POLICY_REQUESTS`. */
+export function prunePolicyRequests(requests: Record<string, PolicyRequestRecord>, at: number, room = true): void {
+    prune(requests, at, room, POLICY_RESULT_TTL_MS, MAX_POLICY_REQUESTS);
 }
 
 /** `pruneFs` for history requests (#397): the same rule over `HISTORY_RESULT_TTL_MS` / `MAX_HISTORY_REQUESTS`. */

@@ -224,6 +224,9 @@ describe('/machines/:id — this machine (#239)', () => {
     });
 
     it('removes the machine from the workspace — revoked first, so its token cannot reconnect (#259)', { timeout: 15_000 }, async () => {
+        // Removing revokes, and revoking is elevated (#355): this tab confirmed with GitHub a moment ago.
+        await h.stop();
+        h = await startLive(undefined, { actors: [Machine], elevated: true });
         const m = await pairMachine('alien01');
         await say(m.daemon, hello(m.machineId, [], ON));
         const ws = h.app.as(owner).actor(Workspace, workspaceKey(WS));

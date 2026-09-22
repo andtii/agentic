@@ -5,7 +5,7 @@ import { DAEMON_PROTOCOL_VERSION } from '@agentic/daemon-protocol';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
 import { Workspace, defineMachineActor, machineKey, workspaceKey } from '@agentic/platform';
 import { fetchTransport } from '@sigx/actors/client';
-import { overHttp, signIn } from './http';
+import { overHttp, signInElevated } from './http';
 
 const userId = 'gh_daemon';
 const WS = userId as WorkspaceId;
@@ -15,7 +15,7 @@ const Machine = defineMachineActor({ socket: { send: () => false, close: () => {
 
 let cookie = '';
 beforeAll(async () => {
-    cookie = await signIn(userId);
+    cookie = await signInElevated(userId);
 });
 
 async function pairNew(name: string): Promise<{ machineId: MachineId; token: string; machine: ReturnType<typeof overHttp<typeof Machine>> }> {

@@ -11,10 +11,12 @@ import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlot
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
-import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
+import { elevatedPrincipal, statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
+/** The owner beside a live elevation (#355): what `revoke`, `setPolicy` and `browseMachine` take. */
+const elevated = elevatedPrincipal('u1');
 const M1 = 'machine_1' as MachineId;
 const M2 = 'machine_2' as MachineId;
 const E1 = 'env_1' as EnvironmentId;
@@ -180,6 +182,8 @@ describe('Machine authorization', () => {
         expect(await statusOf(machine(K1, asMachine(M2)).socketClosed())).toBe(403);
         expect(await statusOf(machine(K1, asMachine(M1)).socketClosed())).toBeUndefined();
         expect(await statusOf(machine(K1, asMachine(M1)).revoke())).toBe(403);
+        // The owner too, without a live elevation (#355): 403 elevation-required.
+        expect(await statusOf(machine(K1, owner).revoke())).toBe(403);
         expect(await statusOf(machine(K1, asMachine(M1)).openSession('s' as SessionId, E1, openSpec))).toBe(403);
         const external: Principal = { kind: 'external', workspaceId: WS, clientId: 'c', scopes: ['tasks'] };
         expect(await statusOf(app.as(external).actor(Machine, K1).get())).toBe(403);
@@ -219,7 +223,7 @@ describe('Machine pairing (USR-04)', () => {
         const { token } = await machine(key).pair(pairingCode);
         const { seat } = connect(key, daemon(machineId));
         await until(async () => (await machine(key).get()).online, 'online');
-        await machine(key).revoke();
+        await machine(key, elevated).revoke();
         expect(sockets.closed).toContainEqual({ key, code: 1008, reason: 'revoked' });
         expect(await verifyMachineToken(token, await machine(key).tokenRecord())).toEqual({ ok: false, reason: 'revoked' });
         expect(await machine(key).get()).toMatchObject({ revoked: true, online: false });
@@ -595,7 +599,7 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         await until(async () => !(await machine(K1).get()).online, 'offline');
         expect(await statusOf(machine(K1).fsRequest(E1, list('/work')))).toBe(503);
         expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toEqual([]);
-        await machine(K1).revoke();
+        await machine(K1, elevated).revoke();
         expect(await statusOf(machine(K1).fsRequest(E1, list('/work')))).toBe(403);
     });
 
@@ -830,7 +834,7 @@ describe('Machine environment management (#237, EXE-03/04, OPS-01/03)', () => {
         expect(envRequests()).toEqual([]);
         release();
 
-        await machine(K1).revoke();
+        await machine(K1, elevated).revoke();
         expect(await statusOf(machine(K1).putEnvironment(work()))).toBe(403);
         // Revoked wins over what the machine last reported: not 409 for the busy one, not 404 for an unknown one.
         expect(await statusOf(machine(K1).removeEnvironment(E1))).toBe(403);

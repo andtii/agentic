@@ -23,6 +23,7 @@ import { recordAudit } from '../audit/port.js';
 import { sameWorkspace, workspaceOwner, WORKSPACE_KEY_PREFIX } from '../auth/index.js';
 import { Chat } from '../chat/index.js';
 import { defineMachineActor, machineKey, type MachineView } from '../machine/index.js';
+import { checkPolicyRoots } from '../machine/policy.js';
 import { checkChannel, checkUpdatePolicy } from '../machine/update.js';
 import { PAIRING_DIRECTORY_KEY, PairingDirectory } from '../pairing/directory.js';
 import { Registry } from '../registry/actor.js';
@@ -52,8 +53,8 @@ export interface MachineIndexEntry {
     readonly status: MachineStatus;
     readonly registeredAt: number;
     readonly pairedAt?: number;
-    /** Present only while `status === 'pending'`. */
-    readonly pairing?: { readonly code: string; readonly expiresAt: number };
+    /** Present only while `status === 'pending'`. `allowedRoots` (#480): the folders the Pair page preset, handed to the Machine when the code is claimed. */
+    readonly pairing?: { readonly code: string; readonly expiresAt: number; readonly allowedRoots?: readonly string[] };
 }
 
 /** The last run of one OPS-10 task. `finishedAt` without `error` is success. */
@@ -123,6 +124,8 @@ export interface CreateChatInput {
 
 export interface RegisterMachineInput {
     readonly name: string;
+    /** The folders the web may use on the machine once it pairs (#480): `~` forms or absolute paths, ≤ 32. The Pair page's default is `['~']`. */
+    readonly allowedRoots?: readonly string[];
 }
 
 export interface RegisterMachineResult {
@@ -493,7 +496,9 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 if (!input.name.trim()) throw new Error('[Workspace] registerMachinePending: name is required');
                 const machineId = createId('machine') as MachineId;
                 const at = now();
-                const pairing = { code: createPairingCode(), expiresAt: at + PAIRING_CODE_TTL_MS };
+                // The preset (#480) is held to the platform's rule now; the daemon has the last word once it exists (the OS is unknown here).
+                const allowedRoots = input.allowedRoots === undefined ? undefined : checkPolicyRoots({ allowedRoots: input.allowedRoots }, undefined);
+                const pairing = { code: createPairingCode(), expiresAt: at + PAIRING_CODE_TTL_MS, ...(allowedRoots && allowedRoots.length > 0 ? { allowedRoots } : {}) };
                 // The directory is the door; this record is the proof. Filed first: a directory entry without a record is a
                 // harmless 401 that expires, a record without a directory entry would be a code nobody can present.
                 await ctx.actor(PairingDirectory, PAIRING_DIRECTORY_KEY).register(pairing.code, { workspaceId: ownerOfWorkspaceKey(ctx.key) as WorkspaceId, machineId, expiresAt: pairing.expiresAt });
@@ -507,7 +512,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
              * belonged to, or `null` for an unknown, used or expired code — the
              * caller cannot tell which, by design. An expired entry is dropped.
              */
-            async claimPairing(code: string): Promise<{ machineId: MachineId } | null> {
+            async claimPairing(code: string): Promise<{ machineId: MachineId; allowedRoots?: readonly string[] } | null> {
                 const at = now();
                 const i = ctx.state.machines.findIndex((m) => m.pairing !== undefined && codesMatch(m.pairing.code, code));
                 if (i < 0) return null;
@@ -517,9 +522,10 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     await ctx.save();
                     return null;
                 }
+                const allowedRoots = entry.pairing!.allowedRoots;
                 ctx.state.machines[i] = { id: entry.id, name: entry.name, status: 'paired', registeredAt: entry.registeredAt, pairedAt: at };
                 await ctx.save();
-                return { machineId: entry.id };
+                return { machineId: entry.id, ...(allowedRoots ? { allowedRoots } : {}) };
             },
 
             /** Every machine, without the pairing codes — those were shown once, at registration. */
