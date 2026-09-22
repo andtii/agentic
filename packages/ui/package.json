@@ -48,7 +48,8 @@
     "@sigx/markdown": "catalog:",
     "@sigx/ai-agent": "catalog:",
     "@sigx/ai": "catalog:",
-    "@sigx/zero-daisyui": "catalog:"
+    "@sigx/zero-daisyui": "catalog:",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@sigx/vite": "catalog:",
@@ -59,8 +60,7 @@
     "@sigx/runtime-core": "catalog:",
     "@sigx/runtime-dom": "catalog:",
     "@sigx/server-renderer": "catalog:",
-    "@sigx/zero-kit": "catalog:",
-    "shiki": "^4.4.3"
+    "@sigx/zero-kit": "catalog:"
   },
   "sigx-zero": {
     "fragment": "./dist/fragment.js",

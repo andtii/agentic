@@ -546,6 +546,9 @@ importers:
       '@sigx/zero-daisyui':
         specifier: 'catalog:'
         version: 0.2.0-beta.1(@sigx/zero@0.2.0-beta.1(@sigx/reactivity@0.15.6)(@sigx/runtime-core@0.15.6)(@sigx/runtime-dom@0.15.6)(sigx@0.15.6))
+      shiki:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@sigx/reactivity':
         specifier: 'catalog:'
@@ -565,9 +568,6 @@ importers:
       '@sigx/zero-kit':
         specifier: 'catalog:'
         version: 0.2.0-beta.1
-      shiki:
-        specifier: ^4.4.3
-        version: 4.4.3
       sigx:
         specifier: 'catalog:'
         version: 0.15.6

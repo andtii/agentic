@@ -757,4 +757,74 @@ const quotaRings: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel, quotaRings];
+/** A markdown part inside the viewer — `@sigx/markdown` stamps every element `data-scope="markdown"`. */
+const part = (name: string): string => `[data-scope="markdown"][data-part="${name}"]`;
+const md = (name: string): string => `& ${part(name)}`;
+
+/**
+ * A markdown document as prose (#490): `@sigx/markdown` ships no stylesheet,
+ * so the viewer's recipe styles its parts — headings on the type scale,
+ * paragraph and list rhythm on the space scale (the app zeroes `p` margins),
+ * blockquotes as a line-strong rule, code blocks as a base-100 well with the
+ * language and copy button in a mono header, tables as base-200 heads over
+ * `line` borders (the shiki token colour is `kitCss`'s rule: it reads a
+ * variable no design system declares). `compact` is the size a card's well
+ * shows it at: 13 px type and half the block rhythm.
+ */
+const markdown: RecipeInput = {
+    component: 'ag-markdown',
+    tokens: { '--ag-md-gap': 'var(--space-sm)' },
+    parts: {
+        root: {
+            base: { fontSize: 'var(--text-md)', lineHeight: '1.6', color: 'var(--color-base-content)', overflowWrap: 'anywhere', minInlineSize: '0' },
+            selectors: {
+                [md('root')]: { display: 'flex', flexDirection: 'column', gap: 'var(--ag-md-gap)' },
+                [md('heading')]: { margin: '0', marginBlockStart: 'var(--ag-md-gap)', fontWeight: 'var(--weight-semibold)', lineHeight: 'var(--leading-tight)', letterSpacing: 'var(--tracking-tight)' },
+                [`${md('heading')}:first-child`]: { marginBlockStart: '0' },
+                [`${md('heading')}[data-depth="1"]`]: { fontSize: 'var(--text-2xl)' },
+                [`${md('heading')}[data-depth="2"]`]: { fontSize: 'var(--text-xl)' },
+                [`${md('heading')}[data-depth="3"]`]: { fontSize: 'var(--text-lg)' },
+                [`${md('heading')}[data-depth="4"], ${md('heading')}[data-depth="5"], ${md('heading')}[data-depth="6"]`]: { fontSize: 'inherit' },
+                [md('paragraph')]: { margin: '0', textWrap: 'pretty' },
+                [md('list')]: { margin: '0', paddingInlineStart: 'var(--space-xl)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2xs)' },
+                [`${md('list')}[data-spread]`]: { gap: 'var(--ag-md-gap)' },
+                [`${md('list-item')} > ${part('list')}`]: { marginBlockStart: 'var(--space-2xs)' },
+                // A task item is a row: the box, then its text (a paragraph block otherwise drops under the box).
+                [`${md('list-item')}[data-task]`]: { display: 'flex', alignItems: 'baseline', gap: 'var(--space-xs)', listStyle: 'none', marginInlineStart: 'calc(var(--space-lg) * -1)' },
+                [md('checkbox')]: { margin: '0', flexShrink: '0', accentColor: 'var(--color-primary)' },
+                [md('blockquote')]: { margin: '0', paddingInlineStart: 'var(--space-md)', borderInlineStart: '3px solid var(--ag-line-strong)', color: 'var(--ag-text-muted)' },
+                [md('code')]: { display: 'flex', flexDirection: 'column', border: 'var(--border) solid var(--ag-line)', borderRadius: 'var(--radius-field)', background: 'var(--color-base-100)', overflow: 'hidden' },
+                [md('code-header')]: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-sm)', padding: 'var(--space-2xs) var(--space-sm)', borderBlockEnd: 'var(--border) solid var(--ag-line)', background: 'var(--color-base-200)', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' },
+                [md('copy')]: { ...bare, padding: '0 var(--space-xs)', font: 'inherit', color: 'var(--ag-text-muted)', borderRadius: 'var(--radius-selector)' },
+                [`${md('copy')}:hover`]: { color: 'var(--color-base-content)', background: 'var(--color-base-300)' },
+                [`${md('copy')}:focus-visible`]: ring,
+                [md('pre')]: { margin: '0', padding: 'var(--space-sm) var(--space-md)', border: 'none', borderRadius: '0', background: 'transparent', overflow: 'auto', fontFamily: mono, fontSize: 'var(--text-sm)', lineHeight: '1.5' },
+                [md('code-body')]: { padding: '0', background: 'none', fontSize: 'inherit' },
+                [md('inline-code')]: { fontFamily: mono, fontSize: '0.92em', padding: '0.1rem 0.35rem', borderRadius: 'var(--radius-selector)', background: 'var(--color-base-300)' },
+                [md('table')]: { display: 'block', inlineSize: 'max-content', maxInlineSize: '100%', overflowX: 'auto', borderCollapse: 'collapse', border: 'var(--border) solid var(--ag-line)', borderRadius: 'var(--radius-field)', fontSize: 'var(--text-sm)' },
+                [md('table-head')]: { background: 'var(--color-base-200)' },
+                [md('table-cell')]: { padding: 'var(--space-xs) var(--space-sm)', borderBlockEnd: 'var(--border) solid var(--ag-line)', textAlign: 'start', verticalAlign: 'top' },
+                [`& th${part('table-cell')}`]: { fontWeight: 'var(--weight-semibold)' },
+                [`${md('table-body')} > ${part('table-row')}:last-child > ${part('table-cell')}`]: { borderBlockEnd: 'none' },
+                [md('thematic-break')]: { margin: 'var(--space-xs) 0', border: 'none', borderBlockStart: 'var(--border) solid var(--ag-line)' },
+                [md('link')]: { color: 'var(--color-primary)', textDecoration: 'underline', textUnderlineOffset: '0.15em' },
+                [`${md('link')}:hover`]: { color: 'var(--ag-link-hover)' },
+                [md('image')]: { maxInlineSize: '100%', blockSize: 'auto', borderRadius: 'var(--radius-field)' }
+            }
+        }
+    },
+    modifiers: {
+        compact: {
+            root: {
+                base: { '--ag-md-gap': 'var(--space-xs)', fontSize: 'var(--text-sm)' },
+                selectors: {
+                    [`${md('heading')}[data-depth="1"]`]: { fontSize: 'var(--text-xl)' },
+                    [`${md('heading')}[data-depth="2"]`]: { fontSize: 'var(--text-lg)' },
+                    [`${md('heading')}[data-depth="3"]`]: { fontSize: 'var(--text-md)' }
+                }
+            }
+        }
+    }
+};
+
+export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel, quotaRings, markdown];

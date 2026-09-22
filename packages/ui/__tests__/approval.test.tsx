@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Decision, OpenRequest } from '@sigx/ai-agent/app';
 import { expectAnatomy } from '@sigx/zero/testing';
-import { ApprovalPrompt, DENY_MESSAGE, KEEP_PLANNING_MESSAGE, aiApprovalAnatomy, decisionText, type RespondOptions } from '../src/thread';
+import { ApprovalPrompt, DENY_MESSAGE, KEEP_PLANNING_MESSAGE, aiApprovalAnatomy, decisionText, type ApprovalDecision, type RespondOptions } from '../src/thread';
 import { mount, one, all, buttonNamed, buttonName, tick } from './helpers';
 
 const request: OpenRequest = { requestId: 'r1', kind: 'permission', toolName: 'Bash', message: 'Runs `git status`.', seq: 1 };
@@ -106,24 +106,58 @@ describe('the approval card', () => {
 
 describe('the plan card (#454)', () => {
     const exit: OpenRequest = { requestId: 'r2', kind: 'permission', toolName: 'ExitPlanMode', seq: 2 };
-    function plan(input: unknown = { plan: ['## Plan', '', '1. Read the card', '2. Add the listbox'].join('\n') }) {
+    function plan(input: unknown = { plan: ['## Plan', '', '1. Read the card', '2. Add the listbox'].join('\n') }, decision?: ApprovalDecision) {
         const seen: [string, Decision, RespondOptions | undefined][] = [];
-        const dom = mount(<ApprovalPrompt request={exit} onRespond={(id, d, o) => seen.push([id, d, o])} input={input} />);
+        const dom = mount(<ApprovalPrompt request={exit} onRespond={(id, d, o) => seen.push([id, d, o])} input={input} highlighter={false} decision={decision} />);
         return { dom, seen };
     }
+    const popup = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-scope="dialog"][data-part="popup"]');
 
     it('shows the plan as markdown under "Plan ready for review", with the three plan answers instead of the tool well', () => {
         const { dom } = plan();
         expect(one(dom, 'ai-approval', 'title')!.textContent).toBe('Plan ready for review');
         expect(one(dom, 'ai-approval', 'request')).toBeNull();
         const body = one(dom, 'ai-approval', 'plan')!;
+        // The well is the viewer at the card's size (#490).
+        expect(one(body, 'ag-markdown', 'root')!.hasAttribute('data-mod-compact')).toBe(true);
         expect(body.querySelector('h2')?.textContent).toBe('Plan');
         expect([...body.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Read the card', 'Add the listbox']);
-        expect(buttons(dom).map((b) => [buttonName(b), b.getAttribute('data-intent')])).toEqual([
+        expect(buttons(one(dom, 'ai-approval', 'actions')!).map((b) => [buttonName(b), b.getAttribute('data-intent')])).toEqual([
             ['Approve · default', 'wait'],
             ['Approve · accept edits', 'default'],
             ['Keep planning', 'danger']
         ]);
+    });
+
+    it('opens the plan full-size from the header (#490): the same three answers in the dialog, and an answer there closes it', async () => {
+        const { dom, seen } = plan();
+        const open = buttonNamed(one(dom, 'ai-approval', 'header')!, 'Open plan');
+        expect(popup(dom)?.hasAttribute('open') ?? false).toBe(false);
+        open.click();
+        await tick();
+        const dialog = popup(dom)!;
+        expect(dialog.hasAttribute('open')).toBe(true);
+        expect(one(dialog, 'dialog', 'title')!.textContent).toBe('Plan');
+        expect(one(dialog, 'ag-markdown', 'root')!.hasAttribute('data-mod-compact')).toBe(false);
+        expect(dialog.querySelector('h2')?.textContent).toBe('Plan');
+        expect(buttons(dialog).map(buttonName)).toEqual(['Approve · default', 'Approve · accept edits', 'Keep planning']);
+        buttonNamed(dialog, 'Approve · default').click();
+        await tick();
+        expect(seen).toEqual([['r2', { type: 'permission', outcome: 'allow', scope: 'once' }, { permissionMode: 'default' }]]);
+        expect(popup(dom)?.hasAttribute('open') ?? false).toBe(false);
+    });
+
+    it('closes the dialog without answering, and drops the button once decided or without a plan', async () => {
+        const { dom, seen } = plan();
+        buttonNamed(dom, 'Open plan').click();
+        await tick();
+        buttonNamed(popup(dom)!, 'Close').click();
+        await tick();
+        expect(seen).toEqual([]);
+        expect(popup(dom)?.hasAttribute('open') ?? false).toBe(false);
+
+        expect(buttons(plan({}).dom).map(buttonName)).not.toContain('Open plan');
+        expect(buttons(plan(undefined, { outcome: 'allow', scope: 'once' }).dom).map(buttonName)).not.toContain('Open plan');
     });
 
     it.each([

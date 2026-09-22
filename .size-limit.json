@@ -7,12 +7,15 @@
   {
     "name": "@agentic/ui",
     "path": "packages/ui/dist/index.prod.js",
-    "limit": "81 KB"
+    "limit": "84 KB",
+    "ignore": [
+      "shiki"
+    ]
   },
   {
     "name": "@agentic/ui css (control-room design system)",
     "path": "packages/ui/dist/ds/css/index.css",
-    "limit": "23 KB"
+    "limit": "24 KB"
   },
   {
     "name": "@agentic/plugins-git",

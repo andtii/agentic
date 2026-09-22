@@ -38,5 +38,7 @@ export const kitScopes: Record<string, ScopeVocabulary> = {
     'ag-quota': { axes: { tone: ['muted', 'live', 'needs-you', 'failed'] }, modifiers: ['stale', 'compact'] },
     'ag-quota-panel': { modifiers: ['stale', 'compact'] },
     // A member's rings (#452): each ring carries its window's tone on its `item`; `stale` dims them all.
-    'ag-quota-rings': { modifiers: ['stale'] }
+    'ag-quota-rings': { modifiers: ['stale'] },
+    // A markdown document (#490): `compact` is the card-well size.
+    'ag-markdown': { modifiers: ['compact'] }
 };
