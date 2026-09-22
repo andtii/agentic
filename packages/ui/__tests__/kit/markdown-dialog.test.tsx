@@ -1,7 +1,7 @@
 /**
  * The document dialog (#490): a modal with the title, the document as
  * markdown in a scrolling body, the caller's footer actions before Close;
- * a close that no action preceded emits `close`.
+ * every close emits `close`.
  */
 import { describe, it, expect } from 'vitest';
 import { signal } from '@sigx/runtime-core';

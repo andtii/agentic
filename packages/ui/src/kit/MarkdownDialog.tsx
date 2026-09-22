@@ -5,8 +5,9 @@
  * `Close`. Like `ConfirmDialog` it carries no scope of its own; the popup is
  * sized by `kitCss` through the `data-ag-document` marker.
  *
- * The dialog never decides anything: the footer's buttons are the caller's,
- * and a close that no action preceded (Close, Escape, backdrop) emits `close`.
+ * The dialog never decides anything: the footer's buttons are the caller's.
+ * Every close — Close, Escape, the backdrop, or the model set false after a
+ * footer action — emits `close`; a caller that acted knows it did.
  */
 import { component, type Define } from '@sigx/runtime-core';
 import { Dialog } from '@sigx/zero';
