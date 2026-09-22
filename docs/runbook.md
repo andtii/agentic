@@ -299,6 +299,8 @@ From a terminal inside a repo under one of the machine's working roots, `agentic
 
 ### 5.4 Doctor, logs, restart
 
+Since #481 both are on the Machine page too: **This machine → Restart…** (drain, or now — running turns are interrupted and offered Resume, idle sessions re-open with their next message, exactly as for an update) and **Daemon log** (the last 200 lines, token-redacted). By hand:
+
 ```powershell
 # Windows
 node "$env:LOCALAPPDATA\agentic\daemon\bin\agentic-daemon.mjs" doctor       # exit 1 on any error; the token is never printed

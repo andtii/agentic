@@ -13,7 +13,10 @@
  * - `draining`: no new turns — the daemon answers a turn-starting prompt with `drainingReply` — while a `session.open`
  *   is still accepted. It ends when no turn runs on any environment, when `drainTimeoutMs` passes, or at once for `now`.
  * - `restarting`: the host stops the daemon with reason `update` (every live session closed with code `update`),
- *   deletes `state/ready` and exits 75; the supervisor swaps `daemon.staged` in.
+ *   deletes `state/ready` and exits 75; the supervisor swaps `daemon.staged` in. For `update.request { target: 'restart' }`
+ *   (#481) the phase is the same but the reason is `restart`: no `downloading` / `verifying` / `staged` phase before the
+ *   drain, the sessions closed with code `restart`, `state/ready` kept, exit 75 with nothing staged — the supervisor's
+ *   plain relaunch of this build.
  *
  * `update.cancel` before `restarting` stops the drain, removes the staged folder (a `previous` one goes back to
  * `daemon.prev`) and answers `failed { code: 'cancelled' }`; later it is ignored. One update runs at a time: another
@@ -253,8 +256,12 @@ export async function cleanLeftovers(layout: UpdateLayout): Promise<string[]> {
 export interface UpdateClientOptions {
     /** The install root (`installPaths().root`). */
     readonly root: string;
-    /** Stop the daemon with reason `update`, delete `state/ready` and exit 75: the CLI resolves `run`'s `until` with `'update'`. */
-    readonly restart: () => void | Promise<void>;
+    /**
+     * Stop the daemon and exit 75 for the supervisor: `'update'` — reason `update`, `state/ready` deleted, the staged build
+     * swapped in; `'restart'` (#355, #481) — reason `restart`, nothing staged, the same build relaunched. The CLI resolves
+     * `run`'s `until` with it.
+     */
+    readonly restart: (why: 'update' | 'restart') => void | Promise<void>;
     readonly fetch?: typeof fetch;
     /** Tests only: allow `http:` on the loopback. Never set in production. */
     readonly allowLoopbackHttp?: boolean;
@@ -333,9 +340,11 @@ export function createUpdateClient(host: UpdateHost, options: UpdateClientOption
         if (!j.abort.signal.aborted && host.runningTurns() > 0) logger.warn('update: drain timed out; running turns are interrupted', { requestId: j.requestId, running: host.runningTurns(), timeoutMs });
     }
 
-    async function run(j: Job, target: ReleaseAsset | 'previous' | 'staged', mode: 'drain' | 'now', drainTimeoutMs: number): Promise<void> {
+    async function run(j: Job, target: ReleaseAsset | 'previous' | 'staged' | 'restart', mode: 'drain' | 'now', drainTimeoutMs: number): Promise<void> {
         try {
-            if (target !== 'staged') {
+            // A restart (#481) stages nothing — but never with a staged folder present: exit 75 would apply that build, not restart.
+            if (target === 'restart' && existsSync(layout.staged)) throw new UpdateError('busy', 'an update is staged on this machine; apply or cancel it first');
+            if (target !== 'staged' && target !== 'restart') {
                 if (existsSync(layout.staged)) throw new UpdateError('busy', 'an update is already staged on this machine');
                 if (target === 'previous') {
                     await stagePrevious(layout);
@@ -365,14 +374,14 @@ export function createUpdateClient(host: UpdateHost, options: UpdateClientOption
                 }
                 cancelled(j);
                 status(j, 'staged');
-            } else j.staged = true;
+            } else if (target === 'staged') j.staged = true;
             j.phase = 'draining';
             status(j, 'draining');
             await drain(j, mode, drainTimeoutMs);
             cancelled(j);
             j.phase = 'restarting';
             status(j, 'restarting');
-            await options.restart();
+            await options.restart(target === 'restart' ? 'restart' : 'update');
         } catch (e) {
             const error = e instanceof UpdateError ? e : new UpdateError('io', (e as Error).message);
             if (j.staged) await unstage(layout).catch((u: unknown) => logger.warn('update: cannot remove the staged folder', { error: u }));
@@ -437,11 +446,9 @@ export function createUpdateClient(host: UpdateHost, options: UpdateClientOption
         },
         request(frame) {
             if (job) return refuse(frame.requestId, 'busy', `an update is already running (${job.requestId}, ${job.phase ?? 'starting'})`);
-            // A restart from the web (#355) is #481's: until it lands, this build says so rather than restarting for nothing.
-            if (frame.target === 'restart') return refuse(frame.requestId, 'unsupported', 'this daemon does not restart on request yet');
             const j: Job = { requestId: frame.requestId, local: false, phase: undefined, abort: new AbortController(), wake: undefined, staged: false };
             job = j;
-            logger.info('update: requested', { requestId: frame.requestId, target: frame.target === 'previous' ? 'previous' : frame.target.version, mode: frame.mode });
+            logger.info(frame.target === 'restart' ? 'restart: requested' : 'update: requested', { requestId: frame.requestId, target: typeof frame.target === 'string' ? frame.target : frame.target.version, mode: frame.mode });
             void run(j, frame.target, frame.mode, frame.drainTimeoutMs);
         },
         cancel(requestId) {

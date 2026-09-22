@@ -123,6 +123,8 @@ The service runs the **supervisor** (`scripts/supervise.mjs`, #362), copied to `
 
 ### Updates
 
+**Restart from the web (#481).** `update.request { target: 'restart' }` is the same client and the same drain with nothing downloaded or staged: `draining` → `restarting`, the live sessions closed with code `restart`, exit 75 — and with no `daemon.staged` the supervisor relaunches this build (a staged folder present makes it `failed { code: 'busy' }`: exit 75 would apply that build instead). `agentic-daemon update` still restarts for `update`. **The log (#481).** `log.request { lines }` answers the last lines of `<stateDir>/logs/daemon.log` (`DaemonPaths.logFile`, the file the service scripts point stderr at) through `src/log-tail.ts`: at most 512 KiB read from the end, the first cut line dropped, every line redacted again on the way out, `truncated` when the file holds more; a foreground `run` has no file and answers `no-log`. `hello.features` lists `log` when the daemon runs with the port.
+
 The platform updates a machine with `update.request` (#364; only to a daemon whose `hello.features` lists `update`, which it does when it runs under the supervisor), and `agentic-daemon update` does the same from the terminal. Each step is an `update.status` phase:
 
 1. **downloading** the release zip over `https:` only, to `<install root>/downloads/<version>.zip`, with progress at most every 2 s and a 10-minute limit;

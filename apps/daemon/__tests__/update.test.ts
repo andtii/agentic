@@ -24,6 +24,7 @@ describe('update client', () => {
     let sent: Status[];
     let running: number;
     let restarts: number;
+    let restartedFor: ('update' | 'restart')[];
     const clients: UpdateClient[] = [];
 
     beforeEach(async () => {
@@ -40,6 +41,7 @@ describe('update client', () => {
         sent = [];
         running = 0;
         restarts = 0;
+        restartedFor = [];
     });
     afterEach(async () => {
         for (const c of clients.splice(0)) c.stop();
@@ -50,14 +52,14 @@ describe('update client', () => {
     const client = (options: Partial<UpdateClientOptions> = {}): UpdateClient => {
         const c = createUpdateClient(
             { send: (frame) => sent.push(frame), runningTurns: () => running },
-            { root, restart: () => void restarts++, allowLoopbackHttp: true, pollMs: 10, check: async () => 'agentic-daemon 0.2.0 (abc1234, protocol 1, stable)', ...options }
+            { root, restart: (why) => void (restarts++, restartedFor.push(why)), allowLoopbackHttp: true, pollMs: 10, check: async () => 'agentic-daemon 0.2.0 (abc1234, protocol 1, stable)', ...options }
         );
         clients.push(c);
         return c;
     };
     const phases = (requestId = 'upd_1'): UpdatePhase[] => sent.filter((f) => f.requestId === requestId && !f.progress).map((f) => f.phase);
     const last = (requestId = 'upd_1'): Status | undefined => sent.filter((f) => f.requestId === requestId).at(-1);
-    const request = (c: UpdateClient, target: ReleaseAsset | 'previous', mode: 'drain' | 'now' = 'drain', requestId = 'upd_1', drainTimeoutMs = 60_000) =>
+    const request = (c: UpdateClient, target: ReleaseAsset | 'previous' | 'restart', mode: 'drain' | 'now' = 'drain', requestId = 'upd_1', drainTimeoutMs = 60_000) =>
         c.request({ v: V, t: 'update.request', requestId, target, mode, drainTimeoutMs });
     const ended = (requestId = 'upd_1') => vi.waitFor(() => expect(['restarting', 'failed']).toContain(last(requestId)?.phase), { timeout: 5_000 });
 
@@ -153,6 +155,42 @@ describe('update client', () => {
         await ended('upd_timeout');
         expect(last('upd_timeout')?.phase).toBe('restarting');
         expect(restarts).toBe(3);
+    });
+
+    // #481: a restart from the web is the same drain and the same exit 75, with nothing downloaded or staged.
+    it('target restart: no download, no staged folder, drain then restarting for reason restart; busy with a staged build present', async () => {
+        running = 1;
+        const c = client();
+        request(c, 'restart', 'drain', 'rst_1');
+        await vi.waitFor(() => expect(last('rst_1')?.phase).toBe('draining'));
+        expect(c.draining).toBe(true);
+        expect(existsSync(staged)).toBe(false);
+        expect(server.requests).toEqual([]);
+        running = 0;
+        await ended('rst_1');
+        expect(phases('rst_1')).toEqual(['draining', 'restarting']);
+        expect(restartedFor).toEqual(['restart']);
+        expect(existsSync(staged)).toBe(false);
+
+        const now = client();
+        request(now, 'restart', 'now', 'rst_now');
+        await ended('rst_now');
+        expect(phases('rst_now')).toEqual(['draining', 'restarting']);
+        expect(restartedFor).toEqual(['restart', 'restart']);
+
+        // A staged build present: exit 75 would apply it, so a restart is refused busy and the folder is left alone.
+        await mkdir(join(staged, 'bin'), { recursive: true });
+        const blocked = client();
+        request(blocked, 'restart', 'now', 'rst_blocked');
+        await ended('rst_blocked');
+        expect(last('rst_blocked')).toMatchObject({ phase: 'failed', error: { code: 'busy' } });
+        expect(existsSync(staged)).toBe(true);
+        expect(restarts).toBe(2);
+        // An update restarts for an update.
+        await rm(staged, { recursive: true });
+        request(client(), asset, 'now', 'upd_after');
+        await ended('upd_after');
+        expect(restartedFor.at(-1)).toBe('update');
     });
 
     it('one update at a time: another request while one runs is failed busy', async () => {

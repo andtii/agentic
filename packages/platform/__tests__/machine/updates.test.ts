@@ -277,6 +277,52 @@ describe('requestUpdate, the drain and the judging hello (#365)', () => {
         await until(async () => (await audits(['machine.update-failed'])).some((e) => e.by === 'system:updates'), 'a timeout record by system:updates');
     });
 
+    // #481: a restart from the web rides the update machinery — nothing downloaded, judged by the next hello alone.
+    it('requestRestart sends update.request target restart, drains, and the next hello — whatever its build — records machine.restarted with no Inbox row', async () => {
+        await hello();
+        const { requestId } = await machine().requestRestart();
+        expect(requestId).toMatch(/^restart_/);
+        expect(sockets.frames('update.request')).toMatchObject([{ requestId, target: 'restart', mode: 'drain', drainTimeoutMs: 30 * 60_000 }]);
+        expect(await statusOf(machine().requestRestart())).toBe(409);
+        expect(await statusOf(machine().requestUpdate())).toBe(409);
+        const view = await machine().get();
+        expect(view.draining).toMatchObject({ requestId });
+        expect(freeSlots(view, E1)).toBe(0);
+        expect((await machine().updateState()).pending).toMatchObject({ requestId, target: 'restart', from: '0.1.0', by: 'user:u1' });
+        expect((await machine().updateState()).pending?.asset).toBeUndefined();
+        await status(requestId, 'draining');
+        expect((await machine().updateState()).pending?.phase).toBe('draining');
+        expect((await audits(['machine.restart-requested']))[0]!.data).toEqual({ machineId: M1, mode: 'drain' });
+        expect(await audits(['machine.update-requested'])).toEqual([]);
+
+        // The same build comes back: restarted — not "failed, came back on 0.1.0".
+        await hello();
+        const after = await machine().updateState();
+        expect(after.pending).toBeUndefined();
+        expect(after.draining).toBeUndefined();
+        expect(after.last).toMatchObject({ requestId, from: '0.1.0', to: 'restart', outcome: 'restarted' });
+        expect(freeSlots(await machine().get(), E1)).toBeGreaterThan(0);
+        await until(async () => (await audits(['machine.restarted'])).length === 1, 'machine.restarted');
+        expect((await audits(['machine.restarted']))[0]!.data).toEqual({ machineId: M1 });
+        expect((await inbox()).filter((n) => n.kind === 'update-applied' || n.kind === 'update-failed')).toEqual([]);
+        // `now` is passed through; a failed phase closes it as any update's.
+        const second = await machine().requestRestart({ mode: 'now' });
+        expect(sockets.frames('update.request').at(-1)).toMatchObject({ requestId: second.requestId, target: 'restart', mode: 'now' });
+        await status(second.requestId, 'failed', { error: { code: 'busy', message: 'an update is staged' } });
+        expect((await machine().updateState()).last).toMatchObject({ requestId: second.requestId, outcome: 'failed', error: 'busy: an update is staged' });
+    });
+
+    it('requestRestart refuses like requestUpdate: 403 revoked, 503 offline, 409 pending or without the update feature, 400 a bad mode; owner only', async () => {
+        await hello({ features: [] });
+        expect(await statusOf(machine().requestRestart())).toBe(409);
+        await hello();
+        expect(await statusOf(machine().requestRestart({ mode: 'later' as never }))).toBe(400);
+        expect(await statusOf(machine().requestRestart({ drainTimeoutMs: -1 }))).toBe(400);
+        for (const who of [agentPrincipal, daemonPrincipal]) expect(await statusOf(machine(who).requestRestart())).toBe(403);
+        await daemon().socketClosed();
+        expect(await statusOf(machine().requestRestart())).toBe(503);
+    });
+
     it('only the owner reaches the update methods', async () => {
         await hello();
         for (const who of [agentPrincipal, daemonPrincipal]) {
