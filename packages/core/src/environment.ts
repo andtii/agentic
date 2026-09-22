@@ -59,6 +59,12 @@ export interface CapabilityReport {
     readonly steer: boolean;
     readonly permissions: 'every-call' | 'harness-filtered' | 'none';
     readonly tools: 'native' | 'mcp' | 'none';
+    /**
+     * How an environment of this runtime is signed in (#355, #484): `relay` — the daemon runs the runtime's own login
+     * and relays it to the Machine page (`login.request`); `terminal` — only `agentic-daemon env login` on the machine.
+     * Absent from a daemon that predates the relay (read as `terminal`).
+     */
+    readonly login?: 'relay' | 'terminal';
 }
 
 export interface MachineInfo {

@@ -287,6 +287,17 @@ describe('daemon frame schemas', () => {
         expect(daemonFrame.safeParse({ v: V, t: 'env.response', requestId: 'env_1', error: { code: 'nope', message: 'x' } }).success).toBe(false);
     });
 
+    it('a capability says how its environments sign in (#484): relay, terminal, or nothing from an older daemon', () => {
+        const relay = { ...daemonCases.hello.valid, capabilities: [{ ...IN_MEMORY_CAPABILITIES, login: 'relay' }] };
+        expect(daemonFrame.safeParse(relay)).toEqual({ success: true, data: relay });
+        const terminal = { ...daemonCases.hello.valid, capabilities: [{ ...IN_MEMORY_CAPABILITIES, login: 'terminal' }] };
+        expect(daemonFrame.safeParse(terminal)).toEqual({ success: true, data: terminal });
+        const { login: _login, ...older } = IN_MEMORY_CAPABILITIES;
+        const old = { ...daemonCases.hello.valid, capabilities: [older] };
+        expect(daemonFrame.safeParse(old)).toEqual({ success: true, data: old });
+        expect(daemonFrame.safeParse({ ...daemonCases.hello.valid, capabilities: [{ ...IN_MEMORY_CAPABILITIES, login: 'browser' }] }).success).toBe(false);
+    });
+
     it('hello, welcome and session.closed keep the lifecycle fields (#359); an older frame still parses', () => {
         const hello = {
             ...daemonCases.hello.valid,

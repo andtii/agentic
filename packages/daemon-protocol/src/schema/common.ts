@@ -141,7 +141,8 @@ export const capabilityReport: z.ZodType<CapabilityReport> = z.object({
     cancel: z.boolean(),
     steer: z.boolean(),
     permissions: z.enum(['every-call', 'harness-filtered', 'none']),
-    tools: z.enum(['native', 'mcp', 'none'])
+    tools: z.enum(['native', 'mcp', 'none']),
+    login: z.enum(['relay', 'terminal']).optional()
 });
 
 /** One `ApprovalRule` as the agent config keeps it (first-match over tools / categories / source). */
