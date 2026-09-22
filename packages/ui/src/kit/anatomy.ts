@@ -217,6 +217,15 @@ export const agQuotaRingsAnatomy = defineAnatomy('ag-quota-rings', {
     label: { element: 'span', parent: 'item', tokens: ['text'] }
 });
 
+/**
+ * A markdown document as prose (#490): the one part is the reading surface
+ * whose recipe styles what `@sigx/markdown` renders inside it (`data-scope="markdown"`);
+ * `compact` is the size a card's well shows it at.
+ */
+export const agMarkdownAnatomy = defineAnatomy('ag-markdown', {
+    root: { element: 'div', tokens: ['color', 'radius-field', 'text'] }
+});
+
 export const kitAnatomies = [
     agPillAnatomy,
     agAgentTileAnatomy,
@@ -236,5 +245,6 @@ export const kitAnatomies = [
     agMapFieldAnatomy,
     agQuotaAnatomy,
     agQuotaPanelAnatomy,
-    agQuotaRingsAnatomy
+    agQuotaRingsAnatomy,
+    agMarkdownAnatomy
 ] as const;

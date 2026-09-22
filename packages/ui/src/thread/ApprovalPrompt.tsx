@@ -18,16 +18,19 @@
  * Plan mode's way out (#454) is the same card with other words: the plan as
  * markdown, `Approve · default` / `Approve · accept edits` — an allow that
  * names the permission mode the member goes on in — and `Keep planning`, a
- * deny that tells the model to revise.
+ * deny that tells the model to revise. The well shows the plan at the
+ * card's size; `Open plan` reads it full-size in a `MarkdownDialog` (#490)
+ * with the same three answers in its footer.
  */
-import { component, type Define } from '@sigx/runtime-core';
+import { component, type Define, type JSXElement } from '@sigx/runtime-core';
 import type { Decision, OpenRequest } from '@sigx/ai-agent/app';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { Button } from '../kit/Button.js';
 import { EnvironmentLine, type EnvironmentParts } from '../kit/EnvironmentLine.js';
 import { Icon } from '../kit/icons.js';
+import { MarkdownDialog } from '../kit/MarkdownDialog.js';
+import { MarkdownViewer, type MarkdownViewerProps } from '../kit/MarkdownViewer.js';
 import { aiApprovalAnatomy } from './anatomy.js';
-import { StreamingMarkdown } from './StreamingMarkdown.js';
 import { nonBlank, signature } from './text.js';
 
 const SCOPE = aiApprovalAnatomy.scope;
@@ -91,7 +94,9 @@ export type ApprovalPromptProps =
     /** Session page and mobile: no context rows. */
     & Define.Prop<'compact', boolean, false>
     /** A decision that arrived (from this or another client): the card collapses to its record. */
-    & Define.Prop<'decision', ApprovalDecision, false>;
+    & Define.Prop<'decision', ApprovalDecision, false>
+    /** The plan dialog's code highlighter; `false` keeps code plain (tests). */
+    & Define.Prop<'highlighter', MarkdownViewerProps['highlighter'], false>;
 
 export const DENY_MESSAGE = 'The operator denied this call.';
 
@@ -110,14 +115,18 @@ export function decisionText(d: ApprovalDecision): string {
 }
 
 export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal }) => {
-    /** The button that was clicked, until the request resolves or the caller passes the decision; `error` when the answer did not get through. */
-    const st = signal({ pending: undefined as string | undefined, error: '' });
+    /**
+     * The button that was clicked, until the request resolves or the caller passes the decision; `error` when the
+     * answer did not get through; `open` while the plan is read full-size (#490).
+     */
+    const st = signal({ pending: undefined as string | undefined, error: '', open: false });
 
     /** `mode`: a plan approved into that permission mode (#454); `message`: what a deny tells the model. */
     const decide = (outcome: 'allow' | 'deny', scope: 'once' | 'session', plan?: { readonly mode?: string; readonly message?: string }): void => {
         if (st.pending) return;
         st.pending = plan?.mode ?? (outcome === 'deny' ? 'deny' : scope);
         st.error = '';
+        st.open = false;
         let out: unknown;
         try {
             out = props.onRespond(
@@ -143,6 +152,21 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
         st.error = e instanceof Error ? e.message : String(e);
     };
 
+    /** The plan's three answers — in the card's action row and again in the dialog's footer (#490). */
+    const planActions = (): JSXElement[] => {
+        const busy = st.pending !== undefined;
+        return [
+            ...PLAN_MODES.map((m, i) => (
+                <Button intent={i === 0 ? 'wait' : 'default'} icon={i === 0 ? 'check' : undefined} loading={st.pending === m.mode} disabled={busy} onClick={() => decide('allow', 'once', { mode: m.mode })}>
+                    {m.label}
+                </Button>
+            )),
+            <Button intent="danger" icon="close" loading={st.pending === 'deny'} disabled={busy} onClick={() => decide('deny', 'once', { message: KEEP_PLANNING_MESSAGE })}>
+                Keep planning
+            </Button>
+        ];
+    };
+
     return () => {
         const request = props.request;
         const name = request.toolName ?? props.toolName ?? 'this tool';
@@ -156,6 +180,8 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
         const context = !props.compact && (who || env || via);
         const decision = props.decision;
         const busy = st.pending !== undefined;
+        // A written plan, still open: readable full-size.
+        const readable = !!plan && !decision;
         return (
             <div
                 data-scope={SCOPE}
@@ -169,9 +195,14 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                     <Icon name="shield" size={15} />
                     <span data-scope={SCOPE} data-part="title">{plan !== undefined ? (decision ? 'Plan' : 'Plan ready for review') : decision ? 'Approval' : 'Approval needed'}</span>
                     {rule && <span data-scope={SCOPE} data-part="rule">{`rule: ${rule}`}</span>}
+                    {readable && <Button intent="icon" icon="expand" label="Open plan" onClick={() => { st.open = true; }} />}
                 </div>
                 {plan !== undefined ? (
-                    !decision && <div data-scope={SCOPE} data-part="plan">{plan ? <StreamingMarkdown text={plan} done /> : <p>The agent asks to leave plan mode without a written plan.</p>}</div>
+                    !decision && (
+                        <div data-scope={SCOPE} data-part="plan">
+                            {plan ? <MarkdownViewer value={plan} compact highlighter={props.highlighter} /> : <p>The agent asks to leave plan mode without a written plan.</p>}
+                        </div>
+                    )
                 ) : (
                     <div data-scope={SCOPE} data-part="request">
                         <code>{name}</code>
@@ -210,16 +241,7 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                 {decision ? (
                     <p data-scope={SCOPE} data-part="record">{decisionText(decision)}</p>
                 ) : plan !== undefined ? (
-                    <div data-scope={SCOPE} data-part="actions">
-                        {PLAN_MODES.map((m, i) => (
-                            <Button intent={i === 0 ? 'wait' : 'default'} icon={i === 0 ? 'check' : undefined} loading={st.pending === m.mode} disabled={busy} onClick={() => decide('allow', 'once', { mode: m.mode })}>
-                                {m.label}
-                            </Button>
-                        ))}
-                        <Button intent="danger" icon="close" loading={st.pending === 'deny'} disabled={busy} onClick={() => decide('deny', 'once', { message: KEEP_PLANNING_MESSAGE })}>
-                            Keep planning
-                        </Button>
-                    </div>
+                    <div data-scope={SCOPE} data-part="actions">{planActions()}</div>
                 ) : (
                     <div data-scope={SCOPE} data-part="actions">
                         <Button intent="wait" icon="check" loading={st.pending === 'once'} disabled={busy} onClick={() => decide('allow', 'once')}>
@@ -233,6 +255,9 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                             Deny
                         </Button>
                     </div>
+                )}
+                {readable && (
+                    <MarkdownDialog model={() => st.open} title="Plan" value={plan} highlighter={props.highlighter} slots={{ footer: planActions }} />
                 )}
             </div>
         );

@@ -31,6 +31,15 @@ export const kitCss = `[data-visually-hidden] {
 /* the folder picker's dialog: wider than a confirm; border-box, so width: calc(100% - 2rem) keeps the 16 px gutter with its padding */
 [data-scope="dialog"][data-part="popup"]:has([data-scope="ag-workdir-picker"]) { max-width: 640px; box-sizing: border-box; }
 
+/* a document dialog (#490): 880 px, never taller than the viewport; the document scrolls between the title and the footer.
+   Only the width goes on the popup — its display is the UA's (a closed <dialog> is display: none), so the column is the inner box */
+[data-scope="dialog"][data-part="popup"]:has([data-ag-document]) { max-width: 880px; box-sizing: border-box; }
+[data-ag-document] { display: flex; flex-direction: column; max-block-size: calc(100dvh - 2rem - 2 * var(--space-2xl)); }
+[data-ag-document-body] { flex: 1; min-block-size: 0; overflow: auto; overscroll-behavior: contain; }
+
+/* highlighted code (#490): shiki writes each token's dark colour to --shiki-dark; control-room is dark, so that is the one shown */
+[data-scope="ag-markdown"] [data-scope="markdown"][data-part="code-body"] span { color: var(--shiki-dark, inherit); }
+
 /* a label never wraps: the button grows, the row wraps */
 [data-scope="button"][data-part="root"] { white-space: nowrap; }
 [data-scope="button"][data-part="root"] > span { white-space: nowrap; }

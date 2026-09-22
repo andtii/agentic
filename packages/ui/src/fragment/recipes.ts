@@ -384,7 +384,11 @@ const approval: RecipeInput = {
             },
             at: { 'reduced-motion': { base: { transition: 'none' } } }
         },
-        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-warning)' } },
+        header: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', color: 'var(--color-warning)' },
+            // The plan's Open button (#490) sits at the end, after the rule when there is one.
+            selectors: { '& > [data-scope="button"]': { marginInlineStart: 'auto' }, '& > [data-part="rule"] + [data-scope="button"]': { marginInlineStart: '0' } }
+        },
         title: { base: { fontWeight: 'var(--weight-semibold, 600)', fontSize: 'var(--text-lg)' } },
         rule: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } },
         plan: {
@@ -394,8 +398,7 @@ const approval: RecipeInput = {
                 borderRadius: 'var(--radius-field)',
                 background: 'var(--color-base-100)',
                 maxBlockSize: '24rem',
-                overflow: 'auto',
-                fontSize: 'var(--text-sm)'
+                overflow: 'auto'
             }
         },
         request: {

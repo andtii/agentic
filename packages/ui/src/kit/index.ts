@@ -5,7 +5,7 @@
  */
 import './globals.js';
 
-export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy, agQuotaAnatomy, agQuotaPanelAnatomy, agQuotaRingsAnatomy } from './anatomy.js';
+export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy, agQuotaAnatomy, agQuotaPanelAnatomy, agQuotaRingsAnatomy, agMarkdownAnatomy } from './anatomy.js';
 export { recipes as kitRecipes } from './recipes.js';
 export { kitScopes, TONES, NEEDS_KINDS } from './vocabulary.js';
 export type { Tone, NeedsKind } from './vocabulary.js';
@@ -45,6 +45,10 @@ export { VersionItem } from './VersionItem.js';
 export type { VersionItemProps, VersionState } from './VersionItem.js';
 export { ConfirmDialog } from './ConfirmDialog.js';
 export type { ConfirmDialogProps } from './ConfirmDialog.js';
+export { MarkdownViewer, markdownHighlighter } from './MarkdownViewer.js';
+export type { MarkdownViewerProps } from './MarkdownViewer.js';
+export { MarkdownDialog } from './MarkdownDialog.js';
+export type { MarkdownDialogProps } from './MarkdownDialog.js';
 export { ConnectionStrip } from './ConnectionStrip.js';
 export type { ConnectionStripProps, ConnectionRow } from './ConnectionStrip.js';
 export { SectionHeading, Label } from './text.js';
@@ -64,3 +68,4 @@ export type { DefaultForAgent } from '../forms/environment-card.js';
 export { FailureCard as AgFailure } from './states/FailureCard.js';
 export { OfflineBanner as AgBanner } from './states/OfflineBanner.js';
 export { EmptyState as AgEmpty } from './states/EmptyState.js';
+export { MarkdownViewer as AgMarkdown } from './MarkdownViewer.js';
