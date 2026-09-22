@@ -1,7 +1,7 @@
 /**
  * `Thread` — the transcript (`ai-thread`): a `role="log"` container that
- * WINDOWS its rows, sticks to the bottom while the reader is there, and
- * pauses when they scroll up.
+ * WINDOWS its rows, opens at the bottom, sticks to it while the reader is
+ * there, and pauses when they scroll up.
  *
  * Driven by a reactive `AgentTranscript` — `useAgentSession(...).transcript`,
  * or any transcript the reducer folds in place. This component reads the
@@ -14,9 +14,13 @@
  * resumes the tail.
  *
  * Following is decided from real scroll geometry (`scrollHeight - scrollTop
- * - clientHeight <= threshold`), which is what a scroll-up flips off; the
- * window's `end` freezes at that moment so rows do not shift under the
- * reader while the agent goes on streaming.
+ * - clientHeight <= threshold`), and only a scroll UP past the threshold
+ * flips it off — a pin, or content growing under the viewport, never moves
+ * the offset up, so it cannot pause the thread (#495). The window's `end`
+ * freezes at that moment so rows do not shift under the reader while the
+ * agent goes on streaming. While following, the bottom is pinned on mount,
+ * after every render, and on every resize of the list — a streaming part
+ * re-renders only itself, so the thread's own render does not see it grow.
  *
  * The host may hold more than the transcript (a chat whose older entries are
  * paged from a store): with `hasEarlier` the chip stays once the window is
@@ -29,7 +33,7 @@
  * `describe`; the STREAMING pill sits on the last assistant row while the
  * session is mid-turn.
  */
-import { component, type Define } from '@sigx/runtime-core';
+import { component, onMounted, onUnmounted, type Define } from '@sigx/runtime-core';
 import { spawnedAgent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { aiThreadAnatomy } from './anatomy.js';
@@ -97,6 +101,9 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         extra: 0
     });
     let root: HTMLElement | null = null;
+    let list: HTMLElement | null = null;
+    /** The offset the last scroll (or pin) left: a scroll below it moved up. */
+    let lastTop = 0;
     /** The first message when the window froze: rows prepended before it move the frozen `end` by their units. */
     let frozenFirst: string | undefined;
     /** The last render's first unit; its first row against the first row the DOM last settled on, and the scroll height before the change — the prepend correction reads them. */
@@ -111,7 +118,9 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
     const threshold = (): number => props.threshold ?? 24;
 
     const scrollToBottom = (): void => {
-        if (root) root.scrollTop = root.scrollHeight;
+        if (!root) return;
+        root.scrollTop = root.scrollHeight;
+        lastTop = root.scrollTop;
     };
 
     /** The units now before the message that was first when the window froze — what the host prepended since. */
@@ -130,7 +139,10 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
     const onScroll = (e: Event): void => {
         const el = e.currentTarget as HTMLElement;
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        const following = gap <= threshold();
+        const up = el.scrollTop < lastTop;
+        lastTop = el.scrollTop;
+        // At the bottom follows; away from it pauses only when the reader moved up.
+        const following = gap <= threshold() || (st.following && !up);
         if (following !== st.following) {
             if (!following) {
                 const messages = threadMessages(props.transcript);
@@ -156,6 +168,19 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         frozenFirst = undefined;
         scrollToBottom();
     };
+
+    // Open at the tail, and hold it while the list grows between renders
+    // (streaming deltas, markdown, images, a card expanding).
+    let observer: ResizeObserver | undefined;
+    onMounted(() => {
+        scrollToBottom();
+        if (typeof ResizeObserver === 'undefined' || !list) return;
+        observer = new ResizeObserver(() => {
+            if (st.following) scrollToBottom();
+        });
+        observer.observe(list);
+    });
+    onUnmounted(() => observer?.disconnect());
 
     // After every render: keep the tail in view while following; frozen, keep
     // the reader's rows where they were when rows were prepended (the first
@@ -215,7 +240,13 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                         <u>Load earlier</u>
                     </button>
                 )}
-                <ol data-scope={SCOPE} data-part="list">
+                <ol
+                    data-scope={SCOPE}
+                    data-part="list"
+                    ref={(el: HTMLElement | null) => {
+                        list = el;
+                    }}
+                >
                     {rows.map((row) => (
                         <li key={row.key} data-scope={SCOPE} data-part="row">
                             <Message
