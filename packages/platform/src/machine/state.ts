@@ -355,7 +355,7 @@ export const MAX_POLICY_REQUESTS = 16;
 export const POLICY_RESULT_TTL_MS = 120_000;
 /** At most this many log requests are kept (#481). */
 export const MAX_LOG_REQUESTS = 16;
-/** A finished log request is kept this long — its lines with it. */
+/** A finished log request is kept this long; the activation drops the lines it holds for it at the same time. */
 export const LOG_RESULT_TTL_MS = 60_000;
 /** A finished environment request is pruned this long after it finished. */
 export const ENV_RESULT_TTL_MS = 120_000;

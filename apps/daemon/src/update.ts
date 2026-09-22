@@ -12,10 +12,11 @@
  *   `target: 'previous'` skips all three: `daemon.prev` is renamed to `daemon.staged`.
  * - `draining`: no new turns — the daemon answers a turn-starting prompt with `drainingReply` — while a `session.open`
  *   is still accepted. It ends when no turn runs on any environment, when `drainTimeoutMs` passes, or at once for `now`.
- * - `restarting`: the host stops the daemon with reason `update` (every live session closed with code `update`) — or,
- *   for `update.request { target: 'restart' }` (#481), with reason `restart` and nothing staged: the supervisor's plain
- *   relaunch, the sessions closed with code `restart`, no `downloading` / `verifying` / `staged` phase before the drain,
- *   deletes `state/ready` and exits 75; the supervisor swaps `daemon.staged` in.
+ * - `restarting`: the host stops the daemon with reason `update` (every live session closed with code `update`),
+ *   deletes `state/ready` and exits 75; the supervisor swaps `daemon.staged` in. For `update.request { target: 'restart' }`
+ *   (#481) the phase is the same but the reason is `restart`: no `downloading` / `verifying` / `staged` phase before the
+ *   drain, the sessions closed with code `restart`, `state/ready` kept, exit 75 with nothing staged — the supervisor's
+ *   plain relaunch of this build.
  *
  * `update.cancel` before `restarting` stops the drain, removes the staged folder (a `previous` one goes back to
  * `daemon.prev`) and answers `failed { code: 'cancelled' }`; later it is ignored. One update runs at a time: another

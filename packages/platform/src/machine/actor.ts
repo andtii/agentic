@@ -1921,8 +1921,9 @@ export function defineMachineActor(ports: MachinePorts) {
                     const s = ctx.state;
                     if (!Number.isInteger(lines) || lines < 1 || lines > DAEMON_LOG_MAX_LINES) throw new ServerFnError(400, `machine: lines must be a whole number from 1 to ${DAEMON_LOG_MAX_LINES}`);
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
-                    if (!s.features?.includes('log')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not serve its log; reinstall it once`);
+                    // Offline before the feature: `features` is what the LAST hello said, stale for a daemon that is not here.
                     if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    if (!s.features?.includes('log')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not serve its log; reinstall it once`);
                     const at = now();
                     const requestId = `log_${crypto.randomUUID()}`;
                     if (!send({ v: V, t: 'log.request', requestId, lines })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
