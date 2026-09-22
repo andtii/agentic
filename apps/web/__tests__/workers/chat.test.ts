@@ -67,7 +67,8 @@ describe('worker: a post activates an agent — task, route, session, and the ch
             {
                 post: (text, mentions) => chat.post(text, mentions),
                 createTask: (id, contract, owner) => overHttp(TaskActor, taskKey(WS, id), cookie).create(contract, { owner }),
-                run: (taskId) => overHttp(Routing, routingKeyOf(WS), cookie).run(taskId),
+                // The page's own hand-off (#492): one-way over the endpoint, the response is the ack — the agent still answers.
+                run: (taskId) => overHttp(Routing, routingKeyOf(WS), cookie, { oneWay: true }).run(taskId),
                 newTaskId: () => createId('task') as TaskId
             },
             { chatId: chatId as ChatId, text: 'hello from the worker', mentions: [], summary, entries: [], lookup: unknownAgent }

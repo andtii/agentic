@@ -114,6 +114,7 @@ import { r2ChatFileStore } from './files/store';
 import { channelCatalogue, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
+import { observeSlowTurns } from './actors/slow-turns';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -400,6 +401,12 @@ export function createActorHost(actors: readonly AnyActorDefinition[] = defaultA
             if (own?.type === 'machine') daemonSockets.bind(own.key, state);
             this.#daemon = createDaemonSocketHost({ state, host: () => this.host(), machine: Machine, registry: daemonSockets });
             this.#purge = createPurgeHandler({ state, host: () => this.host(), own, secret: () => secrets.sessionSecret });
+        }
+        /** The running host, with the slow-turn log attached (#492) — once; the base memoizes the host. */
+        override async host(): Promise<Host> {
+            const host = await super.host();
+            observeSlowTurns(host);
+            return host;
         }
         override async fetch(request: Request): Promise<Response> {
             const host = await this.host();
