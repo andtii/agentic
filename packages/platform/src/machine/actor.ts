@@ -19,7 +19,7 @@ import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFram
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import { isServerFnError, ServerFnError } from '@sigx/server';
+import { ServerFnError } from '@sigx/server';
 
 import { principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
@@ -1016,26 +1016,20 @@ export function defineMachineActor(ports: MachinePorts) {
             }
 
             /**
-             * Hand a daemon's word about a session to its record ONE-WAY (#492): the call is queued on the Session and this
-             * turn goes on. A Session's turn can be slow — a turn-end folds the transcript, learns and tells the chat — and
-             * while this machine waited on it, every other session's frame, every `get` the router's placement makes and
-             * every `openSession` for another chat queued behind that one turn; at the host's call deadline the placement
-             * failed, in a chat that never touched the slow session. The mailbox keeps the frames of a session in the
-             * order they were sent, so the record sees them as the daemon did.
+             * A daemon's word about a session goes to its record ONE-WAY (#492): the call is queued on the Session and
+             * this turn goes on. A Session's turn can be slow — a turn-end folds the transcript, learns and tells the
+             * chat — and while this machine waited on it, every other session's frame, every `get` the router's
+             * placement makes and every `openSession` for another chat queued behind that one turn; at the host's call
+             * deadline the placement failed, in a chat that never touched the slow session. The mailbox keeps the frames
+             * of a session in the order they were sent, so the record sees them as the daemon did.
              *
              * A Session refuses a frame for a session it is not hosted on by this machine (a stale one after a restart,
-             * one re-opened elsewhere, one it never opened) with a 403 (#393); one-way, that refusal is dropped where it
-             * lands, so it never reaches the host's `webSocketMessage` and takes the daemon's whole socket down with
-             * every other session on it.
+             * one re-opened elsewhere, one it never opened) with a 403 (#393). One-way, that refusal is raised inside the
+             * Session's own turn and dropped there — it never reaches the host's `webSocketMessage`, which would take
+             * the daemon's whole socket down with every other session on it. What a one-way dispatch itself can throw
+             * is a failure before acceptance — an authorization or placement bug — and that surfaces.
              */
-            async function toSession(fn: () => Promise<void> | undefined): Promise<void> {
-                try {
-                    await fn();
-                } catch (e) {
-                    // The one-way dispatch itself: a record that cannot be reached at all. The refusal never gets here.
-                    if (!(isServerFnError(e) && e.status === 403)) throw e;
-                }
-            }
+            const toSession = (fn: () => Promise<void> | undefined): Promise<void> => Promise.resolve(fn());
 
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {
                 const h = ctx.state.activeSessions[frame.sessionId];
