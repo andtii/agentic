@@ -156,7 +156,8 @@ export const IN_MEMORY_CAPABILITIES: CapabilityReport = {
     cancel: true,
     steer: false,
     permissions: 'none',
-    tools: 'mcp'
+    tools: 'mcp',
+    login: 'relay'
 };
 
 /** The build the fake reports (#359): a prerelease, so any real release orders above it. */
