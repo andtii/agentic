@@ -26,7 +26,8 @@ export function checkPolicyRoots(input: unknown, os: MachineOs | undefined): str
     if (roots.length > POLICY_MAX_ROOTS) throw new ServerFnError(400, `machine: at most ${POLICY_MAX_ROOTS} folders`);
     const out: string[] = [];
     const keys = new Set<string>();
-    const keyOs = hostOs(os) ?? 'linux';
+    // With the OS unknown (at pairing), a Windows-looking root is keyed as Windows, so `C:/src` and `c:\src` are one folder there too.
+    const keyOs = (root: string): HostOs => hostOs(os) ?? (/^[A-Za-z]:[\\/]|^~\\/.test(root) ? 'windows' : 'linux');
     for (const raw of roots) {
         if (typeof raw !== 'string' || raw.trim() === '') throw new ServerFnError(400, 'machine: a folder is a non-empty path');
         const root = raw.trim();
@@ -38,7 +39,7 @@ export function checkPolicyRoots(input: unknown, os: MachineOs | undefined): str
             if (!absolute) throw new ServerFnError(400, `machine: ${root} is not an absolute path (or ~ / ~/…)`);
         }
         // The same folder spelled twice (`C:/src` and `C:/src/`) is one folder; the first spelling stays.
-        const key = policyRootKey(root, keyOs);
+        const key = policyRootKey(root, keyOs(root));
         if (!keys.has(key)) {
             keys.add(key);
             out.push(root);

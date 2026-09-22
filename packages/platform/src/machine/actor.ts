@@ -1312,7 +1312,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     kind: 'auth.elevated',
                     at: now(),
                     by: principalLabel(principal),
-                    summary: `${principal.userId} confirmed with the login provider to change machine ${ctx.state.name || machineId}`,
+                    summary: `${principal.userId} confirmed with the login provider; elevated for machine ${ctx.state.name || machineId} until ${new Date(principal.elevatedUntil).toISOString()}`,
                     data: { userId: principal.userId, until: principal.elevatedUntil }
                 });
             }
@@ -1791,8 +1791,9 @@ export function defineMachineActor(ports: MachinePorts) {
                  */
                 async setPolicy(input: MachinePolicyInput): Promise<PolicyRequested> {
                     const s = ctx.state;
-                    const allowedRoots = checkPolicyRoots(input, s.os);
+                    // Elevation first: a plain owner is told to confirm, not what the input would have to look like.
                     requireElevated(ctx.principal as Principal | null, now(), `change the folders the web may use on ${s.name || machineId}`);
+                    const allowedRoots = checkPolicyRoots(input, s.os);
                     await auditElevation();
                     const at = now();
                     const previous = s.policyDesired?.allowedRoots ?? s.policy?.requested ?? s.policy?.allowedRoots ?? [];
@@ -1815,8 +1816,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 /** List a folder of the machine (or its roots) for the folder picker (#480): owner only, elevated — it sees past `cwdRoots`. */
                 async browseMachine(path?: string): Promise<PolicyRequested> {
                     const s = ctx.state;
-                    if (path !== undefined && (typeof path !== 'string' || path.trim() === '' || path.length > 1024)) throw new ServerFnError(400, 'machine: a folder to browse is a non-empty path');
                     requireElevated(ctx.principal as Principal | null, now(), `browse the folders of ${s.name || machineId}`);
+                    if (path !== undefined && (typeof path !== 'string' || path.trim() === '' || path.length > 1024)) throw new ServerFnError(400, 'machine: a folder to browse is a non-empty path');
                     await auditElevation();
                     return policyRequest(path === undefined ? { op: 'browse' } : { op: 'browse', path: path.trim() }, principalLabel(ctx.principal));
                 },

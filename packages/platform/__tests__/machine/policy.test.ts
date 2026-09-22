@@ -102,6 +102,9 @@ describe('Machine.setPolicy (#480)', () => {
         expect(await statusOf(machine(owner).setPolicy({ allowedRoots: ['~'] }))).toBe(403);
         expect(await statusOf(machine(daemonPrincipal).setPolicy({ allowedRoots: ['~'] }))).toBe(403);
         expect(await statusOf(machine({ kind: 'agent', workspaceId: WS, agentId: 'a' as never, sessionId: 's' as never }).setPolicy({ allowedRoots: ['~'] }))).toBe(403);
+        // A plain owner is told to confirm before anything about the input: 403, not 400.
+        expect(await statusOf(machine(owner).setPolicy({ allowedRoots: ['src'] }))).toBe(403);
+        expect(await statusOf(machine(owner).browseMachine('   '))).toBe(403);
         expect(await statusOf(machine(elevated).setPolicy({ allowedRoots: ['src'] }))).toBe(400);
         expect(await statusOf(machine(elevated).setPolicy({ allowedRoots: ['\\\\nas\\share'] }))).toBe(400);
         expect(await statusOf(machine(elevated).setPolicy({ allowedRoots: Array.from({ length: 33 }, (_, i) => `C:\\r${i}`) }))).toBe(400);
@@ -296,8 +299,8 @@ describe('the pure half', () => {
     it('checkPolicyRoots: ~ forms and absolute paths on the machine’s OS, never a network path, at most 32, no repeats', () => {
         expect(checkPolicyRoots({ allowedRoots: [' ~ ', '~/src', 'C:\\Dev', 'C:\\Dev', 'D:/x/../y'] }, 'windows')).toEqual(['~', '~/src', 'C:\\Dev', 'D:/x/../y']);
         expect(checkPolicyRoots({ allowedRoots: ['/home/me', '~'] }, 'linux')).toEqual(['/home/me', '~']);
-        // The OS unknown (at pairing): a lexical check of either family.
-        expect(checkPolicyRoots({ allowedRoots: ['/home/me', 'C:\\Dev', '~\\x'] }, undefined)).toEqual(['/home/me', 'C:\\Dev', '~\\x']);
+        // The OS unknown (at pairing): a lexical check of either family, and a Windows-looking root deduped the Windows way.
+        expect(checkPolicyRoots({ allowedRoots: ['/home/me', 'C:\\Dev', '~\\x', 'c:/dev', '/home/me/'] }, undefined)).toEqual(['/home/me', 'C:\\Dev', '~\\x']);
         for (const bad of [{ allowedRoots: ['src'] }, { allowedRoots: ['/home/me'] }, { allowedRoots: ['\\\\nas\\share'] }, { allowedRoots: ['//nas/share'] }, { allowedRoots: [''] }, { allowedRoots: [1] }, {}, null, { allowedRoots: ['~x'] }]) {
             expect(() => checkPolicyRoots(bad, 'windows'), JSON.stringify(bad)).toThrow();
         }
