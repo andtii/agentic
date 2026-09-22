@@ -73,9 +73,13 @@ Rendered from the artboard source at 1×, at the artboard's own size. Sample dat
 
 ![Machine detail with environments, sessions, doctor and revoke](screenshots/Machine.png)
 
+Since #482 the page is where a machine is set up and controlled, no terminal needed after the install line. Under the header, a **setup checklist** (`[data-setup-checklist]`): Paired → Folders → Environment → Signed in → Ready; done steps fold to a tick and a word, the current one is open with its note and one action (Rename, Choose folders, Add environment, Show the command, Run the doctor), the rest dim; once everything is done it is one line. Above the environments, **Folders the web may use** (`[data-policy-card]`, `data-policy-state` = `web` / `local` / `locked` / `off` / `no-feature`): each root as asked beside what the daemon made of it (`~ → C:\Users\andy`, a `not applied yet` tag until the machine reports it), a WEB / LOCAL / LOCKED / OFF pill, who set it and when; an "Add a folder" field (a `~` form or a full path), **Browse…** (a picker over the whole machine in the workdir picker's anatomy: the machine's roots, then folders; "Allow this folder"), Remove per row, **Save folders** once the list differs and **Discard**. Saving (and browsing) asks the user to confirm with GitHub once (the elevate dialog, #355); a locked machine is read-only with the `agentic-daemon policy unlock` command well; a daemon that predates web-set folders keeps the local `allow-root` well. The environment dialog gains an **Allow bypassPermissions** switch (on needs the same confirmation). **This machine** gains **Restart…** (a confirm naming the running turns, a When-idle / Now choice; the update card then follows the restart and ends on "Restarted at …") and a **Daemon log** disclosure (the last 200 lines, monospace, Refresh, "the file holds more", and an explanation when the daemon runs in a terminal).
+
 ### Pair `/pair`
 
 ![Pairing steps with six-character code](screenshots/Pair.png)
+
+Step 2 carries the machine name and, since #482, **Folders the web may use** (`[data-pair-folders]`, a textarea, one per line, default `~`): they ride the pending record and become the machine's policy on its first hello, so a fresh machine is usable from the page at once. Changing either field mints a fresh code. Full paths also go on the by-hand `agentic-daemon pair` command as `--allow-root` for a headless install; a `~` form never does (the daemon's `pair` takes absolute paths only).
 
 ### Schedules `/schedules`
 

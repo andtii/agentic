@@ -1,25 +1,31 @@
 /**
  * `/pair` on the platform (#144): the page mints a pairing code through
- * `Workspace.registerMachinePending({ name })` as soon as it knows the
- * workspace — six characters, single use, ten minutes (architecture §9) —
- * and shows the runbook's install line and the by-hand `agentic-daemon
- * pair` command with the code, this origin and the machine name. The name
- * is what the daemon registers under (`--name`); changing it mints a fresh
- * code so the index entry and the daemon agree. "New code" after expiry
- * mints again. The pending record is watched live: the moment the daemon
- * redeems the code (`Machine.paired`) the page moves to the machine.
+ * `Workspace.registerMachinePending({ name, allowedRoots })` as soon as it
+ * knows the workspace — six characters, single use, ten minutes
+ * (architecture §9) — and shows the runbook's install line and the by-hand
+ * `agentic-daemon pair` command with the code, this origin and the machine
+ * name. The name is what the daemon registers under (`--name`); the folders
+ * the web may use (#482, default `~`) ride the pending record and become the
+ * machine's policy on its first hello. Changing either mints a fresh code so
+ * the index entry and the daemon agree. "New code" after expiry mints again.
+ * The pending record is watched live: the moment the daemon redeems the code
+ * (`Machine.paired`) the page moves to the machine.
  */
 import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
 import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { Button, EmptyState, TextField } from '@agentic/ui';
+import { Button, EmptyState, TextField, TextareaField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { pairing } from '../../mock/ops';
 import { OpsPage } from '../ops/OpsPage';
 import { PairView } from '../Pair';
 import { defaultMachineName, pairCommands, secondsLeft } from './live';
+import { rootsOf } from './manage';
+
+/** What a fresh machine may use unless the owner says otherwise: the daemon user's home folder. */
+export const DEFAULT_PAIR_FOLDERS = '~';
 
 /** The daemon's `--url`: this page's origin in the browser, a placeholder while rendering elsewhere. */
 export const pageOrigin = (): string => (typeof location !== 'undefined' ? location.origin : '');
@@ -28,20 +34,22 @@ export const LivePair = component(() => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
-    const st = signal({ name: '', minted: '', allowRoot: '', code: '', expiresIn: 0, machineId: '', busy: false, error: '' });
+    const st = signal({ name: '', minted: '', folders: DEFAULT_PAIR_FOLDERS, mintedFolders: '', code: '', expiresIn: 0, machineId: '', busy: false, error: '' });
 
-    /** Register a pending machine under the current name; the code and its expiry replace the page's. */
+    /** Register a pending machine under the current name and folders; the code and its expiry replace the page's. */
     const mint = async (ws: string): Promise<void> => {
         const name = st.name.trim();
         if (!name || st.busy) return;
         st.busy = true;
         st.error = '';
+        const allowedRoots = rootsOf(st.folders);
         try {
-            const r = await actor(defs.Workspace, workspaceKeyOf(ws)).registerMachinePending({ name });
+            const r = await actor(defs.Workspace, workspaceKeyOf(ws)).registerMachinePending({ name, allowedRoots });
             st.code = r.pairingCode;
             st.expiresIn = secondsLeft(r.expiresAt, Date.now());
             st.machineId = r.machineId;
             st.minted = name;
+            st.mintedFolders = allowedRoots.join('\n');
         } catch (e) {
             st.error = e instanceof Error ? e.message : String(e);
         } finally {
@@ -78,9 +86,10 @@ export const LivePair = component(() => {
     });
     onUnmounted(stopWatch);
 
-    const rename = (): void => {
+    /** The name or the folders changed since the code was minted: mint again so the pending record says what the page says. */
+    const changed = (): void => {
         const ws = viewer.workspaceId;
-        if (ws && st.name.trim() && st.name.trim() !== st.minted) void mint(ws);
+        if (ws && st.name.trim() && (st.name.trim() !== st.minted || rootsOf(st.folders).join('\n') !== st.mintedFolders)) void mint(ws);
     };
 
     return (): JSXElement => {
@@ -107,7 +116,7 @@ export const LivePair = component(() => {
                 </OpsPage>
             );
         }
-        const commands = pairCommands(pageOrigin(), st.code, st.minted, st.allowRoot);
+        const commands = pairCommands(pageOrigin(), st.code, st.minted, st.mintedFolders.split('\n'));
         return (
             <>
                 <PairView
@@ -120,16 +129,17 @@ export const LivePair = component(() => {
                     slots={{
                         name: () => (
                             <>
-                                <div onChange={rename}>
+                                <div onChange={changed}>
                                     <TextField model={() => st.name} name="machine-name" label="Machine name" description="The daemon registers under this name; changing it issues a new code." disabled={st.busy} />
                                 </div>
-                                <div data-pair-allow-root>
-                                    <TextField
-                                        model={() => st.allowRoot}
-                                        name="allow-root"
-                                        label="Folder agents may work in (optional)"
-                                        placeholder="C:\Dev"
-                                        description="Lets this page add environments inside that folder once the machine is paired. Leave it empty to keep managing them on the machine."
+                                <div data-pair-folders onChange={changed}>
+                                    <TextareaField
+                                        model={() => st.folders}
+                                        name="allowed-roots"
+                                        label="Folders the web may use"
+                                        rows={2}
+                                        description="One per line. ~ is the daemon user's home folder on the machine; add more later from the machine's page. Full paths also go on the by-hand command as --allow-root."
+                                        disabled={st.busy}
                                     />
                                 </div>
                             </>

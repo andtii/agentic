@@ -1,8 +1,9 @@
 import { component, signal, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
-import type { EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
-import { Button, ConfirmDialog, EmptyState, Icon, Label, StatusPill, TextField } from '@agentic/ui';
-import { doctorChecks, doctorFootnote, environmentsOf, machinePolicyOf, opsAgent, opsMachine, opsQuota, opsTelemetry, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
+import type { DaemonFeature, EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
+import type { MachineUpdateView } from '@agentic/platform';
+import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, TextField } from '@agentic/ui';
+import { doctorChecks, doctorFootnote, environmentsOf, opsAgent, opsDaemonLog, opsMachine, opsPolicy, opsQuota, opsTelemetry, opsUpdate, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { CommandWell } from './machines/CommandWell';
 import { EnvironmentDialog } from './machines/EnvironmentDialog';
@@ -10,11 +11,15 @@ import { EnvironmentGrid, mockDefaultFor, type EnvironmentFacts } from './machin
 import { machineHead } from './machines/head';
 import { LiveMachine } from './machines/LiveMachine';
 import { MockHarnessCard } from './machines/MockHarnessCard';
+import { MockPolicyCard } from './machines/MockPolicyCard';
 import { MockUpdateCard } from './machines/MockUpdateCard';
 import { SessionsTable } from './machines/SessionsTable';
-import { buildLabel } from './machines/update';
+import { SetupChecklist } from './machines/SetupChecklist';
+import { buildLabel, impactText } from './machines/update';
 import { loadText, loadTone, machineLoadOf, sessionLoadOf, warningText, type DefaultForAgent, type MachineLoad } from './machines/live';
-import { allowRootCommand, fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
+import { fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
+import { logErrorText, policyCardState, type LogState } from './machines/policy';
+import { setupSteps, type SetupStepId } from './machines/setup';
 import { LinkButton } from './ops/LinkButton';
 import { OpsPage } from './ops/OpsPage';
 import { defineTopbar, routeId } from '../components/topbar';
@@ -22,15 +27,25 @@ import { defineTopbar, routeId } from '../components/topbar';
 /**
  * The page's last environment request (#239) as the container tracks it:
  * `pending` while the daemon has not answered, then `done` (the dialog
- * closes; the row arrives with the daemon's `env` frame) or `error`.
- * `seq` tells two requests with the same outcome apart.
+ * closes; the row arrives with the daemon's `env` frame) or `error` — or
+ * `elevate` (#482): the platform wants the user to confirm with GitHub
+ * first; the dialog closes too, its draft rides the round trip and one
+ * Confirm click on the way back sends it. `seq` tells two requests with the
+ * same outcome apart.
  */
 export interface EnvRequestState {
     readonly op: 'put' | 'remove';
     readonly environmentId?: string;
-    readonly status: 'pending' | 'done' | 'error';
+    readonly status: 'pending' | 'done' | 'error' | 'elevate';
     readonly failure?: EnvFailure;
     readonly seq: number;
+}
+
+/** A restart asked from the page (#481): `pending` until the daemon comes back (the update card's `last` then reads "Restarted"), or why it was refused. */
+export interface RestartState {
+    readonly status: 'pending' | 'error';
+    readonly mode?: 'drain' | 'now';
+    readonly message?: string;
 }
 
 export type MachineViewProps =
@@ -66,31 +81,52 @@ export type MachineViewProps =
     /** "Runtimes on this machine" (#370) under the environments: the live page's or the mock's. */
     & Define.Slot<'harness'>
     /** The machine's own CPU and memory (#400): in the caption, and an alert under the hero while a limit is crossed. */
-    & Define.Prop<'machineLoad', MachineLoad>;
+    & Define.Prop<'machineLoad', MachineLoad>
+    /** What the daemon answers (`hello.features`, #359): `policy` for the folders card, `log` for the log, `update` for a restart. */
+    & Define.Prop<'features', readonly DaemonFeature[]>
+    /** "Folders the web may use" (#482) above the environments: the live card or the mock's. */
+    & Define.Slot<'policy'>
+    /** What a restart interrupts (`updateState().impact`); absent → the confirm cannot name them. */
+    & Define.Prop<'impact', MachineUpdateView['impact']>
+    & Define.Prop<'restartState', RestartState | null>
+    /** Restart the daemon (`Machine.requestRestart`): after running turns end, or now. */
+    & Define.Event<'restart', 'drain' | 'now'>
+    /** The daemon log disclosure (#481): its state, and `log` asks for the tail (on open, and Refresh). */
+    & Define.Prop<'log', LogState | null>
+    & Define.Event<'readLog'>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** The first folder a machine's environments already work in: the likeliest one to allow. */
-const likelyRoot = (environments: readonly EnvironmentDescriptor[]): string | undefined => environments.flatMap((e) => e.cwdRoots)[0];
+export const likelyRoot = (environments: readonly EnvironmentDescriptor[]): string | undefined => environments.flatMap((e) => e.cwdRoots)[0];
 
 /**
  * `/machines/:id` — the machine header, its environments as reported by
  * the daemon, the active sessions table, the EXE-07 doctor checklist and
  * the revoke card. Revoking says sessions become disconnected, not failed.
  *
- * Setting the machine up (#239): with web management on (the machine's own
- * `policy.json`), environments are added, changed and removed here and the
- * daemon writes them; off, the page shows the command that turns it on. A
- * signed-out account shows the command that signs it in — logins never
- * leave the machine. "This machine" renames it or removes it from the
- * workspace (revoked first).
+ * Setting the machine up (#239, #482): the checklist under the header says
+ * which step is next (Paired → Folders → Environment → Signed in → Ready).
+ * "Folders the web may use" (the `policy` slot) sets the machine's policy
+ * from here; with web management on, environments are added, changed and
+ * removed here and the daemon writes them. A signed-out account shows the
+ * command that signs it in — logins never leave the machine. "This machine"
+ * renames it, restarts its daemon (drain or now), shows the daemon's log,
+ * or removes it from the workspace (revoked first).
  */
 export const MachineView = component<MachineViewProps>(({ props, emit, slots }) => {
-    const ui = signal({ revoking: false, envOpen: false, editing: '', removing: '', removeOpen: false, renaming: false, name: '', renameAttempted: false, removingMachine: false });
+    const ui = signal({ revoking: false, envOpen: false, editing: '', removing: '', removeOpen: false, renaming: false, name: '', renameAttempted: false, removingMachine: false, restarting: false, restartMode: 'drain' as 'drain' | 'now', logOpen: false });
+    /** Scroll a card into view — the checklist's "go there" for the steps whose action is a card. Browser only. */
+    const goTo = (selector: string): void => {
+        if (typeof document === 'undefined') return;
+        const el = document.querySelector<HTMLElement>(selector);
+        el?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+        el?.querySelector<HTMLElement>('input, button')?.focus?.();
+    };
     // A finished request closes the dialog it came from; a refusal keeps it open with the reason.
     watch(() => props.envRequest?.seq, () => {
         const r = props.envRequest;
-        if (r?.status !== 'done') return;
+        if (r?.status !== 'done' && r?.status !== 'elevate') return;
         if (r.op === 'put') ui.envOpen = false;
         else ui.removeOpen = false;
     });
@@ -105,6 +141,33 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
         const policy = policyState(props.policy);
         const manageable = policy === 'on' && !revoked;
         const offline = !m.online;
+        const features = props.features ?? [];
+        const steps = setupSteps({ name: m.name, online: m.online, revoked, policy: policyCardState(props.policy, features), webManaged: policy === 'on', environments: props.environments, doctor: props.doctor });
+        const onStep = (id: SetupStepId): void => {
+            switch (id) {
+                case 'paired':
+                    ui.name = m.name;
+                    ui.renameAttempted = false;
+                    ui.renaming = true;
+                    return;
+                case 'folders':
+                    return goTo('[data-policy-card]');
+                case 'environment':
+                    if (manageable && !offline) {
+                        ui.editing = '';
+                        ui.envOpen = true;
+                    } else goTo('[data-machine-envs]');
+                    return;
+                case 'signed-in':
+                    return goTo('[data-env-login]');
+                case 'ready':
+                    return emit('recheck');
+            }
+        };
+        const restartable = features.includes('update') && !revoked;
+        const impact = props.impact ?? { runningTurns: [], liveSessions: 0 };
+        const restart = props.restartState ?? null;
+        const log = props.log ?? null;
         const editing = props.environments.find((e) => e.id === ui.editing);
         const removing = props.environments.find((e) => e.id === ui.removing);
         const runtimes = props.runtimes ?? [];
@@ -148,6 +211,8 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     </p>
                 ) : null}
 
+                {!revoked ? <SetupChecklist steps={steps} disabled={offline ? ['environment'] : []} onAction={onStep} /> : null}
+
                 {slots.update?.()}
 
                 <section aria-label="Environments" data-machine-envs>
@@ -158,17 +223,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                             : <span data-label-aside>reported by the daemon</span>}
                     </div>
                     {manageable && offline ? <p data-env-note>The machine is offline. Environments can be changed while its daemon is connected.</p> : null}
-                    {!revoked && policy !== 'on' ? (
-                        <div data-card data-env-policy={policy}>
-                            <p data-card-text>
-                                {policy === 'unknown'
-                                    ? `The daemon on ${m.name} does not say whether this page may manage its environments. Update agentic-daemon there, then allow the folder agents may work in:`
-                                    : `${m.name} does not let this page manage its environments. To add them here, allow the folder agents may work in — on the machine:`}
-                            </p>
-                            <CommandWell command={allowRootCommand(likelyRoot(props.environments))} fallback={fallbackCommand(allowRootCommand(likelyRoot(props.environments)), m.os)} />
-                            <p data-card-text>Only a command on the machine can widen what the web may reach. The page picks the change up when the daemon reports it.</p>
-                        </div>
-                    ) : null}
+                    {!revoked ? slots.policy?.() : null}
                     {props.environments.length
                         ? <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} load={props.load} actions={actions} />
                         : <EmptyState caption={m.online ? (manageable ? 'No environment yet. Add one to run agents on this machine.' : 'The daemon reported no environment.') : 'The daemon has not connected yet: its environments arrive with its first hello.'} />}
@@ -231,11 +286,51 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
 
                         <section data-card aria-label="This machine" data-machine-manage>
                             <div data-label-row><Label>This machine</Label></div>
-                            <p data-card-text>Rename it, or remove it from this workspace. Removing revokes its token first; its environments and logins stay on the machine.</p>
+                            <p data-card-text>Rename it, restart its daemon, or remove it from this workspace. Removing revokes its token first; its environments and logins stay on the machine.</p>
                             <div data-card-actions>
                                 <Button intent="default" onClick={() => { ui.name = m.name; ui.renameAttempted = false; ui.renaming = true; }}>Rename</Button>
+                                {restartable ? <Button intent="default" disabled={offline || restart?.status === 'pending'} onClick={() => { ui.restartMode = 'drain'; ui.restarting = true; }}>Restart…</Button> : null}
                                 <Button intent="danger" onClick={() => { ui.removingMachine = true; }}>Remove from workspace</Button>
                             </div>
+                            {restart?.status === 'pending' ? <p data-machine-restart role="status">Restarting {restart.mode === 'now' ? 'now' : 'when idle'} — the daemon comes back on its own; the update card follows it.</p> : null}
+                            {restart?.status === 'error' ? <p data-machine-restart data-tone="failed" role="alert">{restart.message}</p> : null}
+                            {features.includes('log') && !revoked ? (
+                                <details data-daemon-log onToggle={(e: Event) => { const open = (e.currentTarget as HTMLDetailsElement).open; ui.logOpen = open; if (open && !log) emit('readLog'); }}>
+                                    <summary>Daemon log</summary>
+                                    <div data-daemon-log-body>
+                                        <div data-label-row>
+                                            <span data-label-aside>{log?.status === 'done' ? `The last ${log.lines?.length ?? 0} lines${log.truncated ? ' — the file holds more' : ''}` : log?.status === 'pending' ? 'Reading…' : 'Token-redacted, read from the machine.'}</span>
+                                            <Button intent="default" disabled={offline || log?.status === 'pending'} loading={log?.status === 'pending'} onClick={() => emit('readLog')}>Refresh</Button>
+                                        </div>
+                                        {log?.status === 'done' ? (log.lines?.length ? <pre data-daemon-log-lines>{log.lines.join('\n')}</pre> : <p data-env-note>The log is empty.</p>) : null}
+                                        {log?.status === 'error' && log.error ? <p data-env-failure role="alert">{logErrorText(log.error)}</p> : null}
+                                        {offline && !log ? <p data-env-note>The machine is offline. The log can be read while its daemon is connected.</p> : null}
+                                    </div>
+                                </details>
+                            ) : null}
+                            <ConfirmDialog
+                                model={() => ui.restarting}
+                                title={`Restart the daemon on ${m.name}?`}
+                                description={`${impactText(impact)} Nothing is downloaded: the same build comes back, and idle sessions re-open with their next message.`}
+                                confirmLabel={ui.restartMode === 'now' && impact.runningTurns.length ? `Interrupt ${impact.runningTurns.length} and restart` : 'Restart'}
+                                cancelLabel="Not now"
+                                danger={false}
+                                onCancel={() => { ui.restarting = false; }}
+                                onConfirm={() => { ui.restarting = false; emit('restart', ui.restartMode); }}
+                            >
+                                <SelectField
+                                    model={() => ui.restartMode}
+                                    name="restart-mode"
+                                    label="When"
+                                    options={[{ value: 'drain', label: 'When idle — after the running turns end' }, { value: 'now', label: impact.runningTurns.length ? `Now — interrupt ${plural(impact.runningTurns.length, 'running turn', 'running turns')}` : 'Now' }]}
+                                />
+                                {impact.runningTurns.length ? (
+                                    <div data-update-impact>
+                                        <p data-update-impact-label>Running turns · {impact.runningTurns.length}</p>
+                                        <ul data-update-turns>{impact.runningTurns.map((t) => <li data-update-turn={t.sessionId}>{(props.agents ?? opsAgent)(t.agentId).name} · {t.sessionId}</li>)}</ul>
+                                    </div>
+                                ) : null}
+                            </ConfirmDialog>
                             <ConfirmDialog
                                 model={() => ui.renaming}
                                 title={`Rename ${m.name}`}
@@ -315,16 +410,26 @@ const mockEnvId = (machineId: string, name: string): string => `env_${machineId.
  */
 const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props }) => {
     const router = useRouter();
-    const policy = machinePolicyOf(props.machine.id);
     const telemetry = opsTelemetry[props.machine.id];
     const now = Date.now();
-    const st = signal({ environments: [...environmentsOf(props.machine.id)], name: props.machine.name, request: null as EnvRequestState | null, seq: 0 });
+    const sample = opsPolicy(props.machine.id);
+    const st = signal({ environments: [...environmentsOf(props.machine.id)], name: props.machine.name, request: null as EnvRequestState | null, seq: 0, policy: sample.policy as MachinePolicy | undefined, features: sample.features as readonly DaemonFeature[], restart: null as RestartState | null, log: null as LogState | null });
+    const policyOf = (): MachinePolicy | undefined => st.policy;
+    const restart = (mode: 'drain' | 'now'): void => {
+        st.restart = { status: 'pending', mode };
+        setTimeout(() => { st.restart = null; }, 1500);
+    };
+    const readLog = (): void => {
+        st.log = { status: 'pending' };
+        setTimeout(() => { st.log = props.machine.online ? { status: 'done', lines: opsDaemonLog, truncated: true } : { status: 'error', error: { code: 'machine-offline', message: '' } }; }, 300);
+    };
     const answer = (r: Omit<EnvRequestState, 'seq'>): void => {
         st.seq += 1;
         st.request = { ...r, seq: st.seq };
     };
     const save = (input: EnvironmentInput): void => {
         const os = props.machine.os;
+        const policy = policyOf();
         const roots = rootsOf(input.cwdRoots.join('\n'));
         const outside = roots.find((r) => !(policy?.allowedRoots ?? []).some((a) => isWithin(r, a, os)));
         if (!policy?.webManaged) return answer({ op: 'put', status: 'error', failure: { code: 'policy-disabled', message: '' } });
@@ -339,7 +444,8 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
             account: { label: input.accountLabel ?? input.name, authStatus: was?.account.authStatus ?? 'missing' },
             cwdRoots: roots,
             concurrency: { active: was?.concurrency.active ?? 0, max: input.concurrency ?? was?.concurrency.max ?? 1 },
-            isolation: 'config-dir'
+            isolation: 'config-dir',
+            ...(input.allowBypassPermissions ?? was?.allowBypassPermissions ? { allowBypassPermissions: true } : {})
         };
         st.environments = was ? st.environments.map((e) => (e.id === id ? next : e)) : [...st.environments, next];
         answer({ op: 'put', environmentId: id, status: 'done' });
@@ -361,16 +467,34 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
             defaultFor={mockDefaultFor}
             quota={opsQuota}
             {...(telemetry ? { load: telemetry.environments, machineLoad: machineLoadOf(telemetry, now) } : {})}
-            {...(policy ? { policy } : {})}
+            {...(st.policy ? { policy: st.policy } : {})}
+            features={st.features}
             runtimes={runtimesOf([], st.environments)}
             envRequest={st.request}
             onSaveEnvironment={save}
             onRemoveEnvironment={remove}
             onRename={(name: string) => { st.name = name; }}
             onRemoveMachine={() => { void router.push('/machines'); }}
+            impact={opsUpdate(props.machine.id).impact}
+            restartState={st.restart}
+            onRestart={restart}
+            log={st.log}
+            onReadLog={readLog}
             slots={{
                 update: () => <MockUpdateCard machineId={props.machine.id} name={st.name} os={props.machine.os} daemonVersion={props.machine.daemonVersion} />,
-                harness: () => <MockHarnessCard machineId={props.machine.id} name={st.name} os={props.machine.os} online={props.machine.online} />
+                harness: () => <MockHarnessCard machineId={props.machine.id} name={st.name} os={props.machine.os} online={props.machine.online} />,
+                policy: () => (
+                    <MockPolicyCard
+                        machineId={props.machine.id}
+                        name={st.name}
+                        os={props.machine.os}
+                        online={props.machine.online}
+                        {...(st.policy ? { policy: st.policy } : {})}
+                        features={st.features}
+                        likelyRoot={likelyRoot(st.environments) ?? ''}
+                        onChange={(next: { policy: MachinePolicy | undefined; features: readonly DaemonFeature[] }) => { st.policy = next.policy; st.features = next.features; }}
+                    />
+                )
             }}
         />
     );

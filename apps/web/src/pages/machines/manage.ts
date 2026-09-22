@@ -2,14 +2,15 @@
  * Setting a machine up from its page (#239): the pure half of adding,
  * changing and removing environments through `Machine.putEnvironment` /
  * `removeEnvironment` (#237), the commands the page hands the user for the
- * two steps that stay on the machine — turning web management on
- * (`agentic-daemon policy allow-root`, #238) and signing an account in
- * (`agentic-daemon env login`, #235) — the long form for a daemon installed
- * before the installer wrote a launcher (#354) — and how a refusal reads.
+ * steps that stay on the machine — signing an account in (`agentic-daemon
+ * env login`, #235), and turning web management on with `policy allow-root`
+ * (#238) on a daemon that predates web-set folders (#355; `./policy.ts` is
+ * the folders card's half) — the long form for a daemon installed before
+ * the installer wrote a launcher (#354) — and how a refusal reads.
  *
- * The daemon's machine-local policy is the authority (decisions 2026-09-19
- * (c)): the check here only saves a round trip for a folder that is plainly
- * outside `allowedRoots`; the daemon resolves links and decides.
+ * The daemon's policy is what it enforces, whoever set it: the check here
+ * only saves a round trip for a folder that is plainly outside
+ * `allowedRoots`; the daemon resolves links and decides.
  */
 import type { EnvError, EnvErrorCode, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, HostOs, MachinePolicy } from '@agentic/core';
 
@@ -22,6 +23,10 @@ export interface EnvironmentDraft {
     roots: string;
     concurrency: number | null;
     accountLabel: string;
+    /** Sessions here may run in a mode that asks about nothing (#450, #482): turning it on needs elevation. */
+    allowBypass: boolean;
+    /** The environment had it when the dialog opened: turning it off is sent as an explicit `false`. */
+    hadBypass?: boolean;
 }
 
 export type DraftField = 'name' | 'runtime' | 'roots' | 'concurrency';
@@ -29,16 +34,21 @@ export type DraftErrors = Partial<Record<DraftField, string>>;
 
 /** A refusal the page shows: the daemon's own `EnvError`, or why the platform never sent the request. */
 export interface EnvFailure {
-    readonly code: EnvErrorCode | 'machine-offline' | 'revoked' | 'forbidden' | 'not-found' | 'internal';
+    readonly code: EnvErrorCode | 'machine-offline' | 'revoked' | 'forbidden' | 'not-found' | 'internal' | 'policy-locked' | 'protected';
     readonly message: string;
 }
 
-/** Where web management stands on a machine: `unknown` when its daemon reports no policy (it predates #238, or never said hello). */
-export type PolicyState = 'on' | 'off' | 'unknown';
+/**
+ * Where web management stands on a machine: `unknown` when its daemon reports no policy (it predates #238, or never
+ * said hello); `locked` when it is off AND locked on the machine (#355) — nothing the web can turn on. A locked policy
+ * that is on still reads `on`: environments inside its folders are managed as usual, only the folders are read-only.
+ */
+export type PolicyState = 'on' | 'off' | 'unknown' | 'locked';
 
 export function policyState(policy: MachinePolicy | undefined): PolicyState {
     if (!policy) return 'unknown';
-    return policy.webManaged ? 'on' : 'off';
+    if (policy.webManaged) return 'on';
+    return policy.locked ? 'locked' : 'off';
 }
 
 /** A shell argument as the user pastes it: quoted when it holds a space or a quote. */
@@ -88,7 +98,7 @@ export function runtimesOf(capabilities: readonly { readonly runtime: string }[]
 }
 
 export function emptyDraft(runtimes: readonly string[]): EnvironmentDraft {
-    return { id: '', name: '', runtime: runtimes[0] ?? '', roots: '', concurrency: null, accountLabel: '' };
+    return { id: '', name: '', runtime: runtimes[0] ?? '', roots: '', concurrency: null, accountLabel: '', allowBypass: false, hadBypass: false };
 }
 
 /** An environment as the dialog edits it; the account label is kept only when it differs from the name (the daemon's default). */
@@ -99,7 +109,9 @@ export function draftOf(env: EnvironmentDescriptor): EnvironmentDraft {
         runtime: env.runtime,
         roots: env.cwdRoots.join('\n'),
         concurrency: env.concurrency.max,
-        accountLabel: env.account.label === env.name ? '' : env.account.label
+        accountLabel: env.account.label === env.name ? '' : env.account.label,
+        allowBypass: env.allowBypassPermissions === true,
+        hadBypass: env.allowBypassPermissions === true
     };
 }
 
@@ -169,7 +181,11 @@ export function validateDraft(draft: EnvironmentDraft, context: DraftContext): D
     return errors;
 }
 
-/** The request `putEnvironment` sends; an unset concurrency or label leaves the daemon's (or the environment's own) value. */
+/**
+ * The request `putEnvironment` sends; an unset concurrency or label leaves the daemon's (or the environment's own)
+ * value. `allowBypassPermissions` goes only when it is on, or to turn it off where it was on (the daemon keeps the
+ * flag when the field is absent, #479).
+ */
 export function inputOf(draft: EnvironmentDraft): EnvironmentInput {
     const label = draft.accountLabel.trim();
     return {
@@ -178,9 +194,14 @@ export function inputOf(draft: EnvironmentDraft): EnvironmentInput {
         runtime: draft.runtime,
         cwdRoots: rootsOf(draft.roots),
         ...(draft.concurrency !== null ? { concurrency: draft.concurrency } : {}),
-        ...(label ? { accountLabel: label } : {})
+        ...(label ? { accountLabel: label } : {}),
+        ...(draft.allowBypass ? { allowBypassPermissions: true } : draft.hadBypass ? { allowBypassPermissions: false } : {})
     };
 }
+
+/** Whether a save turns `bypassPermissions` on where it was off: the one environment change that needs elevation (#480). */
+export const turnsBypassOn = (input: EnvironmentInput, environments: readonly EnvironmentDescriptor[]): boolean =>
+    input.allowBypassPermissions === true && !(input.id && environments.some((e) => e.id === input.id && e.allowBypassPermissions === true));
 
 /** The dialog field a refusal belongs under, or `null` for the dialog's own error line. */
 export function failureField(failure: EnvFailure): DraftField | null {
@@ -221,6 +242,10 @@ export function failureText(failure: EnvFailure): string {
             return 'This machine is revoked.';
         case 'forbidden':
             return 'Only the workspace owner can change a machine.';
+        case 'policy-locked':
+            return 'The policy is locked on the machine: run agentic-daemon policy unlock there first.';
+        case 'protected':
+            return `A folder is inside the daemon's own folders and cannot be used.${detail}`;
         default:
             return failure.message || 'Something went wrong.';
     }

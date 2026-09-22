@@ -3,8 +3,9 @@
  * whose socket captures what the platform sends, so the page's
  * `putEnvironment` / `removeEnvironment` become `env.request` frames a test
  * answers the way a daemon does (`env` with the new descriptors, then
- * `env.response`). Also: the policy-off state, the sign-in command, rename,
- * remove (revoked first, #259) and `/pair`'s `--allow-root`.
+ * `env.response`). Also: the policy-off state, the sign-in command, rename
+ * and remove (revoked first, #259). The Pair page's folders are in
+ * `machines-policy-live.test.tsx` (#482).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { EnvironmentDescriptor, EnvironmentId, MachineId, MachinePolicy } from '@agentic/core';
@@ -243,22 +244,6 @@ describe('/machines/:id — this machine (#239)', () => {
     });
 });
 
-describe('/pair — --allow-root (#239)', () => {
-    it('adds the allowed folder to the pair command without minting a new code', { timeout: 15_000 }, async () => {
-        const dom = await mountLive('/pair', h);
-        await until(() => dom.querySelector('[data-code-cell]') !== null, 'the code');
-        const code = texts(dom.querySelectorAll('[data-code-cell]')).join('');
-        const pairLine = () => texts(dom.querySelectorAll('[data-command-well] code'))[2]!; // after the two install lines
-        expect(pairLine()).not.toContain('--allow-root');
-        type(dom, '[data-pair-allow-root] input', 'C:\\My Code');
-        await until(() => pairLine().includes('--allow-root'), 'the flag');
-        expect(pairLine()).toBe(`agentic-daemon pair ${code} --url ${location.origin} --name machine-1 --allow-root "C:\\My Code"`);
-        await tick(20);
-        expect(texts(dom.querySelectorAll('[data-code-cell]')).join('')).toBe(code);
-        expect(await h.app.as(owner).actor(Workspace, workspaceKey(WS)).listMachines()).toHaveLength(1);
-    });
-});
-
 describe('the machine setup model', () => {
     it('spells the local commands, quoting what needs it', () => {
         expect(loginCommand('env_work')).toBe('agentic-daemon env login env_work');
@@ -309,7 +294,7 @@ describe('the machine setup model', () => {
     });
 
     it('validates a draft the way the daemon will, and builds the request without a profile directory', () => {
-        const base = { id: '', name: 'b', runtime: 'claude-code', roots: 'C:\\Dev\\b', concurrency: null, accountLabel: '' };
+        const base = { id: '', name: 'b', runtime: 'claude-code', roots: 'C:\\Dev\\b', concurrency: null, accountLabel: '', allowBypass: false };
         const context = { policy: ON, os: 'windows' as const, runtimes: ['claude-code'], takenNames: ['work'] };
         expect(validateDraft(base, context)).toEqual({});
         expect(validateDraft({ ...base, name: 'Work' }, context).name).toContain('already has an environment named Work');

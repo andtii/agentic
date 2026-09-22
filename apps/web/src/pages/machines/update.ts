@@ -92,8 +92,11 @@ export function lastLine(last: MachineUpdateView['last'], zone?: string): string
         case 'timeout':
             return `The update to ${last.to} timed out at ${at}${last.error ? `: ${last.error}` : ''}.`;
         case 'cancelled':
-            return `The update to ${last.to} was cancelled at ${at}.`;
+            return last.to === 'restart' ? `The restart was cancelled at ${at}.` : `The update to ${last.to} was cancelled at ${at}.`;
+        case 'restarted':
+            return `Restarted at ${at}.`;
         default:
+            if (last.to === 'restart') return `The restart failed at ${at}${last.error ? `: ${last.error}` : ''}.`;
             return `The update to ${last.to} failed at ${at}${last.error ? `: ${last.error}` : ''}.`;
     }
 }
