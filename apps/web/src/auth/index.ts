@@ -14,12 +14,15 @@ import {
     beginOAuth,
     clearSessionCookie,
     completeOAuth,
+    elevationCookie,
     githubAuthProvider,
     normalizePairingCode,
     PAIRING_CODE_LENGTH,
+    sealElevation,
     sealSession,
     serverAuth,
     sessionCookie,
+    sessionFromRequest,
     type AuthProvider,
     type ExternalIdentity,
     type MachineTokenLookup,
@@ -73,8 +76,12 @@ export type RouteHandler = (request: Request) => Promise<Response>;
 
 /** Always mounted — the session secret is all they need. */
 export type SessionRouteKey = 'POST /auth/logout' | 'GET /auth/me' | 'POST /auth/pair';
-/** Mounted only with a login provider (the GitHub app's secrets, or `wiring.provider`) and an origin for the callback. */
-export type LoginRouteKey = 'GET /auth/login' | 'GET /auth/callback';
+/**
+ * Mounted only with a login provider (the GitHub app's secrets, or `wiring.provider`) and an origin for the callback.
+ * `/auth/elevate` (#355) runs the same flow with `purpose: 'elevate'`: the callback then mints `__Host-elevated` for the
+ * signed-in user instead of a session.
+ */
+export type LoginRouteKey = 'GET /auth/login' | 'GET /auth/callback' | 'GET /auth/elevate';
 
 export interface WebAuth {
     /** Mount on the Worker: method + path → handler. The login pair is absent when it cannot be mounted. */
@@ -127,6 +134,16 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
             const { location, setCookie } = await beginOAuth(provider, { secret, redirectUri, returnTo: returnTo ?? '/', now: now() });
             return redirect(location, setCookie);
         };
+        /**
+         * Elevation (#355): the same provider round trip for a user who is already signed in. The callback compares the
+         * identity that comes back with the session's user — a match mints `__Host-elevated`, anything else mints nothing.
+         */
+        const elevate: RouteHandler = async (request) => {
+            if (!(await sessionFromRequest(request, secret, now()))) return json({ error: 'unauthorized' }, 401);
+            const returnTo = new URL(request.url).searchParams.get('returnTo');
+            const { location, setCookie } = await beginOAuth(provider, { secret, redirectUri, returnTo: returnTo ?? '/', purpose: 'elevate', now: now() });
+            return redirect(location, setCookie);
+        };
         const callback: RouteHandler = async (request) => {
             const result = await completeOAuth(provider, request, { secret, redirectUri, now: now() });
             if (!result.ok) {
@@ -135,11 +152,17 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
             }
             const user = await resolveUser(result.identity);
             const headers = new Headers({ location: result.returnTo, 'cache-control': 'no-store' });
-            headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
+            if (result.purpose === 'elevate') {
+                // The session is not re-minted: an elevation proves the SAME user again, or it proves nothing.
+                const session = await sessionFromRequest(request, secret, now());
+                if (!session) return json({ error: 'unauthorized' }, 401, { 'set-cookie': result.clearCookie });
+                if (session.userId !== user.userId) return json({ error: 'user_mismatch' }, 403, { 'set-cookie': result.clearCookie });
+                headers.append('set-cookie', elevationCookie(await sealElevation({ userId: session.userId }, secret, { now: now() })));
+            } else headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
             headers.append('set-cookie', result.clearCookie);
             return new Response(null, { status: 302, headers });
         };
-        return { provider, routes: { 'GET /auth/login': begin, 'GET /auth/callback': callback } };
+        return { provider, routes: { 'GET /auth/login': begin, 'GET /auth/callback': callback, 'GET /auth/elevate': elevate } };
     })();
 
     const logout: RouteHandler = async () => redirect('/', clearSessionCookie());

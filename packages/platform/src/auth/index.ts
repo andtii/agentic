@@ -30,8 +30,11 @@ export {
     type BeginOAuthOptions,
     type BeginOAuthResult,
     type CompleteOAuthOptions,
-    type CompleteOAuthResult
+    type CompleteOAuthResult,
+    type OAuthPurpose
 } from './oauth.js';
+
+export { ELEVATION_COOKIE, ELEVATION_TTL_MS, ELEVATION_REQUIRED, sealElevation, openElevation, elevationCookie, clearElevationCookie, elevationFromRequest, isElevated, requireElevated, type ElevationPayload, type ElevationOptions } from './elevation.js';
 
 export { isPrincipal, encodePrincipal, decodePrincipal, principalCodec, userPrincipal, machinePrincipal, mintAgentPrincipal, type AgentPrincipalInput } from './principal.js';
 

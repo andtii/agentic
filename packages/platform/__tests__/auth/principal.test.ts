@@ -9,6 +9,7 @@ const SECRET = 'test-session-secret-that-is-long-enough';
 
 const all: Principal[] = [
     { kind: 'user', userId: 'gh_1', workspaceId: ws },
+    { kind: 'user', userId: 'gh_1', workspaceId: ws, elevatedUntil: NOW + 600_000 },
     { kind: 'machine', workspaceId: ws, machineId: 'machine_1' as MachineId },
     { kind: 'agent', workspaceId: ws, agentId: 'agent_1' as AgentId, sessionId: 'session_1' as SessionId },
     { kind: 'agent', workspaceId: ws, agentId: 'agent_1' as AgentId, sessionId: 'session_1' as SessionId, taskId: 'task_1' as TaskId },
@@ -32,6 +33,9 @@ describe('principal codec', () => {
             { kind: 'user', userId: '', workspaceId: ws },
             { kind: 'user', userId: 'x' },
             { kind: 'user', userId: 'x', workspaceId: ws, admin: true },
+            { kind: 'user', userId: 'x', workspaceId: ws, elevatedUntil: 'forever' },
+            { kind: 'user', userId: 'x', workspaceId: ws, elevatedUntil: Number.POSITIVE_INFINITY },
+            { kind: 'machine', workspaceId: ws, machineId: 'm', elevatedUntil: 1 },
             { kind: 'external', workspaceId: ws, clientId: 'c', scopes: ['everything'] },
             { kind: 'agent', workspaceId: ws, agentId: 'a', sessionId: 's', taskId: 1 },
             null,

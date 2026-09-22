@@ -18,8 +18,15 @@
  * Runtimes (#370): "Runtimes on this machine" (`LiveHarnessCard`) reads the
  * same live `get` — the daemon's harnesses, what the release ships — and
  * installs, updates or removes one with `Machine.requestHarness`.
+ *
+ * Elevation (#355): a call the platform refuses `elevation-required` opens
+ * "Confirm with GitHub to continue" (`ElevateDialog`); the change is put
+ * aside per machine (`savePending`) for the round trip through
+ * `/auth/elevate`, and on the way back the page reopens the dialog in its
+ * resume shape — one Confirm click sends it. Revoke and Remove go through it;
+ * the folders card and the bypass switch (#482) will too.
  */
-import { component, effect, onUnmounted, signal, useData, type JSXElement } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, useData, type JSXElement } from 'sigx';
 import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
@@ -35,6 +42,8 @@ import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { machineHead } from './head';
 import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineLoadOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
+import { browserPendingStore, elevateUrl, isElevationRequired, savePending, takePending, type PendingChange, type PendingKind } from './elevate';
+import { ElevateDialog } from './ElevateDialog';
 import { LiveHarnessCard } from './LiveHarnessCard';
 import { LiveUpdateCard } from './LiveUpdateCard';
 
@@ -123,17 +132,67 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
             st.busy = false;
         }
     };
-    const revoke = (): Promise<void> => act(() => client().revoke());
+    /**
+     * Elevation (#355): `open` is the dialog's state — `pending` what was being done, `resume` whether the round trip is
+     * done. `withElevation` runs a change and, refused `elevation-required`, asks instead of failing; `dispatch` runs a
+     * change by kind, which is what the resumed dialog's Confirm does.
+     */
+    const elevate = signal({ open: false, pending: null as PendingChange | null, resume: false });
+    const withElevation = async (kind: PendingKind, run: () => Promise<unknown>, draft?: unknown): Promise<void> => {
+        if (st.busy) return;
+        st.busy = true;
+        st.error = '';
+        try {
+            await run();
+        } catch (e) {
+            if (isElevationRequired(e)) {
+                elevate.pending = { kind, ...(draft === undefined ? {} : { draft }), at: Date.now() };
+                elevate.resume = false;
+                elevate.open = true;
+            } else st.error = e instanceof Error ? e.message : String(e);
+        } finally {
+            st.busy = false;
+        }
+    };
+    const revoke = (): Promise<void> => withElevation('revoke', () => client().revoke());
     const rename = (name: string): Promise<void> => act(() => client().rename(name));
     // Revoke FIRST: `Workspace.removeMachine` only drops the index entry, and a daemon still holding a valid token could reconnect (#259).
     const removeMachine = (): Promise<void> =>
-        act(async () => {
+        withElevation('remove', async () => {
             const ws = viewer.workspaceId;
             if (!ws) return;
             await client().revoke();
             await actor(defs.Workspace, workspaceKeyOf(ws)).removeMachine(props.id as MachineId);
             await router.push('/machines');
         });
+    const dispatch = (change: PendingChange): Promise<void> => {
+        switch (change.kind) {
+            case 'revoke':
+                return revoke();
+            case 'remove':
+                return removeMachine();
+            default:
+                // `policy` / `environment` arrive with their cards (#482).
+                return Promise.resolve();
+        }
+    };
+    /** Continue: keep the change for the way back, then GitHub. Runs only in a browser — the page's own URL is the way back. */
+    const toGitHub = (): void => {
+        const pending = elevate.pending;
+        if (!pending) return;
+        savePending(browserPendingStore(), props.id, { kind: pending.kind, ...(pending.draft === undefined ? {} : { draft: pending.draft }) });
+        elevate.open = false;
+        if (typeof location !== 'undefined') location.assign(elevateUrl(`${location.pathname}${location.search}${location.hash}`));
+    };
+    // Back from GitHub: the change waits for one click, never runs on its own.
+    onMounted(() => {
+        const pending = takePending(browserPendingStore(), props.id);
+        if (pending) {
+            elevate.pending = pending;
+            elevate.resume = true;
+            elevate.open = true;
+        }
+    });
 
     const stopHead = effect(() => {
         const v = view.value;
@@ -211,6 +270,18 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     }}
                 />
                 {st.error ? <p data-machine-error role="alert">{st.error}</p> : null}
+                {elevate.pending ? (
+                    <ElevateDialog
+                        model={() => elevate.open}
+                        kind={elevate.pending.kind}
+                        machineName={v.name || id}
+                        resume={elevate.resume}
+                        busy={st.busy}
+                        onContinue={toGitHub}
+                        onConfirm={() => { const pending = elevate.pending; elevate.open = false; if (pending) void dispatch(pending); }}
+                        onCancel={() => { elevate.open = false; elevate.pending = null; }}
+                    />
+                ) : null}
             </>
         );
     };

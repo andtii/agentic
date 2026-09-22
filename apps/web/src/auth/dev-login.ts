@@ -20,9 +20,14 @@
  *
  * The identity is `dev_<user>`: its own namespace, so a dev workspace can
  * never collide with a GitHub user's (`gh_<id>`, `defaultResolveUser`).
+ *
+ * `elevate` (#355) — `?elevate=1` on the form's link, `elevate: true` in the
+ * JSON body, the form's checkbox — also mints `__Host-elevated` for that
+ * user, so a preview or a workers test can make an elevated change without
+ * a GitHub round trip.
  */
 import type { WorkspaceId } from '@agentic/core';
-import { sealSession, sessionCookie } from '@agentic/platform';
+import { elevationCookie, sealElevation, sealSession, sessionCookie } from '@agentic/platform';
 import type { RouteHandler } from './index';
 
 export const DEV_LOGIN_PATH = '/auth/dev-login';
@@ -45,6 +50,8 @@ export interface DevLoginEnv {
 export interface DevLoginBody {
     readonly token: string;
     readonly user: string;
+    /** Also mint the elevation cookie (#355). */
+    readonly elevate?: boolean;
 }
 
 /** The identity a dev login mints for `user`. */
@@ -77,7 +84,7 @@ const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;'
 const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 
 /** The form: plain HTML, no script, a few inline rules — it works before any asset does. */
-export function renderDevLoginForm(fields: { user: string; token: string; error?: string }, status = 200): Response {
+export function renderDevLoginForm(fields: { user: string; token: string; elevate?: boolean; error?: string }, status = 200): Response {
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -103,6 +110,7 @@ button { font: inherit; font-weight: 600; padding: 9px 12px; border: 0; border-r
 ${fields.error ? `<p data-error role="alert">${escapeHtml(fields.error)}</p>` : ''}
 <label>User<input name="user" value="${escapeHtml(fields.user)}" autocomplete="username" required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}"></label>
 <label>Secret (AGENTIC_DEV_LOGIN)<input name="token" type="password" value="${escapeHtml(fields.token)}" autocomplete="off" required></label>
+<label><input name="elevate" type="checkbox" value="1"${fields.elevate ? ' checked' : ''}> Elevated (may change machine security for ten minutes)</label>
 <button type="submit">Sign in</button>
 </form>
 </body>
@@ -126,11 +134,16 @@ export function createDevLoginRoute(env: Partial<DevLoginEnv>, options: { now?: 
     const secret = env.AGENTIC_DEV_LOGIN;
     const now = options.now ?? Date.now;
 
-    const issue = async (user: string): Promise<{ principal: { kind: 'user'; userId: string; workspaceId: WorkspaceId }; cookie: string }> => {
+    const issue = async (user: string, elevate: boolean): Promise<{ principal: { kind: 'user'; userId: string; workspaceId: WorkspaceId }; cookies: string[] }> => {
         const userId = devUserId(user);
         const principal = { kind: 'user' as const, userId, workspaceId: userId as WorkspaceId };
-        const cookie = sessionCookie(await sealSession({ userId, workspaceId: principal.workspaceId }, env.SESSION_SECRET, { now: now() }));
-        return { principal, cookie };
+        const cookies = [sessionCookie(await sealSession({ userId, workspaceId: principal.workspaceId }, env.SESSION_SECRET, { now: now() }))];
+        if (elevate) cookies.push(elevationCookie(await sealElevation({ userId }, env.SESSION_SECRET, { now: now() })));
+        return { principal, cookies };
+    };
+    const withCookies = (response: Response, cookies: readonly string[]): Response => {
+        for (const c of cookies) response.headers.append('set-cookie', c);
+        return response;
     };
 
     /** `null` when the body checks out; otherwise the error code and its status. */
@@ -146,7 +159,7 @@ export function createDevLoginRoute(env: Partial<DevLoginEnv>, options: { now?: 
         if (request.method === 'GET') {
             const token = isLocalhost(url) ? url.searchParams.get('token') ?? '' : '';
             const user = url.searchParams.get('user') ?? DEFAULT_USER;
-            return renderDevLoginForm({ user: USER_RE.test(user) ? user : DEFAULT_USER, token });
+            return renderDevLoginForm({ user: USER_RE.test(user) ? user : DEFAULT_USER, token, elevate: url.searchParams.get('elevate') === '1' });
         }
         if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { allow: 'GET, POST' });
 
@@ -162,8 +175,8 @@ export function createDevLoginRoute(env: Partial<DevLoginEnv>, options: { now?: 
             const body = { token: String(form.get('token') ?? ''), user: String(form.get('user') ?? '') };
             const failed = check(body);
             if (failed) return renderDevLoginForm({ user: body.user || DEFAULT_USER, token: '', error: ERRORS[failed.error] ?? failed.error }, failed.status);
-            const { cookie } = await issue(body.user);
-            return new Response(null, { status: 303, headers: { location: '/', 'set-cookie': cookie, 'cache-control': 'no-store' } });
+            const { cookies } = await issue(body.user, form.get('elevate') === '1');
+            return withCookies(new Response(null, { status: 303, headers: { location: '/', 'cache-control': 'no-store' } }), cookies);
         }
 
         let body: Partial<DevLoginBody>;
@@ -174,8 +187,8 @@ export function createDevLoginRoute(env: Partial<DevLoginEnv>, options: { now?: 
         }
         const failed = check(body);
         if (failed) return json({ error: failed.error }, failed.status);
-        const { principal, cookie } = await issue(body.user!);
-        return json({ principal }, 200, { 'set-cookie': cookie });
+        const { principal, cookies } = await issue(body.user!, body.elevate === true);
+        return withCookies(json({ principal }, 200), cookies);
     };
 }
 

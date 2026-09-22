@@ -72,6 +72,8 @@ export interface LiveOptions {
     readonly defaults?: Partial<HostDefaults>;
     /** How the router purges an ended session's record and pages (#399, `RoutingPorts.store`); absent, "New session" closes and unbinds only. */
     readonly store?: WorkspaceStore;
+    /** The tab's user is elevated (#355), as the `__Host-elevated` cookie would make it: `elevatedUntil` ten minutes out on every wire call. */
+    readonly elevated?: boolean;
 }
 
 /** Start the host, the wire and the stubbed identity. `agentScript` is the mock runtime every session runs. */
@@ -92,14 +94,15 @@ export async function startLive(agentScript: MockAgentOptions = { respond: (inpu
         codec,
         authenticate: (rq: { request?: Request }) => {
             const user = rq.request?.headers.get('x-user');
-            return user ? (userPrincipal(user) as Principal) : null;
+            const elevatedUntil = rq.request?.headers.get('x-elevated');
+            return user ? ({ ...userPrincipal(user), ...(elevatedUntil ? { elevatedUntil: Number(elevatedUntil) } : {}) } as Principal) : null;
         }
     });
     const handler = createFetchHandler(app.app, { base: BASE, origin: false });
     const fetch = (url: string, init?: RequestInit): Promise<Response> => handler(new Request(url, init));
     const transport = fetchTransport({
         endpoint: `${ORIGIN}${BASE}`,
-        headers: { 'x-user': USER, origin: ORIGIN },
+        headers: { 'x-user': USER, origin: ORIGIN, ...(options.elevated ? { 'x-elevated': String(Date.now() + 10 * 60_000) } : {}) },
         fetch: (input, init) => fetch(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init)
     });
     configureActors(transport);

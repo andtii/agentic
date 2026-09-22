@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createWebAuth, defaultResolveUser, loginConfigured, userOf, type AuthEnv } from '../src/auth/index';
-import { issueMachineToken, OAUTH_COOKIE, sealSession, sessionCookie, type AuthProvider } from '@agentic/platform';
+import { ELEVATION_COOKIE, ELEVATION_TTL_MS, issueMachineToken, OAUTH_COOKIE, sealSession, sessionCookie, type AuthProvider } from '@agentic/platform';
 import { ServerFnError } from '@sigx/server';
 import type { MachineId, WorkspaceId } from '@agentic/core';
 
@@ -46,6 +46,58 @@ describe('apps/web auth routes (stub for #23/#33)', () => {
         const me = await auth.routes['GET /auth/me'](new Request('https://app.test/auth/me', { headers: { cookie: session.split(';')[0]! } }));
         expect(me.status).toBe(200);
         await expect(me.json()).resolves.toEqual({ principal: { kind: 'user', userId: 'gh_42', workspaceId: 'gh_42' } });
+    });
+
+    // #355: an elevation re-proves the signed-in user and mints `__Host-elevated`; it never re-mints the session.
+    it('elevate → the provider with an elevate transient; callback for the same user → the elevation cookie, the session untouched', async () => {
+        const auth = createWebAuth(env, { resolveUser: defaultResolveUser, provider, now: () => NOW });
+        const session = sessionCookie(await sealSession({ userId: 'gh_42', workspaceId: 'gh_42' as WorkspaceId }, env.SESSION_SECRET, { now: NOW })).split(';')[0]!;
+
+        // Signed out: nothing to elevate.
+        expect((await auth.routes['GET /auth/elevate']!(new Request('https://app.test/auth/elevate?returnTo=/machines/m1'))).status).toBe(401);
+
+        const begin = await auth.routes['GET /auth/elevate']!(new Request('https://app.test/auth/elevate?returnTo=/machines/m1', { headers: { cookie: session } }));
+        expect(begin.status).toBe(302);
+        const state = new URL(begin.headers.get('location')!).searchParams.get('state')!;
+        const transient = setCookies(begin).find((c) => c.startsWith(OAUTH_COOKIE))!.split(';')[0]!;
+
+        const callback = await auth.routes['GET /auth/callback']!(new Request(`https://app.test/auth/callback?code=good&state=${state}`, { headers: { cookie: `${session}; ${transient}` } }));
+        expect(callback.status).toBe(302);
+        expect(callback.headers.get('location')).toBe('/machines/m1');
+        const cookies = setCookies(callback);
+        const elevated = cookies.find((c) => c.startsWith(`${ELEVATION_COOKIE}=`))!;
+        expect(elevated).toMatch(/Max-Age=600; HttpOnly; Secure/);
+        expect(cookies.some((c) => c.startsWith('__Host-session='))).toBe(false);
+        expect(cookies.find((c) => c.startsWith(`${OAUTH_COOKIE}=`))).toMatch(/Max-Age=0/);
+
+        // With both cookies the principal is elevated until the cookie's expiry; with the session alone it is not.
+        const me = await auth.routes['GET /auth/me'](new Request('https://app.test/auth/me', { headers: { cookie: `${session}; ${elevated.split(';')[0]!}` } }));
+        await expect(me.json()).resolves.toEqual({ principal: { kind: 'user', userId: 'gh_42', workspaceId: 'gh_42', elevatedUntil: NOW + ELEVATION_TTL_MS } });
+        const plain = await auth.routes['GET /auth/me'](new Request('https://app.test/auth/me', { headers: { cookie: session } }));
+        await expect(plain.json()).resolves.toEqual({ principal: { kind: 'user', userId: 'gh_42', workspaceId: 'gh_42' } });
+        // Another user's session with this elevation: not elevated — the cookie names gh_42.
+        const other = sessionCookie(await sealSession({ userId: 'gh_7', workspaceId: 'gh_7' as WorkspaceId }, env.SESSION_SECRET, { now: NOW })).split(';')[0]!;
+        const lent = await auth.routes['GET /auth/me'](new Request('https://app.test/auth/me', { headers: { cookie: `${other}; ${elevated.split(';')[0]!}` } }));
+        await expect(lent.json()).resolves.toEqual({ principal: { kind: 'user', userId: 'gh_7', workspaceId: 'gh_7' } });
+    });
+
+    it('an elevation callback for another identity, or without a session, mints nothing', async () => {
+        const auth = createWebAuth(env, { resolveUser: defaultResolveUser, provider, now: () => NOW });
+        const session = sessionCookie(await sealSession({ userId: 'gh_7', workspaceId: 'gh_7' as WorkspaceId }, env.SESSION_SECRET, { now: NOW })).split(';')[0]!;
+        const begin = await auth.routes['GET /auth/elevate']!(new Request('https://app.test/auth/elevate', { headers: { cookie: session } }));
+        const state = new URL(begin.headers.get('location')!).searchParams.get('state')!;
+        const transient = setCookies(begin).find((c) => c.startsWith(OAUTH_COOKIE))!.split(';')[0]!;
+        // The provider answers gh_42; the session is gh_7.
+        const mismatch = await auth.routes['GET /auth/callback']!(new Request(`https://app.test/auth/callback?code=good&state=${state}`, { headers: { cookie: `${session}; ${transient}` } }));
+        expect(mismatch.status).toBe(403);
+        await expect(mismatch.json()).resolves.toEqual({ error: 'user_mismatch' });
+        expect(setCookies(mismatch).some((c) => c.startsWith(`${ELEVATION_COOKIE}=`) && !/Max-Age=0/.test(c))).toBe(false);
+        // The session went away in between.
+        const begin2 = await auth.routes['GET /auth/elevate']!(new Request('https://app.test/auth/elevate', { headers: { cookie: session } }));
+        const state2 = new URL(begin2.headers.get('location')!).searchParams.get('state')!;
+        const transient2 = setCookies(begin2).find((c) => c.startsWith(OAUTH_COOKIE))!.split(';')[0]!;
+        const gone = await auth.routes['GET /auth/callback']!(new Request(`https://app.test/auth/callback?code=good&state=${state2}`, { headers: { cookie: transient2 } }));
+        expect(gone.status).toBe(401);
     });
 
     it('callback with a forged state is 400 and clears the transient; a failed exchange is 502', async () => {
@@ -143,7 +195,8 @@ describe('apps/web auth routes without the GitHub app (#180)', () => {
         expect(loginConfigured({ APP_ORIGIN: 'https://app.test', GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec' })).toBe(true);
         expect(loginConfigured({ APP_ORIGIN: 'https://app.test' }, { provider })).toBe(true);
         const full = createWebAuth(env, { resolveUser: defaultResolveUser, provider });
-        expect(Object.keys(full.routes)).toHaveLength(5);
+        expect(Object.keys(full.routes)).toHaveLength(6);
+        expect(full.routes['GET /auth/elevate']).toBeDefined();
         expect(full.provider).toBe(provider);
     });
 });

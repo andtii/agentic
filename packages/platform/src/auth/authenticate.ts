@@ -5,7 +5,9 @@
  *
  * Precedence: a bearer token names its kind (`amt.` machine, `agt.` agent)
  * and is decided on its own — a bad bearer is anonymous, never a fallback
- * to the cookie. Only a request with no bearer reads `__Host-session`.
+ * to the cookie. Only a request with no bearer reads `__Host-session` — and,
+ * beside it, `__Host-elevated` (#355), which becomes `elevatedUntil` on the
+ * user principal when it names the session's user.
  *
  * `null` is the anonymous outcome; this never throws for bad input. A
  * request context with no request at all (a detached in-process call) is
@@ -16,6 +18,7 @@ import type { Principal } from '@agentic/core';
 import type { ServerFnContext } from '@sigx/server';
 import { openAgentToken, AGENT_TOKEN_PREFIX } from './agent-token.js';
 import { sessionFromRequest } from './cookie.js';
+import { elevationFromRequest } from './elevation.js';
 import { bearerToken, parseMachineToken, verifyMachineToken, MACHINE_TOKEN_PREFIX, type MachineTokenRecord, type MachineTokenRef } from './machine-token.js';
 import { principalCodec, userPrincipal } from './principal.js';
 
@@ -55,7 +58,10 @@ export async function authenticateRequest(request: Request, options: Authenticat
         return null;
     }
     const session = await sessionFromRequest(request, options.sessionSecret, now);
-    return session ? userPrincipal(session.userId, session.workspaceId) : null;
+    if (!session) return null;
+    // An elevation (#355) counts only for the user it was minted for: a cookie from another session is no elevation here.
+    const elevation = await elevationFromRequest(request, options.sessionSecret, now);
+    return userPrincipal(session.userId, session.workspaceId, elevation && elevation.userId === session.userId ? elevation.exp : undefined);
 }
 
 /** The `createServerApp({ authenticate })` hook. */
