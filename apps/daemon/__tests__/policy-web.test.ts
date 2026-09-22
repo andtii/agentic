@@ -95,12 +95,24 @@ describe('policy.request', () => {
             expect(parsePolicy({ webManaged: true, allowedRoots: [home], requested: [''] }).ok).toBe(false);
         });
 
-        it('expandHome', () => {
-            expect(expandHome('~', '/h')).toBe('/h');
-            expect(expandHome('~/x/y', '/h')).toBe(join('/h', 'x/y'));
-            expect(expandHome('~\\x', '/h')).toBe(join('/h', 'x'));
-            expect(expandHome('~x', '/h')).toBe('~x');
-            expect(expandHome('/abs', '/h')).toBe('/abs');
+        it('expandHome stays under the home folder', () => {
+            expect(expandHome('~', '/h', 'linux')).toBe('/h');
+            expect(expandHome('~/x/y', '/h', 'linux')).toBe(join('/h', 'x/y'));
+            expect(expandHome('~//x', '/h', 'linux')).toBe(join('/h', 'x'));
+            expect(expandHome('~/x/../y', '/h', 'linux')).toBe(join('/h', 'y'));
+            expect(expandHome('~x', '/h', 'linux')).toBe('~x');
+            expect(expandHome('/abs', '/h', 'linux')).toBe('/abs');
+            // Out of home dressed as home: refused, whatever the spelling.
+            expect(expandHome('~/../etc', '/h', 'linux')).toBeNull();
+            expect(expandHome('~/x/../../etc', '/h', 'linux')).toBeNull();
+            expect(expandHome('~/..', '/h', 'linux')).toBeNull();
+            expect(expandHome('~\\x', 'C:\\Users\\me', 'win32')).toBe(join('C:\\Users\\me', 'x'));
+            expect(expandHome('~\\..\\Windows', 'C:\\Users\\me', 'win32')).toBeNull();
+        });
+
+        it('a ~ form that leads out of home is refused; a network path is remote-path on every platform', async () => {
+            expect(await applyWebPolicy({ allowedRoots: ['~/../work'] }, ctx())).toMatchObject({ error: { code: 'invalid' } });
+            expect(await applyWebPolicy({ allowedRoots: ['//server/share'] }, ctx())).toMatchObject({ error: { code: 'remote-path' } });
         });
     });
 

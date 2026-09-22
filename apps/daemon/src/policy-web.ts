@@ -48,11 +48,15 @@ export interface PolicyWebContext {
 
 const fail = (code: MachinePolicyError['code'], message: string): { error: MachinePolicyError } => ({ error: { code, message: message.slice(0, 1024) } });
 
-/** `~`, `~/x`, `~\x` → under `home`; anything else as given. */
-export function expandHome(root: string, home: string): string {
+/**
+ * `~`, `~/x`, `~\x` → under `home`; anything else as given. A `~` form that leads out of the home folder (`~/../etc`)
+ * is `null`: the web may name `/etc` outright if it means it, but never dressed as the home folder.
+ */
+export function expandHome(root: string, home: string, platform: NodeJS.Platform = process.platform): string | null {
     if (root === '~') return home;
-    if (root.startsWith('~/') || root.startsWith('~\\')) return join(home, root.slice(2));
-    return root;
+    if (!root.startsWith('~/') && !root.startsWith('~\\')) return root;
+    const expanded = join(home, root.slice(2));
+    return withinRoots(expanded, [home], platform) ? expanded : null;
 }
 
 /** Answer `policy.request { op: 'set' }`. Never throws; call it one at a time (it reads, changes and writes `policy.json`). */
@@ -71,7 +75,11 @@ export async function applyWebPolicy(input: MachinePolicyInput, c: PolicyWebCont
         let next: MachinePolicy = POLICY_OFF;
         for (const requested of input.allowedRoots) {
             if (typeof requested !== 'string' || requested.trim() === '') return fail('invalid', 'a folder must be a non-empty path');
-            const expanded = expandHome(requested.trim(), home);
+            const asked = requested.trim();
+            // Named before `isAbsolute`: on POSIX a `\\server\share` is not absolute either, and the answer should say what it is.
+            if (isRemoteOrDevicePath(asked)) return fail('remote-path', `${requested} is a network or device path; only local folders can be allowed`);
+            const expanded = expandHome(asked, home, platform);
+            if (expanded === null) return fail('invalid', `${requested} leads out of the home folder`);
             if (!isAbsolute(expanded)) return fail('invalid', `${requested} is not an absolute path (or ~ / ~/…)`);
             next = await allowRoot(next, expanded, own, platform);
         }
