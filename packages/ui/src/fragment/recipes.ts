@@ -64,13 +64,15 @@ const thread: RecipeInput = {
                 paddingInline: 'var(--space-2xl)',
                 paddingBlock: 'var(--space-2xl)',
                 background: 'var(--color-base-100)',
-                color: 'var(--color-base-content)'
+                color: 'var(--color-base-content)',
+                // Instant, never smooth (#495): a smooth pin animates the whole chat on open, and its in-between offsets read as a scroll up.
+                scrollBehavior: 'auto'
             },
+            // Following, the thread pins the bottom itself: the browser's scroll anchoring would move the offset up as the window slides, which reads as a scroll up. Paused, it keeps the reader's rows in place.
             states: {
-                on: { scrollBehavior: 'smooth' },
-                off: { scrollBehavior: 'auto' }
-            },
-            at: { 'reduced-motion': { base: { scrollBehavior: 'auto' } } }
+                on: { overflowAnchor: 'none' },
+                off: { overflowAnchor: 'auto' }
+            }
         },
         // The centred "Showing the last N entries · Load earlier" chip.
         earlier: {

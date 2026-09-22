@@ -11,7 +11,7 @@ import { useAgentSession, type AgentMessage, type AgentSessionView, type AgentTr
 import { mockAgent, type MockStep } from '@sigx/ai-agent/testing';
 import { expectAnatomy } from '@sigx/zero/testing';
 import { Thread, aiThreadAnatomy, aiMessageAnatomy, aiToolCallAnatomy, DEFAULT_WINDOW } from '../src/thread';
-import { mount, one, all, buttonNamed, tick, waitFor } from './helpers';
+import { mount, one, all, buttonNamed, tick, waitFor, unmountAll } from './helpers';
 
 /** Mount a thread on a live session; hand the view back so the test can drive it. */
 async function live(agent: Agent, opts: { policy?: boolean; window?: number } = {}): Promise<{ dom: HTMLDivElement; view: AgentSessionView }> {
@@ -89,6 +89,7 @@ describe('the thread over mockAgent', () => {
         expect(one(dom, 'ai-thread', 'anchor')!.hidden).toBe(true);
         const before = dom.textContent;
 
+        scrollTo(root, 3400);
         scrollTo(root, 100);
         await tick();
         expect(root.getAttribute('data-state')).toBe('off');
@@ -115,6 +116,7 @@ describe('the thread over mockAgent', () => {
         await view.prompt('go');
         await tick();
         const root = one(dom, 'ai-thread', 'root')!;
+        scrollTo(root, 3400);
         scrollTo(root, 0);
         await tick();
         expect(root.getAttribute('data-state')).toBe('off');
@@ -159,6 +161,7 @@ describe('the thread over mockAgent', () => {
         expect(asked).toEqual([30]);
         // Scrolled to the top: frozen, and asked once — not again on the next tick at the top.
         const root = one(dom, 'ai-thread', 'root')!;
+        scrollTo(root, 3400);
         scrollTo(root, 0);
         scrollTo(root, 0);
         await tick();
@@ -275,5 +278,81 @@ describe('the thread over a static transcript', () => {
         expect(streaming).toEqual([false, false, true]);
         expect(one(dom, 'ai-thread', 'root')!.getAttribute('aria-live')).toBe('polite');
         expectAnatomy(dom, aiMessageAnatomy);
+    });
+});
+
+describe('following the tail (#495)', () => {
+    const rowsOf = (n: number): AgentMessage[] => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: 'user' as const, parts: [{ type: 'text' as const, id: `p${i}`, text: `row ${i}` }] }));
+
+    it('opens at the latest rows: the mount pins the bottom', () => {
+        const proto = HTMLElement.prototype;
+        const own = Object.getOwnPropertyDescriptor(proto, 'scrollHeight');
+        Object.defineProperty(proto, 'scrollHeight', { get: () => 4000, configurable: true });
+        try {
+            const transcript = createTranscript('s1');
+            transcript.messages = rowsOf(30);
+            const dom = mount(<Thread transcript={transcript} />);
+            const root = one(dom, 'ai-thread', 'root')!;
+            expect(root.scrollTop).toBe(4000);
+            expect(root.getAttribute('data-state')).toBe('on');
+        } finally {
+            if (own) Object.defineProperty(proto, 'scrollHeight', own);
+            else delete (proto as { scrollHeight?: number }).scrollHeight;
+        }
+    });
+
+    it('a scroll that moves down — a pin or content growing under it — keeps following, whatever the gap', async () => {
+        const transcript = createTranscript('s1');
+        transcript.messages = rowsOf(30);
+        const dom = mount(<Thread transcript={transcript} />);
+        const root = one(dom, 'ai-thread', 'root')!;
+        scrollTo(root, 1000);
+        scrollTo(root, 2000);
+        await tick();
+        expect(root.getAttribute('data-state')).toBe('on');
+        expect(one(dom, 'ai-thread', 'anchor')!.hidden).toBe(true);
+        // Only a move up past the threshold pauses.
+        scrollTo(root, 1500);
+        await tick();
+        expect(root.getAttribute('data-state')).toBe('off');
+        expect(one(dom, 'ai-thread', 'anchor')!.hidden).toBe(false);
+    });
+
+    it('content that grows without a thread render (a streaming part, an image) is pinned while following, left alone while paused', async () => {
+        const observers: { cb: () => void; targets: Element[]; live: boolean }[] = [];
+        const original = globalThis.ResizeObserver;
+        globalThis.ResizeObserver = class {
+            private o: { cb: () => void; targets: Element[]; live: boolean };
+            constructor(cb: () => void) { this.o = { cb, targets: [], live: true }; observers.push(this.o); }
+            observe(el: Element): void { this.o.targets.push(el); }
+            unobserve(): void {}
+            disconnect(): void { this.o.live = false; }
+        } as unknown as typeof ResizeObserver;
+        try {
+            const transcript = createTranscript('s1');
+            transcript.messages = rowsOf(30);
+            const dom = mount(<Thread transcript={transcript} />);
+            const root = one(dom, 'ai-thread', 'root')!;
+            const list = one(dom, 'ai-thread', 'list')!;
+            const observer = observers.find((o) => o.targets.includes(list))!;
+            expect(observer).toBeDefined();
+            scrollTo(root, 3400);
+            await tick();
+            // The content grew by 1 000 px: the observer pins the new bottom.
+            Object.defineProperty(root, 'scrollHeight', { value: 5000, configurable: true });
+            observer.cb();
+            expect(root.scrollTop).toBe(5000);
+            // Paused: growth leaves the reader where they are.
+            scrollTo(root, 1000, { scrollHeight: 5000, clientHeight: 600 });
+            await tick();
+            expect(root.getAttribute('data-state')).toBe('off');
+            Object.defineProperty(root, 'scrollHeight', { value: 6000, configurable: true });
+            observer.cb();
+            expect(root.scrollTop).toBe(1000);
+            unmountAll();
+            expect(observer.live).toBe(false);
+        } finally {
+            globalThis.ResizeObserver = original;
+        }
     });
 });
