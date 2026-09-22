@@ -40,7 +40,10 @@
  *   inside the folders — the machine-local policy allows (`./env-manage.ts`,
  *   #238); the answer is `env.response` plus the `env` frame it caused.
  *   `hello` and `env` carry that policy so the platform can explain a refusal.
- *   The policy itself only ever changes on the machine (`setPolicy`).
+ *   The policy changes on the machine (`setPolicy`, from the file watcher) or,
+ *   with the `webPolicy` port (#355), on a `policy.request` from the platform —
+ *   answered through the port `cli.ts` injects (`./policy-web.ts`), never by
+ *   a writer this module can reach; `browse` lists folders for the picker.
  * - `quota` reports each environment's provider limits (`./quota.ts`, #271):
  *   from rate-limit events in the live session streams and, unless
  *   `quota.probe` is off, by probing accounts once welcomed, when idle and
@@ -91,13 +94,16 @@ import {
     type LocalEnvironment,
     type ModelOption,
     type MachineId,
+    type MachineListing,
     type MachinePolicy,
+    type MachinePolicyError,
+    type MachinePolicyInput,
     type QuotaSource,
     type RuntimeDriver,
     type SessionClosedCode,
     type SessionId
 } from '@agentic/core';
-import { decodePlatformFrame, drainingReply, encodeFrame, LIMITS, platformKey, type DaemonFrame, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
+import { decodePlatformFrame, drainingReply, encodeFrame, LIMITS, platformKey, type DaemonFrame, type DaemonFrameOf, type PlatformFrame, type PlatformFrameOf } from '@agentic/daemon-protocol';
 import { sessionPolicyOf } from '@agentic/runtimes';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentSession, type Policy, type SessionRef } from '@sigx/ai-agent';
 import { cursorBefore, serveSession, WIRE_PROTOCOL_VERSION, type ServedSession, type WireFrame } from '@sigx/ai-agent/wire';
@@ -161,6 +167,12 @@ export interface DaemonOptions {
      */
     readonly manage?: { readonly paths: Pick<DaemonPaths, 'configDir' | 'stateDir' | 'environmentsFile'>; readonly secure?: SecureWriteOptions };
     /**
+     * The web-set policy (#355; the `policy` feature): `apply` writes `policy.json` for a `policy.request { op: 'set' }`
+     * and answers the policy as applied (which the daemon then runs with and announces), `browse` lists folders for the
+     * picker. Without it every `policy.request` is refused `unsupported`.
+     */
+    readonly webPolicy?: DaemonWebPolicy;
+    /**
      * Provider limits (#271): the `quota` sources by runtime (`builtinQuotaSources()`; none → no `quota` frames),
      * whether to probe accounts (default on; off is the stream only), the idle poll (default 5 min, 0 off), the
      * probe after a turn ends (default 30 s later) and how long an unchanged snapshot is not sent again (default 15 min).
@@ -187,6 +199,12 @@ export interface DaemonOptions {
     readonly arch?: string;
     /** The harness store (#369): with it the daemon reports its harnesses and answers `harness.request` (feature `harness`). */
     readonly harnesses?: DaemonHarnesses;
+}
+
+/** What `policy.request` is answered through (#355): `cli.ts` binds `policy-web.ts`; tests bind a fake. */
+export interface DaemonWebPolicy {
+    apply(input: MachinePolicyInput): Promise<{ readonly policy: MachinePolicy } | { readonly error: MachinePolicyError }>;
+    browse(path: string | undefined): Promise<{ readonly listing: MachineListing } | { readonly error: MachinePolicyError }>;
 }
 
 export interface DaemonHarnesses {
@@ -439,7 +457,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     }
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
-    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : [])];
+    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : [])];
     const version = options.daemonVersion ?? DAEMON_VERSION;
     const build = { version, commit: DAEMON_COMMIT, protocol: V, channel: DAEMON_CHANNEL, platform: platformKey(platform, options.arch ?? process.arch) };
 
@@ -637,6 +655,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 return;
             case 'harness.request':
                 void harnessRequest(frame);
+                return;
+            case 'policy.request':
+                void policyRequest(frame);
                 return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
@@ -929,6 +950,42 @@ export function createDaemon(options: DaemonOptions): Daemon {
         }).catch((e: unknown) => {
             logger.error('env: request failed', { error: e });
             send({ v: V, t: 'env.response', requestId: frame.requestId, error: { code: 'io', message: 'the machine could not answer; see the daemon log' } });
+        });
+    }
+
+    /**
+     * `policy.request` (#355): a `set` goes through the port one at a time with every other change to the environments
+     * and the policy; the `env` frame carrying the policy as applied goes out before `policy.response`. A `browse` reads
+     * only and needs no turn.
+     */
+    function policyRequest(frame: PlatformFrameOf<'policy.request'>): Promise<void> {
+        const answer = (outcome: { readonly result?: DaemonFrameOf<'policy.response'>['result']; readonly error?: MachinePolicyError }) => send({ v: V, t: 'policy.response', requestId: frame.requestId, ...outcome });
+        const port = options.webPolicy;
+        if (!port) {
+            answer({ error: { code: 'unsupported', message: 'this daemon does not take its policy from the platform' } });
+            return Promise.resolve();
+        }
+        const run =
+            frame.op === 'browse'
+                ? async () => {
+                      const outcome = await port.browse(frame.path);
+                      answer('listing' in outcome ? { result: { listing: outcome.listing } } : { error: outcome.error });
+                  }
+                : () =>
+                      serial(async () => {
+                          const outcome = await port.apply(frame.policy);
+                          if ('policy' in outcome) {
+                              policy = outcome.policy;
+                              send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+                              answer({ result: { policy: announcedPolicy() } });
+                          } else {
+                              logger.info('policy: request refused', { code: outcome.error.code });
+                              answer({ error: outcome.error });
+                          }
+                      });
+        return run().catch((e: unknown) => {
+            logger.error('policy: request failed', { error: e });
+            answer({ error: { code: 'io', message: 'the machine could not answer; see the daemon log' } });
         });
     }
 

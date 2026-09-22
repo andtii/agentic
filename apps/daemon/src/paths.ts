@@ -2,8 +2,10 @@
  * Where the daemon keeps things (architecture §5b). The token,
  * `environments.json` and `policy.json` are configuration and roam with the user profile
  * (`%APPDATA%/agentic`); session logs are machine-local state
- * (`%LOCALAPPDATA%/agentic/sessions`). `AGENTIC_DAEMON_HOME` puts both under
- * one directory — for tests and portable installs.
+ * (`%LOCALAPPDATA%/agentic/sessions`), and so is `logs/daemon.log` — the file the
+ * service scripts point the supervisor's (and so the daemon's) stderr at, which
+ * `log.request` tails (#355). `AGENTIC_DAEMON_HOME` puts all of it under one
+ * directory — for tests and portable installs.
  */
 
 import { homedir } from 'node:os';
@@ -17,6 +19,8 @@ export interface DaemonPaths {
     readonly policyFile: string;
     readonly stateDir: string;
     readonly sessionsDir: string;
+    /** `<stateDir>/logs/daemon.log`: what the installers' service definitions write the daemon's output to; absent for a foreground `run`. */
+    readonly logFile: string;
 }
 
 export interface PathContext {
@@ -52,7 +56,8 @@ export function daemonPaths(context: PathContext = {}): DaemonPaths {
         environmentsFile: join(configDir, 'environments.json'),
         policyFile: join(configDir, 'policy.json'),
         stateDir,
-        sessionsDir: join(stateDir, 'sessions')
+        sessionsDir: join(stateDir, 'sessions'),
+        logFile: join(stateDir, 'logs', 'daemon.log')
     };
 }
 
