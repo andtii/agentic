@@ -45,7 +45,7 @@ export interface EnvironmentDescriptor {
     readonly doctor?: EnvironmentVerdict;
     /** The models its account may use, as the runtime reported them (#450); absent until reported. */
     readonly models?: readonly ModelOption[];
-    /** Sessions here may run in a mode that asks about nothing (#450); set on the machine only. */
+    /** Sessions here may run in a mode that asks about nothing (#450); set on the machine, or from the page by an elevated owner (#355). */
     readonly allowBypassPermissions?: boolean;
 }
 
