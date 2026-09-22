@@ -1,16 +1,23 @@
 /**
- * `policy.json` — the machine-local policy for web-managed environments
- * (#238, decisions 2026-09-19 (c)): whether the platform may add, change and
- * remove this machine's environments at all, and inside which folders.
+ * `policy.json` — the policy for web-managed environments (#238, #355): whether
+ * the platform may add, change and remove this machine's environments at all,
+ * and inside which folders.
  *
  * ```json
- * { "webManaged": true, "allowedRoots": ["C:\\src"] }
+ * { "webManaged": true, "allowedRoots": ["C:\\Users\\me"], "source": "web", "requested": ["~"] }
  * ```
  *
  * A missing file is OFF, and so is a file that does not parse: the policy
- * fails closed. It is edited only here, on the machine — `pair --allow-root`
- * and `agentic-daemon policy …` (`policy-cli.ts`). Nothing that arrives over
- * the socket reaches a function in this module that writes.
+ * fails closed. Two things write it: the owner's commands on the machine —
+ * `pair --allow-root`, `agentic-daemon policy …` (`policy-cli.ts`, `source:
+ * "local"`) — and, since #355 (decisions 2026-09-22), a `policy.request` from
+ * the platform through `policy-web.ts` (`source: "web"`, `requested` echoing
+ * the roots as the web asked for them, `~` included). `agentic-daemon policy
+ * lock` sets `locked`, and a locked policy refuses every `policy.request`
+ * until `unlock` is run here. Nothing that arrives over the socket reaches a
+ * function in this module that writes: `policy-web.ts` is the only web-facing
+ * caller of `allowRoot` / `writePolicy`, and `daemon.ts` reaches it only
+ * through the port `cli.ts` injects.
  *
  * Allowed roots are stored as the `realpath` of a directory that exists, so
  * what the owner allowed cannot later be re-pointed through a link. The
@@ -45,14 +52,28 @@ export class PolicyError extends Error {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** The keys `policy.json` may carry, in the order they are written — so a policy re-read from disk stringifies like the one written. */
 export function parsePolicy(value: unknown): PolicyResult {
     if (!isRecord(value)) return { ok: false, errors: ['policy.json must be { "webManaged": boolean, "allowedRoots": [...] }'] };
     const errors: string[] = [];
     if (typeof value.webManaged !== 'boolean') errors.push('policy.webManaged must be true or false');
     const roots = value.allowedRoots ?? [];
     if (!Array.isArray(roots) || !roots.every((r) => typeof r === 'string' && isAbsolute(r) && !isRemoteOrDevicePath(r))) errors.push('policy.allowedRoots must be a list of absolute local paths');
+    if (value.source !== undefined && value.source !== 'local' && value.source !== 'web') errors.push('policy.source must be "local" or "web"');
+    if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push('policy.locked must be true or false');
+    const requested = value.requested;
+    if (requested !== undefined && (!Array.isArray(requested) || !requested.every((r) => typeof r === 'string' && r.length > 0))) errors.push('policy.requested must be a list of the folders the web asked for');
     if (errors.length) return { ok: false, errors };
-    return { ok: true, policy: { webManaged: value.webManaged as boolean, allowedRoots: [...(roots as string[])] } };
+    return {
+        ok: true,
+        policy: {
+            webManaged: value.webManaged as boolean,
+            allowedRoots: [...(roots as string[])],
+            ...(value.source === undefined ? {} : { source: value.source as 'local' | 'web' }),
+            ...(value.locked === true ? { locked: true } : {}),
+            ...(requested === undefined ? {} : { requested: [...(requested as string[])] })
+        }
+    };
 }
 
 export async function loadPolicy(file: string): Promise<PolicyResult> {
@@ -72,12 +93,41 @@ export async function loadPolicy(file: string): Promise<PolicyResult> {
 
 /** Atomic and owner-only, like `credentials.json`: whoever can write this file decides what the web may reach. */
 export async function writePolicy(file: string, policy: MachinePolicy, options: SecureWriteOptions = {}): Promise<void> {
-    await writeOwnerOnly(file, `${JSON.stringify({ webManaged: policy.webManaged, allowedRoots: policy.allowedRoots }, null, 2)}\n`, options);
+    const row = {
+        webManaged: policy.webManaged,
+        allowedRoots: policy.allowedRoots,
+        ...(policy.source === undefined ? {} : { source: policy.source }),
+        ...(policy.locked === true ? { locked: true } : {}),
+        ...(policy.requested === undefined ? {} : { requested: policy.requested })
+    };
+    await writeOwnerOnly(file, `${JSON.stringify(row, null, 2)}\n`, options);
 }
 
-/** What `hello` / `env` carry: the roots only while the web may use them — on with none allowed is refused like off, so it says off. */
+/**
+ * What `hello` / `env` carry: the roots only while the web may use them — on with none allowed is refused like off, so
+ * it says off; `source` and `requested` when the file names them; `locked` whenever it is set, off or on, so the web
+ * knows why a request would be refused.
+ */
 export function reportedPolicy(policy: MachinePolicy): MachinePolicy {
-    return policy.webManaged && policy.allowedRoots.length > 0 ? { webManaged: true, allowedRoots: [...policy.allowedRoots] } : POLICY_OFF;
+    const on = policy.webManaged && policy.allowedRoots.length > 0;
+    return {
+        webManaged: on,
+        allowedRoots: on ? [...policy.allowedRoots] : [],
+        ...(policy.source === undefined ? {} : { source: policy.source }),
+        ...(policy.locked === true ? { locked: true } : {}),
+        ...(policy.requested === undefined ? {} : { requested: [...policy.requested] })
+    };
+}
+
+/** `policy` as a command on the machine leaves it: `source: 'local'`, the web's `requested` dropped, the lock kept. */
+export function localEdit(policy: MachinePolicy): MachinePolicy {
+    return { webManaged: policy.webManaged, allowedRoots: policy.allowedRoots, source: 'local', ...(policy.locked === true ? { locked: true } : {}) };
+}
+
+/** `policy` with the lock set or cleared; nothing else changes. */
+export function withLock(policy: MachinePolicy, locked: boolean): MachinePolicy {
+    const { locked: _, ...rest } = policy;
+    return locked ? { ...rest, locked: true } : rest;
 }
 
 export function watchPolicy(options: Omit<WatchConfigFileOptions<PolicyResult>, 'load'>): Promise<{ close(): void }> {
@@ -185,7 +235,7 @@ export async function allowRoot(policy: MachinePolicy, dir: string, own: Pick<Pr
         if (withinRoots(real, [await realOrLexical(mine)], platform) || withinRoots(real, [resolve(mine)], platform)) throw new PolicyError('protected', `${dir} is inside the daemon's own folder ${mine}`);
     }
     const kept = policy.allowedRoots.filter((r) => fold(r, platform) !== fold(real, platform));
-    return { webManaged: true, allowedRoots: [...kept, real] };
+    return { ...policy, webManaged: true, allowedRoots: [...kept, real] };
 }
 
 /** `policy` without `dir`; with no root left the web manages nothing, so it goes off. */
@@ -193,5 +243,5 @@ export async function denyRoot(policy: MachinePolicy, dir: string, platform: Nod
     const candidates = new Set([fold(resolve(dir), platform), fold(await realOrLexical(dir), platform)]);
     const kept = policy.allowedRoots.filter((r) => !candidates.has(fold(resolve(r), platform)));
     if (kept.length === policy.allowedRoots.length) throw new PolicyError('not-found', `${dir} is not an allowed root`);
-    return kept.length === 0 ? POLICY_OFF : { webManaged: policy.webManaged, allowedRoots: kept };
+    return kept.length === 0 ? { ...policy, ...POLICY_OFF } : { ...policy, allowedRoots: kept };
 }

@@ -59,7 +59,7 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
             cwdRoots: row.cwdRoots as string[],
             concurrency: concurrency as number,
             ...(row.accountLabel === undefined ? {} : { accountLabel: row.accountLabel as string }),
-            // Machine-local (#453): only this file sets it — `env.request` cannot, and a replace keeps it (`addEnvironment`).
+            // Set here, by `env add --allow-bypass`, or by an `env.request` the platform admits only to an elevated owner (#453, #355); a replace keeps it (`addEnvironment`).
             ...(row.allowBypassPermissions === true ? { allowBypassPermissions: true } : {})
         });
     });

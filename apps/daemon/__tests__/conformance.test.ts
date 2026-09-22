@@ -10,6 +10,8 @@ import { createDaemon, type Daemon } from '../src/daemon';
 import { writeEnvironments } from '../src/env-store';
 import { ndjsonEventLog, type NdjsonEventLog } from '../src/event-log';
 import { harnessStore } from '../src/harness';
+import { loadPolicy, localEdit, withLock, writePolicy } from '../src/policy';
+import { applyWebPolicy, browseMachine } from '../src/policy-web';
 import { namingDriver } from './helpers/drivers';
 import { releaseZip } from './helpers/release';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
@@ -39,6 +41,8 @@ afterAll(() => rm(releaseDir, { recursive: true, force: true }));
 /** The harness build `harness-install` installs (#369): a package for the scripted runtime, served at an `https:` URL through the daemon's `fetch`. */
 const releases = fakeReleases();
 let harnessTarget: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset } | undefined;
+/** The daemon's configuration folder of the daemon under test (#355): a policy must refuse it, a listing never show it. */
+let protectedFolder: string | undefined;
 let zips: string;
 beforeAll(async () => {
     zips = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-zips-'));
@@ -58,16 +62,25 @@ const harness: DaemonConformanceHarness = {
     // `build` / `update` (#364): `hello` carries the build and `features: ['update']`; the update client downloads `updateTarget`
     // into a temp install root, and its restart is `stop({ reason: 'update' })` — what `run` does before it exits 75.
     // `harness` (#369): a real harness store under the daemon's dir; the install downloads through the injected `fetch`.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness'],
+    // `policy` (#355): a real `policy.json`, the web port over `policy-web.ts` with `~` expanding to a folder under the temp dir,
+    // the configuration folder as the one a policy must refuse and a listing must never show, and `lock` writing the file.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy'],
     updateTarget: UPDATE_TARGET,
     knownOrigin: KNOWN_ORIGIN,
     get harnessTarget() {
         return harnessTarget;
     },
+    get protectedFolder() {
+        return protectedFolder;
+    },
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
         // The machine's own folders beside the one its owner allowed (#238): configuration, state, and the work.
-        const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), environmentsFile: join(dir, 'config', 'environments.json') };
+        const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), environmentsFile: join(dir, 'config', 'environments.json'), policyFile: join(dir, 'config', 'policy.json') };
+        protectedFolder = paths.configDir;
+        const home = join(dir, 'home');
+        await mkdir(join(home, 'src'), { recursive: true });
+        await mkdir(paths.stateDir, { recursive: true });
         await mkdir(join(dir, 'work', 'agentic', '.git'), { recursive: true });
         await writeFile(join(dir, 'work', 'agentic', '.git', 'HEAD'), 'ref: refs/heads/main\n');
         await writeFile(join(dir, 'work', 'agentic', '.git', 'config'), `[remote "origin"]\n\turl = ${KNOWN_ORIGIN}\n`);
@@ -80,6 +93,8 @@ const harness: DaemonConformanceHarness = {
         const store = harnessStore({ root: join(dir, 'install', 'harnesses'), bundled: false });
         await writeEnvironments(paths.environmentsFile, environments, secure);
         const policy: MachinePolicy = { webManaged: true, allowedRoots: [work] };
+        await writePolicy(paths.policyFile, policy, secure);
+        const web = { paths, profileDirs: [join(paths.configDir, 'profiles')], home, secure };
         // A new process each time: a fresh log handle over the same files.
         const create = (): Daemon =>
             createDaemon({
@@ -87,6 +102,7 @@ const harness: DaemonConformanceHarness = {
                 environments,
                 policy,
                 manage: { paths, secure },
+                webPolicy: { apply: (input) => applyWebPolicy(input, web), browse: (path) => browseMachine(path, web) },
                 drivers: [driver],
                 eventLog: (log = ndjsonEventLog(join(paths.stateDir, 'sessions'))),
                 heartbeatMs: script.heartbeatMs,
@@ -111,6 +127,13 @@ const harness: DaemonConformanceHarness = {
                 await daemon.setEnvironments(next.map(toLocal));
             },
             async setPolicy(next) {
+                await writePolicy(paths.policyFile, localEdit(next), secure);
+                await daemon.setPolicy(localEdit(next));
+            },
+            async lock(locked) {
+                const loaded = await loadPolicy(paths.policyFile);
+                const next = withLock(loaded.ok ? loaded.policy : policy, locked);
+                await writePolicy(paths.policyFile, next, secure);
                 await daemon.setPolicy(next);
             },
             async truncateLog(sessionId: SessionId, keepFrom) {

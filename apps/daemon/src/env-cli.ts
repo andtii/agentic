@@ -1,6 +1,6 @@
 /**
  * `agentic-daemon env add --name <name> --root <dir>… [--runtime claude-code|copilot-cli|codex-cli] [--id <id>]
- *                         [--concurrency <n>] [--account <label>] [--profile-dir <dir>] [--replace]`
+ *                         [--concurrency <n>] [--account <label>] [--profile-dir <dir>] [--allow-bypass] [--replace]`
  * `agentic-daemon env list`
  * `agentic-daemon env rm <id>`
  * `agentic-daemon env login <id> [--cli <path to the runtime's CLI>]`
@@ -65,7 +65,8 @@ export function flagValues(argv: readonly string[], flag: string): string[] {
 
 export const ENV_USAGE = `  agentic-daemon env add --name <name> --root <dir> [--root <dir>…] [--runtime claude-code|copilot-cli|codex-cli] [--id <id>]
                          [--concurrency <n>] [--account <label>] [--profile-dir <dir>]
-                         [--replace]   (with --id: change an environment; its profile is kept)
+                         [--allow-bypass]   (lets a chat member run this environment in bypassPermissions: every tool unasked)
+                        [--replace]   (with --id: change an environment; its profile is kept)
   agentic-daemon env list
   agentic-daemon env rm <id>
   agentic-daemon env login <id> [--cli <path>]`;
@@ -163,7 +164,8 @@ ${ENV_USAGE}`);
                         cwdRoots: roots.map((r) => resolve(r)),
                         ...(concurrency === undefined ? {} : { concurrency }),
                         ...(account ? { accountLabel: account } : {}),
-                        ...(profileDir ? { profileDir: resolve(profileDir) } : {})
+                        ...(profileDir ? { profileDir: resolve(profileDir) } : {}),
+                        ...(flags['allow-bypass'] === true ? { allowBypassPermissions: true } : {})
                     },
                     { ...c.secure, ...(flags.replace === true ? { replace: true } : {}) }
                 );

@@ -2,11 +2,12 @@
  * `env.request` (#236/#238, decisions 2026-09-19 (c)): the platform asks this
  * machine to add, change or remove an environment, and the machine decides.
  *
- * The decision rests on `policy.json`, which only the machine's owner edits
- * locally (`policy.ts`): with the policy off every request is refused; with
- * it on, every working root must pass `checkWorkingRoot`. Nothing here writes
- * the policy, and nothing the request carries chooses a `profileDir` — a new
- * environment gets `<configDir>/profiles/<id>`, a changed one keeps its own.
+ * The decision rests on `policy.json` (`policy.ts`; set on the machine or,
+ * since #355, from the web through `policy-web.ts`): with the policy off every
+ * request is refused; with it on, every working root must pass
+ * `checkWorkingRoot`. Nothing here writes the policy, and nothing the request
+ * carries chooses a `profileDir` — a new environment gets
+ * `<configDir>/profiles/<id>`, a changed one keeps its own.
  * What is written goes through `env-store.ts`, the same writer `env add` uses.
  *
  * Failures that are the machine's own business (`environments.json` is
@@ -87,9 +88,11 @@ export async function answerEnvRequest(op: EnvOp, c: EnvManageContext): Promise<
         // An existing environment keeps what the request leaves out (`replace` alone would drop them).
         const concurrency = input.concurrency ?? existing?.concurrency;
         const accountLabel = input.accountLabel ?? existing?.accountLabel;
+        // `allowBypassPermissions` (#355): `true` sets, `false` clears, absent keeps — the platform admits turning it on to an elevated owner only.
+        const allowBypassPermissions = typeof input.allowBypassPermissions === 'boolean' ? input.allowBypassPermissions : undefined;
         const { environments, environment } = addEnvironment(
             current,
-            { ...(input.id === undefined ? {} : { id: input.id }), name: input.name, runtime: input.runtime, cwdRoots: roots, ...(concurrency === undefined ? {} : { concurrency }), ...(accountLabel === undefined ? {} : { accountLabel }) },
+            { ...(input.id === undefined ? {} : { id: input.id }), name: input.name, runtime: input.runtime, cwdRoots: roots, ...(concurrency === undefined ? {} : { concurrency }), ...(accountLabel === undefined ? {} : { accountLabel }), ...(allowBypassPermissions === undefined ? {} : { allowBypassPermissions }) },
             c.paths,
             { replace: existing !== undefined, platform }
         );

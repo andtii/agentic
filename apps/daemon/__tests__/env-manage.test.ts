@@ -107,7 +107,23 @@ describe('answerEnvRequest', () => {
         expect(JSON.stringify(outcome)).not.toContain('config');
     });
 
-    it('never writes policy.json — nothing on the wire can widen what the web may reach', async () => {
+    it('allowBypassPermissions: true sets, false clears, absent keeps (#355)', async () => {
+        const made = await put({ name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'b')] });
+        expect(made).toMatchObject({ result: { environmentId: 'env_web' } });
+        const row = async () => (await readEnvironmentsForEdit(paths.environmentsFile)).find((e) => e.id === 'env_web')!;
+        expect((await row()).allowBypassPermissions).toBeUndefined();
+        await put({ id: 'env_web', name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'b')], allowBypassPermissions: true });
+        expect((await row()).allowBypassPermissions).toBe(true);
+        await put({ id: 'env_web', name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'b')], concurrency: 2 });
+        expect((await row()).allowBypassPermissions).toBe(true);
+        await put({ id: 'env_web', name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'b')], allowBypassPermissions: false });
+        expect((await row()).allowBypassPermissions).toBeUndefined();
+        // Not a boolean: ignored, never coerced.
+        await put({ id: 'env_web', name: 'Web', runtime: 'scripted', cwdRoots: [join(work, 'b')], allowBypassPermissions: 'yes' });
+        expect((await row()).allowBypassPermissions).toBeUndefined();
+    });
+
+    it('env.request never writes policy.json — the web sets the policy only through policy.request and the port cli.ts injects (#355)', async () => {
         const policyFile = join(paths.configDir, 'policy.json');
         await writeFile(policyFile, JSON.stringify({ webManaged: true, allowedRoots: [work] }));
         const before = await readFile(policyFile, 'utf8');
@@ -115,10 +131,11 @@ describe('answerEnvRequest', () => {
         await put({ name: 'x', runtime: 'scripted', cwdRoots: [join(dir, 'outside')] });
         await answerEnvRequest({ op: 'remove', environmentId: byHand.id }, ctx());
         expect(await readFile(policyFile, 'utf8')).toBe(before);
-        // And by construction: the code that answers the platform cannot reach a policy writer.
+        // And by construction: the code that answers the platform's environment requests cannot reach a policy writer. Since #355
+        // `policy.request` may set the policy — through `policy-web.ts`, which only `cli.ts` binds into the daemon as a port.
         for (const file of ['env-manage.ts', 'daemon.ts']) {
             const source = await readFile(join(__dirname, '..', 'src', file), 'utf8');
-            expect(source).not.toMatch(/writePolicy|policyFile|allowRoot|denyRoot/);
+            expect(source).not.toMatch(/writePolicy|policyFile|allowRoot|denyRoot|from '\.\/policy-web/);
         }
     });
 });

@@ -317,7 +317,7 @@ describe('env add / env login with harnesses', () => {
 
     it('login runs the installed harness for Claude Code and Codex, the copilot CLI for Copilot; add says how to install a missing harness', async () => {
         const { envCommand } = await import('../src/env-cli');
-        const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), credentialsFile: join(dir, 'c.json'), environmentsFile: join(dir, 'config', 'environments.json'), policyFile: join(dir, 'p.json'), sessionsDir: join(dir, 's') };
+        const paths = { configDir: join(dir, 'config'), stateDir: join(dir, 'state'), credentialsFile: join(dir, 'c.json'), environmentsFile: join(dir, 'config', 'environments.json'), policyFile: join(dir, 'p.json'), sessionsDir: join(dir, 's'), logFile: join(dir, 'daemon.log') };
         const located = (runtime: string): HarnessLocation | undefined => (runtime === 'copilot-cli' ? undefined : { runtime, version: '1.0.0', dir: '/h', binary: `/h/${runtime}/bin`, source: 'store', installedAt: 1 });
         const logins: { command: string; args: readonly string[] }[] = [];
         const out: string[] = [];

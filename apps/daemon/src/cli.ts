@@ -17,6 +17,7 @@
 
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
 import type { DaemonExit, DaemonUpdateOutcome, QuotaSource } from '@agentic/core';
 import { registeredChildren, killTreeSync } from '@sigx/ai-agent-node';
 import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner, type Credentials } from './credentials.js';
@@ -35,7 +36,8 @@ import { openUrl, resolveOpen, type UrlOpener } from './open.js';
 import { pair, PairingError } from './pair.js';
 import { daemonPaths, installPaths, type DaemonPaths, type InstallPaths } from './paths.js';
 import { policyCommand, POLICY_USAGE } from './policy-cli.js';
-import { allowRoot, loadPolicy, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
+import { applyWebPolicy, browseMachine } from './policy-web.js';
+import { allowRoot, loadPolicy, localEdit, POLICY_OFF, PolicyError, watchPolicy, writePolicy } from './policy.js';
 import { isSupervised, updateCommand, UPDATE_USAGE, type UpdateTestOptions } from './update-cli.js';
 import { DAEMON_CHANNEL, DAEMON_VERSION, versionLine } from './version.js';
 
@@ -72,6 +74,8 @@ export interface CliContext {
      */
     readonly install?: InstallPaths;
     readonly platform?: NodeJS.Platform;
+    /** What `~` in a web-set policy expands to (#355; tests). Default `os.homedir()`. */
+    readonly home?: string;
     readonly run?: CommandRunner;
     readonly hostname?: string;
     /** Called once `run` has started the daemon (tests). */
@@ -293,7 +297,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 await saveCredentials(paths.credentialsFile, credentials, secure);
                 out(`paired as machine ${result.machineId} (workspace ${result.workspaceId}); credentials saved to ${paths.credentialsFile}`);
                 if (allow.length > 0) {
-                    await writePolicy(paths.policyFile, policy, secure);
+                    await writePolicy(paths.policyFile, localEdit(policy), secure);
                     out(`the web may add environments inside: ${policy.allowedRoots.join(', ')} (change it with \`agentic-daemon policy\`)`);
                 }
                 return 0;
@@ -359,6 +363,9 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                 if (loaded.environments.length === 0) log.warn('no environments yet — add one with `agentic-daemon env add`; this daemon picks it up while running', { file: paths.environmentsFile });
                 // An unreadable policy is off: web management fails closed.
                 const loadedPolicy = await loadPolicy(paths.policyFile);
+                /** What the daemon runs with, as the file spells it: the watcher announces only a change to it. */
+                let runningPolicy = '';
+                const profileDirsOf = (envs: readonly { readonly profileDir?: string }[]) => [join(paths.configDir, 'profiles'), ...envs.flatMap((e) => (e.profileDir === undefined ? [] : [e.profileDir]))];
                 if (!loadedPolicy.ok) for (const e of loadedPolicy.errors) log.error('policy.json is invalid; the web manages nothing on this machine', { problem: e });
                 if (harnesses) {
                     for (const report of harnesses.reports(drivers.map((d) => d.runtime))) log.info('harness', { ...report });
@@ -373,6 +380,16 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     environments: loaded.environments,
                     policy: loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF,
                     manage: { paths, secure },
+                    // The web sets the policy (#355) through this port and nowhere else; what it wrote is already the
+                    // running policy, so the file watcher below is told not to announce it a second time.
+                    webPolicy: {
+                        apply: async (input) => {
+                            const outcome = await applyWebPolicy(input, { paths, profileDirs: profileDirsOf(daemon.environments), secure, logger: log, ...(context.home ? { home: context.home } : {}), ...(context.platform ? { platform: context.platform } : {}) });
+                            if ('policy' in outcome) runningPolicy = JSON.stringify(outcome.policy);
+                            return outcome;
+                        },
+                        browse: (path) => browseMachine(path, { paths, profileDirs: profileDirsOf(daemon.environments), logger: log, ...(context.home ? { home: context.home } : {}), ...(context.platform ? { platform: context.platform } : {}) })
+                    },
                     drivers,
                     quota: { sources: context.quotaSources ?? builtin?.quotaSources ?? [], ...quota },
                     telemetry,
@@ -432,7 +449,7 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     return undefined;
                 });
                 // `agentic-daemon policy …` (or a hand edit) takes effect at once; a broken file turns web management off.
-                let runningPolicy = JSON.stringify(loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF);
+                runningPolicy = JSON.stringify(loadedPolicy.ok ? loadedPolicy.policy : POLICY_OFF);
                 const policyWatcher = await watchPolicy({
                     file: paths.policyFile,
                     ...(context.watchDebounceMs !== undefined ? { debounceMs: context.watchDebounceMs } : {}),

@@ -33,7 +33,7 @@ describe('doctor: harnesses (#369)', () => {
         // What the daemon's install on start last hit.
         await store.setFailure('claude-code', 'no release manifest at https://releases.test/manifest.json (404)');
 
-        const paths = { configDir: dir, stateDir: dir, credentialsFile: join(dir, 'credentials.json'), environmentsFile: join(dir, 'environments.json'), policyFile: join(dir, 'policy.json'), sessionsDir: join(dir, 'sessions') };
+        const paths = { configDir: dir, stateDir: dir, credentialsFile: join(dir, 'credentials.json'), environmentsFile: join(dir, 'environments.json'), policyFile: join(dir, 'policy.json'), sessionsDir: join(dir, 'sessions'), logFile: join(dir, 'logs', 'daemon.log') };
         await writeEnvironments(paths.environmentsFile, [{ id: 'env_claude' as EnvironmentId, name: 'Claude', runtime: 'claude-code', cwdRoots: [dir], concurrency: 1 }], { run: async () => ({ code: 0, stderr: '' }) });
         const fake = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'fake' };
         const which = async (command: string) => (command === 'claude' ? '/usr/local/bin/claude' : undefined);

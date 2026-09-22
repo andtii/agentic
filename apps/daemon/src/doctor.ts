@@ -15,6 +15,7 @@ import type { DaemonDriver } from './daemon.js';
 import { loadEnvironments } from './environments.js';
 import { BUILTIN_HARNESSES, type HarnessStore } from './harness.js';
 import type { DaemonPaths } from './paths.js';
+import { loadPolicy } from './policy.js';
 
 export interface DoctorOptions {
     readonly paths: DaemonPaths;
@@ -56,6 +57,16 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         else findings.push({ level: 'info', code: 'paired', message: `paired as machine ${credentials.machineId} of workspace ${credentials.workspaceId} at ${credentials.url}` });
     } catch (e) {
         error('credentials-unreadable', (e as Error).message);
+    }
+
+    // The policy for web-managed environments (#238, #355): how many folders, who set it, and whether the web may set it.
+    const policy = await loadPolicy(options.paths.policyFile);
+    if (!policy.ok) for (const message of policy.errors) error('policy-invalid', `${message} — web management is off until ${options.paths.policyFile} is fixed`);
+    else {
+        const p = policy.policy;
+        const on = p.webManaged && p.allowedRoots.length > 0;
+        const notes = [on ? `${p.allowedRoots.length} folder${p.allowedRoots.length === 1 ? '' : 's'}` : 'off', ...(p.source ? [p.source === 'web' ? 'set from the web' : 'set on this machine'] : []), ...(p.locked ? ['locked'] : [])];
+        findings.push({ level: 'info', code: 'policy', message: `policy: ${notes.join(', ')}${p.locked ? ' — the web cannot set it until `agentic-daemon policy unlock`' : ''}` });
     }
 
     const loaded = await loadEnvironments(options.paths.environmentsFile);
