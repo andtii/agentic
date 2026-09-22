@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { codexAccountEnv } from '@agentic/runtimes/codex-cli';
 import { copilotAccountEnv } from '@agentic/runtimes/copilot-cli';
 import type { SecureWriteOptions } from './credentials.js';
@@ -134,13 +134,16 @@ export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
 };
 
 /** Whether `command` is on `PATH` as an executable (`.exe` / `.cmd` / … on Windows); an absolute path is checked as is. */
-export function onPath(command: string, env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform): boolean {
+export function onPath(command: string, env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = existsSync): boolean {
     const win = platform === 'win32';
+    const sep = win ? '\\' : '/';
     const exts = win ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
     const candidates = (base: string): string[] => (win && !/\.[A-Za-z0-9]+$/.test(base) ? exts.map((x) => base + x.toLowerCase()) : [base]);
-    if (isAbsolute(command)) return candidates(command).some((c) => existsSync(c));
+    // The target platform's own spellings, never the running one's: a Windows daemon splits `PATH` on `;`, a POSIX one on `:`.
+    const absolute = win ? /^([A-Za-z]:[\\/]|\\\\)/.test(command) : command.startsWith('/');
+    if (absolute) return candidates(command).some(exists);
     const dirs = (env.PATH ?? env.Path ?? '').split(win ? ';' : ':').filter(Boolean);
-    return dirs.some((dir) => candidates(join(dir, command)).some((c) => existsSync(c)));
+    return dirs.some((dir) => candidates(dir.replace(/[\\/]+$/, '') + sep + command).some(exists));
 }
 
 export interface LoginPortContext {
@@ -149,6 +152,8 @@ export interface LoginPortContext {
     readonly platform?: NodeJS.Platform;
     /** How a relay is started; the real spawn unless a test binds a fake. */
     readonly spawn?: typeof spawnLoginRelay;
+    /** How `PATH` is probed; the real filesystem unless a test binds a fake. */
+    readonly exists?: (path: string) => boolean;
 }
 
 /**
@@ -164,7 +169,7 @@ export function loginPort(c: LoginPortContext): DaemonLoginPort {
         const harness = signIn.harness ? c.harnesses?.locate(runtime) : undefined;
         if (harness) return { command: harness.binary, args: signIn.relay.args, signIn };
         if (signIn.prefix) return { command: signIn.command, args: [...signIn.prefix, ...signIn.relay.args], signIn };
-        return onPath(signIn.command, c.env, platform) ? { command: signIn.command, args: signIn.relay.args, signIn } : undefined;
+        return onPath(signIn.command, c.env, platform, c.exists) ? { command: signIn.command, args: signIn.relay.args, signIn } : undefined;
     };
     return {
         relays: (runtime) => cliOf(runtime) !== undefined,

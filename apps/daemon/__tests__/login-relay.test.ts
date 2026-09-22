@@ -5,7 +5,7 @@
  * runtimes relay on a machine, and the CLI it resolves.
  */
 // @vitest-environment node
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,41 +128,62 @@ describe('the daemon’s login port', () => {
         await rm(dir, { recursive: true, force: true });
     });
 
-    it('finds a command on PATH per platform', async () => {
-        await writeFile(join(dir, 'copilot.cmd'), '@echo off\n');
-        await writeFile(join(dir, 'gh'), '#!/bin/sh\n');
-        expect(onPath('copilot', { PATH: dir, PATHEXT: '.EXE;.CMD' }, 'win32')).toBe(true);
-        expect(onPath('copilot', { PATH: dir }, 'linux')).toBe(false);
-        expect(onPath('gh', { PATH: dir }, 'linux')).toBe(true);
-        expect(onPath('nope', { PATH: dir }, 'win32')).toBe(false);
-        expect(onPath(join(dir, 'gh'), {}, 'linux')).toBe(true);
+    // Both spellings on whichever OS the suite runs: a fake `exists` over a fixed set, so a Windows temp path is never
+    // parsed as a POSIX `PATH` (its drive colon would split it) and a `.cmd` never has to exist on Linux.
+    it('finds a command on PATH per platform: PATHEXT and ; on Windows, the bare name and : on POSIX', () => {
+        const files = new Set(['C:\\tools\\copilot.cmd', 'C:\\tools\\node.exe', '/usr/local/bin/copilot', '/usr/local/bin/gh']);
+        const has = (p: string): boolean => files.has(p);
+        const WIN = { PATH: 'C:\\windows;C:\\tools\\', PATHEXT: '.EXE;.CMD' };
+        const POSIX = { PATH: '/usr/bin:/usr/local/bin' };
+        expect(onPath('copilot', WIN, 'win32', has)).toBe(true);
+        expect(onPath('node', WIN, 'win32', has)).toBe(true);
+        expect(onPath('gh', WIN, 'win32', has)).toBe(false);
+        // A PATHEXT that does not name the extension the file has: not found, like `cmd.exe`.
+        expect(onPath('copilot', { ...WIN, PATHEXT: '.EXE' }, 'win32', has)).toBe(false);
+        expect(onPath('copilot', { Path: 'C:\\tools' }, 'win32', has)).toBe(true); // `Path` as Windows spells it
+        expect(onPath('copilot', POSIX, 'linux', has)).toBe(true);
+        expect(onPath('gh', POSIX, 'linux', has)).toBe(true);
+        expect(onPath('copilot.cmd', POSIX, 'linux', has)).toBe(false);
+        expect(onPath('copilot', {}, 'linux', has)).toBe(false);
+        // An absolute command is checked as it stands, in the target platform's spelling.
+        expect(onPath('C:\\tools\\copilot.cmd', {}, 'win32', has)).toBe(true);
+        expect(onPath('C:\\tools\\copilot', {}, 'win32', has)).toBe(true); // PATHEXT applies to it too
+        expect(onPath('/usr/local/bin/gh', {}, 'linux', has)).toBe(true);
+        expect(onPath('/usr/local/bin/nope', {}, 'linux', has)).toBe(false);
+        // And against the real filesystem, on whichever OS this runs: this Node exists, a sibling nonsense name does not.
+        expect(onPath(process.execPath, {})).toBe(true);
+        expect(onPath(join(dir, 'no-such-cli'), {})).toBe(false);
     });
 
-    it('relays the runtimes whose CLI is here — the harness executable first, the shipped launcher, else PATH — and starts a relay under the profile', async () => {
-        const env = (runtime: string, profileDir?: string): LocalEnvironment => ({ id: `env_${runtime}` as EnvironmentId, name: runtime, runtime, cwdRoots: [dir], concurrency: 1, ...(profileDir ? { profileDir } : {}) });
+    // A Windows machine as the daemon would see it, on whichever OS this runs: a fake `PATH` probe and a fake spawn.
+    it('relays the runtimes whose CLI is here — the harness executable first, the shipped launcher, else PATH — and starts a relay under the profile', () => {
+        const TOOLS = 'C:\\tools';
+        const HARNESS = 'C:\\harnesses\\claude-code\\2.1.0\\claude.exe';
+        const files = new Set([HARNESS]);
+        const env = (runtime: string, profileDir?: string): LocalEnvironment => ({ id: `env_${runtime}` as EnvironmentId, name: runtime, runtime, cwdRoots: ['C:\\Dev'], concurrency: 1, ...(profileDir ? { profileDir } : {}) });
         const started: { command: string; args: readonly string[]; env: Readonly<Record<string, string | undefined>> }[] = [];
         const spawn = ((spec: { command: string; args: readonly string[]; env: Readonly<Record<string, string | undefined>> }) => {
             started.push(spec);
             return { events: (async function* () { yield { phase: 'done' as const }; })(), answer: () => undefined, cancel: () => undefined };
         }) as unknown as typeof spawnLoginRelay;
-        const harnesses: HarnessLocator = { locate: (runtime) => (runtime === 'claude-code' ? { runtime, version: '2.1.0', dir, binary: join(dir, 'claude.exe'), source: 'store', installedAt: 1 } : undefined) };
-        const port = loginPort({ env: { PATH: dir, CLAUDE_CONFIG_DIR: 'C:\\elsewhere', ANTHROPIC_API_KEY: 'sk-x' }, harnesses, platform: 'win32', spawn });
-        expect(port.relays('claude-code')).toBe(true);
-        expect(port.relays('codex-cli')).toBe(SIGN_INS['codex-cli']!.prefix !== undefined);
+        const harnesses: HarnessLocator = { locate: (runtime) => (runtime === 'claude-code' ? { runtime, version: '2.1.0', dir: 'C:\\harnesses\\claude-code\\2.1.0', binary: HARNESS, source: 'store', installedAt: 1 } : undefined) };
+        const port = loginPort({ env: { PATH: TOOLS, PATHEXT: '.EXE;.CMD', CLAUDE_CONFIG_DIR: 'C:\\elsewhere', ANTHROPIC_API_KEY: 'sk-x' }, harnesses, platform: 'win32', spawn, exists: (p) => files.has(p) });
+        expect(port.relays('claude-code')).toBe(true); // its harness is installed
+        expect(port.relays('codex-cli')).toBe(SIGN_INS['codex-cli']!.prefix !== undefined); // the shipped launcher, when this daemon has it
         expect(port.relays('copilot-cli')).toBe(false); // not on this PATH
-        expect(port.relays('in-memory')).toBe(false);
+        expect(port.relays('in-memory')).toBe(false); // no sign-in at all
         expect(port.start(env('copilot-cli'))).toBeNull();
-        const claude = port.start(env('claude-code', join(dir, 'profiles', 'work')));
-        expect(claude).not.toBeNull();
-        expect(started[0]).toMatchObject({ command: join(dir, 'claude.exe'), args: ['auth', 'login', '--claudeai'] });
+        expect(port.start(env('claude-code', 'C:\\profiles\\work'))).not.toBeNull();
+        expect(started[0]).toMatchObject({ command: HARNESS, args: ['auth', 'login', '--claudeai'] });
         // The profile's own environment: the daemon's config dir and every ANTHROPIC_* removed, the profile in.
-        expect(started[0]!.env.CLAUDE_CONFIG_DIR).toBe(join(dir, 'profiles', 'work'));
+        expect(started[0]!.env.CLAUDE_CONFIG_DIR).toBe('C:\\profiles\\work');
         expect(started[0]!.env.ANTHROPIC_API_KEY).toBeUndefined();
-        await writeFile(join(dir, 'copilot.cmd'), '@echo off\n');
+        // `copilot` appears on PATH: the row relays from then on, from PATH and not from a harness.
+        files.add('C:\\tools\\copilot.cmd');
         expect(port.relays('copilot-cli')).toBe(true);
-        port.start(env('copilot-cli', join(dir, 'profiles', 'oc')));
+        port.start(env('copilot-cli', 'C:\\profiles\\oc'));
         expect(started[1]).toMatchObject({ command: 'copilot', args: ['login', '--device-code'] });
-        expect(started[1]!.env.COPILOT_HOME).toBe(join(dir, 'profiles', 'oc'));
+        expect(started[1]!.env.COPILOT_HOME).toBe('C:\\profiles\\oc');
     });
 });
 
