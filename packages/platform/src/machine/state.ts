@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, DaemonLogError, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, DaemonLogError, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, LoginAction, LoginError, LoginPhase, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -127,6 +127,23 @@ export interface LogRequestRecord {
     readonly deadline: number;
     finishedAt?: number;
     error?: DaemonLogError;
+}
+
+/**
+ * A sign-in relayed from the web (#355, #484), one per environment: the phase the daemon last reported and the action
+ * the person must take — never the pasted text, which is forwarded inside the turn that receives it and stored nowhere.
+ */
+export interface LoginRecord {
+    readonly requestId: string;
+    readonly environmentId: EnvironmentId;
+    phase: LoginPhase;
+    readonly startedAt: number;
+    /** After this, with no end from the daemon, the reminder fails it `timeout` (the daemon's own cap is ten minutes). */
+    readonly deadline: number;
+    readonly by: string;
+    action?: LoginAction;
+    error?: LoginError;
+    finishedAt?: number;
 }
 
 /**
@@ -295,6 +312,8 @@ export interface MachineState {
     policyRequests?: Record<string, PolicyRequestRecord>;
     /** `logTail` entries by request id, at most `MAX_LOG_REQUESTS` (#481): the status only — the lines live in the activation. */
     logRequests?: Record<string, LogRequestRecord>;
+    /** The sign-ins relayed from the web (#484), by environment id: one running or lately ended per environment. */
+    logins?: Record<string, LoginRecord>;
     /** The folders the web may use, as the owner wants them (#480); absent until set or preset. */
     policyDesired?: PolicyDesired;
     /** The `elevatedUntil` of the last elevation audited (`auth.elevated`, #355): one row per elevation window, by its first change. */
@@ -357,6 +376,13 @@ export const POLICY_RESULT_TTL_MS = 120_000;
 export const MAX_LOG_REQUESTS = 16;
 /** A finished log request is kept this long; the activation drops the lines it holds for it at the same time. */
 export const LOG_RESULT_TTL_MS = 60_000;
+/** A relayed sign-in with no end from the daemon is failed `timeout` after this (#484): past the daemon's own ten-minute cap. */
+export const LOGIN_TIMEOUT_MS = 11 * 60_000;
+/** An ended sign-in is kept this long, so the page reads how it ended. */
+export const LOGIN_RESULT_TTL_MS = 60_000;
+
+/** Whether a login record is still running. */
+export const loginRunning = (r: LoginRecord): boolean => r.phase !== 'done' && r.phase !== 'failed';
 /** A finished environment request is pruned this long after it finished. */
 export const ENV_RESULT_TTL_MS = 120_000;
 /** At most this many history requests are kept (#397); the oldest is evicted first. */
@@ -497,6 +523,16 @@ export function prunePolicyRequests(requests: Record<string, PolicyRequestRecord
 /** `pruneFs` for log requests (#481): the same rule over `LOG_RESULT_TTL_MS` / `MAX_LOG_REQUESTS`. */
 export function pruneLogRequests(requests: Record<string, LogRequestRecord>, at: number, room = true): void {
     prune(requests, at, room, LOG_RESULT_TTL_MS, MAX_LOG_REQUESTS);
+}
+
+/** Drop the ended sign-ins older than `LOGIN_RESULT_TTL_MS` (#484), and an ended one of an environment the machine no longer reports; a running one is left to end (`timeout`, a disconnect, a revoke). */
+export function pruneLogins(s: MachineState, at: number): void {
+    if (!s.logins) return;
+    for (const [id, r] of Object.entries(s.logins)) {
+        if (!loginRunning(r) && (r.finishedAt ?? r.startedAt) + LOGIN_RESULT_TTL_MS <= at) delete s.logins[id];
+        else if (!s.environments.some((e) => e.id === id) && !loginRunning(r)) delete s.logins[id];
+    }
+    if (Object.keys(s.logins).length === 0) delete s.logins;
 }
 
 /** `pruneFs` for history requests (#397): the same rule over `HISTORY_RESULT_TTL_MS` / `MAX_HISTORY_REQUESTS`. */

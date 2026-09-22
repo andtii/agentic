@@ -17,13 +17,15 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { codexAccountEnv } from '@agentic/runtimes/codex-cli';
 import { copilotAccountEnv } from '@agentic/runtimes/copilot-cli';
 import type { SecureWriteOptions } from './credentials.js';
-import type { DaemonDriver } from './daemon.js';
+import type { DaemonDriver, DaemonLoginPort } from './daemon.js';
 import { deleteEnvironment, EnvironmentStoreError, putEnvironment, readEnvironmentsForEdit } from './env-store.js';
 import type { HarnessLocator } from './harness.js';
+import { parseClaudeLogin, parseCodexLogin, parseCopilotLogin, spawnLoginRelay, type LoginParser } from './login-relay.js';
 import type { DaemonPaths } from './paths.js';
 
 /** Runs an interactive sign-in attached to this terminal; resolves to its exit code. */
@@ -108,12 +110,17 @@ export interface RuntimeSignIn {
     /** The runtime's harness executable is its CLI (#369): with one installed, `login` runs it instead of `command`. */
     readonly harness?: true;
     env(parent: Readonly<Record<string, string | undefined>>, profileDir: string | undefined): Record<string, string | undefined>;
+    /**
+     * The same CLI's sign-in relayed to the web (#484, from the #483 spike): the arguments that make it print what the
+     * person must do instead of opening a browser on the machine, and the parser that reads it. Absent → terminal only.
+     */
+    readonly relay?: { readonly args: readonly string[]; readonly parse: LoginParser };
 }
 
 /** The runtimes `env login` can sign in, by runtime id. */
 export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
-    'claude-code': { command: 'claude', args: ['/login'], env: loginEnv, harness: true },
-    'copilot-cli': { command: 'copilot', args: ['login'], env: (parent, profileDir) => withAccount(parent, copilotAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)) },
+    'claude-code': { command: 'claude', args: ['/login'], env: loginEnv, harness: true, relay: { args: ['auth', 'login', '--claudeai'], parse: parseClaudeLogin } },
+    'copilot-cli': { command: 'copilot', args: ['login'], env: (parent, profileDir) => withAccount(parent, copilotAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)), relay: { args: ['login', '--device-code'], parse: parseCopilotLogin } },
     'codex-cli': {
         ...(() => {
             const launcher = codexLauncher();
@@ -121,9 +128,58 @@ export const SIGN_INS: Readonly<Record<string, RuntimeSignIn>> = {
         })(),
         args: ['login'],
         env: (parent, profileDir) => withAccount(parent, codexAccountEnv(profileDir === undefined ? {} : { profileDir }, parent)),
-        harness: true
+        harness: true,
+        relay: { args: ['login', '--device-auth'], parse: parseCodexLogin }
     }
 };
+
+/** Whether `command` is on `PATH` as an executable (`.exe` / `.cmd` / … on Windows); an absolute path is checked as is. */
+export function onPath(command: string, env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = existsSync): boolean {
+    const win = platform === 'win32';
+    const sep = win ? '\\' : '/';
+    const exts = win ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+    const candidates = (base: string): string[] => (win && !/\.[A-Za-z0-9]+$/.test(base) ? exts.map((x) => base + x.toLowerCase()) : [base]);
+    // The target platform's own spellings, never the running one's: a Windows daemon splits `PATH` on `;`, a POSIX one on `:`.
+    const absolute = win ? /^([A-Za-z]:[\\/]|\\\\)/.test(command) : command.startsWith('/');
+    if (absolute) return candidates(command).some(exists);
+    const dirs = (env.PATH ?? env.Path ?? '').split(win ? ';' : ':').filter(Boolean);
+    return dirs.some((dir) => candidates(dir.replace(/[\\/]+$/, '') + sep + command).some(exists));
+}
+
+export interface LoginPortContext {
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly harnesses?: HarnessLocator;
+    readonly platform?: NodeJS.Platform;
+    /** How a relay is started; the real spawn unless a test binds a fake. */
+    readonly spawn?: typeof spawnLoginRelay;
+    /** How `PATH` is probed; the real filesystem unless a test binds a fake. */
+    readonly exists?: (path: string) => boolean;
+}
+
+/**
+ * The daemon's `login` port (#484): which runtimes relay on this machine, and a relay per environment — the runtime's
+ * CLI resolved exactly as `env login` resolves it (the harness executable, else the shipped launcher, else `PATH`),
+ * the relay arguments, the profile's environment.
+ */
+export function loginPort(c: LoginPortContext): DaemonLoginPort {
+    const platform = c.platform ?? process.platform;
+    const cliOf = (runtime: string): { readonly command: string; readonly args: readonly string[]; readonly signIn: RuntimeSignIn } | undefined => {
+        const signIn = SIGN_INS[runtime];
+        if (!signIn?.relay) return undefined;
+        const harness = signIn.harness ? c.harnesses?.locate(runtime) : undefined;
+        if (harness) return { command: harness.binary, args: signIn.relay.args, signIn };
+        if (signIn.prefix) return { command: signIn.command, args: [...signIn.prefix, ...signIn.relay.args], signIn };
+        return onPath(signIn.command, c.env, platform, c.exists) ? { command: signIn.command, args: signIn.relay.args, signIn } : undefined;
+    };
+    return {
+        relays: (runtime) => cliOf(runtime) !== undefined,
+        start(environment) {
+            const r = cliOf(environment.runtime);
+            if (!r) return null;
+            return (c.spawn ?? spawnLoginRelay)({ command: r.command, args: r.args, env: r.signIn.env(c.env, environment.profileDir), parse: r.signIn.relay!.parse, platform });
+        }
+    };
+}
 
 const text = (v: string | true | undefined): string | undefined => (typeof v === 'string' ? v : undefined);
 

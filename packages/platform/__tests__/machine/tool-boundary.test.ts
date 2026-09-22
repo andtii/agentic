@@ -25,9 +25,10 @@ function sources(dir: string): string[] {
 
 /**
  * A call that asks a machine to change its environments or its daemon (a mention in a comment is not one), or the frame
- * itself: the environment requests (#237), the daemon's update, channel and policy (#365), and the harness requests (`requestHarness`, #370).
+ * itself: the environment requests (#237), the daemon's update, channel and policy (#365), the harness requests (`requestHarness`, #370),
+ * and what #355 added — the folders the web may use, a restart, the daemon's log, a relayed sign-in (#480, #481, #484).
  */
-const ENV_MUTATION = /\b(putEnvironment|removeEnvironment|envRequest|requestUpdate|cancelUpdate|setUpdatePolicy|setChannel|updateState|requestHarness|harnessResult)\s*\(|['"](env|update|harness)\.request['"]/;
+const ENV_MUTATION = /\b(putEnvironment|removeEnvironment|envRequest|requestUpdate|cancelUpdate|setUpdatePolicy|setChannel|updateState|requestHarness|harnessResult|setPolicy|browseMachine|policyResult|requestRestart|logTail|logResult|requestLogin|answerLogin|cancelLogin|loginState)\s*\(|['"](env|update|harness|policy|log|login)\.request['"]/;
 /** A tool name that reads like one. */
 const ENV_MUTATION_TOOL = /env(ironment)?s?_(put|add|create|set|update|remove|delete)|(put|add|create|set|update|remove|delete)_env(ironment)?|daemon|update_(machine|policy|channel)|machine_update|harness/i;
 

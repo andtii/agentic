@@ -1,6 +1,6 @@
 import { component, signal, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
-import type { DaemonFeature, EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
+import type { CapabilityReport, DaemonFeature, EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
 import type { MachineUpdateView } from '@agentic/platform';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, TextField } from '@agentic/ui';
 import { doctorChecks, doctorFootnote, environmentsOf, opsAgent, opsDaemonLog, opsMachine, opsPolicy, opsQuota, opsTelemetry, opsUpdate, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
@@ -18,6 +18,8 @@ import { SetupChecklist } from './machines/SetupChecklist';
 import { buildLabel, impactText } from './machines/update';
 import { loadText, loadTone, machineLoadOf, sessionLoadOf, warningText, type DefaultForAgent, type MachineLoad } from './machines/live';
 import { fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
+import { LoginDialog } from './machines/LoginDialog';
+import { loginRelayable, type LoginView } from './machines/login';
 import { logErrorText, policyCardState, type LogState } from './machines/policy';
 import { setupSteps, type SetupStepId } from './machines/setup';
 import { LinkButton } from './ops/LinkButton';
@@ -93,7 +95,18 @@ export type MachineViewProps =
     & Define.Event<'restart', 'drain' | 'now'>
     /** The daemon log disclosure (#481): its state, and `log` asks for the tail (on open, and Refresh). */
     & Define.Prop<'log', LogState | null>
-    & Define.Event<'readLog'>;
+    & Define.Event<'readLog'>
+    /** What the daemon's runtimes can do (`hello.capabilities`): a runtime whose report says `login: 'relay'` gets **Sign in…** (#484). */
+    & Define.Prop<'capabilities', readonly CapabilityReport[]>
+    /** The sign-in dialog (#484): the environment it is open for, the sign-in as the platform reports it. */
+    & Define.Prop<'signingIn', string | null>
+    & Define.Prop<'login', LoginView | null>
+    /** Start the relayed sign-in for an environment (`Machine.requestLogin`). */
+    & Define.Event<'signIn', string>
+    /** The pasted code (`answerLogin`), never kept by the page. */
+    & Define.Event<'answerLogin', string>
+    /** Cancel or close the sign-in dialog (`cancelLogin` while one runs). */
+    & Define.Event<'cancelLogin'>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -112,7 +125,9 @@ export const likelyRoot = (environments: readonly EnvironmentDescriptor[]): stri
  * removed here and the daemon writes them. A signed-out account shows the
  * command that signs it in — logins never leave the machine. "This machine"
  * renames it, restarts its daemon (drain or now), shows the daemon's log,
- * or removes it from the workspace (revoked first).
+ * or removes it from the workspace (revoked first). An account whose runtime
+ * the daemon can sign in from here gets **Sign in…** (#484): the runtime's
+ * own login relayed as a link or a device code; the rest keep the command.
  */
 export const MachineView = component<MachineViewProps>(({ props, emit, slots }) => {
     const ui = signal({ revoking: false, envOpen: false, editing: '', removing: '', removeOpen: false, renaming: false, name: '', renameAttempted: false, removingMachine: false, restarting: false, restartMode: 'drain' as 'drain' | 'now', logOpen: false });
@@ -158,8 +173,13 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                         ui.envOpen = true;
                     } else goTo('[data-machine-envs]');
                     return;
-                case 'signed-in':
-                    return goTo('[data-env-login]');
+                case 'signed-in': {
+                    // The first account not signed in: relayed from here when the daemon can, else the command well.
+                    const first = props.environments.find((e) => needsLogin(e));
+                    if (first && !offline && loginRelayable(first, props.capabilities, features)) emit('signIn', first.id);
+                    else goTo('[data-env-login]');
+                    return;
+                }
                 case 'ready':
                     return emit('recheck');
             }
@@ -176,7 +196,12 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
             if (!login && !manageable) return null;
             return (
                 <>
-                    {login ? (
+                    {login && loginRelayable(env, props.capabilities, features) ? (
+                        <div data-env-login data-env-login-relay>
+                            <span data-env-login-text>{env.account.label} is not signed in.</span>
+                            <Button intent="primary" disabled={offline} label={`Sign ${env.account.label} in`} onClick={() => emit('signIn', env.id)}>Sign in…</Button>
+                        </div>
+                    ) : login ? (
                         <div data-env-login>
                             <span data-env-login-text>Sign {env.account.label} in on {m.name}:</span>
                             <CommandWell command={loginCommand(env.id)} fallback={fallbackCommand(loginCommand(env.id), m.os)} />
@@ -257,6 +282,22 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     {removeFailure ? <p data-env-failure role="alert">{failureText(removeFailure)}</p> : null}
                 </ConfirmDialog>
                 </>) : null}
+
+                {props.signingIn ? (() => {
+                    const target = props.environments.find((e) => e.id === props.signingIn);
+                    return (
+                        <LoginDialog
+                            model={() => !!props.signingIn}
+                            machineName={m.name}
+                            environmentName={target?.name ?? props.signingIn}
+                            accountLabel={target?.account.label ?? target?.name ?? props.signingIn}
+                            login={props.login ?? null}
+                            onAnswer={(code: string) => emit('answerLogin', code)}
+                            onRetry={() => { if (props.signingIn) emit('signIn', props.signingIn); }}
+                            onCancel={() => emit('cancelLogin')}
+                        />
+                    );
+                })() : null}
 
                 {slots.harness?.()}
 

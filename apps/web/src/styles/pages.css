@@ -958,6 +958,14 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-daemon-log-body] { display: flex; flex-direction: column; gap: var(--space-sm); margin-block-start: var(--space-sm); }
 [data-daemon-log-lines] { margin: 0; max-block-size: 320px; overflow: auto; padding: var(--space-sm) var(--space-md); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.5; white-space: pre; }
 [data-browse-machine] { min-block-size: 240px; }
+[data-env-login-relay] { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+[data-login-body] { display: flex; flex-direction: column; gap: var(--space-md); margin-block-end: var(--space-lg); }
+[data-login-body] p { margin: 0; }
+[data-login-action] { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); }
+[data-login-code] { font-family: var(--font-mono); font-size: var(--text-2xl); font-weight: var(--weight-semibold); letter-spacing: 0.12em; padding: var(--space-sm) var(--space-md); background: var(--color-base-200); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); }
+[data-login-url] { font-size: var(--text-md); font-weight: var(--weight-medium); }
+[data-login-url-text] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); overflow-wrap: anywhere; }
+[data-login-foot] { font-size: var(--text-sm); color: var(--ag-text-dim); }
 /* daemon updates (#367): the Machine page's card, the Machines list's "Update all", machine notices in "Needs you" */
 [data-update-card] p { margin: 0; }
 [data-update-running] { font-family: var(--font-mono); font-size: var(--text-md); }

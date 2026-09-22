@@ -24,7 +24,7 @@ import { credentialSecrets, loadCredentials, saveCredentials, type CommandRunner
 import { createDaemon, type Daemon, type DaemonDriver } from './daemon.js';
 import { builtinRuntimes, isDisposable } from './drivers.js';
 import { formatDoctorReport, runDoctor } from './doctor.js';
-import { envCommand, ENV_USAGE, flagValues, type LoginRunner } from './env-cli.js';
+import { envCommand, ENV_USAGE, flagValues, type LoginRunner, loginPort } from './env-cli.js';
 import { harnessCommand, HARNESS_USAGE } from './harness-cli.js';
 import { DEFAULT_RELEASES, harnessRoot, harnessStore, releaseManifestUrl, type HarnessStore } from './harness.js';
 import { watchEnvironments } from './env-store.js';
@@ -383,6 +383,8 @@ export async function main(argv: readonly string[], context: CliContext = {}): P
                     manage: { paths, secure },
                     // The daemon's own log for the Machine page (#481): the service writes it; a foreground run has none.
                     logTail: (lines) => tailLog(paths.logFile, lines, secrets),
+                    // Sign-ins relayed to the Machine page (#484): each runtime's own CLI, resolved as `env login` resolves it.
+                    login: loginPort({ env: context.env ?? process.env, ...(harnesses ? { harnesses } : {}), ...(context.platform ? { platform: context.platform } : {}) }),
                     // The web sets the policy (#355) through this port and nowhere else; what it wrote is already the
                     // running policy, so the file watcher below is told not to announce it a second time.
                     webPolicy: {
