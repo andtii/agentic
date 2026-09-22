@@ -19,10 +19,15 @@ import { open, seal, type SealedPayload } from './seal.js';
 export const OAUTH_COOKIE = '__Host-oauth';
 export const OAUTH_TRANSIENT_TTL_MS = 10 * 60 * 1000;
 
+/** Why the flow runs (#355): a login mints a session; an elevation only re-proves the signed-in user and mints `__Host-elevated`. */
+export type OAuthPurpose = 'login' | 'elevate';
+
 interface OAuthTransient extends SealedPayload {
     readonly state: string;
     readonly verifier?: string;
     readonly returnTo: string;
+    /** Absent in a transient sealed before #355: a login. */
+    readonly purpose?: OAuthPurpose;
 }
 
 export interface BeginOAuthOptions {
@@ -32,6 +37,8 @@ export interface BeginOAuthOptions {
     readonly redirectUri: string;
     /** Same-origin path to land on after login. Default `/`. */
     readonly returnTo?: string;
+    /** Default `login`. */
+    readonly purpose?: OAuthPurpose;
     readonly now?: number;
 }
 
@@ -49,7 +56,7 @@ export interface CompleteOAuthOptions {
 }
 
 export type CompleteOAuthResult =
-    | { readonly ok: true; readonly identity: ExternalIdentity; readonly returnTo: string; readonly clearCookie: string }
+    | { readonly ok: true; readonly identity: ExternalIdentity; readonly returnTo: string; readonly purpose: OAuthPurpose; readonly clearCookie: string }
     | { readonly ok: false; readonly reason: 'missing_transient' | 'state_mismatch' | 'provider_denied' | 'missing_code' | 'exchange_failed'; readonly error?: AuthProviderError; readonly clearCookie: string };
 
 export function createOAuthState(): string {
@@ -76,7 +83,7 @@ export async function beginOAuth(provider: AuthProvider, options: BeginOAuthOpti
     const now = options.now ?? Date.now();
     const state = createOAuthState();
     const verifier = provider.pkce ? createCodeVerifier() : undefined;
-    const transient: OAuthTransient = { state, ...(verifier ? { verifier } : {}), returnTo: safeReturnTo(options.returnTo), exp: now + OAUTH_TRANSIENT_TTL_MS };
+    const transient: OAuthTransient = { state, ...(verifier ? { verifier } : {}), returnTo: safeReturnTo(options.returnTo), ...(options.purpose === 'elevate' ? { purpose: 'elevate' as const } : {}), exp: now + OAUTH_TRANSIENT_TTL_MS };
     const sealed = await seal('oat', transient, options.secret);
     const location = provider.authorizationUrl({
         redirectUri: options.redirectUri,
@@ -104,7 +111,7 @@ export async function completeOAuth(provider: AuthProvider, request: Request, op
     if (!code) return { ok: false, reason: 'missing_code', clearCookie };
     try {
         const identity = await provider.exchangeCode({ code, redirectUri: options.redirectUri, ...(transient.verifier ? { codeVerifier: transient.verifier } : {}) });
-        return { ok: true, identity, returnTo: safeReturnTo(transient.returnTo), clearCookie };
+        return { ok: true, identity, returnTo: safeReturnTo(transient.returnTo), purpose: transient.purpose === 'elevate' ? 'elevate' : 'login', clearCookie };
     } catch (error) {
         const wrapped = error instanceof AuthProviderError ? error : new AuthProviderError(provider.id, 'exchange_failed', String(error));
         return { ok: false, reason: 'exchange_failed', error: wrapped, clearCookie };

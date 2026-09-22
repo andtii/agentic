@@ -29,6 +29,16 @@ export function sameWorkspace(principal: Principal | null | undefined, key: stri
     return ws !== null && ws === principal.workspaceId;
 }
 
+/** An elevation (#355) lasts this long: ten minutes from the re-confirmation. */
+export const ELEVATION_TTL_MS = 10 * 60 * 1000;
+/** The message prefix of a 403 that asks for elevation — what the web turns into "Confirm with GitHub to continue". */
+export const ELEVATION_REQUIRED = 'elevation-required';
+
+/** Whether `principal` is a user whose elevation (#355) is still live at `now`. */
+export function isElevated(principal: Principal | null | undefined, now: number = Date.now()): boolean {
+    return principal?.kind === 'user' && typeof principal.elevatedUntil === 'number' && principal.elevatedUntil > now;
+}
+
 export function hasScope(principal: Principal, scope: Scope): boolean {
     return principal.kind !== 'external' || principal.scopes.includes(scope);
 }

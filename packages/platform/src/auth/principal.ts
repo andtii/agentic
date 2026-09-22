@@ -19,7 +19,8 @@ export function isPrincipal(value: unknown): value is Principal {
     if (!str(p.workspaceId)) return false;
     switch (p.kind) {
         case 'user':
-            return str(p.userId) && keysAre(p, ['kind', 'workspaceId', 'userId']);
+            // `elevatedUntil` (#355): a finite instant, or absent — never anything else, so an envelope cannot forge "forever".
+            return str(p.userId) && (p.elevatedUntil === undefined || (typeof p.elevatedUntil === 'number' && Number.isFinite(p.elevatedUntil))) && keysAre(p, ['kind', 'workspaceId', 'userId', 'elevatedUntil']);
         case 'machine':
             return str(p.machineId) && keysAre(p, ['kind', 'workspaceId', 'machineId']);
         case 'agent':
@@ -68,7 +69,7 @@ export function decodePrincipal(encoded: string): Principal | null {
 function canonical(p: Principal): Principal {
     switch (p.kind) {
         case 'user':
-            return { kind: 'user', userId: p.userId, workspaceId: p.workspaceId };
+            return p.elevatedUntil === undefined ? { kind: 'user', userId: p.userId, workspaceId: p.workspaceId } : { kind: 'user', userId: p.userId, workspaceId: p.workspaceId, elevatedUntil: p.elevatedUntil };
         case 'machine':
             return { kind: 'machine', workspaceId: p.workspaceId, machineId: p.machineId };
         case 'agent':
@@ -86,8 +87,9 @@ export const principalCodec: { encode(principal: Principal): string; decode(enco
     decode: decodePrincipal
 };
 
-export function userPrincipal(userId: string, workspaceId: WorkspaceId): Principal {
-    return { kind: 'user', userId, workspaceId };
+/** A user principal; `elevatedUntil` (#355) only when the request carried a live elevation for this very user. */
+export function userPrincipal(userId: string, workspaceId: WorkspaceId, elevatedUntil?: number): Principal {
+    return elevatedUntil === undefined ? { kind: 'user', userId, workspaceId } : { kind: 'user', userId, workspaceId, elevatedUntil };
 }
 
 export function machinePrincipal(workspaceId: WorkspaceId, machineId: MachineId): Principal {
