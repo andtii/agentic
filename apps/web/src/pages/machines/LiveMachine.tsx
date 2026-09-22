@@ -28,6 +28,10 @@
  * `bypassPermissions` on go through it; a Browse… that needed elevation
  * reopens the browser on the way back without a confirm (it changes nothing).
  *
+ * Sign-in (#484): **Sign in…** on a row whose runtime the daemon relays —
+ * `requestLogin`, the phases read live with `loginState`, a pasted code
+ * through `answerLogin` inside one call and never kept, `cancelLogin`.
+ *
  * Restart (#481): `Machine.requestRestart` from "This machine"; the pending
  * restart is read from `updateState` like an update, and its end is the
  * update card's "Restarted at …". The daemon log: `logTail` on opening the
@@ -55,6 +59,7 @@ import { LiveHarnessCard } from './LiveHarnessCard';
 import { LivePolicyCard, isPolicyPending, type PolicyPending } from './LivePolicyCard';
 import { LiveUpdateCard } from './LiveUpdateCard';
 import type { LogState } from './policy';
+import { loginCallFailure, type LoginView } from './login';
 
 /** An environment draft as it comes back from the pending store: the shape `putEnvironment` takes, or nothing. */
 const isEnvironmentInput = (v: unknown): v is EnvironmentInput => !!v && typeof v === 'object' && typeof (v as EnvironmentInput).name === 'string' && typeof (v as EnvironmentInput).runtime === 'string' && Array.isArray((v as EnvironmentInput).cwdRoots);
@@ -238,6 +243,45 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
         return p && p.target === 'restart' ? { status: 'pending', mode: p.mode } : null;
     };
 
+    // Sign-in from the page (#484): one environment at a time; `loginState` read live while the dialog is open.
+    const signIn = signal({ environmentId: '' as string, requestId: '', refused: null as LoginView | null });
+    const loginState = useActorState(defs.Machine, () => { const k = key(); return k && signIn.environmentId ? ([k, 'loginState', signIn.environmentId as EnvironmentId] as const) : null; }, { live: true });
+    const requestLogin = async (environmentId: string): Promise<void> => {
+        signIn.environmentId = environmentId;
+        signIn.requestId = '';
+        signIn.refused = null;
+        try {
+            const { requestId } = await client().requestLogin(environmentId as EnvironmentId);
+            signIn.requestId = requestId;
+        } catch (e) {
+            signIn.refused = { phase: 'failed', error: loginCallFailure(e) };
+        }
+    };
+    const answerLogin = async (text: string): Promise<void> => {
+        if (!signIn.environmentId) return;
+        try {
+            await client().answerLogin(signIn.environmentId as EnvironmentId, text);
+        } catch (e) {
+            signIn.refused = { phase: 'failed', error: loginCallFailure(e) };
+        }
+    };
+    const cancelLogin = async (): Promise<void> => {
+        const environmentId = signIn.environmentId;
+        const v = loginState.value;
+        const running = !signIn.refused && !!v && v.requestId === signIn.requestId && v.phase !== 'done' && v.phase !== 'failed';
+        signIn.environmentId = '';
+        signIn.requestId = '';
+        signIn.refused = null;
+        if (running && environmentId) await client().cancelLogin(environmentId as EnvironmentId).catch(() => undefined);
+    };
+    /** What the dialog shows: the page's own refusal first, else the platform's view of the sign-in (the one this request started). */
+    const loginView = (): LoginView | null => {
+        if (signIn.refused) return signIn.refused;
+        const v = loginState.value;
+        // Only the sign-in THIS click started: the record still holds the last one until the new request lands.
+        return v && v.requestId === signIn.requestId ? { phase: v.phase, ...(v.action ? { action: v.action } : {}), ...(v.error ? { error: v.error } : {}) } : null;
+    };
+
     // The daemon log (#481): one request at a time, its answer read live like `envResult`.
     const log = signal({ requestId: '', state: null as LogState | null });
     let logTimer: ReturnType<typeof setTimeout> | undefined;
@@ -328,6 +372,12 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     onRestart={(mode: 'drain' | 'now') => { void requestRestart(mode); }}
                     log={log.state}
                     onReadLog={() => { void readLog(); }}
+                    capabilities={v.capabilities}
+                    signingIn={signIn.environmentId || null}
+                    login={loginView()}
+                    onSignIn={(environmentId: string) => { void requestLogin(environmentId); }}
+                    onAnswerLogin={(text: string) => { void answerLogin(text); }}
+                    onCancelLogin={() => { void cancelLogin(); }}
                     slots={{
                         policy: () => (v.revoked ? null : (
                             <LivePolicyCard

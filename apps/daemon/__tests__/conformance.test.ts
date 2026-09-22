@@ -6,6 +6,7 @@ import { mkdtempSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDaemon, type Daemon } from '../src/daemon';
 import { writeEnvironments } from '../src/env-store';
 import { ndjsonEventLog, type NdjsonEventLog } from '../src/event-log';
@@ -13,6 +14,7 @@ import { harnessStore } from '../src/harness';
 import { loadPolicy, localEdit, withLock, writePolicy } from '../src/policy';
 import { applyWebPolicy, browseMachine } from '../src/policy-web';
 import { tailLog } from '../src/log-tail';
+import { parseClaudeLogin, spawnLoginRelay, type LoginRelayEvent } from '../src/login-relay';
 import { namingDriver } from './helpers/drivers';
 import { releaseZip } from './helpers/release';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
@@ -46,6 +48,10 @@ let harnessTarget: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset }
 let protectedFolder: string | undefined;
 /** How many lines the daemon under test's log holds (#481). */
 const LOG_LINES = 12;
+/** The sign-in `login-relay` relays (#484): a fake Claude Code CLI that prints this URL and takes this code on stdin. */
+const FAKE_LOGIN = fileURLToPath(new URL('./helpers/fake-login.mjs', import.meta.url));
+const LOGIN_URL = 'https://claude.example.test/oauth/authorize?code=true&client_id=conformance';
+const LOGIN_ANSWER = 'conformance-code-1';
 let zips: string;
 beforeAll(async () => {
     zips = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-zips-'));
@@ -69,8 +75,12 @@ const harness: DaemonConformanceHarness = {
     // the configuration folder as the one a policy must refuse and a listing must never show, and `lock` writing the file.
     // `restart` / `log` (#481): `update.request { target: 'restart' }` stops the daemon with reason `restart` (what `run` does before it
     // exits 75 with nothing staged); the log is a real file of `LOG_LINES` lines under the state dir, tailed through `tailLog`.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log'],
+    // `login` (#484): the real relay (`spawnLoginRelay`, the Claude parser) over a fake CLI with piped stdio; `done` flips the
+    // scripted driver's account to `ok` before the daemon re-inspects, so the `env` after `done` is the real re-inspect.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log', 'login'],
     logLines: LOG_LINES,
+    loginAction: { kind: 'open-url', url: LOGIN_URL, expectsPaste: true },
+    loginAnswer: LOGIN_ANSWER,
     updateTarget: UPDATE_TARGET,
     knownOrigin: KNOWN_ORIGIN,
     get harnessTarget() {
@@ -113,6 +123,21 @@ const harness: DaemonConformanceHarness = {
                 manage: { paths, secure },
                 webPolicy: { apply: (input) => applyWebPolicy(input, web), browse: (path) => browseMachine(path, web) },
                 logTail: (lines) => tailLog(logFile, lines),
+                login: {
+                    relays: (runtime) => runtime === 'scripted',
+                    start: (environment) => {
+                        const relay = spawnLoginRelay({ command: process.execPath, args: [FAKE_LOGIN, '--kind', 'claude', '--url', LOGIN_URL, '--accept', LOGIN_ANSWER], env: process.env, parse: parseClaudeLogin });
+                        const events: AsyncIterable<LoginRelayEvent> = {
+                            async *[Symbol.asyncIterator]() {
+                                for await (const e of relay.events) {
+                                    if (e.phase === 'done') driver.auth.set(environment.id, 'ok');
+                                    yield e;
+                                }
+                            }
+                        };
+                        return { events, answer: (text) => relay.answer(text), cancel: () => relay.cancel() };
+                    }
+                },
                 drivers: [driver],
                 eventLog: (log = ndjsonEventLog(join(paths.stateDir, 'sessions'))),
                 heartbeatMs: script.heartbeatMs,

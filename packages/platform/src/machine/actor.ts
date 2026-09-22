@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -32,7 +32,7 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneLogRequests, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type LogRequestRecord, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, LOGIN_RESULT_TTL_MS, LOGIN_TIMEOUT_MS, loginRunning, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneLogins, pruneLogRequests, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type LoginRecord, type LogRequestRecord, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
 import { checkPolicyRoots, shouldReconcile, SYSTEM_SETUP } from './policy.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
@@ -58,7 +58,7 @@ export const HARNESS_DEADLINE_MS = 30 * 60_000;
 /** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment, history or harness request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.logRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
+    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.logRequests ?? {}).some(pending) || Object.values(s.logins ?? {}).some(loginRunning) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
 }
 
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
@@ -89,6 +89,34 @@ function failPendingEnv(s: MachineState, at: number, message: string): void {
         r.error = { code: 'timeout', message };
         r.finishedAt = at;
     }
+}
+
+/** `machine.login` (#484): how a relayed sign-in ended, never what was pasted. */
+async function auditLoginEnd(ctx: ActorContext<MachineState>, workspaceId: WorkspaceId, machineId: MachineId, r: LoginRecord): Promise<void> {
+    const s = ctx.state;
+    const outcome = r.phase === 'done' ? 'done' : r.error?.code === 'cancelled' ? 'cancelled' : r.error?.code === 'timeout' ? 'timeout' : 'failed';
+    const name = s.environments.find((e) => e.id === r.environmentId)?.name ?? r.environmentId;
+    await recordAudit(ctx, workspaceId, {
+        key: `${ctx.key}:login:${r.requestId}`,
+        kind: 'machine.login',
+        at: r.finishedAt ?? r.startedAt,
+        by: r.by,
+        summary: outcome === 'done' ? `signed ${name} in on machine ${s.name || machineId} from the web` : `the sign-in of ${name} on machine ${s.name || machineId} ${outcome === 'cancelled' ? 'was cancelled' : outcome === 'timeout' ? 'timed out' : 'failed'}${r.error?.message ? `: ${r.error.message}` : ''}`,
+        data: { machineId, environmentId: r.environmentId, outcome, ...(r.error?.message ? { error: r.error.message } : {}) }
+    });
+}
+
+/** And for relayed sign-ins (#484): a running one ends `failed` with `code` — `cancelled` on revoke, `failed` when the daemon went away. */
+function failRunningLogins(s: MachineState, at: number, code: 'cancelled' | 'failed' | 'timeout', message: string): LoginRecord[] {
+    const ended: LoginRecord[] = [];
+    for (const r of Object.values(s.logins ?? {})) {
+        if (!loginRunning(r)) continue;
+        r.phase = 'failed';
+        r.error = { code, message };
+        r.finishedAt = at;
+        ended.push(r);
+    }
+    return ended;
 }
 
 /** And for log requests (#481). */
@@ -195,6 +223,26 @@ export interface PolicyResultView {
     readonly finishedAt?: number;
     readonly result?: MachinePolicyResult;
     readonly error?: MachinePolicyError;
+}
+
+/** `requestLogin` — the id the daemon's `login.status` frames carry (#484). */
+export interface LoginRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `loginState(environmentId)` — the sign-in relayed for an environment (#484), as the daemon last reported it: the phase,
+ * the `action` the person must take once it is known, the `error` once it failed. Never the pasted text.
+ */
+export interface LoginStateView {
+    readonly requestId: string;
+    readonly environmentId: EnvironmentId;
+    readonly phase: LoginPhase;
+    readonly startedAt: number;
+    readonly by: string;
+    readonly action?: LoginAction;
+    readonly error?: LoginError;
+    readonly finishedAt?: number;
 }
 
 /** `logTail` — the id `logResult` reads the answer by (#481). */
@@ -936,6 +984,11 @@ export function defineMachineActor(ports: MachinePorts) {
             requestRestart: owner,
             logTail: owner,
             logResult: owner,
+            // Owner only, and never a tool (#484): a sign-in relayed from the page; not elevated — signing in narrows nothing.
+            requestLogin: owner,
+            answerLogin: owner,
+            cancelLogin: owner,
+            loginState: owner,
             historyRequest: sessionDriver,
             historyResult: sessionDriver,
             // Owner only, and never a tool (#365, decisions 2026-09-19 (c)): an agent must not replace the daemon it runs on.
@@ -1353,6 +1406,27 @@ export function defineMachineActor(ports: MachinePorts) {
                 }
             }
 
+            /**
+             * The daemon's `login.status` for a relayed sign-in (#484): the record follows the phase — the action once it is
+             * known, the error once it failed — and an ended one is audited `machine.login`. A frame for a request that is not
+             * the environment's current one (pruned, or ended already) is ignored.
+             */
+            async function onLoginStatus(frame: DaemonFrameOf<'login.status'>): Promise<void> {
+                const s = ctx.state;
+                const r = s.logins?.[frame.environmentId];
+                if (!r || r.requestId !== frame.requestId || !loginRunning(r)) return;
+                const at = now();
+                r.phase = frame.phase;
+                if (frame.action) r.action = structuredClone(frame.action);
+                if (frame.phase === 'failed') r.error = structuredClone(frame.error ?? { code: 'failed', message: 'the daemon ended the sign-in without a reason' });
+                if (!loginRunning(r)) {
+                    r.finishedAt = at;
+                    await auditLogin(r);
+                }
+            }
+
+            const auditLogin = (r: LoginRecord): Promise<void> => auditLoginEnd(ctx, workspaceId, machineId, r);
+
             /** Send the desired policy when `shouldReconcile` says so (#480): from `hello` and `env` only, as `system:setup`. */
             async function reconcilePolicy(trigger: 'hello' | 'env'): Promise<void> {
                 const s = ctx.state;
@@ -1508,6 +1582,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onPolicyResponse(frame);
                     case 'log.response':
                         return onLogResponse(frame);
+                    case 'login.status':
+                        return onLoginStatus(frame);
                     case 'quota':
                         return onQuota(frame);
                     case 'telemetry':
@@ -1579,6 +1655,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     failPendingEnv(s, now(), 'machine revoked');
                     failPendingPolicy(s, now(), 'machine revoked');
                     failPendingLog(s, now(), 'machine revoked');
+                    for (const r of failRunningLogins(s, now(), 'cancelled', 'machine revoked')) await auditLogin(r);
                     failPendingHistory(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
@@ -1703,6 +1780,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     failPendingEnv(s, now(), 'machine went offline');
                     failPendingPolicy(s, now(), 'machine went offline');
                     failPendingLog(s, now(), 'machine went offline');
+                    for (const r of failRunningLogins(s, now(), 'failed', 'the machine went offline during the sign-in')) await auditLogin(r);
                     failPendingHistory(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
@@ -1938,6 +2016,77 @@ export function defineMachineActor(ports: MachinePorts) {
                 },
 
                 /** One log request as stored (#481), with its lines while this activation holds them; read live like `envResult`. 404 for an unknown or pruned id. */
+                /**
+                 * Sign an environment's account in from the page (#484): owner only, not elevated. 404 an environment the
+                 * machine does not report, 409 a sign-in already running for it or a runtime whose capability says
+                 * `login: 'terminal'` (or a daemon without the `login` feature), 503 offline. The daemon runs the runtime's own
+                 * login and reports `login.status`, read with `loginState(environmentId)`.
+                 */
+                async requestLogin(environmentId: EnvironmentId): Promise<LoginRequested> {
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    const environment = s.environments.find((e) => e.id === environmentId);
+                    if (!environment) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    if (!s.features?.includes('login')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not relay sign-ins; sign in on the machine: agentic-daemon env login ${environmentId}`);
+                    const capability = s.capabilities.find((c) => c.runtime === environment.runtime);
+                    if (capability?.login !== 'relay') throw new ServerFnError(409, `${environment.runtime} is signed in on the machine: agentic-daemon env login ${environmentId}`);
+                    const running = s.logins?.[environmentId];
+                    if (running && loginRunning(running)) throw new ServerFnError(409, `a sign-in is already running for "${environment.name}" (${running.requestId})`);
+                    const at = now();
+                    const requestId = `login_${crypto.randomUUID()}`;
+                    if (!send({ v: V, t: 'login.request', requestId, environmentId })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                    pruneLogins(s, at);
+                    (s.logins ??= {})[environmentId] = { requestId, environmentId, phase: 'started', startedAt: at, deadline: at + LOGIN_TIMEOUT_MS, by: principalLabel(ctx.principal) };
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /**
+                 * What the person pasted back (#484): forwarded to the daemon inside this turn as `login.answer` and kept
+                 * nowhere — not on the record, not in the audit. 404 no sign-in running for the environment, 409 one that
+                 * expects no paste (or has not shown its action yet), 400 an empty or oversized text, 503 offline.
+                 */
+                async answerLogin(environmentId: EnvironmentId, text: string): Promise<void> {
+                    const s = ctx.state;
+                    if (typeof text !== 'string' || text.trim() === '' || text.length > LOGIN_ANSWER_MAX_CHARS) throw new ServerFnError(400, `machine: the answer is a non-empty text of at most ${LOGIN_ANSWER_MAX_CHARS} characters`);
+                    const r = s.logins?.[environmentId];
+                    if (!r || !loginRunning(r)) throw new ServerFnError(404, `machine "${machineId}" has no sign-in running for "${environmentId}"`);
+                    if (!r.action?.expectsPaste) throw new ServerFnError(409, `the sign-in of "${environmentId}" expects nothing pasted${r.action ? '' : ' yet'}`);
+                    if (!s.online || !send({ v: V, t: 'login.answer', requestId: r.requestId, text: text.trim() })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                },
+
+                /** Abandon a relayed sign-in (#484): the daemon ends the runtime's login and reports `failed { cancelled }`; offline, the record ends so here. 404 none running. */
+                async cancelLogin(environmentId: EnvironmentId): Promise<void> {
+                    const s = ctx.state;
+                    const r = s.logins?.[environmentId];
+                    if (!r || !loginRunning(r)) throw new ServerFnError(404, `machine "${machineId}" has no sign-in running for "${environmentId}"`);
+                    if (s.online && send({ v: V, t: 'login.cancel', requestId: r.requestId })) return;
+                    r.phase = 'failed';
+                    r.error = { code: 'cancelled', message: 'the sign-in was cancelled' };
+                    r.finishedAt = now();
+                    await auditLogin(r);
+                    await ctx.save();
+                },
+
+                /** The sign-in relayed for an environment (#484), running or lately ended; `null` when there is none. */
+                loginState(environmentId: EnvironmentId): LoginStateView | null {
+                    const r = ctx.state.logins?.[environmentId];
+                    // An ended one past its TTL reads as none, whether or not the reminder has pruned it yet.
+                    if (!r || (!loginRunning(r) && (r.finishedAt ?? r.startedAt) + LOGIN_RESULT_TTL_MS <= now())) return null;
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        environmentId: r.environmentId,
+                        phase: r.phase,
+                        startedAt: r.startedAt,
+                        by: r.by,
+                        ...(r.action ? { action: r.action } : {}),
+                        ...(r.error ? { error: r.error } : {}),
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {})
+                    }) as LoginStateView;
+                },
+
                 logResult(requestId: string): LogResultView {
                     const r = ctx.state.logRequests?.[requestId];
                     if (!r) throw new ServerFnError(404, `machine "${machineId}" has no log request "${requestId}"`);
@@ -2321,6 +2470,16 @@ export function defineMachineActor(ports: MachinePorts) {
                 }
                 pruneLogRequests(s.logRequests, at, false);
                 for (const key of logs.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in s.logRequests)) logs.delete(key);
+            }
+            if (s.logins) {
+                for (const r of Object.values(s.logins)) {
+                    if (!loginRunning(r) || r.deadline > at) continue;
+                    r.phase = 'failed';
+                    r.error = { code: 'timeout', message: `no end from machine ${ids?.machineId ?? ctx.key} within ${LOGIN_TIMEOUT_MS} ms` };
+                    r.finishedAt = at;
+                    if (ids) await auditLoginEnd(ctx, ids.workspaceId, ids.machineId, r);
+                }
+                pruneLogins(s, at);
             }
             if (s.history) {
                 for (const r of Object.values(s.history)) {

@@ -92,6 +92,8 @@ import {
     type HarnessPhase,
     type LifecycleError,
     type LocalEnvironment,
+    type LoginAction,
+    type LoginError,
     type ModelOption,
     type MachineId,
     type DaemonLogError,
@@ -116,6 +118,7 @@ import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
 import { fetchReleaseManifest, harnessAsset, HarnessError, type HarnessStore } from './harness.js';
 import { silentLogger, type Logger } from './logger.js';
+import type { LoginRelay } from './login-relay.js';
 import { daemonSocketUrl } from './pair.js';
 import type { DaemonPaths } from './paths.js';
 import { POLICY_OFF, reportedPolicy } from './policy.js';
@@ -177,6 +180,12 @@ export interface DaemonOptions {
     /** The daemon's own log for `log.request` (#481; the `log` feature): the last `lines` lines, redacted. Without it a request is refused `unsupported`. */
     readonly logTail?: (lines: number) => Promise<{ readonly result: DaemonLogResult } | { readonly error: DaemonLogError }>;
     /**
+     * Sign-ins relayed from the web (#484; the `login` feature): `cli.ts` binds `login-relay.ts` over each runtime's own
+     * CLI. With it every `CapabilityReport` says `login: 'relay' | 'terminal'`; without it a `login.request` is refused
+     * `unsupported` and the reports say nothing (an older daemon).
+     */
+    readonly login?: DaemonLoginPort;
+    /**
      * Provider limits (#271): the `quota` sources by runtime (`builtinQuotaSources()`; none → no `quota` frames),
      * whether to probe accounts (default on; off is the stream only), the idle poll (default 5 min, 0 off), the
      * probe after a turn ends (default 30 s later) and how long an unchanged snapshot is not sent again (default 15 min).
@@ -203,6 +212,14 @@ export interface DaemonOptions {
     readonly arch?: string;
     /** The harness store (#369): with it the daemon reports its harnesses and answers `harness.request` (feature `harness`). */
     readonly harnesses?: DaemonHarnesses;
+}
+
+/** What `login.request` runs (#484): `cli.ts` binds `login-relay.ts` per runtime; tests bind a fake. */
+export interface DaemonLoginPort {
+    /** Whether `runtime`'s sign-in can be relayed on this machine (its CLI is here): `CapabilityReport.login`. */
+    relays(runtime: string): boolean;
+    /** Start the runtime's login for the environment's profile; `null` when it cannot be relayed. */
+    start(environment: LocalEnvironment): LoginRelay | null;
 }
 
 /** What `policy.request` is answered through (#355): `cli.ts` binds `policy-web.ts`; tests bind a fake. */
@@ -461,7 +478,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
     }
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
-    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : [])];
+    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : []), ...(options.login ? (['login'] as const) : [])];
+    /** The sign-ins running (#484), one per environment: the request they answer and the relay to feed or end. */
+    const logins = new Map<EnvironmentId, { readonly requestId: string; readonly relay: LoginRelay }>();
     const version = options.daemonVersion ?? DAEMON_VERSION;
     const build = { version, commit: DAEMON_COMMIT, protocol: V, channel: DAEMON_CHANNEL, platform: platformKey(platform, options.arch ?? process.arch) };
 
@@ -578,7 +597,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
     function runtimeReports(): CapabilityReport[] {
         const byRuntime = new Map<string, CapabilityReport>();
         for (const inspection of inspections.values()) if (!byRuntime.has(inspection.capabilities.runtime)) byRuntime.set(inspection.capabilities.runtime, inspection.capabilities);
-        return [...byRuntime.values()];
+        // With the relay port, every report says whether its sign-in is relayed (#484); without it nothing is claimed.
+        const login = options.login;
+        return [...byRuntime.values()].map((r) => (login ? { ...r, login: login.relays(r.runtime) ? 'relay' : 'terminal' } : r));
     }
 
     // ------------------------------------------------------------------ socket
@@ -610,6 +631,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
     function onClose(): void {
         socket = undefined;
         welcomed = false;
+        // A sign-in with nobody to show it to is ended (#484): the code it printed is bound to that child.
+        for (const login of logins.values()) login.relay.cancel();
         for (const s of sessions.values()) stopPump(s);
         if (heartbeat !== undefined) clearInterval(heartbeat);
         heartbeat = undefined;
@@ -666,6 +689,20 @@ export function createDaemon(options: DaemonOptions): Daemon {
             case 'log.request':
                 void logRequest(frame);
                 return;
+            case 'login.request':
+                void loginRequest(frame);
+                return;
+            case 'login.answer': {
+                const login = [...logins.values()].find((l) => l.requestId === frame.requestId);
+                // Never logged, never kept: straight to the runtime.
+                login?.relay.answer(frame.text);
+                return;
+            }
+            case 'login.cancel': {
+                const login = [...logins.values()].find((l) => l.requestId === frame.requestId);
+                login?.relay.cancel();
+                return;
+            }
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
                 if (!pending) return;
@@ -1008,6 +1045,58 @@ export function createDaemon(options: DaemonOptions): Daemon {
         }
     }
 
+    /**
+     * `login.request` (#484): the runtime's own sign-in for the environment's profile, relayed phase by phase —
+     * `started`, the `action` the person must take, `waiting`, then `done` (the child exited 0) or `failed`. One per
+     * environment at a time (`busy`); an environment the machine lacks is `unknown-environment`; no port, or a runtime
+     * the port cannot relay, is `unsupported`. After `done` the environment is inspected again at once and an `env`
+     * frame carries the account as it is now.
+     */
+    async function loginRequest(frame: PlatformFrameOf<'login.request'>): Promise<void> {
+        const { requestId, environmentId } = frame;
+        const status = (phase: 'started' | 'action' | 'waiting' | 'done' | 'failed', extra: { readonly action?: LoginAction; readonly error?: LoginError } = {}) => send({ v: V, t: 'login.status', requestId, environmentId, phase, ...extra });
+        const environment = environments.find((e) => e.id === environmentId);
+        if (!environment) return void status('failed', { error: { code: 'unknown-environment', message: `this machine has no environment ${environmentId}` } });
+        if (logins.has(environmentId)) return void status('failed', { error: { code: 'busy', message: `a sign-in is already running for ${environment.name}` } });
+        const relay = options.login?.start(environment) ?? null;
+        if (!relay) return void status('failed', { error: { code: 'unsupported', message: `${environment.runtime} is signed in on the machine: agentic-daemon env login ${environmentId}` } });
+        logins.set(environmentId, { requestId, relay });
+        status('started');
+        logger.info('login: started', { environment: environmentId, runtime: environment.runtime });
+        try {
+            for await (const event of relay.events) {
+                switch (event.phase) {
+                    case 'action':
+                        status('action', { action: event.action });
+                        break;
+                    case 'waiting':
+                        status('waiting');
+                        break;
+                    case 'failed':
+                        logger.warn('login: failed', { environment: environmentId, code: event.error.code });
+                        status('failed', { error: event.error });
+                        break;
+                    case 'done':
+                        logger.info('login: done', { environment: environmentId });
+                        status('done');
+                        break;
+                }
+            }
+        } catch (e) {
+            logger.error('login: relay failed', { environment: environmentId, error: e });
+            status('failed', { error: { code: 'failed', message: 'the sign-in ended unexpectedly; see the daemon log' } });
+        } finally {
+            if (logins.get(environmentId)?.requestId === requestId) logins.delete(environmentId);
+        }
+        // Signed in or not, the account is what it is now: inspected again without waiting for the half-minute tick.
+        try {
+            await inspectAll();
+            send({ v: V, t: 'env', environments: descriptors(), policy: announcedPolicy() });
+        } catch (e) {
+            logger.warn('login: re-inspect failed', { environment: environmentId, error: e });
+        }
+    }
+
     async function command(frame: PlatformFrameOf<'session.command'>): Promise<void> {
         const { sessionId } = frame;
         const s = sessions.get(sessionId);
@@ -1277,6 +1366,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             stopped = true;
             quota.stop();
             updater?.stop();
+            for (const login of logins.values()) login.relay.cancel();
             if (reinspectTimer !== undefined) clearInterval(reinspectTimer);
             reinspectTimer = undefined;
             // While the socket is still up: each session closes with the code its reason maps to (#363).

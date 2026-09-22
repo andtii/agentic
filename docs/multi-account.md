@@ -47,6 +47,24 @@ $env:CLAUDE_CONFIG_DIR = "C:/Users/me/.claude-personal"; claude /login
 $env:CLAUDE_CONFIG_DIR = "D:/clients/acme/.claude";      claude /login
 ```
 
+## Sign in from the web (#484)
+
+Since #484 an environment whose runtime the daemon can sign in is signed in from
+the Machine page: **Sign in…** on its row runs the runtime's own login on the
+machine (`login.request`; decisions 2026-09-22, the #483 spike) — `claude auth
+login --claudeai`, `codex login --device-auth`, `copilot login --device-code` —
+under the environment's profile, with the same stripped environment `env login`
+uses, and relays what the person must do: a link to open in any browser (Claude
+Code then wants the code the page shows pasted back; it goes to the runtime's
+stdin once and is kept nowhere, not on the Machine record, not in the audit, not
+in any daemon file), or a device code to enter at a URL (Codex, Copilot, which
+poll on their own). The credential is minted and kept on the machine (EXE-10);
+the platform learns only that the account can authenticate, from the daemon's
+re-inspect right after the login ends. `agentic-daemon env login <id>` on the
+machine still works, and stays the way for a runtime whose CLI is not on the
+machine (Copilot without `copilot` on `PATH`: the capability says
+`login: 'terminal'` and the row keeps the command).
+
 ## What `doctor` checks and where the verdict shows
 
 The driver's `doctor(envs)` (`claudeCodeDoctor`) reports, with the codes in
