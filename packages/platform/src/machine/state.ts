@@ -525,7 +525,7 @@ export function pruneLogRequests(requests: Record<string, LogRequestRecord>, at:
     prune(requests, at, room, LOG_RESULT_TTL_MS, MAX_LOG_REQUESTS);
 }
 
-/** Drop the ended sign-ins older than `LOGIN_RESULT_TTL_MS` (#484), and every one of an environment the machine no longer reports. */
+/** Drop the ended sign-ins older than `LOGIN_RESULT_TTL_MS` (#484), and an ended one of an environment the machine no longer reports; a running one is left to end (`timeout`, a disconnect, a revoke). */
 export function pruneLogins(s: MachineState, at: number): void {
     if (!s.logins) return;
     for (const [id, r] of Object.entries(s.logins)) {

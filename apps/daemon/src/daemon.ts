@@ -1059,7 +1059,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (!environment) return void status('failed', { error: { code: 'unknown-environment', message: `this machine has no environment ${environmentId}` } });
         if (logins.has(environmentId)) return void status('failed', { error: { code: 'busy', message: `a sign-in is already running for ${environment.name}` } });
         const relay = options.login?.start(environment) ?? null;
-        if (!relay) return void status('failed', { error: { code: 'unsupported', message: `${environment.runtime} is signed in on the machine: agentic-daemon env login ${environmentId}` } });
+        if (!relay) return void status('failed', { error: { code: 'unsupported', message: `${environment.runtime} cannot be signed in from the web on this machine; sign in on the machine itself: agentic-daemon env login ${environmentId}` } });
         logins.set(environmentId, { requestId, relay });
         status('started');
         logger.info('login: started', { environment: environmentId, runtime: environment.runtime });

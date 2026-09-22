@@ -2030,7 +2030,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
                     if (!s.features?.includes('login')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not relay sign-ins; sign in on the machine: agentic-daemon env login ${environmentId}`);
                     const capability = s.capabilities.find((c) => c.runtime === environment.runtime);
-                    if (capability?.login !== 'relay') throw new ServerFnError(409, `${environment.runtime} is signed in on the machine: agentic-daemon env login ${environmentId}`);
+                    if (capability?.login !== 'relay') throw new ServerFnError(409, `${environment.runtime} cannot be signed in from the web on this machine; sign in on the machine itself: agentic-daemon env login ${environmentId}`);
                     const running = s.logins?.[environmentId];
                     if (running && loginRunning(running)) throw new ServerFnError(409, `a sign-in is already running for "${environment.name}" (${running.requestId})`);
                     const at = now();

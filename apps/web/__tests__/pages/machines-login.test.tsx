@@ -183,7 +183,7 @@ describe('the sign-in model', () => {
         expect(loginPhaseText({ phase: 'failed' }, 'box')).toContain('did not complete');
         expect(loginErrorText({ code: 'busy', message: '' })).toContain('already running');
         expect(loginErrorText({ code: 'unknown-environment', message: '' })).toContain('no longer has');
-        expect(loginErrorText({ code: 'unsupported', message: 'x' })).toBe('This runtime is signed in on the machine. x');
+        expect(loginErrorText({ code: 'unsupported', message: 'x' })).toBe('This runtime cannot be signed in from here; sign it in on the machine itself. x');
         expect(loginErrorText({ code: 'cancelled', message: '' })).toBe('The sign-in was cancelled.');
         expect(loginErrorText({ code: 'timeout', message: '' })).toContain('not completed in time');
         expect(loginErrorText({ code: 'machine-offline', message: '' })).toContain('offline');
@@ -191,7 +191,7 @@ describe('the sign-in model', () => {
         expect(loginErrorText({ code: 'internal', message: 'boom' })).toBe('boom');
         expect(loginCallFailure({ status: 503, message: 'x' })).toMatchObject({ code: 'machine-offline' });
         expect(loginCallFailure(Object.assign(new Error('a sign-in is already running for "work"'), { status: 409 }))).toMatchObject({ code: 'busy' });
-        expect(loginCallFailure(Object.assign(new Error('claude-code is signed in on the machine'), { status: 409 }))).toMatchObject({ code: 'unsupported' });
+        expect(loginCallFailure(Object.assign(new Error('claude-code cannot be signed in from the web on this machine'), { status: 409 }))).toMatchObject({ code: 'unsupported' });
         expect(loginCallFailure({ status: 404, message: 'x' })).toMatchObject({ code: 'unknown-environment' });
         expect(loginCallFailure(new Error('boom'))).toEqual({ code: 'internal', message: 'boom' });
     });

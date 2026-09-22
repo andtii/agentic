@@ -47,7 +47,7 @@ export function loginErrorText(error: NonNullable<LoginView['error']>): string {
         case 'unknown-environment':
             return 'The machine no longer has this environment.';
         case 'unsupported':
-            return `This runtime is signed in on the machine.${detail}`;
+            return `This runtime cannot be signed in from here; sign it in on the machine itself.${detail}`;
         case 'cancelled':
             return 'The sign-in was cancelled.';
         case 'timeout':
