@@ -24,7 +24,7 @@ import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/ro
 import { defineSessionActor, type CommandSink, type SessionFactory } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
-import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
+import { elevatedPrincipal, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
@@ -372,7 +372,7 @@ describe('the account on the task’s machine (#414)', () => {
         await createTask('t3', a, { machineId: 'machine_nope' as MachineId });
         expect((await routing().run('t3' as TaskId)).error).toMatchObject({ code: 'machine-unknown' });
         const gone = await online('gone', LOGINS);
-        await machine(gone).revoke();
+        await machine(gone, elevatedPrincipal('u1')).revoke();
         await createTask('t4', a, { machineId: gone });
         expect((await routing().run('t4' as TaskId)).error).toMatchObject({ code: 'machine-unknown' });
         expect((await routing().get()).routes).toEqual([]);

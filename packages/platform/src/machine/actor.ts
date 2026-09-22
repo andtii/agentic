@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -23,7 +23,7 @@ import { ServerFnError } from '@sigx/server';
 
 import { principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
-import { asPrincipal, issueMachineToken, machinePrincipal, mintAgentPrincipal, sameWorkspace, workspaceKey, type MachineTokenRecord } from '../auth/index.js';
+import { asPrincipal, issueMachineToken, machinePrincipal, mintAgentPrincipal, requireElevated, sameWorkspace, workspaceKey, type MachineTokenRecord } from '../auth/index.js';
 import { inboxKey } from '../notify/inbox.js';
 import type { NotificationInput } from '../notify/types.js';
 import { MIN_DAEMON_VERSION, platformVersion, RELEASE_DIRECTORY_KEY, type ReleasesView } from '../releases/directory.js';
@@ -32,7 +32,8 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { checkPolicyRoots, shouldReconcile, SYSTEM_SETUP } from './policy.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
 const V = DAEMON_PROTOCOL_VERSION;
@@ -57,7 +58,7 @@ export const HARNESS_DEADLINE_MS = 30 * 60_000;
 /** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment, history or harness request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
+    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
 }
 
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
@@ -87,6 +88,17 @@ function failPendingEnv(s: MachineState, at: number, message: string): void {
         r.status = 'error';
         r.error = { code: 'timeout', message };
         r.finishedAt = at;
+    }
+}
+
+/** And for policy requests (#480): a failed automatic one holds the reconcile until the owner changes the set or the daemon reconnects. */
+function failPendingPolicy(s: MachineState, at: number, message: string): void {
+    for (const r of Object.values(s.policyRequests ?? {})) {
+        if (r.status !== 'pending') continue;
+        r.status = 'error';
+        r.error = { code: 'timeout', message };
+        r.finishedAt = at;
+        if (r.auto && s.policyDesired) s.policyDesired.lastAuto = { at, converged: false };
     }
 }
 
@@ -152,6 +164,40 @@ export interface EnvResultView {
     readonly error?: EnvError;
 }
 
+/** `setPolicy` / `browseMachine` — the id `policyResult` reads the answer by (#480). */
+export interface PolicyRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `policyResult(requestId)` — one policy request as stored: `pending` until the daemon's `policy.response` lands (or
+ * the deadline / a disconnect fails it with `timeout`), then `done` with `result` (the policy as applied, or a listing)
+ * or `error` with the daemon's own code unchanged (`policy-locked`, `protected`, …). The policy itself shows up in
+ * `get().policy` with the daemon's `env` frame.
+ */
+export interface PolicyResultView {
+    readonly requestId: string;
+    readonly op: MachinePolicyOp;
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** `system:setup` for the reconcile's own request. */
+    readonly by: string;
+    readonly finishedAt?: number;
+    readonly result?: MachinePolicyResult;
+    readonly error?: MachinePolicyError;
+}
+
+/** `MachineView.policyDesired` (#480): what the owner wants, and whether the machine reports it. */
+export interface PolicyDesiredView {
+    readonly allowedRoots: readonly string[];
+    readonly setAt: number;
+    readonly by: string;
+    /** The daemon reports exactly this (source `web`, the same requested roots). */
+    readonly converged: boolean;
+    /** The reconcile's last attempt, when it made one. */
+    readonly lastAuto?: { readonly at: number; readonly converged: boolean };
+}
+
 /** `historyRequest` — the id `historyAnswer` / `historyResult` read the answer by. */
 export interface HistoryRequested {
     readonly requestId: string;
@@ -192,8 +238,10 @@ export interface MachineView {
     readonly daemonVersion?: string;
     readonly capabilities: readonly CapabilityReport[];
     readonly environments: readonly EnvironmentDescriptor[];
-    /** The machine-local policy as last reported: whether the web may manage environments, and inside which roots. Absent → the daemon reports none. */
+    /** The policy as last reported (#355): whether the web may manage environments, inside which roots, who set it (`source`), what was asked (`requested`), and whether the owner `locked` it on the machine. Absent → the daemon reports none. */
     readonly policy?: MachinePolicy;
+    /** The folders the web may use, as the owner wants them (#480); absent until set on the page or preset at pairing. */
+    readonly policyDesired?: PolicyDesiredView;
     /** Provider limits by environment id, as last reported (#261); absent until the daemon reports any, and an environment without an entry has reported none yet. */
     readonly quota?: Readonly<Record<string, QuotaSnapshot>>;
     /** What the sessions cost the machine, as last reported (#400): per session (`null` = unknown), per environment, the daemon, the machine; absent until the daemon reports any. */
@@ -446,6 +494,7 @@ export function defineMachineActor(ports: MachinePorts) {
             capabilities: rest.capabilities,
             environments: rest.environments,
             ...(rest.policy ? { policy: rest.policy } : {}),
+            ...(rest.policyDesired ? { policyDesired: policyDesiredView(rest) } : {}),
             ...(rest.quota && Object.keys(rest.quota).length > 0 ? { quota: rest.quota } : {}),
             ...(rest.telemetry ? { telemetry: rest.telemetry } : {}),
             activeSessions: Object.values(rest.activeSessions),
@@ -461,6 +510,13 @@ export function defineMachineActor(ports: MachinePorts) {
             ...(rest.harnessesAvailable ? { harnessesAvailable: rest.harnessesAvailable } : {}),
             ...harnessPending(rest)
         };
+    }
+
+    /** `MachineView.policyDesired` (#480): the desired set beside whether the reported policy is it. */
+    function policyDesiredView(s: MachineState): PolicyDesiredView {
+        const d = s.policyDesired!;
+        const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
+        return { allowedRoots: d.allowedRoots, setAt: d.setAt, by: d.by, converged: policyConverged(d.allowedRoots, s.policy, os), ...(d.lastAuto ? { lastAuto: d.lastAuto } : {}) };
     }
 
     /** The pending harness request, as `MachineView.harnessRequest` (#370). */
@@ -833,6 +889,10 @@ export function defineMachineActor(ports: MachinePorts) {
             putEnvironment: owner,
             removeEnvironment: owner,
             envResult: owner,
+            // Owner only — elevated inside the method — and never a tool (#355, #480): the folders the web may use on a machine.
+            setPolicy: owner,
+            browseMachine: owner,
+            policyResult: owner,
             historyRequest: sessionDriver,
             historyResult: sessionDriver,
             // Owner only, and never a tool (#365, decisions 2026-09-19 (c)): an agent must not replace the daemon it runs on.
@@ -979,6 +1039,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 for (const p of Object.values(s.pending)) if (p.deadline > at) send({ v: V, t: 'session.command', sessionId: p.sessionId, command: ctx.snapshot(p.command) });
                 dequeue();
                 await armLiveness();
+                // The desired folders (#480): once per connect when the machine does not report them and is not locked.
+                await reconcilePolicy('hello');
                 // Tasks parked on this machine (`waiting {environment-offline}`, policy `queue`) get their retry (§7).
                 await notify((r) => r.machineOnline(machineId));
                 await lifecycle.releaseDrain();
@@ -1186,6 +1248,76 @@ export function defineMachineActor(ports: MachinePorts) {
             }
 
             /**
+             * Send one `policy.request` and keep it as pending (#480) — the shared half of `setPolicy`, `browseMachine`
+             * and the reconcile. `auto` is the reconcile's: its answer updates `policyDesired.lastAuto`.
+             */
+            async function policyRequest(op: MachinePolicyOp, by: string, auto = false): Promise<PolicyRequested> {
+                const s = ctx.state;
+                if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                if (!s.features?.includes('policy')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not take its policy from the platform; reinstall it once`);
+                if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                const at = now();
+                const requestId = `policy_${crypto.randomUUID()}`;
+                if (!send({ v: V, t: 'policy.request', requestId, ...op })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                const requests = (s.policyRequests ??= {});
+                prunePolicyRequests(requests, at);
+                const record: PolicyRequestRecord = { requestId, op: structuredClone(op), status: 'pending', requestedAt: at, deadline: at + envTimeoutMs, by, ...(auto ? { auto: true } : {}) };
+                requests[requestId] = record;
+                await armLiveness();
+                await ctx.save();
+                return { requestId };
+            }
+
+            /** The daemon's answer to a `policy.request` (#480): stored unchanged, and a reconcile's answer noted on the desired set. */
+            function onPolicyResponse(frame: DaemonFrameOf<'policy.response'>): void {
+                const s = ctx.state;
+                const r = s.policyRequests?.[frame.requestId];
+                if (!r || r.status === 'done' || (r.status === 'error' && r.error?.code !== 'timeout')) return;
+                const at = now();
+                r.finishedAt = at;
+                if (frame.result) {
+                    r.status = 'done';
+                    r.result = structuredClone(frame.result);
+                    delete r.error;
+                } else {
+                    r.status = 'error';
+                    r.error = structuredClone(frame.error ?? { code: 'invalid', message: 'policy.response carried neither result nor error' });
+                    delete r.result;
+                }
+                if (r.auto && s.policyDesired) {
+                    const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
+                    s.policyDesired.lastAuto = { at, converged: r.result?.policy !== undefined && policyConverged(s.policyDesired.allowedRoots, r.result.policy, os) };
+                }
+            }
+
+            /** Send the desired policy when `shouldReconcile` says so (#480): from `hello` and `env` only, as `system:setup`. */
+            async function reconcilePolicy(trigger: 'hello' | 'env'): Promise<void> {
+                const s = ctx.state;
+                const pending = Object.values(s.policyRequests ?? {}).some((r) => r.status === 'pending');
+                if (!shouldReconcile({ trigger, features: s.features, desired: s.policyDesired, reported: s.policy, os: s.os, pending, connectedAt: s.connectedAt })) return;
+                try {
+                    await policyRequest({ op: 'set', policy: { allowedRoots: [...s.policyDesired!.allowedRoots] } }, SYSTEM_SETUP, true);
+                } catch {
+                    // Offline or revoked between the check and the send: the next hello tries again.
+                }
+            }
+
+            /** `auth.elevated` (#355): once per elevation window, by the first change it lets through. */
+            async function auditElevation(): Promise<void> {
+                const principal = ctx.principal as Principal | null;
+                if (principal?.kind !== 'user' || principal.elevatedUntil === undefined || ctx.state.elevationAudited === principal.elevatedUntil) return;
+                ctx.state.elevationAudited = principal.elevatedUntil;
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:elevated:${principal.elevatedUntil}`,
+                    kind: 'auth.elevated',
+                    at: now(),
+                    by: principalLabel(principal),
+                    summary: `${principal.userId} confirmed with the login provider; elevated for machine ${ctx.state.name || machineId} until ${new Date(principal.elevatedUntil).toISOString()}`,
+                    data: { userId: principal.userId, until: principal.elevatedUntil }
+                });
+            }
+
+            /**
              * The daemon's answer to a `historyRequest` (#397): the record turns `done` or `error` (the daemon's own code —
              * `gap`, `unknown-session`, `internal` — stored unchanged), the events go to the activation's `answers` for the
              * `historyAnswer` stream. An unknown, pruned or already answered id is ignored — except over a `timeout`.
@@ -1275,12 +1407,14 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onHello(frame);
                     case 'env':
                         s.environments = ctx.snapshot(frame.environments) as EnvironmentDescriptor[];
-                        // The policy is edited on the machine while the daemon runs; an `env` without one says nothing about it.
+                        // The policy changed — on the machine, or by a `policy.request` — an `env` without one says nothing about it.
                         if (frame.policy) s.policy = ctx.snapshot(frame.policy) as MachinePolicy;
                         pruneQuota(s);
                         pruneTelemetry(s);
                         s.lastSeen = now();
                         dequeue();
+                        // A local drift after convergence (`policy off` on the machine) gets one request; a refused one holds (#480).
+                        await reconcilePolicy('env');
                         return;
                     case 'heartbeat':
                         s.lastSeen = now();
@@ -1307,6 +1441,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onFsResponse(frame);
                     case 'env.response':
                         return onEnvResponse(frame);
+                    case 'policy.response':
+                        return onPolicyResponse(frame);
                     case 'quota':
                         return onQuota(frame);
                     case 'telemetry':
@@ -1340,6 +1476,9 @@ export function defineMachineActor(ports: MachinePorts) {
                     const at = now();
                     s.tokenHash = issued.tokenHash;
                     s.pairedAt = at;
+                    // The Pair page's preset (#480): the folders the web may use, applied by the first hello's reconcile. The owner set
+                    // them when the code was minted, so they are theirs — and no elevation is asked: minting a code already pairs a machine.
+                    if (claimed.allowedRoots && claimed.allowedRoots.length > 0) s.policyDesired = { allowedRoots: [...claimed.allowedRoots], setAt: at, by: `user:${workspaceId}` };
                     if (info.name?.trim()) s.name = info.name.trim();
                     if (info.os) s.os = info.os;
                     if (info.daemonVersion) s.daemonVersion = info.daemonVersion;
@@ -1363,14 +1502,17 @@ export function defineMachineActor(ports: MachinePorts) {
                     return { tokenHash: s.tokenHash, revokedAt: s.revokedAt ?? null };
                 },
 
-                /** Refuse the token from now on and drop the daemon (USR-04). */
+                /** Refuse the token from now on and drop the daemon (USR-04). Elevated (#355): a stolen session alone cannot cut a machine off. */
                 async revoke(): Promise<MachineView> {
                     const s = ctx.state;
+                    requireElevated(ctx.principal as Principal | null, now(), `revoke machine ${s.name || machineId}`);
+                    await auditElevation();
                     const first = s.revokedAt === undefined || s.revokedAt === null;
                     if (first) s.revokedAt = now();
                     s.online = false;
                     failPendingFs(s, now(), 'machine revoked');
                     failPendingEnv(s, now(), 'machine revoked');
+                    failPendingPolicy(s, now(), 'machine revoked');
                     failPendingHistory(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
@@ -1391,8 +1533,13 @@ export function defineMachineActor(ports: MachinePorts) {
 
                 async rename(name: string): Promise<MachineView> {
                     if (!name.trim()) throw new ServerFnError(400, 'machine: name is required');
-                    ctx.state.name = name.trim();
+                    const from = ctx.state.name;
+                    const to = name.trim();
+                    ctx.state.name = to;
                     await ctx.save();
+                    if (from !== to) {
+                        await recordAudit(ctx, workspaceId, { key: `${ctx.key}:renamed:${crypto.randomUUID()}`, kind: 'machine.renamed', at: now(), by: principalLabel(ctx.principal), summary: `machine ${from || machineId} renamed to ${to}`, data: { machineId, from, to } });
+                    }
                     return view(ctx);
                 },
 
@@ -1488,6 +1635,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     // No socket, no answer: a folder request never outlives the connection it was sent on.
                     failPendingFs(s, now(), 'machine went offline');
                     failPendingEnv(s, now(), 'machine went offline');
+                    failPendingPolicy(s, now(), 'machine went offline');
                     failPendingHistory(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
@@ -1625,7 +1773,69 @@ export function defineMachineActor(ports: MachinePorts) {
                 async putEnvironment(input: EnvironmentInput): Promise<EnvRequested> {
                     const parsed = environmentInputSchema.safeParse(input);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid environment: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+                    // Turning bypassPermissions ON is security-sensitive (#355): elevated only. Keeping it, or turning it off, is not.
+                    const had = parsed.data.id !== undefined && ctx.state.environments.some((e) => e.id === parsed.data.id && e.allowBypassPermissions === true);
+                    if (parsed.data.allowBypassPermissions === true && !had) {
+                        requireElevated(ctx.principal as Principal | null, now(), `let ${parsed.data.name} run in bypassPermissions`);
+                        await auditElevation();
+                    }
                     return envRequest({ op: 'put', environment: parsed.data });
+                },
+
+                /**
+                 * The folders the web may use on this machine (#355, #480): owner only, elevated. Validated here (`checkPolicyRoots`:
+                 * ≤ 32, each a `~` form or an absolute path, never a network path), stored as the desired set, sent as
+                 * `policy.request { op: 'set' }` — the daemon expands `~`, checks every folder and answers `policy.response`, read
+                 * with `policyResult`. Audited (`machine.policy-set`) and pushed to the Inbox (`machine-security`) at once: the
+                 * decision is the owner's, whatever the daemon then says. 409 when the daemon predates the feature, 503 offline.
+                 */
+                async setPolicy(input: MachinePolicyInput): Promise<PolicyRequested> {
+                    const s = ctx.state;
+                    // Elevation first: a plain owner is told to confirm, not what the input would have to look like.
+                    requireElevated(ctx.principal as Principal | null, now(), `change the folders the web may use on ${s.name || machineId}`);
+                    const allowedRoots = checkPolicyRoots(input, s.os);
+                    await auditElevation();
+                    const at = now();
+                    const previous = s.policyDesired?.allowedRoots ?? s.policy?.requested ?? s.policy?.allowedRoots ?? [];
+                    const by = principalLabel(ctx.principal);
+                    const requested = await policyRequest({ op: 'set', policy: { allowedRoots } }, by);
+                    s.policyDesired = { allowedRoots, setAt: at, by };
+                    await ctx.save();
+                    await recordAudit(ctx, workspaceId, {
+                        key: `${ctx.key}:policy:${requested.requestId}`,
+                        kind: 'machine.policy-set',
+                        at,
+                        by,
+                        summary: `the web may use ${allowedRoots.length === 0 ? 'no folders' : allowedRoots.join(', ')} on machine ${s.name || machineId}`,
+                        data: { machineId, allowedRoots, previous: [...previous], source: 'web' }
+                    });
+                    await lifecycle.inbox({ kind: 'machine-security', title: `Folders the web may use on ${s.name || machineId} changed`, body: allowedRoots.length === 0 ? 'Web management is off.' : allowedRoots.join(', '), ref: { kind: 'machine', machineId } });
+                    return requested;
+                },
+
+                /** List a folder of the machine (or its roots) for the folder picker (#480): owner only, elevated — it sees past `cwdRoots`. */
+                async browseMachine(path?: string): Promise<PolicyRequested> {
+                    const s = ctx.state;
+                    requireElevated(ctx.principal as Principal | null, now(), `browse the folders of ${s.name || machineId}`);
+                    if (path !== undefined && (typeof path !== 'string' || path.trim() === '' || path.length > 1024)) throw new ServerFnError(400, 'machine: a folder to browse is a non-empty path');
+                    await auditElevation();
+                    return policyRequest(path === undefined ? { op: 'browse' } : { op: 'browse', path: path.trim() }, principalLabel(ctx.principal));
+                },
+
+                /** One policy request as stored (#480); read live like `envResult`. 404 for an unknown or pruned id. */
+                policyResult(requestId: string): PolicyResultView {
+                    const r = ctx.state.policyRequests?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no policy request "${requestId}"`);
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        op: r.op,
+                        status: r.status,
+                        requestedAt: r.requestedAt,
+                        by: r.by,
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+                        ...(r.result ? { result: r.result } : {}),
+                        ...(r.error ? { error: r.error } : {})
+                    }) as PolicyResultView;
                 },
 
                 /**
@@ -1960,6 +2170,16 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.finishedAt = at;
                 }
                 pruneEnvRequests(s.envRequests, at, false);
+            }
+            if (s.policyRequests) {
+                for (const r of Object.values(s.policyRequests)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    r.status = 'error';
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${envTimeoutMs} ms` };
+                    r.finishedAt = at;
+                    if (r.auto && s.policyDesired) s.policyDesired.lastAuto = { at, converged: false };
+                }
+                prunePolicyRequests(s.policyRequests, at, false);
             }
             if (s.history) {
                 for (const r of Object.values(s.history)) {

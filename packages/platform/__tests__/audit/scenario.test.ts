@@ -22,10 +22,12 @@ import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/ro
 import { defineSessionActor, type CommandSink, type SessionFactory } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
-import { memoryStorage, recordingStorage, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
+import { elevatedPrincipal, memoryStorage, recordingStorage, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
+/** The owner beside a live elevation (#355): what revoking takes. */
+const elevated = elevatedPrincipal('u1');
 const E1 = 'env_1' as EnvironmentId;
 const asMachine = (id: MachineId): Principal => ({ kind: 'machine', workspaceId: WS, machineId: id });
 
@@ -217,8 +219,8 @@ describe('the audit trail of a scripted scenario', () => {
         const t3 = await task('t3').get();
         expect(t3.status).toBe('completed');
         expect(t3.transitions.map((x) => `${x.from}>${x.to}`)).toEqual(['queued>waiting', 'waiting>active', 'active>completed']);
-        await machine(m1).revoke();
-        await machine(m1).revoke(); // idempotent: no second record
+        await machine(m1, elevated).revoke();
+        await machine(m1, elevated).revoke(); // idempotent: no second record
 
         // 5. Registry: enable (twice — once recorded), grant, open a secret, disable.
         await registry().register(
@@ -255,8 +257,8 @@ describe('the audit trail of a scripted scenario', () => {
         // `session.interrupted` / `session.resumed` / `task.machine-lost` need a daemon that goes away: covered by the Routing tests (#366).
         // The `machine.update*` / `machine.channel-set` kinds need a daemon that updates: covered by the Machine update tests (#365).
         // `harness.changed` needs a daemon that changes a harness: covered by the Machine harness tests (#370).
-        // The #355 kinds (`machine.policy-set`, `machine.renamed`, `machine.restart-requested`, `machine.restarted`, `machine.login`, `auth.elevated`) land with their Machine methods (#480, #481, #484) and the elevation (#478).
-        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed' | 'chat.project-set' | 'chat.machine-set' | 'project.changed' | 'session.interrupted' | 'session.resumed' | 'task.machine-lost' | 'machine.update-requested' | 'machine.updated' | 'machine.update-failed' | 'machine.channel-set' | 'machine.update-policy-set' | 'harness.changed' | 'machine.policy-set' | 'machine.renamed' | 'machine.restart-requested' | 'machine.restarted' | 'machine.login' | 'auth.elevated'>, number> = {
+        // The #355 kinds `machine.policy-set` / `machine.renamed` are covered by the Machine policy tests (#480); `machine.restart-requested` / `machine.restarted` (#481) and `machine.login` (#484) by theirs.
+        const expected: Record<Exclude<AuditKind, 'workdir.worktree-created' | 'plugin.activated' | 'environment.put' | 'environment.removed' | 'chat.project-set' | 'chat.machine-set' | 'project.changed' | 'session.interrupted' | 'session.resumed' | 'task.machine-lost' | 'machine.update-requested' | 'machine.updated' | 'machine.update-failed' | 'machine.channel-set' | 'machine.update-policy-set' | 'harness.changed' | 'machine.policy-set' | 'machine.renamed' | 'machine.restart-requested' | 'machine.restarted' | 'machine.login'>, number> = {
             'config.versioned': 3, // agent_api v1, agent_cc v1, agent_api v2 (the accepted proposal)
             'environment.chosen': 3, // t1 (api), t3 (E1), t3 fallback
             'task.transition': 9, // t1 ×4, t2 ×2, t3 ×3
@@ -265,6 +267,7 @@ describe('the audit trail of a scripted scenario', () => {
             'delegation.created': 1,
             'machine.paired': 1,
             'machine.revoked': 1,
+            'auth.elevated': 1, // the revoke was the elevation's first change (#355)
             'plugin.enabled': 1,
             'plugin.granted': 1,
             'secret.opened': 1,

@@ -1,6 +1,6 @@
 import { SELF } from 'cloudflare:test';
 import type { WorkspaceId } from '@agentic/core';
-import { REGISTRY_TYPE, registryKey, sealSession, sessionCookie, type RegistryActor } from '@agentic/platform';
+import { elevationCookie, REGISTRY_TYPE, registryKey, sealElevation, sealSession, sessionCookie, type RegistryActor } from '@agentic/platform';
 import { ANTHROPIC_API_KEY_SECRET } from '@agentic/runtimes';
 import type { ActorClient, AnyActorDefinition } from '@sigx/actors';
 import { fetchTransport } from '@sigx/actors/client';
@@ -14,6 +14,11 @@ export const seen: string[] = [];
 /** A `__Host-session` cookie header value for `userId` (v1: workspace id = user id). */
 export async function signIn(userId: string): Promise<string> {
     return sessionCookie(await sealSession({ userId, workspaceId: userId as WorkspaceId }, TEST_SESSION_SECRET)).split(';')[0]!;
+}
+
+/** The session beside a live `__Host-elevated` (#355): what the owner-only methods that `requireElevated` (revoke, the folders) need. */
+export async function signInElevated(userId: string): Promise<string> {
+    return `${await signIn(userId)}; ${elevationCookie(await sealElevation({ userId }, TEST_SESSION_SECRET)).split(';')[0]!}`;
 }
 
 /**
