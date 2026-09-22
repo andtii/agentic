@@ -8,7 +8,7 @@
  * Forge, Lint, Scout; alien01, nuc-lab, platform.
  */
 import type { AgentHue } from '@agentic/ui';
-import type { AgentId, DaemonBuild, DaemonFeature, EnvironmentDescriptor, EnvironmentId, HarnessReport, MachineId, MachineInfo, MachinePolicy, MachineTelemetry, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ResourceSample, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
+import type { AgentId, DaemonBuild, DaemonFeature, EnvironmentDescriptor, EnvironmentId, HarnessReport, MachineId, MachineInfo, MachineListing, MachinePolicy, MachineTelemetry, NotificationKind, PluginManifest, QuotaSnapshot, QuotaWindow, ResourceSample, ScheduleId, SessionId, TaskId, UpdatePhase } from '@agentic/core';
 import type { AvailableHarness, Dependents, HarnessResultView, MachineUpdateView, PluginView } from '@agentic/platform';
 import { gitFeatureManifest } from '@agentic/plugins-git';
 import { limitAccountOf, type LimitAccount } from '../pages/usage/limit-accounts';
@@ -72,16 +72,69 @@ export const opsEnvironments: readonly EnvironmentDescriptor[] = [
 export const environmentsOf = (machineId: string): readonly EnvironmentDescriptor[] => opsEnvironments.filter(e => e.machineId === machineId);
 
 /**
- * What each sample daemon reports about web management (#239): alien01 lets
- * the page manage environments inside its allowed folders, nuc-lab does not —
- * so both states of the machine page show on mock data.
+ * What each sample daemon reports about web management (#239, #355): alien01
+ * lets the page manage environments inside folders set from the web, nuc-lab's
+ * daemon predates web-set folders and has none allowed — so both states of the
+ * machine page show on mock data.
  */
 export const opsMachinePolicies: Readonly<Record<string, MachinePolicy>> = {
-    alien01: { webManaged: true, allowedRoots: ['C:\\Dev', 'D:\\scratch', 'C:\\Users\\andy\\src', 'C:\\clients'] },
+    alien01: { webManaged: true, allowedRoots: ['C:\\Dev', 'D:\\scratch', 'C:\\Users\\andy\\src', 'C:\\clients'], source: 'web', requested: ['C:\\Dev', 'D:\\scratch', '~/src', 'C:\\clients'] },
     'nuc-lab': { webManaged: false, allowedRoots: [] }
 };
 
 export const machinePolicyOf = (machineId: string): MachinePolicy | undefined => opsMachinePolicies[machineId];
+
+/** What each sample daemon answers (`hello.features`): alien01 everything, nuc-lab's daemon predates all of it. */
+export const opsFeaturesOf: Readonly<Record<string, readonly DaemonFeature[]>> = { alien01: ['update', 'harness', 'policy', 'log'], 'nuc-lab': [] };
+
+/**
+ * Every state of the folders card (#482), for `pnpm dev:mock`: the mock
+ * Machine page opens on the machine's own state and offers the rest in the
+ * card's "Preview" picker.
+ */
+export const opsPolicyStates = {
+    web: { label: 'Set from the web', policy: opsMachinePolicies.alien01!, features: opsFeaturesOf.alien01! },
+    local: { label: 'Set on the machine (allow-root)', policy: { webManaged: true, allowedRoots: ['C:\\Dev'], source: 'local' } as MachinePolicy, features: opsFeaturesOf.alien01! },
+    locked: { label: 'Locked on the machine', policy: { webManaged: true, allowedRoots: ['C:\\Dev', 'C:\\Users\\andy'], source: 'web', requested: ['C:\\Dev', '~'], locked: true } as MachinePolicy, features: opsFeaturesOf.alien01! },
+    off: { label: 'Nothing allowed yet', policy: { webManaged: false, allowedRoots: [], source: 'local' } as MachinePolicy, features: opsFeaturesOf.alien01! },
+    'no-feature': { label: 'Daemon predates web-set folders', policy: { webManaged: false, allowedRoots: [] } as MachinePolicy, features: ['update', 'harness'] as readonly DaemonFeature[] }
+} as const satisfies Readonly<Record<string, { readonly label: string; readonly policy: MachinePolicy; readonly features: readonly DaemonFeature[] }>>;
+
+export type OpsPolicyState = keyof typeof opsPolicyStates;
+
+/** The policy and features a sample machine opens on. */
+export const opsPolicy = (machineId: string): { readonly policy: MachinePolicy | undefined; readonly features: readonly DaemonFeature[] } => ({ policy: machinePolicyOf(machineId), features: opsFeaturesOf[machineId] ?? [] });
+
+/** The sample machine's folders for Browse… (#482): two drives, a few folders each; the daemon's own folder is never listed. */
+const mockTree: Readonly<Record<string, readonly string[]>> = {
+    'C:\\': ['Dev', 'Users', 'clients', 'Program Files'],
+    'C:\\Dev': ['agentic', 'zero', 'sigx'],
+    'C:\\Dev\\agentic': ['main', 'branches'],
+    'C:\\Users': ['andy'],
+    'C:\\Users\\andy': ['src', 'Documents', 'Downloads'],
+    'C:\\Users\\andy\\src': ['notes', 'scratch'],
+    'C:\\clients': ['acme'],
+    'D:\\': ['scratch', 'backups']
+};
+
+/** A listing of the sample tree: `null` for the roots (the drives and the home folder). */
+export function mockListing(path: string | null): MachineListing {
+    if (path === null) return { path: '', entries: [{ name: 'C:\\', path: 'C:\\' }, { name: 'D:\\', path: 'D:\\' }, { name: 'Home', path: 'C:\\Users\\andy' }], truncated: false };
+    const names = mockTree[path] ?? [];
+    const parent = /^[A-Za-z]:\\$/.test(path) ? undefined : path.replace(/\\[^\\]+$/, '').replace(/^([A-Za-z]:)$/, '$1\\');
+    return { path, ...(parent !== undefined ? { parent } : {}), entries: names.map((name) => ({ name, path: `${path.replace(/\\$/, '')}\\${name}` })), truncated: false };
+}
+
+/** The tail of alien01's daemon log (#481), as the disclosure shows it — nothing that looks like a token. */
+export const opsDaemonLog: readonly string[] = [
+    '{"t":"2026-09-17T14:18:02.114Z","level":"info","msg":"daemon: started","version":"0.1.0","pid":41216}',
+    '{"t":"2026-09-17T14:18:02.371Z","level":"info","msg":"socket: connected","url":"wss://agentic.example/daemon"}',
+    '{"t":"2026-09-17T14:18:02.402Z","level":"info","msg":"hello: sent","environments":5,"features":["update","harness","policy","log"]}',
+    '{"t":"2026-09-17T14:18:02.688Z","level":"info","msg":"welcome: received","token":"[redacted]"}',
+    '{"t":"2026-09-17T14:19:40.020Z","level":"info","msg":"session.open","sessionId":"s_41aa","environmentId":"env_alien01_work"}',
+    '{"t":"2026-09-17T14:19:58.913Z","level":"warn","msg":"env: client-acme cannot authenticate","reason":"token expired"}',
+    '{"t":"2026-09-17T14:20:04.005Z","level":"info","msg":"heartbeat","cpu":0.31,"memory":0.62}'
+];
 
 export const opsEnvironment = (id: string): EnvironmentDescriptor | undefined => opsEnvironments.find(e => e.id === id);
 

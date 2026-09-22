@@ -23,8 +23,15 @@
  * "Confirm with GitHub to continue" (`ElevateDialog`); the change is put
  * aside per machine (`savePending`) for the round trip through
  * `/auth/elevate`, and on the way back the page reopens the dialog in its
- * resume shape — one Confirm click sends it. Revoke and Remove go through it;
- * the folders card and the bypass switch (#482) will too.
+ * resume shape — one Confirm click sends it. Revoke, Remove, the folders
+ * card (`LivePolicyCard`, #482) and an environment save that turns
+ * `bypassPermissions` on go through it; a Browse… that needed elevation
+ * reopens the browser on the way back without a confirm (it changes nothing).
+ *
+ * Restart (#481): `Machine.requestRestart` from "This machine"; the pending
+ * restart is read from `updateState` like an update, and its end is the
+ * update card's "Restarted at …". The daemon log: `logTail` on opening the
+ * disclosure and on Refresh, the answer read live with `logResult`.
  */
 import { component, effect, onMounted, onUnmounted, signal, useData, type JSXElement } from 'sigx';
 import { useRouter } from '@sigx/router';
@@ -35,7 +42,7 @@ import { EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
-import { MachineView, type EnvRequestState } from '../Machine';
+import { MachineView, likelyRoot, type EnvRequestState, type RestartState } from '../Machine';
 import { LinkButton } from '../ops/LinkButton';
 import { OpsPage } from '../ops/OpsPage';
 import { CLIENT_TIMEOUT_MS } from '../workdir/model';
@@ -45,7 +52,12 @@ import { answerFailure, callFailure, runtimesOf } from './manage';
 import { browserPendingStore, elevateUrl, isElevationRequired, savePending, takePending, type PendingChange, type PendingKind } from './elevate';
 import { ElevateDialog } from './ElevateDialog';
 import { LiveHarnessCard } from './LiveHarnessCard';
+import { LivePolicyCard, isPolicyPending, type PolicyPending } from './LivePolicyCard';
 import { LiveUpdateCard } from './LiveUpdateCard';
+import type { LogState } from './policy';
+
+/** An environment draft as it comes back from the pending store: the shape `putEnvironment` takes, or nothing. */
+const isEnvironmentInput = (v: unknown): v is EnvironmentInput => !!v && typeof v === 'object' && typeof (v as EnvironmentInput).name === 'string' && typeof (v as EnvironmentInput).runtime === 'string' && Array.isArray((v as EnvironmentInput).cwdRoots);
 
 export const LiveMachine = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
@@ -88,10 +100,16 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
             // The platform fails an unanswered request itself (`timeout`), on its liveness tick; the page need not wait that long to say so.
             timer = setTimeout(() => { if (env.state?.status === 'pending') settle({ ...scope, status: 'error', failure: { code: 'timeout', message: '' } }); }, CLIENT_TIMEOUT_MS);
         } catch (e) {
+            // An elevation refusal is the helper's: the dialog stays as it was, the draft rides the round trip.
+            if (isElevationRequired(e)) {
+                settle({ ...scope, status: 'elevate' });
+                throw e;
+            }
             settle({ ...scope, status: 'error', failure: callFailure(e) });
         }
     };
-    const saveEnvironment = (input: EnvironmentInput): void => { void request('put', input.id, () => client().putEnvironment(input)); };
+    // Every save goes through the helper: only one that turns `bypassPermissions` on is refused without elevation (#480).
+    const saveEnvironment = (input: EnvironmentInput): void => { void withElevation('environment', () => request('put', input.id, () => client().putEnvironment(input)), input); };
     const removeEnvironment = (id: string): void => { void request('remove', id, () => client().removeEnvironment(id as EnvironmentId)); };
 
     const view = useActorState(defs.Machine, () => { const k = key(); return k && ([k, 'get'] as const); }, { live: true });
@@ -137,7 +155,7 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
      * done. `withElevation` runs a change and, refused `elevation-required`, asks instead of failing; `dispatch` runs a
      * change by kind, which is what the resumed dialog's Confirm does.
      */
-    const elevate = signal({ open: false, pending: null as PendingChange | null, resume: false });
+    const elevate = signal({ open: false, pending: null as PendingChange | null, resume: false, policyResume: null as PolicyPending | null });
     const withElevation = async (kind: PendingKind, run: () => Promise<unknown>, draft?: unknown): Promise<void> => {
         if (st.busy) return;
         st.busy = true;
@@ -171,8 +189,14 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                 return revoke();
             case 'remove':
                 return removeMachine();
+            case 'policy':
+                // The card sends it: a fresh object so its watch fires.
+                if (isPolicyPending(change.draft)) elevate.policyResume = { allowedRoots: [...change.draft.allowedRoots] };
+                return Promise.resolve();
+            case 'environment':
+                if (isEnvironmentInput(change.draft)) saveEnvironment(change.draft);
+                return Promise.resolve();
             default:
-                // `policy` / `environment` arrive with their cards (#482).
                 return Promise.resolve();
         }
     };
@@ -184,15 +208,65 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
         elevate.open = false;
         if (typeof location !== 'undefined') location.assign(elevateUrl(`${location.pathname}${location.search}${location.hash}`));
     };
-    // Back from GitHub: the change waits for one click, never runs on its own.
+    // Back from GitHub: the change waits for one click, never runs on its own — except a Browse…, which changes nothing and reopens where it was.
     onMounted(() => {
         const pending = takePending(browserPendingStore(), props.id);
-        if (pending) {
-            elevate.pending = pending;
-            elevate.resume = true;
-            elevate.open = true;
+        if (!pending) return;
+        if (pending.kind === 'policy' && isPolicyPending(pending.draft) && pending.draft.browse !== undefined) {
+            elevate.policyResume = { allowedRoots: [...pending.draft.allowedRoots], browse: pending.draft.browse };
+            return;
         }
+        elevate.pending = pending;
+        elevate.resume = true;
+        elevate.open = true;
     });
+
+    // Restart (#481): asked from "This machine", followed on `updateState` like an update.
+    const update = useActorState(defs.Machine, () => { const k = key(); return k && ([k, 'updateState'] as const); }, { live: true });
+    const restart = signal({ error: '' });
+    const requestRestart = async (mode: 'drain' | 'now'): Promise<void> => {
+        restart.error = '';
+        try {
+            await client().requestRestart({ mode });
+        } catch (e) {
+            restart.error = e instanceof Error ? e.message : String(e);
+        }
+    };
+    const restartState = (): RestartState | null => {
+        if (restart.error) return { status: 'error', message: restart.error };
+        const p = update.value?.pending;
+        return p && p.target === 'restart' ? { status: 'pending', mode: p.mode } : null;
+    };
+
+    // The daemon log (#481): one request at a time, its answer read live like `envResult`.
+    const log = signal({ requestId: '', state: null as LogState | null });
+    let logTimer: ReturnType<typeof setTimeout> | undefined;
+    onUnmounted(() => { if (logTimer !== undefined) clearTimeout(logTimer); });
+    const logAnswer = useActorState(defs.Machine, () => { const k = key(); return k && log.requestId ? ([k, 'logResult', log.requestId] as const) : null; }, { live: true });
+    const stopLog = effect(() => {
+        const r = logAnswer.value;
+        if (!r || r.requestId !== log.requestId || r.status === 'pending' || log.state?.status !== 'pending') return;
+        if (logTimer !== undefined) clearTimeout(logTimer);
+        log.state = r.status === 'done' && r.result
+            ? { status: 'done', lines: r.result.lines, truncated: r.result.truncated }
+            : { status: 'error', error: r.error ?? { code: 'internal', message: 'The machine answered with something else' } };
+    });
+    onUnmounted(stopLog);
+    const readLog = async (): Promise<void> => {
+        if (log.state?.status === 'pending') return;
+        log.requestId = '';
+        log.state = { status: 'pending' };
+        try {
+            const { requestId } = await client().logTail(200);
+            log.requestId = requestId;
+            if (logTimer !== undefined) clearTimeout(logTimer);
+            logTimer = setTimeout(() => { if (log.state?.status === 'pending') log.state = { status: 'error', error: { code: 'timeout', message: '' } }; }, CLIENT_TIMEOUT_MS);
+        } catch (e) {
+            const status = (e as { status?: number } | null)?.status;
+            const message = e instanceof Error ? e.message : String(e);
+            log.state = { status: 'error', error: status === 503 ? { code: 'machine-offline', message } : status === 409 ? { code: 'unsupported', message } : { code: 'internal', message } };
+        }
+    };
 
     const stopHead = effect(() => {
         const v = view.value;
@@ -242,13 +316,30 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     onRevoke={() => { void revoke(); }}
                     onRecheck={() => { void doctor.refresh(); }}
                     {...(v.policy ? { policy: v.policy } : {})}
+                    {...(v.features ? { features: v.features } : {})}
                     runtimes={runtimesOf(v.capabilities, v.environments)}
                     envRequest={env.state}
                     onSaveEnvironment={saveEnvironment}
                     onRemoveEnvironment={removeEnvironment}
                     onRename={(name: string) => { void rename(name); }}
                     onRemoveMachine={() => { void removeMachine(); }}
+                    {...(update.value ? { impact: update.value.impact } : {})}
+                    restartState={restartState()}
+                    onRestart={(mode: 'drain' | 'now') => { void requestRestart(mode); }}
+                    log={log.state}
+                    onReadLog={() => { void readLog(); }}
                     slots={{
+                        policy: () => (v.revoked ? null : (
+                            <LivePolicyCard
+                                machineKey={key()!}
+                                view={v}
+                                name={v.name || id}
+                                os={v.os ?? 'linux'}
+                                likelyRoot={likelyRoot(v.environments) ?? ''}
+                                elevate={(run, draft) => withElevation('policy', run, draft)}
+                                resume={elevate.policyResume}
+                            />
+                        )),
                         update: () => (v.revoked ? null : (
                             <LiveUpdateCard
                                 machineKey={key()!}

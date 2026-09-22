@@ -273,18 +273,23 @@ const shArg = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
  * (#239): `pair --allow-root` turns web management on at pairing (#238). Left
  * empty, the machine keeps it off and its environments are edited there.
  */
-export function pairCommands(origin: string, code: string, name: string, allowRoot = ''): PairCommands {
+/**
+ * `allowRoots` (#482): the folders the Pair page presets. Only full paths ride the by-hand command as `--allow-root`
+ * (a headless install with no web round trip yet); a `~` form is the platform's to expand on the first hello — the
+ * daemon's `pair` takes absolute paths only.
+ */
+export function pairCommands(origin: string, code: string, name: string, allowRoots: string | readonly string[] = []): PairCommands {
     // Every value quoted when it needs it: a machine name may hold a space, and so does the placeholder URL.
     const base = origin || '<platform url>';
     const url = shellArg(base);
     const machine = shellArg(name);
-    const root = allowRoot.trim();
+    const roots = (typeof allowRoots === 'string' ? [allowRoots] : allowRoots).map((r) => r.trim()).filter((r) => r && !r.startsWith('~'));
     return {
         install: [
             { os: 'Windows', command: `$env:AGENTIC_URL=${psArg(base)}; $env:AGENTIC_CODE=${psArg(code)}; $env:AGENTIC_NAME=${psArg(name)}; irm ${psArg(`${base}/install.ps1`)} | iex` },
             { os: 'macOS / Linux', command: `curl -fsSL ${shArg(`${base}/install.sh`)} | AGENTIC_URL=${shArg(base)} AGENTIC_CODE=${shArg(code)} AGENTIC_NAME=${shArg(name)} sh` }
         ],
-        pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${root ? ` --allow-root ${shellArg(root)}` : ''}`
+        pair: `agentic-daemon pair ${code} --url ${url} --name ${machine}${roots.map((r) => ` --allow-root ${shellArg(r)}`).join('')}`
     };
 }
 

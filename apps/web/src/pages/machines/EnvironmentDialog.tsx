@@ -2,14 +2,14 @@
  * "Add environment" / "Edit environment" (#239): a name, the runtime (what
  * the machine's daemon reports it can host), the folders agents may work in
  * — one per line, inside what the machine allows, with those allowed
- * folders a click away — concurrency and an account label. The daemon's
- * policy decides (decisions 2026-09-19 (c)): its refusal comes back as
- * `failure` and lands under the field it concerns. The profile directory is
- * the daemon's own and never appears here.
+ * folders a click away — concurrency, an account label and the
+ * `bypassPermissions` switch (#482; on needs elevation). The daemon's policy
+ * decides: its refusal comes back as `failure` and lands under the field it
+ * concerns. The profile directory is the daemon's own and never appears here.
  */
 import { component, signal, watch, type Define } from 'sigx';
 import type { EnvironmentDescriptor, EnvironmentInput, HostOs, MachinePolicy } from '@agentic/core';
-import { Button, ConfirmDialog, NumberField, SelectField, TextField, TextareaField } from '@agentic/ui';
+import { Button, ConfirmDialog, NumberField, SelectField, SwitchField, TextField, TextareaField } from '@agentic/ui';
 import { draftOf, emptyDraft, failureField, failureText, inputOf, validateDraft, withRoot, type DraftErrors, type EnvFailure, type EnvironmentDraft } from './manage';
 
 export type EnvironmentDialogProps =
@@ -88,6 +88,7 @@ export const EnvironmentDialog = component<EnvironmentDialogProps>(({ props, emi
                     ) : null}
                     <NumberField model={() => d.concurrency} name="env-concurrency" label="Sessions at once" min={1} step={1} placeholder="1" error={errorOf('concurrency')} disabled={props.busy} />
                     <TextField model={() => d.accountLabel} name="env-account" label="Account label" description="How the account shows in pickers; the environment's name when empty." disabled={props.busy} />
+                    <SwitchField model={() => d.allowBypass} name="env-bypass" label="Allow bypassPermissions" description="Claude Code may run every tool unasked in this environment. Turning it on asks you to confirm with GitHub once." disabled={props.busy} />
                     {failure && !field ? <p data-env-failure role="alert">{failureText(failure)}</p> : null}
                 </div>
             </ConfirmDialog>

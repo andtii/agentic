@@ -78,7 +78,7 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
         const busy = !!props.busy;
         const last = pending ? null : lastLine(u.last, props.timeZone);
         // A cancel is the owner's own choice, not a failure: only a failed, rolled-back or timed-out update is an alert.
-        const lastFailed = u.last !== undefined && u.last.outcome !== 'applied' && u.last.outcome !== 'cancelled';
+        const lastFailed = u.last !== undefined && u.last.outcome !== 'applied' && u.last.outcome !== 'cancelled' && u.last.outcome !== 'restarted';
         const back = pending ? null : rollbackTarget(u);
         const restarts = restartWarning(u, props.now, props.timeZone);
         const percent = progressPercent(pending?.progress);
@@ -97,9 +97,9 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
 
                 {able && pending ? (
                     <div data-update-pending>
-                        <p data-card-text>Updating to {pending.target === 'previous' ? 'the previous version' : pending.target} ({pending.mode === 'now' ? 'now' : 'when idle'}).{pending.phase ? '' : ' Asked — waiting for the daemon to report.'}</p>
+                        <p data-card-text>{pending.target === 'restart' ? 'Restarting' : `Updating to ${pending.target === 'previous' ? 'the previous version' : pending.target}`} ({pending.mode === 'now' ? 'now' : 'when idle'}).{pending.phase ? '' : ' Asked — waiting for the daemon to report.'}</p>
                         <ol data-update-phases>
-                            {phaseSteps(pending).map((s) => (
+                            {phaseSteps(pending).filter((s) => pending.target !== 'restart' || s.phase === 'draining' || s.phase === 'restarting').map((s) => (
                                 <li data-update-phase={s.phase} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>
                                     <span data-update-phase-label>{s.label}</span>
                                     {s.phase === 'downloading' && s.state === 'current' && percent !== null
@@ -116,7 +116,7 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                         </ol>
                         {pending.error ? <p data-update-error role="alert">{pending.error.message}</p> : null}
                         <div data-card-actions>
-                            <Button intent="default" loading={busy} disabled={busy} onClick={() => emit('cancel')}>Cancel update</Button>
+                            <Button intent="default" loading={busy} disabled={busy} onClick={() => emit('cancel')}>{pending.target === 'restart' ? 'Cancel restart' : 'Cancel update'}</Button>
                         </div>
                     </div>
                 ) : null}
