@@ -58,7 +58,7 @@ describe('/machines/:id on mock data (#239)', () => {
         expect(card().getAttribute('data-policy-state')).toBe('web');
         expect(rows()).toEqual(['C:\\Dev', 'D:\\scratch', '~/src', 'C:\\clients']);
         expect(text([...card().querySelectorAll('[data-policy-root]')].find((r) => r.getAttribute('data-policy-root') === '~/src')?.querySelector('[data-policy-resolved]'))).toBe('→ C:\\Users\\andy\\src');
-        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('aria-current')).toBe('ready'); // client-acme's doctor check fails
+        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('data-setup-current')).toBe('ready'); // client-acme's doctor check fails
 
         // Browse the sample tree: roots → a drive → a folder; Allow adds it.
         button(card(), 'Browse…').click();
@@ -95,7 +95,7 @@ describe('/machines/:id on mock data (#239)', () => {
         expect(card().getAttribute('data-policy-state')).toBe('no-feature');
         expect(root.querySelector('[data-env-policy]')!.getAttribute('data-env-policy')).toBe('off');
         expect([...root.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Add environment' && !b.closest('[data-part="popup"]'))).toBe(false);
-        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('aria-current')).toBe('folders');
+        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('data-setup-current')).toBe('folders');
     });
 
     it('alien01: Restart… confirms with the running turn and a drain/now choice; the daemon log shows the sample lines', async () => {
@@ -124,7 +124,7 @@ describe('/machines/:id on mock data (#239)', () => {
 
     it('nuc-lab: offline, the checklist waits for the daemon and the log says the machine is offline', async () => {
         const root = await mountAt('/machines/nuc-lab', <Machine />);
-        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('aria-current')).toBe('paired');
+        expect(root.querySelector('[data-setup-checklist]')!.getAttribute('data-setup-current')).toBe('paired');
         expect(text(root.querySelector('[data-setup-step="paired"]'))).toContain('Waiting for the daemon to connect');
         // A daemon without the features: no Restart…, no log.
         expect([...root.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Restart…')).toBe(false);

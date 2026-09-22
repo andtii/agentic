@@ -20,7 +20,7 @@ export const SetupChecklist = component<SetupChecklistProps>(({ props, emit }) =
         const complete = steps.every((s) => s.state === 'done');
         const current = steps.find((s) => s.state === 'current');
         return (
-            <section data-setup-checklist data-setup-complete={complete ? '' : undefined} aria-label="Setup" aria-current={current?.id}>
+            <section data-setup-checklist data-setup-complete={complete ? '' : undefined} aria-label="Setup" data-setup-current={current?.id}>
                 <ol data-setup-steps>
                     {steps.map((s, i) => (
                         <li data-setup-step={s.id} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>

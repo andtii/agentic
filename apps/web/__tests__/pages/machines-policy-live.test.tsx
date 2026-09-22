@@ -78,7 +78,7 @@ const rows = (dom: ParentNode): string[] => [...card(dom).querySelectorAll('[dat
 /** A row by its root (an attribute selector would take the backslashes for CSS escapes). */
 const row = (dom: ParentNode, root: string): HTMLElement => { const r = [...card(dom).querySelectorAll<HTMLElement>('[data-policy-root]')].find((x) => x.getAttribute('data-policy-root') === root); if (!r) throw new Error(`no row ${root}`); return r; };
 const remove = (dom: ParentNode, root: string): void => { row(dom, root).querySelector('button')!.click(); };
-const current = (dom: ParentNode): string | null => dom.querySelector('[data-setup-checklist]')?.getAttribute('aria-current') ?? null;
+const current = (dom: ParentNode): string | null => dom.querySelector('[data-setup-checklist]')?.getAttribute('data-setup-current') ?? null;
 const last = (t: string): Frame => { const f = frames.filter((x) => x.t === t).at(-1); if (!f) throw new Error(`no ${t} frame`); return f; };
 
 describe('/machines/:id — the folders the web may use (#482)', () => {
