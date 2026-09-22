@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -32,7 +32,7 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneLogRequests, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type LogRequestRecord, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
 import { checkPolicyRoots, shouldReconcile, SYSTEM_SETUP } from './policy.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
@@ -58,7 +58,7 @@ export const HARNESS_DEADLINE_MS = 30 * 60_000;
 /** Whether the liveness reminder has anything to watch: a connected daemon, an unanswered command, folder, environment, history or harness request. */
 function needsLiveness(s: MachineState): boolean {
     const pending = (r: { status: string }) => r.status === 'pending';
-    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
+    return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.logRequests ?? {}).some(pending) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
 }
 
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
@@ -84,6 +84,16 @@ function failPendingFs(s: MachineState, at: number, message: string): void {
 /** The same for environment requests: whether the daemon applied one it never answered is unknown, and `timeout` says so. */
 function failPendingEnv(s: MachineState, at: number, message: string): void {
     for (const r of Object.values(s.envRequests ?? {})) {
+        if (r.status !== 'pending') continue;
+        r.status = 'error';
+        r.error = { code: 'timeout', message };
+        r.finishedAt = at;
+    }
+}
+
+/** And for log requests (#481). */
+function failPendingLog(s: MachineState, at: number, message: string): void {
+    for (const r of Object.values(s.logRequests ?? {})) {
         if (r.status !== 'pending') continue;
         r.status = 'error';
         r.error = { code: 'timeout', message };
@@ -185,6 +195,27 @@ export interface PolicyResultView {
     readonly finishedAt?: number;
     readonly result?: MachinePolicyResult;
     readonly error?: MachinePolicyError;
+}
+
+/** `logTail` — the id `logResult` reads the answer by (#481). */
+export interface LogRequested {
+    readonly requestId: string;
+}
+
+/**
+ * `logResult(requestId)` — the tail of the daemon's log as asked (#481): `pending` until the daemon's `log.response`
+ * lands (or the deadline / a disconnect fails it with `timeout`), then `done` with the lines — held by the activation
+ * that received them, never on the record, so an answer that landed elsewhere reads `error internal` and the page asks
+ * again — or `error` with the daemon's own code (`no-log` for a foreground run).
+ */
+export interface LogResultView {
+    readonly requestId: string;
+    readonly lines: number;
+    readonly status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    readonly finishedAt?: number;
+    readonly result?: DaemonLogResult;
+    readonly error?: DaemonLogError;
 }
 
 /** `MachineView.policyDesired` (#480): what the owner wants, and whether the machine reports it. */
@@ -471,6 +502,8 @@ export function defineMachineActor(ports: MachinePorts) {
      * frame — so an activation that goes between the answer and its reader loses it, and the reader asks again.
      */
     const answers = new Map<string, HistoryAnswer>();
+    /** The lines a `log.response` brought (#481), by `answerKey`: held here like history, never on the record. */
+    const logs = new Map<string, DaemonLogResult>();
     const answerKey = (key: string, requestId: string): string => `${key}:${requestId}`;
 
     function view(c: ActorContext<MachineState>): MachineView {
@@ -712,6 +745,9 @@ export function defineMachineActor(ports: MachinePorts) {
             if (outcome === 'applied') {
                 await recordAudit(c, workspaceId, { key: `${c.key}:update:${p.requestId}:applied`, kind: 'machine.updated', at, by, summary: `machine ${named()} updated ${p.from} → ${target}`, data: { machineId, from: p.from, to: target } });
                 await inbox({ kind: 'update-applied', title: `${named()} runs daemon ${target}`, body: `Updated from ${p.from}.`, ref });
+            } else if (outcome === 'restarted') {
+                // No Inbox row: the owner asked for it a moment ago and the card says so (#481).
+                await recordAudit(c, workspaceId, { key: `${c.key}:restart:${p.requestId}:restarted`, kind: 'machine.restarted', at, by, summary: `machine ${named()} restarted`, data: { machineId } });
             } else if (outcome !== 'cancelled') {
                 const message = error ?? outcome;
                 await recordAudit(c, workspaceId, { key: `${c.key}:update:${p.requestId}:failed`, kind: 'machine.update-failed', at, by, summary: `machine ${named()} did not update ${p.from} → ${target}: ${message}`, data: { machineId, from: p.from, to: target, error: message } });
@@ -749,17 +785,18 @@ export function defineMachineActor(ports: MachinePorts) {
             if (c.state.draining?.requestId === r.requestId) await endDrain(`the ${r.runtime} harness change on machine ${machineId} ended (${outcome})`);
         }
 
-        /** Send one `update.request` and hold it pending, with its drain. 503 when no socket takes it. */
-        async function request(target: ReleaseAsset | 'previous', to: string, mode: 'drain' | 'now', drainTimeoutMs: number, by: string): Promise<string> {
+        /** Send one `update.request` and hold it pending, with its drain. 503 when no socket takes it. A `restart` (#481) is audited as its own kind. */
+        async function request(target: ReleaseAsset | 'previous' | 'restart', to: string, mode: 'drain' | 'now', drainTimeoutMs: number, by: string): Promise<string> {
             const s = c.state;
             const u = (s.update ??= {});
             const at = now();
-            const requestId = `update_${crypto.randomUUID()}`;
+            const requestId = `${target === 'restart' ? 'restart' : 'update'}_${crypto.randomUUID()}`;
             if (!ports.socket.send(c.key, encodeFrame({ v: V, t: 'update.request', requestId, target, mode, drainTimeoutMs }))) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
             const from = s.build?.version ?? s.daemonVersion ?? 'unknown';
-            u.pending = { requestId, target: to, ...(target !== 'previous' ? { asset: target } : {}), mode, from, requestedAt: at, deadline: at + drainTimeoutMs + UPDATE_DEADLINE_GRACE_MS, by };
+            u.pending = { requestId, target: to, ...(typeof target !== 'string' ? { asset: target } : {}), mode, from, requestedAt: at, deadline: at + drainTimeoutMs + UPDATE_DEADLINE_GRACE_MS, by };
             s.draining = { requestId, since: at };
-            await recordAudit(c, workspaceId, { key: `${c.key}:update:${requestId}`, kind: 'machine.update-requested', at, by, summary: `update of machine ${named()} ${from} → ${to} requested (${mode})`, data: { machineId, from, to, mode, by } });
+            if (target === 'restart') await recordAudit(c, workspaceId, { key: `${c.key}:restart:${requestId}`, kind: 'machine.restart-requested', at, by, summary: `restart of machine ${named()} requested (${mode})`, data: { machineId, mode } });
+            else await recordAudit(c, workspaceId, { key: `${c.key}:update:${requestId}`, kind: 'machine.update-requested', at, by, summary: `update of machine ${named()} ${from} → ${to} requested (${mode})`, data: { machineId, from, to, mode, by } });
             return requestId;
         }
 
@@ -813,6 +850,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 const version = s.build?.version;
                 const cameBack = `the daemon came back on ${version ?? 'a build it does not name'}`;
                 if (reported?.outcome === 'rolled-back' && reported.at >= p.requestedAt) await close('rolled-back', reported.error ?? `rolled back to ${reported.from}`, reported.to);
+                // A restart (#481): the daemon came back — that is the proof, whatever build it names.
+                else if (p.target === 'restart') await close('restarted');
                 else if (p.target === 'previous') await (version !== undefined && version !== p.from ? close('applied', undefined, version) : close('failed', cameBack));
                 else if (version === p.target) await close('applied');
                 else await close('failed', `${cameBack}, not ${p.target}`);
@@ -893,6 +932,10 @@ export function defineMachineActor(ports: MachinePorts) {
             setPolicy: owner,
             browseMachine: owner,
             policyResult: owner,
+            // Owner only, and never a tool (#481): a restart and the daemon's log.
+            requestRestart: owner,
+            logTail: owner,
+            logResult: owner,
             historyRequest: sessionDriver,
             historyResult: sessionDriver,
             // Owner only, and never a tool (#365, decisions 2026-09-19 (c)): an agent must not replace the daemon it runs on.
@@ -1290,6 +1333,26 @@ export function defineMachineActor(ports: MachinePorts) {
                 }
             }
 
+            /**
+             * The daemon's answer to a `logTail` (#481): the record turns `done` or `error` (the daemon's own code stored
+             * unchanged), the lines go to the activation's `logs` for `logResult` — never onto the record. An unknown, pruned or
+             * already answered id is ignored, except over a `timeout`.
+             */
+            function onLogResponse(frame: DaemonFrameOf<'log.response'>): void {
+                const r = ctx.state.logRequests?.[frame.requestId];
+                if (!r || r.status === 'done' || (r.status === 'error' && r.error?.code !== 'timeout')) return;
+                r.finishedAt = now();
+                if (frame.result) {
+                    r.status = 'done';
+                    delete r.error;
+                    logs.set(answerKey(ctx.key, r.requestId), { lines: [...frame.result.lines], truncated: frame.result.truncated });
+                } else {
+                    r.status = 'error';
+                    r.error = structuredClone(frame.error ?? { code: 'io', message: 'log.response carried neither result nor error' });
+                    logs.delete(answerKey(ctx.key, r.requestId));
+                }
+            }
+
             /** Send the desired policy when `shouldReconcile` says so (#480): from `hello` and `env` only, as `system:setup`. */
             async function reconcilePolicy(trigger: 'hello' | 'env'): Promise<void> {
                 const s = ctx.state;
@@ -1443,6 +1506,8 @@ export function defineMachineActor(ports: MachinePorts) {
                         return onEnvResponse(frame);
                     case 'policy.response':
                         return onPolicyResponse(frame);
+                    case 'log.response':
+                        return onLogResponse(frame);
                     case 'quota':
                         return onQuota(frame);
                     case 'telemetry':
@@ -1513,6 +1578,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     failPendingFs(s, now(), 'machine revoked');
                     failPendingEnv(s, now(), 'machine revoked');
                     failPendingPolicy(s, now(), 'machine revoked');
+                    failPendingLog(s, now(), 'machine revoked');
                     failPendingHistory(s, now(), 'machine revoked');
                     ports.socket.close(ctx.key, 1008, 'revoked');
                     await ctx.reminders.clear(LIVENESS);
@@ -1636,6 +1702,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     failPendingFs(s, now(), 'machine went offline');
                     failPendingEnv(s, now(), 'machine went offline');
                     failPendingPolicy(s, now(), 'machine went offline');
+                    failPendingLog(s, now(), 'machine went offline');
                     failPendingHistory(s, now(), 'machine went offline');
                     await armLiveness();
                     await ctx.save();
@@ -1820,6 +1887,69 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (path !== undefined && (typeof path !== 'string' || path.trim() === '' || path.length > 1024)) throw new ServerFnError(400, 'machine: a folder to browse is a non-empty path');
                     await auditElevation();
                     return policyRequest(path === undefined ? { op: 'browse' } : { op: 'browse', path: path.trim() }, principalLabel(ctx.principal));
+                },
+
+                /**
+                 * Restart the daemon (#481): `update.request { target: 'restart' }` — nothing downloaded or staged, a drain (or
+                 * `now`), exit 75, the supervisor's plain relaunch — judged `restarted` on the next `hello`. Owner only (not
+                 * elevated: a restart narrows nothing), under `requestUpdate`'s guards: 403 revoked, 503 offline, 409 an update or
+                 * a harness change pending, or a daemon without `features: ['update']` ("reinstall once").
+                 */
+                async requestRestart(input: { readonly mode?: 'drain' | 'now'; readonly drainTimeoutMs?: number } = {}): Promise<{ requestId: string }> {
+                    const s = ctx.state;
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    if (s.update?.pending) throw new ServerFnError(409, `machine "${machineId}" has an update pending (${s.update.pending.requestId})`);
+                    const harness = Object.values(s.harnessRequests ?? {}).find((r) => r.status === 'pending');
+                    if (harness) throw new ServerFnError(409, `machine "${machineId}" is changing its ${harness.runtime} harness (${harness.requestId})`);
+                    if (!s.features?.includes('update')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that cannot restart itself: reinstall once`);
+                    const mode = input.mode ?? 'drain';
+                    if (mode !== 'drain' && mode !== 'now') throw new ServerFnError(400, 'machine: mode must be "drain" or "now"');
+                    const drainTimeoutMs = input.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+                    if (!Number.isInteger(drainTimeoutMs) || drainTimeoutMs < 0 || drainTimeoutMs > MAX_DRAIN_TIMEOUT_MS) throw new ServerFnError(400, `machine: drainTimeoutMs must be a whole number of ms up to ${MAX_DRAIN_TIMEOUT_MS}`);
+                    const requestId = await lifecycle.request('restart', 'restart', mode, drainTimeoutMs, principalLabel(ctx.principal));
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /**
+                 * The tail of the daemon's own log (#481): owner only; `lines` 1..500 (default 200). 403 revoked, 503 offline,
+                 * 409 a daemon without the `log` feature. The answer is read with `logResult(requestId)`.
+                 */
+                async logTail(lines = 200): Promise<LogRequested> {
+                    const s = ctx.state;
+                    if (!Number.isInteger(lines) || lines < 1 || lines > DAEMON_LOG_MAX_LINES) throw new ServerFnError(400, `machine: lines must be a whole number from 1 to ${DAEMON_LOG_MAX_LINES}`);
+                    if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    if (!s.features?.includes('log')) throw new ServerFnError(409, `machine "${machineId}" runs a daemon that does not serve its log; reinstall it once`);
+                    if (!s.online) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" is offline`);
+                    const at = now();
+                    const requestId = `log_${crypto.randomUUID()}`;
+                    if (!send({ v: V, t: 'log.request', requestId, lines })) throw new ServerFnError(503, `${MACHINE_OFFLINE_CODE}: machine "${machineId}" has no open socket`);
+                    const requests = (s.logRequests ??= {});
+                    pruneLogRequests(requests, at);
+                    for (const key of logs.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in requests)) logs.delete(key);
+                    const record: LogRequestRecord = { requestId, lines, status: 'pending', requestedAt: at, deadline: at + envTimeoutMs };
+                    requests[requestId] = record;
+                    await armLiveness();
+                    await ctx.save();
+                    return { requestId };
+                },
+
+                /** One log request as stored (#481), with its lines while this activation holds them; read live like `envResult`. 404 for an unknown or pruned id. */
+                logResult(requestId: string): LogResultView {
+                    const r = ctx.state.logRequests?.[requestId];
+                    if (!r) throw new ServerFnError(404, `machine "${machineId}" has no log request "${requestId}"`);
+                    const held = r.status === 'done' ? logs.get(answerKey(ctx.key, requestId)) : undefined;
+                    return ctx.snapshot({
+                        requestId: r.requestId,
+                        lines: r.lines,
+                        status: r.status === 'done' && !held ? 'error' : r.status,
+                        requestedAt: r.requestedAt,
+                        ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
+                        ...(held ? { result: held } : {}),
+                        ...(r.error ? { error: r.error } : r.status === 'done' && !held ? { error: { code: 'io', message: 'the answer landed on another activation; ask again' } } : {})
+                    }) as LogResultView;
                 },
 
                 /** One policy request as stored (#480); read live like `envResult`. 404 for an unknown or pruned id. */
@@ -2180,6 +2310,16 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (r.auto && s.policyDesired) s.policyDesired.lastAuto = { at, converged: false };
                 }
                 prunePolicyRequests(s.policyRequests, at, false);
+            }
+            if (s.logRequests) {
+                for (const r of Object.values(s.logRequests)) {
+                    if (r.status !== 'pending' || r.deadline > at) continue;
+                    r.status = 'error';
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${envTimeoutMs} ms` };
+                    r.finishedAt = at;
+                }
+                pruneLogRequests(s.logRequests, at, false);
+                for (const key of logs.keys()) if (key.startsWith(`${ctx.key}:`) && !(key.slice(ctx.key.length + 1) in s.logRequests)) logs.delete(key);
             }
             if (s.history) {
                 for (const r of Object.values(s.history)) {

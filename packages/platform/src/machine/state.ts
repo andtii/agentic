@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, DaemonLogError, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -114,6 +114,22 @@ export interface PolicyRequestRecord {
 }
 
 /**
+ * One `logTail` (#481): sent as `log.request`, answered by the daemon's `log.response` in a later `socketMessage` turn.
+ * Like a history request, the record keeps the status only: the lines are held by the activation that received them
+ * and handed out by `logResult`, never saved on this record.
+ */
+export interface LogRequestRecord {
+    readonly requestId: string;
+    readonly lines: number;
+    status: 'pending' | 'done' | 'error';
+    readonly requestedAt: number;
+    /** After this the liveness reminder fails a pending request with `timeout`. */
+    readonly deadline: number;
+    finishedAt?: number;
+    error?: DaemonLogError;
+}
+
+/**
  * The folders the web may use on this machine, as the owner wants them (#355, #480): set on the page (`setPolicy`) or
  * preset on the Pair page and stored at `pair`. The daemon reports what it applied (`MachineState.policy`); the two are
  * compared with `policyConverged`, and `lastAuto` records the reconcile's last attempt so it never loops.
@@ -162,7 +178,7 @@ export interface MachineDraining {
 /** An `update.request` in flight (#365), from `requestUpdate` to the `hello` that judges it, a `failed` phase or its deadline. */
 export interface PendingUpdate {
     readonly requestId: string;
-    /** The version asked for, or `previous` (back to the build the daemon kept). */
+    /** The version asked for, `previous` (back to the build the daemon kept), or `restart` (the same build again, #481). */
     readonly target: string;
     readonly asset?: ReleaseAsset;
     readonly mode: 'drain' | 'now';
@@ -277,6 +293,8 @@ export interface MachineState {
     envRequests?: Record<string, EnvRequestRecord>;
     /** `setPolicy` / `browseMachine` entries by request id, at most `MAX_POLICY_REQUESTS`; absent on a record saved before #480. */
     policyRequests?: Record<string, PolicyRequestRecord>;
+    /** `logTail` entries by request id, at most `MAX_LOG_REQUESTS` (#481): the status only — the lines live in the activation. */
+    logRequests?: Record<string, LogRequestRecord>;
     /** The folders the web may use, as the owner wants them (#480); absent until set or preset. */
     policyDesired?: PolicyDesired;
     /** The `elevatedUntil` of the last elevation audited (`auth.elevated`, #355): one row per elevation window, by its first change. */
@@ -335,6 +353,10 @@ export const MAX_ENV_REQUESTS = 16;
 export const MAX_POLICY_REQUESTS = 16;
 /** A finished policy request is kept this long. */
 export const POLICY_RESULT_TTL_MS = 120_000;
+/** At most this many log requests are kept (#481). */
+export const MAX_LOG_REQUESTS = 16;
+/** A finished log request is kept this long — its lines with it. */
+export const LOG_RESULT_TTL_MS = 60_000;
 /** A finished environment request is pruned this long after it finished. */
 export const ENV_RESULT_TTL_MS = 120_000;
 /** At most this many history requests are kept (#397); the oldest is evicted first. */
@@ -470,6 +492,11 @@ export function pruneEnvRequests(requests: Record<string, EnvRequestRecord>, at:
 /** `pruneFs` for policy requests (#480): the same rule over `POLICY_RESULT_TTL_MS` / `MAX_POLICY_REQUESTS`. */
 export function prunePolicyRequests(requests: Record<string, PolicyRequestRecord>, at: number, room = true): void {
     prune(requests, at, room, POLICY_RESULT_TTL_MS, MAX_POLICY_REQUESTS);
+}
+
+/** `pruneFs` for log requests (#481): the same rule over `LOG_RESULT_TTL_MS` / `MAX_LOG_REQUESTS`. */
+export function pruneLogRequests(requests: Record<string, LogRequestRecord>, at: number, room = true): void {
+    prune(requests, at, room, LOG_RESULT_TTL_MS, MAX_LOG_REQUESTS);
 }
 
 /** `pruneFs` for history requests (#397): the same rule over `HISTORY_RESULT_TTL_MS` / `MAX_HISTORY_REQUESTS`. */

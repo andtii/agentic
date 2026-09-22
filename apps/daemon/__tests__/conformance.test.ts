@@ -12,6 +12,7 @@ import { ndjsonEventLog, type NdjsonEventLog } from '../src/event-log';
 import { harnessStore } from '../src/harness';
 import { loadPolicy, localEdit, withLock, writePolicy } from '../src/policy';
 import { applyWebPolicy, browseMachine } from '../src/policy-web';
+import { tailLog } from '../src/log-tail';
 import { namingDriver } from './helpers/drivers';
 import { releaseZip } from './helpers/release';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
@@ -43,6 +44,8 @@ const releases = fakeReleases();
 let harnessTarget: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset } | undefined;
 /** The daemon's configuration folder of the daemon under test (#355): a policy must refuse it, a listing never show it. */
 let protectedFolder: string | undefined;
+/** How many lines the daemon under test's log holds (#481). */
+const LOG_LINES = 12;
 let zips: string;
 beforeAll(async () => {
     zips = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-zips-'));
@@ -64,7 +67,10 @@ const harness: DaemonConformanceHarness = {
     // `harness` (#369): a real harness store under the daemon's dir; the install downloads through the injected `fetch`.
     // `policy` (#355): a real `policy.json`, the web port over `policy-web.ts` with `~` expanding to a folder under the temp dir,
     // the configuration folder as the one a policy must refuse and a listing must never show, and `lock` writing the file.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy'],
+    // `restart` / `log` (#481): `update.request { target: 'restart' }` stops the daemon with reason `restart` (what `run` does before it
+    // exits 75 with nothing staged); the log is a real file of `LOG_LINES` lines under the state dir, tailed through `tailLog`.
+    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log'],
+    logLines: LOG_LINES,
     updateTarget: UPDATE_TARGET,
     knownOrigin: KNOWN_ORIGIN,
     get harnessTarget() {
@@ -95,6 +101,9 @@ const harness: DaemonConformanceHarness = {
         const policy: MachinePolicy = { webManaged: true, allowedRoots: [work] };
         await writePolicy(paths.policyFile, policy, secure);
         const web = { paths, profileDirs: [join(paths.configDir, 'profiles')], home, secure };
+        const logFile = join(paths.stateDir, 'logs', 'daemon.log');
+        await mkdir(join(paths.stateDir, 'logs'), { recursive: true });
+        await writeFile(logFile, Array.from({ length: LOG_LINES }, (_, i) => JSON.stringify({ level: 'info', msg: `line ${i + 1}` })).join('\n') + '\n');
         // A new process each time: a fresh log handle over the same files.
         const create = (): Daemon =>
             createDaemon({
@@ -103,11 +112,12 @@ const harness: DaemonConformanceHarness = {
                 policy,
                 manage: { paths, secure },
                 webPolicy: { apply: (input) => applyWebPolicy(input, web), browse: (path) => browseMachine(path, web) },
+                logTail: (lines) => tailLog(logFile, lines),
                 drivers: [driver],
                 eventLog: (log = ndjsonEventLog(join(paths.stateDir, 'sessions'))),
                 heartbeatMs: script.heartbeatMs,
                 backoff: { initialMs: 5, maxMs: 20 },
-                update: { root: join(dir, 'install'), fetch: serveRelease, pollMs: 20, restart: (): Promise<void> => daemon.stop({ reason: 'update' }) },
+                update: { root: join(dir, 'install'), fetch: serveRelease, pollMs: 20, restart: (why): Promise<void> => daemon.stop({ reason: why }) },
                 harnesses: { store, fetch: releases.fetch, rebuild: () => driver }
             });
         let daemon = create();

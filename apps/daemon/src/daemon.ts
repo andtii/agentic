@@ -94,6 +94,8 @@ import {
     type LocalEnvironment,
     type ModelOption,
     type MachineId,
+    type DaemonLogError,
+    type DaemonLogResult,
     type MachineListing,
     type MachinePolicy,
     type MachinePolicyError,
@@ -172,6 +174,8 @@ export interface DaemonOptions {
      * picker. Without it every `policy.request` is refused `unsupported`.
      */
     readonly webPolicy?: DaemonWebPolicy;
+    /** The daemon's own log for `log.request` (#481; the `log` feature): the last `lines` lines, redacted. Without it a request is refused `unsupported`. */
+    readonly logTail?: (lines: number) => Promise<{ readonly result: DaemonLogResult } | { readonly error: DaemonLogError }>;
     /**
      * Provider limits (#271): the `quota` sources by runtime (`builtinQuotaSources()`; none → no `quota` frames),
      * whether to probe accounts (default on; off is the stream only), the idle poll (default 5 min, 0 off), the
@@ -231,7 +235,7 @@ export const TITLE_RECHECK_MS = 10_000;
 
 /**
  * Why the daemon stops (#363): each live session is closed with the matching `session.closed` code, so the platform knows
- * to re-open it — `restart` (SIGINT / SIGTERM: the supervisor brings the daemon back), `update` (the update client, #364),
+ * to re-open it — `restart` (SIGINT / SIGTERM, or `update.request { target: 'restart' }` from the web, #481: the supervisor brings the daemon back), `update` (the update client, #364),
  * `harness-update` (the harness store, #369). A plain `stop` closes them without a code.
  */
 export type StopReason = 'stop' | 'restart' | 'update' | 'harness-update';
@@ -457,7 +461,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     }
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
-    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : [])];
+    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : [])];
     const version = options.daemonVersion ?? DAEMON_VERSION;
     const build = { version, commit: DAEMON_COMMIT, protocol: V, channel: DAEMON_CHANNEL, platform: platformKey(platform, options.arch ?? process.arch) };
 
@@ -658,6 +662,9 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 return;
             case 'policy.request':
                 void policyRequest(frame);
+                return;
+            case 'log.request':
+                void logRequest(frame);
                 return;
             case 'tool.result': {
                 const pending = pendingTools.get(frame.callId);
@@ -987,6 +994,18 @@ export function createDaemon(options: DaemonOptions): Daemon {
             logger.error('policy: request failed', { error: e });
             answer({ error: { code: 'io', message: 'the machine could not answer; see the daemon log' } });
         });
+    }
+
+    /** `log.request` (#481): the tail of the daemon's own log through the port `cli.ts` injects; reads only, no turn. */
+    async function logRequest(frame: PlatformFrameOf<'log.request'>): Promise<void> {
+        const answer = (outcome: { readonly result?: DaemonLogResult; readonly error?: DaemonLogError }) => send({ v: V, t: 'log.response', requestId: frame.requestId, ...outcome });
+        if (!options.logTail) return void answer({ error: { code: 'unsupported', message: 'this daemon does not serve its log' } });
+        try {
+            answer(await options.logTail(frame.lines));
+        } catch (e) {
+            logger.error('log: request failed', { error: e });
+            answer({ error: { code: 'io', message: 'the machine could not read its log; see the daemon log' } });
+        }
     }
 
     async function command(frame: PlatformFrameOf<'session.command'>): Promise<void> {
