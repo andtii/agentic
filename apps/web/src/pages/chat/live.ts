@@ -839,7 +839,9 @@ export function attachmentPart(file: { readonly name: string; readonly mediaType
  * Post, then start one task per activated agent and hand each to the
  * router (`Routing.run`, PR #102) — the path from a message to a running
  * session. The post is durable before any task exists; a task that fails
- * to route reports through its own record, never by un-posting.
+ * to route reports through its own record, never by un-posting. `run` is
+ * a hand-off (#492): the page fires it one-way and never waits on the
+ * placement — the task's record and the chat's entries say how it went.
  */
 export async function runActivation(ports: ActivationPorts, input: { chatId: ChatId; text: string; attachments?: readonly PromptPart[]; mentions: readonly AgentId[]; summary: ChatSummary; entries: readonly IndexedEntry[]; lookup: AgentLookup; hosted?: (machineId: string, environmentId: string) => boolean }): Promise<Activation> {
     const attachments = input.attachments ?? [];

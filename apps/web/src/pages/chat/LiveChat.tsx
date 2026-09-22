@@ -237,7 +237,10 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                 {
                     post: (parts, mentions) => actor(defs.Chat, k).post(parts, mentions),
                     createTask: (id, contract, owner) => actor(defs.TaskActor, taskKeyOf(ws, id)).create(contract, { owner }),
-                    run: (taskId) => actor(defs.Routing, routingKeyOf(ws)).run(taskId),
+                    // One-way (#492): the router places the task on its own time — a daemon's git hooks, another session's
+                    // slow turn — and the page reads the outcome from the live task index and the chat's entries. Awaited,
+                    // a placement that outran the host's call deadline failed this send in a chat that never touched them.
+                    run: (taskId) => actor(defs.Routing, routingKeyOf(ws)).with({ oneWay: true }).run(taskId),
                     newTaskId: () => createId('task') as TaskId
                 },
                 { chatId: props.id as ChatId, text, attachments, mentions: mentionsIn(text, members, directory.lookup), summary: s, entries: kept.list, lookup: directory.lookup, hosted: workdirs.hosted }

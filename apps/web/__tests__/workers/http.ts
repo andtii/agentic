@@ -20,7 +20,7 @@ export async function signIn(userId: string): Promise<string> {
  * An actor client that ONLY speaks HTTP to the Worker's mount — the same
  * wire the browser client uses (`{type}#{method}`, args `[key, ...args]`).
  */
-export function overHttp<D extends AnyActorDefinition>(def: D, key: string, cookie: string | null): ActorClient<D> {
+export function overHttp<D extends AnyActorDefinition>(def: D, key: string, cookie: string | null, options: { readonly oneWay?: true } = {}): ActorClient<D> {
     const transport = fetchTransport({
         endpoint: `${ORIGIN}/_sigx/actor`,
         headers: cookie ? { cookie, origin: ORIGIN } : { origin: ORIGIN },
@@ -32,7 +32,7 @@ export function overHttp<D extends AnyActorDefinition>(def: D, key: string, cook
     });
     const type = (def as unknown as { type: string }).type;
     return new Proxy({} as ActorClient<D>, {
-        get: (_target, method) => (typeof method === 'string' ? (...args: unknown[]) => transport.call(`${type}#${method}`, [key, ...args], { ref: { type, key } }) : undefined)
+        get: (_target, method) => (typeof method === 'string' ? (...args: unknown[]) => transport.call(`${type}#${method}`, [key, ...args], { ref: { type, key }, ...options }) : undefined)
     });
 }
 
