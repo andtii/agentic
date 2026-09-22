@@ -19,7 +19,7 @@ import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFram
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
 import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame, type WireReply } from '@sigx/ai-agent/wire';
-import { isServerFnError, ServerFnError } from '@sigx/server';
+import { ServerFnError } from '@sigx/server';
 
 import { principalLabel } from '../agent/index.js';
 import { recordAudit } from '../audit/port.js';
@@ -996,7 +996,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 // The daemon's pump skips the wire `hello`; this is where the Session learns its capabilities. The ref it carries is
                 // whatever the runtime called the session before its first prompt — the Session ignores it (#389, `onSessionRef`).
                 const hello: WireFrame = { v: W, kind: 'hello', agentId: h.agentId, sessionId: frame.sessionId, sessionRef: frame.ref as SessionRef, capabilities: toAgentCapabilities(frame.capabilities), head: frame.head };
-                await session(frame.sessionId)?.forwardFrames([hello]);
+                await toSession(() => session(frame.sessionId, { oneWay: true })?.forwardFrames([hello]));
                 // The session can take commands now: the router prompts the task that was waiting for this (a queued one included).
                 await notify((r) => r.sessionOpened(frame.sessionId, h.taskId));
             }
@@ -1006,29 +1006,30 @@ export function defineMachineActor(ports: MachinePorts) {
                 const h = ctx.state.activeSessions[frame.sessionId];
                 if (!h) return; // not ours: nothing to bind it to
                 h.ref = frame.ref;
-                await session(frame.sessionId)?.noteRef(frame.ref as SessionRef);
+                await toSession(() => session(frame.sessionId, { oneWay: true })?.noteRef(frame.ref as SessionRef));
             }
 
             /** The runtime's own title for a hosted session's conversation (#460): handed to the record, which tells its chat. */
             async function onSessionTitle(frame: DaemonFrameOf<'session.title'>): Promise<void> {
                 if (!ctx.state.activeSessions[frame.sessionId]) return; // not ours
-                await toSession(() => session(frame.sessionId)?.noteTitle(frame.title));
+                await toSession(() => session(frame.sessionId, { oneWay: true })?.noteTitle(frame.title));
             }
 
             /**
-             * Hand a daemon's word about a session to its record, and keep the socket whatever the record says (#393):
-             * a Session refuses a frame for a session it is not hosted on by this machine (a stale one after a restart,
-             * one re-opened elsewhere, one it never opened) with a 403, and that refusal must not reach the host's
-             * `webSocketMessage` — it would take the daemon's whole socket down with every other session on it.
+             * A daemon's word about a session goes to its record ONE-WAY (#492): the call is queued on the Session and
+             * this turn goes on. A Session's turn can be slow — a turn-end folds the transcript, learns and tells the
+             * chat — and while this machine waited on it, every other session's frame, every `get` the router's
+             * placement makes and every `openSession` for another chat queued behind that one turn; at the host's call
+             * deadline the placement failed, in a chat that never touched the slow session. The mailbox keeps the frames
+             * of a session in the order they were sent, so the record sees them as the daemon did.
+             *
+             * A Session refuses a frame for a session it is not hosted on by this machine (a stale one after a restart,
+             * one re-opened elsewhere, one it never opened) with a 403 (#393). One-way, that refusal is raised inside the
+             * Session's own turn and dropped there — it never reaches the host's `webSocketMessage`, which would take
+             * the daemon's whole socket down with every other session on it. What a one-way dispatch itself can throw
+             * is a failure before acceptance — an authorization or placement bug — and that surfaces.
              */
-            async function toSession(fn: () => Promise<void> | undefined): Promise<void> {
-                try {
-                    await fn();
-                } catch (e) {
-                    // Only the record's refusal (403): the frame is dropped, the socket stays. Anything else is a bug and surfaces.
-                    if (!(isServerFnError(e) && e.status === 403)) throw e;
-                }
-            }
+            const toSession = (fn: () => Promise<void> | undefined): Promise<void> => Promise.resolve(fn());
 
             async function onSessionFrame(frame: DaemonFrameOf<'session.frame'>): Promise<void> {
                 const h = ctx.state.activeSessions[frame.sessionId];
@@ -1043,7 +1044,7 @@ export function defineMachineActor(ports: MachinePorts) {
                         delete h.running;
                     }
                 }
-                await toSession(() => session(frame.sessionId)?.forwardFrames([wire]));
+                await toSession(() => session(frame.sessionId, { oneWay: true })?.forwardFrames([wire]));
                 if (h && ended !== undefined) {
                     dequeue();
                     await notify((r) => r.slotFreed(machineId, h.environmentId, `turn ${ended} ended in session ${frame.sessionId}`));
@@ -1065,7 +1066,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     if (h && reply.kind === 'ack' && !h.running) h.running = { turnId: reply.turnId ?? command.turnId, since: now() };
                     if (reply.kind === 'error') await notify((r) => r.promptRefused(frame.sessionId, command.turnId, reply.code, reply.message));
                 }
-                await toSession(() => replied(frame.sessionId, reply));
+                await toSession(() => replied(frame.sessionId, reply, { oneWay: true }));
                 if (pending?.command.type === 'close' && reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
             }
 
