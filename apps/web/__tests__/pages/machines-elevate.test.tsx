@@ -112,6 +112,9 @@ describe('the elevate model', () => {
     it('recognises the platform’s refusal and nothing else', () => {
         expect(isElevationRequired(new ServerFnError(403, `${ELEVATION_REQUIRED}: confirm with your login provider to change this machine`))).toBe(true);
         expect(isElevationRequired(new ServerFnError(403, 'machine: only the owner'))).toBe(false);
+        // The prefix, not a mention: a 403 that merely talks about it is not the refusal.
+        expect(isElevationRequired(new ServerFnError(403, `machine: see ${ELEVATION_REQUIRED} in the docs`))).toBe(false);
+        expect(isElevationRequired(new ServerFnError(403, ELEVATION_REQUIRED))).toBe(false);
         expect(isElevationRequired(new ServerFnError(401, `${ELEVATION_REQUIRED}: x`))).toBe(false);
         expect(isElevationRequired(new Error(ELEVATION_REQUIRED))).toBe(false);
         expect(isElevationRequired(null)).toBe(false);
@@ -131,6 +134,11 @@ describe('the elevate model', () => {
         expect(takePending(store, 'm3')).toBeNull();
         map.set(pendingKey('m4'), JSON.stringify({ kind: 'revoke' }));
         expect(takePending(store, 'm4')).toBeNull();
+        // A kind this build does not know is not resumed as anything.
+        map.set(pendingKey('m6'), JSON.stringify({ kind: 'uninstall', at }));
+        expect(takePending(store, 'm6', at)).toBeNull();
+        map.set(pendingKey('m7'), JSON.stringify({ kind: 7, at }));
+        expect(takePending(store, 'm7', at)).toBeNull();
         const throwing: PendingStore = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }, removeItem: () => undefined };
         expect(() => savePending(throwing, 'm5', { kind: 'revoke' })).not.toThrow();
         expect(takePending(throwing, 'm5')).toBeNull();

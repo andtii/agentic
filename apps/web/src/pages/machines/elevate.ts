@@ -12,7 +12,9 @@
 import { ELEVATION_REQUIRED, ELEVATION_TTL_MS } from '@agentic/core';
 
 /** What was being done when elevation was asked for; the page dispatches on `kind` after the round trip. */
-export type PendingKind = 'revoke' | 'remove' | 'policy' | 'environment';
+export const PENDING_KINDS = ['revoke', 'remove', 'policy', 'environment'] as const;
+export type PendingKind = (typeof PENDING_KINDS)[number];
+const isPendingKind = (v: unknown): v is PendingKind => typeof v === 'string' && (PENDING_KINDS as readonly string[]).includes(v);
 
 export interface PendingChange {
     readonly kind: PendingKind;
@@ -22,11 +24,11 @@ export interface PendingChange {
     readonly at: number;
 }
 
-/** A thrown actor call that asks for elevation: 403 with the platform's message prefix. */
+/** A thrown actor call that asks for elevation: 403 whose message STARTS with the platform's prefix (`elevation-required:`), like `requireElevated` writes it. */
 export function isElevationRequired(e: unknown): boolean {
     const status = (e as { status?: number } | null)?.status;
     const message = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-    return status === 403 && message.includes(ELEVATION_REQUIRED);
+    return status === 403 && message.startsWith(`${ELEVATION_REQUIRED}:`);
 }
 
 export const pendingKey = (machineId: string): string => `agentic:elevate:${machineId}`;
@@ -72,9 +74,10 @@ export function takePending(store: PendingStore | null, machineId: string, now: 
     if (!raw) return null;
     try {
         const parsed = JSON.parse(raw) as Partial<PendingChange>;
-        if (typeof parsed.at !== 'number' || typeof parsed.kind !== 'string') return null;
+        // A kind this build does not know (a tampered or an older store) is nothing to resume.
+        if (typeof parsed.at !== 'number' || !isPendingKind(parsed.kind)) return null;
         if (now - parsed.at > ELEVATION_TTL_MS) return null;
-        return { kind: parsed.kind as PendingKind, ...(parsed.draft === undefined ? {} : { draft: parsed.draft }), at: parsed.at };
+        return { kind: parsed.kind, ...(parsed.draft === undefined ? {} : { draft: parsed.draft }), at: parsed.at };
     } catch {
         return null;
     }
