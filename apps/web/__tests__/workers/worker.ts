@@ -37,8 +37,15 @@ const runtimes: RuntimeCatalogue = {
     [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' }
 };
 
+/**
+ * Connector sign-in (#533) and the connector trigger (#535) run over a fake Google (`./google.ts`): the token,
+ * revoke, profile and message endpoints answer in-process, so start → consent → callback → tool call, and a
+ * schedule's poll, run offline.
+ */
+const google = fakeGoogle();
+
 // Offline: no daemon release manifest is fetched (#365).
-const actors = platformActors({ ...defaultPorts, runtimes, releasesFetch: async () => new Response('offline', { status: 404 }) });
+const actors = platformActors({ ...defaultPorts, runtimes, connectorHttp: google.http, releasesFetch: async () => new Response('offline', { status: 404 }) });
 
 export const ActorHost = createActorHost(actors);
 
@@ -62,11 +69,7 @@ const filesRoute = createFilesMount({ store: platformFiles });
  */
 const a2aRoute = createA2aMount({ actors, pollMs: 20 });
 
-/**
- * Connector sign-in (#533), as the production entry mounts it, over a fake Google (`./google.ts`): the token,
- * revoke, profile and message endpoints answer in-process, so start → consent → callback → tool call runs offline.
- */
-const google = fakeGoogle();
+/** Connector sign-in (#533), as the production entry mounts it, over the fake Google above. */
 const connectorsRoute = createConnectorMount({ connectors: conduitConnectorCatalogue, http: google.http });
 
 const worker = createActorWorker({ actors });

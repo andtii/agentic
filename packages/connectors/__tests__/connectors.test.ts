@@ -321,7 +321,7 @@ describe('gmailConnectorPlugin', () => {
         expect(m.permissions.map((p) => p.scope)).toEqual(['secret:client-id', 'secret:client-secret', 'secret:connector-engine-secret', 'network:gmail.googleapis.com', 'network:oauth2.googleapis.com', 'tools:gmail']);
     });
 
-    it('lists its operations as capabilities, and the trigger it does not run yet as unsupported (AGT-09)', () => {
+    it('lists its operations as capabilities, and the trigger it runs by polling (AGT-09, #535)', () => {
         expect(gmailConnectorPlugin.capabilities).toEqual([
             'operation:send-email',
             'operation:create-draft',
@@ -332,7 +332,7 @@ describe('gmailConnectorPlugin', () => {
             'operation:get-attachment',
             'operation:modify-labels',
             'operation:trash-message',
-            'unsupported:trigger:new-email'
+            'trigger:new-email'
         ]);
     });
 });

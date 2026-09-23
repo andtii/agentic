@@ -53,7 +53,8 @@ describe('/plugins/gmail (live)', () => {
         expect(buttonNamed(p, 'Connect').disabled).toBe(true);
         expect(text(p.querySelector('[data-connect-blocker]'))).toBe('Turn Gmail on first (the switch above).');
         expect([...p.querySelectorAll('[data-operation]')].map((li) => li.getAttribute('data-operation'))).toEqual(['send-email', 'create-draft', 'reply-to-message', 'search-messages', 'get-message', 'get-thread', 'get-attachment', 'modify-labels', 'trash-message']);
-        expect(text(p.querySelector('[data-connect-unsupported]'))).toBe('Not yet: New email (trigger).');
+        // The new-email trigger runs by polling (#535): no "Not yet" line.
+        expect(p.querySelector('[data-connect-unsupported]')).toBeNull();
         expect(text(p.querySelector('[data-connect-testing]'))).toContain('expire after 7 days');
         // The owner's two keys have fields; the engine secret the platform generates does not.
         const fields = [...dom.querySelectorAll('[data-scope="ag-secret"][data-part="root"]')].map((f) => f.getAttribute('data-secret'));

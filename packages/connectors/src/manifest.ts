@@ -4,7 +4,7 @@
  * touch is declared: the OAuth client's two secrets, the workspace's engine
  * secret, the hosts it calls and its tool namespace. Its capabilities name every operation an agent can
  * call (`operation:<id>`) and, prefixed `unsupported:`, what the connector
- * has that agentic does not run yet (triggers, #535).
+ * has that agentic does not run yet; a trigger it runs is `trigger:<id>` (#535).
  */
 
 import type { ConnectorSpec } from '@aigntiq/conduit';
@@ -12,6 +12,7 @@ import type { PermissionScope, PluginManifest } from '@agentic/core';
 import gmail from '@aigntiq/conduit-connectors/gmail';
 import { CONNECTOR_CLIENT_ID_SECRET, CONNECTOR_CLIENT_SECRET_SECRET, CONNECTOR_ENGINE_SECRET } from './clients.js';
 import { connectorNamespace, isToolOperation } from './tools.js';
+import { runsTrigger } from './triggers/gmail.js';
 
 export interface ConduitConnectorManifestOptions {
     /** Hosts the connector's requests reach — its API, its token and revoke endpoints. */
@@ -23,7 +24,8 @@ export interface ConduitConnectorManifestOptions {
 /** Capability strings: the operations agents can call, then `unsupported:<kind>:<id>` for the rest. */
 export function conduitCapabilities(spec: ConnectorSpec): string[] {
     const out = spec.operations.filter(isToolOperation).map((op) => `operation:${op.id}`);
-    for (const op of spec.operations) if (op.kind === 'trigger') out.push(`unsupported:trigger:${op.id}`);
+    // A trigger agentic runs (#535) is a capability; any other is listed as not supported yet.
+    for (const op of spec.operations) if (op.kind === 'trigger') out.push(runsTrigger(spec.id, op.id) ? `trigger:${op.id}` : `unsupported:trigger:${op.id}`);
     return out;
 }
 

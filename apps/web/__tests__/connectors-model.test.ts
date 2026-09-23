@@ -74,7 +74,8 @@ describe("a conduit connector's page model", () => {
 
     it('lists what agents can do (AGT-09) and what is not supported yet', () => {
         expect(operationsOf(gmailConnectorPlugin).map((o) => o.label)).toEqual(['Send email', 'Create draft', 'Reply to message', 'Search messages', 'Get message', 'Get thread', 'Get attachment', 'Modify labels', 'Trash message']);
-        expect(unsupportedOf(gmailConnectorPlugin)).toEqual(['New email (trigger)']);
+        // The new-email trigger runs by polling (#535): nothing is left unsupported.
+        expect(unsupportedOf(gmailConnectorPlugin)).toEqual([]);
     });
 
     it('reads what the routes said on the way back', () => {

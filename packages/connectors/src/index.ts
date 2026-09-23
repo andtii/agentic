@@ -18,3 +18,4 @@ export {
     type OpenedConduitConnector
 } from './tools.js';
 export { conduitCapabilities, conduitConnectorManifest, gmailConnectorPlugin, type ConduitConnectorManifestOptions } from './manifest.js';
+export { GMAIL_NEW_EMAIL_TRIGGER, gmailArrivalText, GMAIL_POLL_OVERLAP_SEC, runsTrigger, GMAIL_SEEN_MAX, parseGmailCursor, pollGmail, type GmailArrival, type GmailPoll, type GmailPollOptions } from './triggers/gmail.js';

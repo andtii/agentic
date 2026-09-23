@@ -14,6 +14,8 @@ Design: `docs/architecture.md` §9, "connectors that sign in" (#536).
 | `CONNECTOR_ENGINE_SECRET` | `connector-engine-secret`: the Registry secret holding the workspace's engine `secret`. The app generates it on the first Connect (#533). |
 | `gmailConnectorPlugin` | The Gmail `PluginManifest` (`kind: 'connector'`). |
 | `conduitConnectorManifest(spec, { hosts })` | The same manifest for any conduit connector. |
+| `pollGmail(engine, { account, owner, query?, cursor?, now, maxArrivals? })` | One poll of the Gmail trigger (#535): `{ kind: 'arrivals', arrivals, cursor }` or `{ kind: 'needs-reauth' }`. The caller persists the cursor. |
+| `gmailArrivalText(arrival, connectorId)` | What an agent is told about one new message: From, Subject, snippet, id and the `<id>__get-message` tool. |
 
 ## Tools
 
@@ -30,4 +32,8 @@ Design: `docs/architecture.md` §9, "connectors that sign in" (#536).
 
 - Secrets: `client-id` and `client-secret` (required), the owner's own Google OAuth client, and `connector-engine-secret` (not required), the workspace's engine secret. The platform generates it on the first Connect, so it never holds readiness back and the plugin page offers no field for it (#533).
 - Permissions: `secret:client-id`, `secret:client-secret`, `secret:connector-engine-secret`, `network:gmail.googleapis.com`, `network:oauth2.googleapis.com` and `tools:gmail`.
-- Capabilities: `operation:<id>` for every callable operation, and `unsupported:trigger:new-email` until triggers land (#535).
+- Capabilities: `operation:<id>` for every callable operation, and `trigger:new-email` — agentic runs it by polling (#535).
+
+## The Gmail trigger (#535)
+
+conduit 0.1 declares Gmail's `new-email` poll trigger but runs no triggers, and the spec has no history operation. `pollGmail` stands in: `search-messages` for `(<query>) after:<since − 600 s>` (the overlap covers Gmail's search-index lag; the first poll looks back 15 minutes), minus the ids the cursor says were delivered (at most 500), oldest first and at most 20 per poll (a capped poll keeps its window, so nothing is lost), then `get-message` per arrival for its headers. An account that needs reconnecting is a `needs-reauth` verdict; any other failure throws for the caller to retry. The platform side (the Schedule entry, one task per arrival, the pause) is `apps/web/src/connectors/trigger.ts`.

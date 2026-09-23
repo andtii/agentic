@@ -495,7 +495,7 @@ export const opsPlugins: readonly PluginView[] = [
     builtin(manifest({
         id: 'gmail', version: '1.0.0', kind: 'connector', name: 'Gmail',
         description: 'Search, read, draft and send email in a Gmail account.',
-        capabilities: ['operation:send-email', 'operation:create-draft', 'operation:reply-to-message', 'operation:search-messages', 'operation:get-message', 'operation:get-thread', 'operation:get-attachment', 'operation:modify-labels', 'operation:trash-message', 'unsupported:trigger:new-email'],
+        capabilities: ['operation:send-email', 'operation:create-draft', 'operation:reply-to-message', 'operation:search-messages', 'operation:get-message', 'operation:get-thread', 'operation:get-attachment', 'operation:modify-labels', 'operation:trash-message', 'trigger:new-email'],
         config: NOTHING_TO_SET,
         secrets: [
             { name: 'client-id', title: 'OAuth client ID', description: 'From the OAuth client you created for Gmail', required: true },
