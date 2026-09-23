@@ -279,6 +279,20 @@ describe('the machine setup model', () => {
         expect(runtimesOf([], [env('m' as MachineId, 'e', 'e', 'ok')])).toEqual(['claude-code']);
     });
 
+    it('offers a runtime whose harness is installed before any environment runs on it (#527)', () => {
+        const harnesses = [
+            { runtime: 'claude-code', installed: { version: '0.3.274', at: 1 }, status: 'ready' as const },
+            { runtime: 'copilot-cli', installed: { version: '1.0.14', at: 1 }, status: 'ready' as const },
+            { runtime: 'codex-cli', installed: { version: '0.155.1', at: 1 }, status: 'ready' as const }
+        ];
+        expect(runtimesOf([{ runtime: 'claude-code' }], [], harnesses)).toEqual(['claude-code', 'copilot-cli', 'codex-cli']);
+        // Not installed, or broken: not offered until it is (re)installed on the machine's page.
+        expect(runtimesOf([{ runtime: 'claude-code' }], [], [
+            { runtime: 'copilot-cli', status: 'missing' },
+            { runtime: 'codex-cli', installed: { version: '0.155.1', at: 1 }, status: 'broken' }
+        ])).toEqual(['claude-code']);
+    });
+
     it('checks folders segment-wise, case-folded on Windows only', () => {
         expect(isWithin('C:\\Dev\\x', 'C:\\Dev', 'windows')).toBe(true);
         expect(isWithin('c:/dev/x', 'C:\\Dev\\', 'windows')).toBe(true);
