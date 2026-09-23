@@ -34,11 +34,25 @@ export function pushSetup(plugins: readonly PluginView[], secretNames: readonly 
     return missing.length ? { state: 'needs-keys', missing } : { state: 'ready', publicKey: text(p.config.publicKey) };
 }
 
-/** Whether "Generate keys" can run: a contact saved (the Registry refuses a config without one), and a workspace key to seal the private half. */
-export function canGenerateKeys(plugin: PluginView, hasKek: boolean): { readonly ok: boolean; readonly why?: string } {
-    if (!hasKek) return { ok: false, why: 'This deployment has no WORKSPACE_KEK, so it cannot seal a private key.' };
-    if (!text(plugin.config.subject)) return { ok: false, why: 'Save a contact above first — push services need a way to reach you.' };
+/** Whether "Generate keys" can run: only a workspace key to seal the private half is needed — a missing contact gets `defaultContact`. */
+export function canGenerateKeys(hasKek: boolean): { readonly ok: boolean; readonly why?: string } {
+    if (!hasKek) return { ok: false, why: 'This deployment has no WORKSPACE_KEK, so it cannot seal a private key (wrangler secret put WORKSPACE_KEK).' };
     return { ok: true };
+}
+
+/**
+ * The contact push services get when nobody typed one (RFC 8292 `sub`): the
+ * app's own address when it is served over https, else a `mailto:` on its
+ * host — plain http only ever pushes from localhost, where the push services
+ * do not check it.
+ */
+export function defaultContact(origin: string): string {
+    try {
+        const url = new URL(origin);
+        return url.protocol === 'https:' ? url.origin : `mailto:push@${url.hostname || 'localhost'}`;
+    } catch {
+        return 'mailto:push@localhost';
+    }
 }
 
 export interface DeviceRow {

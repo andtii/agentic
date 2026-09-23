@@ -6,7 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { VAPID_PRIVATE_KEY_SECRET, WEB_PUSH_PLUGIN_ID, vapidSigner, webPushPlugin, type PluginView } from '@agentic/platform';
 import { deviceLabel, fromBase64Url, generateVapidKeys, pushSupport, toBase64Url } from '../src/push/browser';
-import { VAPID_SECRET, WEB_PUSH_PLUGIN, canGenerateKeys, deviceRows, pushSetup } from '../src/push/model';
+import { VAPID_SECRET, WEB_PUSH_PLUGIN, canGenerateKeys, defaultContact, deviceRows, pushSetup } from '../src/push/model';
+import { ensurePushKeys, type PushKeysRegistry } from '../src/push/setup';
 
 const view = (patch: Partial<PluginView> = {}): PluginView => ({
     manifest: webPushPlugin,
@@ -37,10 +38,50 @@ describe('pushSetup', () => {
 });
 
 describe('canGenerateKeys', () => {
-    it('needs a workspace key and a saved contact', () => {
-        expect(canGenerateKeys(view({ config: { subject: 'mailto:a@b.c' } }), false).ok).toBe(false);
-        expect(canGenerateKeys(view(), true)).toMatchObject({ ok: false, why: expect.stringMatching(/contact/) });
-        expect(canGenerateKeys(view({ config: { subject: 'mailto:a@b.c' } }), true)).toEqual({ ok: true });
+    it('needs only a workspace key — a missing contact gets the default', () => {
+        expect(canGenerateKeys(false)).toMatchObject({ ok: false, why: expect.stringMatching(/WORKSPACE_KEK/) });
+        expect(canGenerateKeys(true)).toEqual({ ok: true });
+    });
+});
+
+describe('defaultContact', () => {
+    it('the https origin, else a mailto: on the host — both pass the platform', () => {
+        expect(defaultContact('https://agentic.example.com')).toBe('https://agentic.example.com');
+        expect(defaultContact('http://localhost:8787')).toBe('mailto:push@localhost');
+        expect(defaultContact('not a url')).toBe('mailto:push@localhost');
+    });
+});
+
+describe('ensurePushKeys', () => {
+    const fake = () => {
+        const calls: string[] = [];
+        const configs: Record<string, unknown>[] = [];
+        const registry: PushKeysRegistry = {
+            configure: async (_id, config) => { calls.push('configure'); configs.push(config); return view({ config }); },
+            setSecret: async (name) => { calls.push(`setSecret:${name}`); return {}; }
+        };
+        return { registry, calls, configs };
+    };
+
+    it('makes a pair when there is none, with the default contact', async () => {
+        const f = fake();
+        const publicKey = await ensurePushKeys(f.registry, view(), false, 'https://app.example');
+        expect(publicKey).toMatch(/^[\w-]{87}$/);
+        expect(f.calls).toEqual(['configure', `setSecret:${VAPID_SECRET}`]);
+        expect(f.configs[0]).toEqual({ subject: 'https://app.example', publicKey });
+    });
+
+    it('keeps a saved contact', async () => {
+        const f = fake();
+        await ensurePushKeys(f.registry, view({ config: { subject: 'mailto:me@b.c' } }), false, 'https://app.example');
+        expect(f.configs[0]!.subject).toBe('mailto:me@b.c');
+    });
+
+    it('reuses the pair for another browser, so the ones already subscribed keep their pushes', async () => {
+        const f = fake();
+        const publicKey = await ensurePushKeys(f.registry, view({ config: { subject: 'mailto:me@b.c', publicKey: 'BPUB' } }), true, 'https://app.example');
+        expect(publicKey).toBe('BPUB');
+        expect(f.calls).toEqual([]);
     });
 });
 
