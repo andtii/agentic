@@ -50,6 +50,27 @@ const collect = async (events: AsyncIterable<LoginRelayEvent>, on?: (e: LoginRel
     }
     return out;
 };
+/** Whether `pid` is still running: signal 0 probes it without touching it (`EPERM` means it exists). */
+const alive = (pid: number): boolean => {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return (e as NodeJS.ErrnoException).code === 'EPERM';
+    }
+};
+/** Whether `pid` exits within `ms`; one still running then is killed, so a failing test leaks nothing. */
+const goneWithin = async (pid: number, ms: number): Promise<boolean> => {
+    const until = Date.now() + ms;
+    while (alive(pid)) {
+        if (Date.now() > until) {
+            process.kill(pid);
+            return false;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    return true;
+};
 const relay = (kind: string, extra: string[] = [], timeoutMs?: number) =>
     spawnLoginRelay({ command: process.execPath, args: [FAKE, '--kind', kind, ...extra], env: process.env, parse: kind === 'claude' ? parseClaudeLogin : kind === 'codex' ? parseCodexLogin : parseCopilotLogin, ...(timeoutMs ? { timeoutMs } : {}) });
 
@@ -101,14 +122,25 @@ describe('spawnLoginRelay over a fake CLI', () => {
         expect(copilot).toEqual([{ phase: 'action', action: { kind: 'device-code', url: 'https://github.example.test/login/device', code: '024D-01A7', expectsPaste: false } }, { phase: 'waiting' }, { phase: 'done' }]);
     });
 
-    it('cancel kills the child and ends cancelled; the timeout ends it timeout', { timeout: 15_000 }, async () => {
-        const r = relay('copilot', ['--hang']);
-        const events = await collect(r.events, (e) => { if (e.phase === 'waiting') r.cancel(); });
-        expect(events.map((e) => e.phase)).toEqual(['action', 'waiting', 'failed']);
-        expect(events.at(-1)).toMatchObject({ error: { code: 'cancelled' } });
-        const slow = relay('claude', ['--hang'], 300);
-        const timed = await collect(slow.events);
-        expect(timed.at(-1)).toEqual({ phase: 'failed', error: { code: 'timeout', message: 'the sign-in was not completed in time' } });
+    it('cancel kills the child and ends cancelled; the timeout ends it timeout — and the CLI itself is gone either way (#520)', { timeout: 20_000 }, async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'login-relay-'));
+        try {
+            const cancelledPid = join(dir, 'cancelled.pid');
+            const r = relay('copilot', ['--hang', '--pid-file', cancelledPid]);
+            const events = await collect(r.events, (e) => { if (e.phase === 'waiting') r.cancel(); });
+            expect(events.map((e) => e.phase)).toEqual(['action', 'waiting', 'failed']);
+            expect(events.at(-1)).toMatchObject({ error: { code: 'cancelled' } });
+            const timedPid = join(dir, 'timed.pid');
+            const slow = relay('claude', ['--hang', '--pid-file', timedPid], 300);
+            const timed = await collect(slow.events);
+            expect(timed.at(-1)).toEqual({ phase: 'failed', error: { code: 'timeout', message: 'the sign-in was not completed in time' } });
+            // On Windows the CLI runs under `cmd.exe`: killing only the wrapper left it running (#520).
+            // Both are probed (and killed if still there) before either is asserted, so a failing run leaks nothing.
+            const gone = await Promise.all([cancelledPid, timedPid].map(async (file) => goneWithin(Number(await readFile(file, 'utf8')), 5_000)));
+            expect(gone).toEqual([true, true]);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
     });
 
     it('a command that cannot start fails at once', { timeout: 15_000 }, async () => {
