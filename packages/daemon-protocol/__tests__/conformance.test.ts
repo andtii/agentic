@@ -30,6 +30,9 @@ describe('daemonConformance × inMemoryHarness', () => {
             'session-reopen',
             'fs-list',
             'fs-locate',
+            'files-tree',
+            'files-read',
+            'files-changes',
             'env-put',
             'env-remove',
             'env-policy',
@@ -61,6 +64,9 @@ describe('daemonConformance × inMemoryHarness', () => {
             ['session-reopen', 'the harness does not declare the "resume" feature'],
             ['fs-list', 'the harness does not declare the "fs" feature'],
             ['fs-locate', 'the harness does not declare the "fs" feature'],
+            ['files-tree', 'the harness does not declare the "files" feature'],
+            ['files-read', 'the harness does not declare the "files" feature'],
+            ['files-changes', 'the harness does not declare the "files" feature'],
             ['env-put', 'the harness does not declare the "env-manage" feature'],
             ['env-remove', 'the harness does not declare the "env-manage" feature'],
             ['env-policy', 'the harness does not declare the "env-manage" feature'],
@@ -102,6 +108,20 @@ describe('daemonConformance catches a broken daemon', () => {
 
     it('a daemon that lists folders outside its working roots (OPS-01)', async () => {
         await expect(only('fs-list', { browseAnywhere: true }).run()).rejects.toThrow(/a folder outside the working roots is refused/);
+    });
+
+    it('a daemon that lists a session folder outside its root (OPS-01, #559)', async () => {
+        await expect(only('files-tree', { filesAnywhere: true }).run()).rejects.toThrow(/a path climbing out of root is refused/);
+    });
+
+    it('a daemon that reads a file outside its root (OPS-01, #559)', async () => {
+        await expect(only('files-read', { filesAnywhere: true }).run()).rejects.toThrow(/a file outside root is refused/);
+    });
+
+    it('a harness with its own folders and no conformance files leaves the files cases out (#559)', () => {
+        const custom = inMemoryHarness({ folders: [{ root: '/work/x', files: { 'a.txt': 'a' } }] });
+        expect(custom.features).not.toContain('files');
+        expect(daemonConformance(custom).find((c) => c.name === 'files-tree')?.skip).toBe('the harness does not declare the "files" feature');
     });
 
     it('a daemon that locates checkouts outside its working roots (OPS-01)', async () => {

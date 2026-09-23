@@ -130,6 +130,7 @@ export const FS_ERROR_TEXT: Record<FsErrorCode, string> = {
     timeout: "The machine didn't answer",
     'unknown-environment': "This environment isn't on the machine any more",
     unsupported: "The machine's daemon can't do this yet — update it",
+    'too-large': 'That file is too large to show',
     internal: 'The machine hit an error while reading the folder'
 };
 

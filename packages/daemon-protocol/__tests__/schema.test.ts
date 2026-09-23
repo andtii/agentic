@@ -1,6 +1,6 @@
 /** Every frame kind: one valid frame parses, one invalid frame is refused with a field-level issue. */
 
-import { DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, PLATFORM_FRAME_TYPES } from '@agentic/core';
+import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_READ_MAX_BYTES, isBinaryText, PLATFORM_FRAME_TYPES } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameType, PlatformFrame, PlatformFrameType } from '../src/index';
 import {
@@ -10,6 +10,7 @@ import {
     UPDATE_PHASES,
     daemonFrame,
     daemonFrameSchemas,
+    encodeFrame,
     harnessReport,
     harnessReports,
     harnessRequestFrame,
@@ -440,6 +441,67 @@ describe('daemon frame schemas', () => {
         expect(neither.error?.issues[0]?.path).toEqual(['result']);
         expect(daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', error: { code: 'internal', message: 'x' } }).success).toBe(false);
         expect(platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op: { kind: 'delete', path: '/work' } }).success).toBe(false);
+    });
+
+    it('fs.request tree, read and changes carry a root and a relative path (#559)', () => {
+        const request = (op: Record<string, unknown>) => platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op });
+        expect(request({ kind: 'tree', root: '/work/app', path: '' }).success).toBe(true);
+        expect(request({ kind: 'tree', root: '/work/app', path: 'src/ui' }).success).toBe(true);
+        expect(request({ kind: 'tree', root: '', path: '' }).success).toBe(false);
+        expect(request({ kind: 'read', root: '/work/app', path: 'src/a.ts' }).success).toBe(true);
+        expect(request({ kind: 'read', root: '/work/app', path: 'src/a.ts', rev: 'base', base: 'main' }).success).toBe(true);
+        expect(request({ kind: 'read', root: '/work/app', path: 'src/a.ts', rev: 'stash' }).success).toBe(false);
+        expect(request({ kind: 'read', root: '/work/app', path: '' }).success).toBe(false);
+        expect(request({ kind: 'changes', root: '/work/app', scope: 'uncommitted' }).success).toBe(true);
+        expect(request({ kind: 'changes', root: '/work/app', scope: 'branch', base: 'origin/main' }).success).toBe(true);
+        expect(request({ kind: 'changes', root: '/work/app' }).success).toBe(false);
+        expect(request({ kind: 'changes', root: '/work/app', scope: 'everything' }).success).toBe(false);
+    });
+
+    it('fs.response tree, read and changes results are bounded (#559)', () => {
+        const response = (f: Record<string, unknown>) => daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', requestId: 'fs_1', ...f });
+        const tree = (n: number) => ({ kind: 'tree', root: '/work/app', path: '', entries: Array.from({ length: n }, (_, i) => ({ name: `f${i}`, path: `f${i}`, type: 'file', size: 1, ...(i === 0 ? { change: 'modified' } : {}) })), truncated: false, ignoredHidden: true });
+        expect(response({ result: tree(FS_LIST_MAX_ENTRIES) }).success).toBe(true);
+        expect(response({ result: tree(FS_LIST_MAX_ENTRIES + 1) }).success).toBe(false);
+        expect(response({ result: { ...tree(1), entries: [{ name: 'x', path: 'x', type: 'socket' }] } }).success).toBe(false);
+        expect(response({ result: { kind: 'read', path: 'a.ts', rev: 'working', size: 3, text: 'abc', lines: 1 } }).success).toBe(true);
+        expect(response({ result: { kind: 'read', path: 'a.png', rev: 'head', size: 3000, binary: true } }).success).toBe(true);
+        expect(response({ result: { kind: 'read', path: 'a.png', rev: 'head', size: 3, text: 'abc', binary: true } }).success).toBe(false);
+        expect(response({ result: { kind: 'read', path: 'a.ts', rev: 'working', size: 1, text: 'x'.repeat(LIMITS.fileText + 1) } }).success).toBe(false);
+        const changes = (files: number, commits: number) => ({
+            kind: 'changes',
+            vcs: 'git',
+            scope: 'branch',
+            branch: 'feat/x',
+            head: 'abc1234',
+            base: 'main',
+            ahead: 2,
+            behind: 0,
+            files: Array.from({ length: files }, (_, i) => ({ path: `f${i}`, status: i === 0 ? 'renamed' : 'modified', ...(i === 0 ? { oldPath: 'old' } : {}), added: 1, removed: 0 })),
+            commits: Array.from({ length: commits }, (_, i) => ({ id: `c${i}`, short: `c${i}`, subject: 'x', at: 1, author: 'a' })),
+            truncated: false
+        });
+        expect(response({ result: changes(CHANGES_MAX_FILES, CHANGES_MAX_COMMITS) }).success).toBe(true);
+        expect(response({ result: changes(CHANGES_MAX_FILES + 1, 0) }).success).toBe(false);
+        expect(response({ result: changes(0, CHANGES_MAX_COMMITS + 1) }).success).toBe(false);
+        expect(response({ result: { ...changes(1, 0), files: [{ path: 'f', status: 'copied' }] } }).success).toBe(false);
+        expect(response({ error: { code: 'too-large', message: 'big' } }).success).toBe(true);
+    });
+
+    it('a read of FS_READ_MAX_BYTES fits one frame even when JSON escapes every character (#559)', () => {
+        expect(LIMITS.fileText).toBe(FS_READ_MAX_BYTES);
+        // Worst case the contract allows: every character one JSON escapes in two (a file with other control characters is binary).
+        for (const ch of ['"', '\\', '\n', '\t']) {
+            const text = ch.repeat(FS_READ_MAX_BYTES);
+            expect(isBinaryText(text)).toBe(false);
+            const frame = { v: V, t: 'fs.response', requestId: `fs_${'x'.repeat(LIMITS.id - 3)}`, result: { kind: 'read', path: 'p'.repeat(LIMITS.text), rev: 'working', size: FS_READ_MAX_BYTES, text, lines: FS_READ_MAX_BYTES } } as const;
+            expect(daemonFrameSchemas['fs.response'].safeParse(frame).success).toBe(true);
+            const encoded = encodeFrame(frame as DaemonFrame);
+            expect(new TextEncoder().encode(encoded).length).toBeLessThanOrEqual(LIMITS.frameBytes);
+        }
+        expect(isBinaryText('a\u0000b')).toBe(true);
+        expect(isBinaryText('a\u001bb')).toBe(true);
+        expect(isBinaryText('tab\there\r\nform\fback\b')).toBe(false);
     });
 
     it('fs.request locate names an origin, with an optional depth (#331)', () => {

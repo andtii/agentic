@@ -58,7 +58,8 @@ import type { DaemonFrame, EnvRequestFrame, HarnessRequestFrame, HistoryRequestF
 import { decodePlatformFrame, encodeFrame } from '../framing/codec.js';
 import { drainingReply } from '../lifecycle.js';
 import { LIMITS } from '../schema/limits.js';
-import type { ConformanceDaemon, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
+import type { ConformanceDaemon, ConformanceFiles, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
+import { answerFilesOp, IN_MEMORY_CONFORMANCE_FILES, IN_MEMORY_SESSION_FOLDERS, type InMemoryFolder } from './in-memory-files.js';
 
 export interface InMemoryFaults {
     /** `'duplicate'`: replay from a few frames before `wanted`; `'skip'`: from one after it; `'ignore'`: from the start of the log. */
@@ -105,6 +106,8 @@ export interface InMemoryFaults {
     readonly ignoreLoginCancel?: boolean;
     /** Report a restart as a real update: `downloading` and `staged` phases, and `session.closed { code: 'update' }` (#355). */
     readonly restartAsUpdate?: boolean;
+    /** Answer `tree` / `read` / `changes` for any root and path, inside the working roots or not (#559). */
+    readonly filesAnywhere?: boolean;
 }
 
 export interface InMemoryHarnessOptions {
@@ -117,6 +120,16 @@ export interface InMemoryHarnessOptions {
      * directly below it (and badges the folder itself), and `locate` finds the ones whose `git.origin` matches.
      */
     readonly repos?: readonly { readonly path: string; readonly git: FsGitInfo }[];
+    /**
+     * The session folders `tree` / `read` / `changes` answer from (#559). Default `IN_MEMORY_SESSION_FOLDERS`: a repository
+     * at `/work/project` with uncommitted work and a plain folder at `/work/plain`.
+     */
+    readonly folders?: readonly InMemoryFolder[];
+    /**
+     * What the conformance `files` cases read when `folders` is given; without it, custom folders leave the `files`
+     * harness feature off (the daemon still answers).
+     */
+    readonly conformanceFiles?: ConformanceFiles;
     /** How many characters each streamed `part-delta` carries (default: the event's number and a space) — a platform test that needs a session to page out sets it. */
     readonly deltaChars?: number;
     /** The lines its log holds for `log.request` (#355); absent → the daemon has no log file and answers `no-log`. */
@@ -304,7 +317,7 @@ export class InMemoryDaemon implements ConformanceDaemon {
             resume,
             policy: this.reportedPolicy(),
             build: IN_MEMORY_BUILD,
-            features: ['update', 'harness', 'policy', 'log', 'login'],
+            features: ['update', 'harness', 'policy', 'log', 'login', 'files'],
             harnesses: this.harnesses
         });
         return {
@@ -457,6 +470,9 @@ export class InMemoryDaemon implements ConformanceDaemon {
                 const env = this.environments.find((e) => e.id === frame.environmentId);
                 if (!env) return answer({ error: { code: 'unknown-environment', message: `no environment ${frame.environmentId}` } });
                 if (frame.op.kind === 'locate') return answer({ result: this.locate(env, frame.op) });
+                if (frame.op.kind === 'tree' || frame.op.kind === 'read' || frame.op.kind === 'changes') {
+                    return answer(answerFilesOp(this.options.folders ?? IN_MEMORY_SESSION_FOLDERS, env, frame.op, this.options.faults?.filesAnywhere));
+                }
                 if (frame.op.kind !== 'list') return answer({ error: { code: 'unsupported', message: `the in-memory daemon does not answer ${frame.op.kind}` } });
                 const path = normalizePath(frame.op.path, 'linux');
                 if (!path || (!this.options.faults?.browseAnywhere && !pathWithin(path, env.cwdRoots, 'linux'))) return answer({ error: { code: 'outside-roots', message: `${frame.op.path} is outside the working roots` } });
@@ -836,9 +852,11 @@ export class InMemoryDaemon implements ConformanceDaemon {
 /** A conformance harness over the fake daemon; also usable directly to exercise a platform implementation. */
 export function inMemoryHarness(options: InMemoryHarnessOptions = {}): DaemonConformanceHarness & { start(script: ConformanceScript): InMemoryDaemon } {
     const knownOrigin = options.repos?.find((r) => r.git.origin !== undefined)?.git.origin;
+    const files = options.folders ? options.conformanceFiles : IN_MEMORY_CONFORMANCE_FILES;
     return {
-        features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness', 'policy', ...(options.log ? (['log'] as const) : []), 'login', 'restart'],
+        features: ['env', 'gap', 'raw', 'fs', ...(files ? (['files'] as const) : []), 'env-manage', 'session-ref', 'history', 'build', 'resume', 'update', 'harness', 'policy', ...(options.log ? (['log'] as const) : []), 'login', 'restart'],
         ...(knownOrigin !== undefined ? { knownOrigin } : {}),
+        ...(files ? { files } : {}),
         updateTarget: IN_MEMORY_RELEASE,
         harnessTarget: IN_MEMORY_HARNESS_TARGET,
         protectedFolder: IN_MEMORY_OWN_DIR,

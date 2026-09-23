@@ -1,6 +1,8 @@
 /** @agentic/daemon-protocol/testing — the conformance suite both ends of the daemon socket must pass, and an in-memory daemon to run it against. */
 
-export type { ConformanceScript, ConformanceFeature, DaemonConformanceHarness, ConformanceDaemon, PlatformSeat } from './harness.js';
+export type { ConformanceScript, ConformanceFeature, ConformanceFiles, DaemonConformanceHarness, ConformanceDaemon, PlatformSeat } from './harness.js';
+export type { InMemoryFolder, InMemoryVcs } from './in-memory-files.js';
+export { answerFilesOp, IN_MEMORY_SESSION_FOLDERS, IN_MEMORY_PROJECT_ROOT, IN_MEMORY_PLAIN_ROOT, IN_MEMORY_CONFORMANCE_FILES } from './in-memory-files.js';
 export type { ConformanceCase, DaemonConformanceOptions } from './conformance.js';
 export { daemonConformance } from './conformance.js';
 export { ConformanceError } from './assert.js';

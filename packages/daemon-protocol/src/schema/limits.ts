@@ -24,5 +24,10 @@ export const LIMITS = {
     /** Lines a `log.request` may ask for and a `log.response` carry (#355; core's `DAEMON_LOG_MAX_LINES`). */
     logLines: 500,
     /** Characters a `login.answer` may carry (#355; core's `LOGIN_ANSWER_MAX_CHARS`). */
-    loginAnswer: 2048
+    loginAnswer: 2048,
+    /**
+     * Characters of a file's text in an `fs.response` `read` result (#559; core's `FS_READ_MAX_BYTES`). Half a frame: JSON
+     * escapes a character in at most two once a daemon answers a file with other control characters as binary.
+     */
+    fileText: 480 * 1024
 } as const;

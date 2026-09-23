@@ -22,7 +22,7 @@
  * ```
  */
 
-import { DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, normalizePath, pathWithin, policyConverged, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type MachinePolicyOp, type PlatformInfo, type SessionId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, normalizePath, pathWithin, policyConverged, sameOrigin, type Cursor, type EnvironmentDescriptor, type EnvironmentInput, type FsOp, type MachinePolicyOp, type PlatformInfo, type SessionId } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION, cursorBefore } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameOf, DaemonFrameType, EnvFrame, EnvResponseFrame, HarnessesFrame, HarnessStatusFrame, HelloFrame, LoginStatusFrame, PlatformFrame, PolicyResponseFrame, SessionClosedFrame, SessionFrameFrame, SessionRefFrame, UpdateStatusFrame } from '../frames.js';
 import { decodeDaemonFrame, parseDaemonFrame } from '../framing/codec.js';
@@ -31,7 +31,7 @@ import { isVersion } from '../release.js';
 import { LIMITS } from '../schema/limits.js';
 import { sessionRef } from '../schema/wire.js';
 import { assert, assertEqual, fail, withTimeout } from './assert.js';
-import type { ConformanceDaemon, ConformanceFeature, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
+import type { ConformanceDaemon, ConformanceFeature, ConformanceFiles, ConformanceScript, DaemonConformanceHarness, PlatformSeat } from './harness.js';
 
 export interface ConformanceCase {
     readonly name: string;
@@ -64,6 +64,9 @@ const NEEDS: Record<string, ConformanceFeature> = {
     gap: 'gap',
     'fs-list': 'fs',
     'fs-locate': 'fs',
+    'files-tree': 'files',
+    'files-read': 'files',
+    'files-changes': 'files',
     'env-put': 'env-manage',
     'env-remove': 'env-manage',
     'env-policy': 'env-manage',
@@ -199,6 +202,34 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
         for (const e of hello.environments) assertEqual(e.machineId, daemon.machineId, `environment ${e.id} belongs to the machine`);
         peer.send({ v: V, t: 'welcome', serverTime: Date.now(), wanted, ...(platform ? { platform } : {}) });
         return { peer, hello };
+    };
+
+    /**
+     * The `files` cases' seat (#559): a handshake whose `hello.features` must list `files`, the suite environment, the harness's
+     * folders, and an `ask` that sends one `fs.request` and returns its answer.
+     */
+    const filesSeat = async (daemon: ConformanceDaemon) => {
+        const { peer, hello } = await handshake(daemon);
+        assert(hello.features?.includes('files') === true, 'a daemon that answers the session-files kinds lists `files` in hello.features');
+        const files: ConformanceFiles | undefined = harness.files;
+        if (!files) fail('the harness declares the files feature but names no files folders');
+        const env = hello.environments.find((e) => e.id === daemon.environmentId)!;
+        assert(pathWithin(files.root, env.cwdRoots, hello.os), `the harness's files root ${files.root} is inside the working roots`);
+        const ask = async (requestId: string, environmentId: string, op: FsOp) => {
+            peer.send({ v: V, t: 'fs.request', requestId, environmentId, op });
+            const response = await peer.expect('fs.response');
+            assertEqual(response.requestId, requestId, 'fs.response answers the request it was sent');
+            return response;
+        };
+        return { peer, hello, env, files, ask };
+    };
+
+    /** A sibling of the first working root, when no root covers it: a folder outside every root. */
+    const outsideRoot = (roots: readonly string[], os: HelloFrame['os']): string | undefined => {
+        const first = roots[0];
+        if (first === undefined) return undefined;
+        const outside = normalizePath(`${first}/../__agentic_conformance_outside__`, os);
+        return outside && !pathWithin(outside, roots, os) ? outside : undefined;
     };
 
     const openSpec = (hello: HelloFrame, daemon: ConformanceDaemon, tools: readonly string[]) => {
@@ -607,6 +638,72 @@ export function daemonConformance(harness: DaemonConformanceHarness, options: Da
                     }
                     const unknown = await ask('fs_locate_unknown', 'env_conformance_unknown', nobody);
                     assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
+                })
+        },
+        {
+            name: 'files-tree',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { hello, env, files, ask } = await filesSeat(daemon);
+                    const top = files.file.path.split('/')[0]!;
+                    const listed = await ask('files_tree', env.id, { kind: 'tree', root: files.root, path: '' });
+                    assert(listed.result?.kind === 'tree', `a tree of the session folder yields a tree (${listed.error?.code ?? ''} ${listed.error?.message ?? ''})`);
+                    assertEqual(listed.result.path, '', 'the tree names the folder it lists, relative to root');
+                    const entry = listed.result.entries.find((e) => e.name === top);
+                    assert(entry !== undefined, `the tree of ${files.root} lists ${top}`);
+                    assertEqual(entry.type, 'dir', `${top} is listed as a folder`);
+                    assert(!listed.result.entries.some((e) => e.name === '.git'), 'the VCS folder is never listed');
+
+                    const escaped = await ask('files_tree_escape', env.id, { kind: 'tree', root: files.root, path: '../..' });
+                    assertEqual(escaped.error?.code, 'outside-roots', 'a path climbing out of root is refused (OPS-01)');
+                    const outside = outsideRoot(env.cwdRoots, hello.os);
+                    if (outside) {
+                        const refused = await ask('files_tree_outside', env.id, { kind: 'tree', root: outside, path: '' });
+                        assertEqual(refused.error?.code, 'outside-roots', 'a root outside the working roots is refused (OPS-01)');
+                    }
+                    const unknown = await ask('files_tree_unknown', 'env_conformance_unknown', { kind: 'tree', root: files.root, path: '' });
+                    assertEqual(unknown.error?.code, 'unknown-environment', 'an environment the daemon does not have is refused');
+                })
+        },
+        {
+            name: 'files-read',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { env, files, ask } = await filesSeat(daemon);
+                    const read = await ask('files_read', env.id, { kind: 'read', root: files.root, path: files.file.path });
+                    assert(read.result?.kind === 'read', `reading a file yields its text (${read.error?.code ?? ''} ${read.error?.message ?? ''})`);
+                    assertEqual(read.result.text, files.file.text, 'the text is the file as it is on disk');
+                    assertEqual(read.result.rev, 'working', 'a read without rev reads the working copy');
+                    assertEqual(read.result.binary, undefined, 'a text file is not binary');
+
+                    const escaped = await ask('files_read_escape', env.id, { kind: 'read', root: files.root, path: `../../__agentic_conformance_outside__.txt` });
+                    assertEqual(escaped.error?.code, 'outside-roots', 'a file outside root is refused, not read (OPS-01)');
+                    const missing = await ask('files_read_missing', env.id, { kind: 'read', root: files.root, path: '__agentic_conformance_missing__.txt' });
+                    assertEqual(missing.error?.code, 'not-found', 'a missing file is not-found');
+                })
+        },
+        {
+            name: 'files-changes',
+            run: () =>
+                withDaemon(script, async (daemon) => {
+                    const { env, files, ask } = await filesSeat(daemon);
+                    if (files.changed) {
+                        const changes = await ask('files_changes', env.id, { kind: 'changes', root: files.root, scope: 'uncommitted' });
+                        assert(changes.result?.kind === 'changes', `changes of a repository yield a change set (${changes.error?.code ?? ''} ${changes.error?.message ?? ''})`);
+                        assert(changes.result.vcs.length > 0, 'the change set names its VCS');
+                        assertEqual(changes.result.scope, 'uncommitted', 'the change set names the scope it was asked for');
+                        assert(
+                            changes.result.files.some((f) => f.path === files.file.path),
+                            `the changed file ${files.file.path} is in the change set (${changes.result.files.map((f) => f.path).join(', ')})`
+                        );
+                        const head = await ask('files_read_head', env.id, { kind: 'read', root: files.root, path: files.file.path, rev: 'head' });
+                        assert(head.result?.kind === 'read' || head.error?.code === 'not-found', `a head read answers the committed text or not-found for a new file (${head.error?.code ?? ''})`);
+                        if (head.result?.kind === 'read') assert(head.result.text !== files.file.text, 'the committed text differs from the changed working copy');
+                    }
+                    if (files.plain !== undefined) {
+                        const plain = await ask('files_changes_plain', env.id, { kind: 'changes', root: files.plain, scope: 'uncommitted' });
+                        assertEqual(plain.error?.code, 'not-a-repo', 'a folder under no version control has no changes to report');
+                    }
                 })
         },
         {

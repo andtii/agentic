@@ -28,7 +28,27 @@ export type FsOp =
      * `depth` levels down (default and cap `FS_LOCATE_MAX_DEPTH`), compared with `sameOrigin`.
      * How a project finds its repo on a machine where it has no folder yet.
      */
-    | { readonly kind: 'locate'; readonly origin: string; readonly depth?: number };
+    | { readonly kind: 'locate'; readonly origin: string; readonly depth?: number }
+    /**
+     * A session's folder, read-only (#559; the `files` daemon feature). Every one carries `root`, the session's `cwd`
+     * (absolute, machine-native, within the environment's `cwdRoots`), and names files by `path` relative to it with
+     * `/` separators (`''` is `root` itself); the daemon refuses a `path` outside `root` and a `root` outside the roots.
+     */
+    /** One level of `path`: files and folders, `.git` and ignored entries left out. */
+    | { readonly kind: 'tree'; readonly root: string; readonly path: string }
+    /**
+     * One file's text at `rev` (default `working`, the file on disk). `head` is the last commit, `base` the merge-base
+     * with `base` (a ref name) or, without one, the one the daemon's VCS resolves. Binary files answer metadata only.
+     */
+    | { readonly kind: 'read'; readonly root: string; readonly path: string; readonly rev?: FsReadRev; readonly base?: string }
+    /** What changed in `root`: uncommitted work, or everything on the branch since its merge-base with `base`. */
+    | { readonly kind: 'changes'; readonly root: string; readonly scope: ChangeScope; readonly base?: string };
+
+/** Which version of a file a `read` returns (#559). */
+export type FsReadRev = 'working' | 'head' | 'base';
+
+/** What a `changes` covers (#559): the working tree against HEAD, or the branch against its merge-base. */
+export type ChangeScope = 'uncommitted' | 'branch';
 
 export interface FsGitInfo {
     /** `repo`: `.git` is a directory; `worktree`: `.git` is a file pointing into another repo's `worktrees/`. */
@@ -77,7 +97,97 @@ export interface FsLocateResult {
     readonly truncated: boolean;
 }
 
-export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult;
+/** How a file differs from the committed version (#559). VCS-neutral: a provider maps its own codes onto these. */
+export type FileChangeStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+
+/** One entry of a `tree` listing. */
+export interface FsTreeEntry {
+    readonly name: string;
+    /** Relative to the request's `root`, `/`-separated. */
+    readonly path: string;
+    readonly type: 'file' | 'dir' | 'symlink';
+    /** Bytes, for a file. */
+    readonly size?: number;
+    /** Set when the file (or, for a folder, something inside it) differs from the committed version. */
+    readonly change?: FileChangeStatus;
+}
+
+export interface FsTreeResult {
+    readonly kind: 'tree';
+    readonly root: string;
+    /** The listed folder, relative to `root` (`''` for `root`). */
+    readonly path: string;
+    /** Folders first, then files, each by name. */
+    readonly entries: readonly FsTreeEntry[];
+    /** More than `FS_LIST_MAX_ENTRIES` entries: only the first ones are listed. */
+    readonly truncated: boolean;
+    /** An ignore filter (`.gitignore`) was applied, so ignored entries are not listed. */
+    readonly ignoredHidden: boolean;
+}
+
+/**
+ * One file (#559). `text` for a text file of at most `FS_READ_MAX_BYTES`; a binary file carries `binary: true` and no
+ * text. A larger text file is the error `too-large`, never a truncated text.
+ */
+export interface FsReadResult {
+    readonly kind: 'read';
+    readonly path: string;
+    readonly rev: FsReadRev;
+    /** Bytes on disk (or in the revision). */
+    readonly size: number;
+    readonly text?: string;
+    readonly binary?: true;
+    /** Line count of `text`. */
+    readonly lines?: number;
+}
+
+/** One changed file in a `ChangeSet`. `added` / `removed` are line counts, absent for a binary file. */
+export interface ChangedFile {
+    /** Relative to the request's `root`, `/`-separated. */
+    readonly path: string;
+    /** The previous path of a rename. */
+    readonly oldPath?: string;
+    readonly status: FileChangeStatus;
+    readonly added?: number;
+    readonly removed?: number;
+    readonly binary?: true;
+}
+
+/** One commit on the branch since its merge-base (`scope: 'branch'`). */
+export interface ChangeCommit {
+    readonly id: string;
+    readonly short: string;
+    readonly subject: string;
+    /** Commit time, epoch ms. */
+    readonly at: number;
+    readonly author: string;
+}
+
+/**
+ * What changed in a session's folder (#559), VCS-neutral: `vcs` names the provider that answered (`git` first).
+ * `files` are the uncommitted changes for `scope: 'uncommitted'`, the branch's against its merge-base for `branch`;
+ * `commits` are the branch's commits since the merge-base, newest first, in both scopes.
+ */
+export interface ChangeSet {
+    readonly kind: 'changes';
+    readonly vcs: string;
+    readonly scope: ChangeScope;
+    /** The checked-out branch; absent when HEAD is detached. */
+    readonly branch?: string;
+    /** Short id of HEAD. */
+    readonly head?: string;
+    /** The ref the branch is compared with, when one resolved. */
+    readonly base?: string;
+    /** Commits on the branch not on `base`, and the reverse. */
+    readonly ahead?: number;
+    readonly behind?: number;
+    readonly files: readonly ChangedFile[];
+    readonly commits: readonly ChangeCommit[];
+    /** More than `CHANGES_MAX_FILES` files or `CHANGES_MAX_COMMITS` commits: only the first ones are listed. */
+    readonly truncated: boolean;
+}
+
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -89,6 +199,7 @@ export type FsErrorCode =
     | 'timeout'
     | 'unknown-environment'
     | 'unsupported'
+    | 'too-large'
     | 'internal';
 
 export interface FsError {
@@ -102,6 +213,26 @@ export const FS_LIST_MAX_ENTRIES = 500;
 export const FS_LOCATE_MAX_DEPTH = 3;
 /** A `locate` reports at most this many checkouts. */
 export const FS_LOCATE_MAX_MATCHES = 20;
+/**
+ * A `read` returns text of at most this many UTF-8 bytes (#559), else the error `too-large`. Chosen so the answer
+ * fits one frame (1 MiB) even when JSON doubles every character (`"`, `\`, newline, tab…): a daemon treats a file
+ * holding any other C0 control character — which JSON would escape six-fold — as binary (`isBinaryText`).
+ */
+export const FS_READ_MAX_BYTES = 480 * 1024;
+/** A `ChangeSet` lists at most this many files… */
+export const CHANGES_MAX_FILES = 500;
+/** …and this many commits. */
+export const CHANGES_MAX_COMMITS = 100;
+
+/**
+ * Whether decoded file text must be answered as binary (#559): it holds a NUL or a C0 control character other than
+ * tab, line feed, carriage return, form feed and backspace (the ones JSON escapes in two characters). Pure, so the
+ * daemon and every test agree.
+ */
+export function isBinaryText(text: string): boolean {
+    // oxlint-disable-next-line no-control-regex
+    return /[\u0000-\u0007\u000B\u000E-\u001F]/.test(text);
+}
 
 /**
  * The comparable form of a remote URL: scheme, user and a trailing `.git` or `/`

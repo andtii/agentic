@@ -2,7 +2,7 @@
   {
     "name": "@agentic/core",
     "path": "packages/core/dist/index.js",
-    "limit": "4.5 KB"
+    "limit": "5 KB"
   },
   {
     "name": "@agentic/ui",

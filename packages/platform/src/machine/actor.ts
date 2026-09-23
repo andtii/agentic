@@ -1883,6 +1883,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+                    // The session-files kinds (#559) are answered once the Machine forwards them over its answer stream (#562).
+                    if (parsed.data.kind === 'tree' || parsed.data.kind === 'read' || parsed.data.kind === 'changes') throw new ServerFnError(400, `machine: fs op ${parsed.data.kind} is not supported yet`);
                     if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate') && (ctx.principal as Principal | null)?.kind !== 'user') {
                         throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : 'locate checkouts'}`);
                     }

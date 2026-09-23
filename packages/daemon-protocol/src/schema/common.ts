@@ -1,6 +1,6 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
+import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
 import type { ApprovalRule, CapabilityReport, Cursor, DaemonLogError, DaemonLogResult, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, LoginAction, LoginError, MachineId, MachineListing, MachinePolicy, MachinePolicyError, MachinePolicyInput, MachinePolicyResult, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
@@ -194,14 +194,23 @@ export const openSpec: z.ZodType<OpenSpec> = z.object({
     resume: z.unknown().optional()
 });
 
+const fsReadRev = z.enum(['working', 'head', 'base']);
+const changeScope = z.enum(['uncommitted', 'branch']);
+const fileChangeStatus = z.enum(['modified', 'added', 'deleted', 'renamed', 'untracked']);
+
 /**
  * What `fs.request` asks (#185, #331): list one folder, add a git worktree, or locate every checkout of an origin under
- * the roots. Paths are bounded text; the daemon decides what they mean.
+ * the roots — and, with the `files` feature (#559), one level of a session's folder, one file in it, or what changed in
+ * it, each under `root` (the session's cwd) with `path` relative to it. Paths are bounded text; the daemon decides what
+ * they mean.
  */
 export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1) }),
     z.object({ kind: z.literal('worktree'), repo: text.min(1), branch: name, base: name.optional(), path: text.min(1) }),
-    z.object({ kind: z.literal('locate'), origin: text.min(1), depth: nonNegativeInt.optional() })
+    z.object({ kind: z.literal('locate'), origin: text.min(1), depth: nonNegativeInt.optional() }),
+    z.object({ kind: z.literal('tree'), root: text.min(1), path: text }),
+    z.object({ kind: z.literal('read'), root: text.min(1), path: text.min(1), rev: fsReadRev.optional(), base: name.optional() }),
+    z.object({ kind: z.literal('changes'), root: text.min(1), scope: changeScope, base: name.optional() })
 ]);
 
 /** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name — absent rather than empty. */
@@ -215,11 +224,36 @@ const fsEntry = z.object({ name: text.min(1), path: text.min(1), git: fsGitInfo.
 export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1), parent: text.min(1).optional(), git: fsGitInfo.optional(), entries: z.array(fsEntry).max(FS_LIST_MAX_ENTRIES), truncated: z.boolean() }),
     z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name }),
-    z.object({ kind: z.literal('locate'), origin: text.min(1), matches: z.array(z.object({ path: text.min(1), git: fsGitInfo })).max(FS_LOCATE_MAX_MATCHES), truncated: z.boolean() })
-]);
+    z.object({ kind: z.literal('locate'), origin: text.min(1), matches: z.array(z.object({ path: text.min(1), git: fsGitInfo })).max(FS_LOCATE_MAX_MATCHES), truncated: z.boolean() }),
+    z.object({
+        kind: z.literal('tree'),
+        root: text.min(1),
+        path: text,
+        entries: z.array(z.object({ name: text.min(1), path: text.min(1), type: z.enum(['file', 'dir', 'symlink']), size: nonNegativeInt.optional(), change: fileChangeStatus.optional() })).max(FS_LIST_MAX_ENTRIES),
+        truncated: z.boolean(),
+        ignoredHidden: z.boolean()
+    }),
+    // A file's text is bounded by `LIMITS.fileText` (core's `FS_READ_MAX_BYTES`); a binary file carries no text.
+    z.object({ kind: z.literal('read'), path: text.min(1), rev: fsReadRev, size: nonNegativeInt, text: z.string().max(LIMITS.fileText).optional(), binary: z.literal(true).optional(), lines: nonNegativeInt.optional() }),
+    z.object({
+        kind: z.literal('changes'),
+        vcs: name,
+        scope: changeScope,
+        branch: name.optional(),
+        head: name.optional(),
+        base: name.optional(),
+        ahead: nonNegativeInt.optional(),
+        behind: nonNegativeInt.optional(),
+        files: z
+            .array(z.object({ path: text.min(1), oldPath: text.min(1).optional(), status: fileChangeStatus, added: nonNegativeInt.optional(), removed: nonNegativeInt.optional(), binary: z.literal(true).optional() }))
+            .max(CHANGES_MAX_FILES),
+        commits: z.array(z.object({ id: name, short: name, subject: text, at: nonNegativeInt, author: text })).max(CHANGES_MAX_COMMITS),
+        truncated: z.boolean()
+    })
+]).refine((r) => r.kind !== 'read' || !(r.text !== undefined && r.binary), { message: 'a read result carries text or binary, not both' });
 
 export const fsError: z.ZodType<FsError> = z.object({
-    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'internal']),
+    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'internal']),
     message: text
 });
 

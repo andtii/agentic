@@ -588,6 +588,10 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
 
         expect(await statusOf(machine(K1).fsResult('fs_nope'))).toBe(404);
         expect(await statusOf(machine(K1).fsRequest(E1, list('')))).toBe(400);
+        // The session-files kinds (#559) are refused until the Machine answers them over its stream (#562).
+        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'tree', root: '/work/app', path: '' }))).toBe(400);
+        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'read', root: '/work/app', path: 'a.ts' }))).toBe(400);
+        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'changes', root: '/work/app', scope: 'uncommitted' }))).toBe(400);
     });
 
     it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {
