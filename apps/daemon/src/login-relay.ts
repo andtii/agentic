@@ -25,7 +25,7 @@ export interface LoginRelay {
     readonly events: AsyncIterable<LoginRelayEvent>;
     /** What the person pasted back (`login.answer`): to the child's stdin, once; ignored when nothing was expected. */
     answer(text: string): void;
-    /** End it: the child is killed and the relay reports `failed { cancelled }`. */
+    /** End it: the child and everything it started are killed, and the relay reports `failed { cancelled }`. */
     cancel(): void;
 }
 
@@ -110,7 +110,17 @@ export function spawnLoginRelay(spec: LoginRelaySpec): LoginRelay {
     };
     const kill = (): void => {
         try {
-            if (child.exitCode === null && child.signalCode === null) child.kill();
+            if (child.exitCode !== null || child.signalCode !== null) return;
+            // Windows: the CLI runs under the `cmd.exe` the `.cmd` shim needs, and `kill()` ends only that wrapper —
+            // the CLI would keep running with its device code (#520). `taskkill /T` ends the whole tree.
+            if (platform === 'win32' && child.pid !== undefined) {
+                const tree = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+                // `taskkill` could not start, or could not end the tree: end at least the wrapper.
+                tree.on('error', () => child.kill());
+                tree.on('exit', (code) => { if (code !== 0) child.kill(); });
+                return;
+            }
+            child.kill();
         } catch {
             // Already gone.
         }

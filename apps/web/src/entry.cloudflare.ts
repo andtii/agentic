@@ -3,7 +3,7 @@
 // this code — wrangler's `assets` config serves matching files first.
 // What is left, in order:
 //
-//     auth + A2A + file routes  ->  daemon socket + actor mount + actor sockets
+//     auth + A2A + file + connector routes  ->  daemon socket + actor mount + actor sockets
 //                  ->  server functions  ->  document render
 //
 // all of it inside ONE `runWithHost` scope — the Worker's own host (#137, #172), booted from `env`
@@ -18,7 +18,9 @@ import { createActorHost, createActorWorker, pairingWiring, platformFiles, platf
 import { devLoginEnabled, devLoginRouteFor } from './auth/dev-login';
 import { createAuthMount, githubEnabled } from './auth/mount';
 import { setSignInOptions } from './auth/sign-in';
+import { createConnectorMount } from './connectors/routes';
 import { createFilesMount, type WaitUntilLike } from './files/route';
+import { conduitConnectorCatalogue } from './plugins/catalogue';
 import { runWithHost } from './host-scope';
 
 const render = createFetchHandler({
@@ -65,6 +67,12 @@ const filesRoute = createFilesMount({ store: platformFiles });
  */
 const a2aRoute = createA2aMount({ actors: platformRegistry() });
 
+/**
+ * Connector sign-in (#533): `GET /_agentic/connectors/:id/start`, `GET /_agentic/connectors/callback` and
+ * `POST /_agentic/connectors/:id/disconnect`, the signed-in owner's, for the build's conduit connectors (Gmail).
+ */
+const connectorsRoute = createConnectorMount({ connectors: conduitConnectorCatalogue });
+
 export default {
     // Every route runs under the Worker's own host scope (#137, #172): the auth routes hop
     // to the objects too (`pairingWiring`, the token lookup, the MCP mount), and an unscoped
@@ -76,7 +84,7 @@ export default {
             // The preview / local-only dev login (#35, #143): `GET` (the form) and `POST` (JSON or the form's
             // body) on `/auth/dev-login`, mounted only while `AGENTIC_DEV_LOGIN` is set; independent of the GitHub secrets.
             // The chat file routes (#207) hop to the Chat actor as the caller, so they boot the host too.
-            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
+            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined) ?? connectorsRoute(request, env);
             if (route) {
                 // The auth routes hop (`pairingWiring`, the token lookup): the Worker host must exist before
                 // one runs, and on a cold isolate nothing else has booted it yet (#182).

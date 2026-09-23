@@ -29,6 +29,7 @@ import { actor, type ActorTaskContext, type AnyActorDefinition } from '@sigx/act
 import { AgentActor, agentKey } from '../agent/index.js';
 import { asPrincipal } from '../auth/index.js';
 import { Chat, PAGE, pageKey } from '../chat/index.js';
+import { ConnectorAccounts, connectorAccountsKey } from '../connector-accounts/index.js';
 import { FLAT_MEMORY_PLUGIN_ID } from '@agentic/memory';
 import { FlatMemory, Memory, memoryActorKey } from '../memory/index.js';
 import { Inbox, inboxKey } from '../notify/index.js';
@@ -192,6 +193,9 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
     // registry — secrets by name only
     await write('registry', await as(Registry, registryKey(ws)).exportRows());
 
+    // connected accounts (#532) — id, connector, status and display name, never credentials
+    await write('connector-accounts', await as(ConnectorAccounts, connectorAccountsKey(ws)).exportRows());
+
     // what the index cannot see: tasks and sessions, when the store can list them
     if (options.store?.list) {
         const taskRows: unknown[] = [];
@@ -220,7 +224,7 @@ export async function exportWorkspace(ctx: Ctx, options: CascadeOptions): Promis
 }
 
 /** Types the export reads through the index; anything else the store lists is "present, not exported". Literals: this module and the Registry import each other. */
-const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'FlatMemory', 'Chat', 'ChatPage', 'session-page', 'session-transcript-page', 'Schedule', 'Inbox', 'Registry']);
+const KNOWN_TYPES: ReadonlySet<string> = new Set(['Workspace', 'Agent', 'Memory', 'FlatMemory', 'Chat', 'ChatPage', 'session-page', 'session-transcript-page', 'Schedule', 'Inbox', 'Registry', 'ConnectorAccounts']);
 
 /** Every child record the index implies, children first; the root is NOT included. */
 export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef[]> {
@@ -279,6 +283,7 @@ export async function childRecords(snap: WorkspaceState): Promise<ActorRecordRef
     for (const id of snap.schedules) add('Schedule', `${ws}:schedule:${id as ScheduleId}`);
     add(Inbox.type, inboxKey(ws));
     add(Registry.type, registryKey(ws));
+    add(ConnectorAccounts.type, connectorAccountsKey(ws));
     return [...refs.values()];
 }
 

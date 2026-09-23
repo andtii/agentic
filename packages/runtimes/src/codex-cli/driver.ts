@@ -20,7 +20,7 @@ import { assertCwdInRoots, assertRuntime as assertRuntimeOf, closingWith } from 
 import { withPlatformMemoryLabel, withUnavailableConnectors } from '../harness/system.js';
 import { bridgedPlatformTools } from '../harness/tools.js';
 import { CODEX_CLI_PLUGIN_ID } from '../plugins.js';
-import { codexCli, type CodexSessionOptions, type ServeTools } from './agent.js';
+import { CODEX_CLI_CAPABILITIES, codexCli, type CodexSessionOptions, type ServeTools } from './agent.js';
 import { readCodexAuth } from './auth.js';
 import { spawnCodexAppServer, type CodexConnect, type CodexConnection, type SpawnCodexOptions } from './client.js';
 import { codexCliDoctor, type CodexDoctorInput } from './doctor.js';
@@ -38,7 +38,7 @@ export function codexSystemPrompt(system: string): string {
     return withPlatformMemoryLabel(system, CODEX_PLATFORM_MEMORY_NOTE);
 }
 
-export function codexCliCapabilityReport(agent: Agent, input: HarnessReportInput = {}) {
+export function codexCliCapabilityReport(agent: Pick<Agent, 'capabilities'>, input: HarnessReportInput = {}) {
     return harnessCapabilityReport({ runtime: RUNTIME, name: 'Codex', runtimeMemory: RUNTIME_MEMORY_REASON }, agent.capabilities, input);
 }
 
@@ -148,6 +148,8 @@ export function codexCliDriver(options: CodexCliDriverOptions = {}): CodexCliDri
         homeOf,
         connect,
         inspect,
+        // The adapter's capabilities do not depend on the environment (#541).
+        report: () => codexCliCapabilityReport({ capabilities: CODEX_CLI_CAPABILITIES }),
         pids: (environmentId) => {
             const pid = serverPids.get(environmentId);
             return pid === undefined ? [] : [pid];

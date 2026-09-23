@@ -10,7 +10,7 @@
  * never put in page state, the URL, a log or an error string.
  */
 import { component, signal, useData, useHead, type Define } from 'sigx';
-import { Link, useRouter } from '@sigx/router';
+import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { runtimeKindOf, type PermissionScope } from '@agentic/core';
 import type { Dependents, MemorySwitchReport, SlotKind } from '@agentic/platform';
@@ -26,6 +26,8 @@ import { usePluginSwitches } from './switches';
 import { LiveRuntimeMachines } from './RuntimeMachines';
 import { GenerateKeys } from '../../push/GenerateKeys';
 import { VAPID_SECRET, WEB_PUSH_PLUGIN } from '../../push/model';
+import { LiveConduitConnect } from './ConduitConnect';
+import { isConduitConnector, managedSecretsOf } from './conduit';
 
 export type LivePluginProps = Define.Prop<'id', string, true>;
 
@@ -34,6 +36,7 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
+    const route = useRoute();
     const agents = useAgentDirectory(defs, viewer);
     const key = (): string | null => (viewer.workspaceId ? registryKeyOf(viewer.workspaceId) : null);
     const ready = useWorkspaceReadiness(defs, viewer);
@@ -187,10 +190,14 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                     status={{ saving: st.saving, saved: st.saved, configError: st.configError || undefined, secretBusy: st.secretBusy, secretErrors: st.secretErrors, busy: st.busy, forceRemove: st.forceRemove }}
                                     agentOf={agents.lookup}
                                     toggle={() => switches.switchFor(p)}
+                                    managedSecrets={managedSecretsOf(p.manifest)}
                                     extra={() => (p.manifest.id === WEB_PUSH_PLUGIN && viewer.workspaceId
                                         ? <GenerateKeys plugin={p} workspaceId={viewer.workspaceId} hasKek={ready.overview()!.hasKek} hasPrivateKey={ready.overview()!.secretNames.includes(VAPID_SECRET)} defs={defs} />
-                                        // A harness runtime (#370): the machines that have it or lack it.
-                                        : runtimeKindOf(p.manifest) === 'harness' ? <LiveRuntimeMachines runtime={p.manifest.id} name={p.manifest.name} /> : null)}
+                                        // A conduit connector (Gmail, #533): the redirect URI, Connect / Reconnect / Disconnect and the account.
+                                        : isConduitConnector(p.manifest) && viewer.workspaceId
+                                            ? <LiveConduitConnect plugin={p} workspaceId={viewer.workspaceId} secretNames={ready.overview()!.secretNames} hasKek={ready.overview()!.hasKek} defs={defs} query={route.query} />
+                                            // A harness runtime (#370): the machines that have it or lack it.
+                                            : runtimeKindOf(p.manifest) === 'harness' ? <LiveRuntimeMachines runtime={p.manifest.id} name={p.manifest.name} /> : null)}
                                     onConfigure={(config: Record<string, unknown>) => { void configure(config); }}
                                     onSaveSecret={(w: SecretWrite) => { void saveSecret(w); }}
                                     onRemoveSecret={(name: string) => { void removeSecret(name); }}

@@ -205,7 +205,7 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 { "version": "0.1.1-main.1790000000.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
   "notesUrl": "https://github.com/andtii/agentic/releases/tag/daemon-latest",
   "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.1-main.1790000000.16c7d40" }, … },
-  "harnesses": { "claude-code": { "version": "0.3.274", "assets": { "win32-x64": { "url": "…/harness-claude-code-win32-x64.zip", "sha256": "…", "bytes": 113268266, "version": "0.3.274" }, … } }, … } }
+  "harnesses": { "claude-code": { "version": "0.3.280", "assets": { "win32-x64": { "url": "…/harness-claude-code-win32-x64.zip", "sha256": "…", "bytes": 113268266, "version": "0.3.280" }, … } }, … } }
 ```
 
 Two channels:
@@ -532,6 +532,28 @@ Off in every workspace until its owner turns it on:
 3. It reads the card at `${APP_ORIGIN}/_agentic/a2a/<agentId>/.well-known/agent-card.json` (or `${APP_ORIGIN}/.well-known/agent-card.json` while exactly one agent is exposed) and posts JSON-RPC to `${APP_ORIGIN}/_agentic/a2a/<agentId>` with `Authorization: Bearer <access token>`.
 
 Every message is a task of that agent — in its runtime, under its approvals, in the audit with `origin: external`. What a client sees: 401 without a valid token, **404 for everything while the plugin is off** or for an agent that is not exposed, 403 `insufficient_scope` for a grant without `tasks` + `sessions`. v1 keeps a live A2A task and its context's history in the isolate that runs it: a streaming or blocking `SendMessage` is complete in one request, but a `GetTask` — or the answer to an `INPUT_REQUIRED` — that reaches another isolate does not find it (the platform task itself is durable and visible at `/tasks`).
+
+### Connect Gmail (#533)
+
+Gmail signs in with **your own** Google OAuth client: the deployment ships none, so each workspace owner creates one in their own Google Cloud project. Nothing is typed into a file; everything below ends on `/plugins/gmail`.
+
+1. **A Google Cloud project.** In the [Google Cloud console](https://console.cloud.google.com/), create a project (or pick one you own).
+2. **Enable the Gmail API.** APIs & Services → Library → *Gmail API* → **Enable**.
+3. **The OAuth consent screen.** APIs & Services → OAuth consent screen (Google Auth Platform → Branding / Audience / Data access):
+   - User type **External** (or *Internal* in a Google Workspace org), an app name and your support email.
+   - Data access → add the scope `https://www.googleapis.com/auth/gmail.modify`.
+   - Audience: leave the publishing status on **Testing** and add yourself under **Test users**. Only test users can sign in while it is in Testing.
+4. **A Web OAuth client.** Credentials → Create credentials → **OAuth client ID** → application type **Web application**. Under **Authorized redirect URIs** add the redirect URI shown on `/plugins/gmail` (Copy): `/_agentic/connectors/callback` on the origin you open agentic on — for example `https://agentic-web.ekdahls.workers.dev/_agentic/connectors/callback`, or `http://localhost:8787/_agentic/connectors/callback` under `pnpm dev`. A deployment reachable on several hostnames (workers.dev and a custom domain) needs one redirect URI per hostname you connect from. Create, and keep the client ID and secret it shows.
+5. **Paste them.** `/plugins/gmail` → turn the plugin on → **OAuth client ID** and **OAuth client secret** → Save each. They are Registry secrets (`client-id`, `client-secret`), sealed under `WORKSPACE_KEK` and opened only while the plugin is on and holds `secret:client-id` / `secret:client-secret`.
+6. **Connect.** Click **Connect** → Google's consent screen (it warns that the app is unverified while in Testing: *Continue*) → back on `/plugins/gmail` it reads **CONNECTED** as your address. The first Connect also generates the workspace's `connector-engine-secret` (it signs the sign-in handshake and seals the account; there is no field for it).
+7. **Grant it.** An agent's config → Connectors → **gmail (conduit)** (the record the first Connect wrote). Its sessions on `anthropic-api` get `gmail__search-messages`, `gmail__get-message`, `gmail__send-email` and the rest. Searching and reading are read-only tools; sending, replying, drafting, labelling and trashing are ruled as network (trash as destructive) actions, so an approval rule such as `network: ask` stops each one for your approval in the Inbox.
+
+What to expect:
+
+- **7-day tokens in Testing.** While the consent screen is in Testing, Google's refresh tokens expire after 7 days. The account then flips to **NEEDS RECONNECTING**, the agent's Gmail calls say to reconnect, and History shows `connector needs reconnecting`. Click **Reconnect** (same account id, so every agent's grant stays). Publishing the consent screen lifts the 7-day limit; `gmail.modify` is a restricted scope, so an app used by anyone beyond its test users needs Google's verification.
+- **Disconnect** revokes the token at Google and forgets the account; the connector record stays, unconnected. Removing `connector-engine-secret` by hand makes every connected account unreadable (they show Reconnect).
+- **Sessions on a machine** (Claude Code and the other harness runtimes) do not get Gmail yet (#534); incoming mail as a trigger is #535.
+- Tokens never leave the Worker: not on a session spec, not to a daemon, not to the model, not in an export (`connector-accounts.ndjson` holds ids, status and the address only).
 
 ### Retention, export, delete
 

@@ -178,9 +178,10 @@ export const dependentCount = (deps: Dependents): number => deps.agents.length +
 /** "Disable github" — nothing running is stopped (AC-13: only NEW use is refused), so the button says exactly that. */
 export const disableLabel = (plugin: PluginView): string => `Disable ${plugin.manifest.name}`;
 
-/** One line per connector: transport and where it is. */
+/** One line per connector: transport and where it is. A conduit connector runs on the platform itself (#530, #533). */
 export function connectorWhere(c: ConnectorRecord): string {
     if (c.transport === 'streamable-http') return c.url ?? 'http';
+    if (c.transport === 'conduit') return `${c.connector ?? 'conduit'} on the platform${c.account === undefined ? ' · not connected' : ''}`;
     return `${c.command ?? 'stdio'}${c.args?.length ? ` ${c.args.join(' ')}` : ''}${c.machine ? ` on ${c.machine}` : ''}`;
 }
 

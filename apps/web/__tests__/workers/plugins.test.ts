@@ -52,7 +52,9 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
             [ANTHROPIC_API_PLUGIN_ID, true, true],
             ['claude-code', true, true],
             ['codex-cli', true, true],
-            ['copilot-cli', true, true]
+            ['copilot-cli', true, true],
+            // Off until the owner saves an OAuth client and connects (#533).
+            ['gmail', false, true]
         ]);
         expect(fresh.active).toEqual({ memory: 'agentic.memory.default', learning: 'agentic.learning.default' });
         expect(fresh.secretNames).toEqual([]);

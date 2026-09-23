@@ -14,6 +14,7 @@ import { Chat, ChatPage } from '../src/chat/index';
 import { FlatMemory, Memory, memoryActorKey } from '../src/memory/index';
 import { Inbox, inboxKey } from '../src/notify/index';
 import { defineRegistry, registryKey } from '../src/registry/index';
+import { ConnectorAccounts, connectorAccountsKey } from '../src/connector-accounts/index';
 import { defineScheduleActor } from '../src/schedule/index';
 import { recordingStorage, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 import { PairingDirectory } from '../src/pairing/index';
@@ -100,7 +101,7 @@ beforeEach(() => {
     purged = [];
     listing = true;
     fileStore.deleted.length = 0;
-    app = testActorApp([Workspace, AgentActor, Memory, FlatMemory, Chat, ChatPage, Schedule, Inbox, Registry, PairingDirectory, Session, SessionPage], { storage: recordingStorage() });
+    app = testActorApp([Workspace, AgentActor, Memory, FlatMemory, Chat, ChatPage, Schedule, Inbox, Registry, ConnectorAccounts, PairingDirectory, Session, SessionPage], { storage: recordingStorage() });
     return app.start();
 });
 afterEach(() => app.stop());
@@ -126,6 +127,8 @@ async function populate() {
     const registry = app.as(owner).actor(Registry, registryKey(WS));
     await registry.register(plugin, { enabled: true, grant: 'declared' });
     await registry.setSecret('github-token', 'ghp_secret');
+    // A connected account (#532, #533): conduit's sealed credentials string, which never leaves the actor.
+    await app.as(owner).actor(ConnectorAccounts, connectorAccountsKey(WS)).createAccount({ id: 'acct_1', owner: WS, connector: 'gmail', method: 'oauth', status: 'active', credentials: 'sealed.SEALED-CREDENTIALS', displayName: 'owner@example.com', version: 1, createdAt: 1, updatedAt: 1 });
     const { pairingCode } = await ws().registerMachinePending({ name: 'laptop' });
     return { agentId, chatId, scheduleId, pairingCode };
 }
@@ -147,7 +150,7 @@ describe('Workspace.exportAll', () => {
         expect(op.prefix).toMatch(new RegExp(`^${WS}/\\d{4}-`));
 
         const paths = [...files.keys()].map((p) => p.slice(op.prefix!.length + 1)).sort();
-        expect(paths).toEqual(['agents.ndjson', 'chats.ndjson', 'inbox.ndjson', 'manifest.json', 'memory.ndjson', 'registry.ndjson', 'schedules.ndjson', 'sessions.ndjson', 'tasks.ndjson', 'workspace.ndjson']);
+        expect(paths).toEqual(['agents.ndjson', 'chats.ndjson', 'connector-accounts.ndjson', 'inbox.ndjson', 'manifest.json', 'memory.ndjson', 'registry.ndjson', 'schedules.ndjson', 'sessions.ndjson', 'tasks.ndjson', 'workspace.ndjson']);
         const at = (kind: string) => rows(`${op.prefix}/${kind}.ndjson`);
 
         expect(at('workspace')[0]).toMatchObject({ kind: 'workspace', workspace: { owner: 'u1', agents: [agentId], chats: [chatId], schedules: [scheduleId] } });
@@ -166,14 +169,16 @@ describe('Workspace.exportAll', () => {
         expect(at('schedules')).toMatchObject([{ kind: 'schedule', id: scheduleId, schedule: { title: 'stand-up' } }]);
         expect(at('inbox')).toMatchObject([{ kind: 'notification', notification: { title: 'Stand-up' } }]);
         expect(at('registry').map((r) => r.kind)).toEqual(['plugin', 'secret']);
+        expect(at('connector-accounts')).toEqual([{ kind: 'connector-account', account: { id: 'acct_1', connector: 'gmail', status: 'active', displayName: 'owner@example.com' } }]);
 
         const everything = [...files.values()].join('\n');
         expect(everything).not.toContain('ghp_secret');
         expect(everything).not.toContain('kek1.');
         expect(everything).not.toContain(pairingCode);
+        expect(everything).not.toContain('SEALED-CREDENTIALS');
 
         const manifest = JSON.parse(files.get(`${op.prefix}/manifest.json`)!) as { files: { path: string; rows: number }[]; retention: unknown; notExported: unknown[] };
-        expect(manifest.files).toHaveLength(9);
+        expect(manifest.files).toHaveLength(10);
         expect(manifest.retention).toEqual({ sessionLogDays: 90, artifactDays: 30 });
         expect(manifest.notExported).toEqual([]);
     });
@@ -198,7 +203,7 @@ describe('Workspace.deleteAll', () => {
     it('leaves no actor state for the workspace in storage', async () => {
         const { agentId, chatId } = await populate();
         const before = savedRefs();
-        expect(before.map((r) => r.type).sort()).toEqual(['Agent', 'Chat', 'FlatMemory', 'Inbox', 'Memory', 'Memory', 'Registry', 'Schedule', 'Workspace']);
+        expect(before.map((r) => r.type).sort()).toEqual(['Agent', 'Chat', 'ConnectorAccounts', 'FlatMemory', 'Inbox', 'Memory', 'Memory', 'Registry', 'Schedule', 'Workspace']);
         for (const ref of before) expect(await app.storage.load(ref.type, ref.key)).not.toBeNull();
 
         await ws().deleteAll();
@@ -215,6 +220,7 @@ describe('Workspace.deleteAll', () => {
         expect(purgedKeys).toContain(`Memory ${memoryActorKey(WS, 'shared:team')}`);
         expect(purgedKeys).toContain(`FlatMemory ${memoryActorKey(WS, `agent:${agentId}`)}`);
         expect(purgedKeys).toContain(`Registry ${registryKey(WS)}`);
+        expect(purgedKeys).toContain(`ConnectorAccounts ${connectorAccountsKey(WS)}`);
         expect(purgedKeys).not.toContain(`Workspace ${KEY}`);
         // Every chat's attachments went through the file store (#205).
         expect(fileStore.deleted).toEqual([`${WS}/${chatId}`]);

@@ -90,10 +90,14 @@ describe('features', () => {
         expect(withOrigin({}, {}, GIT.origin)).toEqual({});
     });
 
-    it('the mock Registry lists one project feature and one connector', () => {
+    it('the mock Registry lists one project feature and its connectors', () => {
         expect(featureManifestsOf(opsPlugins).map((m) => m.id)).toEqual(['agentic.feature.git']);
         expect(featureManifestsOf(opsPlugins)[0]!.projectSettings.properties).toHaveProperty('origin');
-        expect(connectorOptionsOf(opsPlugins)).toEqual([{ value: 'github-mcp', label: 'GitHub (MCP)' }]);
+        expect(connectorOptionsOf(opsPlugins)).toEqual([
+            { value: 'github-mcp', label: 'GitHub (MCP)' },
+            // A conduit connector (#533).
+            { value: 'gmail', label: 'Gmail' }
+        ]);
     });
 });
 

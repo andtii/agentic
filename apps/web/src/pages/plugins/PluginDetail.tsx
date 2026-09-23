@@ -48,6 +48,8 @@ export type PluginDetailProps =
     & Define.Prop<'toggle', () => JSXElement, true>
     /** One plugin's own action, drawn after its keys (Web Push's "Generate keys", #244); most plugins have none. */
     & Define.Prop<'extra', () => JSXElement | null>
+    /** Declared secrets the plugin manages itself (a conduit connector's engine secret, #533): no field is offered for them. */
+    & Define.Prop<'managedSecrets', readonly string[]>
     & Define.Event<'configure', Record<string, unknown>>
     & Define.Event<'saveSecret', SecretWrite>
     & Define.Event<'removeSecret', string>
@@ -62,6 +64,7 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
     const st = props.status ?? {};
     const deps = props.dependents;
     const slot = isSingleSlot(m.kind);
+    const secrets = (m.secrets ?? []).filter((s) => !(props.managedSecrets ?? []).includes(s.name));
     return (
         <div data-plugin-detail data-plugin={m.id}>
             <header data-plugin-detail-head>
@@ -100,11 +103,11 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => ()
                 {st.saved ? <p data-plugin-saved role="status">Saved.</p> : null}
             </section>
 
-            {m.secrets?.length ? (
+            {secrets.length ? (
                 <section data-plugin-panel="secrets" aria-label="Keys">
                     <Label>Keys</Label>
                     <p data-plugin-hint>Sealed under the workspace key and never shown again. The plugin reads one only while it is enabled and holds the permission for it.</p>
-                    {m.secrets.map((s) => (
+                    {secrets.map((s) => (
                         <SecretField
                             name={s.name}
                             label={s.title}
