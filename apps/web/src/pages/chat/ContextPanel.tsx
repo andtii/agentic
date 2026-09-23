@@ -248,7 +248,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                                 {member.workdir ? <button type="button" data-member-workdir-clear aria-label={`Use the project folder for ${a.name}`} title="Back to the project folder" onClick={() => emit('setWorkdir', { agentId: member.agentId, ref: null })}><Icon name="close" size={14} /></button> : null}
                                             </span>
                                         ) : null}
-                                        {model || models.length ? optionRow('model', 'settings', model ?? 'runtime default', models) : null}
+                                        {model || models.length ? optionRow('model', 'settings', model ? (models.find((c) => c.id === model)?.label ?? model) : 'runtime default', models) : null}
                                         {modes.length ? optionRow('permissionMode', 'shield', mode, modes) : null}
                                     </div>
                                     {listbox}

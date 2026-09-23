@@ -60,7 +60,7 @@ export const anthropicApiPlugin: PluginManifest = {
  * `CLAUDE_CODE_MODELS` plus the ones it leaves out that a subscription may have. Spelled out, not imported: this entry
  * runs in the Worker and the adapter is Node's (a test keeps the two in step). An environment's `models` replace it.
  */
-export const CLAUDE_CODE_MODEL_IDS: readonly string[] = ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
+export const CLAUDE_CODE_MODEL_IDS: readonly string[] = ['opus', 'sonnet', 'haiku', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
 
 /** Claude Code's permission modes (#453), the adapter's `PERMISSION_MODES`; `bypassPermissions` only runs where the environment allows it. */
 export const CLAUDE_CODE_PERMISSION_MODES: readonly string[] = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions'];

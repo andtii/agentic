@@ -7,6 +7,9 @@ describe('pricing table', () => {
         expect(ANTHROPIC_PRICING['claude-haiku-4-5']).toEqual({ input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 });
         // Fable 5.1 reads the cache at a flat $0.25, not 0.1× input.
         expect(ANTHROPIC_PRICING['claude-fable-5-1']).toEqual({ input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 });
+        // Opus 5.5 (#517) is cheaper than Opus 5, and its snapshots are not priced as Opus 5.
+        expect(ANTHROPIC_PRICING['claude-opus-5-5']).toEqual({ input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 });
+        expect(resolvePricing('claude-opus-5-5-20260901').pricing).toBe(ANTHROPIC_PRICING['claude-opus-5-5']);
     });
     it('resolves a known id as fact and a dated snapshot to its id', () => {
         expect(resolvePricing('claude-opus-5')).toEqual({ modelId: 'claude-opus-5', pricing: ANTHROPIC_PRICING['claude-opus-5'], estimated: false });
