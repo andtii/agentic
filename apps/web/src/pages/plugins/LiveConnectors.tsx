@@ -78,7 +78,8 @@ export const LiveConnectors = component<LiveConnectorsProps>(({ props }) => {
     };
 
     return () => {
-        const list = connectors.value;
+        // A conduit connector (Gmail, #533) is set up and connected on its own plugin page, not here.
+        const list = connectors.value?.filter((c) => c.transport !== 'conduit');
         const removing = st.removing;
         const names = removing ? dependentNames(removing.dependents, props.agentName) : [];
         return (

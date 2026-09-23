@@ -3,7 +3,11 @@ import { Link, useRoute, useRouter } from '@sigx/router';
 import { runtimeKindOf, type PermissionScope, type PluginReadinessFacts } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
 import { EmptyState, Switch } from '@agentic/ui';
-import { opsHarness, opsMachines, opsPluginDependents, opsPlugins } from '../mock/ops';
+import { opsGmailAccount, opsHarness, opsMachines, opsPluginDependents, opsPlugins } from '../mock/ops';
+import { connectorRedirectUri } from '../connectors/paths';
+import { pageOrigin } from './machines/LivePair';
+import { ConduitConnectPanel } from './plugins/ConduitConnect';
+import { connectBlocker, isConduitConnector, managedSecretsOf, operationsOf, unsupportedOf, type ConnectionState } from './plugins/conduit';
 import { runtimeOnMachine } from './machines/harness';
 import { defineTopbar, routeId } from '../components/topbar';
 import { dataMode } from '../data-mode';
@@ -30,13 +34,14 @@ export type PluginPageViewProps =
 export const PluginPageView = component<PluginPageViewProps>(({ props }) => {
     const router = useRouter();
     const base = props.facts ?? mockPluginFacts();
-    const st = signal<{ enabled: boolean; config: Record<string, unknown>; granted: PermissionScope[]; secretNames: string[]; active: boolean | undefined; saved: boolean }>({
+    const st = signal<{ enabled: boolean; config: Record<string, unknown>; granted: PermissionScope[]; secretNames: string[]; active: boolean | undefined; saved: boolean; connection: ConnectionState }>({
         enabled: props.plugin.enabled,
         config: { ...props.plugin.config },
         granted: [...props.plugin.grantedPermissions],
         secretNames: [...base.secretNames],
         active: props.plugin.active,
-        saved: false
+        saved: false,
+        connection: { state: 'active', account: opsGmailAccount } as ConnectionState
     });
     const current = (): PluginView => ({ ...props.plugin, enabled: st.enabled, config: st.config, grantedPermissions: st.granted, ...(st.active === undefined ? {} : { active: st.active }) });
 
@@ -53,10 +58,23 @@ export const PluginPageView = component<PluginPageViewProps>(({ props }) => {
                     secretNames={st.secretNames}
                     status={{ saved: st.saved }}
                     agentOf={mockAgentOf}
+                    managedSecrets={managedSecretsOf(p.manifest)}
                     extra={() => (runtimeKindOf(p.manifest) === 'harness' ? (
                         <RuntimeMachines name={p.manifest.name}>
                             {opsMachines.map((m) => <RuntimeMachineRow machine={runtimeOnMachine(id, { machineId: m.id, name: m.name, online: m.online, ...opsHarness(m.id) })} />)}
                         </RuntimeMachines>
+                    ) : isConduitConnector(p.manifest) ? (
+                        // A conduit connector (#533): Connect flips the mock account; nothing leaves the page.
+                        <ConduitConnectPanel
+                            name={p.manifest.name}
+                            redirectUri={connectorRedirectUri(pageOrigin())}
+                            connection={st.connection}
+                            blocker={connectBlocker(p, st.secretNames, base.hasKek)}
+                            operations={operationsOf(p.manifest)}
+                            unsupported={unsupportedOf(p.manifest)}
+                            onConnect={() => { st.connection = { state: 'active', account: opsGmailAccount }; }}
+                            onDisconnect={() => { st.connection = { state: 'not-connected' }; }}
+                        />
                     ) : null)}
                     toggle={() => <Switch label={`Enable ${p.manifest.name}`} hideLabel model={() => st.enabled} />}
                     onConfigure={(config: Record<string, unknown>) => { st.config = config; st.saved = true; }}

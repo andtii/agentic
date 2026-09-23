@@ -17,6 +17,7 @@ export const inboxKeyOf = (ws: string): string => `${ws}:inbox`;
 export const machineKeyOf = (ws: string, id: string): string => `${ws}:machine:${id}`;
 export const scheduleKeyOf = (ws: string, id: string): string => `${ws}:schedule:${id}`;
 export const registryKeyOf = (ws: string): string => `${ws}:registry`;
+export const connectorAccountsKeyOf = (ws: string): string => `${ws}:connector-accounts`;
 export const taskIndexKeyOf = (ws: string): string => `${ws}:task-index`;
 export const auditKeyOf = (ws: string): string => `${ws}:audit`;
 /** `month` is `yyyy-mm` in UTC (`ledgerMonthOf`). */

@@ -177,6 +177,9 @@ importers:
       '@agentic/a2a':
         specifier: workspace:*
         version: link:../../packages/a2a
+      '@agentic/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@agentic/core':
         specifier: workspace:*
         version: link:../../packages/core

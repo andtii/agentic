@@ -14,7 +14,7 @@
  * Tests provide either, plus their own transport.
  */
 import { defineInjectable } from 'sigx';
-import type { AgentActor, AuditActor, Chat, FlatMemory, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
+import type { AgentActor, AuditActor, Chat, ConnectorAccounts, FlatMemory, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
 
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
@@ -41,6 +41,8 @@ export interface ActorDefs {
     readonly Memory: typeof Memory;
     /** The flat memory plugin's store of a scope, same key (#281) — read instead of `Memory` while that plugin is active. */
     readonly FlatMemory: typeof FlatMemory;
+    /** The workspace's connected conduit accounts (#532) — a connector page's status (#533). Summaries only, never credentials. */
+    readonly ConnectorAccounts: typeof ConnectorAccounts;
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });

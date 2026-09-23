@@ -291,6 +291,18 @@ describe('a conduit connector on a local session (#530)', () => {
         expect(h.closed()).toBe(1);
     });
 
+    it('the opener is handed the session context beside the ids (#533)', async () => {
+        const seen: unknown[] = [];
+        const context = { workspaceId: WS, principal: owner, secret: async () => undefined };
+        await openSessionConnectors({
+            connectors: [gmail()],
+            opener: async (_input, ctx) => (seen.push(ctx), { tools: [], toolNames: [], close: async () => undefined }),
+            secret: async () => undefined,
+            context
+        });
+        expect(seen).toEqual([context]);
+    });
+
     it('one not connected yet is left out, with the reason and where to connect it; the opener is not called', async () => {
         const h = harness();
         const opened = await h.open([gmail({ account: undefined })]);

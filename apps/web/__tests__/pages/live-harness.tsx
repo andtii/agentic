@@ -19,7 +19,7 @@ import { createFetchHandler } from '@sigx/actors/server';
 import { stubServerApp } from '@sigx/server/testing';
 import { mockAgent, type MockAgent, type MockAgentOptions } from '@sigx/ai-agent/testing';
 import type { AgentId, Principal, WorkspaceId } from '@agentic/core';
-import { AgentActor, AuditActor, ChatPage, FlatMemory, LedgerActor, Memory, PairingDirectory, TaskActor, TaskIndex, Workspace, agentKey, createToolCallPort, defineChatActor, defineInbox, defineMachineActor, defineRegistry, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type MachineSocketPort, type SessionFactory, type WorkspaceStore } from '@agentic/platform';
+import { AgentActor, AuditActor, ChatPage, ConnectorAccounts, FlatMemory, LedgerActor, Memory, PairingDirectory, TaskActor, TaskIndex, Workspace, agentKey, createToolCallPort, defineChatActor, defineInbox, defineMachineActor, defineRegistry, defineRoutingActor, defineSessionActor, sessionPolicy, workspaceKey, type MachineSocketPort, type SessionFactory, type WorkspaceStore } from '@agentic/platform';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../../../packages/platform/src/testing/index';
 import { clientDefs } from '../../src/actors/client';
 import { useActorDefs, useViewer } from '../../src/actors/defs';
@@ -86,7 +86,7 @@ export async function startLive(agentScript: MockAgentOptions = { respond: (inpu
     const Chat = defineChatActor({ routing: () => Routing });
     const extra = options.actors ?? [];
     const typeOf = (d: AnyActorDefinition): string => (d as { type: string }).type;
-    const base = [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, Routing, Machine, PairingDirectory, Inbox, Memory, FlatMemory, LedgerActor, AuditActor, defineRegistry()].filter((d) => !extra.some((e) => typeOf(e) === typeOf(d)));
+    const base = [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, Routing, Machine, PairingDirectory, Inbox, Memory, FlatMemory, LedgerActor, AuditActor, ConnectorAccounts, defineRegistry()].filter((d) => !extra.some((e) => typeOf(e) === typeOf(d)));
     const app = testActorApp([...base, ...extra], options.defaults ? { defaults: options.defaults } : {});
     await app.start();
     // After `start()` (last-wins seam): the wire authenticates the `x-user` header; hops keep the JSON codec.
