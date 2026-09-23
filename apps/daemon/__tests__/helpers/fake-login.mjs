@@ -1,6 +1,9 @@
 // A CLI's sign-in as the relay sees it (#484): prints what the real ones print (the #483 spike's captures) and ends
 // the way they end. `--kind claude` waits for a code on stdin and accepts `--accept <code>`; `--kind codex` / `copilot`
-// print a device code and exit 0 after `--after <ms>` (default 50); `--hang` never exits (for cancel / timeout).
+// print a device code and exit 0 after `--after <ms>` (default 50); `--hang` never exits (for cancel / timeout);
+// `--pid-file <path>` writes its own pid there first, so a test can tell it is really gone (#520).
+import { writeFileSync } from 'node:fs';
+
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
     const i = args.indexOf(`--${name}`);
@@ -12,6 +15,8 @@ const after = Number(flag('after', '50'));
 const hang = args.includes('--hang');
 const bad = args.includes('--bad');
 const stay = () => setInterval(() => undefined, 1_000);
+const pidFile = flag('pid-file', undefined);
+if (pidFile) writeFileSync(pidFile, String(process.pid));
 
 if (bad) {
     process.stderr.write('Error: the browser could not be opened and no code was given\n');
