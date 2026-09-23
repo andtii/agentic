@@ -13,6 +13,7 @@ export {
     type AuditEventInput,
     type AuditKind,
     type ConfigVersionedData,
+    type ConnectorAccountData,
     type DelegationCreatedData,
     type EnvironmentChosenData,
     type EnvironmentPutData,
