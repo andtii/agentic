@@ -116,6 +116,7 @@ import type { SecureWriteOptions } from './credentials.js';
 import { answerEnvRequest } from './env-manage.js';
 import type { NdjsonEventLog, RetentionPolicy } from './event-log.js';
 import { answerFsRequest, checkWithinRoots } from './fs.js';
+import type { VcsProvider } from './vcs/provider.js';
 import { fetchReleaseManifest, harnessAsset, HarnessError, type HarnessStore } from './harness.js';
 import { silentLogger, type Logger } from './logger.js';
 import type { LoginRelay } from './login-relay.js';
@@ -145,6 +146,8 @@ export interface DaemonOptions {
     readonly environments: readonly LocalEnvironment[];
     readonly drivers: readonly DaemonDriver[];
     readonly eventLog: NdjsonEventLog;
+    /** The version control behind a session folder's `tree` / `read` / `changes` (#561), asked in turn. Default: git from PATH. */
+    readonly vcs?: readonly VcsProvider[];
     readonly logger?: Logger;
     /** Default 30 s. */
     readonly heartbeatMs?: number;
@@ -478,7 +481,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
     }
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
-    const features: DaemonFeature[] = [...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : []), ...(options.login ? (['login'] as const) : [])];
+    // `files` (#561): a session folder's tree, files and changes — always answered; without git a folder just has no VCS.
+    const features: DaemonFeature[] = ['files', ...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : []), ...(options.login ? (['login'] as const) : [])];
     /** The sign-ins running (#484), one per environment: the request they answer and the relay to feed or end. */
     const logins = new Map<EnvironmentId, { readonly requestId: string; readonly relay: LoginRelay }>();
     const version = options.daemonVersion ?? DAEMON_VERSION;
@@ -910,7 +914,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     // -------------------------------------------------------------- folders
 
     async function fsRequest(frame: PlatformFrameOf<'fs.request'>): Promise<void> {
-        const outcome = await answerFsRequest(environments, frame.environmentId, frame.op, { platform, logger });
+        const outcome = await answerFsRequest(environments, frame.environmentId, frame.op, { platform, logger, ...(options.vcs ? { vcs: options.vcs } : {}) });
         send({ v: V, t: 'fs.response', requestId: frame.requestId, ...outcome });
     }
 
