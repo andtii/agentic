@@ -51,6 +51,7 @@
     "@sigx/ai-agent": "catalog:",
     "@sigx/ai": "catalog:",
     "@sigx/zero-daisyui": "catalog:",
+    "@sigx/monaco-editor": "catalog:",
     "shiki": "^4.4.3"
   },
   "devDependencies": {
