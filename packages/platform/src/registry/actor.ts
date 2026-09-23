@@ -630,7 +630,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 if (input.transport === 'stdio' && typeof input.command !== 'string') throw new TypeError('[registry] a stdio connector needs a command');
                 if (input.transport === 'conduit') {
                     if (typeof input.connector !== 'string' || input.connector === '') throw new TypeError('[registry] a conduit connector needs a connector id');
-                    if (input.url !== undefined || input.command !== undefined || input.auth !== undefined) throw new TypeError('[registry] a conduit connector has no url, command or auth');
+                    // Ids only: its OAuth client is the connector plugin's secrets, its tokens the account's — never named on the record.
+                    if (input.url !== undefined || input.command !== undefined || input.auth !== undefined || input.secrets !== undefined) throw new TypeError('[registry] a conduit connector has no url, command, secrets or auth');
                 }
                 for (const s of input.secrets ?? []) assertName(s, 'secret name');
                 const bound = [input.auth?.bearer, ...Object.values(input.auth?.headers ?? {}), ...Object.values(input.auth?.env ?? {})].filter((s): s is string => s !== undefined);

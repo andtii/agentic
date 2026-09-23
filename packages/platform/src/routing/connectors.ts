@@ -29,7 +29,7 @@
  * A CONDUIT connector (#530, decisions 2026-09-23) goes to the same opener as
  * `{ kind: 'conduit', id, pluginId, connector, account }` — ids only: the
  * opener resolves the OAuth client and the account's tokens itself, so no
- * secret is opened here. One the owner has not connected yet (no `account`)
+ * secret is opened here. One that the owner has not connected yet (no `account`)
  * is left out and the agent told so. A daemon-hosted session leaves conduit
  * connectors out until they are reachable from a machine (#534).
  */

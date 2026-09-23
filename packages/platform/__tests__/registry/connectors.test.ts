@@ -95,12 +95,13 @@ describe('a conduit connector (#530)', () => {
         expect((await reg().gate({ connectors: ['gmail'] })).connectors?.[0]).not.toHaveProperty('account');
     });
 
-    it('needs a connector id and has no url, command or auth', async () => {
+    it('needs a connector id and has no url, command, secrets or auth', async () => {
         await reg().register(gmail, { enabled: true, grant: 'declared' });
         await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit' })).rejects.toThrow(/needs a connector id/);
-        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', url: 'https://x.test/mcp' })).rejects.toThrow(/no url, command or auth/);
-        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', command: 'x' })).rejects.toThrow(/no url, command or auth/);
-        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', secrets: ['t'], auth: { bearer: 't' } })).rejects.toThrow(/no url, command or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', url: 'https://x.test/mcp' })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', command: 'x' })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', secrets: ['t'] })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', auth: { bearer: 't' } })).rejects.toThrow(/no url, command, secrets or auth/);
         expect(await reg().connectors()).toEqual([]);
     });
 });
