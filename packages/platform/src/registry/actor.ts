@@ -230,6 +230,19 @@ export function defineRegistry(options: RegistryOptions = {}) {
         const p = record ? current(ctx, record.pluginId) : undefined;
         if (!record || !p || p.manifest.kind !== 'connector') return { id, state: 'missing' };
         if (!p.enabled) return { id, state: 'disabled', pluginId: p.manifest.id };
+        // A conduit connector (#530) is opened by the platform from the ids alone: no endpoint, no secret names.
+        if (record.transport === 'conduit') {
+            return {
+                id: record.id,
+                state: 'ready',
+                pluginId: p.manifest.id,
+                transport: 'conduit',
+                ...(record.connector !== undefined ? { connector: record.connector } : {}),
+                ...(record.account !== undefined ? { account: record.account } : {}),
+                tools: record.tools,
+                status: record.status
+            };
+        }
         const config = mergedConfig(p);
         const url = typeof config['url'] === 'string' ? config['url'] : record.url;
         const command = typeof config['command'] === 'string' ? config['command'] : record.command;
@@ -615,6 +628,10 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 plugin(ctx, input.pluginId);
                 if (input.transport === 'streamable-http' && typeof input.url !== 'string') throw new TypeError('[registry] an http connector needs a url');
                 if (input.transport === 'stdio' && typeof input.command !== 'string') throw new TypeError('[registry] a stdio connector needs a command');
+                if (input.transport === 'conduit') {
+                    if (typeof input.connector !== 'string' || input.connector === '') throw new TypeError('[registry] a conduit connector needs a connector id');
+                    if (input.url !== undefined || input.command !== undefined || input.auth !== undefined) throw new TypeError('[registry] a conduit connector has no url, command or auth');
+                }
                 for (const s of input.secrets ?? []) assertName(s, 'secret name');
                 const bound = [input.auth?.bearer, ...Object.values(input.auth?.headers ?? {}), ...Object.values(input.auth?.env ?? {})].filter((s): s is string => s !== undefined);
                 for (const s of bound) {

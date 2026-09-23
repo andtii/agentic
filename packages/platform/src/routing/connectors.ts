@@ -25,6 +25,13 @@
  * NAMES only (the Machine keeps the spec), and the daemon asks for the values
  * over its own `tool.call` (`CONNECTOR_CREDENTIALS_TOOL`), answered by
  * `connectorCredentials` for a connector the calling session's gate names.
+ *
+ * A CONDUIT connector (#530, decisions 2026-09-23) goes to the same opener as
+ * `{ kind: 'conduit', id, pluginId, connector, account }` — ids only: the
+ * opener resolves the OAuth client and the account's tokens itself, so no
+ * secret is opened here. One the owner has not connected yet (no `account`)
+ * is left out and the agent told so. A daemon-hosted session leaves conduit
+ * connectors out until they are reachable from a machine (#534).
  */
 
 import type { ConnectorCredentials, OpenSpecConnector } from '@agentic/core';
@@ -35,13 +42,29 @@ import type { ConnectorStatus, GateConnector } from '../registry/types.js';
 /** A tool as the model agent takes it (`@sigx/ai`'s `AnyTool`). */
 export type ConnectorTool = NonNullable<PlatformAgentDeps['tools']>[number];
 
-/** What the app's opener is handed for one Streamable HTTP connector: credential VALUES, opened for this session only. */
-export interface ConnectorOpenInput {
+/** What the app's opener is handed for one Streamable HTTP MCP connector: credential VALUES, opened for this session only. */
+export interface McpConnectorOpenInput {
+    readonly kind: 'mcp';
     readonly id: string;
     readonly url: string;
     readonly bearer?: string;
     readonly headers?: Readonly<Record<string, string>>;
 }
+
+/** What the app's opener is handed for one conduit connector: ids only — the opener resolves the OAuth client and the account's tokens itself. */
+export interface ConduitConnectorOpenInput {
+    readonly kind: 'conduit';
+    readonly id: string;
+    /** The connector plugin, whose `secret:` grants cover its OAuth client. */
+    readonly pluginId: string;
+    /** The conduit connector id (`gmail`). */
+    readonly connector: string;
+    /** The conduit account id the owner connected. */
+    readonly account: string;
+}
+
+/** One connector for the app's opener, by the engine that opens it. */
+export type ConnectorOpenInput = McpConnectorOpenInput | ConduitConnectorOpenInput;
 
 export interface OpenedConnector {
     readonly tools: readonly ConnectorTool[];
@@ -50,7 +73,7 @@ export interface OpenedConnector {
     close(): Promise<void>;
 }
 
-/** Opens one connector as tools — `openMcpConnector` of `@agentic/mcp`, injected where the app is composed. */
+/** Opens one connector as tools, dispatching on `kind` — injected where the app is composed (`mcp` → `openMcpConnector` of `@agentic/mcp`). */
 export type ConnectorOpener = (input: ConnectorOpenInput) => Promise<OpenedConnector>;
 
 /** A connector the agent names that this session runs without, and why — told to the agent. */
@@ -119,20 +142,26 @@ function notReady(c: GateConnector): string | undefined {
     return undefined;
 }
 
+/** Records what an open found — only when it differs from what the gate answer says the Registry has; never throws. */
+function recorder(c: GateConnector, input: OpenSessionConnectorsInput): (status: ConnectorStatus, tools?: readonly string[]) => Promise<void> {
+    return async (status, tools) => {
+        const unchanged = c.status?.state === status.state && (status.state !== 'error' || c.status.error === status.error) && (tools === undefined || sameTools(c.tools, tools));
+        if (unchanged || !input.report) return;
+        await input.report(c.id, status, tools).catch((e: unknown) => console.warn(`[routing] connector ${c.id}: status not recorded:`, e));
+    };
+}
+
 async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Promise<Outcome> {
     const skip = (reason: string): Outcome => ({ unavailable: { id: c.id, reason } });
     const why = notReady(c);
     if (why !== undefined) return skip(why);
+    if (c.transport === 'conduit') return openConduit(c, input);
     if (c.transport !== 'streamable-http') return skip('it runs on a machine over stdio; only an agent whose sessions run on a machine can use it');
     if (!input.opener) return skip('this deployment cannot open MCP connectors');
     if (c.url === undefined) return skip('it has no URL');
     const pluginId = c.pluginId ?? c.id;
     const values: string[] = [];
-    const record = async (status: ConnectorStatus, tools?: readonly string[]): Promise<void> => {
-        const unchanged = c.status?.state === status.state && (status.state !== 'error' || c.status.error === status.error) && (tools === undefined || sameTools(c.tools, tools));
-        if (unchanged || !input.report) return;
-        await input.report(c.id, status, tools).catch((e: unknown) => console.warn(`[routing] connector ${c.id}: status not recorded:`, e));
-    };
+    const record = recorder(c, input);
     try {
         const need = async (name: string): Promise<string> => {
             const value = await input.secret(name, pluginId);
@@ -143,7 +172,7 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
         const bearer = c.auth?.bearer !== undefined ? await need(c.auth.bearer) : undefined;
         const headers: Record<string, string> = {};
         for (const [header, name] of Object.entries(c.auth?.headers ?? {})) headers[header] = await need(name);
-        const opened = await input.opener({ id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}) });
+        const opened = await input.opener({ kind: 'mcp', id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}) });
         await record({ state: 'ok' }, opened.toolNames);
         return { opened };
     } catch (e) {
@@ -152,6 +181,28 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
         // A secret not set is recorded too, so the plugin page shows why the connector does nothing.
         await record({ state: 'error', error: unset ? `secret not set: ${message}` : message });
         return skip(unset ? message : `it could not be reached: ${message}`);
+    }
+}
+
+/**
+ * A ready conduit connector (#530): no secret is opened here — the opener resolves the OAuth client and the account's
+ * tokens itself. Not connected yet (no `account`) → left out, and the agent told where the owner connects it.
+ */
+async function openConduit(c: GateConnector, input: OpenSessionConnectorsInput): Promise<Outcome> {
+    const skip = (reason: string): Outcome => ({ unavailable: { id: c.id, reason } });
+    const pluginId = c.pluginId ?? c.id;
+    if (c.connector === undefined) return skip('it names no conduit connector');
+    if (c.account === undefined) return skip(`it is not connected yet (/plugins/${pluginId})`);
+    if (!input.opener) return skip('this deployment cannot open conduit connectors');
+    const record = recorder(c, input);
+    try {
+        const opened = await input.opener({ kind: 'conduit', id: c.id, pluginId, connector: c.connector, account: c.account });
+        await record({ state: 'ok' }, opened.toolNames);
+        return { opened };
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        await record({ state: 'error', error: message });
+        return skip(`it could not be opened: ${message}`);
     }
 }
 
@@ -221,6 +272,10 @@ export function daemonConnectors(connectors: readonly GateConnector[], machineId
         const why = notReady(c);
         if (why !== undefined) {
             unavailable.push({ id: c.id, reason: why });
+            continue;
+        }
+        if (c.transport === 'conduit') {
+            unavailable.push({ id: c.id, reason: 'it runs on the platform and is not yet reachable from a machine session' });
             continue;
         }
         const transport = c.transport ?? 'streamable-http';
