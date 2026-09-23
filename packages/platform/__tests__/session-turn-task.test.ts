@@ -277,3 +277,111 @@ describe('one session, many tasks: the turn owns the task (#390)', () => {
         await pump;
     });
 });
+
+describe('a turn the runtime starts itself (#510)', () => {
+    /**
+     * Claude Code starts a turn of its own when a background task it waited on finishes: a `turn-start` with a turn id
+     * the runtime minted and no prompt of ours behind it. The test plays it by prompting the served session directly —
+     * the daemon's side — so the platform sees only its frames.
+     */
+    async function daemonSession(sessionId: string) {
+        await twoTasks(sessionId as SessionId);
+        await session(sessionId).open({ agentId: ADA, runtime: 'claude-code', chatId: CHAT, taskId: A, machineId: 'machine_1' as MachineId, config });
+        const upstream: AgentSession = await agent.session({ policy: firstMatch() });
+        const served = serveSession(upstream, { agentId: agent.id, capabilities: agent.capabilities });
+        const frames: WireFrame[] = [];
+        const pump = (async () => {
+            for await (const f of served.events({ epoch: 0, seq: 0 })) frames.push(f);
+        })();
+        const asMachine = session(sessionId, machine);
+        const upstreamHas = (type: string, turnId: string) => frames.some((f) => f.kind === 'event' && f.event.type === type && f.event.turnId === turnId);
+        /** Forward what the daemon has, up to and including the first event matching `upTo`. */
+        const forward = async (upTo?: (ev: WireFrame) => boolean) => {
+            const i = upTo ? frames.findIndex(upTo) : frames.length - 1;
+            const batch = frames.splice(0, i + 1);
+            if (batch.length) await asMachine.forwardFrames(batch);
+        };
+        const handle = () => Promise.all(sent.splice(0).map((command) => served.handleCommand(command)));
+        const relay = async () => {
+            for (const reply of await handle()) await asMachine.commandReplied(reply);
+        };
+        /** The runtime starts turn `turnId` on its own and runs it to its end on the daemon's side. */
+        const runtimeTurn = async (turnId: string, text: string) => {
+            await served.handleCommand({ v: 1, commandId: turnId, type: 'prompt', turnId, input: [{ type: 'text', text }] });
+            await until(() => upstreamHas('turn-end', turnId), `${turnId} to end upstream`);
+        };
+        const stop = async () => {
+            await served.close();
+            await upstream.close();
+            await pump;
+        };
+        return { asMachine, forward, handle, relay, runtimeTurn, upstreamHas, stop };
+    }
+    const isStart = (f: WireFrame) => f.kind === 'event' && f.event.type === 'turn-start';
+
+    it('is the running turn with no task; its end publishes the reply, and its usage bills no task', async () => {
+        const d = await daemonSession('session_3');
+        // A prompted turn for task A first.
+        await session('session_3').prompt('first', 'tA');
+        await d.relay();
+        await until(() => d.upstreamHas('turn-end', 'tA'), 'turn A to end upstream');
+        await d.forward();
+        expect(received.at(-1)).toMatchObject({ kind: 'message', taskId: A });
+
+        await d.runtimeTurn('rt-1', 'background');
+        await d.forward(isStart);
+        const info = await session('session_3').get();
+        expect(info.running).toMatchObject({ turnId: 'rt-1', commandId: 'rt-1', implicit: true });
+        expect(info.running?.taskId).toBeUndefined();
+        expect(info.status).toBe('running');
+        expect(received.at(-1)).toMatchObject({ kind: 'status', status: 'typing', ref: 'rt-1' });
+
+        await d.forward();
+        const after = await session('session_3').get();
+        expect(after.running).toBeUndefined();
+        expect(after.status).toBe('idle');
+        const reply = received.at(-1)!;
+        expect(reply).toMatchObject({ kind: 'message', parts: [{ type: 'text', text: 'echo: background' }] });
+        expect(reply).not.toHaveProperty('taskId');
+        // The Ledger keeps the row, attributed to no task; task A is charged for its own turn only.
+        expect(await billed('session_3')).toEqual([
+            ['rt-1', undefined],
+            ['tA', A]
+        ]);
+        expect((await task(A).get()).costUsd).toBeCloseTo(0.1);
+        await d.stop();
+    });
+
+    it('a turn-start for a prompt whose ack is still out is that prompt’s turn, under its task', async () => {
+        const d = await daemonSession('session_4');
+        await session('session_4').prompt('first', 'tB', undefined, undefined, { taskId: B });
+        // The daemon's frames race its reply: the turn-start lands before the ack.
+        const replies = await d.handle();
+        await until(() => d.upstreamHas('turn-end', 'tB'), 'turn B to end upstream');
+        await d.forward(isStart);
+        expect((await session('session_4').get()).running).toBeUndefined();
+        for (const r of replies) await d.asMachine.commandReplied(r);
+        expect((await session('session_4').get()).running).toMatchObject({ turnId: 'tB', taskId: B });
+        expect((await session('session_4').get()).running).not.toHaveProperty('implicit');
+        await d.forward();
+        expect(received.at(-1)).toMatchObject({ kind: 'message', taskId: B });
+        await d.stop();
+    });
+
+    it('hostEnded cuts it like any other turn: interrupted, the record idle, no task named', async () => {
+        const d = await daemonSession('session_5');
+        await d.asMachine.noteRef({ agent: 'claude-code', v: 1, id: 'sess-real' });
+        await d.runtimeTurn('rt-2', 'background');
+        await d.forward(isStart);
+        expect((await session('session_5').get()).running).toMatchObject({ turnId: 'rt-2', implicit: true });
+
+        await d.asMachine.hostEnded({ reason: 'the daemon restarted', code: 'restart' });
+        const info = await session('session_5').get();
+        expect(info.running).toBeUndefined();
+        expect(info.status).toBe('idle');
+        const end = (await session('session_5').events()).at(-1)!;
+        expect(end).toMatchObject({ type: 'turn-end', turnId: 'rt-2', stopReason: 'error' });
+        expect(received).toContainEqual(expect.objectContaining({ kind: 'status', status: 'task', ref: 'interrupted:rt-2' }));
+        await d.stop();
+    });
+});

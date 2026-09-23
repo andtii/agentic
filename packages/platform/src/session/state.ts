@@ -101,6 +101,9 @@ export type SessionMode = 'local' | 'remote';
  * The turn in flight — what a restarted driver reads to know a turn was cut short.
  * The turn, not the session, is what a task owns (#390): `taskId` is the task this
  * turn works, from the prompt that started it, else the task the session opened with.
+ * An `implicit` turn (#510) is one the runtime started itself — a `turn-start` no prompt of ours
+ * is out for (Claude Code after a background task): it runs, ends and is cut like any other, but
+ * it works no task — no `taskId`, `commandId` is its turn id.
  */
 export interface RunningTurn {
     readonly turnId: string;
@@ -108,6 +111,7 @@ export interface RunningTurn {
     readonly input: readonly PromptPart[];
     readonly startedAt: number;
     readonly taskId?: TaskId;
+    readonly implicit?: true;
 }
 
 /**

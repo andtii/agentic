@@ -1194,8 +1194,11 @@ export function defineMachineActor(ports: MachinePorts) {
                 const wire = frame.frame;
                 let ended: string | undefined;
                 if (h) {
-                    if (wire.kind === 'event' && advances(h.cursor, { epoch: wire.epoch, seq: wire.seq })) h.cursor = { epoch: wire.epoch, seq: wire.seq };
+                    const fresh = wire.kind === 'event' && advances(h.cursor, { epoch: wire.epoch, seq: wire.seq });
+                    if (fresh) h.cursor = { epoch: wire.epoch, seq: wire.seq };
                     else if (wire.kind === 'gap') h.cursor = { epoch: wire.resumeAt.epoch, seq: wire.resumeAt.seq };
+                    // A turn the runtime started itself holds a slot too (#510) — the daemon counts it (`watchTurns`), so must we.
+                    if (fresh && wire.event.type === 'turn-start' && wire.event.turnId !== undefined && !h.running) h.running = { turnId: wire.event.turnId, since: now() };
                     // The turn is over: its slot is free (#394). Any `turn-end` — a session runs one turn at a time.
                     if (wire.kind === 'event' && wire.event.type === 'turn-end' && h.running) {
                         ended = h.running.turnId;
