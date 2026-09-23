@@ -75,6 +75,8 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
             text.marks = undefined;
             text.size = undefined;
             text.lines = undefined;
+            // A superseded read no longer clears `loading`, so this run always sets it.
+            text.loading = false;
             if (!p || !f.source || !f.online) return;
             const change = changeOf(p);
             text.loading = true;

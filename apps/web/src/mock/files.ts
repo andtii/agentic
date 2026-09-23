@@ -70,9 +70,12 @@ export function memoryWorkspaceSource(folder: MemoryFolder): WorkspaceSource {
     return {
         tree(path) {
             const prefix = path ? `${path}/` : '';
-            const live = paths.filter((p) => folder.files[p]!.working != null && !ignored.some((i) => p === i || p.startsWith(`${i}/`)));
+            // Only a folder under version control has an ignore file and change marks, as the daemon answers.
+            const vcs = folder.vcs !== undefined;
+            const hidden = (p: string): boolean => vcs && ignored.some((i) => p === i || p.startsWith(`${i}/`));
+            const live = paths.filter((p) => folder.files[p]!.working != null && !hidden(p));
             if (path && !live.some((p) => p.startsWith(prefix))) return fail('not-found', `${path} does not exist`);
-            const uncommitted = new Map(changesOf('uncommitted').map((c) => [c.path, c.status]));
+            const uncommitted = new Map(vcs ? changesOf('uncommitted').map((c) => [c.path, c.status]) : []);
             const byName = new Map<string, FsTreeEntry>();
             for (const p of live) {
                 if (!p.startsWith(prefix)) continue;
@@ -90,7 +93,7 @@ export function memoryWorkspaceSource(folder: MemoryFolder): WorkspaceSource {
                 }
             }
             const entries = [...byName.values()].sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
-            return answer({ kind: 'tree', root: '', path, entries, truncated: false, ignoredHidden: folder.vcs !== undefined });
+            return answer({ kind: 'tree', root: '', path, entries, truncated: false, ignoredHidden: vcs && ignored.length > 0 });
         },
         read(path, rev = 'working') {
             const file = folder.files[path];

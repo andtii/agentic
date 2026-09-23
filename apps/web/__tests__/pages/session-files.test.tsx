@@ -258,4 +258,11 @@ describe('where the files come from', () => {
         expect((await source.read('nope.txt')).error!.code).toBe('not-found');
         expect((await source.tree('')).result!.entries.map((e) => e.name)).toEqual(['apps', 'docs', 'packages', 'AGENTS.md', 'package.json', 'README.md']);
     });
+
+    it('a folder under no VCS lists everything with no change marks and no ignore filter', async () => {
+        const plain = memoryWorkspaceSource({ ignored: ['dist'], files: { 'a.txt': { working: 'a\n' }, 'dist/out.js': { working: 'x\n' } } });
+        const tree = (await plain.tree('')).result!;
+        expect(tree.ignoredHidden).toBe(false);
+        expect(tree.entries.map((e) => [e.name, e.change])).toEqual([['dist', undefined], ['a.txt', undefined]]);
+    });
 });

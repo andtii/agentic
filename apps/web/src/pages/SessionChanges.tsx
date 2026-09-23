@@ -67,8 +67,9 @@ function useDiffTexts(files: () => SessionFiles, key: () => { scope: ChangeScope
             st.modified = undefined;
             st.binary = undefined;
             st.error = undefined;
-            if (!k || !f.source) return;
-            if (!f.online) return;
+            // A superseded request no longer clears `loading`, so this run always sets it.
+            st.loading = false;
+            if (!k || !f.source || !f.online) return;
             const [from, to] = REVS[k.scope];
             const side = async (rev: FsReadRev, path: string, absent: boolean): Promise<WorkspaceAnswer<FsReadResult>> => (absent ? { result: { kind: 'read', path, rev, size: 0, text: '' } } : f.source!.read(path, rev));
             st.loading = true;
