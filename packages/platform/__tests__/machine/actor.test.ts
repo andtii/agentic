@@ -7,7 +7,8 @@ import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/a
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, machineWorkspaceSource, MAX_CHANGES_SNAPSHOTS, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, SNAPSHOT_MAX_COMMITS, SNAPSHOT_MAX_FILES, ToolCallError, type FsAnswer, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { initialMachineState, rememberChanges, snapshotOf } from '../../src/machine/state';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
@@ -588,10 +589,6 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
 
         expect(await statusOf(machine(K1).fsResult('fs_nope'))).toBe(404);
         expect(await statusOf(machine(K1).fsRequest(E1, list('')))).toBe(400);
-        // The session-files kinds (#559) are refused until the Machine answers them over its stream (#562).
-        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'tree', root: '/work/app', path: '' }))).toBe(400);
-        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'read', root: '/work/app', path: 'a.ts' }))).toBe(400);
-        expect(await statusOf(machine(K1).fsRequest(E1, { kind: 'changes', root: '/work/app', scope: 'uncommitted' }))).toBe(400);
     });
 
     it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {
@@ -689,6 +686,111 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         await advance(TICK);
         expect(await statusOf(machine(K1).fsResult(ids[1]!))).toBe(404);
         expect((await machine(K1).fsResult(ids[2]!)).status).toBe('error'); // finished a tick later: not yet
+    });
+});
+
+describe('Machine session files (#562, EXE-08, AGT-09)', () => {
+    const agentP: Principal = { kind: 'agent', workspaceId: WS, agentId: 'agent_1', sessionId: 'session_1' } as Principal;
+    const ROOT = '/work/project';
+    const source = (principal: Principal = owner) => machineWorkspaceSource(machine(K1, principal), E1, ROOT, { base: 'main' });
+    const saved = async () => (await app.storage.load('machine', K1))!.state as { fs?: Record<string, { result?: unknown }>; changesSnapshots?: unknown[] };
+    const answerOf = async (requestId: string): Promise<FsAnswer[]> => {
+        const out: FsAnswer[] = [];
+        for await (const a of machine(K1).fsAnswer(requestId)) out.push(a);
+        return out;
+    };
+
+    it('answers tree, read and changes through machineWorkspaceSource, and keeps the answers off the saved record', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+
+        const tree = await source().tree('');
+        expect(tree.error).toBeUndefined();
+        expect(tree.result).toMatchObject({ kind: 'tree', root: ROOT, path: '', ignoredHidden: true });
+        expect(tree.result!.entries.map((e) => e.name)).toEqual(expect.arrayContaining(['README.md', 'src']));
+        expect(tree.result!.entries.map((e) => e.name)).not.toContain('dist');
+
+        expect((await source().read('src/app.ts')).result).toMatchObject({ kind: 'read', rev: 'working', text: expect.stringContaining('answer = 42') });
+        expect((await source().read('src/app.ts', 'head')).result).toMatchObject({ rev: 'head', text: expect.stringContaining('answer = 41') });
+        const sent = sockets.frames(K1).filter((f) => f.t === 'fs.request') as unknown as { op: { kind: string; base?: string } }[];
+        expect(sent.map((f) => f.op.kind)).toEqual(['tree', 'read', 'read']);
+
+        const changes = await source().changes('uncommitted');
+        expect(changes.result).toMatchObject({ kind: 'changes', scope: 'uncommitted', vcs: 'git', branch: 'feature/files' });
+        expect((sockets.frames(K1).at(-1) as unknown as { op: unknown }).op).toEqual({ kind: 'changes', root: ROOT, scope: 'uncommitted', base: 'main' });
+
+        // A session driver reads it too; the record never holds the answers, the live read does.
+        expect((await source(agentP).tree('src')).result).toMatchObject({ path: 'src' });
+        const records = Object.values((await saved()).fs ?? {});
+        expect(records.length).toBeGreaterThan(0);
+        for (const r of records) expect(r.result).toBeUndefined();
+        const last = sent.length ? (sockets.frames(K1).at(-1) as unknown as { requestId: string }).requestId : '';
+        expect(await machine(K1).fsResult(last)).toMatchObject({ status: 'done', result: { kind: 'tree' } });
+    });
+
+    it('answers the daemon\'s own refusals, and refuses at the Machine what it can: outside the roots, a daemon without files', async () => {
+        connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        expect((await machineWorkspaceSource(machine(K1), E1, '/work/plain').changes('uncommitted')).error).toMatchObject({ code: 'not-a-repo' });
+        expect((await source().read('../plain/notes.txt')).error).toMatchObject({ code: 'outside-roots' });
+
+        const before = sockets.frames(K1).filter((f) => f.t === 'fs.request').length;
+        expect((await machineWorkspaceSource(machine(K1), E1, '/etc').tree('')).error).toMatchObject({ code: 'outside-roots' });
+        expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toHaveLength(before);
+
+        // Only a session driver asks; the machine itself does not.
+        expect(await statusOf(machine(K1, asMachine(M1)).fsRequest(E1, { kind: 'tree', root: ROOT, path: '' }))).toBe(403);
+        // A picker id read through the files stream is an internal error, as is an unknown one.
+        const picker = await machine(K1).fsRequest(E1, { kind: 'list', path: '/work' });
+        expect(await answerOf(picker.requestId)).toEqual([{ error: expect.objectContaining({ code: 'internal' }) }]);
+        expect(await answerOf('fs_nobody')).toEqual([{ error: expect.objectContaining({ code: 'internal' }) }]);
+    });
+
+    it('answers unsupported without a frame when the daemon lacks the files feature', async () => {
+        sockets.connected.add(K1);
+        await machine(K1, asMachine(M1)).socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {} }));
+        expect((await source().tree('')).error).toMatchObject({ code: 'unsupported' });
+        expect(sockets.frames(K1).filter((f) => f.t === 'fs.request')).toHaveLength(0);
+    });
+
+    it('times out through the liveness reminder, fails on a disconnect, and keeps the last changes snapshot across both', async () => {
+        const { seat } = connect(K1, daemon(M1));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        expect(await machine(K1).changesSnapshot(E1, ROOT, 'uncommitted')).toBeNull();
+        await source().changes('uncommitted');
+        const snap = await machine(K1).changesSnapshot(E1, ROOT, 'uncommitted');
+        expect(snap).toMatchObject({ at: expect.any(Number), result: { kind: 'changes', branch: 'feature/files' } });
+        expect(await machine(K1).changesSnapshot(E1, ROOT, 'branch')).toBeNull();
+        expect(await statusOf(machine(K1, asMachine(M1)).changesSnapshot(E1, ROOT, 'uncommitted'))).toBe(403);
+
+        sockets.seats.delete(K1); // frames stop reaching the daemon; nothing tells the actor
+        const late = await machine(K1).fsRequest(E1, { kind: 'tree', root: ROOT, path: '' });
+        const pending = answerOf(late.requestId);
+        await advance(TICK);
+        expect(await pending).toEqual([{ error: expect.objectContaining({ code: 'timeout' }) }]);
+
+        const cut = await machine(K1).fsRequest(E1, { kind: 'read', root: ROOT, path: 'README.md' });
+        seat.drop();
+        await machine(K1, asMachine(M1)).socketClosed();
+        expect(await answerOf(cut.requestId)).toEqual([{ error: expect.objectContaining({ code: 'timeout', message: 'machine went offline' }) }]);
+        expect(await machine(K1).changesSnapshot(E1, ROOT, 'uncommitted')).toEqual(snap);
+        expect((await saved()).changesSnapshots).toHaveLength(1);
+    });
+
+    it(`keeps at most ${MAX_CHANGES_SNAPSHOTS} snapshots, one per folder and scope, each within ${SNAPSHOT_MAX_FILES} files and ${SNAPSHOT_MAX_COMMITS} commits`, () => {
+        const s = initialMachineState();
+        const set = (n: number) => ({ kind: 'changes' as const, vcs: 'git', scope: 'uncommitted' as const, files: Array.from({ length: n }, (_, i) => ({ path: `f${i}`, status: 'modified' as const })), commits: [], truncated: false });
+        for (let i = 0; i <= MAX_CHANGES_SNAPSHOTS; i++) rememberChanges(s, { environmentId: E1, root: `/work/${i}`, scope: 'uncommitted', at: i, result: set(1) });
+        expect(s.changesSnapshots!.map((x) => x.root)).toEqual(Array.from({ length: MAX_CHANGES_SNAPSHOTS }, (_, i) => `/work/${i + 1}`));
+        rememberChanges(s, { environmentId: E1, root: '/work/1', scope: 'uncommitted', at: 99, result: set(2) });
+        expect(s.changesSnapshots).toHaveLength(MAX_CHANGES_SNAPSHOTS);
+        expect(s.changesSnapshots!.at(-1)).toMatchObject({ root: '/work/1', at: 99 });
+
+        expect(snapshotOf(set(3))).toEqual(set(3));
+        const big = snapshotOf({ ...set(SNAPSHOT_MAX_FILES + 5), commits: Array.from({ length: SNAPSHOT_MAX_COMMITS + 1 }, (_, i) => ({ id: `${i}`, short: `${i}`, subject: 's', at: i, author: 'a' })) });
+        expect(big.files).toHaveLength(SNAPSHOT_MAX_FILES);
+        expect(big.commits).toHaveLength(SNAPSHOT_MAX_COMMITS);
+        expect(big.truncated).toBe(true);
     });
 });
 

@@ -6,7 +6,7 @@
  * only its hash (`machine-token.ts`); the daemon keeps the token.
  */
 
-import type { CapabilityReport, Cursor, DaemonBuild, DaemonExit, DaemonFeature, DaemonLogError, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, LoginAction, LoginError, LoginPhase, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
+import type { CapabilityReport, ChangeScope, ChangeSet, Cursor, DaemonBuild, DaemonExit, DaemonFeature, DaemonLogError, EnvError, EnvironmentDescriptor, EnvironmentId, EnvOp, EnvResult, FsError, FsOp, FsResult, HarnessPhase, HarnessReport, HistoryError, HistoryRange, LifecycleError, LoginAction, LoginError, LoginPhase, MachineId, MachinePolicy, MachinePolicyError, MachinePolicyOp, MachinePolicyResult, MachineTelemetry, OpenSpec, QuotaSnapshot, ReleaseAsset, ReleaseChannel, RuntimeId, SessionId, TaskId, UpdatePhase, UpdatePolicy, UpdateSettings, WorkspaceId } from '@agentic/core';
 import type { WireCommand } from '@sigx/ai-agent/wire';
 
 export const MACHINE_STATE_VERSION = 1;
@@ -307,6 +307,11 @@ export interface MachineState {
     pending: Record<string, PendingCommand>;
     /** `fsRequest` entries by request id, at most `MAX_FS_REQUESTS`; absent on a record saved before #189. */
     fs?: Record<string, FsRequestRecord>;
+    /**
+     * The last `changes` answer per folder and scope (#562), newest last, at most `MAX_CHANGES_SNAPSHOTS`: what the
+     * Changes view shows, with its time, while the machine is offline. Trimmed by `snapshotOf`; absent before #562.
+     */
+    changesSnapshots?: ChangesSnapshot[];
     /** `putEnvironment` / `removeEnvironment` entries by request id, at most `MAX_ENV_REQUESTS`; absent on a record saved before #237. */
     envRequests?: Record<string, EnvRequestRecord>;
     /** `setPolicy` / `browseMachine` entries by request id, at most `MAX_POLICY_REQUESTS`; absent on a record saved before #480. */
@@ -367,6 +372,11 @@ export const MAX_CLOSURES = 32;
 export const MAX_FS_REQUESTS = 16;
 /** A finished `fsRequest` entry is pruned this long after it finished. */
 export const FS_RESULT_TTL_MS = 120_000;
+/** At most this many `changes` snapshots are kept (#562); the least recently answered is evicted first. */
+export const MAX_CHANGES_SNAPSHOTS = 8;
+/** A snapshot keeps at most this many files, and `SNAPSHOT_MAX_COMMITS` commits, so eight of them stay a small part of the record. */
+export const SNAPSHOT_MAX_FILES = 200;
+export const SNAPSHOT_MAX_COMMITS = 50;
 /** At most this many environment requests are kept; the oldest is evicted first. */
 export const MAX_ENV_REQUESTS = 16;
 /** At most this many policy requests are kept (#480). */
@@ -477,6 +487,30 @@ export function isIdle(view: CapacityView): boolean {
 export function advances(cursor: Cursor | undefined, at: Cursor): boolean {
     if (!cursor) return true;
     return at.epoch > cursor.epoch || (at.epoch === cursor.epoch && at.seq > cursor.seq);
+}
+
+/** The last `changes` answer for one folder and scope (#562), kept across disconnects. */
+export interface ChangesSnapshot {
+    readonly environmentId: EnvironmentId;
+    readonly root: string;
+    readonly scope: ChangeScope;
+    /** When the daemon answered. */
+    readonly at: number;
+    readonly result: ChangeSet;
+}
+
+/** `result` cut to the snapshot bounds; `truncated` when anything was cut. */
+export function snapshotOf(result: ChangeSet): ChangeSet {
+    const copy = structuredClone(result);
+    if (copy.files.length <= SNAPSHOT_MAX_FILES && copy.commits.length <= SNAPSHOT_MAX_COMMITS) return copy;
+    return { ...copy, files: copy.files.slice(0, SNAPSHOT_MAX_FILES), commits: copy.commits.slice(0, SNAPSHOT_MAX_COMMITS), truncated: true };
+}
+
+/** Keep `snapshot` as the newest for its folder and scope, replacing the older one; the least recent goes past `MAX_CHANGES_SNAPSHOTS`. */
+export function rememberChanges(s: MachineState, snapshot: ChangesSnapshot): void {
+    const kept = (s.changesSnapshots ?? []).filter((x) => !(x.environmentId === snapshot.environmentId && x.root === snapshot.root && x.scope === snapshot.scope));
+    kept.push(snapshot);
+    s.changesSnapshots = kept.slice(-MAX_CHANGES_SNAPSHOTS);
 }
 
 /**

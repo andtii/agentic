@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, pathWithin, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceAnswer, type WorkspaceId, type ChangeScope, type ChangeSet } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -32,7 +32,7 @@ import { Workspace } from '../workspace/index.js';
 import type { MachinePorts } from './ports.js';
 import { ToolCallError } from './ports.js';
 import type { HistoryAnswer } from '../session/ports.js';
-import { advances, freeSlots, hostedIn, initialMachineState, LOGIN_RESULT_TTL_MS, LOGIN_TIMEOUT_MS, loginRunning, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneLogins, pruneLogRequests, prunePolicyRequests, pruneQuota, pruneTelemetry, runningIn, type AvailableHarness, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type LoginRecord, type LogRequestRecord, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
+import { advances, freeSlots, hostedIn, initialMachineState, LOGIN_RESULT_TTL_MS, LOGIN_TIMEOUT_MS, loginRunning, MAX_CLOSURES, parseMachineKey, pruneEnvRequests, pruneFs, pruneHarnessRequests, pruneHistory, pruneLogins, pruneLogRequests, prunePolicyRequests, pruneQuota, pruneTelemetry, rememberChanges, runningIn, snapshotOf, type AvailableHarness, type ChangesSnapshot, type AvailableUpdate, type EnvRequestRecord, type FsRequestRecord, type HarnessOp, type HarnessRequestRecord, type HistoryRequestRecord, type HostedSession, type LoginRecord, type LogRequestRecord, type MachineDraining, type MachineOs, type MachineState, type PendingCommand, type PendingUpdate, type PolicyRequestRecord, type QueuedSession, type SessionClosure, type UpdateOutcome } from './state.js';
 import { checkPolicyRoots, shouldReconcile, SYSTEM_SETUP } from './policy.js';
 import { checkChannel, checkUpdatePolicy, CRASH_LOOP_WINDOW_MS, DEFAULT_DRAIN_TIMEOUT_MS, effectiveUpdates, foldRestarts, MAX_DRAIN_TIMEOUT_MS, nextAutoUpdate, SYSTEM_UPDATES, UPDATE_DEADLINE_GRACE_MS } from './update.js';
 
@@ -61,6 +61,17 @@ function needsLiveness(s: MachineState): boolean {
     return s.online || s.update?.pending !== undefined || Object.keys(s.pending).length > 0 || Object.values(s.fs ?? {}).some(pending) || Object.values(s.envRequests ?? {}).some(pending) || Object.values(s.policyRequests ?? {}).some(pending) || Object.values(s.logRequests ?? {}).some(pending) || Object.values(s.logins ?? {}).some(loginRunning) || Object.values(s.history ?? {}).some(pending) || Object.values(s.harnessRequests ?? {}).some(pending);
 }
 
+/**
+ * Why the Machine answers a session-files request itself (#562), before a frame goes out: the daemon lacks the `files`
+ * feature, or `root` is not inside the environment's `cwdRoots` (lexically — the daemon checks again after resolving links).
+ */
+function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root: string): FsError | undefined {
+    if (!s.features?.includes('files')) return { code: 'unsupported', message: 'the daemon does not answer session files (no files feature); update it' };
+    const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
+    if (!pathWithin(root, environment.cwdRoots, os)) return { code: 'outside-roots', message: `${root} is not inside the folders environment "${environment.id}" may use` };
+    return undefined;
+}
+
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
 function failPendingHistory(s: MachineState, at: number, message: string): void {
     for (const r of Object.values(s.history ?? {})) {
@@ -69,6 +80,11 @@ function failPendingHistory(s: MachineState, at: number, message: string): void 
         r.error = { code: 'internal', message };
         r.finishedAt = at;
     }
+}
+
+/** The session-files kinds (#559/#562): answered through the `fsAnswer` stream, gated by the daemon's `files` feature. */
+function isFilesOp(op: FsOp): op is Extract<FsOp, { kind: 'tree' | 'read' | 'changes' }> {
+    return op.kind === 'tree' || op.kind === 'read' || op.kind === 'changes';
 }
 
 /** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
@@ -178,6 +194,19 @@ export interface FsResultView {
     readonly finishedAt?: number;
     readonly result?: FsResult;
     readonly error?: FsError;
+}
+
+/**
+ * The answer to a session-files request (#562: `tree`, `read`, `changes`), as the `fsAnswer` stream yields it — the
+ * daemon's result, or its error (`timeout` when it never answered or went away, `unsupported` when its daemon lacks the
+ * `files` feature, `outside-roots` when `root` is not inside the environment's `cwdRoots`).
+ */
+export type FsAnswer = WorkspaceAnswer<FsResult>;
+
+/** `changesSnapshot` (#562): the last `changes` answer for a folder and scope, and when it came — shown while offline. */
+export interface ChangesSnapshotView {
+    readonly at: number;
+    readonly result: ChangeSet;
 }
 
 /** `putEnvironment` / `removeEnvironment` — the id `envResult` reads the answer by. */
@@ -553,6 +582,15 @@ export function defineMachineActor(ports: MachinePorts) {
     /** The lines a `log.response` brought (#481), by `answerKey`: held here like history, never on the record. */
     const logs = new Map<string, DaemonLogResult>();
     const answerKey = (key: string, requestId: string): string => `${key}:${requestId}`;
+    /**
+     * Session-files results by `answerKey` (#562): a `read` weighs up to half a frame, so `tree` / `read` / `changes`
+     * answers are held here like history's and handed out by `fsAnswer` (and `fsResult`), never saved on the record.
+     */
+    const fsAnswers = new Map<string, FsResult>();
+    /** Drop the held answers whose request the record no longer has (pruned or evicted). */
+    const dropStaleFsAnswers = (key: string, fs: Record<string, FsRequestRecord> | undefined): void => {
+        for (const k of fsAnswers.keys()) if (k.startsWith(`${key}:`) && !(fs && k.slice(key.length + 1) in fs)) fsAnswers.delete(k);
+    };
 
     function view(c: ActorContext<MachineState>): MachineView {
         const s = c.snapshot();
@@ -972,6 +1010,7 @@ export function defineMachineActor(ports: MachinePorts) {
             // `worktree` is narrowed to the owner inside the method: a policy sees the method, not the op.
             fsRequest: sessionDriver,
             fsResult: sessionDriver,
+            changesSnapshot: sessionDriver,
             // Owner only, and never a tool (decisions 2026-09-19 (c)): an agent must not widen where agents may work.
             putEnvironment: owner,
             removeEnvironment: owner,
@@ -1269,11 +1308,21 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.status = 'error';
                     r.error = result ? { code: 'internal', message: `the daemon answered a ${r.op.kind} request with a ${result.kind} result` } : structuredClone(frame.error ?? { code: 'internal', message: 'fs.response carried neither result nor error' });
                     delete r.result;
+                    fsAnswers.delete(answerKey(ctx.key, r.requestId));
                     return;
                 }
                 r.status = 'done';
-                r.result = structuredClone(result);
                 delete r.error;
+                if (isFilesOp(r.op)) {
+                    // Held by the activation, never saved (#562); a `changes` answer also becomes the folder's snapshot.
+                    delete r.result;
+                    fsAnswers.set(answerKey(ctx.key, r.requestId), structuredClone(result));
+                    if (r.op.kind === 'changes' && result.kind === 'changes') {
+                        rememberChanges(ctx.state, { environmentId: r.environmentId, root: r.op.root, scope: r.op.scope, at, result: snapshotOf(result) });
+                    }
+                    return;
+                }
+                r.result = structuredClone(result);
                 if (r.op.kind !== 'worktree' || result.kind !== 'worktree') return;
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:worktree:${r.requestId}`,
@@ -1879,45 +1928,76 @@ export function defineMachineActor(ports: MachinePorts) {
                  * changes the machine, so only its owner asks for one. 400 for
                  * a malformed op, 403 revoked, 404 unknown environment, 503
                  * offline (or no socket to send on).
+                 *
+                 * The session-files kinds `tree` / `read` / `changes` (#562)
+                 * are open to session drivers too; their answer is held by the
+                 * activation and read with the `fsAnswer` stream (or
+                 * `fsResult`), never saved. A daemon without the `files`
+                 * feature, or a `root` outside the environment's `cwdRoots`,
+                 * is answered at once — `unsupported` / `outside-roots` —
+                 * without a frame going out; the daemon checks again after
+                 * resolving links.
                  */
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-                    // The session-files kinds (#559) are answered once the Machine forwards them over its answer stream (#562).
-                    if (parsed.data.kind === 'tree' || parsed.data.kind === 'read' || parsed.data.kind === 'changes') throw new ServerFnError(400, `machine: fs op ${parsed.data.kind} is not supported yet`);
                     if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate') && (ctx.principal as Principal | null)?.kind !== 'user') {
                         throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : 'locate checkouts'}`);
                     }
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
-                    if (!s.environments.some((e) => e.id === environmentId)) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
+                    const environment = s.environments.find((e) => e.id === environmentId);
+                    if (!environment) throw new ServerFnError(404, `machine "${machineId}" has no environment "${environmentId}"`);
                     if (!s.online) throw new ServerFnError(503, `machine "${machineId}" is offline`);
                     const at = now();
                     const requestId = `fs_${crypto.randomUUID()}`;
-                    if (!send({ v: V, t: 'fs.request', requestId, environmentId, op: parsed.data })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
+                    const checked = parsed.data;
+                    // Refused here, before a frame goes out: a daemon that cannot answer, a folder outside the roots.
+                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked.root) : undefined;
+                    if (!refusal && !send({ v: V, t: 'fs.request', requestId, environmentId, op: checked })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
                     const fs = (s.fs ??= {});
                     pruneFs(fs, at);
-                    const record: FsRequestRecord = { requestId, environmentId, op: structuredClone(parsed.data), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs, by: principalLabel(ctx.principal) };
+                    dropStaleFsAnswers(ctx.key, fs);
+                    const by = principalLabel(ctx.principal);
+                    const record: FsRequestRecord = refusal
+                        ? { requestId, environmentId, op: structuredClone(checked), status: 'error', error: refusal, requestedAt: at, finishedAt: at, deadline: at, by }
+                        : { requestId, environmentId, op: structuredClone(checked), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs, by };
                     fs[requestId] = record;
                     await armLiveness();
                     await ctx.save();
                     return { requestId };
                 },
 
-                /** One `fsRequest` as stored — a primitive argument, so `useActorState(Machine, () => [k, 'fsResult', id], { live: true })` can key on it. 404 for an unknown, evicted or pruned id. */
+                /**
+                 * One `fsRequest` as stored — a primitive argument, so `useActorState(Machine, () => [k, 'fsResult', id], { live: true })` can key on it.
+                 * A session-files answer comes from the activation that holds it; one that landed on another activation reads as
+                 * `internal` — ask again. 404 for an unknown, evicted or pruned id.
+                 */
                 fsResult(requestId: string): FsResultView {
                     const r = ctx.state.fs?.[requestId];
                     if (!r) throw new ServerFnError(404, `machine "${machineId}" has no fs request "${requestId}"`);
+                    const held = r.status === 'done' && isFilesOp(r.op) ? fsAnswers.get(answerKey(ctx.key, requestId)) : undefined;
+                    const lost = r.status === 'done' && isFilesOp(r.op) && !held;
+                    const result = held ?? r.result;
                     return ctx.snapshot({
                         requestId: r.requestId,
                         environmentId: r.environmentId,
                         op: r.op,
-                        status: r.status,
+                        status: lost ? 'error' : r.status,
                         requestedAt: r.requestedAt,
                         ...(r.finishedAt !== undefined ? { finishedAt: r.finishedAt } : {}),
-                        ...(r.result ? { result: r.result } : {}),
-                        ...(r.error ? { error: r.error } : {})
+                        ...(result ? { result } : {}),
+                        ...(r.error ? { error: r.error } : lost ? { error: { code: 'internal', message: 'the answer landed on another activation; ask again' } } : {})
                     }) as FsResultView;
+                },
+
+                /**
+                 * The last `changes` answer for `root` in `environmentId` and `scope` (#562), with the time it came — what the
+                 * Changes view shows while the machine is offline. `null` when there is none; it survives disconnects.
+                 */
+                changesSnapshot(environmentId: EnvironmentId, root: string, scope: ChangeScope): ChangesSnapshotView | null {
+                    const found = (ctx.state.changesSnapshots ?? []).find((x: ChangesSnapshot) => x.environmentId === environmentId && x.root === root && x.scope === scope);
+                    return found ? (ctx.snapshot({ at: found.at, result: found.result }) as ChangesSnapshotView) : null;
                 },
 
                 /**
@@ -2405,6 +2485,28 @@ export function defineMachineActor(ports: MachinePorts) {
         },
         streams: (ctx) => ({
             /**
+             * The answer to a session-files `fsRequest` (#562: `tree`, `read`, `changes`), yielded once — when the daemon's
+             * `fs.response` has landed or the request failed (its deadline, a disconnect, a revoke, a refusal at the Machine).
+             * An id this record does not hold, a picker kind, or an answer this activation no longer has is `internal`: ask again.
+             */
+            async *fsAnswer(requestId: string): AsyncIterable<FsAnswer> {
+                for await (const s of ctx.changes({ initial: true, throttleMs: 20 })) {
+                    const r = s.fs?.[requestId];
+                    if (!r || !isFilesOp(r.op)) {
+                        yield { error: { code: 'internal', message: `machine has no session-files request "${requestId}"` } };
+                        return;
+                    }
+                    if (r.status === 'pending') continue;
+                    if (r.status === 'error') {
+                        yield { error: r.error ?? { code: 'internal', message: 'the request failed' } };
+                        return;
+                    }
+                    const result = fsAnswers.get(answerKey(ctx.key, requestId));
+                    yield result ? { result } : { error: { code: 'internal', message: `the answer to fs request "${requestId}" did not survive the machine's activation; ask again` } };
+                    return;
+                }
+            },
+            /**
              * The answer to `historyRequest(requestId)` (#397), yielded once — when the daemon's `history.response` has
              * landed, or the request failed (its deadline, a disconnect, a revoke): the events, or the daemon's named
              * error. An id this record does not hold, or an answer this activation no longer has, is an `internal` error
@@ -2458,6 +2560,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.finishedAt = at;
                 }
                 pruneFs(s.fs, at, false);
+                dropStaleFsAnswers(ctx.key, s.fs);
             }
             if (s.envRequests) {
                 for (const r of Object.values(s.envRequests)) {
