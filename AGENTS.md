@@ -189,6 +189,7 @@ Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost
 | `packages/memory` | `@agentic/memory` | default MemoryPlugin + `memoryConformance` |
 | `packages/learning` | `@agentic/learning` | default LearningPlugin |
 | `packages/plugins-git` | `@agentic/plugins-git` | git project feature plugin: detect, origin identity, instructions, worktree per chat |
+| `packages/connectors` | `@agentic/connectors` | native connectors over conduit: the engine with injected stores, operations as namespaced connector tools, connector manifests (Gmail first) |
 | `packages/daemon-protocol` | `@agentic/daemon-protocol` | envelope validators + `daemonConformance` |
 | `packages/ui` | `@agentic/ui` | zero fragment (`ai-*` scopes), layout shell, streaming markdown |
 | `packages/mcp` | `@agentic/mcp` | MCP client + platform MCP server (orchestration surface) |
