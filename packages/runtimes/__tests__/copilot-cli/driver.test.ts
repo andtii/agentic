@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** `copilotCliDriver`: one isolated runtime per profile, the spec as a Copilot session, the policy on every ask (#319). */
 import { allowAll, denyAll, type AgentEvent, type Policy } from '@sigx/ai-agent';
-import type { EnvironmentId, LocalEnvironment, OpenSpec, PluginContext, SessionId } from '@agentic/core';
+import { CONNECTOR_TOOLS_TOOL, type EnvironmentId, type LocalEnvironment, type OpenSpec, type PluginContext, type SessionId } from '@agentic/core';
 import {
     COPILOT_CLI_DOCTOR_CODES,
     COPILOT_PLATFORM_MEMORY_NOTE,
@@ -113,7 +113,8 @@ describe('copilotCliDriver.open', () => {
         const c = ctx(denyAll);
         const { session } = await driver.open(envA, spec({ tools: ['memory_search'] }), c);
         const events = await collect(session.prompt('find it'));
-        expect(c.callTool).not.toHaveBeenCalled();
+        // Only the daemon's own ask at open for platform-run connectors (#534) — never the denied tool.
+        expect((c.callTool.mock.calls as unknown as [string, unknown][]).map(([name]) => name)).toEqual([CONNECTOR_TOOLS_TOOL]);
         expect(events.filter((e) => e.type === 'tool-update').at(-1)).toMatchObject({ status: 'denied' });
         await session.close();
     });

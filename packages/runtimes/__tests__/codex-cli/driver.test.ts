@@ -2,7 +2,7 @@
 /** `codexCliDriver` and `codexCli` (#320): environment → isolated app-server, OpenSpec → thread, approvals through the policy, tools over MCP, limits streamed, auth and doctor. */
 import { allowAll, denyAll, type AgentEvent, type AgentTurn, type Policy } from '@sigx/ai-agent';
 import { createJsonRpcPeer } from '@sigx/ai-agent/harness';
-import { environmentVerdict, type EnvironmentId, type LocalEnvironment, type OpenSpec, type SessionId } from '@agentic/core';
+import { CONNECTOR_TOOLS_TOOL, environmentVerdict, type EnvironmentId, type LocalEnvironment, type OpenSpec, type SessionId } from '@agentic/core';
 import { buildSystemPrompt } from '../../src/anthropic/index';
 import { CODEX_CLI_DOCTOR_CODES, CODEX_PLATFORM_MEMORY_NOTE, codexAccountEnv, codexCliDriver, initializeCodex, type CodexCliDriverOptions, type CodexPeer } from '../../src/codex-cli/index';
 import { PLATFORM_MEMORY_HEADING } from '../../src/harness/index';
@@ -15,6 +15,8 @@ const spec = (over: Partial<OpenSpec> = {}): OpenSpec => ({ agentId: 'agent_ada'
 const ctx = (policy: Policy = allowAll, calls: { name: string; input: unknown }[] = []) => ({
     sessionId: 'session_1' as SessionId,
     callTool: async (name: string, input: unknown) => {
+        // The daemon's own ask at open for platform-run connectors (#534) is not a tool the model called.
+        if (name === CONNECTOR_TOOLS_TOOL) return { connectors: [], unavailable: [] };
         calls.push({ name, input });
         return { hits: [] };
     },
