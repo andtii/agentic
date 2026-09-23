@@ -9,7 +9,7 @@
  * actor admits its owner only) and driving the router (`Routing.run`, the
  * same principal the schedule trigger uses).
  */
-import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { createId, pathWithin, type AgentId, type EnvironmentDescriptor, type EnvironmentId, type MachineId, type Principal, type SessionId, type TaskContract, type TaskId, type WorkspaceId, type WorkspaceSource } from '@agentic/core';
 import type { ExternalPrincipal, PlatformPort, TaskSummary, TaskTreeNode } from '@agentic/mcp';
 import {
     AgentActor,
@@ -21,6 +21,7 @@ import {
     agentKey,
     asPrincipal,
     machineKey,
+    machineWorkspaceSource,
     memoryActorKey,
     routingKey,
     taskKey,
@@ -35,6 +36,7 @@ import {
     type TaskTree,
     type TaskView
 } from '@agentic/platform';
+import { GIT_FEATURE_ID } from '@agentic/plugins-git';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError, isServerFnError } from '@sigx/server';
 
@@ -94,6 +96,37 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
             views.push(await machine(entry.id, who).get());
         }
         return views;
+    }
+
+    /**
+     * The ref a session's branch is compared with (#566): the git feature's `base` in the project of the session's
+     * task, when it has one. Read as the workspace driver — the task and the project catalogue are the platform's own
+     * machinery here, not something the client asked to read (it may hold `sessions` alone). Absent: the daemon picks.
+     */
+    async function baseOf(taskId: TaskId | undefined): Promise<string | undefined> {
+        if (taskId === undefined) return undefined;
+        const { projectId } = await as(TaskActor, taskKey(workspaceId, taskId), driver).get();
+        if (projectId === undefined) return undefined;
+        const project = (await workspace().projects()).find((p) => p.id === projectId);
+        const base = project?.features[GIT_FEATURE_ID]?.['base'];
+        return typeof base === 'string' && base.trim() !== '' ? base.trim() : undefined;
+    }
+
+    /**
+     * A session's folder as a `WorkspaceSource` (#566) — the one the Changes and Files views read. The Session is read
+     * under the CLIENT's principal, so its `sessions` policy decides whether this client may see the session at all; the
+     * record names the machine, environment and folder (`spec.cwd`). The Machine is then asked as the workspace driver,
+     * like `usage.limits`: the tools are gated by `sessions`, and a client holding that alone must not also need
+     * `machines` — nor can it reach past the session, because every request is rooted at `spec.cwd` on `spec.environmentId`
+     * and the daemon confines paths to that root. A session with no folder on a machine (an API runtime) has no files.
+     */
+    async function sessionFiles(sessionId: SessionId): Promise<WorkspaceSource> {
+        const { spec } = await session(sessionId).get();
+        if (!spec?.machineId || !spec.environmentId || !spec.cwd) {
+            throw new ServerFnError(400, `session ${sessionId} has no folder on a machine${spec ? ` (runtime ${spec.runtime})` : ''}: only sessions that run in a folder on a paired machine have files`);
+        }
+        const base = await baseOf(spec.taskId);
+        return machineWorkspaceSource(machine(spec.machineId, driver), spec.environmentId, spec.cwd, base !== undefined ? { base } : {});
     }
 
     async function createTask(contract: TaskContract): Promise<TaskView> {
@@ -190,7 +223,10 @@ export function createActorPlatformPort(principal: ExternalPrincipal, options: A
                     next: last ? { epoch: last.epoch, seq: last.seq } : (from ?? { epoch: 0, seq: 0 }),
                     truncated: events.length > page.length
                 };
-            }
+            },
+            tree: async (sessionId, path) => (await sessionFiles(sessionId)).tree(path),
+            read: async (sessionId, path, rev) => (await sessionFiles(sessionId)).read(path, rev),
+            changes: async (sessionId, scope) => (await sessionFiles(sessionId)).changes(scope)
         },
         tasks: {
             create: async (input) =>
