@@ -468,6 +468,7 @@ describe('daemon frame schemas', () => {
         expect(response({ result: { kind: 'read', path: 'a.png', rev: 'head', size: 3000, binary: true } }).success).toBe(true);
         expect(response({ result: { kind: 'read', path: 'a.png', rev: 'head', size: 3, text: 'abc', binary: true } }).success).toBe(false);
         expect(response({ result: { kind: 'read', path: 'a.ts', rev: 'head', size: 3 } }).success).toBe(false);
+        expect(response({ result: { kind: 'read', path: 'a.png', rev: 'head', size: 3, binary: true, lines: 1 } }).success).toBe(false);
         expect(response({ result: { kind: 'read', path: 'empty.ts', rev: 'working', size: 0, text: '', lines: 0 } }).success).toBe(true);
         expect(response({ result: { kind: 'read', path: 'a.ts', rev: 'working', size: 1, text: 'x'.repeat(LIMITS.fileText + 1) } }).success).toBe(false);
         const changes = (files: number, commits: number) => ({
