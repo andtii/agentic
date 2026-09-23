@@ -26,6 +26,8 @@ import { registerThemes } from '@sigx/zero/theme';
 import { fragmentCss, recipes as fragmentRecipes } from '../fragment/recipes.js';
 import { kitCss } from '../kit/css.js';
 import { recipes as kitRecipes } from '../kit/recipes.js';
+import { codeCss } from '../code/css.js';
+import { codeRecipes } from '../code/recipes.js';
 import { overriddenRecipes } from './overrides.js';
 import { tokens, system, type Roles } from './tokens.js';
 
@@ -36,8 +38,8 @@ export { overriddenRecipes, withOverride } from './overrides.js';
 export const designSystem: DesignSystemInput<Roles, typeof system> = {
     name: 'agentic',
     tokens,
-    recipes: [.../* @__PURE__ */ layoutRecipes(tokens), ...overriddenRecipes, ...fragmentRecipes, ...kitRecipes],
-    css: [/* @__PURE__ */ layoutCss(tokens), kitCss, fragmentCss]
+    recipes: [.../* @__PURE__ */ layoutRecipes(tokens), ...overriddenRecipes, ...fragmentRecipes, ...kitRecipes, ...codeRecipes],
+    css: [/* @__PURE__ */ layoutCss(tokens), kitCss, codeCss, fragmentCss]
 };
 
 export default designSystem;

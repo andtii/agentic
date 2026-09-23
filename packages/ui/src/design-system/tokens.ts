@@ -21,6 +21,7 @@
 import type { CustomTokenDecl, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
 import { tokens as daisy } from '@sigx/zero-daisyui';
 import { kitScopes } from '../kit/vocabulary.js';
+import { codeScopes } from '../code/vocabulary.js';
 
 type Daisy = typeof daisy;
 /** daisyUI's eight roles — the vocabulary every daisy recipe keys `color` on. */
@@ -180,7 +181,7 @@ export const tokens: TokensInput<Roles, typeof system> = {
     modifiers: [...(daisy.modifiers ?? []), ...AG_MODIFIERS],
     axes: { ...daisy.axes, tone: [...TONES], kind: [...KINDS] },
     breakpoints: daisy.breakpoints,
-    scopes: { ...daisy.scopes, ...kitScopes },
+    scopes: { ...daisy.scopes, ...kitScopes, ...codeScopes },
     system,
     // A single-scheme design system names its one theme as `defaultLight` (the
     // `:root` default) and omits `defaultDark`; `:root` takes its scheme.
