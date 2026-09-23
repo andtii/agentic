@@ -21,5 +21,20 @@
     "name": "@agentic/plugins-git",
     "path": "packages/plugins-git/dist/index.js",
     "limit": "2 KB"
+  },
+  {
+    "name": "@agentic/connectors",
+    "path": "packages/connectors/dist/index.prod.js",
+    "limit": "2.5 KB",
+    "ignore": [
+      "@aigntiq/conduit",
+      "@aigntiq/conduit-connectors",
+      "@sigx/ai"
+    ]
+  },
+  {
+    "name": "@agentic/connectors (with conduit + the Gmail spec)",
+    "path": "packages/connectors/dist/index.prod.js",
+    "limit": "40 KB"
   }
 ]
