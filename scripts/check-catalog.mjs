@@ -8,7 +8,8 @@
  *      one at a range other than the one the catalog pin derives, or peers
  *      without the `devDependencies: "catalog:"` twin (core 1.0's "the app owns
  *      the copy", rfc-1.0 §3.3 — #53),
- *   2. a `catalog:` core entry is NOT a single-minor caret `^X.Y.0` — or, while
+ *   2. a `catalog:` core entry is NOT a single-minor caret `^0.Y.0` on 0.x or a
+ *      caret `^X.Y.Z` from 1.0 (one major is one copy there) — or, while
  *      aligned to a prerelease of a new major, the exact caret `^X.0.0-<pre>`
  *      (`^1.0.0-rc.0`; any prerelease suffix, the rule is the position not the
  *      spelling — a wider range like `>=0.11 <0.13` re-opens the two-copies
@@ -24,6 +25,7 @@
  *   node scripts/check-catalog.mjs              # structural only
  *   node scripts/check-catalog.mjs 0.14         # every core entry must be ^0.14.0
  *   node scripts/check-catalog.mjs 0.14.0       # patch ignored, as in sync-core.mjs
+ *   node scripts/check-catalog.mjs 1.0.1        # 1.x keeps the patch: every core entry must be ^1.0.1
  *   node scripts/check-catalog.mjs 1.0.0-rc.0   # every core entry must be ^1.0.0-rc.0
  *
  * Wire into ci.yml. Generalises lynx's check-versions.js to the catalog model.
@@ -38,7 +40,13 @@ import { CORE_PACKAGES, findInlineCoreDeps, formatInlineCoreDeps, peerRangeFor }
 // ships. A prerelease of a later minor (^1.1.0-beta.0) is deliberately NOT a
 // pin: consumers align to releases, and the rc case exists only because a
 // major's first release has no stable version to pin.
-const SINGLE_MINOR = /^\^\d+\.\d+\.0$|^\^\d+\.0\.0-[0-9A-Za-z.-]+$/;
+//
+// From 1.0 a caret spans the whole MAJOR (`^1.0.1` == `>=1.0.1 <2.0.0`) and 1.0
+// promises additive minors, so one physical copy per major is the guarantee and
+// the pin may carry a patch floor (`^1.0.1` — the release a fix landed in). On
+// 0.x the pin stays `^0.Y.0`: there a caret is one minor, and a patch floor
+// would only hide which minor the catalog is on.
+const SINGLE_MINOR = /^\^0\.\d+\.0$|^\^[1-9]\d*\.\d+\.\d+$|^\^\d+\.0\.0-[0-9A-Za-z.-]+$/;
 
 // Value may be quoted (and a quoted value may contain spaces, e.g. a wide range
 // like ">=0.11.0 <0.13.0") or bare. Capture all three forms so wide ranges are
@@ -48,8 +56,10 @@ const entryRe = /^\s+(["']?)([@a-zA-Z0-9._/-]+)\1\s*:\s*(?:"([^"]*)"|'([^']*)'|(
 /**
  * Normalise a user-supplied version to the caret form the catalog pins.
  * Accepts `0.14`, `0.14.0` and `^0.14.0` (the patch is ignored because the pin
- * is always `.0` — a single minor, not a single patch) and a prerelease of a
- * new major, `1.0.0-rc.0`, which pins exactly. Returns null when the argument
+ * is always `.0` on 0.x — a single minor, not a single patch); from 1.0 the
+ * patch is kept (`1.0.1` -> `^1.0.1`, `1.0` -> `^1.0.0`), because a 1.x pin is
+ * a patch floor inside one major. A prerelease of a new major, `1.0.0-rc.0`,
+ * pins exactly. Returns null when the argument
  * is not a version at all, so the caller can reject it loudly rather than
  * silently degrading to a structural-only run that reports OK.
  */
@@ -57,8 +67,11 @@ export function normalizeExpected(arg) {
     const s = String(arg).trim();
     const pre = /^\^?(\d+)\.0\.0(-[0-9A-Za-z.-]+)$/.exec(s);
     if (pre) return `^${pre[1]}.0.0${pre[2]}`;
-    const m = /^\^?(\d+)\.(\d+)(?:\.\d+)?$/.exec(s);
-    return m ? `^${m[1]}.${m[2]}.0` : null;
+    const m = /^\^?(\d+)\.(\d+)(?:\.(\d+))?$/.exec(s);
+    if (!m) return null;
+    // 1.x+: the patch is part of the pin (`^1.0.1`), see SINGLE_MINOR.
+    if (Number(m[1]) >= 1) return `^${m[1]}.${m[2]}.${m[3] ?? 0}`;
+    return `^${m[1]}.${m[2]}.0`;
 }
 
 /** The core entries a `pnpm-workspace.yaml` catalog carries, in order. */
@@ -96,11 +109,11 @@ export function checkCatalog(ws, want = null) {
     const errors = [];
     for (const { name, ver } of catalogCoreEntries(ws)) {
         if (!SINGLE_MINOR.test(ver)) {
-            errors.push(`catalog["${name}"] = "${ver}" (must be single-minor ^X.Y.0 — or ^X.0.0-<pre> for a new major's prerelease — to keep one copy hoisted)`);
+            errors.push(`catalog["${name}"] = "${ver}" (must be single-minor ^0.Y.0 on 0.x, a caret ^X.Y.Z from 1.0, or ^X.0.0-<pre> for a new major's prerelease — to keep one copy hoisted)`);
         } else if (want && ver !== want) {
             // Structurally fine but the WRONG minor — the failure mode check 2
             // cannot see. Name the remedy: this is what a missed sync looks like.
-            const target = want.slice(1).replace(/^(\d+)\.(\d+)\.0$/, '$1.$2');
+            const target = want.slice(1).replace(/^(0)\.(\d+)\.0$/, '$1.$2');
             errors.push(`catalog["${name}"] = "${ver}" (expected ${want} — run \`pnpm sync:core ${target}\`)`);
         }
     }

@@ -213,6 +213,15 @@ test('a prerelease of a new major pins exactly — the only caret that resolves 
     assert.throws(() => alignCatalog(src, '^1.1.0-beta.0'), /single-minor caret/);
 });
 
+test('from 1.0 the pin keeps its patch floor — ^1.0.0 -> ^1.0.1 is a rewrite, a 0.x patch is not a pin', () => {
+    const src = ['# `^1.0.0` == `>=1.0.0 <2.0.0`.', 'catalog:', '  sigx: ^1.0.0', ''].join('\n');
+    const { text, pins } = alignCatalog(src, '^1.0.1');
+    assert.deepEqual(pins, [{ name: 'sigx', from: '^1.0.0', to: '^1.0.1' }]);
+    assert.match(text, /`\^1\.0\.1` == `>=1\.0\.1 <2\.0\.0`/);
+    assert.deepEqual(alignCatalog(text, '^1.0.1').pins, [], 'idempotent');
+    assert.throws(() => alignCatalog(src, '^0.15.3'), /single-minor caret/);
+});
+
 test("alignManifests writes the peer shape into publishable packages only, keeping each file's indent", () => {
     const root = mkdtempSync(join(tmpdir(), 'sync-core-'));
     try {
