@@ -28,6 +28,9 @@ describe('the sign-in routes: where the owner is sent back', () => {
         expect(unverifiedReturnTo(`${b64url(JSON.stringify({ n: 'x', r: '/plugins/gmail' }))}.sig`)).toBe('/plugins/gmail');
         expect(unverifiedReturnTo(`${b64url(JSON.stringify({ r: 'https://evil.test' }))}.sig`)).toBeUndefined();
         expect(unverifiedReturnTo('garbage')).toBeUndefined();
+        // Unpadded base64url of any length decodes; an oversized payload is not decoded at all.
+        expect(unverifiedReturnTo(`${b64url(JSON.stringify({ r: '/plugins/gmail', pad: 'x' }))}.sig`)).toBe('/plugins/gmail');
+        expect(unverifiedReturnTo(`${b64url(JSON.stringify({ r: '/plugins/gmail', junk: 'x'.repeat(3000) }))}.sig`)).toBeUndefined();
         expect(unverifiedReturnTo(null)).toBeUndefined();
     });
 

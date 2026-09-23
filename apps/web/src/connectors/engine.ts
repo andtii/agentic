@@ -86,11 +86,20 @@ export async function openPluginSecret(registry: Pick<ConnectorRegistry, 'openSe
     }
 }
 
-/** The workspace's engine secret, generated and sealed in the Registry the first time (the owner's call). */
+/**
+ * The workspace's engine secret, generated and sealed in the Registry the first time (the owner's call).
+ *
+ * Generation only happens while the secret is MISSING, so no account is sealed under an earlier value (short of the
+ * owner removing it by hand, which strands those accounts already) and an overwrite never strands a connected
+ * account. Two first Connects racing in one workspace both write; the value is
+ * read back after the write, so each flow signs with what the Registry holds, and at worst the loser's sign-in link
+ * says "start again". A write-once Registry API would close that window entirely; it is not worth a platform seam
+ * for a race only the owner can start against themselves.
+ */
 export async function ensureEngineSecret(registry: Pick<ConnectorRegistry, 'openSecret' | 'setSecret'>, pluginId: string): Promise<string> {
     const existing = await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId);
     if (existing !== undefined) return existing;
     const secret = newEngineSecret();
     await registry.setSecret(CONNECTOR_ENGINE_SECRET, secret);
-    return secret;
+    return (await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId)) ?? secret;
 }

@@ -49,6 +49,9 @@ export interface ConnectorMountWiring {
 
 const SEGMENT = /^[A-Za-z0-9._-]{1,128}$/;
 
+/** The longest state payload `unverifiedReturnTo` decodes. */
+const MAX_STATE_PAYLOAD = 2048;
+
 const json = (body: unknown, status: number): Response =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
@@ -92,9 +95,11 @@ function pluginOfPage(path: string | undefined): string | undefined {
  */
 export function unverifiedReturnTo(state: string | null): string | undefined {
     const payload = state?.split('.')[0];
-    if (!payload) return undefined;
+    // A query string anyone can send: bounded before any decoding work (conduit's own states are a few hundred characters).
+    if (!payload || payload.length > MAX_STATE_PAYLOAD) return undefined;
     try {
-        const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { r?: unknown };
+        const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const decoded = JSON.parse(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '='))) as { r?: unknown };
         return sameSitePath(decoded.r);
     } catch {
         return undefined;
