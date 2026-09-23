@@ -7,9 +7,9 @@
  * `estimated: true`, never silently as fact. Dated snapshots of a known id
  * (`claude-opus-4-6-20260101`) resolve to that id.
  *
- * Rates as published by Anthropic on 2026-06-24. Cache writes are the
+ * Rates as published by Anthropic on 2026-06-24; Opus 5.5 at its launch. Cache writes are the
  * 5-minute rate (1.25× input); cache reads are 0.1× input except on
- * Fable 5.1, where they are $0.25.
+ * Fable 5.1 ($0.25) and Opus 5.5 ($0.20).
  */
 
 import type { Usage } from '@sigx/ai';
@@ -33,6 +33,7 @@ export const ANTHROPIC_PRICING: Readonly<Record<string, ModelPricing>> = {
     'claude-fable-5-1': tier(10, 50, 0.25),
     'claude-mythos-5-1': FABLE,
     'claude-fable-5': FABLE,
+    'claude-opus-5-5': tier(4, 20, 0.2),
     'claude-opus-5': OPUS,
     'claude-opus-4-8': OPUS,
     'claude-opus-4-7': OPUS,

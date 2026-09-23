@@ -1,11 +1,11 @@
 /**
  * What a chat member's model and mode rows offer (#453): the models its environment's account reports
- * (`EnvironmentDescriptor.models`), else the runtime plugin's `defaultModel` enum; the permission modes its runtime
+ * (`EnvironmentDescriptor.models`), else the runtime plugin's `defaultModel` enum, each by its display name (#517); the permission modes its runtime
  * plugin lists (`defaultPermissionMode`), `bypassPermissions` only where the environment allows it. Pure.
  */
 import { BYPASS_PERMISSIONS_MODE, type ModelOption, type PluginManifest, type RuntimeId } from '@agentic/core';
 import { RUNTIME_PLUGINS } from '@agentic/runtimes';
-import type { WorkdirEnvironment } from '@agentic/ui';
+import { modelDisplayName, type WorkdirEnvironment } from '@agentic/ui';
 
 /** One entry of a member's listbox. */
 export interface MemberChoice {
@@ -35,8 +35,13 @@ function enumOf(runtime: RuntimeId, key: string, plugins: readonly PluginManifes
 /** The models a member on `runtime` may switch to: its environment's, else the plugin's; `current` is always one of them. */
 export function modelChoices(runtime: RuntimeId, env: Pick<WorkdirEnvironment, 'models'> | undefined, current: string | undefined, plugins: readonly PluginManifest[] = RUNTIME_PLUGINS): MemberChoice[] {
     const reported: readonly ModelOption[] = env?.models?.length ? env.models : enumOf(runtime, 'defaultModel', plugins).map((id) => ({ id }));
-    const out: MemberChoice[] = reported.map((m) => ({ id: m.id, label: m.id, ...(m.label && m.label !== m.id ? { hint: m.label } : {}) }));
-    if (current && !out.some((m) => m.id === current)) out.unshift({ id: current, label: current });
+    // Named as a person reads it (#517): `Opus 5.5`, the id it runs as beside it.
+    const choice = (id: string, m?: ModelOption): MemberChoice => {
+        const label = modelDisplayName(id, m);
+        return { id, label, ...(label !== id ? { hint: id } : {}) };
+    };
+    const out: MemberChoice[] = reported.map((m) => choice(m.id, m));
+    if (current && !out.some((m) => m.id === current)) out.unshift(choice(current));
     return out;
 }
 

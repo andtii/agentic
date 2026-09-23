@@ -65,7 +65,7 @@ describe('ContextPanel — the member card', () => {
         expect(open.querySelector('[data-member-workdir-path]')!.textContent).toBe('…\\agentic\\main');
         expect(open.getAttribute('title')).toBe('alien01 / work · …\\agentic\\main');
         expect(rows[1]!.querySelector('[data-member-workdir-clear]')).not.toBeNull();
-        expect(rows[2]!.querySelector('[data-member-model]')!.textContent).toBe('claude-sonnet-4.5');
+        expect(rows[2]!.querySelector('[data-member-model]')!.textContent).toBe('Sonnet 4.5');
         expect(rows[3]!.querySelector('[data-member-mode]')!.textContent).toBe('default');
         expect(rows[2]!.querySelector('[data-member-option-clear]')).toBeNull();
     });
@@ -164,7 +164,9 @@ describe('ContextPanel — switching model and mode (#453)', () => {
         await openRow(c, 'model');
         expect(c.querySelector('[data-row="model"] [data-member-option-open]')!.getAttribute('aria-expanded')).toBe('true');
         expect(c.querySelector('[data-member-options-head]')!.textContent).toBe('Model · applies to the next turn');
-        expect(options(c)).toEqual(['claude-fable-5-1', '✓ claude-sonnet-4.5']);
+        // Named as a person reads them (#517), the id beside each.
+        expect(options(c)).toEqual(['Fable 5.1', '✓ Sonnet 4.5']);
+        expect([...c.querySelectorAll('[data-member-options] [role="option"]')].map((o) => o.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('claude-fable-5-1')]));
         c.querySelector<HTMLElement>('[data-member-options] [role="option"]')!.click();
         await tick();
         expect(events).toEqual([{ agentId: 'forge', patch: { model: 'claude-fable-5-1' } }]);
@@ -175,8 +177,9 @@ describe('ContextPanel — switching model and mode (#453)', () => {
         const { c, events } = await card();
         await openRow(c, 'model');
         const listbox = c.querySelector<HTMLElement>('[data-member-options] [role="listbox"]')!;
-        expect(options(c)).toContain('claude-fable-5-1');
-        expect(options(c)[0]).toBe('✓ claude-sonnet-4.5');
+        expect(options(c)).toContain('Fable 5.1');
+        expect(options(c)).toContain('Opus 5.5');
+        expect(options(c)[0]).toBe('✓ Sonnet 4.5');
         listbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
         await tick();
         listbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -196,7 +199,7 @@ describe('ContextPanel — switching model and mode (#453)', () => {
 
     it('an override shows its value with a clear button that goes back to the config', async () => {
         const { c, events } = await card({}, { model: 'claude-fable-5-1', permissionMode: 'plan' });
-        expect(c.querySelector('[data-member-model]')!.textContent).toBe('claude-fable-5-1');
+        expect(c.querySelector('[data-member-model]')!.textContent).toBe('Fable 5.1');
         expect(c.querySelector('[data-member-mode]')!.textContent).toBe('plan');
         c.querySelector<HTMLButtonElement>('[data-row="mode"] [data-member-option-clear]')!.click();
         await tick();
