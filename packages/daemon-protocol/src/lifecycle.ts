@@ -11,7 +11,7 @@ import { WIRE_PROTOCOL_VERSION, type WireReply } from '@sigx/ai-agent/wire';
 export const SESSION_CLOSED_CODES = ['restart', 'update', 'harness-update', 'draining', 'harness-missing', 'resume-failed'] as const satisfies readonly SessionClosedCode[];
 
 /** Every `DaemonFeature` a `hello.features` may list. */
-export const DAEMON_FEATURES = ['update', 'harness', 'policy', 'log', 'login'] as const satisfies readonly DaemonFeature[];
+export const DAEMON_FEATURES = ['update', 'harness', 'policy', 'log', 'login', 'files'] as const satisfies readonly DaemonFeature[];
 
 /** `update.status` phases, in the order a successful update passes them (`failed` ends one early). */
 export const UPDATE_PHASES = ['downloading', 'verifying', 'staged', 'draining', 'restarting', 'failed'] as const satisfies readonly UpdatePhase[];

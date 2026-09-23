@@ -10,7 +10,8 @@ export type PromptPart =
     | { readonly type: 'text'; readonly text: string }
     | { readonly type: 'image'; readonly mediaType: string; readonly data?: string; readonly url?: string }
     | { readonly type: 'file'; readonly mediaType: string; readonly name?: string; readonly data?: string; readonly url?: string }
-    | { readonly type: 'resource'; readonly uri: string; readonly mediaType?: string };
+    /** A reference; `text` embeds a bounded excerpt (#559: a diff hunk under an `agentic-session://` URI, at most `RESOURCE_TEXT_MAX_CHARS`). */
+    | { readonly type: 'resource'; readonly uri: string; readonly mediaType?: string; readonly text?: string };
 
 export type Author = { readonly kind: 'user' } | { readonly kind: 'agent'; readonly agentId: AgentId; readonly sessionId?: SessionId };
 

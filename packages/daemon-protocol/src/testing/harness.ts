@@ -27,7 +27,7 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness' | 'policy' | 'log' | 'login' | 'restart';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'files' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness' | 'policy' | 'log' | 'login' | 'restart';
 
 export interface DaemonConformanceHarness {
     /**
@@ -43,7 +43,8 @@ export interface DaemonConformanceHarness {
      * `set` with `~` expanded to its user's home and its own folder refused, `browse` — and implements `lock`; `'log'`: the daemon
      * answers `log.request` from a log that holds at least `logLines` lines; `'login'`: the daemon relays a sign-in for the suite
      * environment (`login.request`, the `loginAction` it will show, and `loginAnswer` when the action expects a paste); `'restart'`:
-     * the daemon restarts on `update.request { target: 'restart' }` — no download, `session.closed { code: 'restart' }`.
+     * the daemon restarts on `update.request { target: 'restart' }` — no download, `session.closed { code: 'restart' }`; `'files'`: the daemon
+     * lists `files` in `hello.features` and answers `fs.request` `tree` / `read` / `changes` (#559) over the harness's `files` folders.
      */
     readonly features?: readonly ConformanceFeature[];
     /**
@@ -51,6 +52,8 @@ export interface DaemonConformanceHarness {
      * so `fs-locate` can prove a match (#331). Without it the case only checks the shape of an empty answer.
      */
     readonly knownOrigin?: string;
+    /** Feature `'files'`: the folders the session-files cases read (#559). */
+    readonly files?: ConformanceFiles;
     /** Feature `'update'`: a release the daemon can update to — what it downloads is the harness's business. */
     readonly updateTarget?: ReleaseAsset;
     /** Feature `'harness'`: a harness build the daemon can install, for a runtime it has a driver for. */
@@ -64,6 +67,18 @@ export interface DaemonConformanceHarness {
     readonly loginAnswer?: string;
     /** A fresh, paired daemon under test running `script`. Called once per case; the case stops it. */
     start(script: ConformanceScript): Promise<ConformanceDaemon> | ConformanceDaemon;
+}
+
+/**
+ * Folders under the suite environment's `cwdRoots` for the `files` cases (#559). `root` holds `file` (relative, `/`-separated,
+ * at least one folder deep) with exactly `file.text` on disk. With `changed`, `root` is under version control and `file`
+ * differs from its last commit; `plain`, when given, is a folder inside the roots that is under no version control.
+ */
+export interface ConformanceFiles {
+    readonly root: string;
+    readonly file: { readonly path: string; readonly text: string };
+    readonly changed?: boolean;
+    readonly plain?: string;
 }
 
 export interface ConformanceDaemon {

@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'vitest';
-import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, ChangeSet, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FileChangeStatus, FsErrorCode, FsOp, FsReadResult, FsResult, FsTreeResult, PromptPart, WorkspaceAnswer, WorkspaceSource, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
 import type { CONNECTOR_CALL_TOOL, CONNECTOR_TOOLS_TOOL, DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
@@ -46,10 +46,22 @@ describe('contract type tests', () => {
         expectTypeOf<keyof PlatformConnectorCall>().toEqualTypeOf<'connectorId' | 'tool' | 'input'>();
     });
     it('fs operations and results are closed unions', () => {
-        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
-        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
+        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes'>();
+        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes'>();
         expectTypeOf<Extract<FsOp, { kind: 'locate' }>['origin']>().toEqualTypeOf<string>();
         expectTypeOf<'outside-roots'>().toMatchTypeOf<FsErrorCode>();
+        expectTypeOf<'too-large'>().toMatchTypeOf<FsErrorCode>();
+    });
+    it('session files (#559): ops name a root, the source seam answers like the wire, changes are VCS-neutral', () => {
+        expectTypeOf<Extract<FsOp, { kind: 'read' }>['rev']>().toEqualTypeOf<'working' | 'head' | 'base' | undefined>();
+        expectTypeOf<Extract<FsOp, { kind: 'tree' | 'read' | 'changes' }>['root']>().toEqualTypeOf<string>();
+        expectTypeOf<FileChangeStatus>().toEqualTypeOf<'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'>();
+        expectTypeOf<ChangeSet['vcs']>().toEqualTypeOf<string>();
+        expectTypeOf<ReturnType<WorkspaceSource['tree']>>().toEqualTypeOf<Promise<WorkspaceAnswer<FsTreeResult>>>();
+        expectTypeOf<ReturnType<WorkspaceSource['read']>>().toEqualTypeOf<Promise<WorkspaceAnswer<FsReadResult>>>();
+        expectTypeOf<ReturnType<WorkspaceSource['changes']>>().toEqualTypeOf<Promise<WorkspaceAnswer<ChangeSet>>>();
+        expectTypeOf<'files'>().toMatchTypeOf<DaemonFeature>();
+        expectTypeOf<Extract<PromptPart, { type: 'resource' }>['text']>().toEqualTypeOf<string | undefined>();
     });
     it('env operations are a closed union and an environment input never names a profile directory', () => {
         expectTypeOf<Discriminant<EnvOp, 'op'>>().toEqualTypeOf<'put' | 'remove'>();

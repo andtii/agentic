@@ -6,6 +6,7 @@
  * depth the wire contract fixes; their payloads are the runtime's business.
  */
 
+import { RESOURCE_TEXT_MAX_CHARS } from '@agentic/core';
 import type { AgentCapabilities, AgentEvent, Decision, PromptPart, SessionRef } from '@sigx/ai-agent';
 import { isAgentEvent } from '@sigx/ai-agent';
 import type { WireCommand, WireFrame, WireOutputSpec, WireReply } from '@sigx/ai-agent/wire';
@@ -50,7 +51,8 @@ function isPromptPart(p: unknown): p is PromptPart {
         case 'file':
             return typeof p.mediaType === 'string' && (typeof p.data === 'string') !== (typeof p.url === 'string');
         default:
-            return typeof p.uri === 'string';
+            // A resource may embed a bounded excerpt (#559: a diff hunk under an `agentic-session://` URI).
+            return typeof p.uri === 'string' && (p.text === undefined || (typeof p.text === 'string' && p.text.length <= RESOURCE_TEXT_MAX_CHARS));
     }
 }
 
