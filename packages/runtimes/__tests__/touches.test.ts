@@ -6,6 +6,7 @@ describe('filesTouched (#565)', () => {
         expect(filesTouched(CLAUDE_CODE_PLUGIN_ID, { name: 'MultiEdit', input: { file_path: '/work/a.ts', edits: [] } })).toEqual([{ path: '/work/a.ts' }]);
         expect(filesTouched(CLAUDE_CODE_PLUGIN_ID, { name: 'Write', input: { file_path: '/work/new.ts', content: 'x' } })).toEqual([{ path: '/work/new.ts' }]);
         expect(filesTouched(CLAUDE_CODE_PLUGIN_ID, { name: 'NotebookEdit', input: { notebook_path: '/work/n.ipynb', new_source: '' } })).toEqual([{ path: '/work/n.ipynb' }]);
+        expect(filesTouched(CLAUDE_CODE_PLUGIN_ID, { name: 'Edit', input: { file_path: '  /work/a.ts\n' } })).toEqual([{ path: '/work/a.ts' }]);
     });
 
     it('reports nothing for a tool that does not write, a streaming call without input, or a blank path', () => {

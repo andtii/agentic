@@ -162,4 +162,16 @@ describe('the mock workspace end to end (#565)', () => {
         expect(dom.querySelector('[data-scope="ag-changes"][data-part="item"][aria-current] [data-part="name"]')!.textContent).toBe('shell.css');
         expect(filesHref('s1', 'x')).toBe('/sessions/s1/files?path=x');
     });
+
+    it('a link to a file outside the session folder chooses nothing, in either view', async () => {
+        const changes = await mountRoute(changesHref('s1', { file: 'C:\\Elsewhere\\shell.css' }));
+        await until(() => changes.querySelector('[data-scope="ag-changes"][data-part="item"]') !== null, 'the list');
+        await tick();
+        expect(changes.querySelector('[data-scope="ag-changes"][data-part="item"][aria-current]')).toBeNull();
+        expect(changes.textContent).toContain('Choose a file to see its diff.');
+        const files = await mountRoute(filesHref('s1', 'C:\\Elsewhere\\shell.css'));
+        await until(() => files.querySelector('[data-scope="ag-file-tree"][data-part="item"]') !== null, 'the tree');
+        expect(files.textContent).toContain('Choose a file to read it.');
+        expect(files.querySelector('[data-scope="ag-file-header"]')).toBeNull();
+    });
 });

@@ -20,5 +20,6 @@ export function claudeCodeFileTouches(call: ToolCallLike): FileTouch[] {
     const key = Object.hasOwn(CLAUDE_CODE_EDIT_TOOLS, call.name) ? CLAUDE_CODE_EDIT_TOOLS[call.name] : undefined;
     if (!key || typeof call.input !== 'object' || call.input === null) return [];
     const path = (call.input as Record<string, unknown>)[key];
-    return typeof path === 'string' && path.trim() ? [{ path }] : [];
+    const trimmed = typeof path === 'string' ? path.trim() : '';
+    return trimmed ? [{ path: trimmed }] : [];
 }

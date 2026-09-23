@@ -57,8 +57,9 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
     const router = useRouter();
     const st = signal({ version: 0, known: [] as string[], ignoredHidden: false, rootError: null as FsError | null });
     const files = (): SessionFiles => props.ctx.files;
-    // A tool call's link names the file absolute: read relative to the folder, as the source answers.
-    const path = (): string | undefined => { const q = queryOf(route.query.path); return q === undefined ? undefined : (relativeToRoot(files().root, q) ?? q); };
+    // A tool call's link names the file absolute: read relative to the folder, as the source answers; a path
+    // outside the folder is none of this view's.
+    const path = (): string | undefined => { const q = queryOf(route.query.path); return q === undefined ? undefined : relativeToRoot(files().root, q) || undefined; };
     const uncommitted = useSessionChanges(() => files(), () => (files().vcs === false ? null : 'uncommitted'), () => st.version);
     const changeOf = (p: string): FileChangeStatus | undefined => uncommitted.set?.files.find((f) => f.path === p)?.status;
 

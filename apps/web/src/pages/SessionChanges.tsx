@@ -109,8 +109,9 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
     const router = useRouter();
     const st = signal({ version: 0, selected: null as LineRef | null, sending: false, sent: '' });
     const files = (): SessionFiles => props.ctx.files;
-    // A tool card's "View diff" names the file as the call did (absolute): read relative to the folder.
-    const fileQuery = (): string | undefined => { const f = queryOf(route.query.file); return f === undefined ? undefined : (relativeToRoot(files().root, f) ?? f); };
+    // A tool card's "View diff" names the file as the call did (absolute): read relative to the folder. `null`: the
+    // query names a file outside it, which this folder can never serve — no file is chosen, never the first one.
+    const fileQuery = (): string | null | undefined => { const f = queryOf(route.query.file); return f === undefined ? undefined : relativeToRoot(files().root, f) || null; };
     const q = () => ({
         file: fileQuery(),
         scope: queryOf(route.query.scope) as ChangeScope | undefined,
@@ -125,6 +126,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
         const set = current().set;
         if (!set) return undefined;
         const want = q().file;
+        if (want === null) return undefined;
         return (want ? set.files.find((f) => f.path === want) : undefined) ?? (want ? undefined : set.files[0]);
     };
     const texts = useDiffTexts(() => files(), () => { const file = fileOf(); return file ? { scope: scope(), file } : null; }, () => st.version);
@@ -136,7 +138,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
 
     const go = (next: { file?: string; scope?: ChangeScope; view?: DiffMode }): void => {
         const cur = q();
-        const href = changesHref(props.ctx.v.id, { file: 'file' in next ? next.file : cur.file, scope: next.scope ?? cur.scope, view: next.view ?? cur.view });
+        const href = changesHref(props.ctx.v.id, { file: 'file' in next ? next.file : (cur.file ?? undefined), scope: next.scope ?? cur.scope, view: next.view ?? cur.view });
         // Opening a file is a step back can undo (the phone's full-screen diff); a layout or scope switch is not.
         void ('file' in next && next.scope === undefined ? router.push(href) : router.replace(href));
     };
