@@ -21,7 +21,7 @@
     "@sigx/ai-agent": "catalog:",
     "@sigx/ai-agent-node": "catalog:",
     "@sigx/ai-agent-claude-code": "catalog:",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.274",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
     "@github/copilot-sdk": "^1.0.14",
     "@openai/codex": "^0.155.1",
     "ws": "^8.21.0"
