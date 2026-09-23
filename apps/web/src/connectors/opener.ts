@@ -43,6 +43,7 @@ export function conduitOpener(options: ConduitOpenerOptions = {}): (input: Extra
             ...(options.http ? { http: options.http } : {})
         });
         const opened = await conduitTools(engine, { id: input.id, connector: input.connector, account: input.account, owner: context.workspaceId });
-        return opened as unknown as OpenedConnector;
+        // Structurally: TypeScript checks conduit's tools against what a session takes.
+        return { tools: opened.tools, toolNames: opened.toolNames, close: () => opened.close() };
     };
 }

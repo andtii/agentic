@@ -57,7 +57,7 @@ export const ConduitConnectPanel = component<ConduitConnectPanelProps>(({ props,
                 <p data-plugin-hint>Add this redirect URI to your OAuth client’s authorized redirect URIs, then save the client ID and secret above.</p>
                 <div data-command-well data-connect-redirect>
                     <code>{props.redirectUri}</code>
-                    <Button intent="default" label={`Copy ${props.redirectUri}`} onClick={copy}>Copy</Button>
+                    <Button intent="default" label="Copy redirect URI" onClick={copy}>Copy</Button>
                 </div>
 
                 <div data-connect-status>
