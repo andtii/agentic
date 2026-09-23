@@ -240,7 +240,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
 
                 {slots.update?.()}
 
-                <section aria-label="Environments" data-machine-envs>
+                <section aria-label="Environments" data-machine-envs id="environments">
                     <div data-label-row>
                         <Label>Environments</Label>
                         {manageable
