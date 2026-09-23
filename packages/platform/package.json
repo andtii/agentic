@@ -23,6 +23,7 @@
     "@agentic/daemon-protocol": "workspace:*",
     "@agentic/memory": "workspace:*",
     "@agentic/runtimes": "workspace:*",
+    "@aigntiq/conduit": "catalog:",
     "@sigx/actors": "catalog:",
     "@sigx/ai-agent": "catalog:"
   },

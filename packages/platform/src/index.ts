@@ -13,6 +13,7 @@ export * from './task/index.js';
 export * from './ledger/index.js';
 export * from './machine/index.js';
 export * from './registry/index.js';
+export * from './connector-accounts/index.js';
 export * from './pairing/index.js';
 export * from './releases/index.js';
 export * from './routing/index.js';

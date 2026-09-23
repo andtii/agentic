@@ -24,6 +24,9 @@ export const AUDIT_KINDS = [
     'harness.changed',
     'task.transition',
     'config.versioned',
+    'connector.connected',
+    'connector.disconnected',
+    'connector.needs-reauth',
     'proposal.reviewed',
     'machine.paired',
     'machine.revoked',
@@ -293,6 +296,19 @@ export interface SecretOpenedData {
     readonly pluginId: string;
 }
 
+/**
+ * A conduit account changed state in `{ws}:connector-accounts` (#532, EXE-10): connected (created, or reconnected
+ * from `needsReauth`), disconnected (deleted), or flagged `needsReauth` (a refresh was refused). Never credentials.
+ */
+export interface ConnectorAccountData {
+    readonly accountId: string;
+    readonly connector: string;
+    readonly method: string;
+    readonly displayName?: string;
+    /** `connector.connected` only: the account came back from `needsReauth`. */
+    readonly reconnected?: boolean;
+}
+
 /** A daemon added a git worktree at an owner's `Machine.fsRequest` (#189, OPS-03). `by` is the owner who asked. */
 export interface WorktreeCreatedData {
     readonly machineId: MachineId;
@@ -391,6 +407,9 @@ export interface AuditDataByKind {
     readonly 'environment.removed': EnvironmentRemovedData;
     readonly 'task.transition': TaskTransitionData;
     readonly 'config.versioned': ConfigVersionedData;
+    readonly 'connector.connected': ConnectorAccountData;
+    readonly 'connector.disconnected': ConnectorAccountData;
+    readonly 'connector.needs-reauth': ConnectorAccountData;
     readonly 'proposal.reviewed': ProposalReviewedData;
     readonly 'machine.paired': MachinePairedData;
     readonly 'machine.revoked': MachineRevokedData;
