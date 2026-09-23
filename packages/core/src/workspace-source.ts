@@ -2,7 +2,7 @@
  * A session's folder as the Changes and Files views and the MCP tools read it (#559). Pages and tools depend on
  * `WorkspaceSource` only, never on where the files live: the web builds one over a machine's daemon (`fs.request`
  * `tree` / `read` / `changes`), tests and the mock workspace over fixtures, and a later host (a sandbox, a remote
- * checkout) plugs in by implementing the same four calls. Read-only by design — edits stay with the agent.
+ * checkout) plugs in by implementing the same three calls. Read-only by design — edits stay with the agent.
  */
 
 import type { DaemonFeature } from './daemon.js';
