@@ -498,13 +498,13 @@ export const opsPlugins: readonly PluginView[] = [
         capabilities: ['operation:send-email', 'operation:create-draft', 'operation:reply-to-message', 'operation:search-messages', 'operation:get-message', 'operation:get-thread', 'operation:get-attachment', 'operation:modify-labels', 'operation:trash-message', 'unsupported:trigger:new-email'],
         config: NOTHING_TO_SET,
         secrets: [
-            { name: 'client-id', title: 'OAuth client ID', description: 'From the OAuth client you created for Gmail', required: true },
-            { name: 'client-secret', title: 'OAuth client secret', description: 'From the OAuth client you created for Gmail', required: true },
+            { name: 'gmail-client-id', title: 'OAuth client ID', description: 'From the OAuth client you created for Gmail', required: true },
+            { name: 'gmail-client-secret', title: 'OAuth client secret', description: 'From the OAuth client you created for Gmail', required: true },
             { name: 'connector-engine-secret', title: 'Connector engine secret', description: 'Generated on the first Connect.', required: false }
         ],
         permissions: [
-            { scope: 'secret:client-id', reason: 'The OAuth client id Gmail signs in with' },
-            { scope: 'secret:client-secret', reason: 'The OAuth client secret Gmail signs in with' },
+            { scope: 'secret:gmail-client-id', reason: 'The OAuth client id Gmail signs in with' },
+            { scope: 'secret:gmail-client-secret', reason: 'The OAuth client secret Gmail signs in with' },
             { scope: 'secret:connector-engine-secret', reason: "Signs the sign-in handshake and seals the connected Gmail account's tokens" },
             { scope: 'network:gmail.googleapis.com', reason: 'Call gmail.googleapis.com' },
             { scope: 'network:oauth2.googleapis.com', reason: 'Call oauth2.googleapis.com' },
@@ -532,7 +532,7 @@ export const opsPluginDependents: readonly Dependents[] = [
 ];
 
 /** What `pluginReadiness` reads in the mock workspace: the GitHub token is set, the Anthropic key is not yet. */
-export const opsPluginFacts: { readonly secretNames: readonly string[]; readonly hasKek: boolean } = { secretNames: ['github-token', 'client-id', 'client-secret', 'connector-engine-secret'], hasKek: true };
+export const opsPluginFacts: { readonly secretNames: readonly string[]; readonly hasKek: boolean } = { secretNames: ['github-token', 'gmail-client-id', 'gmail-client-secret', 'connector-engine-secret'], hasKek: true };
 
 /** The mock workspace's Gmail account (#533): connected, as a connector page shows it. */
 export const opsGmailAccount = { id: 'acct_gmail', connector: 'gmail', method: 'oauth', status: 'active', displayName: 'you@example.com', createdAt: Date.parse('2026-09-20T09:00:00Z'), updatedAt: Date.parse('2026-09-23T08:00:00Z') } as const;

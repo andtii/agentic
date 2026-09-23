@@ -215,7 +215,7 @@ describe('platform-run connectors over the daemon’s tool.call (#534)', () => {
         const opener: ConnectorOpener = async (input, context) => {
             opens.push({ input, ...(context ? { context } : {}) });
             if (input.kind !== 'conduit') throw new Error('not conduit');
-            const secret = await context!.secret('client-secret', input.pluginId);
+            const secret = await context!.secret('gmail-client-secret', input.pluginId);
             return {
                 tools: [
                     tool('gmail__search-messages', { readOnly: true }, async () => {
@@ -254,7 +254,7 @@ describe('platform-run connectors over the daemon’s tool.call (#534)', () => {
         await app.start();
         const reg = app.as(owner).actor(RegistryWithGmail, registryKey(WS));
         await reg.enable('gmail');
-        await reg.setSecret('client-secret', CLIENT_SECRET);
+        await reg.setSecret('gmail-client-secret', CLIENT_SECRET);
         await reg.putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', ...(options.connected === false ? {} : { account: 'acct_1' }) });
         // Another conduit connector in the workspace that this agent is not given.
         await reg.putConnector({ id: 'other', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_2' });

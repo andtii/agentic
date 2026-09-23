@@ -158,11 +158,12 @@ afterEach(async () => {
 /** What the plugin page and the sign-in routes do: the OAuth client, Gmail on, one connected account on the record. */
 async function connectGmail(): Promise<void> {
     await registry().enable('gmail');
-    await registry().setSecret('client-id', 'cid.apps.googleusercontent.com');
-    await registry().setSecret('client-secret', CLIENT_SECRET);
+    await registry().setSecret('gmail-client-id', 'cid.apps.googleusercontent.com');
+    await registry().setSecret('gmail-client-secret', CLIENT_SECRET);
     const reg = registry() as unknown as ConnectorRegistry;
     const engine = workspaceConnectorEngine({
         workspaceId: WS,
+        pluginId: 'gmail',
         principal: owner,
         secret: (name) => reg.openSecret(name, 'gmail'),
         engineSecret: await ensureEngineSecret(reg, 'gmail'),

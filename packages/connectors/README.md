@@ -10,8 +10,9 @@ Design: `docs/architecture.md` §9, "connectors that sign in" (#536).
 |---|---|
 | `createConnectorEngine({ secret, accounts, transient, locks, clients, redirectUri, http? })` | `createConduit` with the stores and the OAuth client injected. Specs default to every connector of `@aigntiq/conduit-connectors`. |
 | `conduitTools(engine, { id, connector, account, owner })` | One connected account as `{ tools, toolNames, close }`, the platform's `OpenedConnector` shape. |
-| `clientFromSecrets(openSecret)` | conduit's `ClientResolver` from the connector plugin's `client-id` / `client-secret` secrets. |
-| `CONNECTOR_ENGINE_SECRET` | `connector-engine-secret`: the Registry secret holding the workspace's engine `secret`. The app generates it on the first Connect (#533). |
+| `clientFromSecrets(openSecret, pluginId)` | conduit's `ClientResolver` from the connector plugin's own `<pluginId>-client-id` / `<pluginId>-client-secret` secrets. |
+| `connectorClientSecretNames(pluginId)` | those two names. Registry secret names are workspace-wide, so each conduit connector plugin names its own OAuth client (#548). |
+| `CONNECTOR_ENGINE_SECRET` | `connector-engine-secret`: the Registry secret holding the workspace's engine `secret`. The app generates it on the first Connect (#533). One per workspace, shared by every conduit connector plugin on purpose: it signs state and keys the cipher of the workspace's one account store. |
 | `gmailConnectorPlugin` | The Gmail `PluginManifest` (`kind: 'connector'`). |
 | `conduitConnectorManifest(spec, { hosts })` | The same manifest for any conduit connector. |
 
@@ -28,6 +29,6 @@ Design: `docs/architecture.md` §9, "connectors that sign in" (#536).
 
 ## Gmail manifest
 
-- Secrets: `client-id` and `client-secret` (required), the owner's own Google OAuth client, and `connector-engine-secret` (not required), the workspace's engine secret. The platform generates it on the first Connect, so it never holds readiness back and the plugin page offers no field for it (#533).
-- Permissions: `secret:client-id`, `secret:client-secret`, `secret:connector-engine-secret`, `network:gmail.googleapis.com`, `network:oauth2.googleapis.com` and `tools:gmail`.
+- Secrets: `gmail-client-id` and `gmail-client-secret` (required), the owner's own Google OAuth client, and `connector-engine-secret` (not required), the workspace's engine secret. The platform generates it on the first Connect, so it never holds readiness back and the plugin page offers no field for it (#533).
+- Permissions: `secret:gmail-client-id`, `secret:gmail-client-secret`, `secret:connector-engine-secret`, `network:gmail.googleapis.com`, `network:oauth2.googleapis.com` and `tools:gmail`.
 - Capabilities: `operation:<id>` for every callable operation, and `unsupported:trigger:new-email` until triggers land (#535).
