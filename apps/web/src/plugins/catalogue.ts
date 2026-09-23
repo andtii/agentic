@@ -36,7 +36,7 @@
  */
 import { A2A_PEER_PREFIX, a2aPeerRuntime, a2aServerPlugin } from '@agentic/a2a';
 import type { ProjectFeaturePlugin } from '@agentic/core';
-import type { AnthropicApiRuntimeOptions, CatalogueEntry, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
+import type { AnthropicApiRuntimeOptions, CatalogueEntry, ConnectorOpener, ChannelCatalogue, LearningPluginImpl, MemoryPluginImpl, RuntimeCatalogue } from '@agentic/platform';
 import { WEB_PUSH_PLUGIN_ID, anthropicApiRuntime, flatMemoryActorImpl, withInstanceRuntimes, memoryActorImpl, webPushChannelPlugin, webPushPlugin } from '@agentic/platform';
 import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
@@ -60,6 +60,10 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     { manifest: a2aServerPlugin, enabledByDefault: false }
 ];
 
+/** The opener `anthropic-api` sessions open connectors with: an MCP one through `openMcpConnector`; conduit ones wait for their opener (#531, #533). */
+const openConnector: ConnectorOpener = (input) =>
+    input.kind === 'mcp' ? openMcpConnector(input) : Promise.reject(new Error(`this deployment cannot open conduit connectors yet (${input.connector})`));
+
 /**
  * Runtime id → where its sessions run. The ids are the runtime plugins' ids: the build's own, and the A2A peers a
  * workspace adds (`a2a.<id>`, #246), each a local runtime over `a2aAgent` reading its card URL and token from its plugin.
@@ -67,7 +71,7 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
 export function runtimeCatalogue(options: AnthropicApiRuntimeOptions): RuntimeCatalogue {
     return withInstanceRuntimes(
         {
-            [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openMcpConnector, ...options }),
+            [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ connectors: openConnector, ...options }),
             [CLAUDE_CODE_PLUGIN_ID]: { host: 'daemon' },
             [COPILOT_CLI_PLUGIN_ID]: { host: 'daemon' },
             [CODEX_CLI_PLUGIN_ID]: { host: 'daemon' }

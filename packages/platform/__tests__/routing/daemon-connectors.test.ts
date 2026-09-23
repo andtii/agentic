@@ -38,6 +38,12 @@ const IN_MEMORY_PLUGIN = { ...claudeCodePlugin, id: 'in-memory', name: 'In-memor
 describe('daemonConnectors', () => {
     const ready = (over: Partial<GateConnector>): GateConnector => ({ id: 'acme', state: 'ready', pluginId: 'acme', transport: 'streamable-http', url: 'https://acme.test/mcp', auth: { bearer: 'acme.token' }, ...over });
 
+    it('leaves a conduit connector out, with why — it runs on the platform (#530, until #534)', () => {
+        const placed = daemonConnectors([ready({}), ready({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', url: undefined, auth: undefined, connector: 'gmail', account: 'acct_1' })], 'machine_1');
+        expect(placed.connectors).toEqual([{ id: 'acme', transport: 'streamable-http', url: 'https://acme.test/mcp', auth: { bearer: 'acme.token' } }]);
+        expect(placed.unavailable).toEqual([{ id: 'gmail', reason: 'it runs on the platform and is not yet reachable from a machine session' }]);
+    });
+
     it('places every ready connector with secret names only, and names the rest with why', () => {
         const placed = daemonConnectors(
             [

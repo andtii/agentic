@@ -73,3 +73,35 @@ describe('putConnector', () => {
         await expect(reg().putConnector({ ...acme.connector, secrets: ['acme.token'] })).rejects.toThrow(/binds secret "acme.team"/);
     });
 });
+
+describe('a conduit connector (#530)', () => {
+    /** A connector-kind manifest to hang the record on — the conduit manifests themselves arrive with #531. */
+    const gmail = mcpConnectorSetup({ id: 'gmail', name: 'Gmail', transport: 'streamable-http', url: 'https://unused.test/mcp' }).manifest;
+
+    it('round-trips through putConnector / connectors() / gate(): the connector and account ids, no endpoint, no secret names', async () => {
+        await reg().register(gmail, { enabled: true, grant: 'declared' });
+        await reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1' });
+        expect(await reg().connectors()).toEqual([expect.objectContaining({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' } })]);
+        // A plugin config url is an MCP setting; it never reaches a conduit connector.
+        await reg().configure('gmail', { url: 'https://elsewhere.test/mcp' });
+        expect((await reg().gate({ connectors: ['gmail'] })).connectors).toEqual([
+            { id: 'gmail', state: 'ready', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' } }
+        ]);
+    });
+
+    it('before the owner connects, the gate answer has no account', async () => {
+        await reg().register(gmail, { enabled: true, grant: 'declared' });
+        await reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail' });
+        expect((await reg().gate({ connectors: ['gmail'] })).connectors?.[0]).not.toHaveProperty('account');
+    });
+
+    it('needs a connector id and has no url, command, secrets or auth', async () => {
+        await reg().register(gmail, { enabled: true, grant: 'declared' });
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit' })).rejects.toThrow(/needs a connector id/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', url: 'https://x.test/mcp' })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', command: 'x' })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', secrets: ['t'] })).rejects.toThrow(/no url, command, secrets or auth/);
+        await expect(reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', auth: { bearer: 't' } })).rejects.toThrow(/no url, command, secrets or auth/);
+        expect(await reg().connectors()).toEqual([]);
+    });
+});
