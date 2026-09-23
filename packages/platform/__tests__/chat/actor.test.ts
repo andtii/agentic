@@ -7,8 +7,9 @@ import type { AgentId, ChatEntry, EnvironmentId, MachineId, Principal, ProjectId
 import { AuditActor, auditKey } from '../../src/audit/index.js';
 import { workspaceKey } from '../../src/auth/index.js';
 import { Chat, ChatPage, MAX_TITLE_LENGTH, PAGE, WINDOW, pageKey, sessionEvents } from '../../src/chat/index.js';
+import { defineMachineActor } from '../../src/machine/index.js';
 import { PairingDirectory } from '../../src/pairing/index.js';
-import { statusOf, testActorApp, userPrincipal as testUser, type TestActorApp } from '../../src/testing/index.js';
+import { elevatedPrincipal, statusOf, testActorApp, userPrincipal as testUser, type TestActorApp } from '../../src/testing/index.js';
 import { Workspace } from '../../src/workspace/index.js';
 import { A, B, C, WS, agent, chatKey, countingStorage, startChatApp, user } from './helpers.js';
 
@@ -360,6 +361,8 @@ describe('project (#332)', () => {
 describe('machine (#414)', () => {
     const wsOwner = testUser(WS);
     const ws = () => app.as(wsOwner).actor(Workspace, workspaceKey(WS));
+    /** Removing a paired machine revokes it over a hop first, and `Machine.revoke` is elevated (#259, #355). */
+    const wsElevated = () => app.as(elevatedPrincipal(WS)).actor(Workspace, workspaceKey(WS));
     const auditEvents = async () => (await app.as(wsOwner).actor(AuditActor, auditKey(WS)).list({ kinds: ['chat.machine-set'] })).events;
     const machineOf = (e: { data: unknown }) => (e.data as { machineId: MachineId | null }).machineId;
     /** A machine of the index, paired (the Workspace's own half of `Machine.pair`), or left pending. */
@@ -371,7 +374,8 @@ describe('machine (#414)', () => {
 
     beforeEach(async () => {
         await app.stop();
-        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
+        // The Machine actor answers `Workspace.removeMachine`'s revoke hop (#259); its socket port never runs here.
+        app = testActorApp([Chat, ChatPage, Workspace, PairingDirectory, AuditActor, defineMachineActor({ socket: { send: () => false, close: () => undefined } })]);
         await app.start();
     });
 
@@ -413,7 +417,7 @@ describe('machine (#414)', () => {
         // Newest first.
         expect((await auditEvents()).map(machineOf)).toEqual([pc, mac, null, mac]);
 
-        await ws().removeMachine(pc);
+        await wsElevated().removeMachine(pc);
         const summary = await chat.get();
         expect(summary.machineId).toBe(pc);
         expect(summary.machine).toBeUndefined();
