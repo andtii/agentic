@@ -205,7 +205,7 @@ The daemon (`apps/daemon`, architecture §5b) runs on the user's machine, pairs 
 { "version": "0.1.1-main.1790000000.16c7d40", "channel": "latest", "publishedAt": 1790000000000, "commit": "16c7d40", "protocol": 1,
   "notesUrl": "https://github.com/andtii/agentic/releases/tag/daemon-latest",
   "assets": { "win32-x64": { "url": "…/agentic-daemon-win32-x64.zip", "sha256": "…", "bytes": 123, "version": "0.1.1-main.1790000000.16c7d40" }, … },
-  "harnesses": { "claude-code": { "version": "0.3.274", "assets": { "win32-x64": { "url": "…/harness-claude-code-win32-x64.zip", "sha256": "…", "bytes": 113268266, "version": "0.3.274" }, … } }, … } }
+  "harnesses": { "claude-code": { "version": "0.3.280", "assets": { "win32-x64": { "url": "…/harness-claude-code-win32-x64.zip", "sha256": "…", "bytes": 113268266, "version": "0.3.280" }, … } }, … } }
 ```
 
 Two channels:
