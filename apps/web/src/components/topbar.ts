@@ -25,6 +25,8 @@ export interface TopbarContribution {
     readonly subtitle?: () => JSXElement;
     /** The app bar's one right slot below 768 px; without it the actions render there. */
     readonly phoneAction?: () => JSXElement;
+    /** A whole trail, for a page deeper than section › entity (a session's views, #564); the last crumb is current. */
+    readonly trail?: readonly { readonly label: string; readonly href: string; readonly current?: boolean }[];
 }
 
 const registry = new Map<string, (route: TopbarRoute) => TopbarContribution>();

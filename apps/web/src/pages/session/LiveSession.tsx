@@ -20,9 +20,10 @@ import { useWorkspaceZone, zoneFormat } from '../../time';
 import { useAgentDirectory } from '../chat/directory';
 import { SessionView } from '../Session';
 import { liveSessionView } from './live';
+import { liveSessionFiles, machineClientFor, useLiveFilesExtras } from './files-sources';
 
 /** What the live page tells the topbar: the view for the crumb and the pill, and the two actions. */
-export const sessionHead = signal<{ value: { id: string; view: MockSessionView; cancel: () => void; close: () => void } | null }>({ value: null });
+export const sessionHead = signal<{ value: { id: string; view: MockSessionView; agentName?: string; cancel: () => void; close: () => void } | null }>({ value: null });
 
 export const LiveSession = component<{ id: string }>(({ props }) => {
     const defs = useActorDefs();
@@ -36,6 +37,9 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
     const machine = useActorState(defs.Machine, () => { const ws = viewer.workspaceId; const m = info.value?.spec?.machineId; return ws && m && ([machineKeyOf(ws, m), 'get'] as const); }, { live: true });
     // The router's route for this session (#368): whether a cut turn re-opens, or resumes on its own.
     const cuts = useInterruptionReads(defs, viewer, () => info.value?.spec?.taskId);
+    const extras = useLiveFilesExtras(defs, viewer, () => info.value);
+    /** The session's folder (#564): the session bar's Changes and Files tabs. */
+    const files = () => (viewer.workspaceId ? liveSessionFiles(props.id, info.value, machine.value, machineClientFor(defs, viewer.workspaceId), { ...extras(), time: zoneFormat(zone()).time }) : null);
     const st = signal({ error: '', recovering: false });
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
     const client = () => actor(defs.Session, key()!);
@@ -65,7 +69,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
 
     const stopHead = effect(() => {
         const v = view();
-        sessionHead.value = v ? { id: props.id, view: v, cancel: () => void client().cancel().catch(fail), close: () => void client().close().catch(fail) } : null;
+        sessionHead.value = v ? { id: props.id, view: v, agentName: directory.lookup(v.agentId).name, cancel: () => void client().cancel().catch(fail), close: () => void client().close().catch(fail) } : null;
     });
     onUnmounted(stopHead);
 
@@ -75,15 +79,17 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
             const missing = info.state === 'errored' || (info.value && !info.value.opened) || (!viewer.pending && !viewer.workspaceId);
             return (
                 <Page title={missing ? 'Session not found' : 'Session'} page="session" hideTitle>
-                    {missing
-                        ? <EmptyState variant="generic" title={viewer.workspaceId ? 'No session with that id' : 'Sign in to see your sessions'} caption={info.error?.message ?? `Nothing is called ${props.id}.`} slots={{ actions: () => <Link to="/">Back home</Link> }} />
-                        : <p data-panel-note aria-busy="true">Loading session…</p>}
+                    <div data-files-empty>
+                        {missing
+                            ? <EmptyState variant="generic" title={viewer.workspaceId ? 'No session with that id' : 'Sign in to see your sessions'} caption={info.error?.message ?? `Nothing is called ${props.id}.`} slots={{ actions: () => <Link to="/">Back home</Link> }} />
+                            : <p data-panel-note aria-busy="true">Loading session…</p>}
+                    </div>
                 </Page>
             );
         }
         return (
             <>
-                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} />
+                <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} files={files()} />
                 {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
             </>
         );
