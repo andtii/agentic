@@ -219,7 +219,7 @@ export const agQuotaRingsAnatomy = defineAnatomy('ag-quota-rings', {
 
 /**
  * A markdown document as prose (#490): the one part is the reading surface
- * whose recipe styles what `@sigx/markdown` renders inside it (`data-scope="markdown"`);
+ * whose recipe styles what `@sigx/richtext` renders inside it (`data-scope="richtext"`);
  * `compact` is the size a card's well shows it at.
  */
 export const agMarkdownAnatomy = defineAnatomy('ag-markdown', {
