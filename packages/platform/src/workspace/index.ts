@@ -191,6 +191,10 @@ interface MachineGetClient {
     get(): Promise<MachineView>;
 }
 
+interface MachineRevokeClient {
+    revoke(): Promise<MachineView>;
+}
+
 /** The daemon's path rules; one that never said is taken for Windows, the first platform (decision 2). */
 const osOf = (m: MachineView): HostOs => m.os ?? 'windows';
 
@@ -536,10 +540,24 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 });
             },
 
-            /** Drops the index entry; clears `lastMachineId` when it was this one (chats keep the dangling id, as with a removed project). */
+            /**
+             * Revokes the machine and drops the index entry; clears `lastMachineId` when it was this one
+             * (chats keep the dangling id, as with a removed project).
+             *
+             * Revoked FIRST, over a hop, for a machine the index calls paired (#259, USR-04): dropping the row
+             * alone leaves `tokenHash` valid, so a daemon still holding the token could keep reporting, hosting
+             * sessions and answering `env.request` for a machine its owner removed. Revoking is idempotent, so
+             * an already-revoked machine is removed all the same; a machine that never paired has no token and
+             * skips the hop. `Machine.revoke` is elevated (#355), which makes removing a paired machine elevated
+             * too — and a refusal leaves the row in place rather than orphaning a live token.
+             */
             async removeMachine(machineId: MachineId): Promise<boolean> {
                 const i = ctx.state.machines.findIndex((m) => m.id === machineId);
                 if (i < 0) return false;
+                if (ctx.state.machines[i]!.status === 'paired') {
+                    const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+                    await (ctx.actor(machineRefDef(), machineKey(workspaceId, machineId)) as unknown as MachineRevokeClient).revoke();
+                }
                 ctx.state.machines.splice(i, 1);
                 if (ctx.state.lastMachineId === machineId) delete ctx.state.lastMachineId;
                 await ctx.save();

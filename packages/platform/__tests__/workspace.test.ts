@@ -1,16 +1,27 @@
 import { actorKey, DEFAULT_WORKSPACE_SETTINGS, type EnvironmentId, type MachineId, type Principal, type ProjectId, type WorkspaceId } from '@agentic/core';
-import { workspaceKey } from '../src/auth/index';
+import { AuditActor } from '../src/audit/index';
+import { verifyMachineToken, workspaceKey } from '../src/auth/index';
 import { Chat, ChatPage } from '../src/chat/index';
-import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
+import { defineMachineActor, machineKey, type MachineSocketPort } from '../src/machine/index';
+import { elevatedPrincipal, statusOf, testActorApp, userPrincipal, type TestActorApp } from '../src/testing/index';
 import { PairingDirectory } from '../src/pairing/index';
 import { DEFAULT_SETTINGS, PAIRING_CODE_LENGTH, PAIRING_CODE_TTL_MS, RECENT_WORKDIRS_MAX, Workspace, type WorkspaceState } from '../src/workspace/index';
 
 const owner = userPrincipal('u1');
+/** The owner beside a live elevation (#355): removing a paired machine revokes it, and `Machine.revoke` is elevated. */
+const elevated = elevatedPrincipal('u1');
 const KEY = workspaceKey('u1');
+
+/** Records what the Machine actor closed, so a test can see the daemon's socket go with the token (#259). */
+let closedSockets: { key: string; code: number; reason: string }[];
+let Machine: ReturnType<typeof defineMachineActor>;
 
 let app: TestActorApp;
 beforeEach(() => {
-    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage]);
+    closedSockets = [];
+    const socket: MachineSocketPort = { send: () => false, close: (key, code, reason) => void closedSockets.push({ key, code, reason }) };
+    Machine = defineMachineActor({ socket });
+    app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, AuditActor]);
     return app.start();
 });
 afterEach(async () => {
@@ -19,6 +30,8 @@ afterEach(async () => {
 });
 
 const ws = () => app.as(owner).actor(Workspace, KEY);
+/** The same workspace, elevated: what removing a paired machine takes, since it revokes first (#259). */
+const wsElevated = () => app.as(elevated).actor(Workspace, KEY);
 const workspaceSaves = () => app.saves.filter((s) => s.type === 'Workspace');
 
 describe('Workspace authorization', () => {
@@ -166,11 +179,48 @@ describe('Workspace machines', () => {
 
     it('removes a machine and reports whether it existed', async () => {
         const { machineId } = await ws().registerMachinePending({ name: 'laptop' });
+        // Never paired: there is no token to revoke, so no elevation and no hop.
         expect(await ws().removeMachine(machineId)).toBe(true);
         expect(await ws().removeMachine(machineId)).toBe(false);
         expect(await ws().listMachines()).toEqual([]);
         const stored = (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
         expect(stored.machines).toEqual([]);
+    });
+
+    it('revokes a paired machine before dropping its row, so the old token no longer verifies (#259)', async () => {
+        const { machineId, pairingCode } = await ws().registerMachinePending({ name: 'laptop' });
+        const key = machineKey('u1' as WorkspaceId, machineId);
+        const machine = (principal: Principal = owner) => app.as(principal).actor(Machine, key);
+        const { token } = await machine().pair(pairingCode, { name: 'laptop', os: 'windows' });
+        expect(await verifyMachineToken(token, await machine().tokenRecord())).toMatchObject({ ok: true });
+
+        // Revoking is elevated (#355), so removing a paired machine is too — and the row survives the refusal.
+        expect(await statusOf(ws().removeMachine(machineId))).toBe(403);
+        expect((await ws().listMachines()).map((m) => m.id)).toEqual([machineId]);
+        expect(await verifyMachineToken(token, await machine().tokenRecord())).toMatchObject({ ok: true });
+
+        expect(await wsElevated().removeMachine(machineId)).toBe(true);
+        expect(await ws().listMachines()).toEqual([]);
+        // The daemon holding the old token is refused and its socket closed.
+        expect(await verifyMachineToken(token, await machine().tokenRecord())).toEqual({ ok: false, reason: 'revoked' });
+        expect(await machine().get()).toMatchObject({ revoked: true, online: false });
+        expect(closedSockets).toContainEqual({ key, code: 1008, reason: 'revoked' });
+    });
+
+    it('removes a machine that was already revoked, and one the Machine actor never knew (#259)', async () => {
+        const { machineId, pairingCode } = await ws().registerMachinePending({ name: 'laptop' });
+        const key = machineKey('u1' as WorkspaceId, machineId);
+        await app.as(owner).actor(Machine, key).pair(pairingCode);
+        await app.as(elevated).actor(Machine, key).revoke();
+        // Revoking is idempotent: a second one over the hop still removes the row.
+        expect(await wsElevated().removeMachine(machineId)).toBe(true);
+        expect(await ws().listMachines()).toEqual([]);
+
+        // A row the index calls paired whose Machine actor holds no token is removed all the same.
+        const other = await ws().registerMachinePending({ name: 'pc' });
+        await ws().claimPairing(other.pairingCode);
+        expect(await wsElevated().removeMachine(other.machineId)).toBe(true);
+        expect(await ws().listMachines()).toEqual([]);
     });
 
     it('createChat({ machineId }) puts the chat on the machine over a hop and notes it as the last used; an unknown or pending machine is refused first (#414)', async () => {
@@ -193,7 +243,8 @@ describe('Workspace machines', () => {
         await ws().noteMachine(mac);
         expect((await ws().get()).lastMachineId).toBe(mac);
         // Removing the machine clears the last-used note; the chat keeps its id (decisions 2026-09-21).
-        await ws().removeMachine(mac);
+        // Elevated: removing a paired machine revokes it first (#259).
+        await wsElevated().removeMachine(mac);
         expect((await ws().get()).lastMachineId).toBeUndefined();
         expect(await chat.get()).toMatchObject({ machineId: mac });
         expect((await chat.get()).machine).toBeUndefined();
