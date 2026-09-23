@@ -9,7 +9,7 @@
  * a refresh Google refuses (`invalid_grant`) marks the account `needsReauth` and the call says to reconnect;
  * Disconnect revokes at Google and forgets the account.
  */
-import { env, SELF } from 'cloudflare:test';
+import { SELF } from 'cloudflare:test';
 import type { WorkspaceId } from '@agentic/core';
 import { CONNECTOR_ENGINE_SECRET } from '@agentic/connectors';
 import { connectorAccountsKey, type ConnectorAccountsActor } from '@agentic/platform';
@@ -17,8 +17,6 @@ import { CONNECTOR_ENGINE_SECRET_NAME } from '../../src/connectors/paths';
 import { overHttp, registryOverHttp, signIn } from './http';
 
 const ORIGIN = 'https://agentic.test';
-/** `wrangler.jsonc`'s `APP_ORIGIN`: the redirect URI is the deployment's public origin, not the request's host. */
-const APP_ORIGIN = (env as { APP_ORIGIN?: string }).APP_ORIGIN ?? ORIGIN;
 const ConnectorAccounts = { type: 'ConnectorAccounts' } as unknown as ConnectorAccountsActor;
 
 const get = (path: string, cookie?: string): Promise<Response> => SELF.fetch(`${ORIGIN}${path}`, { redirect: 'manual', headers: cookie ? { cookie } : {} });
@@ -50,7 +48,8 @@ async function connect(cookie: string, code: string): Promise<Response> {
     const consent = new URL(start.headers.get('location')!);
     expect(consent.origin).toBe('https://accounts.google.com');
     expect(consent.searchParams.get('client_id')).toBe('cid.apps.googleusercontent.com');
-    expect(consent.searchParams.get('redirect_uri')).toBe(`${APP_ORIGIN}/_agentic/connectors/callback`);
+    // The callback on the host the owner started from (the one holding their session cookie), not `APP_ORIGIN`.
+    expect(consent.searchParams.get('redirect_uri')).toBe(`${ORIGIN}/_agentic/connectors/callback`);
     expect(consent.searchParams.get('code_challenge_method')).toBe('S256');
     const state = consent.searchParams.get('state')!;
     return get(`/_agentic/connectors/callback?state=${encodeURIComponent(state)}&code=${code}`, cookie);

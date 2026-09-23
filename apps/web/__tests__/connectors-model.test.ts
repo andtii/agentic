@@ -7,7 +7,7 @@ import { CONNECTOR_ENGINE_SECRET, gmailConnectorPlugin } from '@agentic/connecto
 import type { ConnectorAccountSummary, PluginView } from '@agentic/platform';
 import { newEngineSecret } from '../src/connectors/engine';
 import { CONNECTOR_ENGINE_SECRET_NAME, connectorRedirectUri } from '../src/connectors/paths';
-import { sameSitePath, unverifiedReturnTo } from '../src/connectors/routes';
+import { sameSitePath, unverifiedReturnTo, withParam } from '../src/connectors/routes';
 import { connectBlocker, connectionOf, connectOutcome, isConduitConnector, managedSecretsOf, operationsOf, ownerSecretsOf, unsupportedOf } from '../src/pages/plugins/conduit';
 import { connectorWhere } from '../src/pages/ops/live';
 import { HISTORY_KIND_FILTERS, kindLabel, refOf, toneOf } from '../src/pages/history/live';
@@ -22,6 +22,11 @@ describe('the sign-in routes: where the owner is sent back', () => {
         expect(sameSitePath('/plugins/gmail')).toBe('/plugins/gmail');
         expect(sameSitePath('/plugins/gmail?x=1')).toBe('/plugins/gmail?x=1');
         for (const bad of ['https://evil.test/', '//evil.test/', '/\\evil.test', 'plugins/gmail', '', undefined, 42]) expect(sameSitePath(bad), String(bad)).toBeUndefined();
+    });
+
+    it('sets one query parameter, percent-encoded, over any earlier copy', () => {
+        expect(withParam('/plugins/gmail', 'connect_error', 'a b+c')).toBe('/plugins/gmail?connect_error=a%20b%2Bc');
+        expect(withParam('/plugins/gmail?connected=1&x=y z', 'connected', '1')).toBe('/plugins/gmail?x=y%20z&connected=1');
     });
 
     it('reads returnTo off a conduit state without trusting it for anything but a same-site path', () => {

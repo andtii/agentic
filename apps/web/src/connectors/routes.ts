@@ -26,6 +26,11 @@
  * same-site path only. Any failure lands on the plugin page with
  * `?connect_error=` instead of a raw error page.
  *
+ * The redirect URI is the callback on the origin the request came in on —
+ * the one the plugin page shows (`location.origin`) — so the provider sends
+ * the owner back to the host that holds their session cookie, even when the
+ * deployment answers on more than one hostname.
+ *
  * Every route is the signed-in OWNER's (a user principal; the session
  * cookie is the credential), and every actor call is made as that owner, so
  * the Registry's and the accounts' own policies apply. Disconnect is a
@@ -68,12 +73,15 @@ export function sameSitePath(value: unknown): string | undefined {
     }
 }
 
-/** `path` with one more query parameter, percent-encoded (`%20`, never `+`: the app's router decodes with `decodeURIComponent`). */
-function withParam(path: string, name: string, value: string): string {
+/**
+ * `path` with `name` set to `value` (any earlier copy dropped), every parameter percent-encoded — `%20`, never `+`:
+ * the app's router decodes with `decodeURIComponent`.
+ */
+export function withParam(path: string, name: string, value: string): string {
     const url = new URL(path, 'http://x');
-    url.searchParams.delete(name);
-    const search = url.search ? `${url.search}&` : '?';
-    return `${url.pathname}${search}${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+    const params = [...url.searchParams].filter(([k]) => k !== name);
+    params.push([name, value]);
+    return `${url.pathname}?${params.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
 }
 
 /** The plugin id of a `/plugins/:id` path. */
@@ -150,8 +158,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
                 await registry.putConnector({ id: pluginId, pluginId, transport: 'conduit', connector });
                 record = null;
             }
-            const origin = originOf(env, request) ?? new URL(request.url).origin;
-            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, origin);
+            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, new URL(request.url).origin);
             // Reconnect the record's own account when it still exists, so its id (and every grant) stays.
             const account = record?.account !== undefined && (await engine.accounts.get(record.account, ws)) ? record.account : undefined;
             const begun = await engine.auth.begin({ connector, method: await methodOf(engine, connector), owner: ws, returnTo: page, ...(account ? { account } : {}) });
@@ -177,8 +184,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
             const registry = registryAs(principal, ws);
             const engineSecret = await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId);
             if (engineSecret === undefined) throw new Error('this sign-in link has expired — start again');
-            const origin = originOf(env, request) ?? url.origin;
-            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, origin);
+            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, url.origin);
             const { account, returnTo } = await engine.auth.complete({ callbackUrl: request.url });
             if (account.owner !== ws || account.connector !== connector) throw new Error('this sign-in belongs to another connector');
             await registry.putConnector({ id: pluginId, pluginId, transport: 'conduit', connector, account: account.id });
@@ -190,7 +196,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
 
     const disconnect = async (request: Request, env: AuthMountEnv, principal: Principal, pluginId: string, connector: string): Promise<Response> => {
         const origin = request.headers.get('origin');
-        if (!origin || (origin !== new URL(request.url).origin && origin !== originOf(env, request))) return json({ error: 'cross-origin' }, 403);
+        if (!origin || (origin !== new URL(request.url).origin && origin !== originOf(env, request)?.replace(/\/+$/, ''))) return json({ error: 'cross-origin' }, 403);
         const ws = principal.workspaceId as WorkspaceId;
         const registry = registryAs(principal, ws);
         const record = await registry.getConnector(pluginId);
@@ -198,7 +204,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
         let revoked = false;
         const engineSecret = await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId).catch(() => undefined);
         if (engineSecret !== undefined) {
-            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, originOf(env, request) ?? new URL(request.url).origin);
+            const engine = engineFor(principal, ws, registry, pluginId, engineSecret, new URL(request.url).origin);
             // Best effort at the provider; conduit deletes the account either way.
             revoked = await engine.auth
                 .revoke(record.account, ws)
