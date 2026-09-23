@@ -88,9 +88,9 @@ type FilesOp = Extract<FsOp, { kind: 'tree' | 'read' | 'changes' }>;
 const err = (code: FsError['code'], message: string): Answer => ({ error: { code, message } });
 const bytes = (text: string): number => new TextEncoder().encode(text).length;
 
-/** `path` relative to a root, resolved: `''` for the root, `null` when it climbs out of it or is absolute. */
+/** `path` relative to a root, resolved: `''` for the root, `null` when it climbs out of it or is absolute (POSIX, UNC or a drive). */
 function relative(path: string): string | null {
-    if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return null;
+    if (/^[\\/]/.test(path) || /^[A-Za-z]:/.test(path)) return null;
     const out: string[] = [];
     for (const s of path.replace(/\\/g, '/').split('/')) {
         if (s === '' || s === '.') continue;
@@ -102,11 +102,15 @@ function relative(path: string): string | null {
     return out.join('/');
 }
 
-/** Lines added and removed between two texts, by a longest-common-subsequence of lines. */
+/** Past this many cells the line LCS is not computed: every line counts as removed and added. */
+const LCS_MAX_CELLS = 1_000_000;
+
+/** Lines added and removed between two texts, by a longest-common-subsequence of lines (conservative for large texts). */
 function lineCounts(before: string | undefined, after: string | undefined): { added: number; removed: number } {
     const split = (t: string | undefined) => (t === undefined || t === '' ? [] : t.replace(/\n$/, '').split('\n'));
     const a = split(before);
     const b = split(after);
+    if ((a.length + 1) * (b.length + 1) > LCS_MAX_CELLS) return { added: b.length, removed: a.length };
     const lcs: number[][] = Array.from({ length: a.length + 1 }, () => Array.from({ length: b.length + 1 }, () => 0));
     for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
     const common = lcs[0]![0]!;

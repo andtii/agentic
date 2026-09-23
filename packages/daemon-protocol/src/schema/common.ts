@@ -250,7 +250,7 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
         commits: z.array(z.object({ id: name, short: name, subject: text, at: nonNegativeInt, author: text })).max(CHANGES_MAX_COMMITS),
         truncated: z.boolean()
     })
-]).refine((r) => r.kind !== 'read' || !(r.text !== undefined && r.binary), { message: 'a read result carries text or binary, not both' });
+]).refine((r) => r.kind !== 'read' || (r.text !== undefined) !== (r.binary === true), { message: 'a read result carries exactly one of text or binary' });
 
 export const fsError: z.ZodType<FsError> = z.object({
     code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'internal']),

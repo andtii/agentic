@@ -46,6 +46,8 @@ describe("the in-memory daemon's session folders (#559)", () => {
         expect(ask({ kind: 'tree', root: '/elsewhere', path: '' }).error?.code).toBe('outside-roots');
         expect(ask({ kind: 'read', root: IN_MEMORY_PROJECT_ROOT, path: '../plain/notes.txt' }).error?.code).toBe('outside-roots');
         expect(ask({ kind: 'read', root: IN_MEMORY_PROJECT_ROOT, path: '/work/plain/notes.txt' }).error?.code).toBe('outside-roots');
+        expect(ask({ kind: 'read', root: IN_MEMORY_PROJECT_ROOT, path: '\\\\server\\share\\src\\app.ts' }).error?.code).toBe('outside-roots');
+        expect(ask({ kind: 'read', root: IN_MEMORY_PROJECT_ROOT, path: 'C:\\src\\app.ts' }).error?.code).toBe('outside-roots');
         expect(ask({ kind: 'tree', root: '/work/missing', path: '' }).error?.code).toBe('not-found');
     });
 
