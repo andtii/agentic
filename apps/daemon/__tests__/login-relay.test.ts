@@ -50,7 +50,7 @@ const collect = async (events: AsyncIterable<LoginRelayEvent>, on?: (e: LoginRel
     }
     return out;
 };
-/** Whether `pid` has exited within `ms`: signal 0 probes it without touching it. */
+/** Whether `pid` is still running: signal 0 probes it without touching it (`EPERM` means it exists). */
 const alive = (pid: number): boolean => {
     try {
         process.kill(pid, 0);
@@ -59,6 +59,7 @@ const alive = (pid: number): boolean => {
         return (e as NodeJS.ErrnoException).code === 'EPERM';
     }
 };
+/** Whether `pid` exits within `ms`; one still running then is killed, so a failing test leaks nothing. */
 const goneWithin = async (pid: number, ms: number): Promise<boolean> => {
     const until = Date.now() + ms;
     while (alive(pid)) {

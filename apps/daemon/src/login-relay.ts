@@ -115,7 +115,9 @@ export function spawnLoginRelay(spec: LoginRelaySpec): LoginRelay {
             // the CLI would keep running with its device code (#520). `taskkill /T` ends the whole tree.
             if (platform === 'win32' && child.pid !== undefined) {
                 const tree = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+                // `taskkill` could not start, or could not end the tree: end at least the wrapper.
                 tree.on('error', () => child.kill());
+                tree.on('exit', (code) => { if (code !== 0) child.kill(); });
                 return;
             }
             child.kill();
