@@ -258,7 +258,8 @@ describe('AgentForm', () => {
         it('the model select round-trips the runtime default, a listed model and a custom id', () => {
             const blank = mountWith('');
             expect(blank.modelSelect()!.value).toBe('');
-            expect(blank.modelSelect()!.options[0]!.textContent).toBe('Runtime default (claude-opus-5)');
+            expect(blank.modelSelect()!.options[0]!.textContent).toBe('Runtime default (Opus 5)');
+            expect(blank.modelSelect()!.options[1]!.textContent).toBe('Opus 5 — claude-opus-5');
             expect(blank.posted().execution).not.toHaveProperty('model');
 
             setSelect(blank.modelSelect()!, 'claude-sonnet-5');

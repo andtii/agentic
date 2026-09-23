@@ -20,6 +20,7 @@ export type { QuotaMeterProps, QuotaPanelProps, QuotaBadgeProps } from './QuotaM
 export { QuotaRings, QuotaRings as AgQuotaRings, ringWindows, ringLabel } from './QuotaRings.js';
 export type { QuotaRingsProps } from './QuotaRings.js';
 export { QUOTA_STALE_MS, quotaTone, quotaPercent, quotaShortLabel, quotaUsedText, resetsText, resetsShortText, ageText, isQuotaStale } from './quota.js';
+export { modelDisplayName } from './model-name.js';
 export type { StatusPillProps, TagProps, WaitReasonLineProps } from './StatusPill.js';
 export { AgentTile, AGENT_HUE_SLOTS, hueFor, monogramOf } from './AgentTile.js';
 export type { AgentTileProps, AgentHue, TileSize } from './AgentTile.js';

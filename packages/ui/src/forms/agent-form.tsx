@@ -41,6 +41,7 @@ import {
 } from './agent-model.js';
 import { MultiSelectField, NumberField, SelectField, SwitchField, TextField, TextareaField, type FieldOption } from './fields.js';
 import { Segmented } from '../kit/Segmented.js';
+import { modelDisplayName } from '../kit/model-name.js';
 
 export interface AgentFormApi {
     /** Restore the draft from the bound config and clear shown errors. */
@@ -172,8 +173,12 @@ function runtimeFieldOptions(runtimes: readonly RuntimeOption[]): FieldOption[] 
 
 function modelOptions(models: readonly string[], defaultModel: string | undefined): FieldOption[] {
     return [
-        { value: '', label: defaultModel ? `Runtime default (${defaultModel})` : 'Runtime default' },
-        ...models.map((m) => ({ value: m, label: m })),
+        { value: '', label: defaultModel ? `Runtime default (${modelDisplayName(defaultModel)})` : 'Runtime default' },
+        // Named as a person reads it (#517), the id it runs as beside it.
+        ...models.map((m) => {
+            const name = modelDisplayName(m);
+            return { value: m, label: name === m ? m : `${name} — ${m}` };
+        }),
         { value: CUSTOM_MODEL, label: 'Custom…' }
     ];
 }
