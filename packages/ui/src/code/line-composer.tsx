@@ -11,8 +11,6 @@ import { agLineComposerAnatomy } from './anatomy.js';
 
 const SCOPE = agLineComposerAnatomy.scope;
 
-let composerCount = 0;
-
 export type LineComposerProps =
     & Define.Prop<'agent', { readonly name: string; readonly hue?: AgentHue }, true>
     & Define.Prop<'line', number, true>
@@ -27,13 +25,14 @@ export type LineComposerProps =
 
 export const LineComposer = component<LineComposerProps>(({ props }) => {
     const st = signal({ text: '' });
-    const id = `ag-line-composer-${++composerCount}`;
     let input: HTMLTextAreaElement | null = null;
     onMounted(() => input?.focus());
     const send = (): void => {
         const text = st.text.trim();
         if (text && !props.sending) props.onSend(text);
     };
+    // Derived from props, not a counter, so a server render and the hydrating client name it alike.
+    const id = (): string => `ag-line-composer-${props.fileRef.replace(/[^A-Za-z0-9_-]/g, '_')}`;
     return () => (
         <form
             data-scope={SCOPE}
@@ -49,9 +48,9 @@ export const LineComposer = component<LineComposerProps>(({ props }) => {
                 <span data-scope={SCOPE} data-part="title">Ask {props.agent.name} about line {props.line}</span>
                 <span data-scope={SCOPE} data-part="ref">{props.fileRef}</span>
             </div>
-            <label for={id} data-visually-hidden="">Question about this line</label>
+            <label for={id()} data-visually-hidden="">Question about this line</label>
             <textarea
-                id={id}
+                id={id()}
                 data-scope={SCOPE}
                 data-part="input"
                 rows={2}

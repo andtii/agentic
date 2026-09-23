@@ -62,7 +62,7 @@ export const SessionBar = component<SessionBarProps>(({ props, slots }) => () =>
                     {props.env ? <span data-scope={SCOPE} data-part="env">{props.env}</span> : null}
                     {props.branch ? (
                         <span data-scope={SCOPE} data-part="branch" title={`Branch ${props.branch}`}>
-                            <Icon name="delegate" size={13} />
+                            <Icon name="branch" size={13} />
                             <span>{props.branch}</span>
                         </span>
                     ) : null}

@@ -93,7 +93,8 @@ export const FileTree = component<FileTreeProps>(({ props }) => {
 
     const focusRow = (root: HTMLElement | null, path: string): void => {
         st.focus = path;
-        queueMicrotask(() => root?.querySelector<HTMLElement>(`[data-path="${path.replace(/["\\]/g, '\\$&')}"]`)?.focus());
+        // Matched by value, not a selector: a path may hold any character a selector would need escaped.
+        queueMicrotask(() => [...(root?.querySelectorAll<HTMLElement>('[data-part="item"]') ?? [])].find((el) => el.dataset['path'] === path)?.focus());
     };
 
     let rootEl: HTMLElement | null = null;

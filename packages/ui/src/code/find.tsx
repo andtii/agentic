@@ -13,8 +13,6 @@ const SCOPE = agFindAnatomy.scope;
 /** At most this many matches are listed. */
 export const FIND_MAX_RESULTS = 20;
 
-let findCount = 0;
-
 /**
  * A match score for `query` in `path` (higher is better), or -1 for none:
  * a subsequence match, better when it falls in the file name, is contiguous
@@ -57,11 +55,12 @@ export type GoToFileProps =
     /** The hint shown at the end (`Ctrl P`); empty hides it. */
     & Define.Prop<'shortcut', string>
     /** Focus on Ctrl/Cmd+P anywhere on the page. */
-    & Define.Prop<'hotkey', boolean>;
+    & Define.Prop<'hotkey', boolean>
+    /** The input's id and the stem of the list and option ids; default `ag-find` (one per page). Stable, so server and client agree. */
+    & Define.Prop<'id', string>;
 
 export const GoToFile = component<GoToFileProps>(({ props }) => {
     const st = signal({ query: '', active: 0, open: false });
-    const id = `ag-find-${++findCount}`;
     let input: HTMLInputElement | null = null;
     const onKey = (e: KeyboardEvent): void => {
         if (props.hotkey && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'p') {
@@ -81,6 +80,7 @@ export const GoToFile = component<GoToFileProps>(({ props }) => {
         const results = st.open ? findPaths(props.paths, st.query) : [];
         const active = Math.min(st.active, Math.max(0, results.length - 1));
         const shortcut = props.shortcut ?? 'Ctrl P';
+        const id = props.id ?? 'ag-find';
         return (
             <div data-scope={SCOPE} data-part="root">
                 <span data-scope={SCOPE} data-part="icon"><Icon name="search" size={14} /></span>
