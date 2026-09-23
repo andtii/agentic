@@ -1,7 +1,7 @@
 import { signal } from '@sigx/reactivity';
 import { NOTIFICATION_KINDS } from '@agentic/core';
 import { SettingsForm, SETTINGS_FIELDS as F, defaultSettingsFormValue, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi, type SettingsFormValue } from '@agentic/ui';
-import { controls, describedByRole, fullSettings, labelOf, mount, setText, settle, submit, toggle } from './helpers';
+import { controls, describedByRole, fullSettings, labelOf, mount, setText, settle, submit, toggle, formDataOf } from './helpers';
 
 const zones = ['Europe/Stockholm', 'Europe/London', 'America/New_York', 'UTC'];
 
@@ -51,7 +51,7 @@ describe('SettingsForm', () => {
         const { root, form, state } = mountForm();
         await settle();
         for (const el of controls(root)) expect(labelOf(el), `${el.getAttribute('name')} has a label`).not.toBe('');
-        expect(fromSettingsDraft(settingsDraftFromFormData(new FormData(form)))).toEqual(state.settings);
+        expect(fromSettingsDraft(settingsDraftFromFormData(formDataOf(form)))).toEqual(state.settings);
     });
 
     it('edits bind through the model and a valid submit writes back', () => {
@@ -73,7 +73,7 @@ describe('SettingsForm', () => {
             notifications: { kinds: { ...fullSettings().notifications.kinds, 'task-done': true }, push: false },
             defaultEnvironmentId: 'env_1'
         });
-        expect(fromSettingsDraft(settingsDraftFromFormData(new FormData(form)))).toEqual(state.settings);
+        expect(fromSettingsDraft(settingsDraftFromFormData(formDataOf(form)))).toEqual(state.settings);
     });
 
     it('blocks an unknown zone with an accessible error and reset() restores', () => {

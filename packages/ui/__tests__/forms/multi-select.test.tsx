@@ -1,6 +1,6 @@
 import { signal } from '@sigx/reactivity';
 import { MultiSelect } from '@agentic/ui';
-import { mount, setText } from './helpers';
+import { mount, setText, formDataOf } from './helpers';
 
 const options = [
     { value: 'read', label: 'Read' },
@@ -21,7 +21,7 @@ function mountIn(values: string[], props: { allowCustom?: boolean; disabled?: bo
     const tags = () => [...root.querySelectorAll<HTMLElement>('[data-scope="combobox"][data-part="tag"]')];
     const label = (t: HTMLElement) => t.querySelector('[data-part="tag-label"]')!.textContent;
     const remove = (t: HTMLElement) => t.querySelector<HTMLElement>('[data-part="tag-remove"]')!;
-    const posted = () => new FormData(form).getAll('tools');
+    const posted = () => formDataOf(form).getAll('tools');
     const enter = () => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     return { state, root, form, input, items, tags, label, remove, posted, enter, changes };
 }
@@ -105,6 +105,6 @@ describe('MultiSelect (zero Combobox multiple)', () => {
         const root = mount(<MultiSelect name="x" options={options} />);
         form.appendChild(root);
         root.querySelector<HTMLElement>('[data-scope="combobox"][data-part="item"]')!.click();
-        expect(new FormData(form).getAll('x')).toEqual(['read']);
+        expect(formDataOf(form).getAll('x')).toEqual(['read']);
     });
 });

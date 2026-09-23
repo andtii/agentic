@@ -216,7 +216,7 @@ export const MultiSelectField = component<MultiSelectFieldProps>(
         () => (
             <Field.Root invalid={!!props.error} required={props.required} disabled={props.disabled}>
                 <Field.Label>{props.label}</Field.Label>
-                <MultiSelect model={props.model} name={props.name} options={props.options} placeholder={props.placeholder} allowCustom={props.allowCustom} disabled={props.disabled} invalid={!!props.error} slots={slots.tag ? { tag: slots.tag } : {}} />
+                <MultiSelect model={props.model} name={props.name} options={props.options} placeholder={props.placeholder} allowCustom={props.allowCustom} disabled={props.disabled} invalid={!!props.error} {...(slots.tag ? { slots: { tag: slots.tag } } : {})} />
                 {props.description ? <Field.Description>{props.description}</Field.Description> : null}
                 {props.error ? <Field.Error>{props.error}</Field.Error> : null}
             </Field.Root>

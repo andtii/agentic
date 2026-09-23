@@ -4,25 +4,20 @@ import type { AgentConfig, AgentId, EnvironmentId } from '@agentic/core';
 import type { SettingsFormValue } from '@agentic/ui';
 
 /**
- * happy-dom's `new FormData(form)` gets a `<select multiple>` wrong twice: it takes only the first selected option,
- * and it posts the select while disabled. A browser posts every selected option of an enabled one (HTML:
- * constructing the entry list). zero's multiple Combobox posts through such a select, so the form tests read the
- * entry list a browser would build.
+ * The entry list a browser builds for `form` (HTML: constructing the entry list). happy-dom's `new FormData(form)`
+ * gets a `<select multiple>` wrong twice: it takes only the first selected option, and it posts the select while
+ * disabled. zero's multiple Combobox posts through such a select, so a form test reads what it posts through this.
  */
-const HappyFormData = globalThis.FormData;
-class BrowserFormData extends HappyFormData {
-    constructor(form?: HTMLFormElement, submitter?: HTMLElement | null) {
-        super(form, submitter);
-        if (!form) return;
-        const multiples = [...form.elements].filter((el): el is HTMLSelectElement => el instanceof HTMLSelectElement && el.multiple && !!el.name);
-        for (const name of new Set(multiples.map((el) => el.name))) this.delete(name);
-        for (const el of multiples) {
-            if (el.disabled || el.closest('fieldset:disabled')) continue;
-            for (const o of el.options) if (o.selected && !o.disabled) this.append(el.name, o.value);
-        }
+export function formDataOf(form: HTMLFormElement): FormData {
+    const data = new FormData(form);
+    const multiples = [...form.elements].filter((el): el is HTMLSelectElement => el instanceof HTMLSelectElement && el.multiple && !!el.name);
+    for (const name of new Set(multiples.map((el) => el.name))) data.delete(name);
+    for (const el of multiples) {
+        if (el.disabled || el.closest('fieldset:disabled')) continue;
+        for (const o of el.options) if (o.selected && !o.disabled) data.append(el.name, o.value);
     }
+    return data;
 }
-if (globalThis.FormData === HappyFormData) globalThis.FormData = BrowserFormData as typeof FormData;
 
 /** Mount into a fresh container attached to the document (zero's ids and popovers need a live tree). */
 export function mount(node: JSXElement): HTMLElement {

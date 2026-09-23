@@ -1,7 +1,7 @@
 import { signal } from '@sigx/reactivity';
 import type { AgentConfig } from '@agentic/core';
 import { AgentForm, AGENT_FIELDS as F, CUSTOM_MODEL, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi, type AgentFormWorkdirProps, type RuntimeOption } from '@agentic/ui';
-import { controlOf, controls, describedByRole, fullAgentConfig, labelOf, mount, optionValues, setSelect, setText, settle, submit, toggle } from './helpers';
+import { controlOf, controls, describedByRole, fullAgentConfig, labelOf, mount, optionValues, setSelect, setText, settle, submit, toggle, formDataOf } from './helpers';
 
 function mountForm(config: AgentConfig = fullAgentConfig()) {
     const state = signal({ config });
@@ -37,7 +37,7 @@ describe('AgentForm', () => {
     it('posts a FormData that reads back to the bound config', async () => {
         const { form, state } = mountForm();
         await settle();
-        const posted = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+        const posted = fromAgentDraft(agentDraftFromFormData(formDataOf(form)));
         expect(posted).toEqual(state.config);
     });
 
@@ -64,7 +64,7 @@ describe('AgentForm', () => {
         expect(next.memoryPolicy.autoLearn).toBe('off');
         // the posted form agrees with what was written back
         await settle();
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(next);
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form)))).toEqual(next);
     });
 
     it('edits execution.onInterrupt with a two-option select that explains itself (#368)', async () => {
@@ -93,18 +93,18 @@ describe('AgentForm', () => {
         );
         const form = root.querySelector('form')!;
         slot!.set({ environmentId: 'env_2', path: 'D:/src/app' });
-        const picked = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+        const picked = fromAgentDraft(agentDraftFromFormData(formDataOf(form)));
         expect(picked.execution).toMatchObject({ defaultEnvironmentId: 'env_2', defaultWorkdir: 'D:/src/app' });
         expect(root.querySelector('[data-workdir-slot]')!.textContent).toBe('env_2|D:/src/app');
 
         setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.environment}"]`)!, 'env_1');
-        const moved = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+        const moved = fromAgentDraft(agentDraftFromFormData(formDataOf(form)));
         expect(moved.execution.defaultEnvironmentId).toBe('env_1');
         expect(moved.execution).not.toHaveProperty('defaultWorkdir');
 
         slot!.set({ environmentId: 'env_1', path: 'C:/work' });
         slot!.set(null);
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution).not.toHaveProperty('defaultWorkdir');
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form))).execution).not.toHaveProperty('defaultWorkdir');
     });
 
     it('binds the agent to an account (#414): the key round-trips as execution.account, picking one drops the pin and its folder, pinning drops the account, and a key of another runtime binds nothing', () => {
@@ -118,15 +118,15 @@ describe('AgentForm', () => {
         const accountSelect = root.querySelector<HTMLSelectElement>(`select[name="${F.account}"]`)!;
         // Only this runtime's accounts are offered.
         expect([...accountSelect.options].map((o) => o.value)).toEqual(['', 'claude-code|id:me@work']);
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution).toMatchObject({ defaultEnvironmentId: 'env_1', defaultWorkdir: 'C:/work' });
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form))).execution).toMatchObject({ defaultEnvironmentId: 'env_1', defaultWorkdir: 'C:/work' });
         setSelect(accountSelect, 'claude-code|id:me@work');
-        const bound = fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution;
+        const bound = fromAgentDraft(agentDraftFromFormData(formDataOf(form))).execution;
         expect(bound.account).toEqual({ identity: 'me@work' });
         expect(bound).not.toHaveProperty('defaultEnvironmentId');
         expect(bound).not.toHaveProperty('defaultWorkdir');
         // Pinning again unbinds.
         setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.environment}"]`)!, 'env_2');
-        const pinned = fromAgentDraft(agentDraftFromFormData(new FormData(form))).execution;
+        const pinned = fromAgentDraft(agentDraftFromFormData(formDataOf(form))).execution;
         expect(pinned).not.toHaveProperty('account');
         expect(pinned.defaultEnvironmentId).toBe('env_2');
         // The draft round-trips a bound config, and a stale key of another runtime binds nothing.
@@ -169,7 +169,7 @@ describe('AgentForm', () => {
         setText(turns, '0');
         turns.dispatchEvent(new Event('blur', { bubbles: true }));
         expect(api().draft.limits.maxTurns).toBe(1); // NumberInput clamps to min
-        expect(new FormData(form).get(F.limit('maxTurns'))).toBe('1');
+        expect(formDataOf(form).get(F.limit('maxTurns'))).toBe('1');
 
         api().draft.limits.maxTurns = 0; // e.g. a stale value from the server
         submit(form);
@@ -191,15 +191,15 @@ describe('AgentForm', () => {
         expect(name.value).toBe('Reviewer');
         expect(describedByRole(name, 'alert')).toHaveLength(0);
         await settle();
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(state.config);
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form)))).toEqual(state.config);
     });
 
     it('collaborators are chosen only when delegation is not open to everyone', () => {
         const { root, form } = mountForm();
-        expect(new FormData(form).getAll(F.collaborators)).toHaveLength(2);
+        expect(formDataOf(form).getAll(F.collaborators)).toHaveLength(2);
         toggle(root.querySelector<HTMLInputElement>(`input[name="${F.collaborateAll}"]`)!, true);
-        expect(new FormData(form).getAll(F.collaborators)).toHaveLength(0);
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).collaborators).toBe('all');
+        expect(formDataOf(form).getAll(F.collaborators)).toHaveLength(0);
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form))).collaborators).toBe('all');
     });
 
     it('a tool picked from the list gets a mode select that posts', () => {
@@ -213,7 +213,7 @@ describe('AgentForm', () => {
         const mode = root.querySelector<HTMLSelectElement>(`select[name="${F.toolMode('Write')}"]`)!;
         expect(labelOf(mode)).toMatch(/Write/);
         setSelect(mode, 'ask');
-        expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).tools).toContainEqual({ name: 'Write', mode: 'ask' });
+        expect(fromAgentDraft(agentDraftFromFormData(formDataOf(form))).tools).toContainEqual({ name: 'Write', mode: 'ask' });
     });
 
     it('starts from the blank default without a model', () => {
@@ -236,7 +236,7 @@ describe('AgentForm', () => {
             const form = root.querySelector('form')!;
             const modelSelect = () => root.querySelector<HTMLSelectElement>(`select[name="${F.model}"]`);
             const custom = () => root.querySelector<HTMLInputElement>(`input[name="${F.modelCustom}"]`);
-            const posted = () => fromAgentDraft(agentDraftFromFormData(new FormData(form)));
+            const posted = () => fromAgentDraft(agentDraftFromFormData(formDataOf(form)));
             return { root, form, state, api: () => ref.current!, modelSelect, custom, posted };
         }
 
