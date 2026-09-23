@@ -34,6 +34,9 @@
       "@agentic/learning": [
         "./packages/learning/src/index.ts"
       ],
+      "@agentic/connectors": [
+        "./packages/connectors/src/index.ts"
+      ],
       "@agentic/plugins-git": [
         "./packages/plugins-git/src/index.ts"
       ],

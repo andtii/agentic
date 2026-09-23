@@ -1,0 +1,32 @@
+{
+  "name": "@agentic/connectors",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Native connectors over conduit: an engine with injected stores, conduit operations as namespaced connector tools, and the connector catalogue (Gmail first).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./dist/index.js",
+      "production": "./dist/index.prod.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agentic/core": "workspace:*",
+    "@aigntiq/conduit": "catalog:",
+    "@aigntiq/conduit-connectors": "catalog:",
+    "@sigx/ai": "catalog:"
+  },
+  "devDependencies": {
+    "@sigx/vite": "catalog:",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.3"
+  }
+}
