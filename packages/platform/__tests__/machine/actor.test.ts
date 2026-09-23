@@ -687,6 +687,20 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(await statusOf(machine(K1).fsResult(ids[1]!))).toBe(404);
         expect((await machine(K1).fsResult(ids[2]!)).status).toBe('error'); // finished a tick later: not yet
     });
+
+    it('evicts a finished entry before any pending one, so a request in flight keeps its answer (#562)', async () => {
+        const { respond } = await rawDaemon();
+        const ids: string[] = [];
+        for (let i = 0; i < MAX_FS_REQUESTS; i++) {
+            vi.setSystemTime(Date.now() + 1);
+            ids.push((await machine(K1).fsRequest(E1, list(`/work/${i}`))).requestId);
+        }
+        // The newest answered, the oldest still in flight: room is made by dropping the answered one.
+        await respond(ids.at(-1)!, { result: { kind: 'list', path: `/work/${MAX_FS_REQUESTS - 1}`, entries: [], truncated: false } });
+        await machine(K1).fsRequest(E1, list('/work/next'));
+        expect(await statusOf(machine(K1).fsResult(ids.at(-1)!))).toBe(404);
+        for (const id of ids.slice(0, -1)) expect((await machine(K1).fsResult(id)).status).toBe('pending');
+    });
 });
 
 describe('Machine session files (#562, EXE-08, AGT-09)', () => {

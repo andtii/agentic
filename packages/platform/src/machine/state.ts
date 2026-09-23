@@ -515,11 +515,16 @@ export function rememberChanges(s: MachineState, snapshot: ChangesSnapshot): voi
 
 /**
  * Make room for one more `fsRequest` entry: drop finished entries older than
- * `FS_RESULT_TTL_MS`, then evict the oldest (by `requestedAt`) until fewer
- * than `MAX_FS_REQUESTS` remain. `room: false` only prunes.
+ * `FS_RESULT_TTL_MS`, then evict until fewer than `MAX_FS_REQUESTS` remain —
+ * finished entries first, oldest first, and a pending one only when every
+ * entry is still in flight (#562: a Files page asks several at once, and an
+ * evicted pending request loses its answer). `room: false` only prunes.
  */
 export function pruneFs(fs: Record<string, FsRequestRecord>, at: number, room = true): void {
-    prune(fs, at, room, FS_RESULT_TTL_MS, MAX_FS_REQUESTS);
+    prune(fs, at, false, FS_RESULT_TTL_MS, MAX_FS_REQUESTS);
+    if (!room) return;
+    const order = Object.values(fs).sort((a, b) => Number(a.status === 'pending') - Number(b.status === 'pending') || a.requestedAt - b.requestedAt);
+    while (order.length >= MAX_FS_REQUESTS) delete fs[order.shift()!.requestId];
 }
 
 /** Drop the telemetry of sessions the machine no longer hosts and of environments it no longer reports, and the warnings told for them. */
