@@ -47,6 +47,7 @@ import {
     AgentActor,
     AuditActor,
     ChatPage,
+    ConnectorAccounts,
     LedgerActor,
     Memory,
     FlatMemory,
@@ -173,7 +174,7 @@ export interface PlatformPorts {
 }
 
 /** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
-const secrets: { sessionSecret?: string; workspaceKek?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
+const secrets: { sessionSecret?: string; workspaceKek?: string; appOrigin?: string; actors?: DurableObjectNamespaceLike; artifacts?: R2BucketLike } = {};
 
 /**
  * The deployment's chat file store (#207): R2, the `ARTIFACTS` bucket under `files/`. One per
@@ -215,7 +216,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // tools reach the same store the session retrieves from, on both paths.
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
     const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles });
+    // Conduit connectors (#533): a session's engine names the deployment's callback, though it never begins a sign-in.
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles }, { origin: () => secrets.appOrigin });
     const Session = defineSessionActor({
         factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
@@ -262,7 +264,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.
     const Chat = defineChatActor({ ...withFiles, routing: () => Routing, titles: createChatTitler({ registry }) });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, OAuthClients, OAuthGrants];
+    // `ConnectorAccounts`: conduit's accounts, handshakes and refresh locks per workspace (#532, #533) — the one `ActorHost` DO serves it.
+    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, ConnectorAccounts, OAuthClients, OAuthGrants];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
@@ -318,7 +321,8 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         Audit: byType('audit') as ActorDefs['Audit'],
         Ledger: byType('ledger') as ActorDefs['Ledger'],
         Memory: byType('Memory') as ActorDefs['Memory'],
-        FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory']
+        FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory'],
+        ConnectorAccounts: byType('ConnectorAccounts') as ActorDefs['ConnectorAccounts']
     };
 }
 
@@ -346,6 +350,7 @@ export function ensureServerApp(env: PlatformEnv, actors: readonly AnyActorDefin
     const secret = env.SESSION_SECRET && env.SESSION_SECRET.length >= MIN_SECRET ? env.SESSION_SECRET : '';
     secrets.sessionSecret = secret || undefined;
     secrets.workspaceKek = env.WORKSPACE_KEK || undefined;
+    secrets.appOrigin = env.APP_ORIGIN || undefined;
     secrets.actors = env.ACTORS;
     secrets.artifacts = env.ARTIFACTS;
     if (stampedFor === secret) return;

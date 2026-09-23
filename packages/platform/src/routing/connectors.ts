@@ -31,10 +31,13 @@
  * opener resolves the OAuth client and the account's tokens itself, so no
  * secret is opened here. One that the owner has not connected yet (no `account`)
  * is left out and the agent told so. A daemon-hosted session leaves conduit
- * connectors out until they are reachable from a machine (#534).
+ * connectors out until they are reachable from a machine (#534). The opener
+ * gets the session's `ConnectorOpenContext` beside the ids (#533) — the
+ * workspace, the session's agent principal and the way to the connector
+ * plugin's secrets — so the app builds the workspace's conduit engine itself.
  */
 
-import type { ConnectorCredentials, OpenSpecConnector } from '@agentic/core';
+import type { ConnectorCredentials, OpenSpecConnector, Principal, WorkspaceId } from '@agentic/core';
 import type { PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy, ToolAnnotations } from '@sigx/ai-agent';
 import type { ConnectorStatus, GateConnector } from '../registry/types.js';
@@ -73,8 +76,24 @@ export interface OpenedConnector {
     close(): Promise<void>;
 }
 
-/** Opens one connector as tools, dispatching on `kind` — injected where the app is composed (`mcp` → `openMcpConnector` of `@agentic/mcp`). */
-export type ConnectorOpener = (input: ConnectorOpenInput) => Promise<OpenedConnector>;
+/**
+ * Who a session opens its connectors for (#533): what a conduit opener needs to reach the workspace's accounts and
+ * the connector plugin's secrets itself. An MCP opener ignores it.
+ */
+export interface ConnectorOpenContext {
+    readonly workspaceId: WorkspaceId;
+    /** The session's own agent principal: tool calls (and the token refreshes inside them) run under it. */
+    readonly principal: Principal;
+    /** A secret of a connector plugin, through `Registry.openSecret(name, pluginId)` (enabled + granted, audited); `undefined` when not set. */
+    secret(name: string, pluginId: string): Promise<string | undefined>;
+}
+
+/**
+ * Opens one connector as tools, dispatching on `kind` — injected where the app is composed (`mcp` → `openMcpConnector`
+ * of `@agentic/mcp`, `conduit` → `conduitTools` over the workspace's engine). `context` is the session's, when the
+ * caller has one (`anthropicApiRuntime` always does).
+ */
+export type ConnectorOpener = (input: ConnectorOpenInput, context?: ConnectorOpenContext) => Promise<OpenedConnector>;
 
 /** A connector the agent names that this session runs without, and why — told to the agent. */
 export interface UnavailableConnector {
@@ -101,6 +120,8 @@ export interface OpenSessionConnectorsInput {
     report?(id: string, status: ConnectorStatus, tools?: readonly string[]): Promise<void>;
     /** Tool names already on the session (the platform's); a connector tool may not shadow one. */
     readonly taken?: readonly string[];
+    /** Handed to the opener as its second argument (#533). */
+    readonly context?: ConnectorOpenContext;
 }
 
 /** The category a connector tool's request is ruled on. */
@@ -172,7 +193,7 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
         const bearer = c.auth?.bearer !== undefined ? await need(c.auth.bearer) : undefined;
         const headers: Record<string, string> = {};
         for (const [header, name] of Object.entries(c.auth?.headers ?? {})) headers[header] = await need(name);
-        const opened = await input.opener({ kind: 'mcp', id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}) });
+        const opened = await input.opener({ kind: 'mcp', id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}) }, input.context);
         await record({ state: 'ok' }, opened.toolNames);
         return { opened };
     } catch (e) {
@@ -196,7 +217,7 @@ async function openConduit(c: GateConnector, input: OpenSessionConnectorsInput):
     if (!input.opener) return skip('this deployment cannot open conduit connectors');
     const record = recorder(c, input);
     try {
-        const opened = await input.opener({ kind: 'conduit', id: c.id, pluginId, connector: c.connector, account: c.account });
+        const opened = await input.opener({ kind: 'conduit', id: c.id, pluginId, connector: c.connector, account: c.account }, input.context);
         await record({ state: 'ok' }, opened.toolNames);
         return { opened };
     } catch (e) {

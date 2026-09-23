@@ -11,6 +11,14 @@ import type { ClientLookup, ClientResolver } from '@aigntiq/conduit';
 export const CONNECTOR_CLIENT_ID_SECRET = 'client-id';
 /** The secret holding the OAuth client secret. */
 export const CONNECTOR_CLIENT_SECRET_SECRET = 'client-secret';
+/**
+ * The workspace's own random engine secret (≥ 32 characters): conduit's
+ * `secret`, which signs OAuth state and keys the credential cipher. The
+ * platform generates it on the first Connect and keeps it as a Registry
+ * secret; nobody types it. Every conduit connector plugin of a workspace
+ * shares it, so its accounts open with one key per workspace.
+ */
+export const CONNECTOR_ENGINE_SECRET = 'connector-engine-secret';
 
 /** Opens one secret of the connector plugin (`Registry.openSecret(name, pluginId)`); `undefined` when it is not set. */
 export type OpenConnectorSecret = (name: string, lookup: ClientLookup) => Promise<string | undefined>;

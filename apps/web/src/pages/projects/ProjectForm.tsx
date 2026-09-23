@@ -11,7 +11,7 @@
 import { component, signal, watch, type Define } from 'sigx';
 import type { EnvironmentId, FsGitInfo, ProjectFeatureManifest, ProjectFeaturePlugin, ProjectPatch, ProjectRecord } from '@agentic/core';
 import { Button, ChipInput, ConfirmDialog, Label, SchemaForm, Switch, Tag, TextField, TextareaField, gitBadgeText, type SchemaFormApi, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
-import { projectFeatureCatalogue } from '../../plugins/catalogue';
+import { projectFeatureCatalogue } from '../../plugins/features';
 import { MemberPicker } from '../chat/MemberPicker';
 import type { AgentIdentity } from '../chat/live';
 import { WorkdirInput } from '../workdir/WorkdirInput';

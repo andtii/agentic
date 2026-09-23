@@ -18,6 +18,9 @@ import { createAuthMount } from '../../src/auth/mount';
 import { devLoginRouteFor } from '../../src/auth/dev-login';
 import { createFilesMount, type WaitUntilLike } from '../../src/files/route';
 import { runWithHost } from '../../src/host-scope';
+import { createConnectorMount } from '../../src/connectors/routes';
+import { conduitCall, fakeGoogle } from './google';
+import { conduitConnectorCatalogue } from '../../src/plugins/catalogue';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -59,6 +62,13 @@ const filesRoute = createFilesMount({ store: platformFiles });
  */
 const a2aRoute = createA2aMount({ actors, pollMs: 20 });
 
+/**
+ * Connector sign-in (#533), as the production entry mounts it, over a fake Google (`./google.ts`): the token,
+ * revoke, profile and message endpoints answer in-process, so start → consent → callback → tool call runs offline.
+ */
+const google = fakeGoogle();
+const connectorsRoute = createConnectorMount({ connectors: conduitConnectorCatalogue, http: google.http });
+
 const worker = createActorWorker({ actors });
 
 // The same shape as `entry.cloudflare.ts`: the dev login (#35, #143: GET form + POST), the auth
@@ -66,7 +76,9 @@ const worker = createActorWorker({ actors });
 export default {
     fetch(request: Request, env: PlatformEnv, ctx?: unknown): Promise<Response> {
         return runWithHost(worker.host, async () => {
-            const route = devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined);
+            // Test-only: what the fake Google saw, and one conduit tool call the way a session makes it (`./google.ts`).
+            const testRoute = google.route(request) ?? conduitCall(request, google.http);
+            const route = testRoute ?? devLoginRouteFor(request, env) ?? authRoute(request, env) ?? a2aRoute(request, env) ?? filesRoute(request, env, ctx as WaitUntilLike | undefined) ?? connectorsRoute(request, env);
             if (route) {
                 // The Worker host boots from `env` before an auth route hops (#182).
                 await worker.boot(env);

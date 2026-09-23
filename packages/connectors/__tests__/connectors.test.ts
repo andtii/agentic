@@ -314,9 +314,11 @@ describe('gmailConnectorPlugin', () => {
         expect(m).toMatchObject({ id: 'gmail', kind: 'connector', name: 'Gmail', version: '1.0.0' });
         expect(m.secrets?.map((s) => [s.name, s.required])).toEqual([
             ['client-id', true],
-            ['client-secret', true]
+            ['client-secret', true],
+            // Generated on the first Connect (#533), so it never holds readiness back.
+            ['connector-engine-secret', false]
         ]);
-        expect(m.permissions.map((p) => p.scope)).toEqual(['secret:client-id', 'secret:client-secret', 'network:gmail.googleapis.com', 'network:oauth2.googleapis.com', 'tools:gmail']);
+        expect(m.permissions.map((p) => p.scope)).toEqual(['secret:client-id', 'secret:client-secret', 'secret:connector-engine-secret', 'network:gmail.googleapis.com', 'network:oauth2.googleapis.com', 'tools:gmail']);
     });
 
     it('lists its operations as capabilities, and the trigger it does not run yet as unsupported (AGT-09)', () => {

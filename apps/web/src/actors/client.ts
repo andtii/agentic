@@ -33,6 +33,7 @@ export function clientDefs(): ActorDefs {
         Audit: ref('audit'),
         Ledger: ref('ledger'),
         Memory: ref('Memory'),
-        FlatMemory: ref('FlatMemory')
+        FlatMemory: ref('FlatMemory'),
+        ConnectorAccounts: ref('ConnectorAccounts')
     };
 }

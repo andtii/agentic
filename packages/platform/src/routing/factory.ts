@@ -102,8 +102,9 @@ export interface AnthropicApiRuntimeOptions {
      */
     readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
     /**
-     * Opens an MCP connector as tools (#240) — `openMcpConnector` of `@agentic/mcp`, passed where the app is composed.
-     * Absent: an agent's connectors are left out of its sessions, and the agent is told why.
+     * Opens a connector as tools — `mcp` through `openMcpConnector` of `@agentic/mcp` (#240), `conduit` through the
+     * workspace's conduit engine (#533) — passed where the app is composed, and handed the session's
+     * `ConnectorOpenContext`. Absent: an agent's connectors are left out of its sessions, and the agent is told why.
      */
     readonly connectors?: ConnectorOpener;
     /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
@@ -180,7 +181,9 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 ...(options.connectors ? { opener: options.connectors } : {}),
                 secret: (name, pluginId) => plugin.secret(name, pluginId),
                 ...(plugin.reportConnector ? { report: (id, status, tools) => plugin.reportConnector!(id, status, tools) } : {}),
-                taken: PLATFORM_TOOL_NAMES
+                taken: PLATFORM_TOOL_NAMES,
+                // A conduit opener reaches the workspace's accounts as this session, and the plugin's secrets as the owner does (#533).
+                context: { workspaceId: c.workspaceId, principal, secret: (name, pluginId) => plugin.secret(name, pluginId) }
             });
             try {
                 const built = createPlatformModelAgent(c.spec.config, {
