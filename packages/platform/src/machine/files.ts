@@ -23,7 +23,7 @@ export interface MachineFilesClient {
 export interface MachineWorkspaceOptions {
     /**
      * The ref a branch is compared with — `read(path, 'base')` and `changes('branch')`. Usually the project git
-     * feature's `base` setting; absent, the daemon resolves the upstream, then `main`, then `master`.
+     * feature's `base` setting; absent, the daemon tries `main`, then `master`, then what `origin/HEAD` names.
      */
     readonly base?: string;
 }
