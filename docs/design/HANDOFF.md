@@ -1,10 +1,10 @@
 # Agentic UI — Design Handoff
 
-2026-09-17 · Andii
+Sep 17, 2026 · Andii
 
 ## Overview
 
-This hands off the [Agentic UI canvas](https://claude.ai/artifact/3eEJpPfwQdxsH5GtGJtw87): 20 artboards covering every route in `docs/architecture.md` §10, built as a dark "control room" daisyUI theme on `@sigx/zero-daisyui`. The artboards are static HTML with inline styles, so every measurement below can be read off the source. All 20 were rendered in Chromium at their own size; the render found two layout bugs (Home task table, Schedules columns), both fixed on the canvas and in the screenshots below.
+This hands off the [Agentic UI canvas](https://claude.ai/artifact/3eEJpPfwQdxsH5GtGJtw87): 23 artboards covering every route in `docs/architecture.md` §10, built as a dark "control room" daisyUI theme on `@sigx/zero-daisyui`. The artboards are static HTML with inline styles, so every measurement below can be read off the source. All 23 were rendered in Chromium at their own size; the render found two layout bugs (Home task table, Schedules columns), both fixed on the canvas and in the screenshots below.
 
 All names, tasks, costs and token counts on the boards are invented sample data. Copy the structure, not the content.
 
@@ -25,6 +25,8 @@ All names, tasks, costs and token counts on the boards are invented sample data.
 | `History` | no route in §10 yet | 1440 × 800 | #44 |
 | `Usage` | no route in §10 yet | 1440 × 900 | #45 |
 | `MobileHome`, `MobileChat`, `MobileMachines`, `MobileNav` | same routes at 400 px | 400 × 860 (chat 980) | [#47](https://github.com/andtii/agentic/issues/47) |
+| `MemberCard` | chat context panel | 1872 × 720 | member card, execution switches, usage meters |
+| `Changes`, `Files` | `/sessions/:id/changes`, `/sessions/:id/files` | 1440 × 1080, 1000 | session files and git diff (new) |
 | `Foundations` | none | 1440 × 1500 | [#23](https://github.com/andtii/agentic/issues/23) tokens, [#46](https://github.com/andtii/agentic/issues/46) states |
 
 Start with `Foundations`: it is the single reference for tokens, status pills, tool-call states and failure states. Every other board reuses those parts unchanged.
@@ -43,7 +45,7 @@ Rendered from the artboard source at 1×, at the artboard's own size. Sample dat
 
 ### Chat `/chats/:id`
 
-![Chat: chat list, thread with tool calls and approval card, composer, members and tasks panel](screenshots/Chat.png)
+![Chat: chat list, thread with tool calls and approval card, composer, members panel with the new member cards](screenshots/Chat.png)
 
 ### Task `/tasks/:id`
 
@@ -73,13 +75,9 @@ Rendered from the artboard source at 1×, at the artboard's own size. Sample dat
 
 ![Machine detail with environments, sessions, doctor and revoke](screenshots/Machine.png)
 
-Since #482 the page is where a machine is set up and controlled, no terminal needed after the install line. Under the header, a **setup checklist** (`[data-setup-checklist]`): Paired → Folders → Environment → Signed in → Ready; done steps fold to a tick and a word, the current one is open with its note and one action (Rename, Choose folders, Add environment, Show the command, Run the doctor), the rest dim; once everything is done it is one line. Above the environments, **Folders the web may use** (`[data-policy-card]`, `data-policy-state` = `web` / `local` / `locked` / `off` / `no-feature`): each root as asked beside what the daemon made of it (`~ → C:\Users\andy`, a `not applied yet` tag until the machine reports it), a WEB / LOCAL / LOCKED / OFF pill, who set it and when; an "Add a folder" field (a `~` form or a full path), **Browse…** (a picker over the whole machine in the workdir picker's anatomy: the machine's roots, then folders; "Allow this folder"), Remove per row, **Save folders** once the list differs and **Discard**. Saving (and browsing) asks the user to confirm with GitHub once (the elevate dialog, #355); a locked machine is read-only with the `agentic-daemon policy unlock` command well; a daemon that predates web-set folders keeps the local `allow-root` well. The environment dialog gains an **Allow bypassPermissions** switch (on needs the same confirmation). **This machine** gains **Restart…** (a confirm naming the running turns, a When-idle / Now choice; the update card then follows the restart and ends on "Restarted at …") and a **Daemon log** disclosure (the last 200 lines, monospace, Refresh, "the file holds more", and an explanation when the daemon runs in a terminal).
-
 ### Pair `/pair`
 
 ![Pairing steps with six-character code](screenshots/Pair.png)
-
-Step 2 carries the machine name and, since #482, **Folders the web may use** (`[data-pair-folders]`, a textarea, one per line, default `~`): they ride the pending record and become the machine's policy on its first hello, so a fresh machine is usable from the page at once. Changing either field mints a fresh code. Full paths also go on the by-hand `agentic-daemon pair` command as `--allow-root` for a headless install; a `~` form never does (the daemon's `pair` takes absolute paths only).
 
 ### Schedules `/schedules`
 
@@ -104,6 +102,112 @@ Step 2 carries the machine name and, since #482, **Folders the web may use** (`[
 ### Mobile at 400 px
 
 ![Mobile: inbox with approval, chat with composer, machines, drawer](screenshots/Mobile.png)
+
+## Member card and usage meters
+
+The chat panel's member card now groups every switchable execution setting in one box and shows three usage limits as rings. It replaces the card described under Chat in Screen specs. Board: `MemberCard` (1872 × 720), used by `Chat`.
+
+![Member card: before, default, limit reached, usage details open, model switcher open](screenshots/MemberCard.png)
+
+### Anatomy, top to bottom
+
+| Part | Spec |
+| --- | --- |
+| Card | 296 px wide in the 320 px panel, `base-200`, border `line`, radius 8, padding 12, stack gap 10 |
+| Header | `AgentTile` 28 + name 13 / 600 + one mono 11 `text-dim` line `account · runtime`, ellipsis. Status pill right. Show only the account's local part (`claude2`); the full address goes in `title` |
+| Settings group | One box: `base-100` fill, border `line`, radius 6. Rows are 32 px `<button>`s with `aria-haspopup="listbox"`: icon 14 `text-muted`, mono 12 value, chevron 13. Rows divided by `line` |
+| Row: environment | `machine / environment`. Always shown |
+| Row: folder | Dim prefix `project ·` when the folder came from the project default, then the path. The path truncates from the start (`direction: rtl` with `&lrm;` guards) so the last segment always shows. Omitted for runtimes without a filesystem (`anthropic-api`), never shown as a dash |
+| Row: model | Model id. Opens the model listbox |
+| Usage meters | See below |
+| Footer | History access in 11 `text-dim` left, `New session` link right |
+
+### Switching environment, folder or model
+
+Each row opens a listbox directly under the group: `base-300`, border `line-strong`, radius 6, shadow `0 12px 32px #00000099`. A mono label header says "Applies to the next turn". Options are 34 px, check mark on the current one, a short hint right ("default", "fastest"). The choice never changes a running turn (EXE-12); if a turn is running, the row shows the pending value with a `NEXT TURN` tag until it ends.
+
+### Usage meters
+
+| Part | Spec |
+| --- | --- |
+| Row | 3-column grid, equal columns, column gap 8. Order: session, period (week, or month for API keys), current model |
+| Ring | 24 px SVG, stroke 3, track `line-strong`, arc `live`, round cap, starts at 12 o'clock. At 100% the arc is `needs-you` |
+| Value | Mono 12 / 600 `text`, then the label in mono 10 / 500 uppercase `text-dim`. Both turn `needs-you` at 100% |
+| Note line | Reset of the limit closest to full: `Week resets Thu 12:00`. At 100%: `Opus limit · resets Thu 12:00` in `needs-you`. `Details` button right, 22 px |
+| Details popover | Opens under the rings, same surface as the listbox, padding 12, gap 12. Header: plan tag (`max`) left, `updated 1 min ago` right. One row per limit: title 12 / 600, % right, 4 px bar, exact reset in 11 px with date and time |
+
+A hit limit is `needs-you`, not `failed`: it means wait, and nothing is broken. Only the ring at 100% changes colour.
+
+| Edge case | Behaviour |
+| --- | --- |
+| Usage unknown | Rings render as empty tracks, values `n/a`, note says `Usage not reported by claude-code` |
+| A limit not reported | Drop that ring; the grid keeps three columns with an empty cell rather than stretching |
+| Stale data (> 15 min) | The `updated` time turns `needs-you` in the popover |
+| Two limits at 100% | Both amber; the note names the one that resets last |
+| API agent | Session, Month and model; no plan tag, and the popover shows spend against the budget instead |
+
+Accessibility: the ring row has `role="group"` and `aria-label="Usage"`; each cell reads as "Week, 76 percent used, resets Thursday 12:00". `Details` has `aria-expanded`.
+
+## Session files and changes
+
+Every session gets two new read-only views next to its transcript: Changes (the git diff of the session's folder) and Files (a browser of that folder). They answer "what did the agent actually do to my code" without leaving the platform. Boards: `Changes` (1440 × 1080) and `Files` (1440 × 1000), beside `Session`.
+
+![Changes: uncommitted files, branch commits, unified diff with an ask-about-a-line composer](screenshots/Changes.png)
+
+![Files: folder tree with changed markers, read-only viewer with change stripes](screenshots/Files.png)
+
+### Routes
+
+| Route | View |
+| --- | --- |
+| `/sessions/:id` | Transcript (existing Session page) |
+| `/sessions/:id/changes?file=&scope=uncommitted\|branch&view=unified\|split` | Changes |
+| `/sessions/:id/files?path=` | Files |
+
+All three share a session bar under the topbar: tabs `Transcript`, `Changes 3` (count of changed files), `Files`, a divider, then agent tile, `machine / account`, branch chip and `2 ahead of main`. View controls sit on the right. The existing Session board does not show this tab strip yet; add it there too.
+
+### Changes
+
+| Part | Spec |
+| --- | --- |
+| File list | 300 px left column. `Uncommitted` group with total counts, one 40 px row per file: status tile (M `working`, A `live`, D `failed`, ? `text-dim`; 18 px, mono 10 / 700), file name mono 12, folder mono 10 truncated from the start, `+n −n`. Below: `On this branch` commits vs the base branch with message, short hash, time and author tile |
+| File header | Status tile, path with the file name in `text` 600, counts, `Edited by <tile> Edit at 14:09` linking to the tool call in the chat, copy-path icon button |
+| Diff | Grid `48px 48px 20px 1fr`: old line, new line, marker, code in mono 12 on 22 px rows. Hunk header rows on `base-300`. Added rows `live` at 8%, removed rows `failed` at 8%, markers in full colour |
+| Controls | `Unified / Split` and `Uncommitted / Branch` segmented controls, refresh icon button (re-fetches from the machine) |
+| Ask about a line | Clicking a line number marks the line with a 2 px `needs-you` inset and opens an inline composer under it: agent tile, "Ask Forge about line 61", `file:line`, textarea, the note "Posts to \<chat> with the file, line and hunk attached", Cancel and `Send to chat`. The message posts to the chat the session belongs to, addressed to the session's agent, with the hunk attached |
+
+Diff tints are the one exception to "colour only means state": the green/red convention is stronger than our rule, and at 8% they do not compete with status pills.
+
+### Files
+
+| Part | Spec |
+| --- | --- |
+| Tree | 300 px. `Go to file` search with a `Ctrl P` hint, the session folder path (truncated), then 28 px rows indented 14 px per level. Changed files carry a 6 px dot: `working` for modified, `live` for added. Legend and `.gitignore hidden` at the foot |
+| Viewer header | Path as breadcrumbs with the file name in `text` 600, status tile, `82 lines · 2.1 KB`, `Open diff`, `Mention in chat` (inserts `@file:path` into the composer), copy path |
+| Viewer | Grid `56px 3px 1fr`: line number, 3 px change stripe (`working` where the line differs from HEAD), code mono 12 on 22 px rows. Read-only; no syntax highlighting in v1 |
+
+### Where the data comes from
+
+Files never leave the machine except what the user opens. The daemon gets four new read-only commands over the existing socket, each scoped to the session's `cwd` and rejected outside `cwdRoots`:
+
+| Command | Returns | Limits |
+| --- | --- | --- |
+| `fs.list {path}` | entries with type, size, git status | one level per call, `.gitignore` respected |
+| `fs.read {path}` | text content and size | 1 MB; binary files return metadata only |
+| `git.status` | branch, ahead/behind, changed files with counts |  |
+| `git.diff {scope, path?}` | unified diff | 5,000 lines per file, then a "diff too large" state linking to Files |
+
+They are Machine actor methods like everything else, so the platform MCP server can expose them too. There are no write commands: edits stay with the agent, behind its approval rules.
+
+| State | Behaviour |
+| --- | --- |
+| Machine offline | Both views show the last fetched snapshot with its time and a `Machine disconnected` banner; refresh is disabled |
+| Session closed | Views stay available read-only while the folder exists; if the worktree is gone, show "Folder no longer on alien01" |
+| No changes | Changes shows "No uncommitted changes" and switches the scope control to Branch |
+| Not a git repo | Changes tab hidden; Files still works |
+| API agent session | Both tabs hidden (no filesystem) |
+
+Not drawn yet: split view, the mobile version (a file list that opens a full-screen unified diff), and a "View diff" link on Edit tool cards in the chat.
 
 ## Design tokens
 
