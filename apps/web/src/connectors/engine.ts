@@ -9,9 +9,10 @@
  *   principal for a tool call (a token refresh inside it writes as that
  *   session).
  * - **OAuth client**: `clientFromSecrets` over the connector plugin's own
- *   `client-id` / `client-secret` Registry secrets, opened per lookup.
+ *   `<pluginId>-client-id` / `<pluginId>-client-secret` Registry secrets
+ *   (#548), opened per lookup.
  * - **Secret**: `connector-engine-secret`, a random per-workspace value kept
- *   as a Registry secret. It signs OAuth state and keys the credential
+ *   as a Registry secret, shared by every conduit connector plugin. It signs OAuth state and keys the credential
  *   cipher, so one workspace's sealed accounts never open with another's
  *   key. `ensureEngineSecret` generates it on the first Connect (the owner
  *   only: `setSecret` is owner-only); a session only ever reads it.
@@ -31,6 +32,8 @@ export interface WorkspaceEngineInput {
     readonly workspaceId: WorkspaceId;
     /** Who the account store is called as. */
     readonly principal: Principal;
+    /** The connector plugin whose OAuth client signs in. */
+    readonly pluginId: string;
     /** A secret of the connector plugin (`Registry.openSecret(name, pluginId)`); `undefined` when not set. */
     secret(name: string): Promise<string | undefined>;
     /** The workspace's engine secret (`ensureEngineSecret`, or read back for a session). */
@@ -45,7 +48,7 @@ export function workspaceConnectorEngine(input: WorkspaceEngineInput): Connector
     return createConnectorEngine({
         secret: input.engineSecret,
         ...connectorAccountStores(client),
-        clients: clientFromSecrets((name) => input.secret(name)),
+        clients: clientFromSecrets((name) => input.secret(name), input.pluginId),
         redirectUri: input.redirectUri,
         ...(input.http ? { http: input.http } : {})
     });

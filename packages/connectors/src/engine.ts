@@ -21,7 +21,7 @@ export interface ConnectorEngineOptions {
     readonly transient: TransientStore;
     /** So a token is refreshed once when calls race. */
     readonly locks: LockProvider;
-    /** The OAuth client per connector — `clientFromSecrets(openSecret)`. */
+    /** The OAuth client per connector — `clientFromSecrets(openSecret, pluginId)`. */
     readonly clients: ClientResolver;
     /** The absolute URL of the OAuth callback route. */
     readonly redirectUri: string;

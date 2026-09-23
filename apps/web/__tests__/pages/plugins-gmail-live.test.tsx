@@ -36,8 +36,8 @@ const account = (status: StoredAccount['status']): StoredAccount => ({ id: 'acct
 /** Gmail on, its OAuth client saved, one account on the record — what the sign-in routes leave behind. */
 async function connected(status: StoredAccount['status']): Promise<void> {
     await registry().enable('gmail');
-    await registry().setSecret('client-id', 'cid');
-    await registry().setSecret('client-secret', 'cs');
+    await registry().setSecret('gmail-client-id', 'cid');
+    await registry().setSecret('gmail-client-secret', 'cs');
     await accounts().createAccount(account(status));
     await registry().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1' });
 }
@@ -57,13 +57,13 @@ describe('/plugins/gmail (live)', () => {
         expect(text(p.querySelector('[data-connect-testing]'))).toContain('expire after 7 days');
         // The owner's two keys have fields; the engine secret the platform generates does not.
         const fields = [...dom.querySelectorAll('[data-scope="ag-secret"][data-part="root"]')].map((f) => f.getAttribute('data-secret'));
-        expect(fields).toEqual(['client-id', 'client-secret']);
+        expect(fields).toEqual(['gmail-client-id', 'gmail-client-secret']);
 
         // On, then the client saved: Connect is offered without a reload.
         await registry().enable('gmail');
         await until(() => text(panel(dom)?.querySelector('[data-connect-blocker]')).startsWith('Save the OAuth client ID and OAuth client secret'), 'the missing keys');
-        await registry().setSecret('client-id', 'cid');
-        await registry().setSecret('client-secret', 'cs');
+        await registry().setSecret('gmail-client-id', 'cid');
+        await registry().setSecret('gmail-client-secret', 'cs');
         await until(() => !panel(dom)?.querySelector('[data-connect-blocker]') && !buttonNamed(panel(dom)!, 'Connect').disabled, 'Connect enabled');
     }, 20_000);
 
@@ -100,7 +100,7 @@ describe('/plugins/gmail (live)', () => {
             <LiveConduitConnect
                 plugin={plugin}
                 workspaceId={WS}
-                secretNames={['client-id', 'client-secret']}
+                secretNames={['gmail-client-id', 'gmail-client-secret']}
                 hasKek
                 defs={clientDefs()}
                 navigate={(href: string) => { went.push(href); }}

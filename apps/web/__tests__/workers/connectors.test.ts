@@ -36,8 +36,8 @@ async function setUp(userId: string) {
     const cookie = await signIn(userId);
     const registry = registryOverHttp(WS, cookie);
     await registry.enable('gmail');
-    await registry.setSecret('client-id', 'cid.apps.googleusercontent.com');
-    await registry.setSecret('client-secret', 'client-shh');
+    await registry.setSecret('gmail-client-id', 'cid.apps.googleusercontent.com');
+    await registry.setSecret('gmail-client-secret', 'client-shh');
     return { WS, cookie, registry };
 }
 
@@ -86,7 +86,7 @@ describe('worker: connecting Gmail (#533)', () => {
         expect(record).toMatchObject({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail' });
         expect(record!.account).toEqual(expect.any(String));
         // The engine secret was generated on this first Connect and sealed beside the OAuth client.
-        expect((await registry.overview()).secretNames).toEqual(expect.arrayContaining(['client-id', 'client-secret', CONNECTOR_ENGINE_SECRET]));
+        expect((await registry.overview()).secretNames).toEqual(expect.arrayContaining(['gmail-client-id', 'gmail-client-secret', CONNECTOR_ENGINE_SECRET]));
 
         // The account: sealed by conduit — neither token appears, and it is not plain JSON.
         const accounts = overHttp(ConnectorAccounts, connectorAccountsKey(WS), cookie);

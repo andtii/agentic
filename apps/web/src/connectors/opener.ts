@@ -37,6 +37,7 @@ export function conduitOpener(options: ConduitOpenerOptions = {}): (input: Extra
         const engine = workspaceConnectorEngine({
             workspaceId: context.workspaceId,
             principal: context.principal,
+            pluginId: input.pluginId,
             secret: (name) => context.secret(name, input.pluginId),
             engineSecret,
             redirectUri: connectorRedirectUri(options.origin?.() ?? PLACEHOLDER_ORIGIN),

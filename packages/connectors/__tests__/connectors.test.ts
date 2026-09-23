@@ -9,11 +9,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inProcessLocks, memoryAccounts, memoryTransient, type AccountStore, type OperationSpec } from '@aigntiq/conduit';
 import type { AnyTool } from '@sigx/ai';
+import gmailSpec from '@aigntiq/conduit-connectors/gmail';
 import { describe, expect, it } from 'vitest';
 
 import {
     clientFromSecrets,
+    conduitConnectorManifest,
     conduitTools,
+    connectorClientSecretNames,
     connectorToolName,
     ConnectorToolError,
     createConnectorEngine,
@@ -88,7 +91,7 @@ interface Harness {
     connect(): Promise<string>;
 }
 
-function harness(secrets: Record<string, string | undefined> = { 'client-id': 'cid.apps.googleusercontent.com', 'client-secret': 'client-shh' }): Harness {
+function harness(secrets: Record<string, string | undefined> = { 'gmail-client-id': 'cid.apps.googleusercontent.com', 'gmail-client-secret': 'client-shh' }): Harness {
     const google = fakeGoogle();
     const accounts = memoryAccounts();
     const engine = createConnectorEngine({
@@ -96,7 +99,7 @@ function harness(secrets: Record<string, string | undefined> = { 'client-id': 'c
         accounts,
         transient: memoryTransient(),
         locks: inProcessLocks(),
-        clients: clientFromSecrets(async (name) => secrets[name]),
+        clients: clientFromSecrets(async (name) => secrets[name], 'gmail'),
         redirectUri: REDIRECT,
         http: google.http
     });
@@ -283,15 +286,31 @@ describe('clientFromSecrets', () => {
         const asked: string[] = [];
         const resolve = clientFromSecrets(async (name, lookup) => {
             asked.push(`${lookup.connector}/${lookup.method}:${name}`);
-            return { 'client-id': 'cid', 'client-secret': 'cs' }[name];
-        });
+            return { 'gmail-client-id': 'cid', 'gmail-client-secret': 'cs' }[name];
+        }, 'gmail');
         expect(await resolve({ connector: 'gmail', method: 'oauth', owner: OWNER })).toEqual({ id: 'cid', secret: 'cs' });
-        expect(asked).toEqual(['gmail/oauth:client-id', 'gmail/oauth:client-secret']);
+        expect(asked).toEqual(['gmail/oauth:gmail-client-id', 'gmail/oauth:gmail-client-secret']);
     });
 
     it('no client id → no client; no secret → a public client', async () => {
-        expect(await clientFromSecrets(async () => undefined)({ connector: 'gmail', method: 'oauth' })).toBeUndefined();
-        expect(await clientFromSecrets(async (n) => (n === 'client-id' ? 'cid' : undefined))({ connector: 'gmail', method: 'oauth' })).toEqual({ id: 'cid' });
+        expect(await clientFromSecrets(async () => undefined, 'gmail')({ connector: 'gmail', method: 'oauth' })).toBeUndefined();
+        expect(await clientFromSecrets(async (n) => (n === 'gmail-client-id' ? 'cid' : undefined), 'gmail')({ connector: 'gmail', method: 'oauth' })).toEqual({ id: 'cid' });
+    });
+
+    it('two conduit connector plugins declare and resolve their own OAuth clients (#548)', async () => {
+        const work = conduitConnectorManifest(gmailSpec, { id: 'gmail-work', hosts: ['gmail.googleapis.com'] });
+        const declared = (m: typeof work): string[] => (m.secrets ?? []).filter((s) => s.required).map((s) => s.name);
+        expect(declared(gmailConnectorPlugin)).toEqual(['gmail-client-id', 'gmail-client-secret']);
+        expect(declared(work)).toEqual(['gmail-work-client-id', 'gmail-work-client-secret']);
+        expect(connectorClientSecretNames('gmail-work')).toEqual({ id: 'gmail-work-client-id', secret: 'gmail-work-client-secret' });
+        // One workspace-wide name space, as the Registry keeps it.
+        const registry: Record<string, string> = { 'gmail-client-id': 'personal', 'gmail-client-secret': 'personal-shh', 'gmail-work-client-id': 'work', 'gmail-work-client-secret': 'work-shh' };
+        const lookup = { connector: 'gmail', method: 'oauth', owner: OWNER };
+        expect(await clientFromSecrets(async (n) => registry[n], gmailConnectorPlugin.id)(lookup)).toEqual({ id: 'personal', secret: 'personal-shh' });
+        expect(await clientFromSecrets(async (n) => registry[n], work.id)(lookup)).toEqual({ id: 'work', secret: 'work-shh' });
+        // The engine secret stays one per workspace: both declare the same name.
+        expect(work.secrets?.find((s) => !s.required)?.name).toBe('connector-engine-secret');
+        expect(gmailConnectorPlugin.secrets?.find((s) => !s.required)?.name).toBe('connector-engine-secret');
     });
 
     it('sends the client secret to the token endpoint only', async () => {
@@ -313,12 +332,12 @@ describe('gmailConnectorPlugin', () => {
         const m = gmailConnectorPlugin;
         expect(m).toMatchObject({ id: 'gmail', kind: 'connector', name: 'Gmail', version: '1.0.0' });
         expect(m.secrets?.map((s) => [s.name, s.required])).toEqual([
-            ['client-id', true],
-            ['client-secret', true],
+            ['gmail-client-id', true],
+            ['gmail-client-secret', true],
             // Generated on the first Connect (#533), so it never holds readiness back.
             ['connector-engine-secret', false]
         ]);
-        expect(m.permissions.map((p) => p.scope)).toEqual(['secret:client-id', 'secret:client-secret', 'secret:connector-engine-secret', 'network:gmail.googleapis.com', 'network:oauth2.googleapis.com', 'tools:gmail']);
+        expect(m.permissions.map((p) => p.scope)).toEqual(['secret:gmail-client-id', 'secret:gmail-client-secret', 'secret:connector-engine-secret', 'network:gmail.googleapis.com', 'network:oauth2.googleapis.com', 'tools:gmail']);
     });
 
     it('lists its operations as capabilities, and the trigger it does not run yet as unsupported (AGT-09)', () => {

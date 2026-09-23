@@ -101,12 +101,13 @@ const until = async (check: () => Promise<boolean>, what: string): Promise<void>
 async function connectGmail(): Promise<string> {
     await registry().setSecret(ANTHROPIC_API_KEY_SECRET, 'sk-ant-test');
     await registry().enable('gmail');
-    await registry().setSecret('client-id', 'cid.apps.googleusercontent.com');
-    await registry().setSecret('client-secret', 'client-shh');
+    await registry().setSecret('gmail-client-id', 'cid.apps.googleusercontent.com');
+    await registry().setSecret('gmail-client-secret', 'client-shh');
     const reg = registry() as unknown as ConnectorRegistry;
     const engine = workspaceConnectorEngine({
         workspaceId: WS,
         principal: owner,
+        pluginId: 'gmail',
         secret: (name) => reg.openSecret(name, 'gmail'),
         engineSecret: await ensureEngineSecret(reg, 'gmail'),
         redirectUri: 'https://agentic.example/_agentic/connectors/callback',
