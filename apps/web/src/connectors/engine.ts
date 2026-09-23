@@ -77,10 +77,19 @@ export interface ConnectorRegistry {
     putConnector(input: { readonly id: string; readonly pluginId: string; readonly transport: 'conduit'; readonly connector: string; readonly account?: string }): Promise<unknown>;
     openSecret(name: string, pluginId: string): Promise<string>;
     setSecret(name: string, value: string): Promise<unknown>;
+    /** Names and timestamps only (`SecretInfo`) — whether a secret is set, readable without opening it. */
+    secrets(): Promise<readonly { readonly name: string; readonly updatedAt: number }[]>;
 }
 
-/** A connector plugin's secret, `undefined` when it is not set. Any other refusal (plugin off, not granted) throws. */
-export async function openPluginSecret(registry: Pick<ConnectorRegistry, 'openSecret'>, name: string, pluginId: string): Promise<string | undefined> {
+/**
+ * A connector plugin's secret, `undefined` when it is not set. Any other refusal (plugin off, not granted) throws.
+ *
+ * "Not set" is read from `secrets()` (names only), not from the refusal: these routes call the Registry from the
+ * Worker, where a production build masks every refusal that is not a `ServerFnError` to a bare "Internal error" —
+ * no `code`, no message (#557). The refusal check stays for the window between the two reads.
+ */
+export async function openPluginSecret(registry: Pick<ConnectorRegistry, 'openSecret' | 'secrets'>, name: string, pluginId: string): Promise<string | undefined> {
+    if (!(await registry.secrets()).some((s) => s.name === name)) return undefined;
     try {
         return await registry.openSecret(name, pluginId);
     } catch (e) {
@@ -99,7 +108,7 @@ export async function openPluginSecret(registry: Pick<ConnectorRegistry, 'openSe
  * says "start again". A write-once Registry API would close that window entirely; it is not worth a platform seam
  * for a race only the owner can start against themselves.
  */
-export async function ensureEngineSecret(registry: Pick<ConnectorRegistry, 'openSecret' | 'setSecret'>, pluginId: string): Promise<string> {
+export async function ensureEngineSecret(registry: Pick<ConnectorRegistry, 'openSecret' | 'setSecret' | 'secrets'>, pluginId: string): Promise<string> {
     const existing = await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId);
     if (existing !== undefined) return existing;
     const secret = newEngineSecret();
