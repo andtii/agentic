@@ -9,11 +9,12 @@
  * no provider owns still lists and reads, and its `changes` is `not-a-repo`.
  */
 
-import { FS_LIST_MAX_ENTRIES, FS_READ_MAX_BYTES, isBinaryText, type ChangeSet, type FsError, type FsErrorCode, type FsOp, type FsReadRev, type FsReadResult, type FsTreeEntry, type FsTreeResult } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_READ_MAX_BYTES, type ChangeSet, type FsError, type FsErrorCode, type FsOp, type FsReadRev, type FsReadResult, type FsTreeEntry, type FsTreeResult } from '@agentic/core';
 import { LIMITS } from '@agentic/daemon-protocol';
 import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { checkWithinRoots, isMissing, withinRoots } from './roots.js';
+import { lineCount, SNIFF_BYTES, textOf } from './text.js';
 import { gitProvider } from './vcs/git.js';
 import { openRepo, VcsFailure, type VcsProvider, type VcsRepo } from './vcs/provider.js';
 
@@ -28,8 +29,6 @@ export interface FilesOptions {
     readonly git?: string;
 }
 
-/** Bytes sniffed for a NUL before a file is read as text. */
-const SNIFF_BYTES = 8000;
 /** Leaves room for the envelope below the 1 MiB frame limit. */
 const LISTING_BUDGET_BYTES = LIMITS.frameBytes - 64 * 1024;
 
@@ -143,26 +142,15 @@ async function tree(op: Extract<FsOp, { kind: 'tree' }>, folder: Folder, provide
 
 // -------------------------------------------------------------------- read
 
-/** Text or binary, per `isBinaryText`: a NUL early on, bytes that are not UTF-8, or control characters. */
-function decoded(bytes: Buffer): string | undefined {
-    if (bytes.subarray(0, SNIFF_BYTES).includes(0)) return undefined;
-    let text: string;
-    try {
-        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    } catch {
-        return undefined;
-    }
-    return isBinaryText(text) ? undefined : text;
-}
-
-const lineCount = (text: string) => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
-
-/** A read answer from a file's size and bytes (all of them, or only the first ones when `partial`). */
+/**
+ * A read answer from a file's size and bytes — all of them, or only its first `SNIFF_BYTES` when `partial`. Binary is
+ * decided first, so a large binary file answers its metadata; only a large text file is `too-large`.
+ */
 function answer(path: string, rev: FsReadRev, size: number, bytes: Buffer, partial: boolean): FsReadResult {
-    if (bytes.subarray(0, SNIFF_BYTES).includes(0)) return { kind: 'read', path, rev, size, binary: true };
+    const text = textOf(bytes, partial);
+    if (text === undefined) return { kind: 'read', path, rev, size, binary: true };
     if (partial) throw new Refusal('too-large', `${path} is ${size} bytes, more than the ${FS_READ_MAX_BYTES} a read returns`);
-    const text = decoded(bytes);
-    return text === undefined ? { kind: 'read', path, rev, size, binary: true } : { kind: 'read', path, rev, size, text, lines: lineCount(text) };
+    return { kind: 'read', path, rev, size, text, lines: lineCount(text) };
 }
 
 async function readWorking(real: string, rel: string): Promise<FsReadResult> {

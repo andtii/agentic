@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { answerFsRequest, type FsOptions, type FsOutcome } from '../src/fs';
 import { parseLog, parseNameStatus, parseNumstat, parseStatus } from '../src/vcs/git';
 import type { VcsProvider } from '../src/vcs/provider';
+import { runGit } from '../src/vcs/run';
 
 const hasGit = spawnSync('git', ['--version'], { windowsHide: true }).status === 0;
 /** A directory link: a junction on Windows (no privilege needed), a symlink elsewhere. */
@@ -153,6 +154,13 @@ describe('files: reading', () => {
         const bigBinary = Buffer.alloc(FS_READ_MAX_BYTES + 10);
         await writeFile(join(plain, 'big.bin'), bigBinary);
         expect(await read('big.bin', undefined, plain)).toEqual({ kind: 'read', path: 'big.bin', rev: 'working', size: bigBinary.length, binary: true });
+        // …also one with no NUL early on: bytes that are not UTF-8 are binary at any size, never too-large.
+        const bigLatin1 = Buffer.alloc(FS_READ_MAX_BYTES + 10, 0xe9);
+        await writeFile(join(plain, 'big-latin1.dat'), bigLatin1);
+        expect(await read('big-latin1.dat', undefined, plain)).toEqual({ kind: 'read', path: 'big-latin1.dat', rev: 'working', size: bigLatin1.length, binary: true });
+        // A large UTF-8 text whose sniffed prefix ends inside a multi-byte character is still text, so too-large.
+        await writeFile(join(plain, 'big-utf8.txt'), 'é'.repeat(FS_READ_MAX_BYTES));
+        expect(errorOf(await ask({ kind: 'read', root: plain, path: 'big-utf8.txt' }))).toBe('too-large');
         // Exactly at the cap still reads.
         await writeFile(join(plain, 'edge.txt'), 'y'.repeat(FS_READ_MAX_BYTES));
         expect((await read('edge.txt', undefined, plain)).text?.length).toBe(FS_READ_MAX_BYTES);
@@ -225,6 +233,10 @@ describe.skipIf(!hasGit)('files: a git repo', { timeout: 60_000 }, () => {
         await put('huge.txt', 'z'.repeat(FS_READ_MAX_BYTES + 1));
         commit('huge');
         expect(errorOf(await ask({ kind: 'read', root: repo, path: 'huge.txt', rev: 'head' }))).toBe('too-large');
+        // A committed binary past the cap, with no NUL to give it away, answers its metadata from the prefix alone.
+        await put('huge.dat', Buffer.alloc(FS_READ_MAX_BYTES + 1, 0xe9));
+        commit('huge binary');
+        expect(await read('huge.dat', 'head')).toEqual({ kind: 'read', path: 'huge.dat', rev: 'head', size: FS_READ_MAX_BYTES + 1, binary: true });
     });
 
     it('changes (uncommitted): modified, added, deleted, renamed and untracked, with line counts', async () => {
@@ -235,12 +247,15 @@ describe.skipIf(!hasGit)('files: a git repo', { timeout: 60_000 }, () => {
         git('mv', 'src/old-name.ts', 'src/new-name.ts');
         await put('src/untracked.ts', 'one\ntwo\nthree\n');
         await put('pic.bin', Buffer.from([0, 9, 9]));
+        // Not UTF-8 and no NUL: still binary, not a made-up line count.
+        await put('pic.dat', Buffer.from([0xe9, 0x0a, 0xe9]));
         const set = await changes('uncommitted');
         expect(set).toMatchObject({ kind: 'changes', vcs: 'git', scope: 'uncommitted', branch: 'main', base: 'main', ahead: 0, behind: 0, commits: [], truncated: false });
         expect(set.head).toMatch(/^[0-9a-f]{7}$/);
         expect(set.files).toEqual([
             { path: 'README.md', status: 'deleted', added: 0, removed: 1 },
             { path: 'pic.bin', status: 'untracked', binary: true },
+            { path: 'pic.dat', status: 'untracked', binary: true },
             { path: 'src/app.css', status: 'modified', added: 2, removed: 1 },
             { path: 'src/new-name.ts', oldPath: 'src/old-name.ts', status: 'renamed', added: 0, removed: 0 },
             { path: 'src/staged.ts', status: 'added', added: 2, removed: 0 },
@@ -326,6 +341,24 @@ describe.skipIf(!hasGit)('files: a repo before its first commit', { timeout: 60_
             { path: 'b.txt', status: 'untracked', added: 1, removed: 0 }
         ]);
         expect(errorOf(await ask({ kind: 'read', root: repo, path: 'a.txt', rev: 'head' }))).toBe('not-found');
+    });
+});
+
+describe('runGit', () => {
+    it('kills a command past maxBytes and reports it as overflow with a non-zero code, never a success', async () => {
+        const r = await runGit(process.execPath, ['-e', 'process.stdout.write("x".repeat(1 << 20)); setTimeout(() => {}, 5000)'], { timeoutMs: 20_000, maxBytes: 10 });
+        expect(r.overflow).toBe(true);
+        expect(r.stdout.toString()).toBe('x'.repeat(10));
+        expect(r.code).not.toBe(0);
+    });
+
+    it('feeds stdin, reports the exit code, and says missing for a binary that is not there', async () => {
+        const echo = await runGit(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], { timeoutMs: 20_000, input: 'a\0b' });
+        expect(echo).toMatchObject({ code: 0, overflow: false });
+        expect(echo.stdout.toString()).toBe('a\0b');
+        expect((await runGit(process.execPath, ['-e', 'process.exit(3)'], { timeoutMs: 20_000 })).code).toBe(3);
+        expect((await runGit(join(tmpdir(), 'agentic-no-such-git'), ['--version'], { timeoutMs: 20_000 })).code).toBe('missing');
+        expect((await runGit(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { timeoutMs: 200 })).code).toBe('timeout');
     });
 });
 

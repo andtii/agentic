@@ -14,6 +14,7 @@ import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_READ_MAX_BYTES, type ChangeC
 import { LIMITS } from '@agentic/daemon-protocol';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { lineCount, textOf } from '../text.js';
 import { runGit, type GitRun, type GitRunOptions } from './run.js';
 import { VcsFailure, type VcsBlob, type VcsProvider, type VcsRepo } from './provider.js';
 
@@ -150,16 +151,13 @@ export function parseLog(out: string): ChangeCommit[] {
     return commits;
 }
 
-const lineCount = (text: string) => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
-
 /** Line counts of an untracked file read from disk: every line is added. */
 async function untrackedCounts(file: string): Promise<Counts> {
     try {
         const info = await stat(file);
         if (!info.isFile() || info.size > FS_READ_MAX_BYTES) return {};
-        const bytes = await readFile(file);
-        if (bytes.subarray(0, 8000).includes(0)) return { binary: true };
-        return { added: lineCount(bytes.toString('utf8')), removed: 0 };
+        const text = textOf(await readFile(file));
+        return text === undefined ? { binary: true } : { added: lineCount(text), removed: 0 };
     } catch {
         return {};
     }
@@ -237,7 +235,8 @@ function repoAt(folder: string, prefix: string, git: string, timeoutMs: number):
             const size = Number(m[3]);
             const partial = size > options.maxBytes;
             const blob = await run(['cat-file', 'blob', m[1]!], { maxBytes: partial ? options.prefixBytes : options.maxBytes });
-            if (blob.code !== 0) throw new VcsFailure('internal', `git cat-file failed: ${blob.stderr}`);
+            // Reading only a prefix kills git once it is read: that overflow is the point, not a failure.
+            if (blob.code !== 0 && !(partial && blob.overflow)) throw new VcsFailure('internal', `git cat-file failed: ${blob.stderr}`);
             return { kind: 'blob', size, bytes: blob.stdout, partial };
         },
         async changes(scope: ChangeScope, base?: string): Promise<ChangeSet> {

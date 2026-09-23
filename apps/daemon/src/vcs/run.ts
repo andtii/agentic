@@ -1,7 +1,8 @@
 /**
  * Running `git` (#188, #561): always through `spawn` with no shell, a timeout, `LC_ALL=C` and no terminal prompt, so
  * nothing a path or ref holds is ever interpreted by a shell and nothing waits on a credential. Stdout is kept up to
- * `maxBytes`: past it the process is killed and the run says `overflow`, with the bytes read so far.
+ * `maxBytes`: past it the process is killed and the run says `overflow`, with the bytes read so far and the exit code
+ * the killed process had (non-zero), so no caller mistakes cut output for a success.
  */
 
 import { spawn } from 'node:child_process';
@@ -67,7 +68,8 @@ export function runGit(git: string, args: readonly string[], options: GitRunOpti
             if (err.length < STDERR_BYTES) err += chunk.toString('utf8');
         });
         child.on('error', (e: NodeJS.ErrnoException) => finish(e.code === 'ENOENT' ? 'missing' : 1));
-        child.on('close', (code) => finish(timedOut ? 'timeout' : overflow ? 0 : (code ?? 1)));
+        // Killed for overflow, a git reports no exit code: that is a failure too — `overflow` says why.
+        child.on('close', (code) => finish(timedOut ? 'timeout' : (code ?? 1)));
         // A git that exits before reading stdin makes the write fail with EPIPE; the exit code says what happened.
         child.stdin.on('error', () => undefined);
         child.stdin.end(options.input ?? '');
