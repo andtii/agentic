@@ -80,6 +80,8 @@ let recipes: RecipeInput[] = [...daisyRecipes];
 // `line-strong` border, hover border `text-dim`.
 recipes = withOverride(recipes, 'button', {
     parts: {
+        // The loading spinner is zero's `spinner` part (0.3; it was daisy's `loading` modifier).
+        spinner: { base: { inlineSize: '14px', blockSize: '14px' } },
         root: {
             base: {
                 height: 'var(--ag-control-h)',
@@ -94,9 +96,6 @@ recipes = withOverride(recipes, 'button', {
     variants: {
         size: { md: { root: { base: { padding: '0 var(--space-lg)', fontSize: 'var(--text-md)' } } } }
     },
-    modifiers: {
-        loading: { root: { selectors: { '&::before': { inlineSize: '14px', blockSize: '14px' } } } }
-    },
     compoundVariants: [
         {
             match: { color: 'neutral', variant: 'solid' },
@@ -110,7 +109,7 @@ recipes = withOverride(recipes, 'button', {
     ]
 });
 
-// Text controls: one field chrome for input, textarea, native select, select and combobox.
+// Text controls: one field chrome for input, textarea, select and combobox.
 recipes = withOverride(recipes, 'input', {
     parts: {
         control: { base: fieldBase, states: fieldStates },
@@ -124,12 +123,6 @@ recipes = withOverride(recipes, 'textarea', {
             states: fieldStates,
             selectors: { '&::placeholder': { color: 'var(--ag-text-dim)' } }
         }
-    }
-});
-recipes = withOverride(recipes, 'native-select', {
-    parts: {
-        control: { base: { ...fieldBase, padding: '0 var(--space-md)', paddingInlineEnd: 'calc(var(--space-md) + 1.25em)' }, states: fieldStates },
-        indicator: { base: { opacity: '1', color: 'var(--ag-text-dim)' } }
     }
 });
 recipes = withOverride(recipes, 'select', {

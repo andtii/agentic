@@ -20,7 +20,7 @@
 
 import { component, type Define, type JSXElement } from '@sigx/runtime-core';
 import { batch, computed, signal, watch } from '@sigx/reactivity';
-import { Button, Field, NativeSelect } from '@sigx/zero';
+import { Button, Field, Select } from '@sigx/zero';
 import type { AgentConfig } from '@agentic/core';
 import {
     AGENT_FIELDS as F,
@@ -372,7 +372,7 @@ export const AgentForm = component<AgentFormProps>(
                                     chip: ({ value, label }) => (
                                         <Field.Root size="xs">
                                             <Field.Label>Mode for {label}</Field.Label>
-                                            <NativeSelect.Root model={() => draft.toolModes[value]} name={F.toolMode(value)} options={TOOL_MODE_OPTIONS} />
+                                            <Select.Root model={() => draft.toolModes[value]} name={F.toolMode(value)} items={TOOL_MODE_OPTIONS} itemValue={(o) => o.value} />
                                         </Field.Root>
                                     )
                                 }}

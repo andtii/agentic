@@ -1,7 +1,7 @@
 import { signal } from '@sigx/reactivity';
 import { NOTIFICATION_KINDS } from '@agentic/core';
 import { SettingsForm, SETTINGS_FIELDS as F, defaultSettingsFormValue, fromSettingsDraft, parseSettingsFormData, settingsDraftFromFormData, supportedTimeZones, toSettingsDraft, validateSettingsDraft, type SettingsErrors, type SettingsFormApi, type SettingsFormValue } from '@agentic/ui';
-import { controls, describedByRole, fullSettings, labelOf, mount, setText, submit, toggle } from './helpers';
+import { controls, describedByRole, fullSettings, labelOf, mount, setText, settle, submit, toggle } from './helpers';
 
 const zones = ['Europe/Stockholm', 'Europe/London', 'America/New_York', 'UTC'];
 
@@ -47,8 +47,9 @@ describe('settings model', () => {
 });
 
 describe('SettingsForm', () => {
-    it('labels every control and posts a FormData that reads back to the model', () => {
+    it('labels every control and posts a FormData that reads back to the model', async () => {
         const { root, form, state } = mountForm();
+        await settle();
         for (const el of controls(root)) expect(labelOf(el), `${el.getAttribute('name')} has a label`).not.toBe('');
         expect(fromSettingsDraft(settingsDraftFromFormData(new FormData(form)))).toEqual(state.settings);
     });

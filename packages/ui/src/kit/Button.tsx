@@ -5,7 +5,8 @@
  * (amber: the answer to something waiting on a person), `danger` (outline
  * until the confirm step, then filled) and `icon` (36 px square, needs an
  * accessible name). Loading keeps the label and swaps the icon for a 14 px
- * spinner; the button is disabled meanwhile.
+ * spinner — zero's `loading` state (`data-state="loading"` + the button's
+ * `spinner` part, zero 0.3); the button is disabled meanwhile.
  *
  * Rendered as a real `<button>` carrying the same `data-*` axes zero's
  * `Button.Root` stamps (`variantAttrs`), so the design system's button
@@ -62,7 +63,7 @@ export const Button = component<ButtonProps>(({ props, slots }) => () => {
     const attrs = variantAttrs({
         color: axes.color as never,
         variant: axes.variant,
-        mods: { ...axes.mods, loading: props.loading ? true : undefined, block: props.block ? true : undefined }
+        mods: { ...axes.mods, block: props.block ? true : undefined }
     });
     const disabled = props.disabled || props.loading;
     return (
@@ -71,6 +72,7 @@ export const Button = component<ButtonProps>(({ props, slots }) => () => {
             data-part="root"
             data-intent={intent}
             {...attrs}
+            data-state={props.loading ? 'loading' : undefined}
             type={props.type ?? 'button'}
             disabled={disabled}
             data-disabled={disabled ? '' : undefined}
@@ -80,7 +82,7 @@ export const Button = component<ButtonProps>(({ props, slots }) => () => {
             class={props.class}
             onClick={(e: MouseEvent) => props.onClick?.(e)}
         >
-            {props.icon && !props.loading ? <Icon name={props.icon} size={15} /> : null}
+            {props.loading ? <span data-scope="button" data-part="spinner" aria-hidden="true" /> : props.icon ? <Icon name={props.icon} size={15} /> : null}
             {intent === 'icon' ? null : <span>{slots.default?.()}</span>}
         </button>
     );

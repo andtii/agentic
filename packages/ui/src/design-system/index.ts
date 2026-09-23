@@ -13,9 +13,15 @@
  * that owns it — `@agentic/ui` importing `@agentic/ui`. The app keeps using
  * `@sigx/zero-daisyui/components`, whose vocabulary is a subset of this one.
  *
- * Kit import type-only: this entry loads in Node without the kit's barrel.
+ * The layout tier (zero 0.3's Stack / Row / Grid / … recipes and CSS) is
+ * generated from these tokens' spacing ramp and breakpoints, as daisy's own
+ * design system does. The kit is reached only through `@sigx/zero-kit/define`,
+ * its node:-free authoring subpath, so this entry still loads in Node without
+ * the kit's barrel; the calls are `@__PURE__` so an app importing only
+ * `installThemes` tree-shakes them away.
  */
 import type { DesignSystemInput } from '@sigx/zero-kit';
+import { layoutCss, layoutRecipes } from '@sigx/zero-kit/define';
 import { registerThemes } from '@sigx/zero/theme';
 import { fragmentCss, recipes as fragmentRecipes } from '../fragment/recipes.js';
 import { kitCss } from '../kit/css.js';
@@ -30,8 +36,8 @@ export { overriddenRecipes, withOverride } from './overrides.js';
 export const designSystem: DesignSystemInput<Roles, typeof system> = {
     name: 'agentic',
     tokens,
-    recipes: [...overriddenRecipes, ...fragmentRecipes, ...kitRecipes],
-    css: [kitCss, fragmentCss]
+    recipes: [.../* @__PURE__ */ layoutRecipes(tokens), ...overriddenRecipes, ...fragmentRecipes, ...kitRecipes],
+    css: [/* @__PURE__ */ layoutCss(tokens), kitCss, fragmentCss]
 };
 
 export default designSystem;

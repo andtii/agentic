@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { compileTokensCss, mergeManifests, validateDesignSystem, type ZeroManifest } from '@sigx/zero-kit';
 import { AGENT_HUES, AG_MODIFIERS, KINDS, THEME, TONES, custom, designSystem, palette, tokens } from '../src/design-system';
 import { fragment } from '../src/fragment';
+import { tokens as daisy } from '@sigx/zero-daisyui';
 
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
 // A path, not `new URL(...)`: happy-dom replaces the global URL, which node:fs refuses.
@@ -45,11 +46,11 @@ describe('the agentic design system', () => {
         expect(result.warnings).toEqual([]);
     });
 
-    it('ships exactly one theme, dark, as both scheme defaults', () => {
+    it('ships exactly one theme, dark, as the single-scheme default', () => {
         expect(Object.keys(tokens.themes)).toEqual([THEME]);
         expect(theme.colorScheme).toBe('dark');
         expect(tokens.defaultLight).toBe(THEME);
-        expect(tokens.defaultDark).toBe(THEME);
+        expect(tokens.defaultDark).toBeUndefined();
     });
 
     it('takes every colour from docs/design/tokens.json', () => {
@@ -86,6 +87,8 @@ describe('the agentic design system', () => {
             if (name.startsWith('ag-')) expect(css).toContain(`--${name}: ${value};`);
         }
         expect(css).toMatch(/\[data-theme="control-room"\]\s*\{\s*color-scheme: dark;/);
+        // The kit states the dark default's own scheme on :root — no `color-scheme: light`.
+        expect(css).not.toMatch(/color-scheme: light/);
         expect(css).toContain('--font-sans: \'Schibsted Grotesk\'');
         expect(css).toContain('--space-2xs: 2px;');
         expect(css).toContain('--text-md: 13px;');
@@ -105,10 +108,11 @@ describe('the agentic design system', () => {
     });
 
     it('declares the product axes and modifiers the kit issues wire, beside daisy\'s', () => {
-        expect(tokens.axes).toEqual({ tone: [...TONES], kind: [...KINDS] });
+        expect(tokens.axes).toEqual({ ...daisy.axes, tone: [...TONES], kind: [...KINDS] });
+        expect(tokens.breakpoints).toEqual(daisy.breakpoints);
         for (const mod of AG_MODIFIERS) expect(tokens.modifiers).toContain(mod);
-        for (const mod of ['wide', 'block', 'square', 'circle', 'active', 'loading', 'zebra', 'hover']) expect(tokens.modifiers).toContain(mod);
-        expect(tokens.variants).toEqual(['solid', 'outline', 'soft', 'ghost', 'dash', 'link']);
+        for (const mod of ['wide', 'block', 'square', 'circle', 'active', 'zebra', 'hover']) expect(tokens.modifiers).toContain(mod);
+        for (const v of ['solid', 'outline', 'soft', 'ghost', 'dash', 'link']) expect(tokens.variants).toContain(v);
     });
 
     it('overrides daisy\'s recipes in place — one recipe per scope, daisy\'s axes intact', () => {
