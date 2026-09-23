@@ -597,6 +597,16 @@ export function createDaemon(options: DaemonOptions): Daemon {
     function runtimeReports(): CapabilityReport[] {
         const byRuntime = new Map<string, CapabilityReport>();
         for (const inspection of inspections.values()) if (!byRuntime.has(inspection.capabilities.runtime)) byRuntime.set(inspection.capabilities.runtime, inspection.capabilities);
+        // A runtime no environment runs on yet is reported by its driver, so the platform can offer it for the first
+        // one (#541); a driver without `report` (a harness that is not installed) is left out.
+        for (const [runtime, driver] of drivers) {
+            if (byRuntime.has(runtime) || !driver.report) continue;
+            try {
+                byRuntime.set(runtime, driver.report());
+            } catch (e) {
+                logger.warn('runtime report failed; not reported', { runtime, error: e });
+            }
+        }
         // With the relay port, every report says whether its sign-in is relayed (#484); without it nothing is claimed.
         const login = options.login;
         return [...byRuntime.values()].map((r) => (login ? { ...r, login: login.relays(r.runtime) ? 'relay' : 'terminal' } : r));
