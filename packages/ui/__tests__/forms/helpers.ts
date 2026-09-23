@@ -3,6 +3,22 @@ import type { JSXElement } from '@sigx/runtime-core';
 import type { AgentConfig, AgentId, EnvironmentId } from '@agentic/core';
 import type { SettingsFormValue } from '@agentic/ui';
 
+/**
+ * The entry list a browser builds for `form` (HTML: constructing the entry list). happy-dom's `new FormData(form)`
+ * gets a `<select multiple>` wrong twice: it takes only the first selected option, and it posts the select while
+ * disabled. zero's multiple Combobox posts through such a select, so a form test reads what it posts through this.
+ */
+export function formDataOf(form: HTMLFormElement): FormData {
+    const data = new FormData(form);
+    const multiples = [...form.elements].filter((el): el is HTMLSelectElement => el instanceof HTMLSelectElement && el.multiple && !!el.name);
+    for (const name of new Set(multiples.map((el) => el.name))) data.delete(name);
+    for (const el of multiples) {
+        if (el.disabled || el.closest('fieldset:disabled')) continue;
+        for (const o of el.options) if (o.selected && !o.disabled) data.append(el.name, o.value);
+    }
+    return data;
+}
+
 /** Mount into a fresh container attached to the document (zero's ids and popovers need a live tree). */
 export function mount(node: JSXElement): HTMLElement {
     const container = document.createElement('div');

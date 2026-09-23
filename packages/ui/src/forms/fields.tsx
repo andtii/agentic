@@ -7,14 +7,81 @@
  */
 
 import { component, type Define } from '@sigx/runtime-core';
-import { Field, Input, NumberInput, Select, Switch, Textarea, type InputType } from '@sigx/zero';
+import { Combobox, Field, Input, NumberInput, Select, Switch, Textarea, type InputType } from '@sigx/zero';
 import { derivedModel } from '@sigx/zero/behaviors';
-import { MultiSelect, type MultiSelectOption } from '../_zero-gaps/multi-select.js';
 import { agMapFieldAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
 import type { MapRow } from './schema-model.js';
 
-export type FieldOption = MultiSelectOption;
+/** One choice of a select or multi-select: posted as `value`, shown as `label` (the value when absent). */
+export interface FieldOption {
+    readonly value: string;
+    readonly label?: string;
+    readonly disabled?: boolean;
+    readonly group?: string;
+}
+
+/** What a multi-select's per-value `tag` slot is given: the value and its label. */
+export interface MultiSelectTag {
+    readonly value: string;
+    readonly label: string;
+}
+
+export type MultiSelectProps = Define.Model<string[]> &
+    Define.Prop<'options', readonly FieldOption[]> &
+    /** Posted once per chosen value (zero's hidden `<select multiple>`). */
+    Define.Prop<'name', string, true> &
+    Define.Prop<'placeholder', string> &
+    /** Enter on text that matches no option adds it verbatim. */
+    Define.Prop<'allowCustom', boolean> &
+    Define.Prop<'disabled', boolean> &
+    Define.Prop<'invalid', boolean> &
+    Define.Prop<'emptyText', string> &
+    Define.Event<'valueChange', string[]> &
+    /** Extra content per chosen value, between its label and its remove button (a per-item control such as a mode select). */
+    Define.Slot<'tag', MultiSelectTag>;
+
+/**
+ * A `string[]` of chosen options: zero's `Combobox` in `multiple` mode over `FieldOption`s. The chosen values are
+ * its tags (label, then the `tag` slot, then remove), and they post pre-hydration under `name` like a native
+ * `<select multiple>`; custom values post too.
+ */
+export const MultiSelect = component<MultiSelectProps>(
+    ({ props, slots, emit }) =>
+        () => (
+            <Combobox.Root
+                multiple
+                model={props.model}
+                items={props.options ?? []}
+                itemValue={(o: FieldOption) => o.value}
+                itemKey={(o) => o.value}
+                itemLabel={(o) => o.label ?? o.value}
+                itemDisabled={(o) => !!o.disabled}
+                itemGroup={(o) => o.group}
+                name={props.name}
+                placeholder={props.placeholder}
+                allowCustom={props.allowCustom}
+                disabled={props.disabled}
+                invalid={props.invalid}
+                emptyText={props.emptyText ?? (props.allowCustom ? 'Press Enter to add' : 'No matches')}
+                onValueChange={(v: string[]) => emit('valueChange', v)}
+                slots={
+                    slots.tag
+                        ? {
+                              tag: ({ value, label }: MultiSelectTag) => (
+                                  <>
+                                      <Combobox.TagLabel />
+                                      {slots.tag!({ value, label })}
+                                      <Combobox.TagRemove />
+                                  </>
+                              )
+                          }
+                        : undefined
+                }
+            />
+        ),
+    { name: 'MultiSelect' }
+);
 
 type Common = Define.Prop<'name', string, true> &
     Define.Prop<'label', string, true> &
@@ -142,14 +209,14 @@ export type MultiSelectFieldProps = Define.Model<string[]> &
     Define.Prop<'options', readonly FieldOption[]> &
     Define.Prop<'placeholder', string> &
     Define.Prop<'allowCustom', boolean> &
-    Define.Slot<'chip', { value: string; label: string }>;
+    Define.Slot<'tag', MultiSelectTag>;
 
 export const MultiSelectField = component<MultiSelectFieldProps>(
     ({ props, slots }) =>
         () => (
             <Field.Root invalid={!!props.error} required={props.required} disabled={props.disabled}>
                 <Field.Label>{props.label}</Field.Label>
-                <MultiSelect model={props.model} name={props.name} options={props.options} placeholder={props.placeholder} allowCustom={props.allowCustom} disabled={props.disabled} invalid={!!props.error} slots={{ chip: slots.chip }} />
+                <MultiSelect model={props.model} name={props.name} options={props.options} placeholder={props.placeholder} allowCustom={props.allowCustom} disabled={props.disabled} invalid={!!props.error} {...(slots.tag ? { slots: { tag: slots.tag } } : {})} />
                 {props.description ? <Field.Description>{props.description}</Field.Description> : null}
                 {props.error ? <Field.Error>{props.error}</Field.Error> : null}
             </Field.Root>
