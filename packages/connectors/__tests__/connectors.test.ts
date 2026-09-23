@@ -335,13 +335,37 @@ describe('gmailConnectorPlugin', () => {
     });
 });
 
+describe('createConnectorEngine', () => {
+    const base = { accounts: memoryAccounts(), transient: memoryTransient(), locks: inProcessLocks(), clients: () => undefined };
+    it('refuses a short secret and a redirect URI that is not an absolute http(s) URL', () => {
+        expect(() => createConnectorEngine({ ...base, secret: 'short', redirectUri: REDIRECT })).toThrow(/at least 32 characters/);
+        expect(() => createConnectorEngine({ ...base, secret: 'x'.repeat(32), redirectUri: '/_agentic/connectors/callback' })).toThrow(/not an absolute URL/);
+        expect(() => createConnectorEngine({ ...base, secret: 'x'.repeat(32), redirectUri: 'javascript:alert(1)' })).toThrow(/must be http\(s\)/);
+        expect(() => createConnectorEngine({ ...base, secret: 'x'.repeat(32), redirectUri: REDIRECT })).not.toThrow();
+    });
+});
+
+/** Every module specifier in `text`: static imports and re-exports, side-effect imports, dynamic `import()`, either quote. */
+function specifiersOf(text: string): string[] {
+    const patterns = [/\bfrom\s*(['"])([^'"]+)\1/g, /\bimport\s*(['"])([^'"]+)\1/g, /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g];
+    return patterns.flatMap((re) => [...text.matchAll(re)].map((m) => m[2]!));
+}
+
 describe('edge safety', () => {
-    it("imports no `node:` module and never conduit's `/node` subpath", () => {
-        const dir = join(import.meta.dirname, '..', 'src');
-        for (const file of readdirSync(dir)) {
-            const text = readFileSync(join(dir, file), 'utf8');
-            const specifiers = [...text.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]!);
-            expect(specifiers.filter((s) => s.startsWith('node:') || s.startsWith('@aigntiq/conduit/node') || s.startsWith('@agentic/platform'))).toEqual([]);
+    const sources = (dir: string): string[] =>
+        readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+
+    it('finds every import form', () => {
+        const text = `import a from "node:fs";\nexport { b } from '@aigntiq/conduit/node';\nimport 'node:path';\nconst c = await import("node:crypto");`;
+        expect(specifiersOf(text).sort()).toEqual(['@aigntiq/conduit/node', 'node:crypto', 'node:fs', 'node:path']);
+    });
+
+    it("imports no `node:` module, never conduit's `/node` subpath, never the platform", () => {
+        const files = sources(join(import.meta.dirname, '..', 'src'));
+        expect(files.length).toBeGreaterThan(0);
+        for (const file of files) {
+            const bad = specifiersOf(readFileSync(file, 'utf8')).filter((s) => s.startsWith('node:') || s.startsWith('@aigntiq/conduit/node') || s.startsWith('@agentic/platform'));
+            expect(bad, file).toEqual([]);
         }
     });
 });
