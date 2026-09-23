@@ -25,7 +25,7 @@
   {
     "name": "@agentic/connectors",
     "path": "packages/connectors/dist/index.prod.js",
-    "limit": "2.5 KB",
+    "limit": "3.5 KB",
     "ignore": [
       "@aigntiq/conduit",
       "@aigntiq/conduit-connectors",

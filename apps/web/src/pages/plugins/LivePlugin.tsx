@@ -27,6 +27,8 @@ import { LiveRuntimeMachines } from './RuntimeMachines';
 import { GenerateKeys } from '../../push/GenerateKeys';
 import { VAPID_SECRET, WEB_PUSH_PLUGIN } from '../../push/model';
 import { LiveConduitConnect } from './ConduitConnect';
+import { LiveConnectorTrigger } from './ConnectorTrigger';
+import { hasTrigger } from './connector-trigger';
 import { isConduitConnector, managedSecretsOf } from './conduit';
 
 export type LivePluginProps = Define.Prop<'id', string, true>;
@@ -195,7 +197,13 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                         ? <GenerateKeys plugin={p} workspaceId={viewer.workspaceId} hasKek={ready.overview()!.hasKek} hasPrivateKey={ready.overview()!.secretNames.includes(VAPID_SECRET)} defs={defs} />
                                         // A conduit connector (Gmail, #533): the redirect URI, Connect / Reconnect / Disconnect and the account.
                                         : isConduitConnector(p.manifest) && viewer.workspaceId
-                                            ? <LiveConduitConnect plugin={p} workspaceId={viewer.workspaceId} secretNames={ready.overview()!.secretNames} hasKek={ready.overview()!.hasKek} defs={defs} query={route.query} />
+                                            ? (
+                                                <>
+                                                    <LiveConduitConnect plugin={p} workspaceId={viewer.workspaceId} secretNames={ready.overview()!.secretNames} hasKek={ready.overview()!.hasKek} defs={defs} query={route.query} />
+                                                    {/* A trigger this deployment runs (#535): new email wakes an agent. */}
+                                                    {hasTrigger(p.manifest) ? <LiveConnectorTrigger plugin={p} workspaceId={viewer.workspaceId} defs={defs} /> : null}
+                                                </>
+                                            )
                                             // A harness runtime (#370): the machines that have it or lack it.
                                             : runtimeKindOf(p.manifest) === 'harness' ? <LiveRuntimeMachines runtime={p.manifest.id} name={p.manifest.name} /> : null)}
                                     onConfigure={(config: Record<string, unknown>) => { void configure(config); }}

@@ -4,6 +4,10 @@
  * - The token endpoint trades `code-ok` for a refresh token that renews, and `code-revoked` for one Google refuses
  *   (`invalid_grant`). Both access tokens it issues first expire within conduit's 60 s refresh skew, so the FIRST tool
  *   call refreshes. A renewed token is `at-2`; only it lists messages.
+ * - A MAILBOX for the trigger tests (#535): `code-mail` signs in `mail@example.com` with a token that lasts an hour
+ *   (`at-m`). Its `messages.list` honours `after:<epoch s>` and answers newest first; `messages.get` answers the
+ *   headers. `POST /__test/google/mail` `{ id, from, subject, snippet }` delivers a message now;
+ *   `POST /__test/google/mail/revoke` revokes the sign-in (`at-m` 401, its refresh `invalid_grant`).
  * - `GET /__test/google/log` answers what it saw, one `METHOD path grant` line per request, so a test can say a
  *   refresh happened without seeing a token.
  * - `POST /__test/connectors/call` `{ workspaceId, pluginId, tool, input }` opens the workspace's connector through
@@ -22,8 +26,18 @@ const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+interface Mail {
+    readonly id: string;
+    readonly at: number;
+    readonly from: string;
+    readonly subject: string;
+    readonly snippet: string;
+}
+
 export function fakeGoogle() {
     const log: string[] = [];
+    const mailbox: Mail[] = [];
+    const mail = { revoked: false };
     const http: ConnectorHttp = async (request) => {
         const body = request.method === 'GET' ? '' : new TextDecoder().decode(await request.arrayBuffer());
         const url = new URL(request.url);
@@ -35,10 +49,15 @@ export function fakeGoogle() {
                 const code = form.get('code');
                 if (code === 'code-ok') return json({ access_token: 'at-1', refresh_token: 'rt-ok', expires_in: 30, token_type: 'Bearer' });
                 if (code === 'code-revoked') return json({ access_token: 'at-x', refresh_token: 'rt-revoked', expires_in: 30, token_type: 'Bearer' });
+                if (code === 'code-mail') {
+                    mail.revoked = false;
+                    return json({ access_token: 'at-m', refresh_token: 'rt-mail', expires_in: 3600, token_type: 'Bearer' });
+                }
                 return json({ error: 'invalid_grant', error_description: 'Bad code.' }, 400);
             }
             if (grant === 'refresh_token') {
                 if (form.get('refresh_token') === 'rt-ok') return json({ access_token: 'at-2', expires_in: 3600, token_type: 'Bearer' });
+                if (form.get('refresh_token') === 'rt-mail' && !mail.revoked) return json({ access_token: 'at-m', expires_in: 3600, token_type: 'Bearer' });
                 return json({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
             }
             return json({ error: 'unsupported_grant_type' }, 400);
@@ -47,6 +66,28 @@ export function fakeGoogle() {
         if (!request.url.startsWith(GMAIL)) return json({ error: { message: `no route ${request.url}` } }, 404);
         const auth = request.headers.get('authorization');
         const path = url.pathname.replace('/gmail/v1/users/me', '');
+        if (auth === 'Bearer at-m') {
+            if (mail.revoked) return json({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
+            if (path === '/profile') return json({ emailAddress: 'mail@example.com' });
+            if (path === '/messages') {
+                const after = /after:(\d+)/.exec(url.searchParams.get('q') ?? '');
+                const bound = after ? Number(after[1]) * 1000 : 0;
+                const hits = mailbox.filter((m) => m.at > bound).sort((a, b) => b.at - a.at);
+                return json(hits.length ? { messages: hits.map((m) => ({ id: m.id, threadId: `t_${m.id}` })) } : { resultSizeEstimate: 0 });
+            }
+            const one = mailbox.find((m) => path === `/messages/${m.id}`);
+            if (one) {
+                return json({
+                    id: one.id,
+                    threadId: `t_${one.id}`,
+                    labelIds: ['INBOX', 'UNREAD'],
+                    snippet: one.snippet,
+                    internalDate: String(one.at),
+                    payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: one.from }, { name: 'Subject', value: one.subject }], body: { data: '' } }
+                });
+            }
+            return json({ error: { message: 'Requested entity was not found.' } }, 404);
+        }
         if (path === '/profile') {
             if (auth === 'Bearer at-1' || auth === 'Bearer at-2') return json({ emailAddress: 'owner@example.com' });
             if (auth === 'Bearer at-x') return json({ emailAddress: 'revoked@example.com' });
@@ -58,7 +99,22 @@ export function fakeGoogle() {
         http,
         log,
         route(request: Request): ((request: Request) => Promise<Response>) | undefined {
-            return new URL(request.url).pathname === '/__test/google/log' ? async () => json({ log }) : undefined;
+            const path = new URL(request.url).pathname;
+            if (path === '/__test/google/log') return async () => json({ log });
+            if (path === '/__test/google/mail/revoke') {
+                return async () => {
+                    mail.revoked = true;
+                    return json({ revoked: true });
+                };
+            }
+            if (path === '/__test/google/mail') {
+                return async (req) => {
+                    const m = (await req.json()) as Omit<Mail, 'at'>;
+                    mailbox.push({ ...m, at: Date.now() });
+                    return json({ delivered: m.id });
+                };
+            }
+            return undefined;
         }
     };
 }

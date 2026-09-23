@@ -449,3 +449,79 @@ describe('Schedule machine (#414)', () => {
         expect('environmentId' in back).toBe(false);
     });
 });
+
+describe('Schedule source, cursor and pause (#535)', () => {
+    const SOURCE = { kind: 'connector', connector: 'gmail', query: 'in:inbox' } as const;
+
+    /** A port that answers each firing from a script, recording what it was handed. */
+    class Scripted implements TriggerPort {
+        events: ScheduleFired[] = [];
+        constructor(private readonly answers: ((e: ScheduleFired) => { cursor?: string; pause?: string } | void)[]) {}
+        async fired(event: ScheduleFired) {
+            this.events.push(event);
+            return this.answers.shift()?.(event);
+        }
+    }
+
+    it('hands the source and the stored cursor to each firing, and keeps the cursor a firing returns', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const trigger = new Scripted([() => ({ cursor: 'c1' }), (e) => ({ cursor: `${e.cursor}+c2` }), () => undefined, () => ({ cursor: 'x'.repeat(40_000) })]);
+        const r = await rig({ trigger: trigger as unknown as Recorder });
+        const client = r.host.actor(r.Schedule, KEY);
+        const created = await client.create({ kind: 'agent-task', title: 'mail', recurrence: { kind: 'cron', cron: '*/5 * * * *', tz: 'UTC' }, agentId: 'agent_a' as AgentId, source: SOURCE });
+        expect(created.source).toEqual(SOURCE);
+        await r.advance(15 * MIN);
+        expect(trigger.events.map((e) => [e.source?.connector, e.cursor])).toEqual([
+            ['gmail', undefined],
+            ['gmail', 'c1'],
+            ['gmail', 'c1+c2']
+        ]);
+        // A firing that returns nothing leaves the cursor as it was.
+        expect((await client.get()).cursor).toBe('c1+c2');
+        // An oversized cursor is not stored: the previous one stays.
+        await r.advance(5 * MIN);
+        expect(trigger.events).toHaveLength(4);
+        expect((await client.get()).cursor).toBe('c1+c2');
+    });
+
+    it('a firing that asks to pause turns the entry off with the reason; enable clears it and polls again', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const trigger = new Scripted([() => ({ cursor: 'c1', pause: 'needs reconnecting' }), () => undefined]);
+        const r = await rig({ trigger: trigger as unknown as Recorder });
+        const client = r.host.actor(r.Schedule, KEY);
+        await client.create({ kind: 'agent-task', title: 'mail', recurrence: { kind: 'cron', cron: '*/5 * * * *', tz: 'UTC' }, agentId: 'agent_a' as AgentId, source: SOURCE });
+        await r.advance(5 * MIN);
+        const paused = await client.get();
+        expect(paused).toMatchObject({ enabled: false, next: null, cursor: 'c1', paused: { reason: 'needs reconnecting' } });
+        expect(paused.log.map((l) => l.kind)).toEqual(['fired', 'paused']);
+        await r.advance(30 * MIN);
+        expect(trigger.events).toHaveLength(1);
+
+        const resumed = await client.enable();
+        expect(resumed.enabled).toBe(true);
+        expect(resumed.paused).toBeUndefined();
+        await r.advance(5 * MIN);
+        expect(trigger.events).toHaveLength(2);
+        expect(trigger.events[1]!.cursor).toBe('c1');
+    });
+
+    it('refuses a malformed source or one without an agent; a source change to another connector drops the cursor', async () => {
+        vi.setSystemTime(T('2026-09-17T10:00:00Z'));
+        const trigger = new Scripted([() => ({ cursor: 'c1' })]);
+        const r = await rig({ trigger: trigger as unknown as Recorder });
+        const client = r.host.actor(r.Schedule, KEY);
+        const base = { kind: 'agent-task', title: 'mail', recurrence: { kind: 'cron', cron: '*/5 * * * *', tz: 'UTC' } } as const;
+        await expect(client.create({ ...base, source: SOURCE })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, agentId: 'agent_a' as AgentId, source: { kind: 'connector', connector: 'no spaces' } })).rejects.toMatchObject({ status: 400 });
+        await expect(client.create({ ...base, agentId: 'agent_a' as AgentId, source: { kind: 'connector', connector: 'gmail', query: 'x'.repeat(1001) } })).rejects.toMatchObject({ status: 400 });
+        await client.create({ ...base, agentId: 'agent_a' as AgentId, source: SOURCE });
+        await r.advance(5 * MIN);
+        expect((await client.get()).cursor).toBe('c1');
+        // A new query keeps the cursor (the same mailbox); another connector starts over.
+        expect((await client.update({ source: { ...SOURCE, query: 'is:unread' } })).cursor).toBe('c1');
+        const moved = await client.update({ source: { kind: 'connector', connector: 'gmail-work' } });
+        expect(moved.cursor).toBeUndefined();
+        const cleared = await client.update({ source: null });
+        expect('source' in cleared).toBe(false);
+    });
+});

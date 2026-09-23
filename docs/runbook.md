@@ -552,8 +552,22 @@ What to expect:
 
 - **7-day tokens in Testing.** While the consent screen is in Testing, Google's refresh tokens expire after 7 days. The account then flips to **NEEDS RECONNECTING**, the agent's Gmail calls say to reconnect, and History shows `connector needs reconnecting`. Click **Reconnect** (same account id, so every agent's grant stays). Publishing the consent screen lifts the 7-day limit; `gmail.modify` is a restricted scope, so an app used by anyone beyond its test users needs Google's verification.
 - **Disconnect** revokes the token at Google and forgets the account; the connector record stays, unconnected. Removing `connector-engine-secret` by hand makes every connected account unreadable (they show Reconnect).
-- **Sessions on a machine** (Claude Code and the other harness runtimes) do not get Gmail yet (#534); incoming mail as a trigger is #535.
+- **Sessions on a machine** (Claude Code and the other harness runtimes) do not get Gmail yet (#534).
 - Tokens never leave the Worker: not on a session spec, not to a daemon, not to the model, not in an export (`connector-accounts.ndjson` holds ids, status and the address only).
+
+**New email starts agent work (#535).** Once Gmail is connected, `/plugins/gmail` → **New email starts agent work**:
+
+1. Pick the **Agent** each new email wakes (give that agent Gmail among its connectors, step 7, so it can read the message), an optional **Filter** in Gmail search syntax (default `in:inbox`; for example `is:unread label:inbox -from:me`), how often to **Check** (every 5, 10, 15, 30 or 60 minutes) and, optionally, what to **Ask the agent** for each email.
+2. **Turn on.** It is a Schedule entry (listed on `/schedules` too, as `New Gmail email → <agent>`), polled by the entry's own Durable Object alarm with no browser or machine online.
+
+What to expect:
+
+- **One task per new message.** Each poll searches `(<filter>) after:<last poll − 10 min>` and starts one task for the agent per message it has not delivered yet (origin `trigger`: the task page says `trigger <schedule id>`), with the sender, subject, snippet and message id; the agent reads the body with `gmail__get-message`. At most 20 per poll, oldest first — a burst takes a few polls. The first poll looks back only 15 minutes: turning the trigger on never replays the inbox.
+- **Never twice.** The task id is derived from the message id, and the entry keeps the ids it delivered, so a re-poll — or a poll that failed half-way and is retried — never starts a second turn for a message.
+- **A message that starts matching later** (labelled, or marked unread again, after it arrived) is not news to the trigger: Gmail's `after:` compares the time it was received.
+- **Paused, not looping.** When the account needs reconnecting (the 7-day Testing tokens above, a revoked sign-in) or is disconnected, the poll turns the trigger **off** with the reason, and the Inbox says so once. Reconnect, then switch the trigger back on. With the Gmail plugin turned off, polls read nothing and resume when it is back on.
+- **Off** (the switch on `/plugins/gmail` or on `/schedules`): nothing polls.
+- Push (Gmail `watch` → Pub/Sub → a Worker route) is not built; polling needs no Google Cloud Pub/Sub topic.
 
 ### Retention, export, delete
 

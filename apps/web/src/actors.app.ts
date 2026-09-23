@@ -27,7 +27,9 @@
  * the daemon's `tool.call` runs the platform tools over the actors
  * (`createToolCallPort`), and `POST /auth/pair` resolves codes through the
  * `PairingDirectory` (`pairingWiring`). The Schedule trigger is the
- * platform's `scheduleTrigger()` (#42) over the router: the environment
+ * platform's `scheduleTrigger()` (#42) over the router — behind
+ * `connectorTrigger` (#535), which polls a connector for an entry that
+ * watches one and starts a task per new item: the environment
  * probe reads the Machines, and every task a firing creates — queued, or
  * parked `waiting {environment-offline}` — is handed to `Routing.run`.
  * Delegation (#39): the same tool ports serve `delegate` on both paths; a
@@ -42,7 +44,7 @@
  * (`platformFiles`, `src/files`) reaches the Chat, the router, both tool
  * ports and the Workspace.
  */
-import type { ChatFileStore, Principal, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, Principal, TaskId, WorkspaceId } from '@agentic/core';
 import {
     AgentActor,
     AuditActor,
@@ -112,6 +114,8 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
+import { connectorTrigger } from './connectors/trigger';
+import type { ConnectorHttp } from './connectors/engine';
 import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
@@ -149,8 +153,13 @@ export interface PlatformPorts {
     readonly runtimes?: RuntimeCatalogue;
     /** The plugins every workspace's Registry lists (#231). Default: `pluginCatalogue` (`src/plugins/catalogue.ts`). */
     readonly catalogue?: readonly CatalogueEntry[];
-    /** Where a schedule firing goes. Default: `scheduleTrigger` over the Machines (environment probe) and the router (`Routing.run`). */
+    /**
+     * Where a schedule firing goes. Default: `connectorTrigger` (an entry watching a connector polls it, #535) over
+     * `scheduleTrigger` (the Machines as the environment probe), both starting their tasks through `Routing.run`.
+     */
     readonly trigger?: TriggerPort;
+    /** `fetch` replacement for a connector trigger's provider calls (tests). Default: the global `fetch`. */
+    readonly connectorHttp?: ConnectorHttp;
     /** Channels every notification goes through whatever the Registry says — tests. The workspace's own are `channelPlugins`. */
     readonly channels: readonly NotificationChannel[];
     /** Notification plugin id → implementation, opened per notification when that plugin is on (#244). Default: `channelCatalogue` (`src/plugins/catalogue.ts`). */
@@ -247,18 +256,26 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.
+    const route = (ws: WorkspaceId, taskId: TaskId, from: string): void => {
+        void actor(Routing, routingKey(ws))
+            .with({ context: asPrincipal(userPrincipal(ws, ws)) })
+            .run(taskId)
+            .catch((e: unknown) => console.warn(`[actors.app] routing ${taskId} from ${from} failed:`, e));
+    };
+    // An entry that watches a connector (#535) polls it and starts a task per new item; every other firing is `scheduleTrigger`'s.
     const trigger =
         ports.trigger ??
-        scheduleTrigger({
-            environments: createEnvironmentProbe({ machines: () => Machine }),
-            onOutcome: (event, outcome) => {
-                if (outcome.kind !== 'task' || (outcome.status !== 'queued' && outcome.wait?.kind !== 'environment-offline')) return;
-                const ws = event.workspaceId;
-                void actor(Routing, routingKey(ws))
-                    .with({ context: asPrincipal(userPrincipal(ws, ws)) })
-                    .run(outcome.taskId)
-                    .catch((e: unknown) => console.warn(`[actors.app] routing ${outcome.taskId} from schedule ${event.scheduleId} failed:`, e));
-            }
+        connectorTrigger({
+            fallback: scheduleTrigger({
+                environments: createEnvironmentProbe({ machines: () => Machine }),
+                onOutcome: (event, outcome) => {
+                    if (outcome.kind !== 'task' || (outcome.status !== 'queued' && outcome.wait?.kind !== 'environment-offline')) return;
+                    route(event.workspaceId, outcome.taskId, `schedule ${event.scheduleId}`);
+                }
+            }),
+            route: (ws, taskId) => route(ws, taskId, 'a connector trigger'),
+            origin: () => secrets.appOrigin,
+            ...(ports.connectorHttp ? { http: ports.connectorHttp } : {})
         });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the

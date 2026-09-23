@@ -18,7 +18,8 @@ import { workspaceOfKey } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { sameWorkspace } from '../auth/index.js';
-import type { OfflinePolicy, ScheduleFired, ScheduleKind, TriggerHop, TriggerPort } from './ports.js';
+import { NAME_RE } from '../registry/manifest.js';
+import type { OfflinePolicy, ScheduleFired, ScheduleKind, ScheduleSource, TriggerHop, TriggerPort, TriggerResult } from './ports.js';
 import { countOccurrences, nextOccurrence, validateRecurrence, type Recurrence } from './recur.js';
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,9 @@ export type ScheduleLogEntry =
     | { readonly kind: 'skipped'; readonly at: number; readonly from: number; readonly to: number; readonly count: number }
     | { readonly kind: 'retry'; readonly at: number; readonly scheduledFor: number; readonly attempt: number; readonly error: string }
     | { readonly kind: 'dropped'; readonly at: number; readonly scheduledFor: number; readonly error: string }
-    | { readonly kind: 'exhausted'; readonly at: number };
+    | { readonly kind: 'exhausted'; readonly at: number }
+    /** A firing asked to turn the entry off (#535). */
+    | { readonly kind: 'paused'; readonly at: number; readonly reason: string };
 
 export interface ScheduleState {
     /** `false` until `create` has run — every other method requires it. */
@@ -57,6 +60,12 @@ export interface ScheduleState {
     machineId?: MachineId;
     prompt?: string;
     offlinePolicy: OfflinePolicy;
+    /** What the entry watches (#535): handed to every firing. */
+    source?: ScheduleSource;
+    /** The trigger's progress, as the last firing that returned one left it (#535). */
+    cursor?: string;
+    /** Why a firing turned the entry off (#535); cleared when the owner switches it. */
+    paused?: { readonly at: number; readonly reason: string };
     log: ScheduleLogEntry[];
     createdAt: number;
     updatedAt: number;
@@ -85,10 +94,29 @@ export interface ScheduleSpec {
     readonly offlinePolicy?: OfflinePolicy;
     /** Default `true`. */
     readonly enabled?: boolean;
+    /** What the entry watches (#535): a connector trigger. Needs an `agentId` — the agent each new item wakes. */
+    readonly source?: ScheduleSource;
 }
 
-/** `workdir: null` clears the folder; `projectId: null` / `environmentId: null` / `machineId: null` clear those. */
-export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir' | 'projectId' | 'environmentId' | 'machineId'>> & { readonly workdir?: string | null; readonly projectId?: ProjectId | null; readonly environmentId?: EnvironmentId | null; readonly machineId?: MachineId | null };
+/** `workdir: null` clears the folder; `projectId: null` / `environmentId: null` / `machineId: null` / `source: null` clear those. */
+export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir' | 'projectId' | 'environmentId' | 'machineId' | 'source'>> & { readonly workdir?: string | null; readonly projectId?: ProjectId | null; readonly environmentId?: EnvironmentId | null; readonly machineId?: MachineId | null; readonly source?: ScheduleSource | null };
+
+/** The longest cursor an entry keeps (#535): a longer one is not stored, and the previous cursor stays. */
+export const SCHEDULE_CURSOR_MAX = 32_768;
+/** The longest `source.query` an entry keeps. */
+export const SOURCE_QUERY_MAX = 1000;
+
+/** A source names a connector plugin, carries a bounded filter, and wakes an agent (#535). */
+function checkSource(source: ScheduleSource | undefined, agentId: AgentId | undefined): void {
+    if (source === undefined) return;
+    if (typeof source !== 'object' || source === null || source.kind !== 'connector') throw new ServerFnError(400, "[schedule] source.kind must be 'connector'");
+    if (typeof source.connector !== 'string' || !NAME_RE.test(source.connector)) throw new ServerFnError(400, '[schedule] source.connector must be a plugin id');
+    if (source.query !== undefined && (typeof source.query !== 'string' || source.query.length > SOURCE_QUERY_MAX)) throw new ServerFnError(400, `[schedule] source.query must be text of at most ${SOURCE_QUERY_MAX} characters`);
+    if (agentId === undefined) throw new ServerFnError(400, '[schedule] a source needs an agentId (the agent each new item wakes)');
+}
+
+/** The stored copy: only the fields a source has. */
+const sourceOf = (s: ScheduleSource): ScheduleSource => ({ kind: 'connector', connector: s.connector, ...(s.query !== undefined ? { query: s.query } : {}) });
 
 /** A folder travels with its environment (#190): refuse one without it, or a blank one. */
 function checkWorkdir(workdir: string | undefined, environmentId: EnvironmentId | undefined): void {
@@ -233,6 +261,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 checkWorkdir(spec.workdir, spec.environmentId);
                 checkProject(spec.projectId, spec.environmentId, spec.workdir);
                 checkMachine(spec.machineId, spec.environmentId, spec.workdir);
+                checkSource(spec.source, spec.agentId);
                 const at = now();
                 const s = ctx.state;
                 s.created = true;
@@ -247,6 +276,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 if (spec.machineId !== undefined) s.machineId = spec.machineId;
                 if (spec.prompt !== undefined) s.prompt = spec.prompt;
                 s.offlinePolicy = spec.offlinePolicy ?? 'queue';
+                if (spec.source !== undefined) s.source = sourceOf(spec.source);
                 s.createdAt = at;
                 await reschedule(ctx, at);
                 return view(s);
@@ -263,6 +293,8 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 checkWorkdir(workdir, environmentId);
                 checkProject(projectId, environmentId, workdir);
                 checkMachine(machineId, environmentId, workdir);
+                const source = patch.source === null ? undefined : (patch.source ?? s.source);
+                checkSource(source, patch.agentId ?? s.agentId);
                 if (patch.title !== undefined) s.title = patch.title;
                 if (patch.recurrence !== undefined) s.recurrence = patch.recurrence;
                 if (patch.agentId !== undefined) s.agentId = patch.agentId;
@@ -276,7 +308,14 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 else s.machineId = machineId;
                 if (patch.prompt !== undefined) s.prompt = patch.prompt;
                 if (patch.offlinePolicy !== undefined) s.offlinePolicy = patch.offlinePolicy;
-                if (patch.enabled !== undefined) s.enabled = patch.enabled;
+                // The cursor is the progress through ONE connector's items: another connector (or none) starts over.
+                if (source?.connector !== s.source?.connector) delete s.cursor;
+                if (source === undefined) delete s.source;
+                else s.source = sourceOf(source);
+                if (patch.enabled !== undefined) {
+                    s.enabled = patch.enabled;
+                    delete s.paused;
+                }
                 s.attempts = 0;
                 await reschedule(ctx, now());
                 return view(s);
@@ -286,6 +325,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 requireCreated(ctx);
                 ctx.state.enabled = true;
                 ctx.state.attempts = 0;
+                delete ctx.state.paused;
                 await reschedule(ctx, now());
                 return view(ctx.state);
             },
@@ -294,6 +334,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 requireCreated(ctx);
                 ctx.state.enabled = false;
                 ctx.state.attempts = 0;
+                delete ctx.state.paused;
                 await reschedule(ctx, now());
                 return view(ctx.state);
             },
@@ -337,14 +378,17 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 ...(s.projectId !== undefined ? { projectId: s.projectId } : {}),
                 ...(s.machineId !== undefined ? { machineId: s.machineId } : {}),
                 ...(s.prompt !== undefined ? { prompt: s.prompt } : {}),
-                offlinePolicy: s.offlinePolicy
+                offlinePolicy: s.offlinePolicy,
+                ...(s.source !== undefined ? { source: s.source } : {}),
+                ...(s.cursor !== undefined ? { cursor: s.cursor } : {})
             };
             // The port hops through THIS actor's context: trusted actor-to-actor
             // calls, so the Inbox and Task policies are not re-run against the
             // reminder's empty principal.
             const hop: TriggerHop = { actor: (def, key) => ctx.actor(def, key) };
+            let result: void | TriggerResult;
             try {
-                await options.trigger.fired(event, hop);
+                result = await options.trigger.fired(event, hop);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 s.attempts++;
@@ -368,6 +412,14 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
             log(ctx, { kind: 'fired', at, scheduledFor, skipped });
             if (skipped > 0) {
                 log(ctx, { kind: 'skipped', at, from: scheduledFor, to: at, count: skipped });
+            }
+            // A trigger's progress and its word to stop (#535), saved with the rest of this turn by `reschedule`.
+            if (result && typeof result.cursor === 'string' && result.cursor.length <= SCHEDULE_CURSOR_MAX) s.cursor = result.cursor;
+            if (result && typeof result.pause === 'string') {
+                const reason = result.pause.slice(0, 500);
+                s.enabled = false;
+                s.paused = { at, reason };
+                log(ctx, { kind: 'paused', at, reason });
             }
             // `at` is the search origin: everything missed before now stays skipped.
             await reschedule(ctx, at);

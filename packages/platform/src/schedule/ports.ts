@@ -11,6 +11,31 @@ export type ScheduleKind = 'reminder' | 'recurring' | 'agent-task';
 /** What to do when the entry needs an environment that is offline (AST-05). */
 export type OfflinePolicy = 'queue' | 'fail' | 'fallback-api';
 
+/**
+ * What an entry watches instead of only running its prompt (#535): a connector
+ * trigger. The Schedule keeps it and hands it to every firing; the port
+ * decides what a firing becomes (the app polls the connector and starts one
+ * task per new item).
+ */
+export interface ScheduleSource {
+    readonly kind: 'connector';
+    /** The connector plugin id (`gmail`). */
+    readonly connector: string;
+    /** A provider-side filter — for Gmail, search syntax (`is:unread label:inbox`). At most 1000 characters. */
+    readonly query?: string;
+}
+
+/**
+ * What a port may hand back from a firing (#535). Both are saved in the same
+ * turn as the firing's own bookkeeping.
+ */
+export interface TriggerResult {
+    /** Opaque progress, stored and handed to the next firing as `event.cursor` (what the trigger has already seen). At most `SCHEDULE_CURSOR_MAX` characters; a longer one is not stored. */
+    readonly cursor?: string;
+    /** Turn the entry off, recording why (e.g. the connector's account needs reconnecting). `enable()` clears it. */
+    readonly pause?: string;
+}
+
 /** One firing, as delivered to the `TriggerPort`. */
 export interface ScheduleFired {
     readonly type: 'ScheduleFired';
@@ -38,6 +63,10 @@ export interface ScheduleFired {
     readonly machineId?: MachineId;
     readonly prompt?: string;
     readonly offlinePolicy: OfflinePolicy;
+    /** What the entry watches (#535). */
+    readonly source?: ScheduleSource;
+    /** What the last firing that returned one stored (#535); absent before that. */
+    readonly cursor?: string;
 }
 
 /**
@@ -57,7 +86,9 @@ export interface TriggerHop {
  * an agent, an Inbox notification (`'reminder'`) otherwise; in tests it is a
  * recorder. A rejection is retried by the actor a bounded number of times,
  * then logged and skipped — the calendar never wedges on a failing consumer.
+ * A port may answer a `TriggerResult` (#535): a cursor to keep, or a reason
+ * to pause the entry.
  */
 export interface TriggerPort {
-    fired(event: ScheduleFired, hop: TriggerHop): void | Promise<void>;
+    fired(event: ScheduleFired, hop: TriggerHop): void | TriggerResult | Promise<void | TriggerResult>;
 }
