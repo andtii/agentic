@@ -45,7 +45,7 @@
    "x": 1520,
    "y": 0,
    "w": 1440,
-   "h": 1240,
+   "h": 1300,
    "title": "Chat  /chats/:id",
    "page": "core",
    "is_interactive": true
@@ -210,6 +210,33 @@
    "h": 1500,
    "title": "Foundations: tokens, states, failures",
    "page": "foundations"
+  },
+  "MemberCard.dc.html": {
+   "x": 0,
+   "y": 2640,
+   "w": 1872,
+   "h": 720,
+   "title": "Member card: states",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Changes.dc.html": {
+   "x": 3040,
+   "y": 1400,
+   "w": 1440,
+   "h": 1080,
+   "title": "Changes: diff  /sessions/:id/changes",
+   "page": "core",
+   "is_interactive": true
+  },
+  "Files.dc.html": {
+   "x": 4560,
+   "y": 1400,
+   "w": 1440,
+   "h": 1000,
+   "title": "Files  /sessions/:id/files",
+   "page": "core",
+   "is_interactive": true
   }
  },
  "order": [
@@ -217,6 +244,9 @@
   "Chat.dc.html",
   "Task.dc.html",
   "Session.dc.html",
+  "Changes.dc.html",
+  "Files.dc.html",
+  "MemberCard.dc.html",
   "Agents.dc.html",
   "AgentConfig.dc.html",
   "AgentMemory.dc.html",

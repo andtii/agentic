@@ -260,3 +260,23 @@ Connectors were MCP servers with a static credential. Nothing could sign in to a
 - **Bring-your-own OAuth client per workspace.** The owner creates the OAuth client in their own Google Cloud project. Its id and secret are Registry secrets of the connector plugin, named per plugin because Registry secret names are workspace-wide (`<pluginId>-client-id`, `<pluginId>-client-secret`: `gmail-client-id`, `gmail-client-secret`; #548), opened only under that plugin's `secret:` grants (PLG-04), as with the Anthropic key (row 7). The deployment ships no Google client, so agentic never goes through Google's app verification for restricted scopes (`gmail.modify`). The known cost is the same as OpenClaw's: while the owner's consent screen is in "Testing", Google issues refresh tokens that expire after 7 days. The connector's page says so, and an account whose refresh fails shows Reconnect. Ruled out for now: a deployment-wide client, which would mean verification plus one Google project answering for every workspace.
 - **Connected accounts are workspace-held and never model-visible (EXE-10, OPS-01, USR-01).** A per-workspace `ConnectorAccounts` actor (`{ws}:connector-accounts`) implements conduit's stores. It holds conduit's sealed credential string, never plaintext, and every connect, disconnect and `needsReauth` transition is audited. The credential cipher is keyed from a random per-workspace value kept as a Registry secret, so one workspace's sealed accounts cannot be opened with another's key. Only the Worker opens an account, and only to run one operation. Tokens never go on a session spec, never reach a daemon (a machine-hosted session reaches a conduit connector over its own `tool.call`, #534), never reach the model, and never appear in an export. Operations become tools named `<id>__<operation>`, with read and destructive hints taken from the spec, so the agent's approval policy governs sending, replying and trashing exactly as it governs an MCP tool.
 - **Incoming mail is a trigger, polling first (#535).** A Schedule reads Gmail history since the last `historyId`. That needs no Pub/Sub project. Gmail watch → Pub/Sub → a public Worker route is an option on top.
+
+## 2026-09-23 — session Changes and Files: Monaco renders, everything else is a seam (#568)
+
+The updated design handoff adds two read-only views beside every session's transcript, Changes and Files (`docs/design/HANDOFF.md` § "Session files and changes"). The calls:
+
+- **Monaco renders both the diff and the file viewer.** `@sigx/monaco-editor` wrapped only the plain editor, so a diff editor goes upstream in `signalxjs/monaco-editor` (#560): `createDiffEditor`, `<MonacoDiffEditor>`, and the generic helpers `onLineNumberClick`, `mountViewZone` and `languageForPath`. Nothing agentic-specific goes upstream. A hand-built diff grid was the alternative: it would be pixel-exact to the board and render during SSR, but Split view and syntax highlighting would be ours to build. Monaco gives us those.
+- **Accepted deviations from the board.** These come from Monaco:
+  - collapsible unchanged-region bars instead of `@@ … @@` hunk rows;
+  - deleted lines as inline zones in Unified, rather than two line-number columns;
+  - nothing renders before JS loads.
+
+  A plain line-grid renderer covers SSR, no-JS and tests.
+- **Pluggable, not hardcoded:**
+  - the renderer is behind a ui seam (`CodeRenderer`), with Monaco as the default;
+  - the data is behind core's `WorkspaceSource`;
+  - the VCS is behind the daemon's `VcsProvider`, git first, and the wire's `ChangeSet` is VCS-neutral;
+  - "which files did this tool call touch" is a per-runtime extractor registry;
+  - the Monaco theme is generated from the design tokens, never hex in the renderer.
+- **Read-only, and the machine keeps the files.** Only what the user opens crosses the wire. Reads are bounded to one frame, and a larger file is `too-large`. There are no write commands, so edits stay with the agent under its approval rules.
+- **v1 scope** includes Split view, the mobile version (a file list that opens a full-screen unified diff), "View diff" on Edit tool cards, and MCP tools (`sessions_files_list`, `sessions_files_read`, `sessions_changes`).
