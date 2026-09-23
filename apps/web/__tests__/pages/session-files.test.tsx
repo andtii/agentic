@@ -215,8 +215,12 @@ describe('/sessions/:id/files', () => {
         const stripes = [...dom.querySelectorAll('[data-scope="ag-code"][data-part="stripe"][data-tone="working"]')];
         expect(stripes.length).toBeGreaterThan(5);
         expect(dom.querySelector('[data-scope="ag-file-header"][data-part="facts"]')!.textContent).toMatch(/^\d+ lines · \d+\.\d KB$/);
-        expect(dom.querySelector('[data-scope="ag-file-header"] a[href]')!.getAttribute('href')).toBe(changesHref('s1', { file: 'packages/ui/src/shell/shell.css' }));
-        expect(dom.textContent).not.toContain('Mention in chat');
+        const links = [...dom.querySelectorAll<HTMLAnchorElement>('[data-scope="ag-file-header"] a[href]')];
+        expect(links.find((a) => a.textContent === 'Open diff')!.getAttribute('href')).toBe(changesHref('s1', { file: 'packages/ui/src/shell/shell.css' }));
+        // #565: the mock chat's Edit call wrote this file, and the file can be mentioned in that chat.
+        expect(dom.querySelector('[data-file-edited]')!.textContent).toMatch(/^Edited byFOEdit at \d\d:\d\d$/);
+        expect(dom.querySelector('[data-file-edited] a')!.getAttribute('href')).toBe('/chats/c1');
+        expect(dom.textContent).toContain('Mention in chat');
         expect(dom.querySelector('[data-scope="ag-file-tree"][data-part="legend"]')!.textContent).toContain('.gitignore hidden');
         expect(dom.querySelector('[data-files-root]')!.textContent).toContain('C:/Dev/agentic/branches/47-mobile-drawer');
     });

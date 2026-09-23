@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { expectAnatomy } from '@sigx/zero/testing';
-import { Composer, NOBODY_HINT, aiComposerAnatomy } from '../src/composer';
+import { signal } from '@sigx/reactivity';
+import { component } from '@sigx/runtime-core';
+import { Composer, NOBODY_HINT, aiComposerAnatomy, appendToDraft, type ComposerInsert } from '../src/composer';
 import { mount, one, all, buttonNamed, tick } from './helpers';
 
 const people = [
@@ -335,5 +337,34 @@ describe('the composer', () => {
             await tick();
             expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(true);
         });
+    });
+});
+
+describe('a host inserting into the draft (#565)', () => {
+    it('appends spaced text', () => {
+        expect(appendToDraft('', '@file:a.ts ')).toBe('@file:a.ts ');
+        expect(appendToDraft('look at', '@file:a.ts ')).toBe('look at @file:a.ts ');
+        expect(appendToDraft('look at ', '@file:a.ts ')).toBe('look at @file:a.ts ');
+        expect(appendToDraft('keep', '')).toBe('keep');
+    });
+
+    it('puts the insert in on mount and again on each new id, reporting the draft', async () => {
+        const st = signal<{ insert: ComposerInsert }>({ insert: { id: 1, text: '@file:src/a.ts ' } });
+        const drafts: string[] = [];
+        const sent: string[] = [];
+        const Host = component(() => () => <Composer insert={st.insert} onDraft={(d: string) => drafts.push(d)} onSend={(t: string) => sent.push(t)} />);
+        const dom = mount(<Host />);
+        await tick();
+        expect(textarea(dom).value).toBe('@file:src/a.ts ');
+        type(dom, '@file:src/a.ts why?');
+        st.insert = { id: 2, text: '@file:src/b.ts ' };
+        await tick();
+        expect(textarea(dom).value).toBe('@file:src/a.ts why? @file:src/b.ts ');
+        expect(drafts).toEqual(['@file:src/a.ts ', '@file:src/a.ts why? @file:src/b.ts ']);
+        // The same id again inserts nothing; the draft sends as typed.
+        st.insert = { id: 2, text: '@file:src/b.ts ' };
+        await tick();
+        key(dom, 'Enter');
+        expect(sent).toEqual(['@file:src/a.ts why? @file:src/b.ts']);
     });
 });

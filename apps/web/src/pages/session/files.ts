@@ -77,6 +77,25 @@ export const queryOf = (v: unknown): string | undefined => (Array.isArray(v) ? q
 /** `C:\Dev\agentic\branches\x` → `~/Dev/agentic/branches/x`-ish display: forward slashes, the drive kept. */
 export const displayRoot = (root: string): string => root.replace(/\\/g, '/');
 
+/**
+ * `path` relative to the session's folder `root`, `/`-separated (#565): a tool call names files absolute
+ * (`C:\Dev\app\src\a.ts`), the views and the `WorkspaceSource` by their place in the folder (`src/a.ts`). A path
+ * already relative comes back as it is; one outside the folder is `undefined`. Windows paths (a drive or a
+ * backslash) compare case-insensitively.
+ */
+export function relativeToRoot(root: string, path: string): string | undefined {
+    const slash = (s: string): string => s.replace(/\\/g, '/').replace(/\/+$/, '');
+    const p = slash(path);
+    const absolute = p.startsWith('/') || /^[A-Za-z]:(\/|$)/.test(p);
+    if (!absolute) return p.replace(/^\.\//, '');
+    const r = slash(root);
+    if (!r) return undefined;
+    const windows = /^[A-Za-z]:/.test(r) || root.includes('\\');
+    const fold = (s: string): string => (windows ? s.toLowerCase() : s);
+    if (fold(p) === fold(r)) return '';
+    return fold(p).startsWith(`${fold(r)}/`) ? p.slice(r.length + 1) : undefined;
+}
+
 export interface ChangesState {
     loading: boolean;
     set?: ChangeSet;

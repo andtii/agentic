@@ -231,3 +231,17 @@ describe('the sub-agent card', () => {
         expect([...passive.querySelectorAll('button')].some((b) => b.textContent === 'Cancel')).toBe(false);
     });
 });
+
+describe('the tool card links (#565)', () => {
+    it('renders a page link in the header before the meta, and none by default', () => {
+        const dom = mount(<ToolCall part={tool({ name: 'Edit' })} meta="+18 −6" links={[{ label: 'View diff', href: '/sessions/s1/changes?file=a.ts' }]} />);
+        expectAnatomy(dom, aiToolCallAnatomy);
+        const link = one(dom, 'ai-tool-call', 'link') as HTMLAnchorElement;
+        expect(link.textContent).toBe('View diff');
+        expect(link.getAttribute('href')).toBe('/sessions/s1/changes?file=a.ts');
+        const header = one(dom, 'ai-tool-call', 'header')!;
+        const parts = [...header.children].map((c) => c.getAttribute('data-part'));
+        expect(parts.indexOf('link')).toBeLessThan(parts.indexOf('meta'));
+        expect(one(mount(<ToolCall part={tool()} />), 'ai-tool-call', 'link')).toBeNull();
+    });
+});

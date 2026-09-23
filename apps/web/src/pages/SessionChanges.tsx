@@ -18,7 +18,7 @@ import { dataMode } from '../data-mode';
 import { agentNamed, loadSession } from '../mock/workspace';
 import { LinkButton } from './ops/LinkButton';
 import { SessionFilesBar, envLineOf } from './session/bar';
-import { changesHref, displayRoot, filesHref, queryOf, useSessionChanges, type SessionFiles } from './session/files';
+import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, useSessionChanges, type SessionFiles } from './session/files';
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
@@ -109,8 +109,10 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
     const router = useRouter();
     const st = signal({ version: 0, selected: null as LineRef | null, sending: false, sent: '' });
     const files = (): SessionFiles => props.ctx.files;
+    // A tool card's "View diff" names the file as the call did (absolute): read relative to the folder.
+    const fileQuery = (): string | undefined => { const f = queryOf(route.query.file); return f === undefined ? undefined : (relativeToRoot(files().root, f) ?? f); };
     const q = () => ({
-        file: queryOf(route.query.file),
+        file: fileQuery(),
         scope: queryOf(route.query.scope) as ChangeScope | undefined,
         view: (queryOf(route.query.view) === 'split' ? 'split' : 'unified') as DiffMode
     });

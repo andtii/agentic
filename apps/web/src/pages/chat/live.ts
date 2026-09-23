@@ -14,6 +14,7 @@ import { WIRE_PROTOCOL_VERSION, type SessionTransport, type WireCommand, type Wi
 import { hueFor, type AgentHue, type EnvironmentParts, type MessageAuthor } from '@agentic/ui';
 import { failureOf, interruptionLine, INTERRUPTED_CODE, type FailureState, type Interruption } from '../../components/status';
 import { formatTime, USER, type MockChatMember, type MockChatSummary, type MockTaskRow } from '../../mock/workspace';
+import { isFileTokenAt, resourceText } from '../session/references';
 
 // ---- identities --------------------------------------------------------------
 
@@ -407,6 +408,8 @@ function threadPart(p: PromptPart, id: string): AgentPart {
             return p.type === 'image' ? { type: 'image', mediaType: p.mediaType, data: p.data } : { type: 'file', mediaType: p.mediaType, data: p.data, ...(name ? { filename: name } : {}) };
         }
     }
+    // A code reference with its snippet (#565, "Ask about a line"): the file and line, then the hunk as a block.
+    if (p.type === 'resource' && p.text) return { type: 'text', id, text: resourceText(p) };
     return { type: 'text', id, text: partText(p) };
 }
 
@@ -728,7 +731,8 @@ export function mentionsIn(draft: string, members: readonly MockChatMember[], lo
     let at = text.indexOf('@');
     while (at !== -1) {
         // A mention starts a word: "andy@ekdahls.net" in running text is an address, not a mention.
-        const starts = at === 0 || !word.test(text[at - 1]!);
+        // `@file:<path>` references a file (#565), never a member — even one called "file".
+        const starts = (at === 0 || !word.test(text[at - 1]!)) && !isFileTokenAt(text, at);
         const hit = starts ? names.find((n) => n.key !== '' && text.startsWith(n.key, at + 1) && !word.test(text[at + 1 + n.key.length] ?? ' ')) : undefined;
         if (hit && !out.includes(hit.id as AgentId)) out.push(hit.id as AgentId);
         // Resume after a matched name: an "@" inside it belongs to the name.
@@ -766,7 +770,9 @@ export function activationContract(agentId: AgentId, chatId: ChatId, messageId: 
         seen.add(part.url);
         context.push(part);
     }
-    const objective = text || attachments.map(partText).join(' ');
+    // A code reference's snippet is the agent's to read (#565): the question, then each hunk it points at.
+    const snippets = attachments.flatMap((p) => (p.type === 'resource' && p.text ? [resourceText(p)] : []));
+    const objective = [text || (snippets.length ? '' : attachments.map(partText).join(' ')), ...snippets].filter(Boolean).join('\n\n');
     // The chat's project rides along (#333): the router resolves its folder for the environment unless the member has its own.
     // So does its machine (#414): the router resolves the member's account there — and leaves a folder aside whose environment that machine does not report.
     return { objective, origin: { kind: 'user', chatId, messageId }, assignee: agentId, context, constraints: {}, ...(workdir ? { environmentId: workdir.environmentId, workdir: workdir.path } : {}), ...(projectId ? { projectId } : {}), ...(machineId ? { machineId } : {}) };

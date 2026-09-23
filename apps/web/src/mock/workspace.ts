@@ -322,7 +322,8 @@ function mobilePassTranscript(): Omit<MockChatView, 'chat' | 'tasks'> {
         {
             id: 'm3', role: 'assistant', actor: 'forge', parts: [
                 { type: 'text', id: 'p3', text: 'The drawer used a fixed 232 px column. I moved it to a `data-l-drawer` state and collapse it under 768 px. Tests pass locally.' },
-                tool('c_edit', 'Edit', { file: 'packages/ui/src/shell/shell.css' }, { output: 'ok' }),
+                // Claude Code's own input shape (#565): the file absolute, as the "View diff" link and "Edited by" read it.
+                tool('c_edit', 'Edit', { file_path: 'C:\\Dev\\agentic\\branches\\47-mobile-drawer\\packages\\ui\\src\\shell\\shell.css', old_string: 'grid-template-columns: 232px 1fr;', new_string: 'grid-template-columns: var(--drawer-w, 232px) minmax(0, 1fr);' }, { output: 'ok' }),
                 tool('c_test', 'Bash', { command: 'pnpm test packages/ui' }, { output: '42 passed · 0 failed · 3.1s' }),
                 tool('c_push', 'Bash', { command: 'git push origin 47-mobile-drawer' }, { status: 'pending', requestId: 'r_5d01' })
             ]
@@ -713,6 +714,9 @@ export function loadSession(id: string): MockSessionView | undefined {
 }
 
 export const sessionsOf = (taskId: TaskId): readonly MockSessionView[] => SESSIONS.filter((s) => s.taskId === taskId);
+
+/** The session `agentId` runs for chat `chatId` — whose folder a tool call in that chat touched (#565). */
+export const chatSessionOf = (chatId: string, agentId: string): MockSessionView | undefined => SESSIONS.find((s) => s.chatId === chatId && s.agentId === agentId);
 
 // ---- addressing (docs/design/HANDOFF.md → Chat) ------------------------------------
 

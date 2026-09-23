@@ -16,7 +16,7 @@ import { dataMode } from '../data-mode';
 import { agentNamed, loadSession } from '../mock/workspace';
 import { LinkButton } from './ops/LinkButton';
 import { SessionFilesBar, envLineOf } from './session/bar';
-import { changesHref, displayRoot, filesHref, queryOf, useSessionChanges, type SessionFiles } from './session/files';
+import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, useSessionChanges, type SessionFiles } from './session/files';
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
@@ -57,7 +57,8 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
     const router = useRouter();
     const st = signal({ version: 0, known: [] as string[], ignoredHidden: false, rootError: null as FsError | null });
     const files = (): SessionFiles => props.ctx.files;
-    const path = (): string | undefined => queryOf(route.query.path);
+    // A tool call's link names the file absolute: read relative to the folder, as the source answers.
+    const path = (): string | undefined => { const q = queryOf(route.query.path); return q === undefined ? undefined : (relativeToRoot(files().root, q) ?? q); };
     const uncommitted = useSessionChanges(() => files(), () => (files().vcs === false ? null : 'uncommitted'), () => st.version);
     const changeOf = (p: string): FileChangeStatus | undefined => uncommitted.set?.files.find((f) => f.path === p)?.status;
 

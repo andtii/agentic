@@ -28,7 +28,7 @@ import { aiMessageAnatomy } from './anatomy.js';
 import type { RespondFn } from './ApprovalPrompt.js';
 import { Reasoning } from './Reasoning.js';
 import { StreamingMarkdown } from './StreamingMarkdown.js';
-import { ToolCall, type DescribeRequestFn, type ToolMetaFn } from './ToolCall.js';
+import { ToolCall, type DescribeRequestFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
 import { formatBytes, nonBlank } from './text.js';
 
 const SCOPE = aiMessageAnatomy.scope;
@@ -57,6 +57,7 @@ export type MessageProps =
     /** The session is mid-turn on this row: the STREAMING pill. */
     & Define.Prop<'streaming', boolean, false>
     & Define.Prop<'toolMeta', ToolMetaFn, false>
+    & Define.Prop<'toolLinks', ToolLinksFn, false>
     & Define.Prop<'logHref', string, false>
     & Define.Prop<'onRespond', RespondFn, false>
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
@@ -97,6 +98,7 @@ type PartProps =
     & Define.Prop<'part', AgentPart, true>
     & Define.Prop<'transcript', AgentTranscript, false>
     & Define.Prop<'toolMeta', ToolMetaFn, false>
+    & Define.Prop<'toolLinks', ToolLinksFn, false>
     & Define.Prop<'logHref', string, false>
     & Define.Prop<'onRespond', RespondFn, false>
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
@@ -116,6 +118,7 @@ const Part = component<PartProps>(({ props }) => {
                         part={p}
                         transcript={props.transcript}
                         meta={props.toolMeta?.(p as ToolPartState)}
+                        links={props.toolLinks?.(p as ToolPartState)}
                         logHref={props.logHref}
                         onRespond={props.onRespond}
                         describeRequest={props.describeRequest}
@@ -208,6 +211,7 @@ export const Message = component<MessageProps>(({ props }) => {
                                 part={part}
                                 transcript={props.transcript}
                                 toolMeta={props.toolMeta}
+                                toolLinks={props.toolLinks}
                                 logHref={props.logHref}
                                 onRespond={props.onRespond}
                                 describeRequest={props.describeRequest}

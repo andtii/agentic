@@ -80,6 +80,8 @@ export const aiToolCallAnatomy = defineAnatomy('ai-tool-call', {
     signature: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     /** Duration, diff stat, task id — whatever the caller knows about the call. */
     meta: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
+    /** A page's link about the call ("View diff") — `links`, before the meta. */
+    link: { element: 'a', parent: 'header', tokens: ['color', 'text'] },
     status: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
     input: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },
     output: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },

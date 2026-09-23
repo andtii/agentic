@@ -40,7 +40,7 @@ import { aiThreadAnatomy } from './anatomy.js';
 import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message, type MessageAuthor } from './Message.js';
-import { approvalContext, type DescribeRequestFn, type ToolMetaFn } from './ToolCall.js';
+import { approvalContext, type DescribeRequestFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
 
 const SCOPE = aiThreadAnatomy.scope;
@@ -55,6 +55,8 @@ export type ThreadProps =
     & Define.Prop<'describe', DescribeFn, false>
     /** Header meta per tool call (duration, diff stat, task id). */
     & Define.Prop<'toolMeta', ToolMetaFn, false>
+    /** Links a page puts on a call's card ("View diff"). */
+    & Define.Prop<'toolLinks', ToolLinksFn, false>
     /** The approval card's context rows per request — rule, requester, environment, delegation path — resolved by the page. */
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
     /** The session log long outputs link to. */
@@ -257,6 +259,7 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                                 author={props.describe?.(row.message)}
                                 streaming={streaming && row.message === lastAssistant}
                                 toolMeta={props.toolMeta}
+                                toolLinks={props.toolLinks}
                                 logHref={props.logHref}
                                 onRespond={props.onRespond}
                                 describeRequest={props.describeRequest}

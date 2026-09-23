@@ -1,11 +1,13 @@
-import { component, signal } from 'sigx';
+import { component, onMounted, onUnmounted, signal, watch } from 'sigx';
 import type { WorkdirRef } from '@agentic/core';
-import { Link, useRoute } from '@sigx/router';
+import { Link, useRoute, useRouter } from '@sigx/router';
+import type { ToolPartState } from '@sigx/ai-agent';
 import { Drawer } from '@sigx/zero';
-import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type Mention } from '@agentic/ui';
+import { Button, Composer, EmptyState, NOBODY_HINT, Tag, Thread, type ComposerInsert, type Mention } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId } from '../components/topbar';
-import { PROJECTS, agentNamed, loadChat, loadChats, mentionedIn, projectNamed, resolveAddressing, type MockChatSummary } from '../mock/workspace';
+import { mockChatPosts } from '../mock/chat-posts';
+import { PROJECTS, USER, agentNamed, chatSessionOf, formatTime, loadChat, loadChats, mentionedIn, projectNamed, resolveAddressing, type MockChatSummary } from '../mock/workspace';
 import { ChatList, MemberTiles } from './chat/ChatList';
 import { ContextPanel } from './chat/ContextPanel';
 import { closeContextDrawer, contextDrawer, openContextDrawer } from './chat/context-drawer';
@@ -14,6 +16,8 @@ import { chatHead, openChatSettings, toggleChatSearch } from './chat/head';
 import { lookupOver } from './chat/live';
 import { LiveChat } from './chat/LiveChat';
 import { mockWorkdirEnvironments } from './workdir/environments';
+import { queryOf } from './session/files';
+import { fileToken, mentionOfQuery, resourceText, viewDiffLinks } from './session/references';
 
 /** "1 waiting · 1 active" — the app bar's status summary under the chat title. */
 export function memberSummary(chat: Pick<MockChatSummary, 'members'>): string {
@@ -82,7 +86,36 @@ export const Chat = component(() => {
             const { workdir: _old, ...rest } = m;
             return picked ? { ...rest, workdir: picked } : rest;
         });
-        return { ...v, chat: { ...v.chat, members } };
+        // What the session views posted here (#565, "Ask about a line"), after the chat's own rows.
+        const authors = { ...v.authors };
+        for (const post of mockChatPosts(v.chat.id)) {
+            v.transcript.messages.push({ id: post.id, role: 'user', author: USER.name, parts: post.parts.map((p, i) => ({ type: 'text' as const, id: `${post.id}:${i}`, text: p.type === 'resource' ? resourceText(p) : p.type === 'text' ? p.text : `[${p.type}]` })) });
+            authors[post.id] = { name: USER.name, person: true, time: { text: formatTime(post.at), dateTime: new Date(post.at).toISOString() } };
+        }
+        return { ...v, authors, chat: { ...v.chat, members } };
+    };
+    // "Mention in chat" (#565): `?file=` puts `@file:<path>` into the composer once.
+    const router = useRouter();
+    const mention = signal<{ insert: ComposerInsert | null }>({ insert: null });
+    let mentionSeq = 0;
+    onMounted(() => {
+        const stop = watch(
+            () => queryOf(route.query.file),
+            (value) => {
+                const m = mentionOfQuery(value);
+                if (!m) return;
+                mention.insert = { id: ++mentionSeq, text: `${fileToken(m.path)} ` };
+                void router.replace(`/chats/${encodeURIComponent(String(route.params.id))}`);
+            },
+            { immediate: true }
+        );
+        onUnmounted(() => stop.stop());
+    });
+    /** "View diff" on a call that wrote a file: the session its author runs for this chat, its runtime's say. */
+    const toolLinks = (chatId: string, actorOf: ReadonlyMap<string, string>) => (part: ToolPartState) => {
+        const agentId = actorOf.get(part.callId);
+        const session = agentId ? chatSessionOf(chatId, agentId) : undefined;
+        return agentId && session ? viewDiffLinks(agentNamed(agentId).environment.runtime, session.id, part) : undefined;
     };
     const setWorkdir = (e: { readonly agentId: string; readonly ref: WorkdirRef | null }): void => { folders.value = { ...folders.value, [e.agentId]: e.ref }; };
     return () => {
@@ -115,6 +148,7 @@ export const Chat = component(() => {
                                 transcript={v.transcript}
                                 describe={(m) => v.authors[m.id]}
                                 toolMeta={(p) => v.toolMeta[p.callId]}
+                                toolLinks={toolLinks(v.chat.id, new Map(v.transcript.messages.flatMap((m) => (m.actor ? m.parts.flatMap((p) => (p.type === 'tool' ? [[p.callId, m.actor!] as const] : [])) : []))))}
                                 describeRequest={(r) => v.approvals[r.requestId]}
                                 logHref={v.logHref}
                                 onRespond={() => undefined}
@@ -126,6 +160,8 @@ export const Chat = component(() => {
                             hint={addressing.recipients.length ? addressing.hint : NOBODY_HINT}
                             mentions={mentions}
                             placeholder="Message the chat. @ to address an agent, otherwise the coordinator answers."
+                            {...(mention.insert ? { insert: mention.insert } : {})}
+                            onDraft={(draft: string) => { st.draft = draft; }}
                             onSend={() => { st.draft = ''; }}
                         />
                     </div>

@@ -258,13 +258,14 @@ const sessionBar: RecipeInput = {
 const fileHeader: RecipeInput = {
     component: 'ag-file-header',
     parts: {
-        root: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-md)', padding: '14px var(--space-xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)' } },
+        // Wraps: a page's actions ("Edited by", Open diff, Mention in chat) drop under the path rather than scroll the page.
+        root: { base: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-sm) var(--space-md)', padding: '14px var(--space-xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)' } },
         path: { base: { ...ellipsis, fontFamily: mono, fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)' } },
         name: { base: { color: 'var(--color-base-content)', fontWeight: 'var(--weight-semibold)' } },
         sep: { base: { color: 'var(--ag-text-muted)' } },
         facts: { base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', flexShrink: '0', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
         actions: {
-            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexShrink: '0', marginInlineStart: 'auto' },
+            base: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0', marginInlineStart: 'auto' },
             selectors: {
                 '& [data-scope="button"]': { minBlockSize: '32px', blockSize: '32px' },
                 '& [data-intent="icon"]': { inlineSize: '32px', background: 'transparent', color: 'var(--ag-text-muted)' },

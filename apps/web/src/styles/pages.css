@@ -1241,6 +1241,10 @@ code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
     font-size: var(--text-sm);
 }
 [data-files-banner][data-tone="failed"] { background: color-mix(in oklab, var(--color-error) 8%, transparent); color: var(--color-error); }
+/* "Edited by <tile> Edit at 14:09" in a file's header (#565): dim label, the agent's tile, the call as a link. */
+[data-file-edited] { display: inline-flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; white-space: nowrap; }
+[data-file-edited-label] { font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-file-edited] > a { font-size: var(--text-sm); }
 [data-files-body] {
     flex: 1 1 auto;
     min-block-size: 0;
