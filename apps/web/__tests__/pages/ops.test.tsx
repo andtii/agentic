@@ -296,7 +296,8 @@ describe('/settings', () => {
         expect(root.querySelector('[data-api-masked]')!.textContent).toBe('sk-ant-…9f2c');
         expect(root.querySelector('[data-api-key] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('KEY OK');
         // Every field has a label.
-        for (const input of root.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]), select')) {
+        // A zero Select posts through an aria-hidden `<select>`; its labelled control is the trigger.
+        for (const input of root.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]), select:not([data-part="hidden-input"]), [data-scope="select"][data-part="trigger"]')) {
             const label = input.id ? root.querySelector(`label[for="${input.id}"]`) : null;
             expect(label || input.getAttribute('aria-label') || input.closest('label'), input.getAttribute('name') ?? input.outerHTML).toBeTruthy();
         }

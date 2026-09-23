@@ -28,6 +28,23 @@ test('normalizeExpected accepts X.Y, X.Y.Z and a leading caret', () => {
     assert.equal(normalizeExpected(' 1.0 '), '^1.0.0');
 });
 
+test('normalizeExpected keeps the patch from 1.0 — a 1.x pin is a patch floor inside one major', () => {
+    assert.equal(normalizeExpected('1.0.1'), '^1.0.1');
+    assert.equal(normalizeExpected('^1.2.3'), '^1.2.3');
+    assert.equal(normalizeExpected('1.2'), '^1.2.0');
+});
+
+test('from 1.0 any caret is a valid pin (one major is one copy); on 0.x a patch floor is not', () => {
+    assert.deepEqual(checkCatalog(ws('1.0.1')), []);
+    assert.deepEqual(checkCatalog(ws('1.3.2')), []);
+    assert.deepEqual(checkCatalog(ws('1.0.1'), '^1.0.1'), []);
+    const [stale] = checkCatalog(ws('1.0.0'), '^1.0.1');
+    assert.match(stale, /expected \^1\.0\.1 — run `pnpm sync:core 1\.0\.1`/);
+    const errors = checkCatalog(ws('0.15.3'));
+    assert.equal(errors.length, 3);
+    assert.match(errors[0], /must be single-minor/);
+});
+
 test('normalizeExpected accepts a prerelease of a NEW MAJOR, pinned exactly', () => {
     // `^1.0.0` does not resolve `1.0.0-rc.0`; the exact caret is the only pin
     // an rc alignment can use, and it keeps matching rc.1 and 1.0.0 itself.

@@ -11,8 +11,7 @@
  */
 import { component, type Define } from '@sigx/runtime-core';
 import { Dialog } from '@sigx/zero';
-import type { DomLinkHandler } from '@sigx/markdown/dom';
-import type { CodeHighlighter } from '@sigx/markdown/shiki';
+import type { CodeHighlighter, DomLinkHandler } from '@sigx/richtext/dom';
 import { MarkdownViewer } from './MarkdownViewer.js';
 
 export type MarkdownDialogProps =

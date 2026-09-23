@@ -7,7 +7,8 @@
  */
 
 import { component, type Define } from '@sigx/runtime-core';
-import { Field, Input, NativeSelect, NumberInput, Switch, Textarea, type InputType } from '@sigx/zero';
+import { Field, Input, NumberInput, Select, Switch, Textarea, type InputType } from '@sigx/zero';
+import { derivedModel } from '@sigx/zero/behaviors';
 import { MultiSelect, type MultiSelectOption } from '../_zero-gaps/multi-select.js';
 import { agMapFieldAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
@@ -62,21 +63,43 @@ export const TextareaField = component<TextareaFieldProps>(
 export type SelectFieldProps = Define.Model<string> &
     Common &
     Define.Prop<'options', readonly FieldOption[], true> &
-    /** Rendered as the disabled empty option; a model of `''` selects it and posts nothing. */
+    /** Shown while nothing is chosen; a model of `''` is nothing chosen and posts nothing. */
     Define.Prop<'placeholder', string>;
 
-export const SelectField = component<SelectFieldProps>(
-    ({ props }) =>
-        () => (
-            <Field.Root invalid={!!props.error} required={props.required} disabled={props.disabled}>
-                <Field.Label>{props.label}</Field.Label>
-                <NativeSelect.Root model={props.model} name={props.name} options={props.options} placeholder={props.placeholder} required={props.required} />
-                {props.description ? <Field.Description>{props.description}</Field.Description> : null}
-                {props.error ? <Field.Error>{props.error}</Field.Error> : null}
-            </Field.Root>
-        ),
-    { name: 'SelectField' }
-);
+/**
+ * zero's `Select.Root` over the options as data. Its value model is
+ * `string | null` and reserves `''` for the placeholder; this field keeps the
+ * string model its callers bind (`''` = nothing chosen) by bridging the two,
+ * and an option valued `''` (a caller's "No project") becomes the placeholder
+ * text rather than an item. The hidden `<select name>` posts pre-hydration.
+ */
+export const SelectField = component<SelectFieldProps>(({ props }) => {
+    const model = derivedModel<string | null>(
+        () => props.model?.value || null,
+        (next) => {
+            if (props.model) props.model.value = next ?? '';
+        }
+    );
+    const items = (): readonly FieldOption[] => props.options.filter((o) => o.value !== '');
+    const placeholder = (): string | undefined => props.placeholder ?? props.options.find((o) => o.value === '')?.label;
+    return () => (
+        <Field.Root invalid={!!props.error} required={props.required} disabled={props.disabled}>
+            <Field.Label>{props.label}</Field.Label>
+            <Select.Root
+                model={model}
+                items={items()}
+                itemValue={(o) => o.value}
+                itemLabel={(o) => o.label ?? o.value}
+                itemDisabled={(o) => !!o.disabled}
+                name={props.name}
+                placeholder={placeholder()}
+                required={props.required}
+            />
+            {props.description ? <Field.Description>{props.description}</Field.Description> : null}
+            {props.error ? <Field.Error>{props.error}</Field.Error> : null}
+        </Field.Root>
+    );
+}, { name: 'SelectField' });
 
 export type NumberFieldProps = Define.Model<number | null> & Common & Define.Prop<'min', number> & Define.Prop<'max', number> & Define.Prop<'step', number> & Define.Prop<'placeholder', string>;
 

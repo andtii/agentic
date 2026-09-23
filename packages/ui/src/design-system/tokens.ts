@@ -10,11 +10,10 @@
  * keep a complete palette: neutral is the raised surface (default button
  * fill), secondary is the muted text, accent is the working cyan.
  *
- * Dark only in v1 (`docs/decisions.md`). The kit emits `color-scheme: light`
- * on `:root` when `defaultDark` is absent (`targets/web/tokens-css.js`,
- * `rootDecls`), so both defaults point at the one theme: `:root` then
- * carries `color-scheme: light dark` with identical values either way, and
- * `styles.css` pins `color-scheme: dark` for native controls.
+ * Dark only in v1 (`docs/decisions.md`): `control-room` is the one default
+ * (`defaultLight`, no `defaultDark`). The kit (0.3+) states the default
+ * theme's own scheme on `:root` (`color-scheme: dark`), so native controls
+ * and scrollbars follow it with no app-level pin.
  *
  * Pure data: the kit import is type-only, so `dist/design-system.js` loads
  * in a Node build script without the kit's Node-only barrel.
@@ -167,18 +166,24 @@ const controlRoom: ThemeInput<Roles, typeof system> = {
 export const TONES = ['muted', 'dim', 'live', 'working', 'needs-you', 'failed'] as const;
 /** The `data-kind` axis: inbox item kinds and the six named failure states. */
 export const KINDS = ['approval', 'input', 'interrupted', 'offline', 'machine', 'auth', 'runtime', 'task'] as const;
-/** Presence-only modifiers the kit wires (`data-mod-*`), on top of daisy's. */
-export const AG_MODIFIERS = ['hollow', 'outline', 'compact', 'selected', 'current', 'stale'] as const;
+/**
+ * Presence-only modifiers the kit wires (`data-mod-*`), on top of daisy's.
+ * `loading` is the workdir picker's; daisy dropped it when zero made a
+ * button's loading a state (zero 0.3).
+ */
+export const AG_MODIFIERS = ['hollow', 'outline', 'compact', 'selected', 'current', 'stale', 'loading'] as const;
 
 export const tokens: TokensInput<Roles, typeof system> = {
     roles: daisy.roles,
     custom,
     variants: daisy.variants,
     modifiers: [...(daisy.modifiers ?? []), ...AG_MODIFIERS],
-    axes: { tone: [...TONES], kind: [...KINDS] },
+    axes: { ...daisy.axes, tone: [...TONES], kind: [...KINDS] },
+    breakpoints: daisy.breakpoints,
     scopes: { ...daisy.scopes, ...kitScopes },
     system,
+    // A single-scheme design system names its one theme as `defaultLight` (the
+    // `:root` default) and omits `defaultDark`; `:root` takes its scheme.
     defaultLight: THEME,
-    defaultDark: THEME,
     themes: { [THEME]: controlRoom }
 };

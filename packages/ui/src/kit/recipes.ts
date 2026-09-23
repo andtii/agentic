@@ -757,12 +757,12 @@ const quotaRings: RecipeInput = {
     }
 };
 
-/** A markdown part inside the viewer — `@sigx/markdown` stamps every element `data-scope="markdown"`. */
-const part = (name: string): string => `[data-scope="markdown"][data-part="${name}"]`;
+/** A rich-text part inside the viewer — `@sigx/richtext` stamps every element `data-scope="richtext"`. */
+const part = (name: string): string => `[data-scope="richtext"][data-part="${name}"]`;
 const md = (name: string): string => `& ${part(name)}`;
 
 /**
- * A markdown document as prose (#490): `@sigx/markdown` ships no stylesheet,
+ * A markdown document as prose (#490): `@sigx/richtext` ships no stylesheet,
  * so the viewer's recipe styles its parts — headings on the type scale,
  * paragraph and list rhythm on the space scale (the app zeroes `p` margins),
  * blockquotes as a line-strong rule, code blocks as a base-100 well with the

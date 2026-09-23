@@ -38,11 +38,13 @@ test('roster → agent → Config → Memory, with every config field labelled',
     await expect(page.locator('[data-save-card]')).toHaveCount(0);
     await expect(page.locator('[data-versions-list] [data-scope="ag-version"][data-part="root"]')).toHaveCount(5);
 
-    // every visible control has a visible label (Field.Label, wrapping label, or aria-label)
+    // every visible control has a visible label (Field.Label, wrapping label, or aria-label). A zero Select is its
+    // `combobox` trigger; the `<select>` it posts through is aria-hidden and never a control anyone sees.
     const unlabelled = await form.evaluate((f) => {
-        const els = [...f.querySelectorAll<HTMLElement>('input:not([type="hidden"]), textarea, select, [role="group"][aria-label]')];
+        const els = [...f.querySelectorAll<HTMLElement>('input:not([type="hidden"]), textarea, select, [role="combobox"], [role="group"][aria-label]')];
         return els
             .filter((el) => {
+                if (el.getAttribute('aria-hidden') === 'true') return false;
                 if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false;
                 const forLabel = el.id ? f.querySelector(`label[for="${el.id}"]`) : null;
                 return !(forLabel || el.closest('label'));

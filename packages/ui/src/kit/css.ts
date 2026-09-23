@@ -38,7 +38,7 @@ export const kitCss = `[data-visually-hidden] {
 [data-ag-document-body] { flex: 1; min-block-size: 0; overflow: auto; overscroll-behavior: contain; }
 
 /* highlighted code (#490): shiki writes each token's dark colour to --shiki-dark; control-room is dark, so that is the one shown */
-[data-scope="ag-markdown"] [data-scope="markdown"][data-part="code-body"] span { color: var(--shiki-dark, inherit); }
+[data-scope="ag-markdown"] [data-scope="richtext"][data-part="code-body"] span { color: var(--shiki-dark, inherit); }
 
 /* a label never wraps: the button grows, the row wraps */
 [data-scope="button"][data-part="root"] { white-space: nowrap; }

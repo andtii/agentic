@@ -6,34 +6,38 @@ onlyBuiltDependencies:
   - esbuild
   - workerd
 
-# Single source of truth for every sigx-estate version. Core is pinned to ONE
-# minor (`^0.15.0`): @sigx/reactivity keeps reactive state in module-local
-# variables, so a second physical copy silently splits core's singletons.
+# Single source of truth for every sigx-estate version. Core is on the 1.0
+# line (`^1.0.1`): from 1.0 a caret spans one MAJOR and minors are additive, so
+# every core entry resolves to one physical copy. That still matters —
+# @sigx/reactivity keeps reactive state in module-local variables, so a second
+# physical copy silently splits core's singletons (core 1.0 throws on it in dev).
 # `sync:core` rewrites the core entries; the sibling entries are bumped by hand.
 catalog:
-  "@sigx/cache": ^0.15.0
-  "@sigx/cloudflare": ^0.15.0
-  "@sigx/reactivity": ^0.15.0
-  "@sigx/runtime-core": ^0.15.0
-  "@sigx/runtime-dom": ^0.15.0
-  "@sigx/serialize": ^0.15.0
-  "@sigx/server": ^0.15.0
-  "@sigx/server-renderer": ^0.15.0
-  "@sigx/vite": ^0.15.0
-  "sigx": ^0.15.0
+  "@sigx/cache": ^1.0.1
+  "@sigx/cloudflare": ^1.0.1
+  "@sigx/reactivity": ^1.0.1
+  "@sigx/runtime-core": ^1.0.1
+  "@sigx/runtime-dom": ^1.0.1
+  "@sigx/serialize": ^1.0.1
+  "@sigx/server": ^1.0.1
+  "@sigx/server-renderer": ^1.0.1
+  "@sigx/vite": ^1.0.1
+  "sigx": ^1.0.1
   # siblings (not core): bump by hand
-  "@sigx/actors": ^0.10.0
-  "@sigx/actors-cloudflare": ^0.10.0
-  "@sigx/actors-ws": ^0.10.0
-  "@sigx/router": ^0.12.1
-  "@sigx/store": ^0.13.0
-  "@sigx/markdown": ^0.2.0
-  "@sigx/zero": ^0.2.0-beta.1
-  "@sigx/zero-kit": ^0.2.0-beta.1
-  "@sigx/zero-daisyui": ^0.2.0-beta.1
-  # @sigx/ai* — published as 0.1.0 before feature work starts (signalxjs/ai#15)
-  "@sigx/ai": ^0.1.0
-  "@sigx/ai-agent": ^0.1.0
-  "@sigx/ai-agent-node": ^0.1.0
-  "@sigx/ai-agent-claude-code": ^0.1.0
-  "@sigx/ai-anthropic": ^0.1.0
+  "@sigx/actors": ^0.11.0
+  "@sigx/actors-cloudflare": ^0.11.0
+  "@sigx/actors-ws": ^0.11.0
+  "@sigx/router": ^0.13.0
+  "@sigx/store": ^0.14.0
+  "@sigx/richtext": ^0.4.0
+  "@sigx/richtext-markdown": ^0.4.0
+  "@sigx/richtext-shiki": ^0.4.0
+  "@sigx/zero": ^0.4.0
+  "@sigx/zero-kit": ^0.4.0
+  "@sigx/zero-daisyui": ^0.4.0
+  # @sigx/ai* — 0.2.1 carries the plan-mode approval fix (signalxjs/ai#187)
+  "@sigx/ai": ^0.2.1
+  "@sigx/ai-agent": ^0.2.1
+  "@sigx/ai-agent-node": ^0.2.1
+  "@sigx/ai-agent-claude-code": ^0.2.1
+  "@sigx/ai-anthropic": ^0.2.1

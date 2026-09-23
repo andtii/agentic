@@ -27,8 +27,8 @@ async function live(agent: Agent, opts: { policy?: boolean; window?: number } = 
 }
 
 const rows = (dom: ParentNode) => all(dom, 'ai-thread', 'row');
-/** Every rendered part element: a markdown root per text part, a card per tool part, a details per reasoning part. */
-const parts = (dom: ParentNode) => dom.querySelectorAll('[data-scope="ai-message"] [data-scope="markdown"][data-part="root"], [data-scope="ai-tool-call"][data-part="root"], [data-scope="ai-reasoning"][data-part="root"]');
+/** Every rendered part element: a rich-text root per text part, a card per tool part, a details per reasoning part. */
+const parts = (dom: ParentNode) => dom.querySelectorAll('[data-scope="ai-message"] [data-scope="richtext"][data-part="root"], [data-scope="ai-tool-call"][data-part="root"], [data-scope="ai-reasoning"][data-part="root"]');
 
 /** A scripted turn of `n` parts — text and tool calls alternating. */
 function manyParts(n: number, label = 'part'): MockStep[] {

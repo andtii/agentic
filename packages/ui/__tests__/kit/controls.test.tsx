@@ -41,12 +41,13 @@ describe('Button', () => {
         expect(button.querySelector('span')).toBeNull();
     });
 
-    it('keeps the label while loading, swaps the icon for the spinner mod, disables and announces busy', () => {
+    it('keeps the label while loading, swaps the icon for the spinner part, disables and announces busy', () => {
         const root = mount(<Button intent="primary" icon="check" loading>Allow once</Button>);
         const button = root.querySelector('button')!;
         expect(button.textContent).toBe('Allow once');
         expect(button.querySelector('svg')).toBeNull();
-        expect(button.hasAttribute('data-mod-loading')).toBe(true);
+        expect(button.getAttribute('data-state')).toBe('loading');
+        expect(button.querySelector('[data-scope="button"][data-part="spinner"]')).not.toBeNull();
         expect(button.disabled).toBe(true);
         expect(button.getAttribute('aria-busy')).toBe('true');
     });

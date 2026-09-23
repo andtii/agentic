@@ -11,11 +11,13 @@
  *   node scripts/sync-core.mjs            # align to the latest published core
  *   node scripts/sync-core.mjs 0.13.0     # align to an explicit version
  *   node scripts/sync-core.mjs 0.13       # minor is enough; patch is ignored
+ *   node scripts/sync-core.mjs 1.0.1      # from 1.0 the patch is kept: ^1.0.1
  *   node scripts/sync-core.mjs 1.0.0-rc.0 # a prerelease of a new major pins exactly
  *   node scripts/sync-core.mjs --check     # exit 1 if a change WOULD be made (CI drift guard)
  *
- * It rewrites only CORE packages (published from signalxjs/core) to `^X.Y.0`
- * (== `>=X.Y.0 <X.(Y+1).0`, one minor — the single-copy guarantee). It never
+ * It rewrites only CORE packages (published from signalxjs/core) to `^0.Y.0` on
+ * 0.x (== `>=0.Y.0 <0.(Y+1).0`, one minor — the single-copy guarantee) and to
+ * `^X.Y.Z` from 1.0 (one major, additive minors; the patch is a floor). It never
  * touches sibling-ecosystem entries (`@sigx/router`, `@sigx/lynx-*`, …) that may
  * also live in the catalog. Formatting is preserved (line-based edit). It does
  * NOT run install/build/test — CI (core-sync.yml) does that and opens the PR;
@@ -100,27 +102,30 @@ function forEachCatalogEntry(lines, cb) {
  * so both the CLI below and the unit tests drive the same code.
  *
  * @param {string} src   the pnpm-workspace.yaml contents
- * @param {string} range the target caret: single-minor `^X.Y.0`, or the exact `^X.0.0-<pre>` of a new major's prerelease
+ * @param {string} range the target caret: single-minor `^0.Y.0`, a 1.x+ caret `^X.Y.Z`, or the exact `^X.0.0-<pre>` of a new major's prerelease
  * @returns {{ text: string, pins: {name:string,from:string,to:string}[], comments: {from:string,to:string}[] }}
  */
 export function alignCatalog(src, range) {
-    // ^X.Y.0, or — for a prerelease of a new major, the only caret that resolves
-    // it — ^X.0.0-<pre>; check-catalog.mjs's SINGLE_MINOR accepts the same two.
-    const rm = /^\^(\d+)\.(\d+)\.0(-[0-9A-Za-z.-]+)?$/.exec(range);
-    if (!rm || (rm[3] && rm[2] !== '0')) {
-        throw new Error(`alignCatalog: range must be a single-minor caret ^X.Y.0 (or ^X.0.0-<pre>), got "${range}"`);
+    // ^0.Y.0, ^X.Y.Z from 1.0, or — for a prerelease of a new major, the only
+    // caret that resolves it — ^X.0.0-<pre>; check-catalog.mjs's SINGLE_MINOR
+    // accepts the same three. From 1.0 the caret may carry a patch floor (`^1.0.1`): a 1.x caret spans
+    // the whole major, so the patch never splits the single copy.
+    const rm = /^\^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/.exec(range);
+    if (!rm || (rm[4] && (rm[2] !== '0' || rm[3] !== '0')) || (rm[1] === '0' && rm[3] !== '0')) {
+        throw new Error(`alignCatalog: range must be a single-minor caret ^0.Y.0, a 1.x+ caret ^X.Y.Z (or ^X.0.0-<pre>), got "${range}"`);
     }
     const tMaj = Number(rm[1]);
     const tMin = Number(rm[2]);
-    const tPre = rm[3] ?? '';
-    const targetCaret = `^${tMaj}.${tMin}.0${tPre}`; // == range, rebuilt from parts for clarity
+    const tPatch = Number(rm[3]);
+    const tPre = rm[4] ?? '';
+    const targetCaret = `^${tMaj}.${tMin}.${tPatch}${tPre}`; // == range, rebuilt from parts for clarity
     // The equivalent explicit range. A caret is one MINOR only while the major
     // is 0 (`^0.13.0` == `>=0.13.0 <0.14.0`); from 1.0 it is the whole major
     // (`^1.3.0` == `>=1.3.0 <2.0.0`, and so is `^1.0.0-rc.0`) — which is the
     // point of 1.0: additive minors, one copy across the line.
     const targetWide = tMaj === 0
         ? `>=0.${tMin}.0 <0.${tMin + 1}.0`
-        : `>=${tMaj}.${tMin}.0${tPre} <${tMaj + 1}.0.0`;
+        : `>=${tMaj}.${tMin}.${tPatch}${tPre} <${tMaj + 1}.0.0`;
 
     const lines = src.split('\n');
 
@@ -154,7 +159,9 @@ export function alignCatalog(src, range) {
         const min = Number(vm[2]);
         const pre = vm[3] ?? '';
         const key = `${maj}.${min}${pre}`;
-        if ((maj === tMaj && min === tMin && pre === tPre) || seenMinor.has(key)) return; // target, or already collected
+        // On 1.x the patch is part of the pin, so `^1.0.0` -> `^1.0.1` is a rewrite.
+        const patch = maj === 0 ? 0 : Number(/\d+\.\d+\.(\d+)/.exec(ver)?.[1] ?? 0);
+        if ((maj === tMaj && min === tMin && (maj === 0 || patch === tPatch) && pre === tPre) || seenMinor.has(key)) return; // target, or already collected
         seenMinor.add(key);
         // Explicit range first (it contains no caret, so it can't collide with the
         // caret pass); then the bare caret. Both forms name the same pinned minor.
@@ -243,10 +250,15 @@ function resolveRange(versionArg) {
     // because a major's first release has no stable version to pin.
     const pre = /^v?(\d+)\.0\.0(-[0-9A-Za-z.-]+)$/.exec(v);
     if (pre) return { range: `^${pre[1]}.0.0${pre[2]}`, display: `${pre[1]}.0.0${pre[2]}` };
-    const m = /^v?(\d+)\.(\d+)/.exec(v);
+    const m = /^v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(v);
     if (!m) {
         console.error(`sync-core: cannot parse a version from "${v}"`);
         process.exit(2);
+    }
+    // From 1.0 the patch is kept: `^1.0.1` is a floor inside one major.
+    if (Number(m[1]) >= 1) {
+        const patch = m[3] ?? '0';
+        return { range: `^${m[1]}.${m[2]}.${patch}`, display: `${m[1]}.${m[2]}.${patch}` };
     }
     return { range: `^${m[1]}.${m[2]}.0`, display: `${m[1]}.${m[2]}` };
 }

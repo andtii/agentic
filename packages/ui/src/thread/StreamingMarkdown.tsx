@@ -1,6 +1,8 @@
 /**
  * `StreamingMarkdown` — a growing text part as markdown, on
- * `@sigx/markdown/dom`'s `MarkdownView`.
+ * `@sigx/richtext/dom`'s `RichTextView` with `@sigx/richtext-markdown`'s
+ * `markdownFormat` (a module constant — a new format identity would re-create
+ * the engine).
  *
  * The view owns one incremental engine: as `text` grows, only the live tail
  * re-parses and only the block still being written re-renders — finalized
@@ -9,7 +11,8 @@
  * component alone: one signal, one part, one render.
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { MarkdownView } from '@sigx/markdown/dom';
+import { RichTextView } from '@sigx/richtext/dom';
+import { markdownFormat } from '@sigx/richtext-markdown';
 
 export type StreamingMarkdownProps =
     & Define.Prop<'text', string, true>
@@ -17,5 +20,5 @@ export type StreamingMarkdownProps =
     & Define.Prop<'done', boolean, false>;
 
 export const StreamingMarkdown = component<StreamingMarkdownProps>(({ props }) => {
-    return () => <MarkdownView value={props.text} linkTarget="_blank" />;
+    return () => <RichTextView value={props.text} format={markdownFormat} linkTarget="_blank" />;
 }, { name: 'StreamingMarkdown' });

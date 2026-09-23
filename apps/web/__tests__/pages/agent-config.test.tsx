@@ -110,7 +110,7 @@ describe('/agents/:id config tab', () => {
 
     it('every control on the config form has a visible label', async () => {
         const root = await configPage();
-        const controls = [...root.querySelectorAll<HTMLElement>('form[data-form="agent"] input:not([type="hidden"]), form[data-form="agent"] textarea, form[data-form="agent"] select, form[data-form="agent"] [role="group"][aria-label]')];
+        const controls = [...root.querySelectorAll<HTMLElement>('form[data-form="agent"] input:not([type="hidden"]), form[data-form="agent"] textarea, form[data-form="agent"] select:not([data-part="hidden-input"]), form[data-form="agent"] [data-scope="select"][data-part="trigger"], form[data-form="agent"] [role="group"][aria-label]')];
         expect(controls.length).toBeGreaterThan(15);
         for (const el of controls) {
             const own = el.getAttribute('aria-label');

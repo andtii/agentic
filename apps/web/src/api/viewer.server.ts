@@ -17,7 +17,7 @@ export interface Viewer {
  */
 export const whoami = serverFn({
     allowAnonymous: true,
-    handler: async (rq): Promise<Viewer | null> => {
+    handler: async ({ rq }): Promise<Viewer | null> => {
         const p = await principal<Principal>(rq);
         return p?.kind === 'user' ? { userId: p.userId, workspaceId: p.workspaceId } : null;
     }

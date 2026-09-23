@@ -7,8 +7,7 @@
  * toggle-group's own accent tokens, set per item, so the design system's
  * recipe stays the only source of the look.
  */
-import { component, signal, type Define } from '@sigx/runtime-core';
-import { watch } from '@sigx/reactivity';
+import { component, type Define } from '@sigx/runtime-core';
 import { ToggleGroup } from '@sigx/zero';
 import type { Tone } from './vocabulary.js';
 
@@ -45,31 +44,11 @@ export type SegmentedProps =
     & Define.Event<'valueChange', string>;
 
 export const Segmented = component<SegmentedProps>(({ props, emit }) => {
-    // The toggle group binds an array; the segmented control is one value. A
-    // local signal carries the array, kept in step with the model both ways.
-    const local = signal({ values: props.model?.value ? [props.model.value] : ([] as string[]) });
-    watch(
-        () => props.model?.value,
-        (value) => {
-            const next = value ? [value] : [];
-            if (next[0] !== local.values[0]) local.values = next;
-        }
-    );
-    // zero writes the array model before it fires `valueChange`, so the
-    // outer model is the one to compare against: it is what a page reads.
-    const pick = (values: string[]): void => {
-        const next = values[values.length - 1];
-        if (next === undefined) {
-            local.values = local.values[0] ? [local.values[0]] : [];
-            return;
-        }
-        if (values.length > 1) local.values = [next];
-        const before = props.model ? props.model.value : undefined;
-        if (props.model) props.model.value = next;
-        if (next !== before) emit('valueChange', next);
-    };
+    // zero's single-mode toggle group holds one string, and `deselectable={false}`
+    // keeps a click on the pressed segment from clearing it: a segmented
+    // control always has one value. The group binds the model directly.
     return () => (
-        <ToggleGroup.Root model={() => local.values} onValueChange={pick} label={props.label} disabled={props.disabled} class={props.class} data-segmented="">
+        <ToggleGroup.Root model={props.model} deselectable={false} onValueChange={(value: string) => emit('valueChange', value)} label={props.label} disabled={props.disabled} class={props.class} data-segmented="">
             {props.options.map((option) => (
                 <ToggleGroup.Item value={option.value} disabled={option.disabled} asChild>
                     {(part) => (

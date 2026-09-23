@@ -26,13 +26,43 @@ export function toggle(el: HTMLInputElement, checked: boolean): void {
     el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-/** Every visible form control inside `root`: real inputs, textareas and selects, hidden inputs excluded. */
+/**
+ * Let zero settle what it writes after a render. Its Select posts through a
+ * hidden `<select>` whose option selectedness is written from `onUpdated`
+ * (zero#145: happy-dom does not run the selectedness algorithm a real engine
+ * runs on insert), so a posted value read straight after a mount or a
+ * programmatic model write is stale until then.
+ */
+export function settle(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** The values a `<select>` offers, without the single-mode placeholder zero's hidden select always carries. */
+export function optionValues(select: HTMLSelectElement): string[] {
+    return [...select.options].map((o) => o.value).filter(Boolean);
+}
+
+/**
+ * The control a person operates for `el`: zero's Select, Combobox and
+ * ToggleGroup post through a visually-hidden, `aria-hidden` `<select>`; the
+ * accessible control is the root's `combobox` (a Select's trigger, a
+ * Combobox's input) or, for a group, the root itself. Every other element is
+ * its own control.
+ */
+export function controlOf(el: HTMLElement): HTMLElement {
+    if (!(el instanceof HTMLSelectElement) || el.dataset.part !== 'hidden-input') return el;
+    const root = el.closest<HTMLElement>(`[data-scope="${el.dataset.scope}"][data-part="root"]`);
+    return root?.querySelector<HTMLElement>('[role="combobox"]') ?? root ?? el;
+}
+
+/** Every visible form control inside `root`: real inputs, textareas and selects (a zero hidden `<select>` as its control), hidden inputs excluded. */
 export function controls(root: HTMLElement): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>('input:not([type="hidden"]), textarea, select')];
+    return [...new Set([...root.querySelectorAll<HTMLElement>('input:not([type="hidden"]), textarea, select')].map(controlOf))];
 }
 
 /** The accessible name a control gets from `<label for>`, a wrapping `<label>` or `aria-label`/`aria-labelledby`. */
-export function labelOf(el: HTMLElement): string {
+export function labelOf(target: HTMLElement): string {
+    const el = controlOf(target);
     const own = el.getAttribute('aria-label');
     if (own) return own;
     const by = el.getAttribute('aria-labelledby');

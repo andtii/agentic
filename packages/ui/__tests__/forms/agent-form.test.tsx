@@ -1,7 +1,7 @@
 import { signal } from '@sigx/reactivity';
 import type { AgentConfig } from '@agentic/core';
 import { AgentForm, AGENT_FIELDS as F, CUSTOM_MODEL, agentDraftFromFormData, fromAgentDraft, toAgentDraft, type AgentErrors, type AgentFormApi, type AgentFormWorkdirProps, type RuntimeOption } from '@agentic/ui';
-import { controls, describedByRole, fullAgentConfig, labelOf, mount, setSelect, setText, submit, toggle } from './helpers';
+import { controlOf, controls, describedByRole, fullAgentConfig, labelOf, mount, optionValues, setSelect, setText, settle, submit, toggle } from './helpers';
 
 function mountForm(config: AgentConfig = fullAgentConfig()) {
     const state = signal({ config });
@@ -34,13 +34,14 @@ describe('AgentForm', () => {
         expect(root.querySelectorAll('[data-scope="field"][data-part="error"]').length).toBe(0);
     });
 
-    it('posts a FormData that reads back to the bound config', () => {
+    it('posts a FormData that reads back to the bound config', async () => {
         const { form, state } = mountForm();
+        await settle();
         const posted = fromAgentDraft(agentDraftFromFormData(new FormData(form)));
         expect(posted).toEqual(state.config);
     });
 
-    it('binds edits through the model and writes the config back on submit', () => {
+    it('binds edits through the model and writes the config back on submit', async () => {
         const { form, root, state, api, submitted } = mountForm();
         setText(root.querySelector<HTMLInputElement>(`input[name="${F.name}"]`)!, 'Reviewer 2');
         setSelect(root.querySelector<HTMLSelectElement>(`select[name="${F.offlinePolicy}"]`)!, 'queue');
@@ -62,13 +63,15 @@ describe('AgentForm', () => {
         expect(next.tools.find((t) => t.name === 'Bash')?.mode).toBe('deny');
         expect(next.memoryPolicy.autoLearn).toBe('off');
         // the posted form agrees with what was written back
+        await settle();
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(next);
     });
 
-    it('edits execution.onInterrupt with a two-option select that explains itself (#368)', () => {
+    it('edits execution.onInterrupt with a two-option select that explains itself (#368)', async () => {
         const { form, root, state, submitted } = mountForm();
+        await settle();
         const select = root.querySelector<HTMLSelectElement>(`select[name="${F.onInterrupt}"]`)!;
-        expect([...select.options].map((o) => o.textContent)).toEqual(['Ask me', 'Resume automatically, once']);
+        expect([...select.options].filter((o) => o.value).map((o) => o.textContent)).toEqual(['Ask me', 'Resume automatically, once']);
         expect(select.value).toBe('ask');
         expect(labelOf(select)).toBe('When a turn is interrupted');
         expect(root.textContent).toContain('what ran before the cut is uncertain');
@@ -174,7 +177,7 @@ describe('AgentForm', () => {
         expect(describedByRole(turns, 'alert')[0]?.textContent).toMatch(/at least 1/);
     });
 
-    it('reset() restores the draft from the model and clears shown errors', () => {
+    it('reset() restores the draft from the model and clears shown errors', async () => {
         const { form, root, api, state } = mountForm();
         const name = root.querySelector<HTMLInputElement>(`input[name="${F.name}"]`)!;
         setText(name, '');
@@ -187,6 +190,7 @@ describe('AgentForm', () => {
         expect(api().draft).toMatchObject(toAgentDraft(state.config));
         expect(name.value).toBe('Reviewer');
         expect(describedByRole(name, 'alert')).toHaveLength(0);
+        await settle();
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form)))).toEqual(state.config);
     });
 
@@ -236,13 +240,14 @@ describe('AgentForm', () => {
             return { root, form, state, api: () => ref.current!, modelSelect, custom, posted };
         }
 
-        it('offers the given runtimes; the chosen one says what is in the way and links to the fix', () => {
+        it('offers the given runtimes; the chosen one says what is in the way and links to the fix', async () => {
             const { root } = mountWith('');
+            await settle();
             const select = root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!;
-            expect([...select.options].map((o) => o.value)).toEqual(['anthropic-api', 'claude-code']);
+            expect(optionValues(select)).toEqual(['anthropic-api', 'claude-code']);
             expect(select.selectedOptions[0]!.textContent).toBe('Anthropic API — needs a key');
             // The hint is the select's description, so a screen reader announces it with the field.
-            const described = (select.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+            const described = (controlOf(select).getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
             expect(described).toContain('Not set yet: anthropic-api-key.');
             expect(root.querySelector('[data-runtime-hint="anthropic-api"] [data-runtime-fix] a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
 
@@ -272,8 +277,9 @@ describe('AgentForm', () => {
             expect(blank.posted().execution).not.toHaveProperty('model');
         });
 
-        it('a stored id the runtime does not list opens on Custom… with the id kept; reset() goes back to it', () => {
+        it('a stored id the runtime does not list opens on Custom… with the id kept; reset() goes back to it', async () => {
             const { modelSelect, custom, posted, api, state } = mountWith('claude-opus-4');
+            await settle();
             expect(modelSelect()!.value).toBe(CUSTOM_MODEL);
             expect(custom()!.value).toBe('claude-opus-4');
             expect(posted().execution.model).toBe('claude-opus-4');
@@ -281,6 +287,7 @@ describe('AgentForm', () => {
             setSelect(modelSelect()!, 'claude-opus-5');
             expect(custom()).toBeNull();
             api().reset();
+            await settle();
             expect(modelSelect()!.value).toBe(CUSTOM_MODEL);
             expect(custom()!.value).toBe('claude-opus-4');
             expect(posted()).toEqual(state.config);

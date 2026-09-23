@@ -43,7 +43,7 @@
     "@cloudflare/workers-types": "^5.20260917.1",
     "@playwright/test": "^1.63.0",
     "@sigx/ai": "catalog:",
-    "@sigx/cli": "^0.11.0",
+    "@sigx/cli": "^0.12.0",
     "@sigx/cloudflare": "catalog:",
     "@sigx/vite": "catalog:",
     "@sigx/zero-kit": "catalog:",

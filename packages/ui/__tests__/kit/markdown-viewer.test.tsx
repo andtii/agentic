@@ -1,5 +1,5 @@
 /**
- * The markdown viewer (#490): `@sigx/markdown`'s parts inside the
+ * The markdown viewer (#490): `@sigx/richtext`'s parts inside the
  * `ag-markdown` surface — headings, lists and task boxes, tables, code
  * blocks (plain with `highlighter={false}`, highlighted through a
  * highlighter otherwise), links that open in a new tab unless `onLink`
@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { expectAnatomy } from '@sigx/zero/testing';
-import type { CodeHighlighter } from '@sigx/markdown/shiki';
+import type { CodeHighlighter } from '@sigx/richtext/dom';
 import { MarkdownViewer, agMarkdownAnatomy } from '@agentic/ui';
 import { mount, one, all, waitFor } from '../helpers';
 
@@ -35,7 +35,7 @@ const doc = [
     'See [the issue](https://example.com/490).'
 ].join('\n');
 
-const part = (root: ParentNode, name: string) => all(root, 'markdown', name);
+const part = (root: ParentNode, name: string) => all(root, 'richtext', name);
 
 describe('MarkdownViewer', () => {
     it('renders the document as markdown parts inside its surface; holds the anatomy', () => {

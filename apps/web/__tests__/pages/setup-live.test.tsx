@@ -34,9 +34,12 @@ afterEach(async () => {
 const registry = () => h.app.as(owner).actor(Registry, registryKey(WS));
 const agentOf = (id: AgentId) => h.app.as(owner).actor(AgentActor, agentKey(WS, id));
 const runtimeSelect = (dom: ParentNode) => dom.querySelector<HTMLSelectElement>('form[data-form="agent"] select[name="runtime"]');
-const optionsOf = (select: HTMLSelectElement | null) => (select ? [...select.options].map((o) => [o.value, text(o)]) : []);
+/** The options a select offers — zero's hidden `<select>` always carries the empty placeholder first; it is not one. */
+const optionsOf = (select: HTMLSelectElement | null) => (select ? [...select.options].filter((o) => o.value).map((o) => [o.value, text(o)]) : []);
+/** zero's Select posts through a hidden `<select>`; the control a screen reader announces is its trigger. */
+const controlOf = (el: Element | null) => el?.closest('[data-scope="select"][data-part="root"]')?.querySelector('[data-part="trigger"]') ?? el;
 /** What a screen reader announces with the control: the text of every element its `aria-describedby` names. */
-const describedBy = (el: Element | null) => (el?.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => text(document.getElementById(id))).join(' ');
+const describedBy = (el: Element | null) => (controlOf(el)?.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => text(document.getElementById(id))).join(' ');
 
 describe('Home: the setup checklist (live)', () => {
     it('a fresh workspace is told to add the Anthropic key or pair a machine; the list goes once the key is set, without a reload', async () => {
@@ -98,7 +101,7 @@ describe('/agents: New agent opens on the workspace default runtime (live)', () 
         await until(() => dom.querySelector('[data-page="agents"]:not([aria-busy])') !== null, 'the roster');
         openNewAgent();
         const select = () => document.querySelector<HTMLSelectElement>('[data-new-agent-fields] select[name="agent-runtime"]');
-        await until(() => select()?.value === 'claude-code' && (select()?.options.length ?? 0) === 2, 'the runtime select on the workspace default');
+        await until(() => select()?.value === 'claude-code' && optionsOf(select()).length === 2, 'the runtime select on the workspace default');
         // Nothing is paired, so the default runtime says what it still needs.
         expect(text(select()!.closest('[data-scope="field"][data-part="root"]')!.querySelector('[data-part="description"]'))).toMatch(/No paired machine/);
         expect(text(document.querySelector('[data-scope="dialog"] [data-part="description"], dialog p'))).toContain('Claude Code');
