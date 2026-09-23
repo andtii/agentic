@@ -280,6 +280,11 @@ describe('a machine offline under a running turn (#366)', () => {
         release();
         await settled('t1');
         expect(await task('t1').get()).toMatchObject({ status: 'completed', sessionId: sid });
+
+        // The liveness watch is armed again: a second silent spell is seen like the first.
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'heartbeat', at: Date.now(), active: [] }));
+        await advance(DEFAULT_HEARTBEAT_WINDOW_MS + TICK);
+        await online(m1, false);
     });
 
     it('past MACHINE_LOST_MS the task fails machine-lost (recoverable), audited, the chat told — and the member’s session re-opens on the next message', async () => {

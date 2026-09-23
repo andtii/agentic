@@ -1562,7 +1562,11 @@ export function defineMachineActor(ports: MachinePorts) {
                         const back = !s.online;
                         s.lastSeen = now();
                         s.online = true;
-                        if (back) await notify((r) => r.machineOnline(machineId));
+                        if (back) {
+                            // Offline and idle, the liveness reminder was let go: re-arm it, or the next silent spell goes unseen.
+                            await armLiveness();
+                            await notify((r) => r.machineOnline(machineId));
+                        }
                         return;
                     }
                     case 'pong':
