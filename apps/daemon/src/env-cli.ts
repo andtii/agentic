@@ -25,14 +25,15 @@ import type { SecureWriteOptions } from './credentials.js';
 import type { DaemonDriver, DaemonLoginPort } from './daemon.js';
 import { deleteEnvironment, EnvironmentStoreError, putEnvironment, readEnvironmentsForEdit } from './env-store.js';
 import type { HarnessLocator } from './harness.js';
-import { parseClaudeLogin, parseCodexLogin, parseCopilotLogin, spawnLoginRelay, type LoginParser } from './login-relay.js';
+import { parseClaudeLogin, parseCodexLogin, parseCopilotLogin, quoteArg, spawnLoginRelay, type LoginParser } from './login-relay.js';
 import type { DaemonPaths } from './paths.js';
 
 /** Runs an interactive sign-in attached to this terminal; resolves to its exit code. */
 export type LoginRunner = (command: string, args: readonly string[], env: Readonly<Record<string, string | undefined>>) => Promise<number | null>;
 
-/** One argument on a `cmd.exe` line: quoted when it has spaces or quotes (a launcher under `C:\Program Files`, say). */
-export const quoteArg = (arg: string): string => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg);
+// One argument on a `cmd.exe` line, the relay's helper (#507): `runLogin` spawns with `shell: true`, so an unquoted
+// `&` in a path is an operator, not text. Re-exported because it is part of this module's surface.
+export { quoteArg };
 
 export const runLogin: LoginRunner = (command, args, env) =>
     new Promise((done, reject) => {

@@ -80,8 +80,13 @@ function reasonOf(stderr: string, stdout: string, secrets: readonly string[]): s
     return last.slice(0, 500);
 }
 
-/** An argument for the `cmd.exe` line the Windows spawn goes through: quoted when it holds whitespace, a quote or a shell metacharacter (`&`, `|`, `<`, `>`, `^`). */
-const quoteArg = (a: string): string => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+/**
+ * One argument for the `cmd.exe` line a Windows spawn goes through (`shell: true`): quoted when it holds whitespace, a
+ * quote, or a metacharacter `cmd.exe` would read as an operator rather than text (`&`, `|`, `<`, `>`, `^`, `(`, `)`) —
+ * a launcher under `C:\Program Files`, an install root under `C:\A & B`, a device URL with a query string. The relay
+ * and `env login` (`env-cli.ts`, which re-exports this) both build their command line with it (#484, #507).
+ */
+export const quoteArg = (a: string): string => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
 
 /**
  * Run the CLI's login and relay it. The events end with `done` (exit 0) or `failed` (a non-zero exit with the last
