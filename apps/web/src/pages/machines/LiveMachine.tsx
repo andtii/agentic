@@ -361,7 +361,7 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
                     onRecheck={() => { void doctor.refresh(); }}
                     {...(v.policy ? { policy: v.policy } : {})}
                     {...(v.features ? { features: v.features } : {})}
-                    runtimes={runtimesOf(v.capabilities, v.environments)}
+                    runtimes={runtimesOf(v.capabilities, v.environments, v.harnesses)}
                     envRequest={env.state}
                     onSaveEnvironment={saveEnvironment}
                     onRemoveEnvironment={removeEnvironment}

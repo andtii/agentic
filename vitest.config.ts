@@ -26,6 +26,7 @@ export default defineConfig({
             { find: '@agentic/runtimes/codex-cli', replacement: resolve(__dirname, 'packages/runtimes/src/codex-cli/index.ts') },
             { find: '@agentic/runtimes', replacement: pkg('runtimes') },
             { find: '@agentic/learning', replacement: pkg('learning') },
+            { find: '@agentic/connectors', replacement: pkg('connectors') },
             { find: '@agentic/plugins-git', replacement: pkg('plugins-git') },
             { find: '@agentic/memory/testing', replacement: resolve(__dirname, 'packages/memory/src/testing/index.ts') },
             { find: '@agentic/memory', replacement: pkg('memory') },
