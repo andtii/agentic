@@ -9,7 +9,7 @@ import type { AgentId, TaskId } from '@agentic/core';
 import type { AuditEvent, LedgerGroup, LedgerTotals, TaskIndexRow } from '@agentic/platform';
 import { lookupOver, type AgentIdentity } from '../../src/pages/chat/live';
 import { chainRoots, countTasks, filterTasks, taskListRow } from '../../src/pages/task/live';
-import { actorOf, auditQueryOf, kindLabel, localIso, mergePages, refOf, rowOf, toneOf } from '../../src/pages/history/live';
+import { actorOf, auditQueryOf, HISTORY_KIND_FILTERS, kindLabel, localIso, mergePages, refOf, rowOf, toneOf } from '../../src/pages/history/live';
 import { costPartsOf, costText, daysOf, statsOf, tokensText, usageRowsOf } from '../../src/pages/usage/live';
 
 const agents: Record<string, AgentIdentity> = {
@@ -90,6 +90,37 @@ describe('history model', () => {
         expect(toneOf(worktree)).toBe('live');
         expect(refOf(worktree)).toEqual({ label: 'feat/x', href: '/machines/m1' });
         expect(auditQueryOf({ kind: 'environments', agentId: null, window: 'all' }, 0).kinds).toEqual(['environment.chosen', 'workdir.worktree-created']);
+    });
+
+    it('files the machine security kinds (#355) under Machines, worded, toned and led to the machine', () => {
+        const machines = HISTORY_KIND_FILTERS.find((f) => f.id === 'machines')!.kinds!;
+        const m = { machineId: 'm1' as never };
+        const login = (outcome: string, extra: Record<string, unknown> = {}) => event({ kind: 'machine.login', data: { ...m, environmentId: 'env_work' as never, outcome: outcome as never, ...extra } });
+        const cases = [
+            [event({ kind: 'machine.policy-set', data: { ...m, allowedRoots: ['C:\\Dev'], previous: [], source: 'web' } }), 'folders set', undefined, { label: 'm1', href: '/machines/m1#machine-folders' }],
+            [event({ kind: 'machine.renamed', data: { ...m, from: 'alien01', to: 'alien02' } }), 'renamed', undefined, { label: 'alien02', href: '/machines/m1' }],
+            [event({ kind: 'machine.restart-requested', data: { ...m, mode: 'drain' } }), 'restart requested', 'working', { label: 'm1', href: '/machines/m1' }],
+            [event({ kind: 'machine.restarted', data: { ...m } }), 'restarted', 'live', { label: 'm1', href: '/machines/m1' }],
+            [login('done'), 'signed in', 'live', { label: 'env_work', href: '/machines/m1' }],
+            // An elevation carries no machine id — only the summary names one — so its row leads nowhere.
+            [event({ kind: 'auth.elevated', data: { userId: 'u1', until: 2_000 } }), 'confirmed with GitHub', 'live', null]
+        ] as const;
+        for (const [e, label, tone, ref] of cases) {
+            expect(machines).toContain(e.kind);
+            expect(kindLabel(e)).toBe(label);
+            expect(toneOf(e)).toBe(tone);
+            expect(refOf(e)).toEqual(ref);
+        }
+        // How a relayed sign-in ended; a cancelled one broke nothing, so it stays neutral.
+        expect(kindLabel(login('timeout'))).toBe('sign-in timed out');
+        expect(kindLabel(login('cancelled'))).toBe('sign-in cancelled');
+        expect(kindLabel(login('failed', { error: 'no code' }))).toBe('sign-in failed');
+        expect(toneOf(login('cancelled'))).toBeUndefined();
+        expect(toneOf(login('timeout'))).toBe('failed');
+        // A restart rides the update machinery (#481), so a failed one arrives as `machine.update-failed`.
+        const restartFailed = event({ kind: 'machine.update-failed', data: { ...m, from: '0.1.0', to: 'restart', error: 'timed out' } });
+        expect(kindLabel(restartFailed)).toBe('restart failed');
+        expect(toneOf(restartFailed)).toBe('failed');
     });
 
     it('stamps the workspace-zone time and groups by day through it', () => {

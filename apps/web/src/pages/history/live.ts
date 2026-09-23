@@ -21,7 +21,8 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created'] },
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
-    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set', 'harness.changed'] },
+    // `auth.elevated` (#355) carries no machine id, but it is only ever written as the gate on a machine security change and its summary names the machine, so it belongs beside the change it let through.
+    { id: 'machines', label: 'Machines', kinds: ['machine.paired', 'machine.revoked', 'environment.put', 'environment.removed', 'machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set', 'harness.changed', 'machine.policy-set', 'machine.renamed', 'machine.restart-requested', 'machine.restarted', 'machine.login', 'auth.elevated'] },
     { id: 'plugins', label: 'Plugins and secrets', kinds: ['plugin.enabled', 'plugin.disabled', 'plugin.activated', 'plugin.granted', 'secret.opened'] },
     { id: 'connectors', label: 'Connected accounts', kinds: ['connector.connected', 'connector.needs-reauth', 'connector.disconnected'] }
 ] as const satisfies readonly { id: string; label: string; kinds?: readonly AuditKind[] }[];
@@ -75,14 +76,17 @@ export const KIND_TONE: Partial<Record<AuditKind, Tone>> = {
     'machine.updated': 'live',
     'machine.update-failed': 'failed',
     'machine.update-requested': 'working',
+    'machine.restart-requested': 'working',
+    'machine.restarted': 'live',
+    'auth.elevated': 'live',
     'workdir.worktree-created': 'live',
     'secret.opened': 'needs-you',
     'connector.connected': 'live',
     'connector.needs-reauth': 'failed'
 };
 
-/** The audit kinds of a daemon update and its settings (#365); each row leads to its machine. */
-const MACHINE_UPDATE_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>(['machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set']);
+/** The audit kinds of a daemon update and its settings (#365) and of a machine's own lifecycle (#355) — the ones the kind slice already words well. */
+const MACHINE_SLICED_KINDS: ReadonlySet<AuditKind> = new Set<AuditKind>(['machine.update-requested', 'machine.updated', 'machine.update-failed', 'machine.channel-set', 'machine.update-policy-set', 'machine.renamed', 'machine.restart-requested', 'machine.restarted']);
 
 /** The kind as the tag prints it: `approval requested`; a transition that parked the work as interrupted says so. */
 export function kindLabel(e: AuditEvent): string {
@@ -95,8 +99,16 @@ export function kindLabel(e: AuditEvent): string {
     if (e.kind === 'connector.connected') return e.data.reconnected ? 'reconnected' : 'connected';
     if (e.kind === 'connector.needs-reauth') return 'needs reconnecting';
     if (e.kind === 'connector.disconnected') return 'disconnected';
-    // A daemon update (#367): `update requested`, `updated`, `channel set`…
-    if (MACHINE_UPDATE_KINDS.has(e.kind)) return e.kind.slice('machine.'.length).replace(/-/g, ' ');
+    // The folders the web may use (#355) — "policy set" would read as the update policy's.
+    if (e.kind === 'machine.policy-set') return 'folders set';
+    // A restart rides the update machinery (#481), so one that did not come back arrives as `machine.update-failed`.
+    if (e.kind === 'machine.update-failed' && e.data.to === 'restart') return 'restart failed';
+    // A daemon update (#367) or a machine's own lifecycle (#355): `update requested`, `updated`, `channel set`, `renamed`, `restarted`…
+    if (MACHINE_SLICED_KINDS.has(e.kind)) return e.kind.slice('machine.'.length).replace(/-/g, ' ');
+    // A sign-in relayed from the web (#355): `signed in`, or how it ended.
+    if (e.kind === 'machine.login') return e.data.outcome === 'done' ? 'signed in' : e.data.outcome === 'cancelled' ? 'sign-in cancelled' : e.data.outcome === 'timeout' ? 'sign-in timed out' : 'sign-in failed';
+    // The owner re-confirmed through the login provider before a security-sensitive change (#355, #477).
+    if (e.kind === 'auth.elevated') return 'confirmed with GitHub';
     // A runtime's harness (#370): `harness installed`, `harness updated`, `harness removed`, or `harness failed`.
     if (e.kind === 'harness.changed') return e.data.outcome === 'done' ? `harness ${e.data.op === 'install' ? 'installed' : e.data.op === 'update' ? 'updated' : 'removed'}` : 'harness failed';
     return e.kind.replace('.', ' ');
@@ -112,6 +124,8 @@ export function toneOf(e: AuditEvent): Tone | undefined {
     }
     if (e.kind === 'environment.put' || e.kind === 'environment.removed') return e.data.outcome === 'ok' ? 'live' : 'failed';
     if (e.kind === 'harness.changed') return e.data.outcome === 'done' ? 'live' : 'failed';
+    // A relayed sign-in (#355): one the owner backed out of broke nothing, so it stays neutral.
+    if (e.kind === 'machine.login') return e.data.outcome === 'done' ? 'live' : e.data.outcome === 'cancelled' ? undefined : 'failed';
     return KIND_TONE[e.kind];
 }
 
@@ -161,9 +175,14 @@ export function refOf(e: AuditEvent): HistoryRef | null {
     if (e.kind === 'environment.removed') return { label: e.data.environmentId, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'workdir.worktree-created') return { label: e.data.branch, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'harness.changed') return { label: e.data.runtime, href: `/machines/${e.data.machineId}#runtimes` };
-    if (e.kind === 'machine.update-requested' || e.kind === 'machine.updated' || e.kind === 'machine.update-failed' || e.kind === 'machine.channel-set' || e.kind === 'machine.update-policy-set') return { label: e.data.machineId, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'machine.renamed') return { label: e.data.to, href: `/machines/${e.data.machineId}` };
+    // The folder policy has its own card on the machine page (#480); a relayed sign-in names the environment it signed in.
+    if (e.kind === 'machine.policy-set') return { label: e.data.machineId, href: `/machines/${e.data.machineId}#machine-folders` };
+    if (e.kind === 'machine.login') return { label: e.data.environmentId, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'machine.update-requested' || e.kind === 'machine.updated' || e.kind === 'machine.update-failed' || e.kind === 'machine.channel-set' || e.kind === 'machine.update-policy-set' || e.kind === 'machine.restart-requested' || e.kind === 'machine.restarted') return { label: e.data.machineId, href: `/machines/${e.data.machineId}` };
     // A conduit connector's plugin has the connector's id (`gmail`, #533): its page is where the account is.
     if (e.kind === 'connector.connected' || e.kind === 'connector.needs-reauth' || e.kind === 'connector.disconnected') return { label: e.data.displayName ?? e.data.accountId, href: `/plugins/${encodeURIComponent(e.data.connector)}` };
+    // `auth.elevated` has no machine id — only its summary names one — so it falls through to the generic ref.
     if (e.taskId) return { label: e.taskId, href: `/tasks/${e.taskId}` };
     if (e.sessionId) return { label: e.sessionId, href: `/sessions/${e.sessionId}` };
     if (e.agentId) return { label: e.agentId, href: `/agents/${e.agentId}` };
