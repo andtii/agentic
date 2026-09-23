@@ -7,6 +7,7 @@
  * on the `$live` stream. Identity rides an `x-user` header the stubbed
  * server app authenticates.
  */
+import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
 import { afterEach } from 'vitest';
 import { defineApp, type JSXElement } from 'sigx';
 import '@sigx/runtime-dom';
@@ -144,6 +145,7 @@ export async function mountLive(path: string, harness: LiveHarness, tree: JSXEle
     app.use(actorsPlugin({ transport: harness.transport, live: { debounceMs: 0, retryMs: 10, maxRetryMs: 50 } }));
     app.defineProvide(useActorDefs, clientDefs);
     app.defineProvide(useViewer, () => () => ({ workspaceId: USER, pending: false }));
+    app.defineProvide(useCodeRenderer, () => plainCodeRenderer);
     app.mount(container);
     await tick();
     closers.push(() => {

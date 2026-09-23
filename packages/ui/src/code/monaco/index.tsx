@@ -46,7 +46,8 @@ function surface<P extends object>(name: string, kind: 'viewer' | 'diff', plain:
             return (
                 <div data-scope={SCOPE} data-part="root" data-kind={kind} data-engine="monaco" data-ready={st.ready ? '' : undefined} data-clickable={clickable}>
                     <div data-plain="">
-                        <Plain {...(props as Record<string, unknown>)} />
+                        {/* Once the engine shows, the hidden grid drops the widget: one composer, one set of ids. */}
+                        <Plain {...(props as Record<string, unknown>)} {...(st.ready ? { lineWidget: undefined } : {})} />
                     </div>
                     {Engine ? <Engine {...(props as Record<string, unknown>)} onEngineReady={() => { st.ready = true; }} /> : null}
                 </div>

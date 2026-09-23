@@ -28,6 +28,8 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     tasks: { label: 'Tasks', href: '/tasks' },
     task: { label: 'Tasks', href: '/tasks' },
     session: { label: 'Sessions', href: '/' },
+    'session-changes': { label: 'Sessions', href: '/' },
+    'session-files': { label: 'Sessions', href: '/' },
     machines: { label: 'Machines', href: '/machines' },
     machine: { label: 'Machines', href: '/machines' },
     pair: { label: 'Machines', href: '/machines' },
@@ -46,6 +48,7 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
  * `crumb` on a route that has no parameter.
  */
 export function trailFor(route: TopbarRoute, contribution: TopbarContribution | undefined): Crumb[] {
+    if (contribution?.trail?.length) return contribution.trail.map((c, i, all) => ({ label: c.label, href: c.href, ...(i === all.length - 1 ? { current: true } : {}) }));
     const root = CRUMBS[String(route.name ?? '')];
     if (!root) return [];
     const id = route.params.id;

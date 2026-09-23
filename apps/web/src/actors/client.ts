@@ -26,7 +26,7 @@ export function clientDefs(): ActorDefs {
         Session: ref('session', ['tail']),
         Routing: ref('routing'),
         Inbox: ref('Inbox'),
-        Machine: ref('machine'),
+        Machine: ref('machine', ['fsAnswer', 'historyAnswer']),
         Schedule: ref('Schedule'),
         Registry: ref('Registry'),
         TaskIndex: ref('task-index'),

@@ -46,6 +46,7 @@
     "@sigx/ai": "catalog:",
     "@sigx/cli": "^0.12.0",
     "@sigx/cloudflare": "catalog:",
+    "@sigx/monaco-editor": "catalog:",
     "@sigx/vite": "catalog:",
     "@sigx/zero-kit": "catalog:",
     "@types/express": "^5.0.6",

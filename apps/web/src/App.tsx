@@ -81,6 +81,9 @@ const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:w
  * contribution (`components/topbar.ts`) supplies the entity name, the
  * actions, the sub-line and the phone's one right slot.
  */
+/** Routes that run edge to edge: the chat, and a session's views under their session bar (#564). */
+const FLUSH_ROUTES = new Set(['chat', 'session', 'session-changes', 'session-files']);
+
 export const App = component(() => {
     useHead({
         titleTemplate: '%s · agentic',
@@ -107,7 +110,7 @@ export const App = component(() => {
                     brand="agentic"
                     groups={NAV_GROUPS(needs().length)}
                     currentPath={route.path}
-                    flush={route.name === 'chat'}
+                    flush={FLUSH_ROUTES.has(String(route.name ?? ''))}
                     title={titleOf(crumbs)}
                     back={backOf(crumbs)}
                     slots={{

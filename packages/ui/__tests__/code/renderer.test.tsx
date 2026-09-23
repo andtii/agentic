@@ -127,4 +127,14 @@ describe('choosing the renderer', () => {
         await waitFor(() => diff.querySelector('[data-engine="monaco"]')!.hasAttribute('data-ready'));
         expect(diff.querySelector('[data-stub-engine="diff"]')).not.toBeNull();
     });
+
+    it('hands the line widget to the engine once it is ready, never to the hidden plain grid as well (#564)', async () => {
+        const widget = () => <textarea id="ask" data-widget="" />;
+        const root = mount(<monacoCodeRenderer.Diff original={SHELL_HEAD} modified={SHELL_NOW} path="shell.css" mode="unified" selected={{ side: 'modified', line: 3 }} onLineSelect={() => undefined} lineWidget={widget} />);
+        // Before the engine: the plain grid draws it (SSR, no JavaScript).
+        expect(root.querySelectorAll('[data-plain] [data-widget]')).toHaveLength(1);
+        await waitFor(() => root.querySelector('[data-engine="monaco"]')!.hasAttribute('data-ready'));
+        // After: the hidden grid drops it, so one element carries its id.
+        expect(root.querySelectorAll('[data-plain] [data-widget]')).toHaveLength(0);
+    });
 });
