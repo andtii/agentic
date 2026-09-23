@@ -251,6 +251,9 @@ describe('/machines/:id, /machines and /plugins/:id on mock data (#370)', () => 
         expect(section.querySelector<HTMLAnchorElement>('[data-runtime-machine="alien01"] a')!.getAttribute('href')).toBe('/machines/alien01#runtimes');
         const cc = await mountRoute('/plugins/claude-code');
         expect(text(cc.querySelector('[data-runtime-machine="alien01"] [data-runtime-machine-version]'))).toBe('2.0.0 · 2.1.0 available');
+        // Installed: the next step is an environment on it (#527); lacking it, there is none to add yet.
+        expect(cc.querySelector<HTMLAnchorElement>('[data-runtime-machine="alien01"] [data-runtime-machine-env] a')!.getAttribute('href')).toBe('/machines/alien01#environments');
+        expect(section.querySelector('[data-runtime-machine="alien01"] [data-runtime-machine-env]')).toBeNull();
         const api = await mountRoute('/plugins/anthropic-api');
         expect(api.querySelector('[data-runtime-machines]')).toBeNull();
     });
