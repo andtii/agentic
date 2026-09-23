@@ -153,6 +153,11 @@ describe('persistence', () => {
         expect(Object.keys((await stored())!.transient).sort()).toEqual(['live', 'new']);
     });
 
+    it('refuses a transient that would be expired on arrival', async () => {
+        for (const ttl of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(await statusOf(client().putTransient('s', 'v', ttl))).toBe(400);
+        expect((await stored())?.transient ?? {}).toEqual({});
+    });
+
     it('caps the transients in flight', async () => {
         await app.stop();
         const Capped = defineConnectorAccounts({ maxTransient: 2 });
@@ -175,6 +180,15 @@ describe('locks', () => {
         expect(second.token).not.toBe(first.token);
         expect(await c.unlock('refresh', first.token)).toBe(false);
         expect(await c.unlock('refresh', second.token)).toBe(true);
+    });
+
+    it('unlock refuses a malformed key or token, and a wrong token is just false', async () => {
+        const c = client();
+        const held = await c.lock('k');
+        expect(await statusOf(c.unlock('', held.token))).toBe(400);
+        expect(await statusOf(c.unlock('k', ''))).toBe(400);
+        expect(await c.unlock('k', 'not-the-token')).toBe(false);
+        expect(await c.unlock('k', held.token)).toBe(true);
     });
 
     it('a waiter gives up with 423 after waitMs', async () => {

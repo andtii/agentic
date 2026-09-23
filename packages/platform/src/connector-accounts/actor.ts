@@ -291,7 +291,8 @@ export function defineConnectorAccounts(options: ConnectorAccountsOptions = {}) 
             async putTransient(key: string, value: string, ttlMs: number): Promise<void> {
                 assertId(key, 'transient key');
                 if (typeof value !== 'string' || value.length > MAX_VALUE) throw bad(`a transient value must be a string of at most ${MAX_VALUE} characters`);
-                if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs)) throw bad('a transient needs a finite ttl');
+                // A ttl of zero or less would store a value that is already expired, against "pruned on every write".
+                if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs <= 0) throw bad('a transient needs a positive, finite ttl');
                 prune(ctx);
                 if (!Object.hasOwn(ctx.state.transient, key) && Object.keys(ctx.state.transient).length >= maxTransient) {
                     throw new ServerFnError(429, `[connector-accounts] too many sign-ins in flight (${maxTransient}); try again shortly`);
@@ -338,8 +339,10 @@ export function defineConnectorAccounts(options: ConnectorAccountsOptions = {}) 
                 });
             },
 
-            /** Release a grant. False when `token` no longer holds the lock (its lease lapsed). */
+            /** Release a grant. False when `token` no longer holds the lock (its lease lapsed); 400 for a malformed key or token. */
             unlock(key: string, token: string): boolean {
+                assertId(key, 'lock key');
+                if (typeof token !== 'string' || token === '') throw bad('unlock needs the token its lock returned');
                 const slot = locksOf(ctx).get(key);
                 if (!slot?.holder || slot.holder.token !== token) return false;
                 release(ctx, key);
