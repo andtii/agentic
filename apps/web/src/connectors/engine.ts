@@ -77,8 +77,8 @@ export interface ConnectorRegistry {
     putConnector(input: { readonly id: string; readonly pluginId: string; readonly transport: 'conduit'; readonly connector: string; readonly account?: string }): Promise<unknown>;
     openSecret(name: string, pluginId: string): Promise<string>;
     setSecret(name: string, value: string): Promise<unknown>;
-    /** Names only — whether a secret is set, readable without opening it. */
-    secrets(): Promise<readonly { readonly name: string }[]>;
+    /** Names and timestamps only (`SecretInfo`) — whether a secret is set, readable without opening it. */
+    secrets(): Promise<readonly { readonly name: string; readonly updatedAt: number }[]>;
 }
 
 /**
