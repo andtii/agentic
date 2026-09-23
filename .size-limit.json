@@ -7,15 +7,16 @@
   {
     "name": "@agentic/ui",
     "path": "packages/ui/dist/index.prod.js",
-    "limit": "100 KB",
+    "limit": "115 KB",
     "ignore": [
-      "shiki"
+      "shiki",
+      "@sigx/monaco-editor"
     ]
   },
   {
     "name": "@agentic/ui css (control-room design system)",
     "path": "packages/ui/dist/ds/css/index.css",
-    "limit": "28 KB"
+    "limit": "30 KB"
   },
   {
     "name": "@agentic/plugins-git",

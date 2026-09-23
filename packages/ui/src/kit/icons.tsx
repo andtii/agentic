@@ -48,7 +48,9 @@ const icons = {
     folder: () => <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" />,
     branch: () => (<><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10" /><path d="M18 9c0 5-12 3-12 8" /></>),
     tree: () => (<><circle cx="6" cy="6" r="2" /><circle cx="18" cy="12" r="2" /><circle cx="18" cy="19" r="2" /><path d="M6 8v11" /><path d="M6 12h6a4 4 0 0 1 4 0" /><path d="M6 19h10" /></>),
-    expand: () => (<><path d="M14 4h6v6" /><path d="m20 4-7 7" /><path d="M10 20H4v-6" /><path d="m4 20 7-7" /></>)
+    expand: () => (<><path d="M14 4h6v6" /><path d="m20 4-7 7" /><path d="M10 20H4v-6" /><path d="m4 20 7-7" /></>),
+    copy: () => (<><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></>),
+    commit: () => (<><circle cx="12" cy="12" r="3" /><path d="M3 12h6" /><path d="M15 12h6" /></>)
 } satisfies Record<string, () => JSXElement>;
 
 export type IconName = keyof typeof icons;

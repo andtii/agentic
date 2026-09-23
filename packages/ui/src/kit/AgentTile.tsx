@@ -15,7 +15,7 @@ const SCOPE = agAgentTileAnatomy.scope;
 export type AgentHue = 1 | 2 | 3 | 4;
 export const AGENT_HUE_SLOTS: readonly AgentHue[] = [1, 2, 3, 4];
 /** The sizes drawn on the artboards, in px. */
-export type TileSize = 18 | 20 | 22 | 28 | 32 | 44 | 52;
+export type TileSize = 18 | 20 | 22 | 24 | 28 | 32 | 44 | 52;
 
 /** The hue for the n-th agent (0-based creation index) — wraps past four until a longer palette exists. */
 export function hueFor(index: number): AgentHue {

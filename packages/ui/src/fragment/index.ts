@@ -13,12 +13,14 @@ import { aiApprovalAnatomy, aiMessageAnatomy, aiQuestionAnatomy, aiReasoningAnat
 import { kitAnatomies } from '../kit/anatomy.js';
 import { recipes as transcriptRecipes } from './recipes.js';
 import { recipes as kitRecipes } from '../kit/recipes.js';
+import { codeAnatomies } from '../code/anatomy.js';
+import { codeRecipes } from '../code/recipes.js';
 
 /** The keyframes the streaming dot pulses on — raw CSS a design system appends verbatim (`DesignSystemInput.css`). */
 export { fragmentCss } from './recipes.js';
 
-/** The recipe pack: the transcript's six scopes and the kit's `ag-*` scopes. */
-export const recipes = [...transcriptRecipes, ...kitRecipes];
+/** The recipe pack: the transcript's six scopes, the kit's `ag-*` scopes and the session files ones (#563). */
+export const recipes = [...transcriptRecipes, ...kitRecipes, ...codeRecipes];
 
 /**
  * The manifest fragment: `mergeManifests(zeroManifest, fragment)` (or
@@ -42,7 +44,8 @@ export const fragment = {
         aiApprovalAnatomy.toJSON(),
         aiQuestionAnatomy.toJSON(),
         aiComposerAnatomy.toJSON(),
-        ...kitAnatomies.map((a) => a.toJSON())
+        ...kitAnatomies.map((a) => a.toJSON()),
+        ...codeAnatomies.map((a) => a.toJSON())
     ]
 };
 
