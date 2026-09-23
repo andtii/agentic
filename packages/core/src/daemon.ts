@@ -138,6 +138,46 @@ export interface ConnectorCredentials {
 }
 
 /**
+ * The `tool.call` a daemon makes on its own — never offered to the model — while it opens a session, for the tools of
+ * the connectors that run on the PLATFORM (#534: conduit connectors, decisions 2026-09-23). Input `{}`, output
+ * `PlatformConnectorTools`. The platform answers from the calling session's recorded gate, with declarations only —
+ * no credential, no account id. A platform that predates it answers with a `tool.result` error whose `code` is
+ * `'unsupported'`; the daemon then serves none (and treats any other error, or an answer of another shape, the same way).
+ */
+export const CONNECTOR_TOOLS_TOOL = 'connector_tools';
+
+/**
+ * The `tool.call` a daemon makes when the model calls one of those tools: input `PlatformConnectorCall`, output the
+ * operation's result. The platform runs it on the Worker, under the session's agent principal, only for a connector
+ * the calling session's gate names as ready; a failure is a `tool.result` error with a message the agent may read.
+ */
+export const CONNECTOR_CALL_TOOL = 'connector_call';
+
+/** One platform-run connector tool as the daemon serves it: what the model sees, and the hints approval rules on. */
+export interface ConnectorToolDeclaration {
+    /** Namespaced `<id>__<operation>`. */
+    readonly name: string;
+    readonly description: string;
+    /** The wire JSON Schema of its input: always an object schema, as a tool's arguments are. */
+    readonly inputSchema: { readonly type: 'object'; readonly [keyword: string]: unknown };
+    /** `@sigx/ai`'s `ToolAnnotations`: `readOnly` → `read`, `destructive` → `destructive`, neither → `network`. */
+    readonly annotations?: { readonly readOnly?: boolean; readonly destructive?: boolean; readonly idempotent?: boolean; readonly openWorld?: boolean };
+}
+
+/** The answer to `CONNECTOR_TOOLS_TOOL`: each platform-run connector's tools, and the ones that could not be opened, with why. */
+export interface PlatformConnectorTools {
+    readonly connectors: readonly { readonly id: string; readonly tools: readonly ConnectorToolDeclaration[] }[];
+    readonly unavailable: readonly { readonly id: string; readonly reason: string }[];
+}
+
+/** The input of `CONNECTOR_CALL_TOOL`: which connector, which of its tools (by its namespaced name), and the model's arguments. */
+export interface PlatformConnectorCall {
+    readonly connectorId: string;
+    readonly tool: string;
+    readonly input: unknown;
+}
+
+/**
  * A slice of a session's history the platform asks its machine for (#397): the events strictly after `from`,
  * up to and including `to` when given, at most `limit` of them (default `HISTORY_LIMIT`). The daemon answers
  * from its NDJSON log — the copy that outlives the platform's bounded pages — and may answer fewer than the
