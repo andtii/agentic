@@ -256,10 +256,13 @@ describe('cli', () => {
         ]);
     });
 
-    it('env login on Windows: an argument with spaces or quotes stays one argument on the cmd line', () => {
+    it('env login on Windows: an argument with spaces, quotes or a cmd.exe metacharacter stays one argument on the cmd line (#507)', () => {
         expect(quoteArg('login')).toBe('login');
         expect(quoteArg('C:/Program Files/agentic/node_modules/@openai/codex/bin/codex.js')).toBe('"C:/Program Files/agentic/node_modules/@openai/codex/bin/codex.js"');
         expect(quoteArg('say "hi"')).toBe('"say \\"hi\\""');
+        // Unquoted, `&` and its kin are cmd.exe operators, not text: the tail after one would run as a second command.
+        expect(quoteArg('C:\\A&B\\node_modules\\@openai\\codex\\bin\\codex.js')).toBe('"C:\\A&B\\node_modules\\@openai\\codex\\bin\\codex.js"');
+        for (const meta of ['&', '|', '<', '>', '^', '(', ')']) expect(quoteArg(`C:\\x${meta}y\\claude.cmd`)).toBe(`"C:\\x${meta}y\\claude.cmd"`);
     });
 
     it('env login: Codex signs in with `codex login` under its own CODEX_HOME, without the parent\'s OpenAI variables', async () => {

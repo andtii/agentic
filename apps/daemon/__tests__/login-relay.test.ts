@@ -19,7 +19,7 @@ import { scriptedDriver } from './helpers/drivers';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 import { loginPort, onPath, SIGN_INS } from '../src/env-cli';
 import type { HarnessLocator } from '../src/harness';
-import { parseClaudeLogin, parseCodexLogin, parseCopilotLogin, spawnLoginRelay, stripAnsi, type LoginRelayEvent } from '../src/login-relay';
+import { parseClaudeLogin, parseCodexLogin, parseCopilotLogin, quoteArg, spawnLoginRelay, stripAnsi, type LoginRelayEvent } from '../src/login-relay';
 
 const FAKE = fileURLToPath(new URL('./helpers/fake-login.mjs', import.meta.url));
 
@@ -148,6 +148,10 @@ describe('spawnLoginRelay over a fake CLI', () => {
         const events = await collect(r.events);
         expect(events).toHaveLength(1);
         expect(events[0]).toMatchObject({ phase: 'failed', error: { code: 'failed' } });
+    });
+
+    it('the relay and `env login` quote the Windows command line with one helper (#507)', async () => {
+        expect((await import('../src/env-cli')).quoteArg).toBe(quoteArg);
     });
 });
 
