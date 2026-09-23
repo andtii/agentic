@@ -1,75 +1,30 @@
 /**
  * `fs.request` (#185, architecture §5b): browse the folders inside an
  * environment's `cwdRoots`, add git worktrees there, and locate the checkouts
- * of a repo among them (#331) — a folder picker, never a file browser.
+ * of a repo among them (#331) — a folder picker, never a file browser. A
+ * session folder's files (`tree` / `read` / `changes`, #561) are `files.ts`'s.
  *
  * Every path is checked twice: lexically against the roots first (a path
  * outside is refused before the disk is touched), then again after
  * `realpath` of the path and of every root, so neither `..` nor a symlink or
  * junction can reach outside a root. All reads then go through the resolved
  * path. Git badges are read from files (`.git`, `HEAD`, `config`); only a
- * worktree creation runs `git`, through `execFile` with no shell.
+ * worktree creation runs `git`, through `runGit` with no shell.
  */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
 import { LIMITS } from '@agentic/daemon-protocol';
-import { execFile } from 'node:child_process';
 import type { Dirent } from 'node:fs';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { silentLogger, type Logger } from './logger.js';
 
-/** `cwd` lies inside one of `roots` (case-insensitive on Windows) — lexically; `checkWithinRoots` also resolves symlinks. */
-export function withinRoots(cwd: string, roots: readonly string[], platform: NodeJS.Platform = process.platform): boolean {
-    const norm = (p: string) => (platform === 'win32' ? resolve(p).toLowerCase() : resolve(p));
-    const target = norm(cwd);
-    return roots.some((root) => {
-        const rel = relative(norm(root), target);
-        return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-    });
-}
+import { answerFilesOp } from './files.js';
+import { checkWithinRoots, isMissing, withinRoots, type RootCheck } from './roots.js';
+import type { VcsProvider } from './vcs/provider.js';
+import { runGit } from './vcs/run.js';
 
-export type RootCheck =
-    /** `path`: the request resolved lexically (what the user sees); `real`: after symlinks (what is read). */
-    | { readonly ok: true; readonly path: string; readonly real: string; readonly realRoots: readonly string[] }
-    | { readonly ok: false; readonly code: 'outside-roots' | 'not-found'; readonly message: string };
-
-const isMissing = (e: unknown) => ['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '');
-
-/** The roots that exist, symlinks resolved. */
-async function realRootsOf(roots: readonly string[]): Promise<string[]> {
-    const out: string[] = [];
-    for (const root of roots) {
-        try {
-            out.push(await realpath(resolve(root)));
-        } catch {
-            // A missing root contains nothing.
-        }
-    }
-    return out;
-}
-
-/**
- * Whether `path` is inside one of `roots`: lexically first (answered without
- * touching the disk), then with symlinks resolved on both sides. A path that
- * does not exist is `not-found`; a relative path is outside.
- */
-export async function checkWithinRoots(path: string, roots: readonly string[], platform: NodeJS.Platform = process.platform): Promise<RootCheck> {
-    const outside: RootCheck = { ok: false, code: 'outside-roots', message: `${path} is outside the working roots` };
-    if (!isAbsolute(path) || !withinRoots(path, roots, platform)) return outside;
-    // Resolved lexically before `realpath`, so `link/..` means what it looks like.
-    const lexical = resolve(path);
-    let real: string;
-    try {
-        real = await realpath(lexical);
-    } catch (e) {
-        if (isMissing(e)) return { ok: false, code: 'not-found', message: `${path} does not exist` };
-        throw e;
-    }
-    const realRoots = await realRootsOf(roots);
-    if (!withinRoots(real, realRoots, platform)) return { ok: false, code: 'outside-roots', message: `${path} resolves outside the working roots` };
-    return { ok: true, path: lexical, real, realRoots };
-}
+export { checkWithinRoots, withinRoots, type RootCheck };
 
 // --------------------------------------------------------------------- git
 
@@ -274,24 +229,6 @@ async function locate(op: Extract<FsOp, { kind: 'locate' }>, roots: readonly str
 
 // ---------------------------------------------------------------- worktree
 
-interface Run {
-    readonly code: number | 'timeout' | 'missing';
-    readonly stderr: string;
-}
-
-function runGit(git: string, args: readonly string[], timeoutMs: number): Promise<Run> {
-    return new Promise((done) => {
-        execFile(git, [...args], { shell: false, windowsHide: true, timeout: timeoutMs, env: { ...process.env, LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0' } }, (error, _stdout, stderr) => {
-            const text = String(stderr ?? '').trim();
-            if (!error) return done({ code: 0, stderr: text });
-            const e = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
-            if (e.code === 'ENOENT') return done({ code: 'missing', stderr: text });
-            if (e.killed) return done({ code: 'timeout', stderr: text });
-            done({ code: typeof e.code === 'number' ? e.code : 1, stderr: text || e.message });
-        });
-    });
-}
-
 /** The nearest ancestor of `path` (itself excluded) that exists. */
 async function existingAncestor(path: string): Promise<string | undefined> {
     for (let at = dirname(path); ; at = dirname(at)) {
@@ -330,14 +267,14 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
 
     const checkTimeout = Math.min(10_000, options.worktreeTimeoutMs);
     if (op.branch.startsWith('-')) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
-    const format = await runGit(git, ['check-ref-format', '--branch', op.branch], checkTimeout);
+    const format = await runGit(git, ['check-ref-format', '--branch', op.branch], { timeoutMs: checkTimeout });
     if (format.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (format.code === 'timeout') return fail('timeout', 'git check-ref-format did not finish');
     if (format.code !== 0) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
-    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], checkTimeout);
+    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
     if (known.code === 0) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
 
-    const added = await runGit(git, ['-C', repo.real, 'worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])], options.worktreeTimeoutMs);
+    const added = await runGit(git, ['-C', repo.real, 'worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])], { timeoutMs: options.worktreeTimeoutMs });
     if (added.code === 0) return { result: { kind: 'worktree', path, branch: op.branch } };
     if (added.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (added.code === 'timeout') return fail('timeout', `git worktree add did not finish within ${options.worktreeTimeoutMs} ms`);
@@ -358,6 +295,8 @@ export interface FsOptions {
     readonly git?: string;
     /** How long `git worktree add` may run. Default 60 s. */
     readonly worktreeTimeoutMs?: number;
+    /** The VCS providers behind `tree` / `read` / `changes` (#561). Default: git, with `git` as the binary. */
+    readonly vcs?: readonly VcsProvider[];
 }
 
 /** Answer one `fs.request` for the environment `environmentId` among `environments`. Never throws. */
@@ -375,7 +314,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
-        return fail('unsupported', `this daemon does not answer ${(op as { kind: string }).kind}`);
+        return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });
         if (isMissing(e)) return fail('not-found', `${'path' in op ? op.path : op.kind} does not exist`);
