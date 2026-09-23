@@ -95,6 +95,7 @@ async function pollConnector(event: ScheduleFired, hop: TriggerHop, options: Con
 
     const engine = workspaceConnectorEngine({
         workspaceId: ws,
+        pluginId,
         principal: owner,
         secret: (name) => openPluginSecret(registry, name, pluginId),
         engineSecret,

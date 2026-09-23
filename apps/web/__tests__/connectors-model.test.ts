@@ -52,7 +52,7 @@ describe("a conduit connector's page model", () => {
     it('knows a conduit connector by its engine secret, and offers fields for the OAuth client only', () => {
         expect(isConduitConnector(gmailConnectorPlugin)).toBe(true);
         expect(managedSecretsOf(gmailConnectorPlugin)).toEqual([CONNECTOR_ENGINE_SECRET]);
-        expect(ownerSecretsOf(gmailConnectorPlugin)).toEqual(['client-id', 'client-secret']);
+        expect(ownerSecretsOf(gmailConnectorPlugin)).toEqual(['gmail-client-id', 'gmail-client-secret']);
     });
 
     it('reads the account status off the record and the summaries', () => {
@@ -65,11 +65,11 @@ describe("a conduit connector's page model", () => {
     });
 
     it('says what Connect still needs', () => {
-        expect(connectBlocker(view(), ['client-id', 'client-secret'], false)).toMatch(/WORKSPACE_KEK/);
-        expect(connectBlocker(view({ enabled: false }), ['client-id', 'client-secret'], true)).toBe('Turn Gmail on first (the switch above).');
-        expect(connectBlocker(view(), ['client-id'], true)).toBe('Save the OAuth client secret above first.');
+        expect(connectBlocker(view(), ['gmail-client-id', 'gmail-client-secret'], false)).toMatch(/WORKSPACE_KEK/);
+        expect(connectBlocker(view({ enabled: false }), ['gmail-client-id', 'gmail-client-secret'], true)).toBe('Turn Gmail on first (the switch above).');
+        expect(connectBlocker(view(), ['gmail-client-id'], true)).toBe('Save the OAuth client secret above first.');
         // The engine secret is generated on Connect, never asked for.
-        expect(connectBlocker(view(), ['client-id', 'client-secret'], true)).toBeUndefined();
+        expect(connectBlocker(view(), ['gmail-client-id', 'gmail-client-secret'], true)).toBeUndefined();
     });
 
     it('lists what agents can do (AGT-09) and what is not supported yet', () => {

@@ -69,7 +69,7 @@ async function connected(): Promise<{ engine: ConnectorEngine; account: string; 
         accounts: memoryAccounts(),
         transient: memoryTransient(),
         locks: inProcessLocks(),
-        clients: clientFromSecrets(async (name) => ({ 'client-id': 'cid', 'client-secret': 'shh' })[name]),
+        clients: clientFromSecrets(async (name) => ({ 'gmail-client-id': 'cid', 'gmail-client-secret': 'shh' })[name], 'gmail'),
         redirectUri: 'https://agentic.example/_agentic/connectors/callback',
         http: box.http
     });

@@ -39,8 +39,8 @@ async function setUp(userId: string) {
     const cookie = await signIn(userId);
     const registry = registryOverHttp(WS, cookie);
     await registry.enable('gmail');
-    await registry.setSecret('client-id', 'cid.apps.googleusercontent.com');
-    await registry.setSecret('client-secret', 'client-shh');
+    await registry.setSecret('gmail-client-id', 'cid.apps.googleusercontent.com');
+    await registry.setSecret('gmail-client-secret', 'client-shh');
     const start = await SELF.fetch(`${ORIGIN}/_agentic/connectors/gmail/start`, { redirect: 'manual', headers: { cookie } });
     const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
     const back = await SELF.fetch(`${ORIGIN}/_agentic/connectors/callback?state=${encodeURIComponent(state)}&code=code-mail`, { redirect: 'manual', headers: { cookie } });

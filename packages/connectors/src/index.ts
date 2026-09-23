@@ -5,7 +5,7 @@
  */
 
 export { createConnectorEngine, type ConnectorEngine, type ConnectorEngineOptions } from './engine.js';
-export { clientFromSecrets, CONNECTOR_CLIENT_ID_SECRET, CONNECTOR_CLIENT_SECRET_SECRET, CONNECTOR_ENGINE_SECRET, type OpenConnectorSecret } from './clients.js';
+export { clientFromSecrets, connectorClientSecretNames, CONNECTOR_ENGINE_SECRET, type OpenConnectorSecret } from './clients.js';
 export {
     conduitTools,
     connectorNamespace,
