@@ -10,15 +10,17 @@ import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, withinRoots, typ
 const hasGit = spawnSync('git', ['--version'], { windowsHide: true }).status === 0;
 /** A directory link: a junction on Windows (no privilege needed), a symlink elsewhere. */
 const link = (target: string, path: string) => symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
-/** Does the volume under `dir` fold case? macOS and Windows volumes do by default, Linux does not. */
+/** Does the volume holding `dir` fold case? A filesystem property: most macOS and Windows volumes do, most Linux ones do not. */
 async function foldsCase(dir: string): Promise<boolean> {
     const probe = join(dir, 'case-probe');
     await mkdir(probe, { recursive: true });
     try {
         await stat(probe.toUpperCase());
         return true;
-    } catch {
-        return false;
+    } catch (e) {
+        // Only "no such path" answers the question — anything else is a real failure.
+        if (['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '')) return false;
+        throw e;
     }
 }
 
