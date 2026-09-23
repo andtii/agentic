@@ -519,6 +519,10 @@ A security-sensitive machine change — the folders the web may use, browsing th
 
 Revoke a machine with `Machine.revoke()` (the daemon is refused on its next dial and every later one); a lost `credentials.json` on a machine is the same case — revoke, then re-pair.
 
+### Turn on Web Push (#543)
+
+There are no keys to fetch: the VAPID pair is made in the browser and stored per workspace. The deployment only needs `WORKSPACE_KEK` (§2.4; `pnpm dev` writes one into `.dev.vars`). In the app, Settings → Notifications → **Turn on push notifications**, and accept the browser's prompt. Repeat that click in every other browser (phone, laptop) — each subscribes with the same pair, and all of them get every push. The contact push services see defaults to the app's address; change it, or replace the keys, on `/plugins/agentic.notify.web-push`.
+
 ### Expose agents over A2A (#245)
 
 Off in every workspace until its owner turns it on:

@@ -12,8 +12,8 @@ import type { PluginView } from '@agentic/platform';
 import { Button, Label } from '@agentic/ui';
 import type { ActorDefs } from '../actors/defs';
 import { inboxKeyOf, registryKeyOf } from '../actors/keys';
-import { generateVapidKeys } from './browser';
 import { VAPID_SECRET, canGenerateKeys } from './model';
+import { writePushKeys } from './setup';
 
 export type GenerateKeysProps =
     & Define.Prop<'plugin', PluginView, true>
@@ -39,10 +39,8 @@ export const GenerateKeys = component<GenerateKeysProps>(({ props }) => {
         st.done = false;
         try {
             const registry = actor(props.defs.Registry, registryKeyOf(props.workspaceId));
-            const keys = await generateVapidKeys();
-            // The contact is required and already saved (`canGenerateKeys`), so this cannot be refused for it.
-            await registry.configure(props.plugin.manifest.id, { ...props.plugin.config, publicKey: keys.publicKey });
-            await registry.setSecret(VAPID_SECRET, keys.privateKey);
+            // No contact saved yet → the app's own address (`defaultContact`).
+            await writePushKeys(registry, props.plugin, location.origin);
             let dropped = 0;
             if (replacing) {
                 const inbox = actor(props.defs.Inbox, inboxKeyOf(props.workspaceId));
@@ -62,7 +60,7 @@ export const GenerateKeys = component<GenerateKeysProps>(({ props }) => {
     };
 
     return (): JSXElement => {
-        const can = canGenerateKeys(props.plugin, props.hasKek);
+        const can = canGenerateKeys(props.hasKek);
         return (
             <section data-plugin-panel="generate-keys" aria-label="Key pair">
                 <Label>Key pair</Label>
@@ -73,7 +71,7 @@ export const GenerateKeys = component<GenerateKeysProps>(({ props }) => {
                     {st.confirm ? 'Replace the keys — browsers subscribe again' : 'Generate keys'}
                 </Button>
                 {!can.ok ? <p data-plugin-hint>{can.why}</p> : null}
-                {st.done ? <p data-plugin-saved role="status">{st.dropped ? `New keys saved. ${st.dropped} subscribed browser${st.dropped === 1 ? '' : 's'} removed — subscribe again in Settings.` : 'Keys saved. Subscribe a browser in Settings → Notifications.'}</p> : null}
+                {st.done ? <p data-plugin-saved role="status">{st.dropped ? `New keys saved. ${st.dropped} subscribed browser${st.dropped === 1 ? '' : 's'} removed — subscribe again in Settings.` : 'Keys saved. Turn push on for each browser in Settings → Notifications.'}</p> : null}
                 {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
             </section>
         );

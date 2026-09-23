@@ -4,6 +4,11 @@
  * browser's permission, then `Inbox.subscribe`; stop is the reverse), and
  * every subscribed browser with a Remove. Subscribing a browser is what turns
  * push on for it; the workspace's plugin page holds the keys.
+ *
+ * "Turn on push notifications" (#543) does the whole setup in one click:
+ * enables the plugin, makes the key pair when there is none (a contact
+ * defaults to the app's address) and subscribes this browser. A second
+ * browser reuses the pair, so the ones already subscribed keep their pushes.
  */
 import { component, onMounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
@@ -15,7 +20,8 @@ import { inboxKeyOf, registryKeyOf } from '../actors/keys';
 import { formatAge } from '../mock/workspace';
 import { pluginHref } from '../pages/plugins/model';
 import { currentEndpoint, pushSupport, subscribeBrowser, unsubscribeBrowser, type PushSupport } from './browser';
-import { WEB_PUSH_PLUGIN, deviceRows, pushSetup } from './model';
+import { VAPID_SECRET, WEB_PUSH_PLUGIN, canGenerateKeys, deviceRows, pushSetup } from './model';
+import { ensurePushKeys } from './setup';
 
 export const PushDevices = component(() => {
     const defs = useActorDefs();
@@ -54,6 +60,22 @@ export const PushDevices = component(() => {
         if (endpoint) await inbox()?.unsubscribe(endpoint);
         st.here = null;
     });
+    /** Everything push still needs, then this browser — when it can take push at all. */
+    const turnOn = () => run(async () => {
+        const o = overview.value;
+        const workspaceId = viewer.workspaceId;
+        if (!o || !workspaceId) return;
+        const plugin = o.plugins.find((p) => p.manifest.id === WEB_PUSH_PLUGIN);
+        if (!plugin) return;
+        const registry = actor(defs.Registry, registryKeyOf(workspaceId));
+        const publicKey = await ensurePushKeys(registry, plugin, o.secretNames.includes(VAPID_SECRET), location.origin);
+        if (!plugin.enabled) await registry.enable(WEB_PUSH_PLUGIN);
+        // Asked here, not read from `st.support`: a click can land before `onMounted` has set it.
+        if (pushSupport() !== 'supported') return;
+        const sub = await subscribeBrowser(publicKey);
+        await actor(defs.Inbox, inboxKeyOf(workspaceId)).subscribe(sub);
+        st.here = sub.endpoint;
+    });
     const remove = (endpoint: string) => run(async () => {
         if (endpoint === st.here) await unsubscribeBrowser();
         await inbox()?.unsubscribe(endpoint);
@@ -66,16 +88,21 @@ export const PushDevices = component(() => {
         const setup = pushSetup(o.plugins, o.secretNames);
         const rows = deviceRows(subscriptions.value ?? [], st.here);
         const here = rows.some((r) => r.here);
+        const can = canGenerateKeys(o.hasKek);
         return (
             <div data-push-devices data-push-state={setup.state}>
                 {setup.state === 'absent'
                     ? <p data-panel-note>This deployment ships no push channel.</p>
                     : setup.state !== 'ready'
                         ? (
-                            <p data-panel-note>
-                                {setup.state === 'off' ? 'Push is off for this workspace. ' : `Push needs ${setup.missing.join(', ')}. `}
-                                <Link to={pluginHref(WEB_PUSH_PLUGIN)}>Set up Web Push</Link>
-                            </p>
+                            <div data-push-setup>
+                                <p data-panel-note>
+                                    {setup.state === 'off' ? 'Push is off for this workspace. ' : `Push needs ${setup.missing.join(', ')}. `}
+                                    {can.ok ? 'One click sets it up — no keys to find.' : can.why}
+                                </p>
+                                {can.ok ? <Button intent="primary" icon="wifi" loading={st.busy} onClick={() => { void turnOn(); }}>Turn on push notifications</Button> : null}
+                                <Link to={pluginHref(WEB_PUSH_PLUGIN)}>Advanced settings</Link>
+                            </div>
                         )
                         : st.support === 'unsupported'
                             ? <p data-panel-note>This browser cannot take push notifications.</p>
