@@ -49,7 +49,7 @@ export const webPushPlugin: PluginManifest = {
                 type: 'string',
                 format: 'uri',
                 title: 'Contact',
-                description: 'A mailto: or https: address the push services can reach you at (RFC 8292). Optional: left empty, it becomes the app’s own address when keys are made.'
+                description: 'A mailto: or https: address the push services can reach you at (RFC 8292). Generating keys without one saved fills in the app’s own address.'
             },
             publicKey: {
                 type: 'string',

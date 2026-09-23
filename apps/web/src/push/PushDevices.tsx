@@ -70,7 +70,8 @@ export const PushDevices = component(() => {
         const registry = actor(defs.Registry, registryKeyOf(workspaceId));
         const publicKey = await ensurePushKeys(registry, plugin, o.secretNames.includes(VAPID_SECRET), location.origin);
         if (!plugin.enabled) await registry.enable(WEB_PUSH_PLUGIN);
-        if (st.support !== 'supported') return;
+        // Asked here, not read from `st.support`: a click can land before `onMounted` has set it.
+        if (pushSupport() !== 'supported') return;
         const sub = await subscribeBrowser(publicKey);
         await actor(defs.Inbox, inboxKeyOf(workspaceId)).subscribe(sub);
         st.here = sub.endpoint;
