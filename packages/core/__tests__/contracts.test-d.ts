@@ -1,6 +1,6 @@
 import { expectTypeOf } from 'vitest';
-import type { AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
-import type { DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
+import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FsErrorCode, FsOp, FsResult, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { CONNECTOR_CALL_TOOL, CONNECTOR_TOOLS_TOOL, DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
 type Discriminant<T, K extends keyof T> = T[K];
@@ -36,6 +36,14 @@ describe('contract type tests', () => {
         expectTypeOf<Extract<DaemonFrame, { t: 'login.status' }>['phase']>().toEqualTypeOf<LoginPhase>();
         expectTypeOf<'policy' | 'log' | 'login'>().toMatchTypeOf<DaemonFeature>();
         expectTypeOf<MachinePolicy['source']>().toEqualTypeOf<'local' | 'web' | undefined>();
+    });
+    it('platform-run connector tools reach a daemon as declarations only (#534)', () => {
+        expectTypeOf<typeof CONNECTOR_TOOLS_TOOL>().toEqualTypeOf<'connector_tools'>();
+        expectTypeOf<typeof CONNECTOR_CALL_TOOL>().toEqualTypeOf<'connector_call'>();
+        // No credential, no account: what the model sees and the hints approval rules on.
+        expectTypeOf<keyof ConnectorToolDeclaration>().toEqualTypeOf<'name' | 'description' | 'inputSchema' | 'annotations'>();
+        expectTypeOf<keyof PlatformConnectorTools>().toEqualTypeOf<'connectors' | 'unavailable'>();
+        expectTypeOf<keyof PlatformConnectorCall>().toEqualTypeOf<'connectorId' | 'tool' | 'input'>();
     });
     it('fs operations and results are closed unions', () => {
         expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate'>();
