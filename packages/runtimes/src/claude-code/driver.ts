@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { query as sdkQuery, type SpawnOptions, type SpawnedProcess, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentSession, ConfigValue, Policy, SessionRef } from '@sigx/ai-agent';
-import { claudeCode, spawnForSdk, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
+import { CLAUDE_CODE_CAPABILITIES, claudeCode, spawnForSdk, type ClaudeCodeSessionOptions, type ListenFn, type ListSessionsFn, type QueryFn } from '@sigx/ai-agent-claude-code';
 import { BYPASS_PERMISSIONS_MODE, type DoctorReport, type EnvironmentInspection, type LocalEnvironment, type ModelOption, type OpenedRuntimeSession, type OpenSpec, type RuntimeDriver, type RuntimeOpenContext } from '@agentic/core';
 import { readProfileAuth, type ProfileAuthDeps } from './auth.js';
 import { claudeCodeCapabilityReport } from './capabilities.js';
@@ -169,6 +169,8 @@ export function claudeCodeDriver(options: ClaudeCodeDriverOptions = {}): ClaudeC
         agentFor,
         configDirOf,
         inspect,
+        // The adapter's capabilities do not depend on the environment (#541).
+        report: () => claudeCodeCapabilityReport(CLAUDE_CODE_CAPABILITIES),
 
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);

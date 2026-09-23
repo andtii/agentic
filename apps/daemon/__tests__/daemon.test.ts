@@ -11,7 +11,7 @@ import { harnessMissingDriver } from '../src/drivers';
 import { harnessStore } from '../src/harness';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
-import { agentDriver, namingDriver, scriptedDriver, titlingDriver } from './helpers/drivers';
+import { agentDriver, namingDriver, scriptedDriver, SCRIPTED_REPORT, titlingDriver } from './helpers/drivers';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
@@ -121,6 +121,17 @@ describe('daemon', () => {
         expect(hello.environments.map((e) => e.id)).toEqual(['env_a', 'env_c']);
         expect(hello.environments[1]!.account.authStatus).toBe('unknown');
         expect(hello.capabilities.find((c) => c.runtime === 'flaky')!.unsupported).toEqual([{ op: '*', reason: 'no claude binary' }]);
+    });
+
+    it('reports a runtime no environment runs on yet from its driver, and not one whose harness is missing (#541)', async () => {
+        const fresh = { ...SCRIPTED_REPORT, runtime: 'fresh', supported: ['prompt'] };
+        const idle: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), runtime: 'fresh', report: () => fresh };
+        // An environment's own inspection wins for its runtime over the driver's environment-free report.
+        const scripted: DaemonDriver = { ...scriptedDriver({ events: 1, heartbeatMs: 1_000 }), report: () => ({ ...SCRIPTED_REPORT, supported: ['not this one'] }) };
+        const { hello } = await start([env('env_a')], [scripted, idle, harnessMissingDriver('gone')]);
+        expect(hello.capabilities.map((c) => c.runtime)).toEqual(['scripted', 'fresh']);
+        expect(hello.capabilities[0]!.supported).toEqual(SCRIPTED_REPORT.supported);
+        expect(hello.capabilities[1]).toEqual(fresh);
     });
 
     it('a sign-in shows up without a restart: environments that are not signed in are inspected again (#235)', async () => {
