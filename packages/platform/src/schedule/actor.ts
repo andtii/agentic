@@ -18,6 +18,7 @@ import { workspaceOfKey } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { sameWorkspace } from '../auth/index.js';
+import { NAME_RE } from '../registry/manifest.js';
 import type { OfflinePolicy, ScheduleFired, ScheduleKind, ScheduleSource, TriggerHop, TriggerPort, TriggerResult } from './ports.js';
 import { countOccurrences, nextOccurrence, validateRecurrence, type Recurrence } from './recur.js';
 
@@ -100,7 +101,8 @@ export interface ScheduleSpec {
 /** `workdir: null` clears the folder; `projectId: null` / `environmentId: null` / `machineId: null` / `source: null` clear those. */
 export type SchedulePatch = Partial<Omit<ScheduleSpec, 'kind' | 'workdir' | 'projectId' | 'environmentId' | 'machineId' | 'source'>> & { readonly workdir?: string | null; readonly projectId?: ProjectId | null; readonly environmentId?: EnvironmentId | null; readonly machineId?: MachineId | null; readonly source?: ScheduleSource | null };
 
-const SOURCE_CONNECTOR = /^[A-Za-z0-9._-]{1,128}$/;
+/** The longest cursor an entry keeps (#535): a longer one is not stored, and the previous cursor stays. */
+export const SCHEDULE_CURSOR_MAX = 32_768;
 /** The longest `source.query` an entry keeps. */
 export const SOURCE_QUERY_MAX = 1000;
 
@@ -108,7 +110,7 @@ export const SOURCE_QUERY_MAX = 1000;
 function checkSource(source: ScheduleSource | undefined, agentId: AgentId | undefined): void {
     if (source === undefined) return;
     if (typeof source !== 'object' || source === null || source.kind !== 'connector') throw new ServerFnError(400, "[schedule] source.kind must be 'connector'");
-    if (typeof source.connector !== 'string' || !SOURCE_CONNECTOR.test(source.connector)) throw new ServerFnError(400, '[schedule] source.connector must be a plugin id');
+    if (typeof source.connector !== 'string' || !NAME_RE.test(source.connector)) throw new ServerFnError(400, '[schedule] source.connector must be a plugin id');
     if (source.query !== undefined && (typeof source.query !== 'string' || source.query.length > SOURCE_QUERY_MAX)) throw new ServerFnError(400, `[schedule] source.query must be text of at most ${SOURCE_QUERY_MAX} characters`);
     if (agentId === undefined) throw new ServerFnError(400, '[schedule] a source needs an agentId (the agent each new item wakes)');
 }
@@ -412,7 +414,7 @@ export function defineScheduleActor(options: ScheduleActorOptions) {
                 log(ctx, { kind: 'skipped', at, from: scheduledFor, to: at, count: skipped });
             }
             // A trigger's progress and its word to stop (#535), saved with the rest of this turn by `reschedule`.
-            if (result && typeof result.cursor === 'string') s.cursor = result.cursor;
+            if (result && typeof result.cursor === 'string' && result.cursor.length <= SCHEDULE_CURSOR_MAX) s.cursor = result.cursor;
             if (result && typeof result.pause === 'string') {
                 const reason = result.pause.slice(0, 500);
                 s.enabled = false;

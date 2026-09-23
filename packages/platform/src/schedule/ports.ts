@@ -30,7 +30,7 @@ export interface ScheduleSource {
  * turn as the firing's own bookkeeping.
  */
 export interface TriggerResult {
-    /** Opaque progress, stored and handed to the next firing as `event.cursor` (what the trigger has already seen). */
+    /** Opaque progress, stored and handed to the next firing as `event.cursor` (what the trigger has already seen). At most `SCHEDULE_CURSOR_MAX` characters; a longer one is not stored. */
     readonly cursor?: string;
     /** Turn the entry off, recording why (e.g. the connector's account needs reconnecting). `enable()` clears it. */
     readonly pause?: string;

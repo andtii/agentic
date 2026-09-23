@@ -465,7 +465,7 @@ describe('Schedule source, cursor and pause (#535)', () => {
 
     it('hands the source and the stored cursor to each firing, and keeps the cursor a firing returns', async () => {
         vi.setSystemTime(T('2026-09-17T10:00:00Z'));
-        const trigger = new Scripted([() => ({ cursor: 'c1' }), (e) => ({ cursor: `${e.cursor}+c2` }), () => undefined]);
+        const trigger = new Scripted([() => ({ cursor: 'c1' }), (e) => ({ cursor: `${e.cursor}+c2` }), () => undefined, () => ({ cursor: 'x'.repeat(40_000) })]);
         const r = await rig({ trigger: trigger as unknown as Recorder });
         const client = r.host.actor(r.Schedule, KEY);
         const created = await client.create({ kind: 'agent-task', title: 'mail', recurrence: { kind: 'cron', cron: '*/5 * * * *', tz: 'UTC' }, agentId: 'agent_a' as AgentId, source: SOURCE });
@@ -477,6 +477,10 @@ describe('Schedule source, cursor and pause (#535)', () => {
             ['gmail', 'c1+c2']
         ]);
         // A firing that returns nothing leaves the cursor as it was.
+        expect((await client.get()).cursor).toBe('c1+c2');
+        // An oversized cursor is not stored: the previous one stays.
+        await r.advance(5 * MIN);
+        expect(trigger.events).toHaveLength(4);
         expect((await client.get()).cursor).toBe('c1+c2');
     });
 
