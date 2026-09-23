@@ -6,6 +6,12 @@ settings:
 
 catalogs:
   default:
+    '@aigntiq/conduit':
+      specifier: ^0.1.0
+      version: 0.1.0
+    '@aigntiq/conduit-connectors':
+      specifier: ^0.1.0
+      version: 0.1.0
     '@sigx/actors':
       specifier: ^0.11.0
       version: 0.11.0
@@ -284,6 +290,31 @@ importers:
       '@sigx/runtime-core':
         specifier: 'catalog:'
         version: 1.0.1(@sigx/reactivity@1.0.1)
+      '@sigx/vite':
+        specifier: 'catalog:'
+        version: 1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.0.3
+        version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)
+
+  packages/connectors:
+    dependencies:
+      '@agentic/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aigntiq/conduit':
+        specifier: 'catalog:'
+        version: 0.1.0
+      '@aigntiq/conduit-connectors':
+        specifier: 'catalog:'
+        version: 0.1.0(@aigntiq/conduit@0.1.0)
+      '@sigx/ai':
+        specifier: 'catalog:'
+        version: 0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
+    devDependencies:
       '@sigx/vite':
         specifier: 'catalog:'
         version: 1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
@@ -591,6 +622,16 @@ importers:
         version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)
 
 packages:
+
+  '@aigntiq/conduit-connectors@0.1.0':
+    resolution: {integrity: sha512-Q8XQL/yo93RtQth0O2mtWyWPCckOS6eaBdUK51NnwV2IDsqWuwPVh8ntOOQLLIuVaghfzl2kR6elig8/w5pAog==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      '@aigntiq/conduit': ^0.1.0
+
+  '@aigntiq/conduit@0.1.0':
+    resolution: {integrity: sha512-t1vG4CrJq4o3mo9ULy9ST6O/82vfy5Q0/9Cswt35KNk0t/9n/BE8xsU0o4YK6Jwl0fwABuYMrtYJUcdwKnviZA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
 
   '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.274':
     resolution: {integrity: sha512-B0uAdUIbUhWuybOT5FkhbdsALGNduyaHYo+bEggKBSQS3RFRjgNbX/ah1+IwkmTn4UKDN7AX86DkTEjpj6TSWQ==}
@@ -3339,6 +3380,12 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@aigntiq/conduit-connectors@0.1.0(@aigntiq/conduit@0.1.0)':
+    dependencies:
+      '@aigntiq/conduit': 0.1.0
+
+  '@aigntiq/conduit@0.1.0': {}
 
   '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.274':
     optional: true
