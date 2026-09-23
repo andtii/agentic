@@ -52,7 +52,7 @@
     "@sigx/reactivity": "catalog:",
     "@sigx/runtime-core": "catalog:",
     "@anthropic-ai/sdk": "^0.126.0",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.274",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
     "@github/copilot-sdk": "^1.0.14"
   }
 }

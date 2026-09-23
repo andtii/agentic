@@ -129,8 +129,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtimes
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.274
-        version: 0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
+        specifier: ^0.3.280
+        version: 0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
       '@github/copilot-sdk':
         specifier: ^1.0.14
         version: 1.0.14
@@ -145,7 +145,7 @@ importers:
         version: 0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@sigx/ai-agent-claude-code':
         specifier: 'catalog:'
-        version: 0.2.1(@anthropic-ai/claude-agent-sdk@0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
+        version: 0.2.1(@anthropic-ai/claude-agent-sdk@0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
       '@sigx/ai-agent-node':
         specifier: 'catalog:'
         version: 0.2.1(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
@@ -530,7 +530,7 @@ importers:
         version: 0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@sigx/ai-agent-claude-code':
         specifier: 'catalog:'
-        version: 0.2.1(@anthropic-ai/claude-agent-sdk@0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
+        version: 0.2.1(@anthropic-ai/claude-agent-sdk@0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
       '@sigx/ai-agent-node':
         specifier: 'catalog:'
         version: 0.2.1(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
@@ -542,8 +542,8 @@ importers:
         version: 4.6.5
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: ^0.3.274
-        version: 0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
+        specifier: ^0.3.280
+        version: 0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
       '@anthropic-ai/sdk':
         specifier: ^0.126.0
         version: 0.126.0(zod@4.6.5)
@@ -636,52 +636,52 @@ packages:
     resolution: {integrity: sha512-t1vG4CrJq4o3mo9ULy9ST6O/82vfy5Q0/9Cswt35KNk0t/9n/BE8xsU0o4YK6Jwl0fwABuYMrtYJUcdwKnviZA==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.274':
-    resolution: {integrity: sha512-B0uAdUIbUhWuybOT5FkhbdsALGNduyaHYo+bEggKBSQS3RFRjgNbX/ah1+IwkmTn4UKDN7AX86DkTEjpj6TSWQ==}
+  '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.280':
+    resolution: {integrity: sha512-Yws14X5g5hgDtF565Tld/+dILAhH9QZpundjKMyO3dFasq9miXZlhU0NwXqwTO2xP0jDjJ54zduIiJwkcfcvGw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.274':
-    resolution: {integrity: sha512-l5pp3Z+z2mti0H3y1O0MRbTg/r+MDm0hly4WpoKmZyIZSOrDQR7jhCqS6Ihj3Vvd7CMP9NZ8t6F0oXVBDCM6YQ==}
+  '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.280':
+    resolution: {integrity: sha512-B1eLx/oZ5RL1c3a13nQ4cRUksWyhGcVNS5vbCHnOVu4Pz+dH0moZ+iY8VaE6FvikVAQwFEW6VDU00b6m3tYdsQ==}
     cpu: [x64]
     os: [darwin]
 
-  '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.274':
-    resolution: {integrity: sha512-pNjZQRF3f1O5JwnoifuAD7tSRfk9LSwwBzEPiUHB4sJgatF6hzqyDgTN05hcDx28xg44j0jpKpyVwsjveI/s4g==}
+  '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.280':
+    resolution: {integrity: sha512-uDh+Ggjb36l+jcVgaYxSziGHmBSSR3clqvGlQ0Bgc1v5dLF4igwqZ6ZPW/hS9dArG27fislIOetH1waEgIr+GA==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.274':
-    resolution: {integrity: sha512-kYsmSN6zieDwVS3QZBBay9fxNp+h4t4OXleuk6xWhrUDEQRfRQEFlD7JVWWWjJIiHILnniycOxarwo4VpqTf1Q==}
+  '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.280':
+    resolution: {integrity: sha512-6s96OIvBHT2817hCFLIZ421JBpQnvrmZucpjlWsyCODKmwGsSxiEhlWqK2h5Q7lwS6F7bzeAhqjGvC7FzDl9Rw==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.274':
-    resolution: {integrity: sha512-a9eIkmgJ5sSywHwWJcComogjIMsfHsurckQ85ljPNTUSFguzl/ZvbTXGiWNRK5rHsoNd3amwQf2fVC/vFyv3eg==}
+  '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.280':
+    resolution: {integrity: sha512-IVbIgvi5C0sdLg/p9hpiVvAQ/ikvTKwOOEy5C1aT7w8XLqBgfpJbzzVuk06df1Q0HlILUmf63EKPmq48lbxtqA==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.274':
-    resolution: {integrity: sha512-QLeK9LzTtTdCjCDRYUVRHj1I3U6AfMvpXYI4Ur1s+vrUcad/C20kShS5/kgug+rERU5CNxNA9v0A052rt47ZXQ==}
+  '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.280':
+    resolution: {integrity: sha512-vpPyxYLy+zNc7LwQDWsZf0GZtTYa0PJLxzuv2vK9iV2dG+hrbRNTl35NSKKRR9rMj6RpKz0i2NLyVQ+D4mREgw==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.274':
-    resolution: {integrity: sha512-A5wvZAXL3nhuabIXUcRuoYhuPPdEIt3LoA3jUkVLT3c0H+7SH0rv5bylpM9n+apf7lwLCm2TdMZ6x1Ze1Vzekg==}
+  '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.280':
+    resolution: {integrity: sha512-heTflHwciJF+Hrf7v0J53QBzD+9mxN9gt2VVmEJAN0+ejbPcOcqnGGZHvyc9aZUuGh5INN0ECaiL4Fn1X2vXQQ==}
     cpu: [arm64]
     os: [win32]
 
-  '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.274':
-    resolution: {integrity: sha512-dGcaLfEpV4kwcSijPAIJru+iEiVhHvbBdkyixPyhhf8pniV9B62nUMFFsjNtYL37xIPHxixh2Gsx9/A+Yk4oww==}
+  '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.280':
+    resolution: {integrity: sha512-N+Y1zJb19nx0oPTvzkl/E3ng9AtWGW+K4hySmSHCgYSsgIwfs1YzDj/F5eHDMrxgklTuzFp76TvL3S75z5ge+g==}
     cpu: [x64]
     os: [win32]
 
-  '@anthropic-ai/claude-agent-sdk@0.3.274':
-    resolution: {integrity: sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==}
+  '@anthropic-ai/claude-agent-sdk@0.3.280':
+    resolution: {integrity: sha512-aIQSTKcCJcOgi125GAGQaNZUYgxbEBQwV2Ac+Utp0+gGUjIEWjTqz4B8kXr9XjkcCTYiRUMTDsXPAUfIcBDjnw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       '@anthropic-ai/sdk': '>=0.93.0'
@@ -3390,44 +3390,44 @@ snapshots:
 
   '@aigntiq/conduit@0.1.0': {}
 
-  '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.274':
+  '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.280':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk@0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)':
+  '@anthropic-ai/claude-agent-sdk@0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)':
     dependencies:
       '@anthropic-ai/sdk': 0.126.0(zod@4.6.5)
       '@modelcontextprotocol/sdk': 1.30.0(zod@4.6.5)
       zod: 4.6.5
     optionalDependencies:
-      '@anthropic-ai/claude-agent-sdk-darwin-arm64': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-darwin-x64': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-linux-arm64': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-linux-arm64-musl': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-linux-x64': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-linux-x64-musl': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.274
-      '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.274
+      '@anthropic-ai/claude-agent-sdk-darwin-arm64': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-darwin-x64': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-linux-arm64': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-linux-arm64-musl': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-linux-x64': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-linux-x64-musl': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-win32-arm64': 0.3.280
+      '@anthropic-ai/claude-agent-sdk-win32-x64': 0.3.280
 
   '@anthropic-ai/sdk@0.126.0(zod@4.6.5)':
     dependencies:
@@ -4232,9 +4232,9 @@ snapshots:
       undici: 7.29.0
       vite: 8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)
 
-  '@sigx/ai-agent-claude-code@0.2.1(@anthropic-ai/claude-agent-sdk@0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))':
+  '@sigx/ai-agent-claude-code@0.2.1(@anthropic-ai/claude-agent-sdk@0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5))(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))':
     dependencies:
-      '@anthropic-ai/claude-agent-sdk': 0.3.274(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
+      '@anthropic-ai/claude-agent-sdk': 0.3.280(@anthropic-ai/sdk@0.126.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.0(zod@4.6.5))(zod@4.6.5)
       '@sigx/ai': 0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@sigx/ai-agent': 0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@sigx/ai-agent-node': 0.2.1(@sigx/ai-agent@0.2.1(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(@sigx/ai@0.2.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))
