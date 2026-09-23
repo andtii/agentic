@@ -83,6 +83,13 @@ export interface OpenedRuntimeSession<S = unknown> {
 export interface RuntimeDriver<S = unknown, P = unknown> {
     readonly runtime: RuntimeId;
     inspect(env: LocalEnvironment): Promise<EnvironmentInspection>;
+    /**
+     * The runtime's capabilities without an environment (#541): what the daemon's `hello` reports for a runtime no
+     * environment runs on yet, so the platform can offer it for the first one. An environment's own `inspect` report
+     * wins for its runtime. A driver that cannot run (a harness that is not installed), or whose capabilities depend
+     * on the environment, does not implement it; its runtime is then reported only once an environment runs on it.
+     */
+    report?(): CapabilityReport;
     open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<P>): Promise<OpenedRuntimeSession<S>>;
     doctor(envs: readonly LocalEnvironment[]): Promise<DoctorReport>;
     /** The models the environment's account may use (#450), as it reports them; `null` when it cannot say. */

@@ -33,7 +33,13 @@ export interface PluginRecord extends PluginState {
     readonly seenScopes?: readonly PermissionScope[];
 }
 
-export type ConnectorTransport = 'streamable-http' | 'stdio';
+/**
+ * How a connector is opened: an MCP server over Streamable HTTP (on the
+ * platform) or stdio (on a machine), or a conduit connector (#530, decisions
+ * 2026-09-23) that the platform's opener runs itself over the account the
+ * owner connected.
+ */
+export type ConnectorTransport = 'streamable-http' | 'stdio' | 'conduit';
 
 export interface ConnectorStatus {
     readonly state: 'unknown' | 'ok' | 'error';
@@ -56,9 +62,10 @@ export interface ConnectorAuth {
 }
 
 /**
- * A configured MCP server (architecture §9). `pluginId` names the manifest it
- * was registered under — by convention the same id (`mcpConnectorSetup`), which
- * is also what an agent's `connectors[]` names.
+ * A configured connector (architecture §9): an MCP server, or a conduit
+ * connector (#530). `pluginId` names the manifest it was registered under — by
+ * convention the same id (`mcpConnectorSetup`), which is also what an agent's
+ * `connectors[]` names.
  */
 export interface ConnectorRecord {
     readonly id: string;
@@ -66,6 +73,10 @@ export interface ConnectorRecord {
     readonly transport: ConnectorTransport;
     /** Streamable HTTP endpoint. */
     readonly url?: string;
+    /** Conduit: the conduit connector id (`gmail`). Required on a conduit record, which has no `url`, `command` or `auth`. */
+    readonly connector?: string;
+    /** Conduit: the conduit account id, set once the owner has connected — an id only, never a credential. */
+    readonly account?: string;
     /** Stdio: the executable the daemon spawns, and where. */
     readonly command?: string;
     readonly args?: readonly string[];
@@ -151,6 +162,9 @@ export interface GateConnector {
     readonly transport?: ConnectorTransport;
     /** Streamable HTTP endpoint: the plugin's `config.url` when set, else the record's. */
     readonly url?: string;
+    /** Conduit: the conduit connector id and, once connected, the account id — the record's, never a credential. */
+    readonly connector?: string;
+    readonly account?: string;
     readonly command?: string;
     readonly args?: readonly string[];
     /** Stdio: the plugin's `config.cwd`, where the daemon runs the server (#280). */

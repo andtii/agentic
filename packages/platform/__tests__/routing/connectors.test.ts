@@ -18,8 +18,8 @@ import { mockModel, type MockModel } from '@sigx/ai/testing';
 import { AgentActor, agentKey } from '../../src/agent/index';
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { generateWorkspaceKek, importWorkspaceKek } from '../../src/auth/index';
-import { defineRegistry, registryKey } from '../../src/registry/index';
-import { anthropicApiRuntime, connectorCategory, createSessionFactory, defineRoutingActor, routingKey, type ConnectorOpener, type RuntimeCatalogue } from '../../src/routing/index';
+import { defineRegistry, registryKey, type ConnectorStatus, type GateConnector } from '../../src/registry/index';
+import { anthropicApiRuntime, connectorCategory, createSessionFactory, openSessionConnectors, defineRoutingActor, routingKey, type ConnectorOpenInput, type ConnectorOpener, type RuntimeCatalogue } from '../../src/routing/index';
 import { defineSessionActor } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
@@ -87,7 +87,7 @@ const scripted = (tool = 'acme__echo') =>
 async function start(tools: readonly FakeTool[] = [{ name: 'echo' }], options: { token?: string; down?: boolean; tool?: string } = {}): Promise<void> {
     server = fakeServer(tools, { token: TOKEN, ...options });
     model = scripted(options.tool);
-    const opener: ConnectorOpener = (input) => openMcpConnector({ ...input, fetch: server.fetch, timeoutMs: 2_000 });
+    const opener: ConnectorOpener = (input) => (input.kind === 'mcp' ? openMcpConnector({ ...input, fetch: server.fetch, timeoutMs: 2_000 }) : Promise.reject(new Error(`unexpected ${input.kind}`)));
     const runtimes: RuntimeCatalogue = { [ANTHROPIC_API_PLUGIN_ID]: anthropicApiRuntime({ routing: () => Routing, sessions: () => Session, model, connectors: opener }) };
     Session = defineSessionActor({ factory: createSessionFactory({ routing: () => Routing, sessions: () => Session, registry: () => Registry, runtimes }) });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session, registry: () => Registry, runtimes });
@@ -251,5 +251,59 @@ describe('a connector that cannot be reached', () => {
         await settled('t1');
         expect((await task('t1').get()).status).toBe('completed');
         expect(model.requests[0]!.system).toContain('- acme: no such connector is set up in this workspace');
+    });
+});
+
+describe('a conduit connector on a local session (#530)', () => {
+    const gmail = (over: Partial<GateConnector> = {}): GateConnector => ({ id: 'gmail', state: 'ready', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' }, ...over });
+    const harness = () => {
+        const inputs: ConnectorOpenInput[] = [];
+        const secrets: string[] = [];
+        const reports: { id: string; status: ConnectorStatus; tools?: readonly string[] }[] = [];
+        let closed = 0;
+        const opener: ConnectorOpener = async (input) => {
+            inputs.push(input);
+            return { tools: [], toolNames: ['gmail__search'], close: async () => void closed++ };
+        };
+        return {
+            inputs,
+            secrets,
+            reports,
+            closed: () => closed,
+            open: (connectors: readonly GateConnector[], o: ConnectorOpener = opener) =>
+                openSessionConnectors({
+                    connectors,
+                    opener: o,
+                    secret: async (name) => (secrets.push(name), undefined),
+                    report: async (id, status, tools) => void reports.push({ id, status, ...(tools ? { tools } : {}) })
+                })
+        };
+    };
+
+    it('a connected one goes to the opener as { kind: conduit, … } with ids only; no secret is opened', async () => {
+        const h = harness();
+        const opened = await h.open([gmail()]);
+        expect(h.inputs).toEqual([{ kind: 'conduit', id: 'gmail', pluginId: 'gmail', connector: 'gmail', account: 'acct_1' }]);
+        expect(h.secrets).toEqual([]);
+        expect(opened.unavailable).toEqual([]);
+        expect(h.reports).toEqual([{ id: 'gmail', status: { state: 'ok' }, tools: ['gmail__search'] }]);
+        await opened.close();
+        expect(h.closed()).toBe(1);
+    });
+
+    it('one not connected yet is left out, with the reason and where to connect it; the opener is not called', async () => {
+        const h = harness();
+        const opened = await h.open([gmail({ account: undefined })]);
+        expect(h.inputs).toEqual([]);
+        expect(opened.unavailable).toEqual([{ id: 'gmail', reason: 'it is not connected yet (/plugins/gmail)' }]);
+    });
+
+    it('an opener failure never fails the session: left out, recorded on the connector', async () => {
+        const h = harness();
+        const opened = await h.open([gmail()], async () => {
+            throw new Error('needs reauth');
+        });
+        expect(opened.unavailable).toEqual([{ id: 'gmail', reason: 'it could not be opened: needs reauth' }]);
+        expect(h.reports).toEqual([{ id: 'gmail', status: { state: 'error', error: 'needs reauth' } }]);
     });
 });

@@ -2,14 +2,27 @@
 // @vitest-environment node
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, type EnvironmentId, type FsListResult, type FsLocateResult, type FsOp, type LocalEnvironment } from '@agentic/core';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, type FsOptions, type FsOutcome } from '../src/fs';
+import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, withinRoots, type FsOptions, type FsOutcome } from '../src/fs';
 
 const hasGit = spawnSync('git', ['--version'], { windowsHide: true }).status === 0;
 /** A directory link: a junction on Windows (no privilege needed), a symlink elsewhere. */
 const link = (target: string, path: string) => symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+/** Does the volume holding `dir` fold case? A filesystem property: most macOS and Windows volumes do, most Linux ones do not. */
+async function foldsCase(dir: string): Promise<boolean> {
+    const probe = join(dir, 'case-probe');
+    await mkdir(probe, { recursive: true });
+    try {
+        await stat(probe.toUpperCase());
+        return true;
+    } catch (e) {
+        // Only "no such path" answers the question — anything else is a real failure.
+        if (['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '')) return false;
+        throw e;
+    }
+}
 
 let base: string;
 let root: string;
@@ -259,12 +272,20 @@ describe('fs locate (#331)', () => {
         const logger = { debug: (msg: string, data?: unknown) => lines.push([msg, data]), info() {}, warn() {}, error() {} };
         expect((await located(ORIGIN, undefined, { logger })).matches).toHaveLength(1);
         expect(lines).toEqual([['fs: request', { environment: 'env_a', op: 'locate', origin: ORIGIN }]]);
+        // The platform rule itself, lexically — no filesystem in the way. `path.relative` folds case
+        // on Windows whatever platform is injected, so the case-sensitive half only runs off it.
+        expect(withinRoots(join(root, 'a'), [root.toUpperCase()], 'win32')).toBe(true);
+        if (process.platform !== 'win32') expect(withinRoots(join(root, 'a'), [root.toUpperCase()], 'linux')).toBe(false);
         if (process.platform === 'win32') {
             environments = [{ ...environments[0]!, cwdRoots: [root.toUpperCase()] }];
             expect((await located(ORIGIN, undefined, { platform: 'win32' })).matches.map((m) => m.path)).toEqual([join(root.toUpperCase(), 'a')]);
         } else {
+            // Off Windows the rule is case-sensitive, but `locate` resolves the root with `realpath`
+            // first: a case-folding volume (macOS by default) finds the uppercased root anyway (#357).
+            const folds = await foldsCase(base);
             environments = [{ ...environments[0]!, cwdRoots: [root.toUpperCase()] }];
-            expect((await located(ORIGIN, undefined, { platform: 'linux' })).matches).toEqual([]);
+            const matches = (await located(ORIGIN, undefined, { platform: 'linux' })).matches.map((m) => m.path);
+            expect(matches).toEqual(folds ? [join(root.toUpperCase(), 'a')] : []);
         }
     });
 });
