@@ -118,6 +118,7 @@ export function copilotCliDriver(options: CopilotCliDriverOptions = {}): Copilot
         clientFor,
         homeOf,
         inspect,
+        report: () => report(),
 
         async open(env: LocalEnvironment, spec: OpenSpec, ctx: RuntimeOpenContext<Policy>): Promise<OpenedRuntimeSession<AgentSession>> {
             const agent = agentFor(env);
