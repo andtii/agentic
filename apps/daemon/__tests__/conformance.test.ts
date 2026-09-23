@@ -1,7 +1,8 @@
 /** `daemonConformance` against the real daemon: real WebSockets, NDJSON logs on disk, a scripted runtime. */
 // @vitest-environment node
 import type { EnvironmentDescriptor, EnvironmentId, LocalEnvironment, MachinePolicy, ReleaseAsset, RuntimeId, SessionId } from '@agentic/core';
-import { daemonConformance, type ConformanceDaemon, type DaemonConformanceHarness } from '@agentic/daemon-protocol/testing';
+import { daemonConformance, type ConformanceDaemon, type ConformanceFiles, type DaemonConformanceHarness } from '@agentic/daemon-protocol/testing';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -46,6 +47,23 @@ const releases = fakeReleases();
 let harnessTarget: { readonly runtime: RuntimeId; readonly asset: ReleaseAsset } | undefined;
 /** The daemon's configuration folder of the daemon under test (#355): a policy must refuse it, a listing never show it. */
 let protectedFolder: string | undefined;
+/** The session folders the `files` cases read (#561): a real git repo with one committed-then-changed file, and a plain folder. */
+let filesFolders: ConformanceFiles | undefined;
+const FILES_TEXT = 'changed by the session\n';
+/** A real git repo at `dir` whose `src/app.txt` was committed, then changed on disk. */
+async function seedRepo(dir: string): Promise<void> {
+    await mkdir(join(dir, 'src'), { recursive: true });
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' });
+    git('init', '-q');
+    git('config', 'user.email', 'conformance@example.test');
+    git('config', 'user.name', 'conformance');
+    git('config', 'core.autocrlf', 'false');
+    git('config', 'commit.gpgsign', 'false');
+    await writeFile(join(dir, 'src', 'app.txt'), 'committed\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    await writeFile(join(dir, 'src', 'app.txt'), FILES_TEXT);
+}
 /** How many lines the daemon under test's log holds (#481). */
 const LOG_LINES = 12;
 /** The sign-in `login-relay` relays (#484): a fake Claude Code CLI that prints this URL and takes this code on stdin. */
@@ -77,7 +95,7 @@ const harness: DaemonConformanceHarness = {
     // exits 75 with nothing staged); the log is a real file of `LOG_LINES` lines under the state dir, tailed through `tailLog`.
     // `login` (#484): the real relay (`spawnLoginRelay`, the Claude parser) over a fake CLI with piped stdio; `done` flips the
     // scripted driver's account to `ok` before the daemon re-inspects, so the `env` after `done` is the real re-inspect.
-    features: ['env', 'gap', 'raw', 'fs', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log', 'login'],
+    features: ['env', 'gap', 'raw', 'fs', 'files', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log', 'login'],
     logLines: LOG_LINES,
     loginAction: { kind: 'open-url', url: LOGIN_URL, expectsPaste: true },
     loginAnswer: LOGIN_ANSWER,
@@ -88,6 +106,10 @@ const harness: DaemonConformanceHarness = {
     },
     get protectedFolder() {
         return protectedFolder;
+    },
+    // `files` (#561): a real git repo under the work root, changed after its commit, beside a folder under no version control.
+    get files() {
+        return filesFolders;
     },
     async start(script): Promise<ConformanceDaemon> {
         const dir = await mkdtemp(join(tmpdir(), 'agentic-daemon-conf-'));
@@ -101,6 +123,10 @@ const harness: DaemonConformanceHarness = {
         await writeFile(join(dir, 'work', 'agentic', '.git', 'HEAD'), 'ref: refs/heads/main\n');
         await writeFile(join(dir, 'work', 'agentic', '.git', 'config'), `[remote "origin"]\n\turl = ${KNOWN_ORIGIN}\n`);
         const work = await realpath(join(dir, 'work'));
+        // `files` (#561): the session folder is a real repo; `plain` is under no version control.
+        await seedRepo(join(work, 'project'));
+        await mkdir(join(work, 'plain'), { recursive: true });
+        filesFolders = { root: join(work, 'project'), file: { path: 'src/app.txt', text: FILES_TEXT }, changed: true, plain: join(work, 'plain') };
         let relay = await startRelay();
         const driver = namingDriver(script);
         let log: NdjsonEventLog;
