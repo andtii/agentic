@@ -31,15 +31,15 @@
  * (`feeds.ts`), so it carries the turn running now and never replays the
  * session's past — every earlier turn's final message is already an entry.
  */
-import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
-import { Link, useRouter } from '@sigx/router';
+import { component, effect, onMounted, onUnmounted, signal, watch, type JSXElement } from 'sigx';
+import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
-import { createId, isChatFilePart, type AgentId, type ChatFilePart, type ChatId, type MachineId, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
+import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import type { IndexedEntry } from '@agentic/platform';
-import type { Decision } from '@sigx/ai-agent';
-import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
+import type { Decision, ToolPartState } from '@sigx/ai-agent';
+import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -56,6 +56,8 @@ import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
 import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
+import { queryOf } from '../session/files';
+import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
 import { NewChatDialog } from './NewChatDialog';
 import { markSeen } from './read-marks';
 import { useProjects } from '../projects/live';
@@ -106,6 +108,37 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The composer's chips (#207): one per file taken, until it is sent or removed.
     const uploads = signal<{ list: Upload[] }>({ list: [] });
     let uploadSeq = 0;
+
+    // "Mention in chat" from a session's Files (#565): `?file=<agentic-session:// uri>` puts `@file:<path>` into the
+    // composer once and remembers which session's folder the path is in, so the message carries the reference.
+    const route = useRoute();
+    const mention = signal<{ insert: ComposerInsert | null; sessions: Record<string, string> }>({ insert: null, sessions: {} });
+    let mentionSeq = 0;
+    onMounted(() => {
+        const stopMention = watch(
+            () => queryOf(route.query.file),
+            (value) => {
+                const m = mentionOfQuery(value);
+                if (!m) return;
+                mention.sessions = { ...mention.sessions, [m.path]: m.sessionId };
+                mention.insert = { id: ++mentionSeq, text: `${fileToken(m.path)} ` };
+                // Consumed: a reload or a later visit does not insert it again.
+                void router.replace(`/chats/${encodeURIComponent(props.id)}`);
+            },
+            { immediate: true }
+        );
+        onUnmounted(() => stopMention.stop());
+    });
+    /** The `resource` parts for the `@file:` tokens of a message whose session is known. */
+    const fileReferences = (text: string): PromptPart[] => fileTokensIn(text).flatMap((path) => {
+        const sessionId = mention.sessions[path];
+        return sessionId ? [{ type: 'resource' as const, uri: sessionFileUri(sessionId, path) }] : [];
+    });
+    /** "View diff" on a call that wrote a file (#565): which session made the call, and what its runtime says it wrote. */
+    const toolLinks = (part: ToolPartState) => {
+        const feed = feeds.list.find((f) => f.transcript.messages.some((m) => m.parts.some((p) => p.type === 'tool' && p.callId === part.callId)));
+        return feed ? viewDiffLinks(directory.lookup(feed.agentId).environment.runtime, feed.sessionId, part) : undefined;
+    };
 
     const session = (sessionId: string): SessionActorClient => actor(defs.Session, sessionKeyOf(viewer.workspaceId!, sessionId)) as unknown as SessionActorClient;
     const fail = (e: unknown): void => { st.error = e instanceof Error ? e.message : String(e); };
@@ -226,7 +259,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         if (!ws || !s || st.sending) return;
         // The chips that go with this message: every ready one (the composer holds Send while one uploads).
         const sent = reshare ? [] : uploads.list.filter((c) => c.status === 'ready' && c.part);
-        const attachments = reshare ?? readyParts(sent);
+        const attachments: readonly PromptPart[] = reshare ?? [...readyParts(sent), ...fileReferences(text)];
         if (!text && !attachments.length) return;
         const k = chatKeyOf(ws, props.id);
         const members = membersOf(s);
@@ -435,6 +468,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             <Thread
                                 transcript={transcript}
                                 describe={(m) => authors.value[m.id]}
+                                toolLinks={toolLinks}
                                 hasEarlier={older.next !== null && older.next !== undefined}
                                 onEarlier={() => { void loadOlder(); }}
                                 onRespond={respond}
@@ -478,6 +512,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             attachments={uploads.list}
                             onFiles={(files: File[]) => attach(files)}
                             onRemoveAttachment={(id: string) => dropUploads(new Set([id]))}
+                            {...(mention.insert ? { insert: mention.insert } : {})}
+                            onDraft={(draft: string) => { st.draft = draft; }}
                             onSend={(text: string) => { void send(text); }}
                         />
                     </div>

@@ -22,8 +22,11 @@ export type MachineFilesPort = MachineFilesClient & { changesSnapshot?(environme
 /** The questions asked in the mock workspace, newest last — it has no chat to post them to. */
 export const mockQuestions: LineQuestion[] = [];
 
-/** A mock session's folder: the fixture behind its `cwd`, or none for a platform session. */
-export function mockSessionFiles(v: MockSessionView): SessionFiles {
+/**
+ * A mock session's folder: the fixture behind its `cwd`, or none for a platform session. `hooks` are the chat
+ * hooks (#565, `mockChatHooks`); the Transcript page's bar needs none. A question is also kept in `mockQuestions`.
+ */
+export function mockSessionFiles(v: MockSessionView, hooks: Pick<SessionFiles, 'ask' | 'mention' | 'fileActions'> = {}): SessionFiles {
     const folder = mockSessionFolder(v.cwd);
     const chat = v.chatId ? chatSummary(v.chatId) : undefined;
     return {
@@ -36,7 +39,11 @@ export function mockSessionFiles(v: MockSessionView): SessionFiles {
         online: v.machine.online,
         ...(chat ? { chat: { id: chat.id, title: chat.title } } : {}),
         time: formatTime,
-        ask: async (q) => { mockQuestions.push(q); }
+        ...hooks,
+        ask: async (q) => {
+            mockQuestions.push(q);
+            await hooks.ask?.(q);
+        }
     };
 }
 
@@ -58,7 +65,7 @@ export function liveSessionFiles(
     info: SessionInfo | null | undefined,
     machine: MachineView | null | undefined,
     client: ((machineId: string) => MachineFilesPort) | null,
-    extra: { base?: string; chat?: { id: string; title: string }; time?: (ms: number) => string } = {}
+    extra: { base?: string; chat?: { id: string; title: string }; time?: (ms: number) => string; hooks?: Pick<SessionFiles, 'ask' | 'mention' | 'fileActions'> } = {}
 ): SessionFiles | null {
     const spec = info?.spec;
     if (!info || !spec) return null;
@@ -77,7 +84,8 @@ export function liveSessionFiles(
         online,
         ...(c?.changesSnapshot && env ? { snapshot: (scope: ChangeScope) => c.changesSnapshot!(env, cwd, scope) } : {}),
         ...(extra.chat ? { chat: extra.chat } : {}),
-        ...(extra.time ? { time: extra.time } : {})
+        ...(extra.time ? { time: extra.time } : {}),
+        ...extra.hooks
     };
 }
 

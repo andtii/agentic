@@ -38,6 +38,15 @@ export const OUTPUT_LOG = 200;
 /** What the page knows about a call that the part does not — `3.4s`, `+18 −6`, `t_8f2c`. */
 export type ToolMetaFn = (part: ToolPartState) => string | undefined;
 
+/** A page's link about a call, in its header — "View diff" to the file an edit touched. */
+export interface ToolLink {
+    readonly label: string;
+    readonly href: string;
+}
+
+/** The links a page puts on a call's card; none by default. */
+export type ToolLinksFn = (part: ToolPartState) => readonly ToolLink[] | undefined;
+
 /** What the page knows about a request that the transcript does not: the rule it matched, who asked, where it runs, the delegation path, a settled decision. */
 export type ApprovalContext = Pick<ApprovalPromptProps, 'toolName' | 'input' | 'rule' | 'requestedBy' | 'environment' | 'via' | 'decision' | 'compact'>;
 /** A request's context as the page describes it: the approval rows, and for a question whether its asker stopped waiting (#285). */
@@ -68,6 +77,8 @@ export type ToolCallProps =
     & Define.Prop<'meta', string, false>
     /** The session log an output past 200 lines links to. */
     & Define.Prop<'logHref', string, false>
+    /** The page's links about this call ("View diff"), in the header before the meta. */
+    & Define.Prop<'links', readonly ToolLink[], false>
     & Define.Prop<'onRespond', RespondFn, false>
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>;
@@ -220,6 +231,11 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                             {sig}
                         </span>
                     )}
+                    {props.links?.map((l) => (
+                        <a key={l.href} data-scope={SCOPE} data-part="link" href={l.href}>
+                            {l.label}
+                        </a>
+                    ))}
                     {meta && <span data-scope={SCOPE} data-part="meta">{meta}</span>}
                     <span data-scope={SCOPE} data-part="status" title={view.label}>
                         <StatusPill status={PILL[view.phase]} />

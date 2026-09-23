@@ -24,6 +24,12 @@
  * flag — zero's own `FileUpload` spells drag-over the same way, and the
  * flag vocabulary is closed (no `data-dragging`).
  *
+ * A host puts text into the draft with `insert` (#565: "Mention in chat"
+ * drops `@file:<path>` in): each new `id` appends its `text` to the draft,
+ * spaced, with the caret after it — also on mount, so a page opened with
+ * a prefill starts with it. The composer still owns the draft; `draft`
+ * reports every change an insert makes, as typing does through `input`.
+ *
  * Keys are read on the FORM: zero's `Textarea.Textarea` declares no key or
  * input handlers of its own (andtii/zero-wip#481), and the events
  * bubble to the root either way — one listener, filtered on the target.
@@ -32,6 +38,7 @@
  * are synced onto the element after every render.
  */
 import { component, onMounted, onUpdated, type Define } from '@sigx/runtime-core';
+import { watch } from '@sigx/reactivity';
 import { Textarea, dataAttr } from '@sigx/zero';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { Button } from '../kit/Button.js';
@@ -77,6 +84,18 @@ export interface Recipient {
     readonly role?: string;
 }
 
+/** Text a host puts into the draft; a new `id` inserts again (the same text twice is two inserts). */
+export interface ComposerInsert {
+    readonly id: string | number;
+    readonly text: string;
+}
+
+/** The draft with `text` appended — a space between when the draft does not already end in one. */
+export function appendToDraft(draft: string, text: string): string {
+    if (!text) return draft;
+    return draft && !/\s$/.test(draft) ? `${draft} ${text}` : `${draft}${text}`;
+}
+
 /** The hint when nobody would answer. */
 export const NOBODY_HINT = 'nobody will answer';
 
@@ -91,6 +110,8 @@ export type ComposerProps =
     & Define.Event<'removeAttachment', string>
     /** The attach button was pressed; the composer opens its own picker as well. */
     & Define.Event<'attach'>
+    /** The draft after an `insert` changed it (typing reports through the DOM's `input` event). */
+    & Define.Event<'draft', string>
     /** A turn is running or awaiting. */
     & Define.Prop<'busy', boolean, false>
     /** `capabilities.steer` — a prompt during a turn lands inside it. */
@@ -109,6 +130,8 @@ export type ComposerProps =
     & Define.Prop<'attachments', readonly Attachment[], false>
     /** The picker's `accept` filter (`image/*,.pdf`); anything by default. */
     & Define.Prop<'accept', string, false>
+    /** Text to put into the draft (`@file:<path> `); each new `id` inserts once. */
+    & Define.Prop<'insert', ComposerInsert, false>
     /** Autogrow bounds in rows. Default 1–8. */
     & Define.Prop<'minRows', number, false>
     & Define.Prop<'maxRows', number, false>;
@@ -219,6 +242,31 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
         const el = textarea();
         if (el) queueMicrotask(() => el.setSelectionRange(next.caret, next.caret));
     };
+
+    // A host's insert: appended, caret after it, focus in the box; the host hears the new draft.
+    let insertedId: string | number | undefined;
+    watch(
+        () => props.insert,
+        (insert) => {
+            if (!insert || insert.id === insertedId) return;
+            insertedId = insert.id;
+            const text = insert.text;
+            if (!text) return;
+            st.draft = appendToDraft(st.draft, text);
+            st.caret = st.draft.length;
+            st.dismissed = true;
+            emit('draft', st.draft);
+            const el = textarea();
+            if (el) {
+                queueMicrotask(() => {
+                    // The page arrived with the insert: focus the box without scrolling the page to it.
+                    el.focus({ preventScroll: true });
+                    el.setSelectionRange(st.caret, st.caret);
+                });
+            }
+        },
+        { immediate: true }
+    );
 
     const onInput = (e: Event): void => {
         const el = e.target as HTMLTextAreaElement | null;

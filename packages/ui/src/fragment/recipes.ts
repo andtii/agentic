@@ -266,8 +266,13 @@ const toolCall: RecipeInput = {
                 flex: '1 1 auto'
             }
         },
-        meta: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap', flexShrink: '0', marginInlineStart: 'auto' } },
-        status: { base: { display: 'inline-flex', flexShrink: '0', marginInlineStart: 'auto' }, selectors: { '[data-part="meta"] + &': { marginInlineStart: '0' } } },
+        meta: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap', flexShrink: '0', marginInlineStart: 'auto' }, selectors: { '[data-part="link"] ~ &': { marginInlineStart: '0' } } },
+        // "View diff": pushed right like the meta; whatever follows it keeps its place.
+        link: {
+            base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--color-primary)', whiteSpace: 'nowrap', flexShrink: '0', marginInlineStart: 'auto' },
+            selectors: { '&:hover': { color: linkHover }, '[data-part="link"] ~ &': { marginInlineStart: '0' } }
+        },
+        status: { base: { display: 'inline-flex', flexShrink: '0', marginInlineStart: 'auto' }, selectors: { '[data-part="meta"] + &': { marginInlineStart: '0' }, '[data-part="link"] ~ &': { marginInlineStart: '0' } } },
         input: {
             base: { fontFamily: mono, fontSize: 'var(--text-sm)', color: textMuted },
             states: { open: { color: 'var(--color-base-content)' }, closed: { opacity: '0.9' } },

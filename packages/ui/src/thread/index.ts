@@ -13,7 +13,7 @@ export type { ThreadProps, DescribeFn } from './Thread.js';
 export { Message, Message as AiMessage, authorOf } from './Message.js';
 export type { MessageProps, MessageAuthor } from './Message.js';
 export { ToolCall, ToolCall as AiToolCall, toolIcon, OUTPUT_FOLD, OUTPUT_LOG } from './ToolCall.js';
-export type { ToolCallProps, ThreadContextProps, ToolMetaFn, ApprovalContext, RequestContext, DescribeRequestFn } from './ToolCall.js';
+export type { ToolCallProps, ThreadContextProps, ToolMetaFn, ToolLink, ToolLinksFn, ApprovalContext, RequestContext, DescribeRequestFn } from './ToolCall.js';
 export { Reasoning, Reasoning as AiReasoning, reasoningSummary } from './Reasoning.js';
 export type { ReasoningProps } from './Reasoning.js';
 export { ApprovalPrompt, ApprovalPrompt as AiApproval, DENY_MESSAGE, EXIT_PLAN_MODE_TOOL, KEEP_PLANNING_MESSAGE, decisionText, planOf } from './ApprovalPrompt.js';

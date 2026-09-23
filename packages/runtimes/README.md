@@ -80,6 +80,10 @@ Both are normalized to 0..1. Only normalized snapshots leave the machine. Record
 
 `platformTools(ports)` gives all nine; `grantedPlatformTools(ports, grants)` the ones a config grants.
 
+## Files a tool call wrote (`src/touches.ts`, #565)
+
+`filesTouched(runtime, call)` → `FileTouch[]` (`{ path, line? }`, the path as the call gave it) for a `{ name, input }` — a transcript's tool part or a `tool-call` event. Each runtime's extractor knows its own tool names; `claude-code` is built in (`claudeCodeFileTouches`: `file_path` of Edit, MultiEdit and Write, `notebook_path` of NotebookEdit). `registerFileTouches(runtime, extractor)` adds or replaces one and returns the undo. A runtime without an extractor touches nothing. Pure and edge-safe: the web app's "View diff" links and "Edited by" lines read it.
+
 ## Plugin manifests (`src/plugins.ts`, #228)
 
 Each runtime ships a `PluginManifest` (PLG-02) for the composition root's catalogue; nothing here registers one. A runtime plugin's id IS its `RuntimeId` — the Registry finds an agent's dependency by `execution.runtime === manifest.id`.
