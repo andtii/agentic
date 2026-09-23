@@ -1556,10 +1556,19 @@ export function defineMachineActor(ports: MachinePorts) {
                         // A local drift after convergence (`policy off` on the machine) gets one request; a refused one holds (#480).
                         await reconcilePolicy('env');
                         return;
-                    case 'heartbeat':
+                    case 'heartbeat': {
+                        // Back from a silent spell on the same socket (#524): the heartbeat window told the router it went
+                        // offline, so it hears the return as it hears a `hello` — or its routes wait `machine-offline` for good.
+                        const back = !s.online;
                         s.lastSeen = now();
                         s.online = true;
+                        if (back) {
+                            // Offline and idle, the liveness reminder was let go: re-arm it, or the next silent spell goes unseen.
+                            await armLiveness();
+                            await notify((r) => r.machineOnline(machineId));
+                        }
                         return;
+                    }
                     case 'pong':
                         s.lastSeen = now();
                         return;
@@ -1742,11 +1751,14 @@ export function defineMachineActor(ports: MachinePorts) {
                 async heartbeat(active: readonly SessionId[] = []): Promise<void> {
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
+                    const back = !s.online;
                     s.lastSeen = now();
                     s.online = true;
                     void active;
                     await armLiveness();
                     await ctx.save();
+                    // As the `heartbeat` frame (#524): a return from the heartbeat window's offline reaches the router.
+                    if (back) await notify((r) => r.machineOnline(machineId));
                 },
 
                 /**

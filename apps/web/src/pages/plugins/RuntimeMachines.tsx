@@ -3,7 +3,9 @@
  * PLG-02, PLG-09): every paired machine, and whether it has the runtime's
  * harness (at which version, with a newer one waiting), lacks it, or has a
  * broken one — each linking to that machine's "Runtimes on this machine"
- * card, where it is installed, updated or removed. The live section reads
+ * card, where it is installed, updated or removed — and, once installed, to
+ * its environments, where one on the runtime is added and signed in (#527).
+ * The live section reads
  * the Workspace's machine index and each machine's `get` live.
  */
 import { component, type Define, type JSXElement } from 'sigx';
@@ -24,6 +26,8 @@ export const RuntimeMachineRow = component<Define.Prop<'machine', RuntimeMachine
             <Link to={`/machines/${m.machineId}#runtimes`} class="ag-ref">{m.name}</Link>
             <StatusPill status={m.state} label={RUNTIME_MACHINE_TEXT[m.state].toUpperCase()} tone={TONE[m.state]} />
             <span data-runtime-machine-version>{runtimeMachineLine(m)}</span>
+            {/* Installed: what makes the runtime usable is an environment on it, signed in (#527). */}
+            {m.state === 'has' ? <span data-runtime-machine-env><Link to={`/machines/${m.machineId}#environments`} class="ag-ref">Add an environment</Link></span> : null}
         </li>
     );
 });
@@ -34,7 +38,10 @@ export const RuntimeMachines = component<Define.Prop<'name', string, true> & Def
         <div data-label-row><Label>Machines</Label><span data-label-aside>where {props.name} is installed</span></div>
         {props.empty
             ? <p data-card-text>No machine is paired yet. Pair one from the Machines page; {props.name} is installed on it from its page.</p>
-            : <ul data-runtime-machine-list>{slots.default?.()}</ul>}
+            : <>
+                <p data-card-text>Install {props.name} on a machine, add an environment that runs on it, then sign that environment in.</p>
+                <ul data-runtime-machine-list>{slots.default?.()}</ul>
+            </>}
     </section>
 ));
 

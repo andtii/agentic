@@ -16,7 +16,7 @@ import { AgentActor, agentKey } from '../../src/agent/index';
 import { capturingAuditPort } from '../../src/audit/index';
 import { Chat } from '../../src/chat/index';
 import { workspaceKey } from '../../src/auth/index';
-import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort, type ToolCallPort } from '../../src/machine/index';
+import { DEFAULT_HEARTBEAT_WINDOW_MS, defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort, type ToolCallPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { defineRoutingActor, MACHINE_LOST_MS, routingKey } from '../../src/routing/index';
 import { defineSessionActor, type CommandSink } from '../../src/session/index';
@@ -256,6 +256,35 @@ describe('a machine offline under a running turn (#366)', () => {
         expect(await task('t1').get()).toMatchObject({ status: 'completed', sessionId: sid });
         expect(ofKind('session.interrupted')).toEqual([]);
         expect(ofKind('task.machine-lost')).toEqual([]);
+    });
+
+    it('silent past the heartbeat window on an open socket: the task waits machine-offline, and the next heartbeat brings it back — never machine-lost (#524)', async () => {
+        await app.stop();
+        await start(true);
+        const { m1, sid } = await running();
+        // The socket stays open; the daemon just goes quiet (a Mac asleep, a network blip) past the heartbeat window.
+        await advance(DEFAULT_HEARTBEAT_WINDOW_MS + TICK);
+        await online(m1, false);
+        await until(async () => (await task('t1').get()).wait?.kind === 'machine-offline', 'the task to wait on the machine');
+        expect((await route('t1'))?.offlineSince).toBeDefined();
+
+        // A heartbeat on the same socket — no new hello: the router hears the machine is back.
+        expect(await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'heartbeat', at: Date.now(), active: [sid] }))).toMatchObject({ ok: true });
+        await online(m1);
+        await until(async () => (await task('t1').get()).status === 'active', 'the task to go on');
+        expect((await route('t1'))?.offlineSince).toBeUndefined();
+
+        // A day later nothing was lost: the route no longer counts as offline.
+        await advance(MACHINE_LOST_MS + TICK);
+        expect(ofKind('task.machine-lost')).toEqual([]);
+        release();
+        await settled('t1');
+        expect(await task('t1').get()).toMatchObject({ status: 'completed', sessionId: sid });
+
+        // The liveness watch is armed again: a second silent spell is seen like the first.
+        await machine(m1, asMachine(m1)).socketMessage(JSON.stringify({ v: 1, t: 'heartbeat', at: Date.now(), active: [] }));
+        await advance(DEFAULT_HEARTBEAT_WINDOW_MS + TICK);
+        await online(m1, false);
     });
 
     it('past MACHINE_LOST_MS the task fails machine-lost (recoverable), audited, the chat told — and the member’s session re-opens on the next message', async () => {

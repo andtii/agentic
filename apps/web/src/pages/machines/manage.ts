@@ -12,7 +12,7 @@
  * only saves a round trip for a folder that is plainly outside
  * `allowedRoots`; the daemon resolves links and decides.
  */
-import type { EnvError, EnvErrorCode, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, HostOs, MachinePolicy } from '@agentic/core';
+import type { EnvError, EnvErrorCode, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, HarnessReport, HostOs, MachinePolicy } from '@agentic/core';
 
 /** What the environment dialog edits. `id` is empty for a new environment (the daemon mints one). */
 export interface EnvironmentDraft {
@@ -89,11 +89,16 @@ export function fallbackCommand(command: string, os: HostOs): string {
 /** An account that cannot run work until someone signs it in on the machine. */
 export const needsLogin = (env: EnvironmentDescriptor): boolean => env.account.authStatus === 'missing' || env.account.authStatus === 'expired';
 
-/** The runtimes a machine can host: what its daemon's drivers report, else what its environments already run. */
-export function runtimesOf(capabilities: readonly { readonly runtime: string }[], environments: readonly EnvironmentDescriptor[]): string[] {
+/**
+ * The runtimes a machine can host: what its daemon's drivers report, else what its environments already run — plus
+ * every runtime whose harness the daemon reports installed and working (#527). The daemon reports capabilities only
+ * for runtimes an environment already runs on, so without the harnesses a runtime could never get its first one.
+ */
+export function runtimesOf(capabilities: readonly { readonly runtime: string }[], environments: readonly EnvironmentDescriptor[], harnesses: readonly HarnessReport[] = []): string[] {
     const out = new Set<string>();
     for (const c of capabilities) out.add(c.runtime);
     if (out.size === 0) for (const e of environments) out.add(e.runtime);
+    for (const h of harnesses) if (h.status === 'ready' && h.installed) out.add(h.runtime);
     return [...out];
 }
 
