@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * The phone regime (#91, `docs/design/HANDOFF.md` → "Responsive behaviour",
@@ -15,6 +15,21 @@ const ROUTES = ['/', '/chats/c1', '/projects', '/projects/new', '/projects/p_age
 async function noHorizontalScroll(page: Page, path: string) {
     const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
     expect(scrollWidth, `${path} scrolls horizontally`).toBeLessThanOrEqual(innerWidth);
+}
+
+/**
+ * The drawer slides in over 200 ms (`shell.css` → "200 ms slide with the scrim
+ * fading in"), and while its `translate` is animating the panel sits on a
+ * composited layer at a fractional offset — every box inside it then measures
+ * a hair off (44.00001…, 20.000001…), so exact `toBe(n)` sizes flake (#276).
+ * Waiting for the element's own and its subtree's animations to finish puts
+ * the panel back on whole pixels. A cancelled animation rejects `finished`;
+ * that only means the drawer moved on, so it is not an error here.
+ */
+async function animationsSettled(locator: Locator): Promise<void> {
+    await locator.evaluate(async (el) => {
+        await Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined)));
+    });
 }
 
 test.describe('phone', () => {
@@ -44,11 +59,13 @@ test.describe('phone', () => {
         await menu.click();
         const panel = page.locator(drawerPanel);
         await expect(panel).toBeVisible();
-        await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(312);
+        // Measure only once the slide has finished, or every box inside reads a sub-pixel off (#276).
+        await animationsSettled(panel);
+        expect(Math.round((await panel.boundingBox())?.width ?? 0)).toBe(312);
         const item = panel.locator('[data-part="nav-item"]').first();
-        expect((await item.boundingBox())?.height).toBe(50);
+        expect(Math.round((await item.boundingBox())?.height ?? 0)).toBe(50);
         expect(await item.locator('a').evaluate((a) => getComputedStyle(a).fontSize)).toBe('16px');
-        expect(await item.locator('svg').evaluate((s) => s.getBoundingClientRect().width)).toBe(20);
+        expect(Math.round(await item.locator('svg').evaluate((s) => s.getBoundingClientRect().width))).toBe(20);
         await expect(panel.locator(shell('connection'))).toBeVisible();
 
         const close = panel.getByRole('button', { name: 'Close' });
