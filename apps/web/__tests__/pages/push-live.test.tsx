@@ -42,14 +42,18 @@ const plugin = async () => (await registry().overview()).plugins.find((p) => p.m
 const generate = (dom: ParentNode) => dom.querySelector<HTMLButtonElement>('[data-plugin-panel="generate-keys"] button');
 
 describe('/plugins/agentic.notify.web-push (live)', () => {
-    it('Generate keys waits for a contact, then stores a pair the platform signs with — the private key shown nowhere', async () => {
+    it('Generate keys without a contact fills in the default one', async () => {
         const dom = await mountLive(`/plugins/${WEB_PUSH_PLUGIN_ID}`, h);
-        await until(() => generate(dom) !== null, 'the key pair panel');
-        expect(generate(dom)!.disabled).toBe(true);
-        expect(dom.querySelector('[data-plugin-panel="generate-keys"]')!.textContent).toMatch(/Save a contact/);
+        await until(() => generate(dom)?.disabled === false, 'the button, with no contact saved');
+        generate(dom)!.click();
+        await until(async () => (await registry().overview()).secretNames.includes(VAPID_PRIVATE_KEY_SECRET), 'the private key, sealed');
+        expect((await plugin()).config.subject).toMatch(/^(https:|mailto:)/);
+    }, 20_000);
 
+    it('Generate keys stores a pair the platform signs with — the private key shown nowhere', async () => {
         await registry().configure(WEB_PUSH_PLUGIN_ID, { subject: CONTACT });
-        await until(() => generate(dom)?.disabled === false, 'the button, once the contact is saved');
+        const dom = await mountLive(`/plugins/${WEB_PUSH_PLUGIN_ID}`, h);
+        await until(() => generate(dom)?.disabled === false, 'the button');
         generate(dom)!.click();
         await until(async () => (await registry().overview()).secretNames.includes(VAPID_PRIVATE_KEY_SECRET), 'the private key, sealed');
         await until(() => dom.querySelector('[data-plugin-panel="generate-keys"] [data-plugin-saved]') !== null, 'the saved note');
@@ -88,6 +92,33 @@ describe('/plugins/agentic.notify.web-push (live)', () => {
 });
 
 describe('/settings, push (live)', () => {
+    const turnOn = (dom: ParentNode) => [...dom.querySelectorAll<HTMLButtonElement>('[data-push-setup] button')].find((b) => /Turn on push/.test(b.textContent ?? ''));
+
+    it('one click from off: enabled, a contact and a key pair', async () => {
+        const dom = await mountLive('/settings', h);
+        const push = () => dom.querySelector<HTMLElement>('[data-push-devices]');
+        await until(() => turnOn(dom) !== undefined, 'the Turn on button');
+        expect(push()!.querySelector(`a[href="/plugins/${WEB_PUSH_PLUGIN_ID}"]`)).not.toBeNull();
+
+        turnOn(dom)!.click();
+        await until(() => push()?.getAttribute('data-push-state') === 'ready', 'push, ready');
+        const p = await plugin();
+        expect(p.enabled).toBe(true);
+        expect(p.config.subject).toMatch(/^(https:|mailto:)/);
+        expect(p.config.publicKey).toMatch(/^[\w-]{87}$/);
+        // This test DOM has no PushManager: the workspace is set up, this browser is not subscribed.
+        expect(await inbox().subscriptions()).toEqual([]);
+    }, 20_000);
+
+    it('without WORKSPACE_KEK it names the fix and offers no button', async () => {
+        await h.stop();
+        const NoKek = defineRegistry({ catalogue: [{ manifest: webPushPlugin, enabledByDefault: false }] });
+        h = await startLive(undefined, { actors: [NoKek] });
+        const dom = await mountLive('/settings', h);
+        await until(() => /WORKSPACE_KEK/.test(dom.querySelector('[data-push-devices]')?.textContent ?? ''), 'the no-kek note');
+        expect(turnOn(dom)).toBeUndefined();
+    }, 20_000);
+
     it('says what push still needs, then lists subscribed browsers and removes one; without PushManager it offers no subscribe', async () => {
         await inbox().subscribe(SUB);
         const dom = await mountLive('/settings', h);
