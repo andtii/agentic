@@ -114,7 +114,7 @@ describe('SchemaForm', () => {
         expect(input(root, 'endpoint').required).toBe(true);
         expect(input(root, 'note').type).toBe('text');
         expect(input(root, 'verbose').type).toBe('checkbox');
-        expect(root.querySelectorAll('[data-scope="ai-multi-select"][data-part="root"]').length).toBe(2);
+        expect(root.querySelectorAll('[data-scope="combobox"][data-part="root"]:has(select[multiple])').length).toBe(2);
         expect(root.querySelector('[data-scope="ag-map-field"][data-part="root"]')).not.toBeNull();
         expect(labelOf(root.querySelector<HTMLElement>('select[name="defaultModel"]')!)).toBe('Default model');
         expect(root.textContent).toContain('Used when an agent names none.');

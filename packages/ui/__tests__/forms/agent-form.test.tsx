@@ -196,15 +196,15 @@ describe('AgentForm', () => {
 
     it('collaborators are chosen only when delegation is not open to everyone', () => {
         const { root, form } = mountForm();
-        expect(root.querySelectorAll(`input[name="${F.collaborators}"]`).length).toBe(2);
+        expect(new FormData(form).getAll(F.collaborators)).toHaveLength(2);
         toggle(root.querySelector<HTMLInputElement>(`input[name="${F.collaborateAll}"]`)!, true);
-        expect(root.querySelectorAll(`input[name="${F.collaborators}"]`).length).toBe(0);
+        expect(new FormData(form).getAll(F.collaborators)).toHaveLength(0);
         expect(fromAgentDraft(agentDraftFromFormData(new FormData(form))).collaborators).toBe('all');
     });
 
     it('a tool picked from the list gets a mode select that posts', () => {
         const { root, form, api } = mountForm();
-        const tools = root.querySelector<HTMLElement>(`[data-scope="ai-multi-select"]:has(input[name="${F.tools}"])`)!;
+        const tools = root.querySelector<HTMLElement>(`[data-scope="combobox"][data-part="root"]:has(select[name="${F.tools}"])`)!;
         const input = tools.querySelector<HTMLInputElement>('input[role="combobox"]')!;
         setText(input, 'Wri');
         tools.querySelector<HTMLElement>('[data-scope="combobox"][data-part="item"]')!.click();

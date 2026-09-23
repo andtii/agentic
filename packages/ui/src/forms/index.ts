@@ -64,8 +64,8 @@ export type { EnvironmentCardProps, EnvironmentState, EnvironmentStatus } from '
 export { SettingsForm } from './settings-form.js';
 export type { SettingsFormApi, SettingsFormProps } from './settings-form.js';
 
-export { MultiSelect } from '../_zero-gaps/multi-select.js';
-export type { MultiSelectOption, MultiSelectProps } from '../_zero-gaps/multi-select.js';
+export { MultiSelect } from './fields.js';
+export type { FieldOption as MultiSelectOption, MultiSelectProps, MultiSelectTag } from './fields.js';
 
 export { WorkdirField } from './workdir-field.js';
 export type { WorkdirFieldProps } from './workdir-field.js';

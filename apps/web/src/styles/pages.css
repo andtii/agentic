@@ -564,35 +564,18 @@ input[data-visually-hidden] { position: absolute; inline-size: 1px; block-size: 
     gap: var(--space-lg);
     align-items: start;
 }
-/* chip inputs: mono chips with a remove button, the per-tool mode select inline and compact */
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="list"] {
-    list-style: none;
-    margin: 0 0 var(--space-sm);
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-}
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip"] {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    min-block-size: 28px;
-    padding-inline: var(--space-sm) var(--space-2xs);
-    border: var(--border) solid var(--ag-line-strong);
-    border-radius: var(--radius-selector);
-    background: var(--color-base-300);
+/* multi-selects: zero's combobox tags (styled by the design system) in mono; the per-tool mode select inline and compact */
+[data-page="agent"] [data-scope="combobox"][data-part="tag"] {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
 }
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip"] [data-scope="field"][data-part="root"] {
+[data-page="agent"] [data-scope="combobox"][data-part="tag"] [data-scope="field"][data-part="root"] {
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
     margin: 0;
 }
-/* the per-tool mode label names its select for assistive tech; the chip shows the tool name + select only */
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip"] [data-scope="field"][data-part="label"] {
+/* the per-tool mode label names its select for assistive tech; the tag shows the tool name + select only */
+[data-page="agent"] [data-scope="combobox"][data-part="tag"] [data-scope="field"][data-part="label"] {
     position: absolute;
     inline-size: 1px;
     block-size: 1px;
@@ -603,27 +586,11 @@ input[data-visually-hidden] { position: absolute; inline-size: 1px; block-size: 
     clip-path: inset(50%);
     white-space: nowrap;
 }
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip"] select {
+[data-page="agent"] [data-scope="combobox"][data-part="tag"] [data-scope="select"][data-part="trigger"] {
     min-block-size: 24px;
     block-size: 24px;
     padding-block: 0;
     font-size: var(--text-xs);
-}
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip-remove"] {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    inline-size: 20px;
-    block-size: 20px;
-    border: 0;
-    border-radius: var(--radius-selector);
-    background: transparent;
-    color: var(--ag-text-muted);
-    cursor: pointer;
-}
-[data-page="agent"] [data-scope="ai-multi-select"][data-part="chip-remove"]:hover {
-    color: var(--color-base-content);
-    background: var(--ag-line-strong);
 }
 [data-page="agent"] [data-scope="ai-form"][data-part="policy-row"] {
     display: flex;

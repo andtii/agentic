@@ -211,7 +211,7 @@ export const AgentForm = component<AgentFormProps>(
         // Dirty against the canonical form of the bound config, so an untouched draft is clean.
         const dirty = (): boolean => JSON.stringify(fromAgentDraft(draft)) !== JSON.stringify(fromAgentDraft(toAgentDraft(source())));
 
-        // a tool picked in the multi-select gets the default mode so its select has a value to post
+        // a tool picked in the multi-select gets the default mode so its tag's select has a value to post
         watch(
             () => draft.tools,
             (tools) => {
@@ -374,7 +374,7 @@ export const AgentForm = component<AgentFormProps>(
                                 placeholder="Add a tool"
                                 description="What the agent may call; the mode routes a tool through approval or denies it."
                                 slots={{
-                                    chip: ({ value, label }) => (
+                                    tag: ({ value, label }) => (
                                         <Field.Root size="xs">
                                             <Field.Label>Mode for {label}</Field.Label>
                                             <Select.Root model={() => draft.toolModes[value]} name={F.toolMode(value)} items={TOOL_MODE_OPTIONS} itemValue={(o) => o.value} />
