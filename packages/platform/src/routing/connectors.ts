@@ -30,14 +30,21 @@
  * `{ kind: 'conduit', id, pluginId, connector, account }` — ids only: the
  * opener resolves the OAuth client and the account's tokens itself, so no
  * secret is opened here. One that the owner has not connected yet (no `account`)
- * is left out and the agent told so. A daemon-hosted session leaves conduit
- * connectors out until they are reachable from a machine (#534). The opener
- * gets the session's `ConnectorOpenContext` beside the ids (#533) — the
- * workspace, the session's agent principal and the way to the connector
- * plugin's secrets — so the app builds the workspace's conduit engine itself.
+ * is left out and the agent told so. The opener gets the session's
+ * `ConnectorOpenContext` beside the ids (#533) — the workspace, the session's
+ * agent principal and the way to the connector plugin's secrets — so the app
+ * builds the workspace's conduit engine itself.
+ *
+ * On a DAEMON-hosted session a conduit connector still runs here, on the Worker
+ * (#534): `daemonConnectors` puts nothing of it on the spec; the daemon asks for
+ * its tool declarations over its own `tool.call` (`CONNECTOR_TOOLS_TOOL`,
+ * answered by `platformConnectorTools`) and sends every call back the same way
+ * (`CONNECTOR_CALL_TOOL`, run by `callPlatformConnector`) — through the same
+ * opener and context as a local session, so refresh and `needsReauth` behave
+ * the same and no token or OAuth client ever reaches the machine.
  */
 
-import type { ConnectorCredentials, OpenSpecConnector, Principal, WorkspaceId } from '@agentic/core';
+import type { ConnectorCredentials, ConnectorToolDeclaration, OpenSpecConnector, PlatformConnectorTools, Principal, WorkspaceId } from '@agentic/core';
 import type { PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy, ToolAnnotations } from '@sigx/ai-agent';
 import type { ConnectorStatus, GateConnector } from '../registry/types.js';
@@ -205,6 +212,13 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
     }
 }
 
+/** Why a ready conduit connector cannot be used yet — the same words on both paths; `undefined` once it is connected. */
+function conduitUnconnected(c: GateConnector): string | undefined {
+    if (c.connector === undefined) return 'it names no conduit connector';
+    if (c.account === undefined) return `it is not connected yet (/plugins/${c.pluginId ?? c.id})`;
+    return undefined;
+}
+
 /**
  * A ready conduit connector (#530): no secret is opened here — the opener resolves the OAuth client and the account's
  * tokens itself. Not connected yet (no `account`) → left out, and the agent told where the owner connects it.
@@ -212,8 +226,8 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
 async function openConduit(c: GateConnector, input: OpenSessionConnectorsInput): Promise<Outcome> {
     const skip = (reason: string): Outcome => ({ unavailable: { id: c.id, reason } });
     const pluginId = c.pluginId ?? c.id;
-    if (c.connector === undefined) return skip('it names no conduit connector');
-    if (c.account === undefined) return skip(`it is not connected yet (/plugins/${pluginId})`);
+    const why = conduitUnconnected(c);
+    if (why !== undefined || c.connector === undefined || c.account === undefined) return skip(why ?? 'it names no conduit connector');
     if (!input.opener) return skip('this deployment cannot open conduit connectors');
     const record = recorder(c, input);
     try {
@@ -296,7 +310,9 @@ export function daemonConnectors(connectors: readonly GateConnector[], machineId
             continue;
         }
         if (c.transport === 'conduit') {
-            unavailable.push({ id: c.id, reason: 'it runs on the platform and is not yet reachable from a machine session' });
+            // Runs on the Worker (#534): nothing on the spec — the daemon asks for its declarations over `tool.call`.
+            const why = conduitUnconnected(c);
+            if (why !== undefined) unavailable.push({ id: c.id, reason: why });
             continue;
         }
         const transport = c.transport ?? 'streamable-http';
@@ -363,4 +379,134 @@ export async function connectorCredentials(input: ConnectorCredentialsInput): Pr
     const env: Record<string, string> = {};
     for (const [variable, name] of Object.entries(c.auth?.env ?? {})) env[variable] = await need(name);
     return { ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}), ...(Object.keys(env).length ? { env } : {}) };
+}
+
+/** A connector a daemon-hosted session reaches on the platform (#534): a ready conduit connector the owner connected. */
+const platformRun = (c: GateConnector): boolean => c.state === 'ready' && c.transport === 'conduit' && conduitUnconnected(c) === undefined;
+
+export interface PlatformConnectorToolsInput {
+    /** The calling session's gate answer (`spec.plugins.connectors`). */
+    readonly connectors: readonly GateConnector[];
+    readonly opener?: ConnectorOpener;
+    /** The session's: its workspace, its agent principal and the connector plugins' secrets. */
+    readonly context: ConnectorOpenContext;
+    /** Record what an open found, as a local session's open does. Never fails the call. */
+    report?(id: string, status: ConnectorStatus, tools?: readonly string[]): Promise<void>;
+}
+
+/** A tool's hints as plain JSON — what the daemon's approval rules on. */
+function plainAnnotations(a: ToolAnnotations | undefined): ConnectorToolDeclaration['annotations'] {
+    if (!a) return undefined;
+    const out: { -readonly [K in keyof ToolAnnotations]: ToolAnnotations[K] } = {};
+    if (a.readOnly !== undefined) out.readOnly = a.readOnly;
+    if (a.destructive !== undefined) out.destructive = a.destructive;
+    if (a.idempotent !== undefined) out.idempotent = a.idempotent;
+    if (a.openWorld !== undefined) out.openWorld = a.openWorld;
+    return Object.keys(out).length ? out : undefined;
+}
+
+/** What the model sees of a tool, and its hints — never how it runs. */
+function declarationOf(t: ConnectorTool): ConnectorToolDeclaration {
+    const annotations = plainAnnotations(t.annotations);
+    // A tool's arguments are an object (conduit's input schemas always are): the declaration says so explicitly.
+    const inputSchema = { ...(structuredClone(t.spec.inputSchema) as Record<string, unknown>), type: 'object' as const };
+    return { name: t.spec.name, description: t.spec.description, inputSchema, ...(annotations ? { annotations } : {}) };
+}
+
+/**
+ * The answer to a daemon's `CONNECTOR_TOOLS_TOOL` (#534): every ready, connected conduit connector of the calling
+ * session, opened through the app's opener as a local session opens it, as tool DECLARATIONS — the engine, its
+ * tokens and the OAuth client stay here. One that cannot be opened is named with why, as on the local path.
+ */
+export async function platformConnectorTools(input: PlatformConnectorToolsInput): Promise<PlatformConnectorTools> {
+    const conduit = input.connectors.filter(platformRun);
+    const open: OpenSessionConnectorsInput = {
+        connectors: conduit,
+        ...(input.opener ? { opener: input.opener } : {}),
+        secret: (name, pluginId) => input.context.secret(name, pluginId),
+        ...(input.report ? { report: input.report } : {}),
+        context: input.context
+    };
+    const outcomes = await Promise.all(conduit.map(async (c) => ({ id: c.id, outcome: await openConduit(c, open) })));
+    const connectors: { id: string; tools: ConnectorToolDeclaration[] }[] = [];
+    const unavailable: UnavailableConnector[] = [];
+    for (const { id, outcome } of outcomes) {
+        if (outcome.unavailable) unavailable.push(outcome.unavailable);
+        if (!outcome.opened) continue;
+        try {
+            connectors.push({ id, tools: outcome.opened.tools.map(declarationOf) });
+        } finally {
+            await outcome.opened.close().catch(() => undefined);
+        }
+    }
+    return { connectors, unavailable };
+}
+
+/** Why `callPlatformConnector` refused or failed. `not-named` is the session's to fix, never the connector's. */
+export class PlatformConnectorError extends Error {
+    constructor(
+        /** `not-named`, `unsupported`, `invalid`, or the tool's own (`needs_reauth`, conduit's codes), else `internal`. */
+        readonly code: string,
+        message: string
+    ) {
+        super(message);
+        this.name = 'PlatformConnectorError';
+    }
+}
+
+export interface CallPlatformConnectorInput extends Omit<PlatformConnectorToolsInput, 'report'> {
+    readonly connectorId: string;
+    /** The tool's namespaced name (`gmail__search-messages`). */
+    readonly tool: string;
+    readonly input: unknown;
+    readonly callId: string;
+    readonly signal?: AbortSignal;
+}
+
+/**
+ * A daemon's `CONNECTOR_CALL_TOOL` (#534): one operation of a conduit connector the calling session's gate names as
+ * ready and connected, run here under the session's agent principal (a refresh inside it writes as the session). The
+ * result goes back to the machine; a failure is a message the agent may read, with every secret opened for it blanked.
+ */
+export async function callPlatformConnector(input: CallPlatformConnectorInput): Promise<unknown> {
+    const c = input.connectors.find((x) => x.id === input.connectorId && x.state === 'ready' && x.transport === 'conduit');
+    if (!c) throw new PlatformConnectorError('not-named', `connector "${input.connectorId}" is not one this session may use on the platform`);
+    const why = conduitUnconnected(c);
+    if (why !== undefined || c.connector === undefined || c.account === undefined) throw new PlatformConnectorError('unsupported', `connector "${c.id}": ${why ?? 'it names no conduit connector'}`);
+    if (!input.opener) throw new PlatformConnectorError('unsupported', 'this deployment cannot open conduit connectors');
+    const values: string[] = [];
+    const context: ConnectorOpenContext = {
+        workspaceId: input.context.workspaceId,
+        principal: input.context.principal,
+        async secret(name, pluginId) {
+            const value = await input.context.secret(name, pluginId);
+            if (value !== undefined) values.push(value);
+            return value;
+        }
+    };
+    const failed = (e: unknown): PlatformConnectorError => {
+        if (e instanceof PlatformConnectorError) return e;
+        const message = scrub(e instanceof Error ? e.message : String(e), values);
+        const name = e instanceof Error ? e.name : '';
+        const code = (e as { code?: unknown } | null)?.code;
+        if (name === 'SchemaValidationError') return new PlatformConnectorError('invalid', message);
+        // `ConnectorToolError` (`@agentic/connectors`): a message written for the agent, and a stable code (`needs_reauth`).
+        if (name === 'ConnectorToolError' && typeof code === 'string' && code !== '') return new PlatformConnectorError(code, message);
+        return new PlatformConnectorError('internal', `${input.tool} failed: ${message}`);
+    };
+    let opened: OpenedConnector;
+    try {
+        opened = await input.opener({ kind: 'conduit', id: c.id, pluginId: c.pluginId ?? c.id, connector: c.connector, account: c.account }, context);
+    } catch (e) {
+        throw failed(e);
+    }
+    try {
+        const tool = opened.tools.find((t) => t.name === input.tool);
+        if (!tool) throw new PlatformConnectorError('invalid', `connector "${c.id}" has no tool named "${input.tool}"`);
+        return await tool.run(input.input, { toolCallId: input.callId, signal: input.signal ?? new AbortController().signal });
+    } catch (e) {
+        throw failed(e);
+    } finally {
+        await opened.close().catch(() => undefined);
+    }
 }

@@ -21,12 +21,32 @@
  * Approval: the daemon compiles the same policy the platform does (AC-12); a
  * connector tool's request is presented to it as `source: 'mcp'` with a
  * category from its MCP hints, as `connectorPolicy` does on the local path.
+ *
+ * Connectors that run on the PLATFORM (#534: conduit, decisions 2026-09-23 —
+ * Gmail) are never opened here. While opening, the daemon asks the platform for
+ * their tool DECLARATIONS over its own `tool.call` (`CONNECTOR_TOOLS_TOOL`):
+ * names, descriptions, input schemas and hints, nothing else. Each becomes a
+ * client tool whose call is another `tool.call` (`CONNECTOR_CALL_TOOL`), run on
+ * the Worker under the session's agent principal — so no token or OAuth client
+ * ever reaches the machine. Its hints join `annotations`, so approval rules on
+ * it exactly as on an MCP connector's tool. A platform that predates the call
+ * answers `unsupported`, and the session simply has none.
  */
 
-import type { AnyTool } from '@sigx/ai';
+import { defineTool, type AnyTool, type StandardSchemaV1 } from '@sigx/ai';
 import type { Policy, ToolAnnotations } from '@sigx/ai-agent';
 import { isWithin } from '@sigx/ai-agent/coding';
-import { CONNECTOR_CREDENTIALS_TOOL, type ConnectorCredentials, type LocalEnvironment, type OpenSpecConnector, type PlatformToolCaller } from '@agentic/core';
+import {
+    CONNECTOR_CALL_TOOL,
+    CONNECTOR_CREDENTIALS_TOOL,
+    CONNECTOR_TOOLS_TOOL,
+    type ConnectorCredentials,
+    type ConnectorToolDeclaration,
+    type LocalEnvironment,
+    type OpenSpecConnector,
+    type PlatformConnectorCall,
+    type PlatformToolCaller
+} from '@agentic/core';
 
 /** What the daemon's opener is handed for one connector: where it is, and its credential VALUES for this session only. */
 export interface DaemonConnectorOpenInput {
@@ -149,24 +169,97 @@ async function openOne(c: OpenSpecConnector, input: OpenDaemonConnectorsInput): 
     }
 }
 
+/** A Standard Schema over a declared JSON Schema: an object with every `required` key — the platform validates the rest. */
+function argumentsSchema(schema: Readonly<Record<string, unknown>>): StandardSchemaV1<Record<string, unknown>, Record<string, unknown>> {
+    const required = Array.isArray(schema.required) ? schema.required.filter((k): k is string => typeof k === 'string') : [];
+    return {
+        '~standard': {
+            version: 1,
+            vendor: 'agentic-harness',
+            validate(value: unknown) {
+                if (typeof value !== 'object' || value === null || Array.isArray(value)) return { issues: [{ message: 'Expected an object of arguments' }] };
+                const issues = required.filter((k) => !Object.hasOwn(value, k)).map((k) => ({ message: `Missing required argument "${k}"`, path: [k] }));
+                return issues.length > 0 ? { issues } : { value: value as Record<string, unknown> };
+            },
+            jsonSchema: { input: () => ({ ...schema }), output: () => ({ ...schema }) }
+        }
+    };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const HINTS = ['readOnly', 'destructive', 'idempotent', 'openWorld'] as const;
+
+/** One declaration as the platform sent it, or `undefined` when it is not one. */
+function declarationOf(v: unknown): ConnectorToolDeclaration | undefined {
+    if (!isRecord(v) || typeof v.name !== 'string' || v.name === '' || typeof v.description !== 'string' || !isRecord(v.inputSchema) || v.inputSchema.type !== 'object') return undefined;
+    const a = isRecord(v.annotations) ? v.annotations : {};
+    const annotations: Record<string, boolean> = {};
+    for (const k of HINTS) if (typeof a[k] === 'boolean') annotations[k] = a[k];
+    return { name: v.name, description: v.description, inputSchema: { ...v.inputSchema, type: 'object' }, ...(Object.keys(annotations).length ? { annotations } : {}) };
+}
+
+/** A platform-run connector's tool, served here and run there: every call is a `CONNECTOR_CALL_TOOL` `tool.call`. */
+function platformConnectorTool(connectorId: string, d: ConnectorToolDeclaration, callTool: PlatformToolCaller): AnyTool {
+    return defineTool({
+        name: d.name,
+        description: d.description,
+        input: argumentsSchema(d.inputSchema),
+        jsonSchema: { ...d.inputSchema },
+        ...(d.annotations ? { annotations: d.annotations } : {}),
+        execute: (input) => callTool(CONNECTOR_CALL_TOOL, { connectorId, tool: d.name, input } satisfies PlatformConnectorCall)
+    });
+}
+
+/**
+ * The platform-run connectors of this session (#534), as outcomes like an opened MCP connector's: their declarations,
+ * asked for once over `tool.call`. A platform without the call (`unsupported`), or an answer that is not one, gives none.
+ */
+async function platformConnectors(callTool: PlatformToolCaller): Promise<readonly { readonly id: string; readonly outcome: Outcome }[]> {
+    let answer: unknown;
+    try {
+        answer = await callTool(CONNECTOR_TOOLS_TOOL, {});
+    } catch {
+        return [];
+    }
+    if (!isRecord(answer)) return [];
+    const out: { id: string; outcome: Outcome }[] = [];
+    for (const u of Array.isArray(answer.unavailable) ? answer.unavailable : []) {
+        if (isRecord(u) && typeof u.id === 'string' && typeof u.reason === 'string') out.push({ id: u.id, outcome: { unavailable: { id: u.id, reason: u.reason } } });
+    }
+    for (const c of Array.isArray(answer.connectors) ? answer.connectors : []) {
+        if (!isRecord(c) || typeof c.id !== 'string' || !Array.isArray(c.tools)) continue;
+        const id = c.id;
+        try {
+            const tools = c.tools.map(declarationOf).flatMap((d) => (d ? [platformConnectorTool(id, d, callTool)] : []));
+            out.push({ id, outcome: { opened: { tools, close: async () => undefined } } });
+        } catch (e) {
+            // A name a provider would refuse (`defineTool` checks it): that connector is left out, not the session.
+            out.push({ id, outcome: { unavailable: { id, reason: `its tools could not be served: ${e instanceof Error ? e.message : String(e)}` } } });
+        }
+    }
+    return out;
+}
+
 /**
  * Open every connector side by side; none can fail the caller. A tool name
  * already taken — by the platform's tools or an earlier connector — leaves
  * that connector out.
  */
 export async function openDaemonConnectors(input: OpenDaemonConnectorsInput): Promise<DaemonConnectors> {
-    const outcomes = await Promise.all(input.connectors.map((c) => openOne(c, input)));
+    // The machine's MCP connectors and the platform's declarations, side by side; the MCP ones keep their precedence.
+    const [mcp, platform] = await Promise.all([Promise.all(input.connectors.map(async (c) => ({ id: c.id, outcome: await openOne(c, input) }))), platformConnectors(input.callTool)]);
     const taken = new Set(input.taken ?? []);
     const tools: AnyTool[] = [];
     const annotations = new Map<string, ToolAnnotations | undefined>();
     const unavailable: UnavailableDaemonConnector[] = [];
     const opened: DaemonOpenedConnector[] = [];
-    for (const [i, o] of outcomes.entries()) {
+    for (const { id, outcome: o } of [...mcp, ...platform]) {
         if (o.unavailable) unavailable.push(o.unavailable);
         if (!o.opened) continue;
         const clash = o.opened.tools.find((t) => taken.has(t.name));
         if (clash) {
-            unavailable.push({ id: input.connectors[i]!.id, reason: `its tool "${clash.name}" has the name of a tool this session already has` });
+            unavailable.push({ id, reason: `its tool "${clash.name}" has the name of a tool this session already has` });
             await o.opened.close().catch(() => undefined);
             continue;
         }

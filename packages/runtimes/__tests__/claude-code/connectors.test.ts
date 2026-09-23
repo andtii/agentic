@@ -2,8 +2,9 @@
 /** MCP connectors on a daemon-hosted Claude Code session (#280): credentials by `tool.call`, tools served beside the platform's, the policy, the prompt, close. */
 import { defineTool, type AnyTool } from '@sigx/ai';
 import type { AgentEvent, AgentTurn, Policy, PolicyRequest } from '@sigx/ai-agent';
-import { CONNECTOR_CREDENTIALS_TOOL, type EnvironmentId, type LocalEnvironment, type OpenSpec, type OpenSpecConnector, type SessionId } from '@agentic/core';
+import { CONNECTOR_CALL_TOOL, CONNECTOR_CREDENTIALS_TOOL, CONNECTOR_TOOLS_TOOL, type EnvironmentId, type PlatformConnectorTools, type LocalEnvironment, type OpenSpec, type OpenSpecConnector, type SessionId } from '@agentic/core';
 import { z } from 'zod';
+import { sessionPolicyOf } from '../../src/policy/index';
 import { claudeCodeDriver, withUnavailableConnectors, type DaemonConnectorOpenInput, type DaemonConnectorOpener } from '../../src/claude-code/index';
 import { fakeListen, fakeQuery, messageStart, messageStop, RESULT, textBlocks, type TurnScript } from './fake-query';
 
@@ -185,6 +186,117 @@ describe('claudeCodeDriver: MCP connectors (#280)', () => {
         expect(byTool.get('acme__look')).toMatchObject({ source: 'mcp', category: 'read' });
         expect(byTool.get('acme__send')).toMatchObject({ source: 'mcp', category: 'network' });
         expect(byTool.get('memory_search')?.source).not.toBe('mcp');
+        await driver.dispose();
+    });
+});
+
+describe('claudeCodeDriver: platform-run connectors (#534)', () => {
+    const declared: PlatformConnectorTools = {
+        connectors: [
+            {
+                id: 'gmail',
+                tools: [
+                    { name: 'gmail__search-messages', description: 'Search messages', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }, annotations: { readOnly: true } },
+                    { name: 'gmail__trash-message', description: 'Trash a message', inputSchema: { type: 'object', properties: { id: { type: 'string' } } }, annotations: { destructive: true } },
+                    { name: 'gmail__send-email', description: 'Send an email', inputSchema: { type: 'object', properties: {} } }
+                ]
+            }
+        ],
+        unavailable: [{ id: 'calendar', reason: 'it could not be opened: its account is not connected' }]
+    };
+
+    /** The platform: declarations at open, a result per call — every call recorded as the daemon sends it. */
+    function conduitPlatform(answer: unknown = declared) {
+        const calls: { tool: string; input: unknown }[] = [];
+        const callTool = async (tool: string, input: unknown) => {
+            calls.push({ tool, input });
+            if (tool === CONNECTOR_TOOLS_TOOL) {
+                if (answer instanceof Error) throw answer;
+                return answer;
+            }
+            if (tool === CONNECTOR_CALL_TOOL) return { messages: [{ id: 'm1' }] };
+            return { ok: true };
+        };
+        return { callTool, calls };
+    }
+
+    it('asks the platform for the declarations once, serves them beside the platform tools, and sends every call back over tool.call', async () => {
+        const { callTool, calls } = conduitPlatform();
+        const { listen, rpc } = capturingListen();
+        const fake = fakeQuery(hello);
+        const driver = claudeCodeDriver({ query: fake.query, listen, parentEnv: {} });
+        const { session, capabilities } = await driver.open(env, spec(), { sessionId: 'session_1' as SessionId, callTool });
+        expect(calls).toEqual([{ tool: CONNECTOR_TOOLS_TOOL, input: {} }]);
+        expect(capabilities.supported).toEqual(expect.arrayContaining(['tool:memory_search', 'tool:gmail__search-messages', 'tool:gmail__send-email']));
+        expect(capabilities.unsupported).toContainEqual({ op: 'connector:calendar', reason: 'it could not be opened: its account is not connected' });
+
+        await drain(session.prompt('Hello'));
+        expect((fake.calls[0]!.systemPrompt as { append: string }).append).toContain('- calendar: it could not be opened: its account is not connected');
+        await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'cli', version: '1' } });
+        const listed = (await rpc('tools/list', {})) as { tools: { name: string; inputSchema: unknown }[] };
+        expect(listed.tools.find((t) => t.name === 'gmail__search-messages')?.inputSchema).toMatchObject({ required: ['query'] });
+        const result = await rpc('tools/call', { name: 'gmail__search-messages', arguments: { query: 'is:unread' } });
+        expect(JSON.stringify(result)).toContain('m1');
+        expect(calls.at(-1)).toEqual({ tool: CONNECTOR_CALL_TOOL, input: { connectorId: 'gmail', tool: 'gmail__search-messages', input: { query: 'is:unread' } } });
+        await session.close();
+        await driver.dispose();
+    });
+
+    it('presents them to the policy as MCP tools with their category, so a denied send never reaches the platform', async () => {
+        const { callTool, calls } = conduitPlatform();
+        const seen: PolicyRequest[] = [];
+        // The agent's own rules, compiled as the daemon compiles them: reads and trashing allowed, anything else (sending) denied.
+        const rules = sessionPolicyOf({
+            rules: [
+                { id: 'read', match: { categories: ['read', 'destructive'] }, outcome: 'allow' },
+                { id: 'network', match: { categories: ['network'] }, outcome: 'deny' }
+            ],
+            grants: []
+        });
+        const policy: Policy = (request, context) => {
+            seen.push(request);
+            return rules(request, context);
+        };
+        const answers: string[] = [];
+        const script: TurnScript = async function* (_u, _t, ctx) {
+            yield messageStart();
+            for (const tool of ['gmail__trash-message', 'gmail__search-messages', 'gmail__send-email']) answers.push((await ctx.ask(`mcp__sigx-tools__${tool}`, {})).behavior);
+            yield* textBlocks('done');
+            yield* messageStop();
+            yield RESULT();
+        };
+        const driver = claudeCodeDriver({ query: fakeQuery(script).query, listen: fakeListen, parentEnv: {} });
+        const { session } = await driver.open(env, spec(), { sessionId: 'session_1' as SessionId, callTool, policy });
+        await drain(session.prompt('go'));
+        const byTool = new Map(seen.filter((r) => r.kind === 'permission').map((r) => [r.toolName, r]));
+        expect(byTool.get('gmail__trash-message')).toMatchObject({ source: 'mcp', category: 'destructive' });
+        expect(byTool.get('gmail__search-messages')).toMatchObject({ source: 'mcp', category: 'read' });
+        expect(byTool.get('gmail__send-email')).toMatchObject({ source: 'mcp', category: 'network' });
+        expect(answers).toEqual(['allow', 'allow', 'deny']);
+        expect(calls.filter((c) => c.tool === CONNECTOR_CALL_TOOL)).toEqual([]);
+        await driver.dispose();
+    });
+
+    it('a platform that predates the call, or a tool name a platform tool already has: the session opens without them', async () => {
+        const old = conduitPlatform(Object.assign(new Error('no platform tool named "connector_tools"'), { code: 'unsupported' }));
+        const driver = claudeCodeDriver({ query: fakeQuery(hello).query, listen: fakeListen, parentEnv: {} });
+        const first = await driver.open(env, spec(), { sessionId: 'session_1' as SessionId, callTool: old.callTool });
+        expect(first.capabilities.supported.filter((op) => op.startsWith('tool:gmail'))).toEqual([]);
+        expect(first.capabilities.unsupported.filter((u) => u.op.startsWith('connector:'))).toEqual([]);
+        await first.session.close();
+
+        const shadow = conduitPlatform({
+            connectors: [
+                { id: 'mem', tools: [{ name: 'memory_search', description: 'x', inputSchema: { type: 'object' } }] },
+                // Not an object schema: not a declaration the daemon serves.
+                { id: 'odd', tools: [{ name: 'odd__x', description: 'x', inputSchema: { type: 'string' } }] }
+            ],
+            unavailable: []
+        });
+        const second = await driver.open(env, spec(), { sessionId: 'session_2' as SessionId, callTool: shadow.callTool });
+        expect(second.capabilities.unsupported).toContainEqual({ op: 'connector:mem', reason: 'its tool "memory_search" has the name of a tool this session already has' });
+        expect(second.capabilities.supported).not.toContain('tool:odd__x');
+        await second.session.close();
         await driver.dispose();
     });
 });

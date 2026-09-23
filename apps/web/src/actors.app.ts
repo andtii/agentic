@@ -112,7 +112,7 @@ import type { ActorDefs } from './actors/defs';
 import type { AuthWiring } from './auth';
 import { actorKeyOfObject, createDaemonSocketHost, createDaemonSocketRegistry, forwardDaemonSocket, DAEMON_SOCKET_PREFIX } from './daemon';
 import { r2ChatFileStore } from './files/store';
-import { channelCatalogue, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
+import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, pluginCatalogue, projectFeatureCatalogue, runtimeCatalogue } from './plugins/catalogue';
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 import { observeSlowTurns } from './actors/slow-turns';
@@ -242,7 +242,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         routing: () => Routing,
         releases: () => Releases,
         inbox: () => Inbox,
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, memory, ...withFiles })
+        // A daemon session's conduit connectors run here, through the opener local sessions use (#534).
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, memory, connectors: connectorOpener({ origin: () => secrets.appOrigin }), ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.

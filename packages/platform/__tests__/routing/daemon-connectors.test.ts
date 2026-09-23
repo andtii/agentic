@@ -9,8 +9,9 @@
  */
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { actorKey, CONNECTOR_CREDENTIALS_TOOL, type AgentId, type EnvironmentId, type FrozenAgentConfig, type MachineId, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, CONNECTOR_CALL_TOOL, CONNECTOR_CREDENTIALS_TOOL, CONNECTOR_TOOLS_TOOL, type AgentId, type EnvironmentId, type FrozenAgentConfig, type MachineId, type Principal, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
+import { gmailConnectorPlugin } from '@agentic/connectors';
 import { mcpConnectorSetup } from '@agentic/mcp';
 import { claudeCodePlugin } from '@agentic/runtimes';
 
@@ -20,7 +21,8 @@ import { generateWorkspaceKek, importWorkspaceKek, mintAgentPrincipal, workspace
 import { defineMachineActor, machineKey, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { defineRegistry, registryKey, type GateConnector } from '../../src/registry/index';
-import { createSessionFactory, createToolCallPort, daemonConnectors, defineRoutingActor, routingKey, type RuntimeCatalogue } from '../../src/routing/index';
+import { createSessionFactory, createToolCallPort, daemonConnectors, defineRoutingActor, routingKey, type ConnectorOpenContext, type ConnectorOpener, type ConnectorOpenInput, type RuntimeCatalogue } from '../../src/routing/index';
+import { defineTool, type AnyTool, type ToolAnnotations } from '@sigx/ai';
 import { defineSessionActor, type CommandSink } from '../../src/session/index';
 import { TaskActor, taskKey } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
@@ -38,10 +40,14 @@ const IN_MEMORY_PLUGIN = { ...claudeCodePlugin, id: 'in-memory', name: 'In-memor
 describe('daemonConnectors', () => {
     const ready = (over: Partial<GateConnector>): GateConnector => ({ id: 'acme', state: 'ready', pluginId: 'acme', transport: 'streamable-http', url: 'https://acme.test/mcp', auth: { bearer: 'acme.token' }, ...over });
 
-    it('leaves a conduit connector out, with why — it runs on the platform (#530, until #534)', () => {
-        const placed = daemonConnectors([ready({}), ready({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', url: undefined, auth: undefined, connector: 'gmail', account: 'acct_1' })], 'machine_1');
+    it('puts nothing of a conduit connector on the spec: a connected one runs on the platform over tool.call, an unconnected one is named with why (#534)', () => {
+        const conduit = (over: Partial<GateConnector>) => ready({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', url: undefined, auth: undefined, connector: 'gmail', account: 'acct_1', ...over });
+        const placed = daemonConnectors([ready({}), conduit({}), conduit({ id: 'mail2', pluginId: 'mail2', account: undefined }), conduit({ id: 'odd', pluginId: 'odd', connector: undefined })], 'machine_1');
         expect(placed.connectors).toEqual([{ id: 'acme', transport: 'streamable-http', url: 'https://acme.test/mcp', auth: { bearer: 'acme.token' } }]);
-        expect(placed.unavailable).toEqual([{ id: 'gmail', reason: 'it runs on the platform and is not yet reachable from a machine session' }]);
+        expect(placed.unavailable).toEqual([
+            { id: 'mail2', reason: 'it is not connected yet (/plugins/mail2)' },
+            { id: 'odd', reason: 'it names no conduit connector' }
+        ]);
     });
 
     it('places every ready connector with secret names only, and names the rest with why', () => {
@@ -166,6 +172,153 @@ describe('the daemon’s credentials call', () => {
         await expect(call({ connectorId: 'acme' })).rejects.toThrow('its secret "acme.token" is not set (/plugins/acme)');
         const acme = (await registry().connectors()).find((c) => c.id === 'acme');
         expect(acme?.status).toMatchObject({ state: 'error', error: 'secret not set: its secret "acme.token" is not set (/plugins/acme)' });
+    });
+});
+
+describe('platform-run connectors over the daemon’s tool.call (#534)', () => {
+    const AGENT = 'agent_1' as AgentId;
+    const SESSION = 'session_1' as SessionId;
+    const principal = mintAgentPrincipal({ workspaceId: WS, agentId: AGENT, sessionId: SESSION });
+    const CLIENT_SECRET = 'client-shh-5d1e-SECRET';
+    const config: FrozenAgentConfig = {
+        agentId: AGENT,
+        configVersion: 1,
+        name: 'Ada',
+        description: '',
+        role: 'assistant',
+        instructions: 'Be brief.',
+        skills: [],
+        tools: [],
+        connectors: [{ id: 'gmail' }, { id: 'acme' }],
+        approvalPolicy: [],
+        memoryPolicy: { shared: [], autoLearn: 'off' },
+        execution: { runtime: 'in-memory', limits: {}, offlinePolicy: 'fail' },
+        collaborators: 'all'
+    };
+
+    /** The app's opener, faked: what it was handed, and a conduit connector's tools — one that reads the plugin's secret and one that fails. */
+    function fakeConduit(fail?: Error) {
+        const opens: { input: ConnectorOpenInput; context?: ConnectorOpenContext }[] = [];
+        const ran: { tool: string; input: unknown }[] = [];
+        const tool = (name: string, annotations: ToolAnnotations | undefined, run: (input: Record<string, unknown>) => Promise<unknown>): AnyTool =>
+            defineTool({
+                name,
+                description: `${name} described`,
+                input: { '~standard': { version: 1, vendor: 't', validate: (v: unknown) => ({ value: v as Record<string, unknown> }) } },
+                jsonSchema: { type: 'object', properties: { query: { type: 'string' } } },
+                ...(annotations ? { annotations } : {}),
+                execute: async (input: unknown) => {
+                    ran.push({ tool: name, input });
+                    return run(input as Record<string, unknown>);
+                }
+            }) as AnyTool;
+        const opener: ConnectorOpener = async (input, context) => {
+            opens.push({ input, ...(context ? { context } : {}) });
+            if (input.kind !== 'conduit') throw new Error('not conduit');
+            const secret = await context!.secret('client-secret', input.pluginId);
+            return {
+                tools: [
+                    tool('gmail__search-messages', { readOnly: true }, async () => {
+                        if (fail) throw fail;
+                        return { messages: [{ id: 'm1' }] };
+                    }),
+                    tool('gmail__send-email', undefined, async () => {
+                        throw new Error(`upstream said no to client ${secret}`);
+                    })
+                ],
+                toolNames: ['gmail__search-messages', 'gmail__send-email'],
+                close: async () => undefined
+            };
+        };
+        return { opener, opens, ran };
+    }
+
+    let conduit: ReturnType<typeof fakeConduit>;
+    const call = (tool: string, input: unknown, as: Principal = principal) => port.call({ callId: 'call_1', sessionId: SESSION, tool, input }, as);
+    const codeOf = async (p: Promise<unknown>): Promise<string | undefined> => {
+        try {
+            await p;
+            return undefined;
+        } catch (e) {
+            return e instanceof ToolCallError ? e.code : `not-a-tool-call-error: ${String(e)}`;
+        }
+    };
+    const RegistryWithGmail = defineRegistry({ kek: () => importWorkspaceKek(KEK), catalogue: [IN_MEMORY_PLUGIN, { manifest: gmailConnectorPlugin, enabledByDefault: false }] });
+
+    async function begin(options: { fail?: Error; connected?: boolean; opener?: boolean } = {}): Promise<void> {
+        conduit = fakeConduit(options.fail);
+        Session = defineSessionActor({ factory: () => null });
+        Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
+        port = createToolCallPort({ routing: () => Routing, sessions: () => Session, registry: () => RegistryWithGmail, ...(options.opener === false ? {} : { connectors: conduit.opener }) });
+        app = testActorApp([Session, Routing, RegistryWithGmail, AuditActor, Workspace]);
+        await app.start();
+        const reg = app.as(owner).actor(RegistryWithGmail, registryKey(WS));
+        await reg.enable('gmail');
+        await reg.setSecret('client-secret', CLIENT_SECRET);
+        await reg.putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', ...(options.connected === false ? {} : { account: 'acct_1' }) });
+        // Another conduit connector in the workspace that this agent is not given.
+        await reg.putConnector({ id: 'other', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_2' });
+        const plugins = await reg.gate({ runtime: 'in-memory', connectors: ['gmail'] });
+        await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: AGENT, runtime: 'in-memory', machineId: 'machine_1' as MachineId, config, plugins });
+    }
+    afterEach(() => app?.stop());
+
+    it('answers the declarations of the session’s connected conduit connectors, opened as a local session opens them — no credential in the answer', async () => {
+        await begin();
+        const answer = await call(CONNECTOR_TOOLS_TOOL, {});
+        expect(answer).toEqual({
+            connectors: [
+                {
+                    id: 'gmail',
+                    tools: [
+                        { name: 'gmail__search-messages', description: 'gmail__search-messages described', inputSchema: { type: 'object', properties: { query: { type: 'string' } } }, annotations: { readOnly: true } },
+                        { name: 'gmail__send-email', description: 'gmail__send-email described', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } }
+                    ]
+                }
+            ],
+            unavailable: []
+        });
+        expect(JSON.stringify(answer)).not.toContain(CLIENT_SECRET);
+        expect(JSON.stringify(answer)).not.toContain('acct_1');
+        // Ids only, the session's own agent principal, the plugin's secrets.
+        expect(conduit.opens).toEqual([{ input: { kind: 'conduit', id: 'gmail', pluginId: 'gmail', connector: 'gmail', account: 'acct_1' }, context: expect.objectContaining({ workspaceId: WS, principal: expect.objectContaining({ kind: 'agent', sessionId: SESSION }) }) }]);
+        // What the open found is recorded on the connector, as on the local path.
+        expect((await app.as(owner).actor(RegistryWithGmail, registryKey(WS)).getConnector('gmail'))?.status.state).toBe('ok');
+    });
+
+    it('runs a call of a named connector on the platform and returns its result', async () => {
+        await begin();
+        await expect(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__search-messages', input: { query: 'is:unread' } })).resolves.toEqual({ messages: [{ id: 'm1' }] });
+        expect(conduit.ran).toEqual([{ tool: 'gmail__search-messages', input: { query: 'is:unread' } }]);
+    });
+
+    it('refuses a connector the session does not name, a tool it does not have, bad input, a caller that is not an agent, and an unwired deployment', async () => {
+        await begin();
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'other', tool: 'gmail__search-messages', input: {} }))).toBe('forbidden');
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'nope', tool: 'x', input: {} }))).toBe('forbidden');
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__nothing', input: {} }))).toBe('invalid');
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail' }))).toBe('invalid');
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__search-messages', input: {} }, owner))).toBe('forbidden');
+        expect(await codeOf(call(CONNECTOR_TOOLS_TOOL, {}, owner))).toBe('forbidden');
+        expect(conduit.ran).toEqual([]);
+        await app.stop();
+        await begin({ opener: false });
+        await expect(call(CONNECTOR_TOOLS_TOOL, {})).resolves.toEqual({ connectors: [], unavailable: [] });
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__search-messages', input: {} }))).toBe('unsupported');
+    });
+
+    it('a connector the owner has not connected: no declarations, and a call is refused', async () => {
+        await begin({ connected: false });
+        await expect(call(CONNECTOR_TOOLS_TOOL, {})).resolves.toEqual({ connectors: [], unavailable: [] });
+        expect(await codeOf(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__search-messages', input: {} }))).toBe('unsupported');
+        expect(conduit.opens).toEqual([]);
+    });
+
+    it('an account that needs reconnecting is a tool error with its code; any other failure is scrubbed of the secrets opened for it', async () => {
+        await begin({ fail: Object.assign(new Error('The Gmail account this connector uses needs to be reconnected.'), { name: 'ConnectorToolError', code: 'needs_reauth' }) });
+        await expect(call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__search-messages', input: {} })).rejects.toMatchObject({ code: 'needs_reauth', message: 'The Gmail account this connector uses needs to be reconnected.' });
+        const failed = await call(CONNECTOR_CALL_TOOL, { connectorId: 'gmail', tool: 'gmail__send-email', input: {} }).catch((e: unknown) => e as ToolCallError);
+        expect(failed).toMatchObject({ code: 'internal', message: 'gmail__send-email failed: upstream said no to client ***' });
     });
 });
 
