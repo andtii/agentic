@@ -130,6 +130,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
         workspaceConnectorEngine({
             workspaceId: ws,
             principal,
+            pluginId,
             secret: (name) => openPluginSecret(registry, name, pluginId),
             engineSecret,
             redirectUri: connectorRedirectUri(origin),
