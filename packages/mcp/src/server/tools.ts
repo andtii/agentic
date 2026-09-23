@@ -16,8 +16,13 @@
  */
 import {
     CHAT_FILE_TEXT_MAX_BYTES,
+    CHANGES_MAX_COMMITS,
+    CHANGES_MAX_FILES,
+    FS_LIST_MAX_ENTRIES,
+    FS_READ_MAX_BYTES,
     MODEL_IMAGE_TYPES,
     chatFileUri,
+    sessionFileUri,
     hasScope,
     isTextLikeMediaType,
     type AgentId,
@@ -25,12 +30,14 @@ import {
     type ChatFileStore,
     type ChatId,
     type EnvironmentId,
+    type FsReadRev,
     type MachineId,
     type MemoryScope,
     type ProjectId,
     type Scope,
     type SessionId,
     type TaskId,
+    type WorkspaceAnswer,
     type WorkspaceId
 } from '@agentic/core';
 import { defineTool, type AnyTool, type ToolAnnotations } from '@sigx/ai';
@@ -54,7 +61,7 @@ export type ToolContentBlock = { readonly type: 'text'; readonly text: string } 
  */
 export const MCP_CONTENT_KEY = 'mcpContent';
 /** The tools whose results carry `MCP_CONTENT_KEY` — no other tool's result is ever rewritten. */
-export const MCP_CONTENT_TOOLS: ReadonlySet<string> = new Set(['chats_file_get']);
+export const MCP_CONTENT_TOOLS: ReadonlySet<string> = new Set(['chats_file_get', 'sessions_files_read']);
 
 /** What `chats_file_get` returns as `structuredContent`; the text or image itself is in `content`. */
 export interface ChatFileGetResult {
@@ -109,6 +116,39 @@ async function getChatFile(port: PlatformPort, files: ChatFileStore | undefined,
     const { text: content, truncated } = utf8Prefix(body.bytes, CHAT_FILE_TEXT_MAX_BYTES);
     const result: ChatFileGetResult = truncated ? { file, uri, kind: 'text', truncated: true, note: `truncated: the first ${kb(CHAT_FILE_TEXT_MAX_BYTES)} of ${kb(file.bytes)}` } : { file, uri, kind: 'text' };
     return reply(result, [{ type: 'text', text: content }]);
+}
+
+/** What `sessions_files_read` returns as `structuredContent`; a text file's text is the second content block. */
+export interface SessionFileReadResult {
+    readonly sessionId: string;
+    /** Relative to the session's folder, `/`-separated. */
+    readonly path: string;
+    readonly rev: FsReadRev;
+    /** The file's `agentic-session://` URI — how a chat message references it (`resource` parts). */
+    readonly uri: string;
+    /** `text`: the second content block carries the file; `metadata`: this record is all there is (a binary file). */
+    readonly kind: 'text' | 'metadata';
+    readonly size: number;
+    readonly lines?: number;
+    readonly note?: string;
+}
+
+/** The answer's result, or its refusal as a thrown error the handler reports as an `isError` result (`code: message`). */
+function answered<R>(tool: string, answer: WorkspaceAnswer<R>): R {
+    if (answer.error) throw new Error(`${tool}: ${answer.error.code}: ${answer.error.message}`);
+    return answer.result;
+}
+
+/**
+ * `sessions_files_read` (#566): the text of a text file, or its metadata alone for a binary one — as
+ * `chats_file_get` does for chat files. A text file over the machine's read limit is the machine's `too-large`.
+ */
+async function readSessionFile(port: PlatformPort, sessionId: SessionId, path: string, rev: FsReadRev | undefined): Promise<SessionFileReadResult & { readonly [MCP_CONTENT_KEY]: readonly ToolContentBlock[] }> {
+    const file = answered('sessions_files_read', await port.sessions.read(sessionId, path, rev));
+    const base = { sessionId, path: file.path, rev: file.rev, uri: sessionFileUri(sessionId, file.path), size: file.size };
+    const reply = (result: SessionFileReadResult, blocks: readonly ToolContentBlock[] = []) => ({ ...result, [MCP_CONTENT_KEY]: [{ type: 'text' as const, text: JSON.stringify(result) }, ...blocks] });
+    if (file.binary || file.text === undefined) return reply({ ...base, kind: 'metadata', note: `binary file (${kb(file.size)}): only its metadata is returned` });
+    return reply({ ...base, kind: 'text', ...(file.lines !== undefined ? { lines: file.lines } : {}) }, [{ type: 'text', text: file.text }]);
 }
 
 /** What the surface declares but does not do yet — enumerated, never implied (PLG-09). */
@@ -271,6 +311,33 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             input: z.object({ sessionId: id('The session id.'), from: cursor.optional(), limit: z.number().int().min(1).max(TAIL_MAX).optional() }),
             annotations: READ,
             run: (input) => port.sessions.tail(input.sessionId as SessionId, input.from, input.limit ?? TAIL_DEFAULT)
+        }),
+
+        // Read-only views of the session's folder (#566) — what the web's Changes and Files views show. `sessions_`
+        // because the session is what is read: the `sessions` scope gates them like `sessions_tail`.
+        tool({
+            name: 'sessions_files_list',
+            scope: 'sessions',
+            description: `One level of a session's folder on its machine: files and folders with sizes and, under version control, how each differs from the committed version (\`change\`). Paths are relative to the folder, \`/\`-separated; omit \`path\` for the folder itself. Ignored files (\`.gitignore\`) are left out when \`ignoredHidden\`; at most ${FS_LIST_MAX_ENTRIES} entries (\`truncated\`). Only sessions that run in a folder on a machine have files.`,
+            input: z.object({ sessionId: id('The session id.'), path: z.string().optional().describe('A folder relative to the session folder; default the folder itself.') }),
+            annotations: READ,
+            run: async (input) => answered('sessions_files_list', await port.sessions.tree(input.sessionId as SessionId, input.path ?? ''))
+        }),
+        tool({
+            name: 'sessions_files_read',
+            scope: 'sessions',
+            description: `One file of a session's folder, relative to it. \`rev\`: \`working\` (default, the file on disk), \`head\` (as last committed) or \`base\` (where the branch left its base) — compare two to see what the agent changed. The first content block is a JSON summary (path, rev, uri, kind, size, lines); a text file's text follows as a second block. A binary file is the summary alone; a text file over ${kb(FS_READ_MAX_BYTES)} is refused as \`too-large\`.`,
+            input: z.object({ sessionId: id('The session id.'), path: z.string().min(1).describe('A file relative to the session folder.'), rev: z.enum(['working', 'head', 'base']).optional() }),
+            annotations: READ,
+            run: (input) => readSessionFile(port, input.sessionId as SessionId, input.path, input.rev)
+        }),
+        tool({
+            name: 'sessions_changes',
+            scope: 'sessions',
+            description: `What changed in a session's folder, from its version control (\`vcs\`, git first): \`scope: "uncommitted"\` (default) lists the files that differ from the last commit, \`"branch"\` the files the branch changed against its base. Each file has a status (modified, added, deleted, renamed, untracked) and line counts; \`commits\` are the branch's since its base, newest first; \`branch\`, \`base\`, \`ahead\` and \`behind\` place it. At most ${CHANGES_MAX_FILES} files and ${CHANGES_MAX_COMMITS} commits (\`truncated\`). A folder without version control is refused as \`not-a-repo\`.`,
+            input: z.object({ sessionId: id('The session id.'), scope: z.enum(['uncommitted', 'branch']).optional() }),
+            annotations: READ,
+            run: async (input) => answered('sessions_changes', await port.sessions.changes(input.sessionId as SessionId, input.scope ?? 'uncommitted'))
         }),
 
         // ---- tasks ----------------------------------------------------------------------

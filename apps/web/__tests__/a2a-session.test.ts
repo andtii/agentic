@@ -60,6 +60,15 @@ function fakePlatform(options: { log?: AgentEvent[]; task?: (n: number) => TaskS
             },
             cancel: async () => {
                 throw new Error('unused');
+            },
+            tree: async () => {
+                throw new Error('unused');
+            },
+            read: async () => {
+                throw new Error('unused');
+            },
+            changes: async () => {
+                throw new Error('unused');
             }
         }
     };

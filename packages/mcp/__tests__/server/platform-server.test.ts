@@ -12,7 +12,7 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { OAuthClientInformationMixed, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { describe, expect, it } from 'vitest';
-import type { AgentId, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, ProjectId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import type { AgentId, ChangeSet, ChatFile, ChatFileStore, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, ProjectId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import { createOAuthServer, memoryOAuthStore, type OAuthUser } from '@agentic/platform';
 import { CHAT_FILE_BYTES_UNAVAILABLE, PLATFORM_MCP_UNSUPPORTED, createPlatformMcpHandler, platformTools, scopeOfTool, type CreateTaskInput, type DelegateTaskInput, type ExternalPrincipal, type OpenSessionInput, type PlatformPort, type TaskSummary } from '@agentic/mcp';
 
@@ -74,6 +74,8 @@ function fakePlatform() {
     /** Each chat's machine (#414), as `chats_set_machine` leaves it; `m_laptop` is the only paired machine. */
     const chatMachines: Record<string, string | null> = {};
     const created: CreateTaskInput[] = [];
+    /** Every session-folder read (#566), with the principal it ran as. */
+    const fileCalls: { op: string; sessionId: string; arg: string; rev?: string; principal: ExternalPrincipal }[] = [];
     const port = (principal: ExternalPrincipal): PlatformPort => ({
         machines: { list: async () => [{ machineId: ENV.machineId, name: 'laptop', online: true, os: 'windows', environments: [ENV] }] },
         environments: {
@@ -112,6 +114,27 @@ function fakePlatform() {
                 const events = after.slice(0, limit);
                 const last = events.at(-1) ?? from ?? { epoch: 0, seq: 0 };
                 return { sessionId, status: 'idle', events, next: { epoch: last.epoch, seq: last.seq }, truncated: after.length > events.length };
+            },
+            // `sess_1` runs in a git folder on the laptop; `sess_api` is an API session with no folder (the port throws).
+            async tree(sessionId, path) {
+                fileCalls.push({ op: 'tree', sessionId, arg: path, principal });
+                if (sessionId !== 'sess_1') throw new Error(`session ${sessionId} has no folder on a machine`);
+                if (path === 'nope') return { error: { code: 'not-found', message: 'nope does not exist' } };
+                return { result: { kind: 'tree', root: 'C:/Dev/agentic', path, entries: [{ name: 'src', path: 'src', type: 'dir', change: 'modified' }, { name: 'README.md', path: 'README.md', type: 'file', size: 10 }], truncated: false, ignoredHidden: true } };
+            },
+            async read(sessionId, path, rev) {
+                fileCalls.push({ op: 'read', sessionId, arg: path, ...(rev !== undefined ? { rev } : {}), principal });
+                if (sessionId !== 'sess_1') throw new Error(`session ${sessionId} has no folder on a machine`);
+                if (path === 'logo.png') return { result: { kind: 'read', path, rev: rev ?? 'working', size: 2048, binary: true } };
+                if (path === 'big.log') return { error: { code: 'too-large', message: 'big.log is over 480 KB' } };
+                const text = rev === 'head' ? 'export const answer = 41;\n' : 'export const answer = 42;\n';
+                return { result: { kind: 'read', path, rev: rev ?? 'working', size: text.length, text, lines: 1 } };
+            },
+            async changes(sessionId, scope) {
+                fileCalls.push({ op: 'changes', sessionId, arg: scope, principal });
+                if (sessionId !== 'sess_1') throw new Error(`session ${sessionId} has no folder on a machine`);
+                const set: ChangeSet = { kind: 'changes', vcs: 'git', scope, branch: 'feature/files', base: 'main', ahead: 1, behind: 0, files: [{ path: 'src/app.ts', status: 'modified', added: 1, removed: 1 }], commits: [], truncated: false };
+                return { result: set };
             }
         },
         tasks: {
@@ -192,7 +215,7 @@ function fakePlatform() {
             })
         }
     });
-    return { port, opened, prompts, delegated, created, fileAccess, chatProjects, projectSets, chatMachines };
+    return { port, opened, prompts, delegated, created, fileAccess, fileCalls, chatProjects, projectSets, chatMachines };
 }
 
 /** The Worker, in process: OAuth routes + the MCP mount, sessions by a `session=<userId>` cookie. */
@@ -324,6 +347,9 @@ describe('platform MCP server: OAuth 2.1 + DCR + PKCE with the official client',
                 'sessions_respond',
                 'sessions_cancel',
                 'sessions_tail',
+                'sessions_files_list',
+                'sessions_files_read',
+                'sessions_changes',
                 'tasks_create',
                 'tasks_delegate',
                 'tasks_get',
@@ -666,5 +692,70 @@ describe('platform MCP server: chats_file_get (#209)', () => {
         const { fileAccess: _omit, ...chats } = port.chats;
         const bare = platformTools({ ...port, chats }, principal).find((t) => t.name === 'chats_file_get')!;
         await expect(bare.run({ chatId: 'chat_1', fileId: 'f_text' }, ctx)).rejects.toThrow(/not available on this host/);
+    });
+});
+
+describe('platform MCP server: session files (#566)', () => {
+    type Content = { type: string; text?: string }[];
+
+    it('sessions_files_list and sessions_changes return the machine’s answer as structured content, read-only and as this client', async () => {
+        const s = server();
+        const { client } = await connect(s, ['sessions']);
+        const { tools } = await client.listTools();
+        for (const name of ['sessions_files_list', 'sessions_files_read', 'sessions_changes']) expect(tools.find((t) => t.name === name)!.annotations).toEqual({ readOnlyHint: true, idempotentHint: true });
+
+        const listed = await client.callTool({ name: 'sessions_files_list', arguments: { sessionId: 'sess_1' } });
+        expect(listed.isError).toBeFalsy();
+        expect(listed.structuredContent).toMatchObject({ kind: 'tree', path: '', ignoredHidden: true, entries: [{ name: 'src', change: 'modified' }, { name: 'README.md', size: 10 }] });
+        const changes = await client.callTool({ name: 'sessions_changes', arguments: { sessionId: 'sess_1' } });
+        expect(changes.structuredContent).toMatchObject({ kind: 'changes', vcs: 'git', scope: 'uncommitted', branch: 'feature/files', files: [{ path: 'src/app.ts', status: 'modified' }] });
+        await client.callTool({ name: 'sessions_changes', arguments: { sessionId: 'sess_1', scope: 'branch' } });
+        expect(s.platform.fileCalls.map((c) => `${c.op}:${c.arg}`)).toEqual(['tree:', 'changes:uncommitted', 'changes:branch']);
+        expect(s.platform.fileCalls[0]!.principal).toMatchObject({ kind: 'external', workspaceId: 'gh_1', scopes: ['sessions'] });
+        await client.close();
+    });
+
+    it('sessions_files_read: a text file as its text after a JSON summary with its agentic-session URI; a binary file as metadata only', async () => {
+        const s = server();
+        const { client } = await connect(s, ['sessions']);
+        const text = await client.callTool({ name: 'sessions_files_read', arguments: { sessionId: 'sess_1', path: 'src/app.ts', rev: 'head' } });
+        expect(text.isError).toBeFalsy();
+        const content = text.content as Content;
+        expect(content.map((c) => c.type)).toEqual(['text', 'text']);
+        expect(content[1]!.text).toBe('export const answer = 41;\n');
+        expect(JSON.parse(content[0]!.text!)).toEqual(text.structuredContent);
+        expect(text.structuredContent).toEqual({ sessionId: 'sess_1', path: 'src/app.ts', rev: 'head', uri: 'agentic-session://sess_1/src/app.ts', kind: 'text', size: 26, lines: 1 });
+
+        const binary = await client.callTool({ name: 'sessions_files_read', arguments: { sessionId: 'sess_1', path: 'logo.png' } });
+        expect((binary.content as Content).map((c) => c.type)).toEqual(['text']);
+        expect(binary.structuredContent).toMatchObject({ path: 'logo.png', rev: 'working', kind: 'metadata', size: 2048, note: expect.stringContaining('binary file') });
+        await client.close();
+    });
+
+    it('a machine refusal, and a session with no folder, are error results naming why', async () => {
+        const s = server();
+        const { client } = await connect(s, ['sessions']);
+        const missing = await client.callTool({ name: 'sessions_files_list', arguments: { sessionId: 'sess_1', path: 'nope' } });
+        expect(missing.isError).toBe(true);
+        expect((missing.content as Content)[0]!.text).toContain('sessions_files_list: not-found: nope does not exist');
+        const big = await client.callTool({ name: 'sessions_files_read', arguments: { sessionId: 'sess_1', path: 'big.log' } });
+        expect(big.isError).toBe(true);
+        expect((big.content as Content)[0]!.text).toContain('too-large');
+        const api = await client.callTool({ name: 'sessions_changes', arguments: { sessionId: 'sess_api' } });
+        expect(api.isError).toBe(true);
+        expect((api.content as Content)[0]!.text).toContain('has no folder on a machine');
+        await client.close();
+    });
+
+    it('is gated by the "sessions" scope, before the port is asked', async () => {
+        const s = server();
+        const { client } = await connect(s, ['machines']);
+        for (const [name, args] of [['sessions_files_list', { sessionId: 'sess_1' }], ['sessions_files_read', { sessionId: 'sess_1', path: 'README.md' }], ['sessions_changes', { sessionId: 'sess_1' }]] as const) {
+            const res = await client.callTool({ name, arguments: args });
+            expect(res.isError).toBe(true);
+            expect((res.content as Content)[0]!.text).toContain('needs the "sessions" scope');
+        }
+        expect(s.platform.fileCalls).toEqual([]);
+        await client.close();
     });
 });

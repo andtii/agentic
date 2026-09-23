@@ -8,7 +8,7 @@
  * The shapes are deliberately plain (JSON-serializable, no branded ids on
  * the wire beyond strings) — they are what an external client sees.
  */
-import type { AgentId, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, ProjectId, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, UsageLimits, UsageLimitsQuery, WaitReason } from '@agentic/core';
+import type { AgentId, ChangeScope, ChangeSet, ChatFile, ChatId, EnvironmentDescriptor, EnvironmentId, FsReadResult, FsReadRev, FsTreeResult, MachineId, MemoryEntry, MemoryQuery, MemoryScope, NewMemoryEntry, Principal, ProjectId, PromptPart, RankedMemory, ScheduleId, SessionId, TaskId, TaskStatus, UsageLimits, UsageLimitsQuery, WaitReason, WorkspaceAnswer } from '@agentic/core';
 
 export type ExternalPrincipal = Extract<Principal, { kind: 'external' }>;
 
@@ -194,6 +194,15 @@ export interface PlatformPort {
         respond(sessionId: SessionId, requestId: string, decision: RespondDecision): Promise<CommandOutcome>;
         cancel(sessionId: SessionId): Promise<CommandOutcome>;
         tail(sessionId: SessionId, from: EventCursor | undefined, limit: number): Promise<SessionEventsPage>;
+        /**
+         * The session's folder, read-only (#566) — the same `WorkspaceSource` calls the Changes and Files views make:
+         * paths relative to the folder, `/`-separated, `''` the folder itself. A session with no folder on a machine (an
+         * API runtime) throws; what the machine refuses (`outside-roots`, `not-found`, `not-a-repo`, `too-large`,
+         * `unsupported`, …) comes back as the answer's `error`.
+         */
+        tree(sessionId: SessionId, path: string): Promise<WorkspaceAnswer<FsTreeResult>>;
+        read(sessionId: SessionId, path: string, rev?: FsReadRev): Promise<WorkspaceAnswer<FsReadResult>>;
+        changes(sessionId: SessionId, scope: ChangeScope): Promise<WorkspaceAnswer<ChangeSet>>;
     };
     readonly tasks: {
         create(input: CreateTaskInput): Promise<TaskSummary>;
