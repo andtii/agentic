@@ -29,7 +29,8 @@ export interface HostedSession {
     ref?: unknown;
     capabilities?: CapabilityReport;
     /**
-     * The turn in flight (#394): set by a prompt's ack (`onSessionReply`), cleared by the turn's `turn-end`
+     * The turn in flight (#394): set by a prompt's ack (`onSessionReply`) or by a `turn-start` the runtime began on
+     * its own (#510, `onSessionFrame`), cleared by the turn's `turn-end`
      * (`onSessionFrame`) or the session's closure. What capacity counts — with the prompts still pending, see `runningIn`.
      */
     running?: { readonly turnId: string; readonly since: number };

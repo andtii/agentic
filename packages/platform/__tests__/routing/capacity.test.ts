@@ -9,11 +9,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { actorKey, type AgentId, type ChatId, type EnvironmentId, type MachineId, type MessageId, type Principal, type PromptPart, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
+import type { AgentEvent } from '@sigx/ai-agent';
+import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 
 import { AgentActor, agentKey } from '../../src/agent/index';
 import { Chat } from '../../src/chat/index';
 import { workspaceKey } from '../../src/auth/index';
-import { defineMachineActor, machineKey, parseMachineKey, ToolCallError, type MachineSocketPort, type ToolCallPort } from '../../src/machine/index';
+import { defineMachineActor, freeSlots, isIdle, machineKey, parseMachineKey, runningIn, ToolCallError, type MachineSocketPort, type ToolCallPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { defineRoutingActor, routingKey } from '../../src/routing/index';
 import { defineSessionActor, type CommandSink } from '../../src/session/index';
@@ -300,5 +302,80 @@ describe('capacity counts running turns, not open sessions (#394)', () => {
         expect(await machine(m1).envResult(requestId)).toMatchObject({ status: 'done', result: { environmentId: E1 } });
         await until(async () => (await machine(m1).get()).environments.length === 0, 'the environment gone');
         expect(await hosted(m1)).toEqual([]);
+    });
+});
+
+describe('a turn the runtime starts itself holds the session and its slot (#510)', () => {
+    /**
+     * Claude Code starts a turn of its own when a background task it waited on finishes: a `turn-start` no prompt of
+     * ours is out for. The in-memory daemon has no such turn, so the test plays it on the daemon's socket, stamped with
+     * the daemon's own next seqs — and moves the fake's counter past them, as a real daemon's log would be.
+     */
+    async function implicitTurn(machineId: MachineId, sessionId: string, turnId = 'rt-1') {
+        const daemon = machine(machineId, asMachine(machineId));
+        const fake = (daemons.find((d) => d.machineId === machineId) as unknown as { sessions: Map<string, { seq: number; epoch: number }> }).sessions.get(sessionId)!;
+        const send = async (event: Record<string, unknown>) => {
+            fake.seq++;
+            const at = { epoch: fake.epoch, seq: fake.seq };
+            const frame = { v: WIRE_PROTOCOL_VERSION, kind: 'event', ...at, event: { ...event, turnId, sessionId, ...at } as AgentEvent };
+            expect(await daemon.socketMessage(JSON.stringify({ v: 1, t: 'session.frame', sessionId, frame }))).toMatchObject({ ok: true });
+        };
+        return {
+            start: () => send({ type: 'turn-start', input: [] }),
+            end: async (text = 'done in the background') => {
+                await send({ type: 'part-delta', partId: `${turnId}:p`, delta: text });
+                await send({ type: 'turn-end', stopReason: 'end_turn' });
+            }
+        };
+    }
+
+    it('the session runs it and the machine counts it: a message to the same member waits for it, then runs', async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const chatId = await room(cc);
+        const first = await message(chatId, cc, 'plan it', 't_1');
+        await settled('t_1');
+        const sid = first.sessionId!;
+
+        const turn = await implicitTurn(m1, sid);
+        await turn.start();
+        expect((await session(sid).get()).running).toMatchObject({ turnId: 'rt-1', implicit: true });
+        expect((await session(sid).get()).running?.taskId).toBeUndefined();
+        // The platform's count matches the daemon's: the slot is taken and the machine is not idle, so no update fires.
+        const busy = await machine(m1).get();
+        expect(runningIn(busy, E1).map((h) => h.sessionId)).toEqual([sid]);
+        expect(freeSlots(busy, E1)).toBe(0);
+        expect(isIdle(busy)).toBe(false);
+
+        // A message meanwhile: the runtime cannot take it into the turn (no steer), so it waits for the turn to end.
+        const next = await message(chatId, cc, 'and now?', 't_2');
+        expect(next.sessionId).toBe(sid);
+        await until(async () => (await routing().get()).routes.find((r) => r.taskId === 't_2')?.status === 'waiting-turn', 't_2 waiting-turn');
+        expect(frames(m1, 'session.command').filter((f) => (f.command as { type: string }).type === 'prompt')).toHaveLength(1);
+
+        await turn.end('background work done');
+        await settled('t_2');
+        expect((await task('t_2').get()).status).toBe('completed');
+        expect(isIdle(await machine(m1).get())).toBe(true);
+    });
+
+    it("another member's message waits on the slot it holds and runs when it ends — no wait on an unrelated turn", async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const dev = await agent('agent_dev');
+        const chatId = await room(cc, dev);
+        const first = await message(chatId, cc, 'plan it', 't_cc');
+        await settled('t_cc');
+
+        const turn = await implicitTurn(m1, first.sessionId!);
+        await turn.start();
+        const b = await message(chatId, dev, 'build it', 't_dev');
+        expect(b.status).toBe('waiting');
+        expect(b.wait).toEqual({ kind: 'capacity', environmentId: E1, position: 1 });
+
+        await turn.end('done in the background');
+        await settled('t_dev');
+        expect((await task('t_dev').get()).status).toBe('completed');
+        expect((await task('t_dev').get()).transitions[1]!.why).toMatch(/slot freed in environment env_1/);
     });
 });

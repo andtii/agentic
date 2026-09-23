@@ -792,8 +792,10 @@ export function defineSessionActor(ports: SessionPorts) {
      * it to the recorder (Ledger + Task budget, OPS-07/08) and return the
      * verdict. Session-scoped events are cumulative totals and never counted.
      * The books never fail a turn: a recorder that throws is a `null` verdict.
+     * `taskId` is the turn's task, read by the caller before any fold; `undefined`
+     * bills no task (a turn the runtime started itself, #510) — never a default.
      */
-    async function recordUsage(c: ActorContext<SessionState>, ev: AgentEvent, taskId: TaskId | undefined = currentTaskId(c.state)): Promise<UsageVerdict | null> {
+    async function recordUsage(c: ActorContext<SessionState>, ev: AgentEvent, taskId: TaskId | undefined): Promise<UsageVerdict | null> {
         if (ev.type !== 'usage' || ev.scope !== 'turn' || !ports.usage) return null;
         const spec = c.state.spec;
         const parsed = parseSessionKey(c.key);
@@ -971,6 +973,18 @@ export function defineSessionActor(ports: SessionPorts) {
 
             const errorReply = (commandId: string, code: Extract<WireReply, { kind: 'error' }>['code'], message: string): WireReply => ({ v: V, kind: 'error', commandId, code, message });
             const pending = (commandId: string): SessionCommandResult => ({ v: V, kind: 'pending', commandId });
+
+            /**
+             * A `turn-start` the runtime began on its own (#510): new to the log, nothing running, the session not closed,
+             * and no prompt of ours out for that turn — Claude Code starts one when a background task it waited on
+             * finishes. It is recorded as the running turn so it ends (`finishTurn`) and is cut (`hostEnded`) like any
+             * other; a prompt whose ack is still out is the prompt's turn, which the ack records under its task.
+             */
+            function isImplicitStart(ev: Extract<AgentEvent, { type: 'turn-start' }>): boolean {
+                const s = ctx.state;
+                if (s.running || s.status === 'closed' || !cursorAfter(s.head, ev)) return false;
+                return !Object.values(s.commands).some((r) => !r.reply && r.command?.type === 'prompt' && r.command.turnId === ev.turnId);
+            }
 
             /**
              * Apply a reply: remember it, start the driver on a prompt ack, settle on a close ack. `taskId` is the
@@ -1305,13 +1319,19 @@ export function defineSessionActor(ports: SessionPorts) {
                                 break;
                             case 'event': {
                                 // Read before the fold: a `turn-end` drops `running`, and the turn's task goes with it (#390).
+                                const ev = frame.event;
+                                if (ev.type === 'turn-start' && ev.turnId !== undefined && isImplicitStart(ev)) {
+                                    await appendEntry(ctx, set({ running: { turnId: ev.turnId, commandId: ev.turnId, input: ev.input, startedAt: now(), implicit: true } }));
+                                    await publishChat(ctx, { kind: 'status', status: 'typing', ref: ev.turnId });
+                                }
                                 const runningTurn = s.running?.turnId;
-                                const runningTask = s.running?.taskId;
-                                await appendEvent(ctx, frame.event);
-                                const verdict = await recordUsage(ctx, frame.event, runningTask ?? currentTaskId(s));
+                                // An implicit turn works no task (#510): its usage, reply and learning are the session's, never the opening task's.
+                                const runningTask = s.running?.implicit ? undefined : s.running?.taskId ?? s.spec?.taskId;
+                                await appendEvent(ctx, ev);
+                                const verdict = await recordUsage(ctx, ev, runningTask);
                                 // Over budget on the daemon path: the cancel travels the CommandSink like any other command.
                                 if (verdict && !verdict.ok && s.running) await dispatch({ v: V, commandId: newCommandId('cancel'), type: 'cancel' });
-                                if (frame.event.type === 'turn-end' && runningTurn !== undefined && runningTurn === frame.event.turnId) await finishTurn(ctx, runningTurn, runningTask ?? s.spec?.taskId);
+                                if (ev.type === 'turn-end' && runningTurn !== undefined && runningTurn === ev.turnId) await finishTurn(ctx, runningTurn, runningTask);
                                 break;
                             }
                             case 'gap':

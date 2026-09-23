@@ -378,6 +378,26 @@ describe('update policies (#365)', () => {
         expect((await machine().updateState()).impact.runningTurns).toEqual([{ sessionId: 'sess_1', agentId: 'agent_1' }]);
     });
 
+    it('does not request while a turn the runtime started itself runs, and does once it ends (#510)', async () => {
+        await hello();
+        await machine().openSession('sess_1' as SessionId, E1, openSpec);
+        await daemon().socketMessage(JSON.stringify({ v: 1, t: 'session.opened', sessionId: 'sess_1', ref: { agent: 'in-memory', v: 1, id: 'r' }, capabilities: {}, head: { epoch: 0, seq: 0 } }));
+        // No prompt of ours is out: the runtime began the turn itself (Claude Code after a background task).
+        const event = (seq: number, event: Record<string, unknown>) =>
+            daemon().socketMessage(JSON.stringify({ v: 1, t: 'session.frame', sessionId: 'sess_1', frame: { v: WIRE_PROTOCOL_VERSION, kind: 'event', epoch: 0, seq, event: { ...event, turnId: 'rt-1', sessionId: 'sess_1', epoch: 0, seq } } }));
+        const free = freeSlots(await machine().get(), E1);
+        await event(1, { type: 'turn-start', input: [] });
+        await machine().setUpdatePolicy({ kind: 'auto-when-idle' });
+        expect(sockets.frames('update.request')).toEqual([]);
+        expect((await machine().updateState()).impact.runningTurns).toEqual([{ sessionId: 'sess_1', agentId: 'agent_1' }]);
+        expect(freeSlots(await machine().get(), E1)).toBe(free - 1);
+
+        await event(2, { type: 'turn-end', stopReason: 'end_turn' });
+        await until(() => sockets.frames('update.request').length === 1, 'the update once the turn ended');
+        // Its end frees the slot for the router, as a prompted turn's does.
+        expect(slotFreed).toContainEqual({ environmentId: E1, why: 'turn rt-1 ended in session sess_1' });
+    });
+
     it('window (the workspace default) requests only inside the window, on the liveness tick', async () => {
         // A daily window at 13:00 UTC for an hour; it is 12:00.
         const policy: UpdatePolicy = { kind: 'window', cron: '0 13 * * *', tz: 'UTC', durationMs: 60 * 60_000 };

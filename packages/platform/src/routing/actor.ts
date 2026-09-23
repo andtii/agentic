@@ -598,7 +598,12 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 const answer = route.answer ? ctx.snapshot(route.answer) : undefined;
                 const input = answer ? answer.input : await promptInput(route, t);
                 const sent = await steerOrPrompt(route, input, answer?.turnId);
-                if (sent === 'busy') return;
+                if (sent === 'busy') {
+                    // Parked `waiting-turn`: `follow` watches the turn in the way when no route of ours follows it (#510).
+                    await ctx.tasks.start('follow');
+                    wakers.get(ctx.key)?.();
+                    return;
+                }
                 if ('kind' in sent) {
                     // The environment is busy after all (#394): wait for a turn to end there. A local route's `busy` is its own session's (#395).
                     if (sent.code === 'busy' && m) {
@@ -1875,6 +1880,40 @@ export function defineRoutingActor(ports: RoutingPorts) {
             const signal = ctx.abortSignal;
 
             /**
+             * Wait out the turn a session runs that no route follows (#510: Claude Code starts one itself after a
+             * background task) and tell the router it ended (`turnEnded`), so the routes parked `waiting-turn` on the
+             * session are prompted. A session already idle is reported at once; one that goes away ends the wait the same
+             * way, and the prompt then fails with the session.
+             */
+            async function watchTurn(sessionId: SessionId): Promise<void> {
+                if (!ids) return;
+                const context = asPrincipal(driverOf(ids.workspaceId));
+                const sessionClient = actor(ports.sessions(), `${ids.workspaceId}:session:${sessionId}`).with({ context }) as unknown as SessionClient;
+                const router = () => actor(self!, ctx.key).with({ context }) as unknown as { turnEnded(sessionId: SessionId, turnId: string): Promise<void> };
+                const info = await sessionClient.get();
+                const turnId = info.running?.turnId;
+                if (turnId !== undefined) {
+                    const it = sessionClient.tail(info.head)[Symbol.asyncIterator]();
+                    const aborted = new Promise<IteratorResult<AgentEvent>>((resolve) => {
+                        const done = () => resolve({ value: undefined as never, done: true });
+                        if (signal.aborted) done();
+                        else signal.addEventListener('abort', done, { once: true });
+                    });
+                    try {
+                        for (;;) {
+                            const next = await Promise.race([it.next(), aborted]);
+                            if (signal.aborted) return;
+                            if (next.done || (next.value.type === 'turn-end' && next.value.turnId === turnId)) break;
+                        }
+                    } finally {
+                        await Promise.resolve(it.return?.()).catch(() => undefined);
+                    }
+                }
+                // Idle already (the turn ended before the watch began): the transition still says so, not an empty turn id.
+                await router().turnEnded(sessionId, turnId ?? '(already over)').catch(() => undefined);
+            }
+
+            /**
              * Follow one route's turn on its Session and settle the Task at the
              * end. A task already settled is left alone; a replay from the log
              * after an eviction finds the turn end again.
@@ -2065,6 +2104,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                  */
                 async follow(): Promise<void> {
                     const active = new Map<TaskId, Promise<void>>();
+                    const watching = new Map<SessionId, Promise<void>>();
                     const aborted = new Promise<void>((resolve) => {
                         if (signal.aborted) resolve();
                         else signal.addEventListener('abort', () => resolve(), { once: true });
@@ -2072,14 +2112,26 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     while (!signal.aborted) {
                         // Arm the wake-up before looking, so a route marked running meanwhile is never missed.
                         const woken = new Promise<void>((resolve) => wakers.set(ctx.key, resolve));
-                        for (const route of Object.values(ctx.snapshot().routes)) {
+                        const routes = Object.values(ctx.snapshot().routes);
+                        for (const route of routes) {
                             if (route.status !== 'running' || active.has(route.taskId)) continue;
                             const run = followOne(route)
                                 .catch(() => undefined)
                                 .finally(() => active.delete(route.taskId));
                             active.set(route.taskId, run);
                         }
-                        await Promise.race([woken, aborted, ...active.values()]);
+                        // A route parked `waiting-turn` behind a turn no route follows — one the runtime started itself
+                        // (#510) — has nobody to say the turn ended: watch that session's turn instead.
+                        for (const route of routes) {
+                            const sessionId = route.sessionId;
+                            if (route.status !== 'waiting-turn' || !sessionId || watching.has(sessionId)) continue;
+                            if (routes.some((r) => r.status === 'running' && r.sessionId === sessionId)) continue;
+                            const run = watchTurn(sessionId)
+                                .catch(() => undefined)
+                                .finally(() => watching.delete(sessionId));
+                            watching.set(sessionId, run);
+                        }
+                        await Promise.race([woken, aborted, ...active.values(), ...watching.values()]);
                         wakers.delete(ctx.key);
                     }
                 }
