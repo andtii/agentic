@@ -1909,7 +1909,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         await Promise.resolve(it.return?.()).catch(() => undefined);
                     }
                 }
-                await router().turnEnded(sessionId, turnId ?? '').catch(() => undefined);
+                // Idle already (the turn ended before the watch began): the transition still says so, not an empty turn id.
+                await router().turnEnded(sessionId, turnId ?? '(already over)').catch(() => undefined);
             }
 
             /**
