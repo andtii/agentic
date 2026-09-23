@@ -12,7 +12,7 @@ const external: Principal = { kind: 'external', workspaceId: ws, clientId: 'c1',
 
 const rq = {} as ServerFnContext;
 const op = (key: string, type = 'Workspace'): ServerPolicyOp =>
-    ({ fn: { name: 'x' }, args: [], resource: { kind: 'actor', type, key, method: 'get' } }) as unknown as ServerPolicyOp;
+    ({ fn: { name: 'x' }, input: undefined, resource: { kind: 'actor', type, key, method: 'get' } }) as unknown as ServerPolicyOp;
 
 describe('workspaceOfActorKey', () => {
     it('reads the root key and every child key', () => {
@@ -40,7 +40,7 @@ describe('sameWorkspace', () => {
         expect(await sameWorkspace(otherUser, rq, op(workspaceKey(ws)))).toBe(false);
         expect(await sameWorkspace(otherUser, rq, op(actorKey(ws, 'chat', 'chat_1'), 'Chat'))).toBe(false);
         expect(await sameWorkspace(null, rq, op(workspaceKey(ws)))).toBe(false);
-        expect(await sameWorkspace(user, rq, { fn: { name: 'x' }, args: [] } as unknown as ServerPolicyOp)).toBe(false);
+        expect(await sameWorkspace(user, rq, { fn: { name: 'x' } } as unknown as ServerPolicyOp)).toBe(false);
         expect(await sameWorkspace(user, rq, op('bare'))).toBe(false);
     });
 });
