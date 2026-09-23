@@ -141,7 +141,8 @@ export interface ConnectorCredentials {
  * The `tool.call` a daemon makes on its own — never offered to the model — while it opens a session, for the tools of
  * the connectors that run on the PLATFORM (#534: conduit connectors, decisions 2026-09-23). Input `{}`, output
  * `PlatformConnectorTools`. The platform answers from the calling session's recorded gate, with declarations only —
- * no credential, no account id. A platform that predates it answers `unsupported`; the daemon then serves none.
+ * no credential, no account id. A platform that predates it answers with a `tool.result` error whose `code` is
+ * `'unsupported'`; the daemon then serves none (and treats any other error, or an answer of another shape, the same way).
  */
 export const CONNECTOR_TOOLS_TOOL = 'connector_tools';
 
@@ -157,8 +158,8 @@ export interface ConnectorToolDeclaration {
     /** Namespaced `<id>__<operation>`. */
     readonly name: string;
     readonly description: string;
-    /** The wire JSON Schema of its input. */
-    readonly inputSchema: Readonly<Record<string, unknown>>;
+    /** The wire JSON Schema of its input: always an object schema, as a tool's arguments are. */
+    readonly inputSchema: { readonly type: 'object'; readonly [keyword: string]: unknown };
     /** `@sigx/ai`'s `ToolAnnotations`: `readOnly` → `read`, `destructive` → `destructive`, neither → `network`. */
     readonly annotations?: { readonly readOnly?: boolean; readonly destructive?: boolean; readonly idempotent?: boolean; readonly openWorld?: boolean };
 }
