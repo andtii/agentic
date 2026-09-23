@@ -45,7 +45,9 @@
   "dependencies": {
     "@agentic/core": "workspace:*",
     "@sigx/zero": "catalog:",
-    "@sigx/markdown": "catalog:",
+    "@sigx/richtext": "catalog:",
+    "@sigx/richtext-markdown": "catalog:",
+    "@sigx/richtext-shiki": "catalog:",
     "@sigx/ai-agent": "catalog:",
     "@sigx/ai": "catalog:",
     "@sigx/zero-daisyui": "catalog:",
@@ -64,6 +66,6 @@
   },
   "sigx-zero": {
     "fragment": "./dist/fragment.js",
-    "requires": ">=0.2.0-beta.1"
+    "requires": ">=0.4.0"
   }
 }
