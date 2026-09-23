@@ -14,8 +14,16 @@ import type { ClientLookup, ClientResolver } from '@aigntiq/conduit';
  * two connectors never sign in with each other's client.
  */
 export function connectorClientSecretNames(pluginId: string): { readonly id: string; readonly secret: string } {
-    return { id: `${pluginId}-client-id`, secret: `${pluginId}-client-secret` };
+    const names = { id: `${pluginId}-client-id`, secret: `${pluginId}-client-secret` };
+    // The Registry takes secret names of at most 128 characters: refuse here, where the plugin id is still named.
+    if (names.secret.length > MAX_SECRET_NAME) {
+        throw new Error(`[connectors] plugin id "${pluginId}" is too long for its OAuth client secret names (at most ${MAX_SECRET_NAME - '-client-secret'.length} characters)`);
+    }
+    return names;
 }
+
+/** The Registry's secret-name limit (`NAME_RE` of `@agentic/platform`). */
+const MAX_SECRET_NAME = 128;
 /**
  * The workspace's own random engine secret (≥ 32 characters): conduit's
  * `secret`, which signs OAuth state and keys the credential cipher. The

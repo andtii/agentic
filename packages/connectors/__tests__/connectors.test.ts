@@ -303,6 +303,9 @@ describe('clientFromSecrets', () => {
         expect(declared(gmailConnectorPlugin)).toEqual(['gmail-client-id', 'gmail-client-secret']);
         expect(declared(work)).toEqual(['gmail-work-client-id', 'gmail-work-client-secret']);
         expect(connectorClientSecretNames('gmail-work')).toEqual({ id: 'gmail-work-client-id', secret: 'gmail-work-client-secret' });
+        // The Registry caps secret names at 128 characters.
+        expect(connectorClientSecretNames('x'.repeat(114)).secret).toHaveLength(128);
+        expect(() => connectorClientSecretNames('x'.repeat(115))).toThrow(/too long.*at most 114/);
         // One workspace-wide name space, as the Registry keeps it.
         const registry: Record<string, string> = { 'gmail-client-id': 'personal', 'gmail-client-secret': 'personal-shh', 'gmail-work-client-id': 'work', 'gmail-work-client-secret': 'work-shh' };
         const lookup = { connector: 'gmail', method: 'oauth', owner: OWNER };
