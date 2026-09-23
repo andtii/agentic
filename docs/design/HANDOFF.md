@@ -26,7 +26,7 @@ All names, tasks, costs and token counts on the boards are invented sample data.
 | `Usage` | no route in §10 yet | 1440 × 900 | #45 |
 | `MobileHome`, `MobileChat`, `MobileMachines`, `MobileNav` | same routes at 400 px | 400 × 860 (chat 980) | [#47](https://github.com/andtii/agentic/issues/47) |
 | `MemberCard` | chat context panel | 1872 × 720 | member card, execution switches, usage meters |
-| `Changes`, `Files` | `/sessions/:id/changes`, `/files` | 1440 × 1080, 1000 | session files and git diff (new) |
+| `Changes`, `Files` | `/sessions/:id/changes`, `/sessions/:id/files` | 1440 × 1080, 1000 | session files and git diff (new) |
 | `Foundations` | none | 1440 × 1500 | [#23](https://github.com/andtii/agentic/issues/23) tokens, [#46](https://github.com/andtii/agentic/issues/46) states |
 
 Start with `Foundations`: it is the single reference for tokens, status pills, tool-call states and failure states. Every other board reuses those parts unchanged.
