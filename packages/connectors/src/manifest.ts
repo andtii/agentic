@@ -78,6 +78,6 @@ export function conduitConnectorManifest(spec: ConnectorSpec, options: ConduitCo
 /** Gmail (`@aigntiq/conduit-connectors/gmail`): the first catalogue entry. */
 export const gmailConnectorPlugin: PluginManifest = conduitConnectorManifest(gmail, {
     hosts: ['gmail.googleapis.com', 'oauth2.googleapis.com'],
-    // Sending and trashing act on the owner's behalf in ways a read does not: they ask first.
-    askByDefault: ['send-email', 'trash-message']
+    // Sending, replying and trashing act on the owner's behalf in ways a read does not: they ask first.
+    askByDefault: ['send-email', 'reply-to-message', 'trash-message']
 });

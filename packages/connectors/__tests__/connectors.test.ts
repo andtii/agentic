@@ -358,12 +358,15 @@ describe('gmailConnectorPlugin', () => {
         ]);
     });
 
-    it('declares its 9 tools; send and trash ask, the reads and searches allow (PLG-09, #632)', () => {
+    it('declares its 9 tools; send, reply and trash ask, the rest allow (PLG-09, #632)', () => {
         const tools = gmailConnectorPlugin.tools ?? [];
         expect(tools).toHaveLength(9);
-        expect(Object.fromEntries(tools.map((t) => [t.name, t.defaultMode]))).toMatchObject({
+        expect(Object.fromEntries(tools.map((t) => [t.name, t.defaultMode]))).toEqual({
             'gmail__send-email': 'ask',
+            'gmail__reply-to-message': 'ask',
             'gmail__trash-message': 'ask',
+            'gmail__create-draft': 'allow',
+            'gmail__modify-labels': 'allow',
             'gmail__search-messages': 'allow',
             'gmail__get-message': 'allow',
             'gmail__get-thread': 'allow',
