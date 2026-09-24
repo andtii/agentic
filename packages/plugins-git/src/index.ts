@@ -58,7 +58,7 @@ export const gitProjectSettings: ConfigSchema = {
             type: 'string',
             title: 'Worktree folder',
             description:
-                "Where a chat's worktree goes, as a template: {repo} (the project folder), {repoName}, {repoParent}, {branch}, {branchSlug}, {chatId8}, {project} — e.g. {repo}/.worktrees/{branchSlug} or {repoParent}/{repoName}-{branchSlug}. `auto` (or empty): beside a checkout named main under branches/, else <repo>-worktrees/<branch>."
+                "Where a chat's worktree goes, as a template: {repo} (the project folder), {repoName}, {repoParent}, {branch}, {branchSlug}, {chatId8}, {project} — e.g. {repo}/.worktrees/{branchSlug} or {repoParent}/{repoName}-{branchSlug}. `auto` (or empty): beside a checkout named main under branches/, else <repo>-worktrees/<branch>, the branch's / written as - (chat/x → chat-x)."
         },
         reuseExisting: {
             type: 'boolean',
