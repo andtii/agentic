@@ -26,6 +26,8 @@ export const RuntimeMachineRow = component<Define.Prop<'machine', RuntimeMachine
             <Link to={`/machines/${m.machineId}#runtimes`} class="ag-ref">{m.name}</Link>
             <StatusPill status={m.state} label={RUNTIME_MACHINE_TEXT[m.state].toUpperCase()} tone={TONE[m.state]} />
             <span data-runtime-machine-version>{runtimeMachineLine(m)}</span>
+            {/* A newer build waits: the update itself (drain or now) is on the machine's runtimes card (#600). */}
+            {m.update ? <span data-runtime-machine-update><Link to={`/machines/${m.machineId}#runtimes`} class="ag-ref">Update</Link></span> : null}
             {/* Installed: what makes the runtime usable is an environment on it, signed in (#527). */}
             {m.state === 'has' ? <span data-runtime-machine-env><Link to={`/machines/${m.machineId}#environments`} class="ag-ref">Add an environment</Link></span> : null}
         </li>
