@@ -13,7 +13,7 @@ import { gmailConnectorPlugin } from '@agentic/connectors';
 import { AgentActor, agentKey, defineRegistry, generateWorkspaceKek, importWorkspaceKek, registryKey } from '@agentic/platform';
 import { anthropicApiPlugin } from '@agentic/runtimes';
 import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
-import { afterConnect } from '../../src/connectors/routes';
+import { afterConnect, startReturnTo } from '../../src/connectors/routes';
 import { createServerRouter } from '../../src/router';
 import { LiveAddConnector } from '../../src/pages/plugins/add/live';
 import { addHref, addedReason, configWithConnector, parseAddQuery, withConnector } from '../../src/pages/plugins/add/model';
@@ -69,6 +69,13 @@ describe('Add connector: the URL is the state', () => {
     it('the sign-in callback keeps next=agents: it lands on the agent step, otherwise on the plugin page', () => {
         expect(afterConnect('/plugins/gmail?next=agents', 'gmail')).toBe('/plugins/connectors/add?selected=gmail&next=agents');
         expect(afterConnect('/plugins/gmail', 'gmail')).toBe('/plugins/gmail');
+    });
+
+    it('the start route carries next=agents onto returnTo, and nothing else', () => {
+        expect(startReturnTo('https://a.test/connectors/gmail/start?next=agents', '/plugins/gmail')).toBe('/plugins/gmail?next=agents');
+        expect(startReturnTo('https://a.test/connectors/gmail/start', '/plugins/gmail')).toBe('/plugins/gmail');
+        expect(startReturnTo('https://a.test/connectors/gmail/start?next=elsewhere', '/plugins/gmail')).toBe('/plugins/gmail');
+        expect(afterConnect(startReturnTo('https://a.test/connectors/gmail/start?next=agents', '/plugins/gmail'), 'gmail')).toBe('/plugins/connectors/add?selected=gmail&next=agents');
     });
 });
 
@@ -160,6 +167,12 @@ describe('/plugins/connectors/add (mock)', () => {
         await wait(() => buttonNamed(dom, 'Add to 1 agent').disabled === false, 'Save enabled');
         buttonNamed(dom, 'Skip').click();
         await wait(() => urlOf(router) === '/plugins/gmail', 'the plugin page');
+    });
+
+    it('a listing installed under another id names the step by that id, not the listing', async () => {
+        const { dom } = await mountMock('/plugins/connectors/add?selected=sentry&next=agents&plugin=sentry-eu');
+        await wait(() => dom.querySelector('[data-add-step="agents"]') !== null, 'the agent step');
+        expect(text(dom.querySelector('[data-add-step] h1'))).toBe('Choose agents for sentry-eu');
     });
 
     it('an MCP listing opens the MCP form prefilled with its name, URL and credential kind', async () => {

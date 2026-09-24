@@ -286,7 +286,8 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
     };
 
     const agentsStep = (listing: ConnectorListing | undefined, pluginId: string) => {
-        const name = listing?.name ?? pluginId;
+        // A listing renamed on the way in (Sentry → `sentry-eu`) was installed under its own id: name it by that, not the listing.
+        const name = listing && listingPluginId(listing) === pluginId ? listing.name : pluginId;
         const agents = props.port.agents();
         const toggle = (id: string, on: boolean): void => { st.picked = on ? [...st.picked.filter((x) => x !== id), id] : st.picked.filter((x) => x !== id); };
         return (

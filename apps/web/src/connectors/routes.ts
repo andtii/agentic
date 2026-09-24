@@ -98,6 +98,11 @@ export function afterConnect(back: string, pluginId: string): string {
     return `/plugins/connectors/add?selected=${encodeURIComponent(pluginId)}&${NEXT_PARAM}=${NEXT_AGENTS}`;
 }
 
+/** The start route's `returnTo`: the plugin page, carrying `?next=agents` when the Add connector page asked for it (#639). */
+export function startReturnTo(requestUrl: string, page: string): string {
+    return new URL(requestUrl).searchParams.get(NEXT_PARAM) === NEXT_AGENTS ? withParam(page, NEXT_PARAM, NEXT_AGENTS) : page;
+}
+
 /** The plugin id of a `/plugins/:id` path. */
 function pluginOfPage(path: string | undefined): string | undefined {
     const m = path ? /^\/plugins\/([^/?#]+)/.exec(path) : null;
@@ -163,7 +168,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
         const ws = principal.workspaceId as WorkspaceId;
         const page = connectorPluginPage(pluginId);
         // `?next=agents` (the Add connector page, #639) rides on `returnTo`, so the callback can honour it.
-        const returnTo = new URL(request.url).searchParams.get(NEXT_PARAM) === NEXT_AGENTS ? withParam(page, NEXT_PARAM, NEXT_AGENTS) : page;
+        const returnTo = startReturnTo(request.url, page);
         try {
             const registry = registryAs(principal, ws);
             const plugin = await registry.get(pluginId);
