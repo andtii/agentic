@@ -26,7 +26,7 @@
  *       review threads must resolve.
  *     - No force-push and no deletion of `main`.
  *     - (Optional) required status checks green before merge — pass --checks.
- *       By default the branch must also be up to date with `main`; pass
+ *       With --checks, the branch must by default also be up to date with `main`; pass
  *       --no-strict to drop that (for repos where parallel sessions merge
  *       faster than CI runs and merge queue is unavailable — user-owned repos).
  *
@@ -85,7 +85,7 @@ if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
         '  --approvals 0  → PR required (plus any --checks), but the author/owner may merge\n' +
         '                   without a separate approval (for solo/small repos where Copilot\n' +
         '                   reviews but can\'t formally approve)\n' +
-        '  --no-strict    → checks must pass, but the branch need not be up to date with main');
+        '  --no-strict    → with --checks: they must pass, but the branch need not be up to date with main');
 }
 
 // ── gh helpers ───────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ if (checks.length) {
     rules.push({
         type: 'required_status_checks',
         parameters: {
-            strict_required_status_checks_policy: strict, // true: branch must be up to date
+            strict_required_status_checks_policy: strict, // true: branch must be up to date (only meaningful with --checks)
             required_status_checks: checks.map((context) => ({ context })),
         },
     });
