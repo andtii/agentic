@@ -84,7 +84,7 @@ agentic-daemon policy off
 
 - `profileDir` is that account's Claude Code config dir (`CLAUDE_CONFIG_DIR`); every environment needs its own. Sign each one in once: `agentic-daemon env login env_work` — it runs `claude /login` with that profile and nothing inherited that could pick another account; it uses the installed Claude Code harness, so no `claude` on `PATH` is needed (`--claude <path>` names another). A running daemon re-checks environments that are not signed in every 30 s, so the platform shows the sign-in without a restart. Sessions always run on the installed harness, never on a CLI from `PATH`.
 - `cwdRoots`: the folders sessions may run in. A session outside them is refused.
-- `concurrency` (default 1): turns running at once on that account; an open session between messages does not count.
+- `concurrency` (optional; no limit when absent, #694): turns running at once on that account; an open session between messages does not count.
 
 `doctor` reports a shared config dir as an error, and a profile that is not signed in — or having no environments at all — as a warning; the same verdict is sent to the platform per environment.
 

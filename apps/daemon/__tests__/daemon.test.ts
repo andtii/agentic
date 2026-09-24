@@ -255,6 +255,35 @@ describe('daemon', () => {
         expect([...daemons[0]!.activeSessions].sort()).toEqual(['s1', 's2']);
     });
 
+    it('an environment without a concurrency has no limit (#694): turns in two sessions run side by side, and hello says no max', async () => {
+        let release!: () => void;
+        const held = new Promise<void>((r) => (release = r));
+        const holding = mockAgent({
+            respond: async () => {
+                await held;
+                return [{ text: 'done' }];
+            }
+        });
+        const { concurrency: _none, ...unlimited } = env('env_mock', { runtime: 'mock' });
+        const { seat, hello } = await start([unlimited], [agentDriver('mock', holding)]);
+        expect(hello.environments[0]!.concurrency).toEqual({ active: 0 });
+        const replyFor = async (commandId: string) => {
+            for (;;) {
+                const frame = await next(seat);
+                if (frame.t === 'session.reply' && frame.reply.commandId === commandId) return frame.reply;
+            }
+        };
+        for (const s of ['s1', 's2', 's3']) {
+            open(seat, s, 'env_mock');
+            expect((await expectFrame(seat, 'session.opened')).sessionId).toBe(s);
+        }
+        for (const [i, s] of ['s1', 's2', 's3'].entries()) {
+            seat.send({ v: V, t: 'session.command', sessionId: s as SessionId, command: { v: 1, commandId: `c${i}`, type: 'prompt', turnId: `t${i}`, input: [{ type: 'text', text: 'go' }] } });
+            expect(await replyFor(`c${i}`)).toMatchObject({ kind: 'ack' });
+        }
+        release();
+    });
+
     describe('a turn nobody asked for (#604)', () => {
         const command = (seat: PlatformSeat, sessionId: string, command: Record<string, unknown>) => seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, ...command } as never });
         /** Frames until `pred` holds, whatever interleaves; the frames seen, the matching one last. */

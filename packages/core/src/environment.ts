@@ -39,7 +39,8 @@ export interface EnvironmentDescriptor {
     readonly runtime: RuntimeId;
     readonly account: { readonly label: string; readonly authStatus: AuthStatus; readonly identity?: string };
     readonly cwdRoots: readonly string[];
-    readonly concurrency: { readonly max: number; readonly active: number };
+    /** Turns running (`active`) and the environment's limit (`max`); no `max` means no limit (#694). */
+    readonly concurrency: { readonly max?: number; readonly active: number };
     readonly isolation: IsolationMechanism;
     /** The runtime's verdict on this environment; absent when the daemon ran no `doctor`. */
     readonly doctor?: EnvironmentVerdict;
@@ -95,8 +96,8 @@ export interface EnvironmentInput {
     readonly runtime: RuntimeId;
     /** Absolute, machine-native; each must lie within the machine's `MachinePolicy.allowedRoots`. */
     readonly cwdRoots: readonly string[];
-    /** Sessions at once; the daemon's default when absent. */
-    readonly concurrency?: number;
+    /** Turns at once: a number sets the limit, `null` clears it (no limit), absent keeps what the environment has (#694). */
+    readonly concurrency?: number | null;
     readonly accountLabel?: string;
     /**
      * Let sessions here run in a mode that asks about nothing (#450, #355): `true` sets it, `false` clears it, absent

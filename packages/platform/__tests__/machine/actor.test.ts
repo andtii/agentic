@@ -392,6 +392,23 @@ describe('Machine sessions (§5b routing, EXE-09)', () => {
         expect(sockets.frames(K1).find((f) => f.t === 'tool.result')).toMatchObject({ error: { code: 'denied', message: 'not allowed' } });
     });
 
+    it('an environment without a max has no limit (#694): a running turn never queues the next open', async () => {
+        const S3 = 'session_3' as SessionId;
+        connect(K1, daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { active: 0 } }], { tool: { name: 'hold', input: {} } }));
+        await until(async () => (await machine(K1).get()).online, 'online');
+        for (const id of [S1, S2, S3]) await session(id).open(sessionSpec(M1));
+        expect(await machine(K1).openSession(S1, E1, openSpec)).toBe('opened');
+        await until(async () => (await machine(K1).get()).activeSessions.some((h) => h.sessionId === S1 && h.status === 'open'), 'S1 opened');
+        const release = holdTurns();
+        await session(S1).prompt('go', 't1');
+        await until(async () => (await machine(K1).get()).activeSessions.find((h) => h.sessionId === S1)?.running?.turnId === 't1', 'the turn running');
+        expect(freeSlots(await machine(K1).get(), E1)).toBe(Number.POSITIVE_INFINITY);
+        expect(await machine(K1).openSession(S2, E1, openSpec)).toBe('opened');
+        expect(await machine(K1).openSession(S3, E1, openSpec)).toBe('opened');
+        expect((await machine(K1).get()).queued).toEqual([]);
+        release();
+    });
+
     it('capacity counts running turns, not open sessions (#394): idle sessions open freely, a turn queues the next open, and the turn ending — not a close — dequeues it', async () => {
         const S3 = 'session_3' as SessionId;
         connect(K1, daemon(M1, [{ ...inMemoryEnvironment(M1, E1), concurrency: { max: 1, active: 0 } }], { tool: { name: 'hold', input: {} } }));

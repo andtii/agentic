@@ -27,10 +27,10 @@ describe('paths', () => {
 describe('environments.json', () => {
     const row = { id: 'env_a', name: 'A', runtime: 'claude-code', profileDir: 'C:/p/a', cwdRoots: ['C:/src'], concurrency: 2 };
 
-    it('accepts an array or { environments } and defaults concurrency to 1', () => {
+    it('accepts an array or { environments }; no concurrency is no limit (#694)', () => {
         const { concurrency: _omit, ...noConcurrency } = row;
         expect(parseEnvironments([row])).toEqual({ ok: true, environments: [row] });
-        expect(parseEnvironments({ environments: [noConcurrency] })).toEqual({ ok: true, environments: [{ ...noConcurrency, concurrency: 1 }] });
+        expect(parseEnvironments({ environments: [noConcurrency] })).toEqual({ ok: true, environments: [noConcurrency] });
     });
     it('reads allowBypassPermissions (#453): only true is kept, anything but a boolean is an error', () => {
         expect(parseEnvironments([{ ...row, allowBypassPermissions: true }])).toEqual({ ok: true, environments: [{ ...row, allowBypassPermissions: true }] });

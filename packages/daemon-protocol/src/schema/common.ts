@@ -53,7 +53,7 @@ export const environment: z.ZodType<EnvironmentDescriptor> = z.object({
         identity: text.optional()
     }),
     cwdRoots: z.array(text).max(LIMITS.list),
-    concurrency: z.object({ max: nonNegativeInt, active: nonNegativeInt }),
+    concurrency: z.object({ max: nonNegativeInt.optional(), active: nonNegativeInt }),
     isolation: z.enum(['config-dir', 'profile', 'os-user', 'container', 'none']),
     doctor: environmentVerdict.optional(),
     models: z.array(modelOption).max(LIMITS.list).optional(),
@@ -71,7 +71,7 @@ export const environmentInput: z.ZodType<EnvironmentInput> = z.strictObject({
     name,
     runtime: name,
     cwdRoots: z.array(text.min(1)).min(1).max(LIMITS.list),
-    concurrency: z.number().int().min(1).optional(),
+    concurrency: z.number().int().min(1).nullable().optional(),
     accountLabel: text.optional(),
     allowBypassPermissions: z.boolean().optional()
 });

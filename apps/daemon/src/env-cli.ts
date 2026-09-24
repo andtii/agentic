@@ -241,7 +241,7 @@ ${ENV_USAGE}`);
             case 'list': {
                 const environments = await readEnvironmentsForEdit(c.paths.environmentsFile);
                 if (environments.length === 0) c.out(`no environments — add one with \`agentic-daemon env add --name <name> --root <dir>\``);
-                for (const e of environments) c.out(`${e.id}\t${e.name}\t${e.runtime}\tconcurrency ${e.concurrency}\troots ${e.cwdRoots.join(', ')}\tprofile ${e.profileDir ?? '(default)'}`);
+                for (const e of environments) c.out(`${e.id}\t${e.name}\t${e.runtime}\tconcurrency ${e.concurrency ?? 'unlimited'}\troots ${e.cwdRoots.join(', ')}\tprofile ${e.profileDir ?? '(default)'}`);
                 return 0;
             }
             case 'rm': {

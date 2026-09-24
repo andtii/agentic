@@ -216,7 +216,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
         const actions = (env: EnvironmentDescriptor): JSXElement | null => {
             const login = needsLogin(env) && !revoked;
             // The limit a link came to change, on a machine the web may not manage (#652): the command that changes it there.
-            const limit = !manageable && !revoked && props.focusEnv === env.id;
+            const limit = !manageable && !revoked && props.focusEnv === env.id && env.concurrency.max !== undefined;
             if (!login && !manageable && !limit) return null;
             return (
                 <>
@@ -234,7 +234,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     {limit ? (
                         <div data-env-limit>
                             <span data-env-limit-text>Web management is off on {m.name}. Change how many turns {env.name} runs at once there:</span>
-                            <CommandWell command={concurrencyCommand(env, env.concurrency.max + 1)} fallback={fallbackCommand(concurrencyCommand(env, env.concurrency.max + 1), m.os)} />
+                            <CommandWell command={concurrencyCommand(env, (env.concurrency.max ?? 0) + 1)} fallback={fallbackCommand(concurrencyCommand(env, (env.concurrency.max ?? 0) + 1), m.os)} />
                         </div>
                     ) : null}
                     {manageable ? (
@@ -541,7 +541,10 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true> & Define.
             runtime: input.runtime,
             account: { label: input.accountLabel ?? input.name, authStatus: was?.account.authStatus ?? 'missing' },
             cwdRoots: roots,
-            concurrency: { active: was?.concurrency.active ?? 0, max: input.concurrency ?? was?.concurrency.max ?? 1 },
+            concurrency: (() => {
+                const max = input.concurrency === null ? undefined : (input.concurrency ?? was?.concurrency.max);
+                return { active: was?.concurrency.active ?? 0, ...(max === undefined ? {} : { max }) };
+            })(),
             isolation: 'config-dir',
             ...(input.allowBypassPermissions ?? was?.allowBypassPermissions ? { allowBypassPermissions: true } : {})
         };

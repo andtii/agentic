@@ -85,6 +85,11 @@ describe('answerEnvRequest', () => {
         expect(changed).toEqual({ id: byHand.id, name: 'By hand, moved', runtime: 'scripted', cwdRoots: [join(work, 'b')], concurrency: 2, accountLabel: 'me@work' });
         expect(await put({ id: byHand.id, name: 'By hand', runtime: 'scripted', cwdRoots: [join(work, 'b')], concurrency: 5 })).toMatchObject({ result: {} });
         expect((await readEnvironmentsForEdit(paths.environmentsFile))[0]).toMatchObject({ concurrency: 5, accountLabel: 'me@work' });
+        // `null` clears the limit (#694): no limit, and a later put without the field keeps it that way.
+        expect(await put({ id: byHand.id, name: 'By hand', runtime: 'scripted', cwdRoots: [join(work, 'b')], concurrency: null })).toMatchObject({ result: {} });
+        expect((await readEnvironmentsForEdit(paths.environmentsFile))[0]).not.toHaveProperty('concurrency');
+        expect(await put({ id: byHand.id, name: 'By hand', runtime: 'scripted', cwdRoots: [join(work, 'b')] })).toMatchObject({ result: {} });
+        expect((await readEnvironmentsForEdit(paths.environmentsFile))[0]).not.toHaveProperty('concurrency');
     });
 
     it('remove: unknown is unknown, in use is in use, otherwise gone — and its sign-in stays on disk', async () => {

@@ -189,7 +189,7 @@ describe('cli', () => {
         expect(await main(['env', 'add', '--name', 'Work', '--id', 'env_work', '--runtime', 'scripted', '--root', dir], ctx())).toBe(1);
         // --replace changes an environment in place and keeps its profile (the sign-in).
         expect(await main(['env', 'add', '--name', 'Work', '--id', 'env_work', '--replace', '--runtime', 'scripted', '--root', join(dir, 'moved')], ctx())).toBe(0);
-        expect(await loadEnvironments(paths().environmentsFile)).toMatchObject({ environments: [{ id: 'env_work', profileDir: join(dir, 'profiles', 'env_work'), cwdRoots: [join(dir, 'moved')], concurrency: 1 }] });
+        expect(await loadEnvironments(paths().environmentsFile)).toMatchObject({ environments: [{ id: 'env_work', profileDir: join(dir, 'profiles', 'env_work'), cwdRoots: [join(dir, 'moved')] }] });
         // --allow-bypass (#355) sets the flag; a replace without it keeps it.
         expect(await main(['env', 'add', '--name', 'Work', '--id', 'env_work', '--replace', '--runtime', 'scripted', '--root', join(dir, 'moved'), '--allow-bypass'], ctx())).toBe(0);
         expect(await loadEnvironments(paths().environmentsFile)).toMatchObject({ environments: [{ id: 'env_work', allowBypassPermissions: true }] });
@@ -205,7 +205,7 @@ describe('cli', () => {
         out = [];
         expect(await main(['env', 'list'], ctx())).toBe(0);
         expect(out).toHaveLength(1);
-        expect(out[0]).toMatch(/^env_work\tWork\tscripted\tconcurrency 1/);
+        expect(out[0]).toMatch(/^env_work\tWork\tscripted\tconcurrency unlimited/);
         expect(await main(['env', 'rm', 'env_nope'], ctx())).toBe(1);
         expect(await main(['env', 'rm', 'env_work'], ctx())).toBe(0);
         expect(await loadEnvironments(paths().environmentsFile)).toEqual({ ok: true, environments: [] });
