@@ -37,7 +37,8 @@ export type CategoryMenuProps =
 // zero's parts forward no `style`, so the look sits on the menu's own elements: the column box
 // around the landmark, the heading, the link (`asChild`) and its count. Board `Plugins`: the column
 // is 232 px with 20 / 12 px padding and a rule on its right; the recipe keeps the group rhythm.
-const columnStyle = 'inline-size: var(--ag-sidebar-w); flex-shrink: 0; box-sizing: border-box; padding: var(--space-xl) var(--space-md); border-inline-end: var(--border) solid var(--ag-line)';
+// The 232 px is a literal, not `--ag-sidebar-w`, so resizing the shell sidebar leaves this column alone.
+const columnStyle = 'inline-size: 232px; flex-shrink: 0; box-sizing: border-box; padding: var(--space-xl) var(--space-md); border-inline-end: var(--border) solid var(--ag-line)';
 // The mono label voice (the kit's `Label`), inset to the links' text.
 const headingStyle = 'padding: 0 calc(var(--space-sm) + var(--space-2xs)); font-family: var(--font-mono); font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--ag-text-dim)';
 const linkBase = 'display: flex; align-items: center; block-size: 34px; box-sizing: border-box; padding: 0 calc(var(--space-sm) + var(--space-2xs)); gap: var(--space-sm); border-radius: var(--radius-field); text-decoration: none; font-size: var(--text-md)';

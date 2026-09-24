@@ -48,7 +48,7 @@ export const SearchField = component<SearchFieldProps>(({ props, emit }) => {
                 <Input.Label visuallyHidden>{props.label}</Input.Label>
                 <Input.Control>
                     <span style={iconStyle}><Icon name="search" size={15} /></span>
-                    <Input.Input placeholder={props.placeholder} />
+                    <Input.Input placeholder={props.placeholder} aria-keyshortcuts="/" />
                     <span style={hintStyle}><Kbd.Root aria-hidden="true">/</Kbd.Root></span>
                 </Input.Control>
             </Input.Root>

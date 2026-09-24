@@ -29,6 +29,7 @@ describe('SearchField', () => {
         const hint = search.querySelector<HTMLElement>('[data-scope="kbd"]')!;
         expect(hint.textContent).toBe('/');
         expect(hint.getAttribute('aria-hidden')).toBe('true');
+        expect(input.getAttribute('aria-keyshortcuts')).toBe('/');
     });
 
     it('binds its model', async () => {
