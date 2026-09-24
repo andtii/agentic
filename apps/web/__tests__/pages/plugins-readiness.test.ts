@@ -38,10 +38,10 @@ describe('isAuthError', () => {
 });
 
 describe('signedOutPluginIds', () => {
-    it('a conduit record whose account needs reauth, or is gone; an MCP record refused with an auth error', () => {
+    it('a conduit record whose account needs reauth (not one whose account is gone); an MCP record refused with an auth error', () => {
         const records = [conduit('gmail', 'a1'), conduit('outlook', 'a2'), conduit('drive', 'gone'), conduit('slack'), mcp('linear', 'failed with HTTP 401'), mcp('github-mcp', 'failed with HTTP 500'), mcp('notion')];
         const accounts = [summary('a1', 'needsReauth'), summary('a2', 'active')];
-        expect(signedOutPluginIds(records, accounts).sort()).toEqual(['drive', 'gmail', 'linear']);
+        expect(signedOutPluginIds(records, accounts).sort()).toEqual(['gmail', 'linear']);
     });
 
     it('accounts still loading sign no conduit record out', () => {

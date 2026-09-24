@@ -42,9 +42,11 @@ export function isAuthError(message: string | undefined): boolean {
 
 /**
  * The plugin ids whose sign-in lapsed: a conduit record whose account needs
- * reauth (or is gone from the workspace — the page says Reconnect for both),
- * or an MCP record whose last check failed with an auth error. Accounts
- * still loading (`undefined`) sign nothing out.
+ * reauth, or an MCP record whose last check failed with an auth error. A
+ * record whose account is gone (`missing`) is not counted: disconnect revokes
+ * the account before it clears the record, and the two live pushes can land
+ * out of order — the plugin page's own Reconnect pill covers that case.
+ * Accounts still loading (`undefined`) sign nothing out.
  */
 export function signedOutPluginIds(
     records: readonly Pick<ConnectorRecord, 'pluginId' | 'transport' | 'account' | 'status'>[],
@@ -54,7 +56,7 @@ export function signedOutPluginIds(
     for (const r of records) {
         if (r.transport === 'conduit') {
             const c = connectionOf(r, accounts);
-            if (c?.state === 'needs-reauth' || c?.state === 'missing') out.add(r.pluginId);
+            if (c?.state === 'needs-reauth') out.add(r.pluginId);
         } else if (r.status.state === 'error' && isAuthError(r.status.error)) {
             out.add(r.pluginId);
         }
