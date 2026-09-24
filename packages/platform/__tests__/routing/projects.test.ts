@@ -470,7 +470,7 @@ describe('the git feature (#335)', () => {
             expect(sent?.cwd).toBe(cwd);
             expect(record).toBe(cwd);
             expect(sent?.system).toContain('## Project');
-            expect(sent?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
+            expect(sent?.system).toContain(`isolated git worktree \`${cwd}\` on branch \`${branch}\``);
             expect(sent?.system).toContain('Branch first; never work on main.');
         }
         // The route still records the project's folder; the worktree is the plugin's replacement.
@@ -478,7 +478,7 @@ describe('the git feature (#335)', () => {
         expect(chosenFor('t2')).toMatchObject({ data: { environmentId: E3, cwd: '/home/b/agentic' } });
     });
 
-    it('a second task in the same chat keeps the worktree: the daemon answers branch-exists, the same folder is the same placement, and the member’s live session is reused (#393)', async () => {
+    it('a second task in the same chat keeps the worktree: the daemon answers reused (#618), the same folder is the same placement, and the member’s live session is reused (#393)', async () => {
         const m1 = await onlineMachine();
         const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
         const projectId = await project({ features: { [GIT_FEATURE_ID]: { worktreePerChat: true } } });
@@ -488,7 +488,7 @@ describe('the git feature (#335)', () => {
         const cwd = `/work/agentic-worktrees/${slugOf(branch)}`;
         const branches = new Set<string>();
         sockets.worktree = (environmentId, op) => {
-            if (branches.has(op.branch)) return { error: { code: 'branch-exists', message: `a branch named '${op.branch}' already exists` } };
+            if (branches.has(op.branch)) return { result: { kind: 'worktree', path: op.path, branch: op.branch, reused: true } };
             branches.add(op.branch);
             return made(environmentId, op);
         };
@@ -501,7 +501,7 @@ describe('the git feature (#335)', () => {
         expect(second.status).not.toBe('waiting');
         await settled('t2');
         expect((await task('t2').get()).status).toBe('completed');
-        // The hook ran for each placement — idempotent: the branch exists, the folder is the same — so the placement is unchanged.
+        // The hook ran for each placement — idempotent: the worktree is reused, the folder is the same — so the placement is unchanged.
         expect(sockets.worktreeRequests.map((r) => r.op)).toEqual([
             { kind: 'worktree', repo: '/work/agentic', branch, path: cwd },
             { kind: 'worktree', repo: '/work/agentic', branch, path: cwd }
@@ -513,7 +513,7 @@ describe('the git feature (#335)', () => {
         expect(Object.keys(sockets.opens(machineKey(WS, m1)))).toEqual([second.sessionId]);
         const record = (await session(second.sessionId!).get()).spec;
         expect(record).toMatchObject({ taskId: 't2', cwd });
-        expect(record?.system).toContain(`This chat works on branch \`${branch}\` in \`${cwd}\`.`);
+        expect(record?.system).toContain(`isolated git worktree \`${cwd}\` on branch \`${branch}\``);
     });
 
     it("a daemon that cannot make the worktree parks the task waiting { project-feature } with the daemon's message; a task from no chat opens in the project's folder", async () => {
@@ -538,6 +538,6 @@ describe('the git feature (#335)', () => {
         expect(sent?.cwd).toBe('/work/agentic');
         expect(sent?.system).toContain('## Project');
         expect(sent?.system).toContain('Branch first.');
-        expect(sent?.system).not.toContain('This chat works on branch');
+        expect(sent?.system).not.toContain('isolated git worktree');
     });
 });

@@ -10,7 +10,10 @@
  * Edge-safe: `@agentic/core` only, no `node:` imports; it runs on the router.
  */
 
-import { PROJECT_FEATURE_KIND, suggestWorktreePath, type ConfigSchema, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { BRANCH_TOKENS, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError } from './templates.js';
+
+export { BRANCH_TOKENS, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, templateError, templateTokens } from './templates.js';
 
 /** The plugin's id: what a project stores its settings under (`features['agentic.feature.git']`). */
 export const GIT_FEATURE_ID = 'agentic.feature.git';
@@ -19,6 +22,11 @@ export const GIT_FEATURE_VERSION = '0.1.0';
 export const DEFAULT_BRANCH_PREFIX = 'chat/';
 /** How many characters of the chat id (after its `chat_` prefix) name the branch. */
 export const SHORT_CHAT_ID_LENGTH = 8;
+/** The `worktreePath` value that keeps the built-in placement (`suggestWorktreePath`). */
+export const AUTO_WORKTREE_PATH = 'auto';
+/** What the agent is told when its session opens in a chat worktree, unless the project words it itself (#619). */
+export const DEFAULT_WORKTREE_NOTICE =
+    'You are working in an isolated git worktree `{path}` on branch `{branch}`, prepared for this chat. Do not create another worktree or switch directories; your changes are shown to the user from here.';
 
 /** The per-project settings (`projectSettings`): what a project stores under `features[GIT_FEATURE_ID]`. */
 export const gitProjectSettings: ConfigSchema = {
@@ -40,6 +48,28 @@ export const gitProjectSettings: ConfigSchema = {
             title: 'Branch prefix',
             description: `What a chat's branch name starts with; the rest is the chat's short id (${DEFAULT_BRANCH_PREFIX}a1b2c3d4).`,
             default: DEFAULT_BRANCH_PREFIX
+        },
+        branchTemplate: {
+            type: 'string',
+            title: 'Branch name',
+            description: "A chat's branch, as a template: {branchPrefix}, {chatId8} (the chat's short id), {chatId}, {project}. Empty: {branchPrefix}{chatId8}."
+        },
+        worktreePath: {
+            type: 'string',
+            title: 'Worktree folder',
+            description:
+                "Where a chat's worktree goes, as a template: {repo} (the project folder), {repoName}, {repoParent}, {branch}, {branchSlug}, {chatId8}, {project} — e.g. {repo}/.worktrees/{branchSlug} or {repoParent}/{repoName}-{branchSlug}. `auto` (or empty): beside a checkout named main under branches/, else <repo>-worktrees/<branch>, the branch's / written as - (chat/x → chat-x)."
+        },
+        reuseExisting: {
+            type: 'boolean',
+            title: 'Keep a chosen worktree',
+            description: 'When a chat or task already works in a worktree other than the project folder, use it as it is instead of creating one.',
+            default: true
+        },
+        worktreeNotice: {
+            type: 'string',
+            title: 'Worktree notice',
+            description: `What the agent is told about its worktree, as a template with {path} and {branch}; empty for nothing. Unset: "${DEFAULT_WORKTREE_NOTICE}"`
         },
         base: {
             type: 'string',
@@ -118,29 +148,99 @@ function instructionsOf({ settings }: ProjectFeatureContext): string | undefined
     return text ? text : undefined;
 }
 
+/** The project's template for `key`, trimmed; `undefined` when unset or blank. */
+const templateSetting = (settings: Readonly<Record<string, unknown>>, key: string): string | undefined => {
+    const text = stringSetting(settings, key)?.trim();
+    return text ? text : undefined;
+};
+
+/** The chat id's short form: the last `SHORT_CHAT_ID_LENGTH` characters after its `chat_` prefix, lowercased. */
+function shortChatId(chatId: string): string {
+    const underscore = chatId.indexOf('_');
+    return (underscore >= 0 ? chatId.slice(underscore + 1) : chatId).trim().slice(-SHORT_CHAT_ID_LENGTH).toLowerCase();
+}
+
 /**
- * When the project has `worktreePerChat` on and the task came from a chat: one `worktree` op to the environment's
- * daemon for `branchPrefix + short chat id` at `suggestWorktreePath(cwd, branch)` (the sigx layout: beside
- * `main` under `branches/`, else `<repo>-worktrees/<slug>`), from `base` when set. The session then opens in
- * the worktree. Nothing is remembered: a later task of the same chat — or the same chat after a restart —
- * asks again and resolves through the daemon's `branch-exists` / `exists` to the same path. Any other error
- * throws, so the router parks the task `waiting { project-feature }` with the daemon's message (EXE-12).
+ * The branch and folder a chat's worktree gets from the project's settings (#619): `branchTemplate` (default
+ * `{branchPrefix}{chatId8}`, i.e. `gitBranchFor`) and `worktreePath` (default `auto`: `suggestWorktreePath`).
+ * Deterministic for a chat. Throws on an unknown token, an invalid branch name or a folder that is not absolute.
  */
-async function beforeSession({ settings, chatId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
+export function chatWorktreeFor(settings: Readonly<Record<string, unknown>>, input: { readonly chatId: string; readonly cwd: string; readonly projectName: string }): { readonly branch: string; readonly path: string } {
+    const prefix = stringSetting(settings, 'branchPrefix') ?? DEFAULT_BRANCH_PREFIX;
+    const os = hostOsOfPath(input.cwd);
+    const chatId8 = shortChatId(input.chatId);
+    const common = { chatId: input.chatId.slice(input.chatId.indexOf('_') + 1).toLowerCase(), chatId8, branchPrefix: prefix, project: slugOf(input.projectName) };
+    const branchTemplate = templateSetting(settings, 'branchTemplate');
+    let branch: string;
+    if (branchTemplate) {
+        branch = expandTemplate(branchTemplate, common, BRANCH_TOKENS);
+        if (!isValidBranchName(branch)) throw new Error(`git worktree: "${branch}" (from the branch template "${branchTemplate}") is not a valid branch name`);
+    } else branch = gitBranchFor(input.chatId, prefix);
+    const pathTemplate = templateSetting(settings, 'worktreePath');
+    if (!pathTemplate || pathTemplate === AUTO_WORKTREE_PATH) {
+        const path = suggestWorktreePath(input.cwd, branch, os);
+        if (path === null) throw new Error(`git worktree: the project's folder "${input.cwd}" is not an absolute path`);
+        return { branch, path };
+    }
+    return { branch, path: expandPath(pathTemplate, { ...common, ...repoValues(input.cwd, os), branch, branchSlug: branch.replace(/\//g, '-') }, os) };
+}
+
+/** Every template setting the project has that cannot expand, by key (#619): what the settings form shows. */
+export function gitSettingsErrors(settings: Readonly<Record<string, unknown>>): Readonly<Record<string, string>> {
+    const errors: Record<string, string> = {};
+    const check = (key: string, allowed: readonly string[]) => {
+        const template = templateSetting(settings, key);
+        if (template === undefined || (key === 'worktreePath' && template === AUTO_WORKTREE_PATH)) return;
+        const error = templateError(template, allowed);
+        if (error) errors[key] = error;
+    };
+    check('branchTemplate', BRANCH_TOKENS);
+    check('worktreePath', PATH_TOKENS);
+    check('worktreeNotice', NOTICE_TOKENS);
+    return errors;
+}
+
+/** The notice for a session in `path` on `branch`: the project's own words, the default when unset, none when blank. */
+function noticeFor(settings: Readonly<Record<string, unknown>>, path: string, branch: string): string | undefined {
+    const own = stringSetting(settings, 'worktreeNotice');
+    const template = own === undefined ? DEFAULT_WORKTREE_NOTICE : own.trim();
+    return template ? expandTemplate(template, { path, branch }, NOTICE_TOKENS) : undefined;
+}
+
+/**
+ * When the project has `worktreePerChat` on and the task came from a chat, the session opens in the chat's worktree:
+ * - With `reuseExisting` (the default), a folder other than the project's own that is already a linked worktree —
+ *   one the user chose for the chat or task, made in a terminal or anywhere else — is used as it is (#619).
+ * - Otherwise one `worktree` op for the branch and folder `chatWorktreeFor` names, from `base` when set. The daemon
+ *   makes it idempotent (#618): a worktree already there is `reused`, one removed by hand `recreated`. So nothing is
+ *   remembered: every task of the chat asks again and lands in the same folder.
+ * Any daemon error — `worktree-mismatch` (something else at the folder), `branch-exists` (the branch checked out in
+ * another folder), `not-a-repo`, … — throws, so the router parks the task `waiting { project-feature }` with the
+ * daemon's message (EXE-12). The agent is told it is already isolated (`worktreeNotice`), so a repo guide that says
+ * "create a worktree first" does not make it leave the folder the user watches.
+ */
+async function beforeSession({ settings, project, chatId, environmentId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
     if (settings['worktreePerChat'] !== true || !chatId) return undefined;
-    const branch = gitBranchFor(chatId, stringSetting(settings, 'branchPrefix') ?? DEFAULT_BRANCH_PREFIX);
-    const path = suggestWorktreePath(cwd, branch, hostOsOfPath(cwd));
-    if (path === null) throw new Error(`git worktree: the project's folder "${cwd}" is not an absolute path`);
+    if (settings['reuseExisting'] !== false) {
+        const own = projectFolderFor(project, environmentId);
+        const os = hostOsOfPath(cwd);
+        const key = (p: string) => (os === 'windows' ? normalizePath(p, os)?.toLowerCase() : normalizePath(p, os));
+        if (own === undefined || key(own) !== key(cwd)) {
+            const listed = await fs({ kind: 'list', path: cwd });
+            const git = listed.result?.kind === 'list' ? listed.result.git : undefined;
+            if (git?.kind === 'worktree') {
+                const instructions = git.branch ? noticeFor(settings, cwd, git.branch) : undefined;
+                return { cwd, ...(instructions ? { instructions } : {}) };
+            }
+        }
+    }
+    const { branch, path } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
     const base = stringSetting(settings, 'base')?.trim();
     const answer = await fs({ kind: 'worktree', repo: cwd, branch, path, ...(base ? { base } : {}) });
-    const effect = (at: string): ProjectFeatureSessionEffect => ({ cwd: at, instructions: `This chat works on branch \`${branch}\` in \`${at}\`.` });
-    if (answer.result) {
-        if (answer.result.kind !== 'worktree') throw new Error(`git worktree: the daemon answered with a ${answer.result.kind} result`);
-        return effect(answer.result.path);
-    }
-    // The worktree from an earlier task of this chat: the same branch at the same path.
-    if (answer.error.code === 'branch-exists' || answer.error.code === 'exists') return effect(path);
-    throw new Error(`git worktree ${answer.error.code}: ${answer.error.message}`);
+    if (answer.error) throw new Error(`git worktree ${answer.error.code}: ${answer.error.message}`);
+    if (answer.result.kind !== 'worktree') throw new Error(`git worktree: the daemon answered with a ${answer.result.kind} result`);
+    const instructions = noticeFor(settings, answer.result.path, answer.result.branch);
+    return { cwd: answer.result.path, ...(instructions ? { instructions } : {}) };
 }
 
 /** The git feature: `detect` on the git badge, `instructions` from the settings, `beforeSession` the worktree per chat. */
