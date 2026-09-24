@@ -1,6 +1,6 @@
 /** Building blocks shared by both directions: ids, cursors, environments, capability reports. */
 
-import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES } from '@agentic/core';
+import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_RUN_MAX_ARGS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL } from '@agentic/core';
 import type { ApprovalRule, CapabilityReport, Cursor, DaemonLogError, DaemonLogResult, EnvError, EnvironmentDescriptor, EnvironmentId, EnvironmentInput, EnvResult, FsError, FsOp, FsResult, HarnessReport, LoginAction, LoginError, MachineId, MachineListing, MachinePolicy, MachinePolicyError, MachinePolicyInput, MachinePolicyResult, MachineTelemetry, ModelOption, OpenSpec, OpenSpecConnector, OpenSpecPolicy, QuotaSnapshot, QuotaWindow, ReleaseAsset, ResourceSample, SessionId, ToolGrant } from '@agentic/core';
 import { z } from 'zod';
 import { isHttpsUrl, SHA256_HEX } from '../release.js';
@@ -201,8 +201,8 @@ const fileChangeStatus = z.enum(['modified', 'added', 'deleted', 'renamed', 'unt
 /**
  * What `fs.request` asks (#185, #331): list one folder, add a git worktree, or locate every checkout of an origin under
  * the roots — and, with the `files` feature (#559), one level of a session's folder, one file in it, or what changed in
- * it, each under `root` (the session's cwd) with `path` relative to it. Paths are bounded text; the daemon decides what
- * they mean.
+ * it, each under `root` (the session's cwd) with `path` relative to it — and, with the `run` feature (#617), a project
+ * command as `argv` in `cwd`. Paths are bounded text; the daemon decides what they mean.
  */
 export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1) }),
@@ -210,7 +210,8 @@ export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('locate'), origin: text.min(1), depth: nonNegativeInt.optional() }),
     z.object({ kind: z.literal('tree'), root: text.min(1), path: text }),
     z.object({ kind: z.literal('read'), root: text.min(1), path: text.min(1), rev: fsReadRev.optional(), base: name.optional() }),
-    z.object({ kind: z.literal('changes'), root: text.min(1), scope: changeScope, base: name.optional() })
+    z.object({ kind: z.literal('changes'), root: text.min(1), scope: changeScope, base: name.optional() }),
+    z.object({ kind: z.literal('run'), cwd: text.min(1), argv: z.array(text).min(1).max(FS_RUN_MAX_ARGS).refine((a) => a[0] !== '', { message: 'argv[0] names a program' }), timeoutMs: z.number().int().positive().max(FS_RUN_MAX_TIMEOUT_MS).optional() })
 ]);
 
 /** A folder's git badge; `origin` is a remote URL, so bounded text rather than a name — absent rather than empty. */
@@ -218,12 +219,13 @@ const fsGitInfo = z.object({ kind: z.enum(['repo', 'worktree']), branch: name.op
 const fsEntry = z.object({ name: text.min(1), path: text.min(1), git: fsGitInfo.optional() });
 
 /**
- * What `fs.response` answers: a listing of at most `FS_LIST_MAX_ENTRIES` folders, the worktree that was added, or at most
- * `FS_LOCATE_MAX_MATCHES` checkouts of an origin.
+ * What `fs.response` answers: a listing of at most `FS_LIST_MAX_ENTRIES` folders, the worktree that was added, reused or
+ * recreated, at most `FS_LOCATE_MAX_MATCHES` checkouts of an origin, a session folder's tree, file or changes, or what a
+ * `run` did (its output tails at most `FS_RUN_OUTPUT_TAIL` characters).
  */
 export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('list'), path: text.min(1), parent: text.min(1).optional(), git: fsGitInfo.optional(), entries: z.array(fsEntry).max(FS_LIST_MAX_ENTRIES), truncated: z.boolean() }),
-    z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name }),
+    z.object({ kind: z.literal('worktree'), path: text.min(1), branch: name, reused: z.literal(true).optional(), recreated: z.literal(true).optional() }),
     z.object({ kind: z.literal('locate'), origin: text.min(1), matches: z.array(z.object({ path: text.min(1), git: fsGitInfo })).max(FS_LOCATE_MAX_MATCHES), truncated: z.boolean() }),
     z.object({
         kind: z.literal('tree'),
@@ -249,13 +251,15 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
             .max(CHANGES_MAX_FILES),
         commits: z.array(z.object({ id: name, short: name, subject: text, at: nonNegativeInt, author: text })).max(CHANGES_MAX_COMMITS),
         truncated: z.boolean()
-    })
+    }),
+    z.object({ kind: z.literal('run'), exitCode: z.number().int(), stdoutTail: z.string().max(FS_RUN_OUTPUT_TAIL), stderrTail: z.string().max(FS_RUN_OUTPUT_TAIL) })
 ])
+    .refine((r) => r.kind !== 'worktree' || !(r.reused === true && r.recreated === true), { message: 'a worktree is reused or recreated, not both' })
     .refine((r) => r.kind !== 'read' || (r.text !== undefined) !== (r.binary === true), { message: 'a read result carries exactly one of text or binary' })
     .refine((r) => r.kind !== 'read' || !(r.binary === true && r.lines !== undefined), { message: 'a binary read result carries metadata only, no lines' });
 
 export const fsError: z.ZodType<FsError> = z.object({
-    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'internal']),
+    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'worktree-mismatch', 'internal']),
     message: text
 });
 
