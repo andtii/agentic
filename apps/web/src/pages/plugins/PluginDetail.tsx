@@ -114,6 +114,7 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => {
         const lost = confirming ? toolsOfScope(confirming, tools.map((t) => t.name)) : [];
         const endpoint = props.endpoint;
         const account = props.account?.() ?? null;
+        const lines = dependentLines(deps, agentName);
         return (
             <div data-plugin-detail data-plugin={m.id}>
                 <header data-plugin-detail-head>
@@ -307,9 +308,10 @@ export const PluginDetail = component<PluginDetailProps>(({ props, emit }) => {
                             <section data-plugin-panel="remove" data-plugin-action="remove" aria-label="Remove">
                                 <Label>Remove</Label>
                                 <p data-plugin-consequence>{removeConsequence(p, deps, props.secretNames, agentName)}</p>
-                                {dependentLines(deps, agentName).length ? (
+                                {lines.length ? (
                                     <ul data-remove-dependents aria-label="Still uses it">
-                                        {dependentLines(deps, agentName).map((line) => <li key={line}>{line}</li>)}
+                                        {/* Two schedules can share a title: the position keeps each key unique. */}
+                                        {lines.map((line, i) => <li key={`${i}:${line}`}>{line}</li>)}
                                     </ul>
                                 ) : null}
                                 {st.forceRemove ? <p data-plugin-hint role="status">They still use it. Removing it anyway leaves them pointing at nothing.</p> : null}
