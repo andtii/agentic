@@ -1250,7 +1250,7 @@ describe('Machine offline and closed sessions (#366)', () => {
                 machineOffline: (id: MachineId) => void heard.push(`offline:${id}`),
                 sessionOpened: () => undefined,
                 sessionClosed: (id: SessionId, reason: string) => void heard.push(`closed:${id}:${reason}`),
-                slotFreed: () => undefined,
+                slotFreed: (id: MachineId, environmentId: EnvironmentId) => void heard.push(`slot:${id}:${environmentId}`),
                 promptRefused: () => undefined
             })
         });
@@ -1313,6 +1313,33 @@ describe('Machine offline and closed sessions (#366)', () => {
         expect(heard.filter((h) => h === `offline:${M1}`)).toHaveLength(1);
         await advance(TICK);
         await until(() => heard.filter((h) => h === `offline:${M1}`).length === 2, 'the router to hear the silence');
+    });
+
+    /** A `session.frame` event for S1, stamped `(0, seq)`. */
+    const eventFrame = (seq: number, event: Record<string, unknown>) => JSON.stringify({ v: 1, t: 'session.frame', sessionId: S1, frame: { v: WIRE_PROTOCOL_VERSION, kind: 'event', epoch: 0, seq, event: { ...event, sessionId: S1, epoch: 0, seq } } });
+
+    it('an ack that lands after its turn ended takes no slot: frames and replies travel apart (#605)', async () => {
+        const asDaemon = await rawDaemon();
+        await opened(asDaemon);
+        await session().prompt('hello', 't1');
+        await asDaemon.socketMessage(eventFrame(1, { type: 'turn-start', turnId: 't1', input: [] }));
+        await asDaemon.socketMessage(eventFrame(2, { type: 'turn-end', turnId: 't1', stopReason: 'end_turn' }));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: S1, reply: { v: WIRE_PROTOCOL_VERSION, kind: 'ack', commandId: 't1', turnId: 't1' } }));
+        const m = await machine(K1).get();
+        expect(m.activeSessions[0]?.running).toBeUndefined();
+        expect(freeSlots(m, E1)).toBeGreaterThan(0);
+        expect((await session().get()).running).toBeUndefined();
+    });
+
+    it('a prompt the daemon refuses frees its slot for whoever waits, except after busy (#605)', async () => {
+        const asDaemon = await rawDaemon();
+        await opened(asDaemon);
+        await session().prompt('hello', 't1');
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: S1, reply: { v: WIRE_PROTOCOL_VERSION, kind: 'error', commandId: 't1', code: 'busy', message: 'at capacity' } }));
+        expect(heard.filter((h) => h.startsWith('slot:'))).toEqual([]);
+        await session().prompt('again', 't2');
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'session.reply', sessionId: S1, reply: { v: WIRE_PROTOCOL_VERSION, kind: 'error', commandId: 't2', code: 'internal', message: 'the runtime fell over' } }));
+        await until(() => heard.includes(`slot:${M1}:${E1}`), 'the router to hear the freed slot');
     });
 
     it('carries the daemon’s close code to the record: the running turn is interrupted with it', async () => {

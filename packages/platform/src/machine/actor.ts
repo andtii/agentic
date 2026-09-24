@@ -1247,9 +1247,12 @@ export function defineMachineActor(ports: MachinePorts) {
                     // A turn the runtime started itself holds a slot too (#510) — the daemon counts it (`watchTurns`), so must we.
                     if (fresh && wire.event.type === 'turn-start' && wire.event.turnId !== undefined && !h.running) h.running = { turnId: wire.event.turnId, since: now() };
                     // The turn is over: its slot is free (#394). Any `turn-end` — a session runs one turn at a time.
-                    if (wire.kind === 'event' && wire.event.type === 'turn-end' && h.running) {
-                        ended = h.running.turnId;
-                        delete h.running;
+                    if (wire.kind === 'event' && wire.event.type === 'turn-end') {
+                        if (wire.event.turnId !== undefined) h.lastEnded = wire.event.turnId;
+                        if (h.running) {
+                            ended = h.running.turnId;
+                            delete h.running;
+                        }
                     }
                 }
                 await toSession(() => session(frame.sessionId, { oneWay: true })?.forwardFrames([wire]));
@@ -1268,11 +1271,22 @@ export function defineMachineActor(ports: MachinePorts) {
                 delete s.pending[key];
                 const { reply } = frame;
                 const command = pending?.command;
-                // A prompt's ack starts the turn that holds the slot (#394); its error frees the pending one and is the router's to judge.
+                // A prompt's ack starts the turn that holds the slot (#394), unless its `turn-end` came first (#605): the frames and the
+                // reply travel apart, and a slot taken for a turn that is over would never be given back. Its error frees the pending
+                // one and is the router's to judge.
                 if (command?.type === 'prompt') {
                     const h = s.activeSessions[frame.sessionId];
-                    if (h && reply.kind === 'ack' && !h.running) h.running = { turnId: reply.turnId ?? command.turnId, since: now() };
-                    if (reply.kind === 'error') await notify((r) => r.promptRefused(frame.sessionId, command.turnId, reply.code, reply.message));
+                    const turnId = reply.kind === 'ack' ? (reply.turnId ?? command.turnId) : command.turnId;
+                    if (h && reply.kind === 'ack' && !h.running && h.lastEnded !== turnId) h.running = { turnId, since: now() };
+                    if (reply.kind === 'error') {
+                        await notify((r) => r.promptRefused(frame.sessionId, command.turnId, reply.code, reply.message));
+                        // The slot the prompt held is free (#605) and goes to whoever waits for one. Not after a `busy`: there was no
+                        // slot to give, and the router, parking on it, would only be prompted into the same refusal again.
+                        if (h && reply.code !== 'busy') {
+                            dequeue();
+                            await notify((r) => r.slotFreed(machineId, h.environmentId, `prompt ${command.turnId} in session ${frame.sessionId} was refused (${reply.code})`));
+                        }
+                    }
                 }
                 await toSession(() => replied(frame.sessionId, reply, { oneWay: true }));
                 if (pending?.command.type === 'close' && reply.kind === 'ack') await sessionGone(frame.sessionId, 'closed by command');
@@ -2552,13 +2566,21 @@ export function defineMachineActor(ports: MachinePorts) {
                 await client.machineOffline(ids.machineId).catch(() => undefined);
             }
             const def = ports.sessions?.();
+            const freed = new Set<EnvironmentId>();
             for (const [key, p] of Object.entries(s.pending)) {
                 if (p.deadline > at) continue;
                 delete s.pending[key];
+                // An unanswered prompt held a slot (#394); it is free now, and whoever waits for one hears so (#605).
+                const h = s.activeSessions[p.sessionId];
+                if (p.command.type === 'prompt' && h) freed.add(h.environmentId);
                 if (def && ids) {
                     const client = actor(def, actorKey(ids.workspaceId, 'session', p.sessionId)).with({ context: asPrincipal(machinePrincipal(ids.workspaceId, ids.machineId)) }) as unknown as SessionClient;
                     await client.commandReplied({ v: W, kind: 'error', commandId: p.command.commandId, code: 'internal', message: `no reply from machine ${ids.machineId} within ${commandTimeoutMs} ms` });
                 }
+            }
+            if (freed.size && ids) {
+                dequeueIn(ctx);
+                for (const environmentId of freed) await tellRouter(ctx, (r) => r.slotFreed(ids.machineId, environmentId, `a prompt got no reply within ${commandTimeoutMs} ms`));
             }
             if (s.fs) {
                 for (const r of Object.values(s.fs)) {
