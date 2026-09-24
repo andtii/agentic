@@ -85,7 +85,7 @@ describe('isHttpsAsset', () => {
 describe('named lifecycle reasons', () => {
     it('lists every SessionClosedCode, feature and phase', () => {
         expect(SESSION_CLOSED_CODES).toEqual(['restart', 'update', 'harness-update', 'draining', 'harness-missing', 'resume-failed']);
-        expect(DAEMON_FEATURES).toEqual(['update', 'harness', 'policy', 'log', 'login', 'files']);
+        expect(DAEMON_FEATURES).toEqual(['update', 'harness', 'policy', 'log', 'login', 'files', 'run']);
         expect(UPDATE_PHASES).toEqual(['downloading', 'verifying', 'staged', 'draining', 'restarting', 'failed']);
         expect(HARNESS_PHASES).toEqual(['downloading', 'verifying', 'staged', 'draining', 'applying', 'done', 'failed']);
     });

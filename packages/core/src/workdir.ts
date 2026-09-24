@@ -21,7 +21,11 @@ export interface WorkdirRef {
 export type FsOp =
     /** The immediate subfolders of `path`. */
     | { readonly kind: 'list'; readonly path: string }
-    /** `git worktree add -b branch path [base]` in `repo`; `path` must not exist yet. */
+    /**
+     * The worktree of `branch` at `path` in `repo`, made idempotent (#617): a worktree already there on `branch` is
+     * `reused`; a `branch` no worktree holds is checked out at `path` again (`recreated`); otherwise
+     * `git worktree add -b branch path [base]`. A `path` that holds anything else is `worktree-mismatch`.
+     */
     | { readonly kind: 'worktree'; readonly repo: string; readonly branch: string; readonly base?: string; readonly path: string }
     /**
      * Every checkout of `origin` under the environment's `cwdRoots` (#330): the roots walked
@@ -42,7 +46,13 @@ export type FsOp =
      */
     | { readonly kind: 'read'; readonly root: string; readonly path: string; readonly rev?: FsReadRev; readonly base?: string }
     /** What changed in `root`: uncommitted work, or everything on the branch since its merge-base with `base`. */
-    | { readonly kind: 'changes'; readonly root: string; readonly scope: ChangeScope; readonly base?: string };
+    | { readonly kind: 'changes'; readonly root: string; readonly scope: ChangeScope; readonly base?: string }
+    /**
+     * A project-configured command (#617; the `run` daemon feature): `argv[0]` with the rest as its arguments, in `cwd`
+     * (within the roots), never through a shell. How a project creates or prepares a worktree its own way. At most
+     * `timeoutMs` (default `FS_RUN_DEFAULT_TIMEOUT_MS`, capped at `FS_RUN_MAX_TIMEOUT_MS`), then `timeout`.
+     */
+    | { readonly kind: 'run'; readonly cwd: string; readonly argv: readonly string[]; readonly timeoutMs?: number };
 
 /** Which version of a file a `read` returns (#559). */
 export type FsReadRev = 'working' | 'head' | 'base';
@@ -86,6 +96,22 @@ export interface FsWorktreeResult {
     readonly kind: 'worktree';
     readonly path: string;
     readonly branch: string;
+    /** The worktree was already at `path` on `branch`; nothing was changed. */
+    readonly reused?: true;
+    /** `branch` existed with no worktree holding it and was checked out at `path` again. */
+    readonly recreated?: true;
+}
+
+/**
+ * What a `run` did (#617). A command that exits non-zero is still a result — the caller judges `exitCode`; one that
+ * cannot start is `not-found`, one that outlives its time `timeout`. The tails are the last `FS_RUN_OUTPUT_TAIL`
+ * characters of each stream.
+ */
+export interface FsRunResult {
+    readonly kind: 'run';
+    readonly exitCode: number;
+    readonly stdoutTail: string;
+    readonly stderrTail: string;
 }
 
 export interface FsLocateResult {
@@ -187,7 +213,7 @@ export interface ChangeSet {
     readonly truncated: boolean;
 }
 
-export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet;
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -200,6 +226,8 @@ export type FsErrorCode =
     | 'unknown-environment'
     | 'unsupported'
     | 'too-large'
+    /** A `worktree` whose `path` exists but is not `branch`'s worktree (#617). */
+    | 'worktree-mismatch'
     | 'internal';
 
 export interface FsError {
@@ -223,6 +251,14 @@ export const FS_READ_MAX_BYTES = 480 * 1024;
 export const CHANGES_MAX_FILES = 500;
 /** …and this many commits. */
 export const CHANGES_MAX_COMMITS = 100;
+/** A `run` without `timeoutMs` stops after this long (#617)… */
+export const FS_RUN_DEFAULT_TIMEOUT_MS = 10 * 60_000;
+/** …and none runs longer than this. */
+export const FS_RUN_MAX_TIMEOUT_MS = 30 * 60_000;
+/** A `run` names at most this many arguments, `argv[0]` included. */
+export const FS_RUN_MAX_ARGS = 64;
+/** A `run` result keeps at most this many trailing characters of stdout and of stderr. */
+export const FS_RUN_OUTPUT_TAIL = 8 * 1024;
 
 /**
  * Whether decoded file text must be answered as binary (#559): it holds a NUL or a C0 control character other than
