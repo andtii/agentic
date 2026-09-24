@@ -158,12 +158,12 @@ export interface ProjectFeaturePlugin {
     previewSettings?(input: ProjectFeaturePreviewInput): readonly ProjectFeaturePreviewLine[];
 }
 
-/** `settings` with a preset's fields laid over them (#621): a `null` field cleared, every other field kept as it was. */
+/** `settings` with a preset's fields laid over them (#621): a `null` field cleared, an `undefined` one ignored, every other field kept as it was. */
 export function applyProjectFeaturePreset(settings: Readonly<Record<string, unknown>>, preset: ProjectFeaturePreset): Record<string, unknown> {
     const next: Record<string, unknown> = { ...settings };
     for (const [key, value] of Object.entries(preset.settings)) {
         if (value === null) delete next[key];
-        else next[key] = value;
+        else if (value !== undefined) next[key] = value;
     }
     return next;
 }
