@@ -1,5 +1,5 @@
 import { component, useHead, type Define } from 'sigx';
-import { Stack } from '@agentic/ui';
+import { Col } from '@sigx/zero';
 
 export type PageProps =
     & Define.Prop<'title', string, true>
@@ -35,10 +35,12 @@ export const Page = component<PageProps>(({ props, slots }) => {
             );
         }
         return (
-            <Stack as="section" gap="xl" aria-label={props.title}>
-                {heading}
-                {slots.default?.()}
-            </Stack>
+            <section aria-label={props.title}>
+                <Col gap="xl">
+                    {heading}
+                    {slots.default?.()}
+                </Col>
+            </section>
         );
     };
 });

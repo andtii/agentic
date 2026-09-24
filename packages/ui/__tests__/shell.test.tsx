@@ -1,5 +1,9 @@
 import { render } from '@sigx/runtime-dom';
 import { AppShell, type NavGroup, type NavItem } from '../src/index';
+import { installThemes } from '../src/design-system';
+
+// The shell asks the registered design system's `md` breakpoint, as the app does after `installThemes()`.
+beforeAll(() => installThemes());
 
 const items: NavItem[] = [
     { href: '/', label: 'Inbox' },
@@ -124,6 +128,33 @@ describe('AppShell', () => {
         expect(panel?.querySelector(`${part('drawer-head')} ${part('brand-name')}`)?.textContent).toBe('agentic');
         expect(panel?.querySelector(`${part('drawer-head')} button[data-scope="drawer"][data-part="close"]`)?.getAttribute('aria-label')).toBe('Close');
         expect(panel?.querySelector('[data-scope="drawer"][data-part="title"]')?.textContent).toBe('agentic navigation');
+    });
+
+    it("follows the design system's md breakpoint: an open drawer closes once the sidebar takes over", async () => {
+        type Listener = (e: { matches: boolean }) => void;
+        const listeners = new Set<Listener>();
+        const list = {
+            matches: false,
+            addEventListener: (_: string, fn: Listener) => { listeners.add(fn); },
+            removeEventListener: (_: string, fn: Listener) => { listeners.delete(fn); }
+        };
+        const matchMedia = vi.fn(() => list as unknown as MediaQueryList);
+        vi.stubGlobal('matchMedia', matchMedia);
+        try {
+            const host = mount(<AppShell items={items} />);
+            // `{ above: 'md' }` over the ramp — daisy's md, 48rem (768 px), the width shell.css switches at.
+            expect(matchMedia).toHaveBeenCalledWith('(min-width: 48rem)');
+            const panel = host.querySelector('[data-scope="drawer"][data-part="panel"]');
+            (host.querySelector(`${part('menu')} button[data-scope="drawer"][data-part="trigger"]`) as HTMLButtonElement).click();
+            await new Promise((r) => setTimeout(r, 0));
+            expect(panel?.getAttribute('data-state')).toBe('open');
+            list.matches = true;
+            for (const fn of listeners) fn({ matches: true });
+            await new Promise((r) => setTimeout(r, 0));
+            expect(panel?.getAttribute('data-state')).toBe('closed');
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it('renders an item icon inside the fallback link and hands it to the link slot', () => {

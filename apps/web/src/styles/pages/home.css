@@ -1,0 +1,29 @@
+/* Home (#88): the inbox row beside the rail, the first-run checklist, today and spend. */
+@import '@agentic/ui/css/breakpoints';
+
+/* ---- home (#88): minmax(0, 1fr) + 340 for the inbox row, tasks table full width, gap 28 ---- */
+[data-page="home"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: var(--ag-space-8);
+    align-items: start;
+}
+[data-page="home"] > [data-scope="ag-empty"] { grid-column: 1 / -1; }
+/* the first-run checklist (#234): full width above the inbox while no runtime is ready */
+[data-home-setup] { grid-column: 1 / -1; }
+[data-setup-text] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
+[data-setup-title] { font-weight: var(--weight-semibold); }
+[data-setup-detail] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-setup-action] { white-space: nowrap; }
+[data-home-rail] { display: flex; flex-direction: column; gap: var(--space-lg); }
+[data-today-time] { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ag-text-dim); }
+[data-spend] { display: flex; align-items: baseline; gap: var(--space-sm); margin: 0; }
+[data-spend-value] { font-family: var(--font-mono); font-size: var(--text-3xl); font-weight: var(--weight-semibold); }
+[data-spend-limit] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-spend-bar] { block-size: 6px; border-radius: 9999px; background: var(--ag-line); overflow: hidden; }
+[data-spend-bar] > span { display: block; block-size: 100%; background: var(--color-primary); }
+
+@media (--below-xl) {
+    /* fixed right rails drop under the main column: Home, Task, Session, Machine, Memory */
+    [data-page="home"] { grid-template-columns: minmax(0, 1fr); }
+}

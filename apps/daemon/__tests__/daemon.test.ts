@@ -11,7 +11,7 @@ import { harnessMissingDriver } from '../src/drivers';
 import { harnessStore } from '../src/harness';
 import { withinRoots } from '../src/fs';
 import { ndjsonEventLog } from '../src/event-log';
-import { agentDriver, namingDriver, scriptedDriver, SCRIPTED_REPORT, titlingDriver } from './helpers/drivers';
+import { agentDriver, ghostDriver, namingDriver, scriptedDriver, SCRIPTED_REPORT, titlingDriver } from './helpers/drivers';
 import { fakeHarnessZip, fakeReleases } from './helpers/harness';
 import { startRelay, TEST_MACHINE, type Relay } from './helpers/relay';
 
@@ -253,6 +253,73 @@ describe('daemon', () => {
         prompt('s2', 3);
         expect(await replyFor('c3')).toMatchObject({ kind: 'ack' });
         expect([...daemons[0]!.activeSessions].sort()).toEqual(['s1', 's2']);
+    });
+
+    describe('a turn nobody asked for (#604)', () => {
+        const command = (seat: PlatformSeat, sessionId: string, command: Record<string, unknown>) => seat.send({ v: V, t: 'session.command', sessionId: sessionId as SessionId, command: { v: 1, ...command } as never });
+        /** Frames until `pred` holds, whatever interleaves; the frames seen, the matching one last. */
+        const until = async (seat: PlatformSeat, pred: (frame: DaemonFrame) => boolean) => {
+            const seen: DaemonFrame[] = [];
+            for (;;) {
+                const frame = await next(seat);
+                seen.push(frame);
+                if (pred(frame)) return seen;
+            }
+        };
+        const turnEnd = (turnId: (id: string | undefined) => boolean) => (frame: DaemonFrame) => frame.t === 'session.frame' && frame.frame.kind === 'event' && frame.frame.event.type === 'turn-end' && turnId(frame.frame.event.turnId);
+        const endOf = (frames: DaemonFrame[]) => {
+            const last = frames.at(-1)!;
+            return last.t === 'session.frame' && last.frame.kind === 'event' ? last.frame.event : undefined;
+        };
+
+        it('configure then prompt: the configure runs first, its ghost turn is cancelled, and the prompt is answered', async () => {
+            const ghost = ghostDriver({ configureMs: 30 });
+            const { seat } = await start([env('env_g', { runtime: 'ghost' })], [ghost]);
+            open(seat, 's1', 'env_g');
+            await expectFrame(seat, 'session.opened');
+            // Back to back, the way the router sends a member's new model before its next prompt.
+            command(seat, 's1', { commandId: 'c1', type: 'configure', patch: { model: 'haiku' } });
+            command(seat, 's1', { commandId: 'c2', type: 'prompt', turnId: 't2', input: [{ type: 'text', text: 'go' }] });
+            const seen = await until(seat, turnEnd((id) => id === 't2'));
+            const replies = seen.flatMap((f) => (f.t === 'session.reply' ? [f.reply] : []));
+            expect(replies.find((r) => r.commandId === 'c1')).toMatchObject({ kind: 'ack' });
+            expect(replies.find((r) => r.commandId === 'c2')).toMatchObject({ kind: 'ack', turnId: 't2' });
+            expect(ghost.configured).toEqual(['haiku']);
+            expect(ghost.prompted).toEqual(['t2']);
+            // The implicit turn ended — cancelled — before t2 started.
+            const ends = seen.flatMap((f) => (f.t === 'session.frame' && f.frame.kind === 'event' && f.frame.event.type === 'turn-end' ? [f.frame.event] : []));
+            expect(ends.map((e) => [e.turnId === 't2' ? 't2' : 'ghost', e.type === 'turn-end' && e.stopReason])).toEqual([
+                ['ghost', 'cancelled'],
+                ['t2', 'end_turn']
+            ]);
+        });
+
+        it('an empty implicit turn left alone is cancelled after the quiet window, and the slot is free again', async () => {
+            const { seat } = await start([env('env_g', { runtime: 'ghost' })], [ghostDriver()], undefined, { ghostTurnMs: 40 });
+            open(seat, 's1', 'env_g');
+            await expectFrame(seat, 'session.opened');
+            command(seat, 's1', { commandId: 'c1', type: 'configure', patch: { model: 'haiku' } });
+            const seen = await until(seat, turnEnd(() => true));
+            expect(endOf(seen)).toMatchObject({ type: 'turn-end', stopReason: 'cancelled' });
+            command(seat, 's1', { commandId: 'c2', type: 'prompt', turnId: 't2', input: [{ type: 'text', text: 'go' }] });
+            const after = await until(seat, (f) => f.t === 'session.reply' && f.reply.commandId === 'c2');
+            expect(after.at(-1)).toMatchObject({ reply: { kind: 'ack', turnId: 't2' } });
+        });
+
+        it('an implicit turn that carries content is left alone (#510)', async () => {
+            const { seat } = await start([env('env_g', { runtime: 'ghost' })], [ghostDriver({ content: true })], undefined, { ghostTurnMs: 20 });
+            open(seat, 's1', 'env_g');
+            await expectFrame(seat, 'session.opened');
+            command(seat, 's1', { commandId: 'c1', type: 'configure', patch: { model: 'haiku' } });
+            await until(seat, (f) => f.t === 'session.frame' && f.frame.kind === 'event' && f.frame.event.type === 'part-delta');
+            await new Promise((r) => setTimeout(r, 150));
+            expect(daemons[0]!.activeSessions).toContain('s1');
+            // Still running: a prompt now is the runtime's to refuse, and nothing cancelled the turn.
+            command(seat, 's1', { commandId: 'c2', type: 'prompt', turnId: 't2', input: [{ type: 'text', text: 'go' }] });
+            const seen = await until(seat, (f) => f.t === 'session.reply' && f.reply.commandId === 'c2');
+            expect(seen.at(-1)).toMatchObject({ reply: { kind: 'error', code: 'busy' } });
+            expect(seen.some(turnEnd(() => true))).toBe(false);
+        });
     });
 
     it('refuses a session cwd that is missing or that a symlink / junction leads out of the roots (#188)', async () => {
@@ -535,15 +602,12 @@ describe('daemon', () => {
                 releases.put('manifest.json', JSON.stringify({ version: '0.2.0', channel: 'stable', publishedAt: 0, commit: 'abcdef0', protocol: 1, assets: {}, harnesses }));
                 return releases;
             }
-            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) =>
-                start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map((r) => harnessMissingDriver(r)), undefined, {
-                    harnesses: {
-                        store,
-                        fetch: releases.fetch,
-                        rebuild: (runtime) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime)),
-                        heal: { manifestUrl: releases.url('manifest.json') }
-                    }
+            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) => {
+                const build = (runtime: string) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime));
+                return start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map(build), undefined, {
+                    harnesses: { store, fetch: releases.fetch, rebuild: build, heal: { manifestUrl: releases.url('manifest.json') } }
                 });
+            };
             const until = async (check: () => boolean) => {
                 for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
                 expect(check()).toBe(true);
@@ -593,6 +657,41 @@ describe('daemon', () => {
                 expect(store.locate('codex-cli')?.version).toBe('1.0.0');
                 expect(store.locate('claude-code')).toBeUndefined();
                 expect(store.failures()).toEqual({});
+            });
+
+            it('a ready harness older than the build pins is updated on start and the old version pruned; a current one downloads nothing (#600)', async () => {
+                const releases = await servedRelease();
+                const old = await fakeHarnessZip(dir, 'claude-code', '0.9.0');
+                releases.put('harness-claude-code-old.zip', old.bytes);
+                let pin = '1.0.0';
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false, pinned: () => pin });
+                await store.setSelection(['claude-code']);
+                const staged = await store.stage('claude-code', old.asset(releases.url('harness-claude-code-old.zip')), { fetch: releases.fetch });
+                await store.activate('claude-code', staged.version);
+                expect(store.reports(['claude-code'])).toMatchObject([{ status: 'ready', installed: { version: '0.9.0' }, current: false }]);
+
+                const first = await startHealing(releases, store);
+                const frames = await collect(first.seat, (f) => f.some((x) => x.t === 'harnesses'));
+                expect(frames.find((f) => f.t === 'harnesses')).toMatchObject({ harnesses: [{ runtime: 'claude-code', status: 'ready', installed: { version: '1.0.0' }, current: true }, {}, {}] });
+                expect(store.locate('claude-code')?.version).toBe('1.0.0');
+                expect((await readdir(join(dir, 'harnesses', 'claude-code'))).sort()).toEqual(['1.0.0', 'current.json']);
+                expect(store.failures()).toEqual({});
+                await first.daemon.stop();
+
+                // Current: the next start does not even read the manifest.
+                releases.requests.length = 0;
+                const second = await startHealing(releases, store);
+                await new Promise((r) => setTimeout(r, 300));
+                expect(releases.requests).toEqual([]);
+                await second.daemon.stop();
+
+                // A pin the release cannot serve (offline): recorded, and the installed harness keeps running.
+                pin = '1.1.0';
+                const third = await startHealing(fakeReleases(), store);
+                await until(() => 'claude-code' in store.failures());
+                expect(store.locate('claude-code')?.version).toBe('1.0.0');
+                open(third.seat, 's1', 'env_c');
+                expect((await expectFrame(third.seat, 'session.opened')).sessionId).toBe('s1');
             });
         });
 

@@ -3,7 +3,7 @@
  * seam with Monaco and plain renderers), the line diff behind the plain one,
  * and the parts the Changes and Files views are made of.
  */
-export { codeAnatomies, agCodeAnatomy, agStatusTileAnatomy, agDiffCountsAnatomy, agChangesAnatomy, agFileTreeAnatomy, agFindAnatomy, agKbdAnatomy, agSessionBarAnatomy, agFileHeaderAnatomy, agLineComposerAnatomy } from './anatomy.js';
+export { codeAnatomies, agCodeAnatomy, agStatusTileAnatomy, agDiffCountsAnatomy, agChangesAnatomy, agFileTreeAnatomy, agFindAnatomy, agSessionBarAnatomy, agFileHeaderAnatomy, agLineComposerAnatomy } from './anatomy.js';
 export { codeRecipes } from './recipes.js';
 export { codeScopes } from './vocabulary.js';
 export { codeCss } from './css.js';
@@ -28,14 +28,14 @@ export { LineComposer } from './line-composer.js';
 export type { LineComposerProps } from './line-composer.js';
 export { GoToFile, findPaths, matchScore, FIND_MAX_RESULTS } from './find.js';
 export type { GoToFileProps } from './find.js';
-export { FileTree, FileTreeLegend, ancestorsOf } from '../_zero-gaps/index.js';
-export type { FileTreeProps, FileTreeLegendProps, FileTreeLoad } from '../_zero-gaps/index.js';
+export { FileTree, FileTreeLegend, ancestorsOf } from './FileTree.js';
+export type { FileTreeProps, FileTreeLegendProps, FileTreeLoad } from './FileTree.js';
 
 // `componentExportName(scope)` for every scope here — the fragment contract.
 export { CodeViewer as AgCode } from './renderer.js';
-export { StatusTile as AgStatusTile, DiffCounts as AgDiffCounts, Kbd as AgKbd } from './parts.js';
+export { StatusTile as AgStatusTile, DiffCounts as AgDiffCounts } from './parts.js';
 export { ChangesPanel as AgChanges } from './changes.js';
-export { FileTree as AgFileTree } from '../_zero-gaps/index.js';
+export { FileTree as AgFileTree } from './FileTree.js';
 export { GoToFile as AgFind } from './find.js';
 export { SessionBar as AgSessionBar } from './session-bar.js';
 export { FileHeader as AgFileHeader } from './file-header.js';

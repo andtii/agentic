@@ -448,7 +448,9 @@ describe('WorkdirDialog', () => {
         p.s.creating = true;
         await tick();
         const create = buttonNamed(p.root, 'Create worktree');
-        expect(create.disabled).toBe(true);
+        // zero's loading keeps focus: aria-disabled, not the native disabled.
+        expect(create.disabled).toBe(false);
+        expect(create.getAttribute('aria-disabled')).toBe('true');
         expect(create.getAttribute('aria-busy')).toBe('true');
         p.s.creating = false;
         p.s.worktreeError = { code: 'branch-exists', message: 'fatal: a branch named x already exists' };

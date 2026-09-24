@@ -18,20 +18,15 @@ import { installThemes } from '@agentic/ui/design-system';
 installThemes();
 ```
 
-`withOverride(recipes, scope, patch)` replaces a daisy recipe in place with the patch deep-merged (arrays and scalars replace, `compoundVariants` append) — one recipe per scope, never two. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
+The design system is `extendDesignSystem(daisy, …)` from `@sigx/zero-kit/define`: each re-tuned daisy scope has one `RecipePatch` in `src/design-system/patches/<scope>.ts` (objects merge per key, arrays and scalars replace, `null` deletes, a `compoundVariants` entry merges into daisy's with the same `match`) — one recipe per scope, never two. The handoff's contrast floors over the `--ag-*` inks are `tokens.contrast` pairs, measured by the kit's validator in every theme; the breakpoints are daisy's plus `xl: 80rem`. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
 
-## Layout tier (`src/layout`)
+## Layout
 
-Stand-in for zero's layout tier until a release ships it (andtii/zero-wip#473 landed on main). `Stack`, `Row`, `Col` render one `data-scope="stack"` carrier with `data-orientation`; `Spacer` takes the free space. Layout facts are `data-l-*` attributes whose values are the design system's `--space-*` ramp (`gap`, `pad`) or flex keywords (`align`, `justify`, `wrap`, `grow`); per-breakpoint overrides put the breakpoint in prefix position (`at={{ md: { gap: 'lg' } }}` → `data-l-md-gap="lg"`). Import `@agentic/ui/layout.css` once. `useMediaQuery(query)` is the SSR-safe `matchMedia` signal.
+Pages lay out with zero's layout tier — `Row`, `Col`, `Stack.Item grow`, `Grid`, `Container` from `@sigx/zero` — whose CSS this design system's build compiles from its own spacing ramp; there is no local layout tier. App CSS queries the ramp's breakpoints through `@agentic/ui/css/breakpoints` (`@custom-media --above-md` / `--below-md` and friends), which needs Lightning CSS with `drafts.customMedia`; in code, `useMediaQuery({ above: 'md' })` from `@sigx/zero/behaviors` after `installThemes()`.
 
-```tsx
-import { Row, Col, Spacer } from '@agentic/ui';
-
-<Row gap="md" align="center" at={{ md: { gap: 'xl' } }}>
-    <Col grow>…</Col>
-    <Spacer />
-    <button>Save</button>
-</Row>
+```css
+@import '@agentic/ui/css/breakpoints';
+@media (--below-md) { … }
 ```
 
 ## App shell (`src/shell`)
@@ -49,17 +44,18 @@ import { Row, Col, Spacer } from '@agentic/ui';
 
 ## Forms
 
-`AgentForm`, `ConfigVersions`, `EnvironmentCard` and `SettingsForm` bind through zero's `model=` contract and also work without JS:
+`AgentForm`, `SchemaForm` and `EnvironmentCard` bind through zero's `model=` contract and also work without JS:
 
 ```tsx
 <AgentForm model={() => state.config} tools={toolOptions} action="/agents/a1/config" onSubmit={({ config, reason }) => save(config, reason)} />
 ```
 
 - The form edits a draft; a valid submit writes the config back through the model and emits `submit`. An invalid submit is blocked, errors render beside their fields (`Field.Error`, `role="alert"`, wired to the control by `aria-describedby`) and `invalid` fires; `reset()` restores the draft.
-- Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
+- Every control has a real `name` (see `AGENT_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` returns the same config plus the validation errors. A form-level error (the count of fields needing attention, a write's refusal) is an `ErrorNote` marked `data-form-summary`.
+- `SelectField virtual={virtualListbox}` (from `@sigx/zero/virtual-listbox`, with an optional `estimateItemSize`) windows a long list — the time-zone field. Its hidden `<select>` then carries only the chosen option, so pick another by the control (typeahead), not by writing the hidden select. Options with a `group` render under group headings.
 - Persistence is the caller's: the forms emit, they never write to an actor.
 - `AgentForm runtimes={…}` takes `RuntimeOption[]`: each runtime may carry a `hint` (drawn under the select, with an `href` to the fix) and the `models` its plugin lists — the model field is then a select (runtime default, each model, "Custom…" → a typed id posted as `AGENT_FIELDS.modelCustom`). Without `runtimes` the form offers the built-in pair and a typed model.
-- `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls, and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
+- `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls (each posts its category through `Segmented name`), and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
 
 ### Working-folder picker (#191)
 
@@ -104,9 +100,14 @@ The dialog never fetches and never assumes that a move happened: it shows what `
 
 ## Component kit (`src/kit`)
 
-The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. The `ag-*` scopes ship in the fragment with recipes (`kitAnatomies` is the list; among them `StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`, `MarkdownViewer` on `ag-markdown`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `MarkdownDialog`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.
+The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. The `ag-*` scopes ship in the fragment with recipes (`kitAnatomies` is the list; among them `StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`, `MarkdownViewer` on `ag-markdown`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `FormDialog`, `MarkdownDialog`, `ErrorNote`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.
 
 - `MarkdownViewer value` is a document as prose: the `ag-markdown` recipe styles what `@sigx/richtext/dom` renders inside it (`data-scope="richtext"`; `@sigx/richtext` ships no stylesheet) — headings, lists and task boxes, blockquotes, code blocks with a language / copy header, tables, links (`_blank`, or `onLink`), images. Code highlights through one shared shiki highlighter (`markdownHighlighter()`, loaded on the first block, plain text on any failure); `highlighter={false}` keeps it plain (tests). `compact` is the card-well size.
+- `Button intent` renders zero's `Button.Root` with the intent's axes (`data-intent` for the kit's own rules); `type`, `form`, `name`, `value`, `label` (`aria-label`) and `onClick` pass through. `loading` is zero's: `data-state="loading"`, `aria-busy`, `aria-disabled` and the `spinner` part, activation blocked but NOT the native `disabled`, so the pressed button keeps focus. `href` renders a real `<a>` through `Button.Root asChild` with the same axes — a link button (the web app's `LinkButton` adds the router push).
+- `Segmented name form` posts the chosen value through zero's `ToggleGroup` hidden `<select>`: no hand-written hidden input beside it.
+- `ConfirmDialog` is the destructive confirm (`role="alertdialog"`, initial focus on Cancel). `cancel` fires on every close the caller did not make (zero's close reason is not `programmatic`: Cancel, Escape); the confirm button does not close, the caller closes by writing the model after `busy`.
+- `FormDialog model title description submitLabel cancelLabel busy` is data entry: a plain modal `Dialog` around a `<form>` (default slot = the fields), so Enter submits, `required` validates and focus lands on the first field. `submit` keeps it open until the caller writes the model; `cancel` fires on Cancel, Escape and a backdrop click (a plain modal light-dismisses).
+- `ErrorNote title` is an error line on zero's `Alert` (`role="alert"`, error colour, small); pass the site's `data-*` hook (`<ErrorNote data-save-error="">`) and it lands on the alert root.
 - `MarkdownDialog model title value` reads a document full-size: zero's `Dialog` at 880 px, the viewer scrolling between the title and the footer, the `footer` slot's actions before `Close`; every close (Close, Escape, backdrop, or the model set false after a footer action) emits `close`. The plan card opens its plan in it.
 
 ```tsx
@@ -159,8 +160,8 @@ The parts of a session's Changes and Files views (`docs/design/HANDOFF.md` → "
 - **`SessionBar`** (`ag-session-bar`): link tabs with counts (`aria-current="page"` on the open one), the agent tile, `machine / account`, the branch chip, "n ahead of base", and the view's controls in the default slot. It wraps below 768 px.
 - **`FileHeader`** (`ag-file-header`): status tile, the path as `dir/name` or spaced `breadcrumbs`, counts or `facts`, actions in the slot.
 - **`LineComposer`** (`ag-line-composer`): "Ask <agent> about line n", `file:line`, a textarea (Ctrl/Cmd+Enter sends, Escape cancels), the "Posts to …" note, Cancel and Send. It only collects the question; posting is the caller's.
-- **`GoToFile`** (`ag-find`): a combobox over known paths (`findPaths` ranks subsequence matches in the file name first); `hotkey` focuses it on Ctrl/Cmd+P. **`Kbd`** is the hint.
-- **`FileTree`** (`ag-file-tree`) and **`FileTreeLegend`** live in `src/_zero-gaps/` until zero ships a Tree (andtii/zero-wip#494): folders load through `load(path)` on first expand, the ancestors of `selected` open on mount, `version` reloads, ARIA tree semantics with arrow-key navigation.
+- **`GoToFile`** (`ag-find`): zero's `Combobox` over known paths, every match ranked by `findPaths` (subsequence matches in the file name first) and windowed with `virtual={virtualListbox}`, so a folder of thousands of files keeps a page of options in the DOM; `hotkey` focuses it on Ctrl/Cmd+P; `id` (default `ag-find`) lands on its root. **`Kbd`** is zero's `Kbd` with the keys as a `keys` prop.
+- **`FileTree`** (`ag-file-tree`) and **`FileTreeLegend`**: zero's `TreeView` (the APG tree: roving focus, arrow keys, typeahead, `aria-level`), each row an `ag-file-tree` `item` rendered `asChild` over TreeView's item or branch trigger. A folder loads through `load(path)` when it is expanded (`expandedValuesChange`) and its children render once they arrive; the ancestors of `selected` open on mount; `version` reloads; Enter or a click on a folder opens it, on a file calls `onSelect`.
 
 ### States (`src/kit/states`)
 

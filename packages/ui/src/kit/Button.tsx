@@ -1,20 +1,19 @@
 /**
- * `Button` — the handoff's five intents on zero's `button` anatomy
+ * `Button` — the handoff's five intents on zero's `Button.Root`
  * (`docs/design/HANDOFF.md` → "Components", "Element states"): `primary`
  * (live fill), `default` (base-300 fill, `line-strong` border), `wait`
  * (amber: the answer to something waiting on a person), `danger` (outline
  * until the confirm step, then filled) and `icon` (36 px square, needs an
- * accessible name). Loading keeps the label and swaps the icon for a 14 px
- * spinner — zero's `loading` state (`data-state="loading"` + the button's
- * `spinner` part, zero 0.3); the button is disabled meanwhile.
+ * accessible name). Loading keeps the label and swaps the icon for zero's
+ * `spinner` part; zero's `loading` sets `data-state="loading"`, `aria-busy`
+ * and `aria-disabled` and blocks activation without the native `disabled`,
+ * so the button the person just pressed keeps focus.
  *
- * Rendered as a real `<button>` carrying the same `data-*` axes zero's
- * `Button.Root` stamps (`variantAttrs`), so the design system's button
- * recipe paints it and every attribute a control needs (`aria-label`,
- * `aria-busy`, `form`) is ours to set.
+ * With `href` it renders a real `<a>` through `Button.Root asChild`, so a
+ * navigation carries the same intent axes and anatomy as a button.
  */
-import { component, type Define } from '@sigx/runtime-core';
-import { variantAttrs } from '@sigx/zero/contract';
+import { component, type Define, type JSXElement } from '@sigx/runtime-core';
+import { Button as ZeroButton } from '@sigx/zero';
 import { Icon, type IconName } from './icons.js';
 
 export type ButtonIntent = 'primary' | 'default' | 'wait' | 'danger' | 'icon';
@@ -49,7 +48,11 @@ export type ButtonProps =
     & Define.Prop<'label', string>
     /** Full width (mobile rows). */
     & Define.Prop<'block', boolean>
+    /** Renders a link (`<a href>`) wearing the same button anatomy and intent. */
+    & Define.Prop<'href', string>
     & Define.Prop<'form', string>
+    & Define.Prop<'name', string>
+    & Define.Prop<'value', string>
     & Define.Prop<'class', string>
     & Define.Prop<'onClick', (e: MouseEvent) => void>
     & Define.Slot<'default'>;
@@ -60,30 +63,42 @@ export const Button = component<ButtonProps>(({ props, slots }) => () => {
         throw new Error('[@agentic/ui] an icon Button needs a `label` — every icon-only control has an aria-label');
     }
     const axes = buttonAxes(intent, props.confirm);
-    const attrs = variantAttrs({
-        color: axes.color as never,
-        variant: axes.variant,
-        mods: { ...axes.mods, block: props.block ? true : undefined }
-    });
-    const disabled = props.disabled || props.loading;
+    const mods = { ...axes.mods, block: !!props.block };
+    const content = (): JSXElement[] => [
+        // zero draws the spinner part while loading; the icon gives way to it.
+        props.loading || !props.icon ? null : <Icon name={props.icon} size={15} />,
+        intent === 'icon' ? null : <span>{slots.default?.()}</span>
+    ];
+    const onClick = (e: MouseEvent): void => props.onClick?.(e);
+    if (props.href !== undefined) {
+        return (
+            <ZeroButton.Root asChild color={axes.color as never} variant={axes.variant as never} mods={mods} loading={props.loading} disabled={props.disabled} aria-label={props.label} data-intent={intent} onClick={onClick}>
+                {(part) => (
+                    <a {...part} href={props.href} class={props.class}>
+                        {props.loading ? <span data-scope="button" data-part="spinner" aria-hidden="true" /> : null}
+                        {content()}
+                    </a>
+                )}
+            </ZeroButton.Root>
+        );
+    }
     return (
-        <button
-            data-scope="button"
-            data-part="root"
-            data-intent={intent}
-            {...attrs}
-            data-state={props.loading ? 'loading' : undefined}
+        <ZeroButton.Root
+            color={axes.color as never}
+            variant={axes.variant as never}
+            mods={mods}
+            loading={props.loading}
+            disabled={props.disabled}
             type={props.type ?? 'button'}
-            disabled={disabled}
-            data-disabled={disabled ? '' : undefined}
-            aria-busy={props.loading ? 'true' : undefined}
-            aria-label={props.label}
             form={props.form}
+            name={props.name}
+            value={props.value}
+            aria-label={props.label}
+            data-intent={intent}
             class={props.class}
-            onClick={(e: MouseEvent) => props.onClick?.(e)}
+            onClick={onClick}
         >
-            {props.loading ? <span data-scope="button" data-part="spinner" aria-hidden="true" /> : props.icon ? <Icon name={props.icon} size={15} /> : null}
-            {intent === 'icon' ? null : <span>{slots.default?.()}</span>}
-        </button>
+            {content()}
+        </ZeroButton.Root>
     );
 }, { name: 'Button' });

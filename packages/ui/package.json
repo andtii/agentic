@@ -13,7 +13,6 @@
       "production": "./dist/index.prod.js",
       "import": "./dist/index.js"
     },
-    "./layout.css": "./src/layout/layout.css",
     "./shell.css": "./src/shell/shell.css",
     "./fragment": {
       "types": "./dist/fragment/index.d.ts",
@@ -29,6 +28,7 @@
     },
     "./css": "./dist/ds/css/index.css",
     "./css/tokens": "./dist/ds/css/tokens.css",
+    "./css/breakpoints": "./dist/ds/css/breakpoints.css",
     "./register": {
       "types": "./dist/ds/register.d.ts",
       "import": "./dist/ds/register.js"

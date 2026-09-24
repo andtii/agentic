@@ -2,7 +2,7 @@
 
 import type { AuthStatus, CapabilityReport, LocalEnvironment, OpenSpec, RuntimeOpenContext } from '@agentic/core';
 import type { ConformanceScript } from '@agentic/daemon-protocol/testing';
-import { createEventLog, type Agent, type AgentEvent, type AgentSession, type AgentTurn, type Policy, type SessionRef, type TurnResult } from '@sigx/ai-agent';
+import { createEventLog, createSessionCore, type Agent, type AgentEvent, type AgentSession, type AgentTurn, type Policy, type SessionRef, type TurnResult } from '@sigx/ai-agent';
 import type { DaemonDriver } from '../../src/daemon';
 
 export const SCRIPTED_REPORT: CapabilityReport = {
@@ -171,6 +171,66 @@ export function agentDriver(runtime: string, agent: Agent, report: CapabilityRep
         async open(_env, spec, ctx) {
             contexts.push(ctx);
             const session = await agent.session({ system: spec.system, ...(spec.model ? { model: spec.model } : {}), ...(ctx.policy ? { policy: ctx.policy } : {}), ...(spec.resume !== undefined ? { resume: spec.resume as SessionRef } : {}) });
+            return { session, capabilities: report };
+        },
+        async doctor() {
+            return { ok: true, findings: [] };
+        }
+    };
+}
+
+/**
+ * A session that opens a turn nobody asked for, the way `@sigx/ai-agent-claude-code@0.2.1` does after `configure`
+ * (#604): the CLI's answer to `setModel` starts an implicit, input-less turn that only a `result` would end, and none
+ * comes. The ghost turn ends only when it is cancelled. `configureMs` delays `configure` (the control request's
+ * round trip); `content` makes the implicit turn carry a part, like a background task's result (#510).
+ */
+export function ghostDriver(options: { readonly configureMs?: number; readonly content?: boolean } = {}): DaemonDriver & { readonly configured: string[]; readonly prompted: string[] } {
+    const configured: string[] = [];
+    const prompted: string[] = [];
+    const report: CapabilityReport = { ...MOCK_REPORT, runtime: 'ghost' };
+    return {
+        runtime: 'ghost',
+        configured,
+        prompted,
+        async inspect() {
+            return { authStatus: 'ok', isolation: 'config-dir', capabilities: report };
+        },
+        async open(_env, _spec, ctx) {
+            const core = createSessionCore({ id: ctx.sessionId, log: createEventLog({ sessionId: ctx.sessionId }) });
+            const ghost = () =>
+                core.startTurn([], undefined, async (driver) => {
+                    if (options.content) {
+                        driver.emit({ type: 'part-start', messageId: `a:${driver.turnId}`, partId: `${driver.turnId}:0`, kind: 'text' });
+                        driver.emit({ type: 'part-delta', partId: `${driver.turnId}:0`, delta: 'a background task finished' });
+                    }
+                    await new Promise<void>((resolve) => driver.signal.addEventListener('abort', () => resolve(), { once: true }));
+                    driver.end({ stopReason: 'cancelled' });
+                });
+            const session: AgentSession = {
+                id: ctx.sessionId,
+                ref: { agent: 'ghost', v: 1, id: ctx.sessionId },
+                prompt(input, promptOptions) {
+                    return core.startTurn(input, promptOptions, async (driver) => {
+                        prompted.push(driver.turnId);
+                        await tick();
+                        driver.emit({ type: 'part-start', messageId: `a:${driver.turnId}`, partId: `${driver.turnId}:0`, kind: 'text' });
+                        driver.emit({ type: 'part-delta', partId: `${driver.turnId}:0`, delta: 'answered' });
+                        driver.emit({ type: 'part-end', partId: `${driver.turnId}:0` });
+                        driver.end({ stopReason: 'end_turn' });
+                    });
+                },
+                async configure(patch) {
+                    if (options.configureMs) await new Promise((r) => setTimeout(r, options.configureMs));
+                    configured.push(String(patch.model));
+                    core.emit({ type: 'config', options: [] });
+                    ghost();
+                },
+                respond: (requestId, decision) => core.respond(requestId, decision),
+                cancel: (target) => core.cancel(target),
+                subscribe: (from) => core.subscribe(from),
+                close: () => core.close()
+            };
             return { session, capabilities: report };
         },
         async doctor() {
