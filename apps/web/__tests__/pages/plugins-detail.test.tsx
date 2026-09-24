@@ -171,7 +171,7 @@ describe('/plugins/:id', () => {
     it('Remove states its consequences and lists every dependent before the button', async () => {
         const root = await view('github-mcp');
         const card = root.querySelector('[data-plugin-panel="remove"][data-plugin-action="remove"]')!;
-        expect(text(card.querySelector('[data-plugin-consequence]'))).toBe('Removes GitHub (MCP), its settings, its tool policy and its connectors from the workspace. Forge still uses it and will point at nothing. Its stored secret stays until you delete it under Keys.');
+        expect(text(card.querySelector('[data-plugin-consequence]'))).toBe('Removes GitHub (MCP), its settings, its tool policy and its connectors from the workspace. Forge still uses it and will point at nothing. Its stored secret is kept: delete it under Keys first if you want it gone.');
         const list = card.querySelector('[data-remove-dependents]')!;
         expect(texts([...list.querySelectorAll('li')])).toEqual(['Forge — connector, tool']);
         const button = buttonNamed(card, 'Remove GitHub (MCP)');

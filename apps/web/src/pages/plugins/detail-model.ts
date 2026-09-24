@@ -185,7 +185,7 @@ export function removeConsequence(plugin: Pick<PluginView, 'manifest'>, deps: De
         parts.push(`${listOf(who)} still ${agents.length + schedules === 1 ? 'uses' : 'use'} it and will point at nothing.`);
     }
     const stored = (m.secrets ?? []).map((s) => s.name).filter((n) => secretNames.includes(n));
-    if (stored.length === 1) parts.push('Its stored secret stays until you delete it under Keys.');
-    else if (stored.length) parts.push(`Its ${plural(stored.length, 'stored secret')} stay until you delete them under Keys.`);
+    if (stored.length === 1) parts.push('Its stored secret is kept: delete it under Keys first if you want it gone.');
+    else if (stored.length) parts.push(`Its ${plural(stored.length, 'stored secret')} are kept: delete them under Keys first if you want them gone.`);
     return parts.join(' ');
 }

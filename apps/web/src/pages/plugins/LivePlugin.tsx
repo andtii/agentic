@@ -87,9 +87,14 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
         st.error = '';
         try {
             await actor(defs.Registry, k).setToolPolicy(props.id, w.tool, w.mode);
-            await policy.refresh();
         } catch (e) {
             st.error = `${w.tool} stays as it was: ${registryErrorText(e)}`;
+        }
+        try {
+            // The write landed; a failed refresh is caught up by the live subscription.
+            await policy.refresh();
+        } catch {
+            /* ignore */
         } finally {
             const { [w.tool]: _done, ...rest } = st.optimistic;
             void _done;
