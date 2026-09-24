@@ -62,8 +62,9 @@ const setSelect = (el: HTMLSelectElement, value: string): void => {
 describe('/plugins: MCP servers (live)', () => {
     it('add → tested, with its tools → an agent picks it → remove refuses and names the agent → removes on confirm', async () => {
         const ada = await h.agent('Ada');
-        const dom = await mountLive('/plugins', h);
-        await until(() => dom.querySelector('[data-plugin-connectors] [data-plugin-none]')?.textContent?.includes('No connectors') === true, 'the empty connector list');
+        // MCP servers are managed in the Connectors view (#637 took them off the list; #638 drew the view).
+        const dom = await mountLive('/plugins?kind=connector', h);
+        await until(() => dom.querySelector('[data-plugin-connectors]')?.textContent?.includes('No connectors') === true, 'the empty connector list');
 
         buttonNamed(dom, 'Add MCP server').click();
         await until(() => popup(dom) !== null, 'the dialog');
@@ -94,7 +95,7 @@ describe('/plugins: MCP servers (live)', () => {
         expect([...popup(dom)!.querySelectorAll('[data-connector-probe] [data-connector-tools] li')].map((li) => text(li))).toEqual(['acme-tools__echo', 'acme-tools__search']);
 
         buttonNamed(popup(dom)!, 'Add connector').click();
-        await until(() => dom.querySelector('[data-connector="acme-tools"]') !== null && popup(dom) === null, 'the connector row');
+        await until(() => dom.querySelector('[data-connector-item="acme-tools"]') !== null && popup(dom) === null, 'the connector row');
 
         // Installed: enabled, its declared scopes granted, the record, the sealed credential, the test's result.
         const plugin = (await registry().get('acme-tools'))!;
@@ -106,11 +107,10 @@ describe('/plugins: MCP servers (live)', () => {
         expect((await registry().secrets()).map((s) => s.name)).toContain('acme-tools.token');
         expect(await registry().openSecret('acme-tools.token', 'acme-tools')).toBe(TOKEN);
 
-        // The row and the catalogue's card show it; the token shows nowhere.
-        const row = () => dom.querySelector<HTMLElement>('[data-connector="acme-tools"]')!;
-        await until(() => row().querySelectorAll('[data-connector-tools] li').length === 2, 'the tools on the row');
-        expect(text(row())).toContain('2 tools');
-        await until(() => dom.querySelector('[data-plugin-group="connector"] [data-plugin="acme-tools"]') !== null, 'the connector card');
+        // The row shows it, and the plugins menu counts it; the token shows nowhere.
+        const row = () => dom.querySelector<HTMLElement>('[data-connector-item="acme-tools"]')!;
+        await until(() => text(row().querySelector('[data-plugin-row-part="description"]')).includes('2 tools'), 'the tools on the row');
+        await until(() => dom.querySelector('[data-plugins-menu] [data-category="connector"] [data-count]')?.textContent === '1', 'the menu to count the connector');
         expect(dom.innerHTML).not.toContain(TOKEN);
         expect(JSON.stringify(await h.app.as(owner).actor(AuditActor, auditKey(WS)).list())).not.toContain(TOKEN);
 
@@ -120,14 +120,14 @@ describe('/plugins: MCP servers (live)', () => {
         await h.app.as(owner).actor(AgentActor, agentKey(WS, ada)).update({ connectors: [{ id: 'acme-tools' }] }, 'pick acme');
 
         // Remove: refused while Ada picks it — the dialog names her; nothing is removed until confirmed.
-        buttonNamed(row(), 'Remove').click();
+        row().querySelector<HTMLButtonElement>('[data-connector-remove] button')!.click();
         await until(() => popup(dom) !== null, 'the in-use dialog');
-        expect(popup(dom)!.textContent).toContain('Remove acme-tools?');
+        expect(popup(dom)!.textContent).toContain('Remove Acme Tools?');
         expect([...popup(dom)!.querySelectorAll('[data-confirm-dependents] li')].map((li) => text(li))).toEqual(['Ada — connector']);
         expect(await registry().get('acme-tools')).not.toBeNull();
 
-        buttonNamed(popup(dom)!, 'Remove acme-tools anyway').click();
-        await until(() => dom.querySelector('[data-connector="acme-tools"]') === null, 'the row to go');
+        buttonNamed(popup(dom)!, 'Remove Acme Tools anyway').click();
+        await until(() => dom.querySelector('[data-connector-item="acme-tools"]') === null, 'the row to go');
         expect(await registry().get('acme-tools')).toBeNull();
         expect(await registry().connectors()).toEqual([]);
         expect((await registry().secrets()).map((s) => s.name)).not.toContain('acme-tools.token');

@@ -128,7 +128,10 @@ describe('/schedules (live)', () => {
 });
 
 describe('/plugins (live)', () => {
-    it('AC-13: switching a plugin off lists its dependents before the confirm, and the card states what still references it after', async () => {
+    const row = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-rows] [data-plugin-row][data-plugin="${id}"]`);
+    const leftLine = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-left][data-plugin="${id}"]`);
+
+    it('AC-13: switching a plugin off lists its dependents before the confirm, and the page states what still references it after', async () => {
         await registry().register(github, { enabled: true, grant: ['network:api.github.com', 'tools:github'] });
         await registry().putConnector({ id: 'github', pluginId: 'github', transport: 'streamable-http', url: 'https://api.github.com/mcp', secrets: ['github-token'] });
         const ada = await h.agent('Ada');
@@ -139,22 +142,19 @@ describe('/plugins (live)', () => {
         await h.app.as(owner).actor(Schedule, `${WS}:schedule:${scheduleId}`).create({ kind: 'agent-task', title: 'nightly triage', prompt: 'Triage', recurrence: { kind: 'at', at: NOW + 86_400_000 }, agentId: bob });
 
         const dom = await mountLive('/plugins', h);
-        await until(() => dom.querySelector('[data-plugin-used] [data-scope="ag-agent-tile"]') !== null, 'the dependents on the card');
-        const card = dom.querySelector<HTMLElement>('[data-scope="ag-plugin-card"][data-plugin="github"]')!;
-        const control = () => card.querySelector<HTMLInputElement>('input[role="switch"]')!;
-        expect(card.getAttribute('aria-label')).toBe('GitHub MCP');
+        await until(() => row(dom, 'github')?.querySelector('[data-plugin-used] [data-plugin-dependent]') != null, 'the dependents on the row');
+        const control = () => row(dom, 'github')!.querySelector<HTMLInputElement>('input[role="switch"]')!;
+        expect(row(dom, 'github')!.querySelector('[data-plugin-row-part="name"]')!.textContent).toBe('GitHub MCP');
         expect(control().checked).toBe(true);
-        // Granted short of what it declares: the card says what it still needs, and links to its page.
-        expect(card.querySelector('[data-part="readiness"]')!.getAttribute('data-readiness')).toBe('needs-grant');
-        expect(card.querySelector('a[href="/plugins/github"]')).not.toBeNull();
-        expect(texts(card.querySelectorAll('[data-plugin-granted] li'))).toEqual(['network:api.github.com', 'tools:github']);
-        expect(card.querySelector('[data-plugin-unsupported]')!.textContent).toBe('secret:github-token');
-        expect([...card.querySelectorAll('[data-plugin-used] [data-scope="ag-agent-tile"][data-part="root"]')].map((t) => t.getAttribute('aria-label') ?? t.getAttribute('title'))).toEqual(['Ada', 'Bob']);
-        expect(card.querySelector('[data-plugin-schedules]')!.textContent).toBe('1 schedule');
-        // Connectors and secret names, never values.
-        expect(dom.querySelector('[data-connector="github"]')!.textContent).toContain('https://api.github.com/mcp');
-        expect(dom.querySelector('[data-connector="github"] [data-connector-secrets]')!.textContent).toBe('secrets: github-token');
+        // Granted short of what it declares: the row says it needs a grant, and links to its page; so does Needs attention.
+        expect(row(dom, 'github')!.getAttribute('data-readiness')).toBe('needs-grant');
+        expect(row(dom, 'github')!.getAttribute('href')).toBe('/plugins/github');
+        expect(dom.querySelector('[data-plugin-attention] li[data-plugin="github"] a[href="/plugins/github#granted"]')).not.toBeNull();
+        expect([...row(dom, 'github')!.querySelectorAll('[data-plugin-used] [data-plugin-dependent]')].map((t) => t.getAttribute('data-name'))).toEqual(['Ada', 'Bob']);
+        expect(row(dom, 'github')!.querySelector('[data-plugin-schedules]')!.textContent).toBe('1 schedule');
+        // Secret names, never values; connectors live in the Connectors view now.
         expect(dom.querySelector('[data-plugin-secrets]')!.textContent).toContain('No secrets stored');
+        expect(dom.querySelector('[data-connector="github"]')).toBeNull();
 
         control().click();
         await until(() => popup(dom) !== null, 'the dependents dialog');
@@ -167,27 +167,26 @@ describe('/plugins (live)', () => {
         expect(await registry().isEnabled('github')).toBe(true);
 
         buttonNamed(dialog, 'Disable GitHub MCP').click();
-        await until(() => card.querySelector('[data-plugin-left]') !== null, 'the card to state what is left');
+        await until(() => leftLine(dom, 'github') !== null, 'the page to state what is left');
         expect(await registry().isEnabled('github')).toBe(false);
         await until(() => !control().checked, 'the switch to follow the Registry');
-        expect(card.querySelector('[data-plugin-left]')!.textContent).toContain('Still referenced by Ada — connector; Bob — tool; nightly triage — schedule via Bob');
-        expect(card.querySelector('[data-plugin-left]')!.textContent).toContain('new use is refused, running work finishes');
+        expect(leftLine(dom, 'github')!.textContent).toContain('Disabled GitHub MCP. Still referenced by Ada — connector; Bob — tool; nightly triage — schedule via Bob');
+        expect(leftLine(dom, 'github')!.textContent).toContain('new use is refused, running work finishes');
 
         // Back on: the line goes, the Registry allows new use again.
         control().click();
-        await until(() => card.querySelector('[data-plugin-left]') === null && control().checked, 'the plugin re-enabled');
+        await until(() => leftLine(dom, 'github') === null && control().checked, 'the plugin re-enabled');
         expect(await registry().isEnabled('github')).toBe(true);
     }, 20_000);
 
     it('a plugin nobody depends on switches off without a dialog', async () => {
         await registry().register({ ...github, id: 'slack', name: 'Slack' }, { enabled: true });
         const dom = await mountLive('/plugins', h);
-        const card = () => dom.querySelector<HTMLElement>('[data-scope="ag-plugin-card"][data-plugin="slack"]')!;
-        await until(() => card() !== null && card().querySelector('[data-part="meta"] [data-plugin-none]')?.textContent === 'No dependents', 'the card');
-        card().querySelector<HTMLInputElement>('input[role="switch"]')!.click();
-        await until(() => card().querySelector('[data-plugin-left]') !== null, 'the disabled line');
+        await until(() => row(dom, 'slack')?.querySelector('[data-plugin-row-part="dependents"] [data-plugin-none]')?.textContent === 'No dependents', 'the row');
+        row(dom, 'slack')!.querySelector<HTMLInputElement>('input[role="switch"]')!.click();
+        await until(() => leftLine(dom, 'slack') !== null, 'the disabled line');
         expect(popup(dom)).toBeNull();
-        expect(card().querySelector('[data-plugin-left]')!.textContent).toBe('Disabled. Nothing references it.');
+        expect(leftLine(dom, 'slack')!.textContent).toBe('Disabled Slack. Nothing references it.');
         expect(await registry().isEnabled('slack')).toBe(false);
     }, 20_000);
 });

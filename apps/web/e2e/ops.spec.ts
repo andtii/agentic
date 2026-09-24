@@ -65,4 +65,25 @@ test('Plugins asks before disabling a plugin with dependents', async ({ page }, 
     await dialog.getByRole('button', { name: 'Keep enabled' }).click();
     await expect(dialog).toBeHidden();
     await expect(claude).toBeChecked();
+    // The switch never followed the row's link; the row itself opens the plugin's page (#637).
+    await expect(page).toHaveURL(/\/plugins$/);
+    await page.locator('[data-plugin-rows] [data-plugin-row][data-plugin="claude-code"] [data-plugin-row-part="name"]').click();
+    await expect(page).toHaveURL(/\/plugins\/claude-code$/);
+});
+
+test('Plugins filters by category and search, and the URL keeps them', async ({ page }, info) => {
+    test.skip(info.project.name !== 'desktop-1280', 'the mobile pass (#91) covers 400 px');
+    await page.goto('/plugins?kind=memory&q=flat');
+    await expect(page.locator('[data-plugin-rows] [data-plugin-row]')).toHaveCount(1);
+    await expect(page.locator('[data-plugin-rows] [data-plugin-row]')).toHaveAttribute('data-plugin', 'agentic.memory.flat');
+    await page.reload();
+    await expect(page.locator('[data-plugin-rows] [data-plugin-row]')).toHaveCount(1);
+    await expect(page.getByRole('searchbox', { name: 'Search plugins' })).toHaveValue('flat');
+    // `/` focuses the search; clearing it widens the list and the URL follows.
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('/');
+    await expect(page.getByRole('searchbox', { name: 'Search plugins' })).toBeFocused();
+    await page.getByRole('searchbox', { name: 'Search plugins' }).fill('');
+    await expect(page).toHaveURL(/\/plugins\?kind=memory$/);
+    await expect(page.locator('[data-plugin-rows] [data-plugin-row]')).toHaveCount(2);
 });

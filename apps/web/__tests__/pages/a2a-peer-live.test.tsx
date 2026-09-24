@@ -43,13 +43,13 @@ afterEach(async () => {
 });
 
 const registry = () => h.app.as(owner).actor(Registry, registryKey(WS));
-const card = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-scope="ag-plugin-card"][data-part="root"][data-plugin="${id}"]`);
+const card = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-rows] [data-plugin-row][data-plugin="${id}"]`);
 const field = (name: string) => document.querySelector<HTMLInputElement>(`[data-a2a-peer-fields] input[name="${name}"]`);
 
 describe('/plugins: Add A2A peer (live)', () => {
     it('refuses an empty draft, then adds the peer as a runtime with its token sealed — listed, offered to agents, never shown', async () => {
         const dom = await mountLive('/plugins', h);
-        await until(() => card(dom, 'anthropic-api') !== null, 'the catalogue');
+        await until(() => card(dom, 'anthropic-api') !== null, 'the list');
         buttonNamed(dom, 'Add A2A peer').click();
         await until(() => field('peer-name') !== null, 'the dialog');
 
@@ -61,7 +61,7 @@ describe('/plugins: Add A2A peer (live)', () => {
         setText(field('peer-card-url')!, 'https://research.example.com/.well-known/agent-card.json');
         setText(field('peer-token')!, TOKEN);
         buttonNamed(document, 'Add peer').click();
-        await until(() => card(dom, 'a2a.research-bot') !== null, 'the peer on the catalogue');
+        await until(() => card(dom, 'a2a.research-bot') !== null, 'the peer on the list');
 
         const peer = (await registry().list()).find((p) => p.manifest.id === 'a2a.research-bot')!;
         expect(peer).toMatchObject({ enabled: true, manifest: { kind: 'runtime', name: 'Research Bot' } });

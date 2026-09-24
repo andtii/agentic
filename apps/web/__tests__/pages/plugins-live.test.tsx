@@ -47,25 +47,32 @@ afterEach(async () => {
 });
 
 const registry = () => h.app.as(owner).actor(Registry, registryKey(WS));
-const card = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-scope="ag-plugin-card"][data-part="root"][data-plugin="${id}"]`);
+const row = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-rows] [data-plugin-row][data-plugin="${id}"]`);
 const readinessOf = (el: ParentNode | null) => el?.querySelector('[data-part="readiness"]')?.getAttribute('data-readiness') ?? null;
 
 describe('/plugins (live, with the catalogue)', () => {
     it('a fresh workspace lists every built-in by kind; a key set elsewhere turns anthropic-api from Needs key to Ready without a reload', async () => {
         const dom = await mountLive('/plugins', h);
-        await until(() => readinessOf(card(dom, 'anthropic-api')) !== null, 'the catalogue with readiness');
+        await until(() => row(dom, 'anthropic-api')?.getAttribute('data-readiness') != null, 'the list with readiness');
         expect([...dom.querySelectorAll('[data-plugin-group]')].map((g) => g.getAttribute('data-plugin-group'))).toEqual(['runtime:harness', 'runtime:model', 'memory', 'learning']);
-        for (const id of ['anthropic-api', 'claude-code', 'agentic.memory.default', 'agentic.memory.flat', 'agentic.learning.default']) expect(card(dom, id), id).not.toBeNull();
-        expect(readinessOf(card(dom, 'anthropic-api'))).toBe('needs-secret');
-        expect(card(dom, 'anthropic-api')!.textContent).toContain('NEEDS KEY');
+        for (const id of ['anthropic-api', 'claude-code', 'agentic.memory.default', 'agentic.memory.flat', 'agentic.learning.default']) expect(row(dom, id), id).not.toBeNull();
+        expect(row(dom, 'anthropic-api')!.getAttribute('data-readiness')).toBe('needs-secret');
+        expect(row(dom, 'anthropic-api')!.textContent).toContain('NEEDS KEY');
         // No machine is paired, so the daemon-hosted runtime has nowhere to run.
-        expect(readinessOf(card(dom, 'claude-code'))).toBe('needs-machine');
-        // The active memory plugin, marked; the configure link goes to its page.
-        expect(card(dom, 'agentic.memory.default')!.hasAttribute('data-mod-selected')).toBe(true);
-        expect(card(dom, 'anthropic-api')!.querySelector('a[href="/plugins/anthropic-api"]')).not.toBeNull();
+        expect(row(dom, 'claude-code')!.getAttribute('data-readiness')).toBe('needs-machine');
+        // Both wait in Needs attention with their fix, and the menu counts them.
+        const attention = () => [...dom.querySelectorAll('[data-plugin-attention] li')].map((li) => li.getAttribute('data-plugin'));
+        expect(attention()).toEqual(expect.arrayContaining(['anthropic-api', 'claude-code']));
+        expect(dom.querySelector('[data-plugin-attention] li[data-plugin="claude-code"] a[href="/pair"]')).not.toBeNull();
+        await until(() => dom.querySelector('[data-plugins-menu] [data-category="attention"] [data-count]')?.textContent === String(attention().length), 'the menu to count them');
+        // The active memory plugin, marked; the row goes to its page.
+        expect(row(dom, 'agentic.memory.default')!.hasAttribute('data-active')).toBe(true);
+        expect(row(dom, 'anthropic-api')!.getAttribute('href')).toBe('/plugins/anthropic-api');
 
         await registry().setSecret('anthropic-api-key', SECRET);
-        await until(() => readinessOf(card(dom, 'anthropic-api')) === 'ready', 'the live overview to flip the badge');
+        await until(() => row(dom, 'anthropic-api')?.getAttribute('data-readiness') === 'ready', 'the live overview to flip the pill');
+        expect(dom.querySelector('[data-plugin-attention] li[data-plugin="anthropic-api"]')).toBeNull();
+        // Settings does not list secrets, so the list keeps them, by name.
         expect(dom.querySelector('[data-plugin-secrets]')!.textContent).toContain('anthropic-api-key');
         expect(dom.innerHTML).not.toContain(SECRET);
     }, 20_000);
