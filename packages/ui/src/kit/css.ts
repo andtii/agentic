@@ -56,9 +56,7 @@ export const kitCss = `[data-visually-hidden] {
     [data-scope="button"][data-part="root"][data-intent="icon"] { min-inline-size: var(--ag-control-h-touch); }
 
     /* action rows: full width or split evenly; an approval card inside takes its own full row */
-    [data-scope="ag-needs-item"][data-part="actions"] > *,
-    [data-scope="ag-failure"][data-part="actions"] > *,
-    [data-scope="ag-empty"][data-part="actions"] > * { flex: 1 1 0; }
+    [data-scope="ag-needs-item"][data-part="actions"] > * { flex: 1 1 0; }
     [data-scope="ag-needs-item"][data-part="actions"] > [data-scope="ai-approval"] { flex: 1 1 100%; }
     [data-scope="ag-needs-item"][data-part="actions"] { grid-column: 1 / -1; }
 

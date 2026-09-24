@@ -4,7 +4,7 @@
  * why the provider reports nothing (OPS-07, PLG-09).
  */
 import type { EnvironmentId, QuotaSnapshot, QuotaWindow } from '@agentic/core';
-import { QuotaBadge, QuotaMeter, QuotaPanel, QuotaRings, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsShortText, resetsText } from '@agentic/ui';
+import { QuotaBadge, QuotaMeter, QuotaPanel, QuotaRings, roleOf, ageText, isQuotaStale, quotaTone, quotaUsedText, resetsShortText, resetsText } from '@agentic/ui';
 import { mount } from '../helpers';
 
 const TZ = 'Europe/Stockholm';
@@ -63,10 +63,17 @@ describe('QuotaMeter', () => {
         const root = mount(<QuotaMeter window={week} now={NOW} timeZone={TZ} />);
         expect(part(root, 'ag-quota', 'root')!.getAttribute('data-tone')).toBe('live');
         expect(part(root, 'ag-quota', 'label')!.textContent).toBe('Current week (all models)');
-        const bar = part(root, 'ag-quota', 'bar')!;
+        // The bar is zero's Progress, in the tone's role, named by the window and saying the percent in words.
+        const bar = part(root, 'progress', 'root')!;
+        expect(bar.hasAttribute('data-quota-bar')).toBe(true);
         expect(bar.getAttribute('role')).toBe('progressbar');
+        expect(bar.getAttribute('aria-label')).toBe('Current week (all models)');
+        expect(bar.getAttribute('aria-valuemin')).toBe('0');
+        expect(bar.getAttribute('aria-valuemax')).toBe('100');
         expect(bar.getAttribute('aria-valuenow')).toBe('76');
-        expect(part(root, 'ag-quota', 'fill')!.getAttribute('style')).toContain('inline-size: 76%');
+        expect(bar.getAttribute('aria-valuetext')).toBe('76% used');
+        expect(bar.getAttribute('data-color')).toBe('primary');
+        expect(part(root, 'progress', 'range')!.getAttribute('style')).toContain('width: 76%');
         expect(part(root, 'ag-quota', 'used')!.textContent).toBe('76% used');
         expect(part(root, 'ag-quota', 'resets')!.textContent).toBe('Resets Sep 22 at 8pm (Europe/Stockholm)');
     });
@@ -78,11 +85,15 @@ describe('QuotaMeter', () => {
     ] as const)('a %s window is painted %s', (status, tone) => {
         const root = mount(<QuotaMeter window={{ ...week, status }} />);
         expect(part(root, 'ag-quota', 'root')!.getAttribute('data-tone')).toBe(tone);
+        expect(part(root, 'progress', 'root')!.getAttribute('data-color')).toBe(roleOf(tone));
     });
 
     it('a window without a number has an empty bar and says so; no reset time, no reset line', () => {
         const root = mount(<QuotaMeter window={{ ...week, utilization: null, status: 'unknown', resetsAt: undefined } as QuotaWindow} />);
-        expect(part(root, 'ag-quota', 'bar')!.hasAttribute('aria-valuenow')).toBe(false);
+        const bar = part(root, 'progress', 'root')!;
+        expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+        expect(bar.getAttribute('data-state')).toBe('indeterminate');
+        expect(bar.getAttribute('aria-valuetext')).toBe('No number reported');
         expect(part(root, 'ag-quota', 'used')!.textContent).toBe('No number reported');
         expect(part(root, 'ag-quota', 'resets')).toBeNull();
     });
@@ -173,6 +184,8 @@ describe('QuotaBadge (#315)', () => {
         const root = mount(<QuotaBadge snapshot={snapshot()} model="claude-fable-5-1" now={NOW} />);
         const meter = part(root, 'ag-quota', 'root')!;
         expect(meter.hasAttribute('data-mod-compact')).toBe(true);
+        // The compact meter's bar is the small Progress.
+        expect(part(root, 'progress', 'root')!.getAttribute('data-size')).toBe('sm');
         expect(part(root, 'ag-quota', 'label')!.textContent).toBe('Week · Fable');
         expect(part(root, 'ag-quota', 'used')!.textContent).toBe('80% used');
         expect(part(root, 'ag-quota', 'resets')).toBeNull();

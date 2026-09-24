@@ -84,7 +84,7 @@ describe('/schedules (live)', () => {
     it('a reminder created on the page (on the workspace clock) fires from its own reminder into the inbox; the switch pauses and resumes it', async () => {
         await ws().updateSettings({ timeZone: 'Europe/Stockholm' });
         const dom = await mountLive('/schedules', h);
-        await until(() => dom.querySelector('[data-scope="ag-empty"]') !== null, 'the empty state');
+        await until(() => dom.querySelector('[data-scope="empty-state"][data-part="root"]') !== null, 'the empty state');
         expect(dom.querySelector('[data-foot-note]')!.textContent).toContain('Times are Europe/Stockholm');
 
         // The topbar's "New schedule" raises the dialog the live page answers.

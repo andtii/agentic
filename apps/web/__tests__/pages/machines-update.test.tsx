@@ -215,7 +215,7 @@ describe('the update card (#367)', () => {
         const outdated = await card(view('outdated'));
         expect(outdated.section.getAttribute('data-tone')).toBe('failed');
         expect(text(outdated.section.querySelector('[data-update-banner]'))).toMatch(/^Update required/);
-        expect(text(outdated.section.querySelector('[data-scope="ag-pill"][data-part="root"]'))).toBe('UPDATE REQUIRED');
+        expect(text(outdated.section.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('UPDATE REQUIRED');
 
         const looping = await card(view('crash-loop'));
         expect(text(looping.section.querySelector('[data-update-restarts]'))).toMatch(/^The daemon restarted 4 times — last exit: crashed \(code 1\)/);

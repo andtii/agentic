@@ -44,10 +44,10 @@ describe('/plugins/:id', () => {
     it('the header: 52 px tile, name and version, kind and transport tags, the description, readiness and the switch', async () => {
         const root = await view('gmail');
         const head = root.querySelector('[data-plugin-detail-head]')!;
-        expect(head.querySelector('[data-scope="ag-agent-tile"]')!.getAttribute('style')).toContain('--ag-tile: 52px');
+        expect(head.querySelector('[data-scope="avatar"][data-part="root"]')!.getAttribute('data-tile')).toBe('52');
         expect(text(head.querySelector('[data-plugin-detail-name] > span'))).toBe('Gmail');
         expect(text(head.querySelector('[data-plugin-detail-version]'))).toBe('1.0.0');
-        expect(texts([...head.querySelectorAll('[data-plugin-detail-tags] [data-scope="ag-pill"][data-part="label"]')]).slice(0, 2)).toEqual(['connector', 'conduit']);
+        expect(texts([...head.querySelectorAll('[data-plugin-detail-tags] [data-scope="badge"][data-part="root"]')]).slice(0, 2)).toEqual(['connector', 'conduit']);
         expect(text(head.querySelector('[data-plugin-detail-description]'))).toBe('Search, read, draft and send email in a Gmail account.');
         expect(head.querySelector('[data-plugin-detail-status] [data-readiness]')!.getAttribute('data-readiness')).toBe('ready');
         expect(head.querySelector('[data-plugin-detail-status] input[role="switch"]')).not.toBeNull();
@@ -71,8 +71,8 @@ describe('/plugins/:id', () => {
 
     it('an MCP connector shows its endpoint and token secret, and the tools it reported', async () => {
         const root = await view('github-mcp');
-        expect(text(root.querySelector('[data-plugin-detail-head] [data-part="monogram"]'))).toBe('GM');
-        const tags = texts([...root.querySelectorAll('[data-plugin-detail-tags] [data-scope="ag-pill"][data-part="label"]')]);
+        expect(text(root.querySelector('[data-plugin-detail-head] [data-scope="avatar"][data-part="fallback"]'))).toBe('GM');
+        const tags = texts([...root.querySelectorAll('[data-plugin-detail-tags] [data-scope="badge"][data-part="root"]')]);
         expect(tags.slice(0, 2)).toEqual(['connector', 'mcp']);
         expect(text(root.querySelector('#account [data-account-row="endpoint"] dd'))).toBe('https://api.github.com/mcp');
         expect(text(root.querySelector('#account [data-account-row="token"] dd'))).toBe('secret:github-tokenstored');
@@ -163,7 +163,7 @@ describe('/plugins/:id', () => {
     it('Used by: agent tiles and how they use it, with the connector note', async () => {
         const root = await view('gmail');
         const used = root.querySelector('[data-plugin-panel="dependents"]')!;
-        expect(used.querySelector('[data-dependent="scout"] [data-scope="ag-agent-tile"]')).not.toBeNull();
+        expect(used.querySelector('[data-dependent="scout"] [data-scope="avatar"][data-part="root"]')).not.toBeNull();
         expect(text(used.querySelector('[data-dependent="scout"] [data-dependent-name] > span'))).toBe('Scout');
         expect(text(used.querySelector('[data-dependents-note]'))).toBe('Agents get a connector only when you add it to their tools.');
     });

@@ -108,7 +108,7 @@ describe('projects on the live pages (#333)', () => {
         const list = await mountLive('/projects', h);
         await until(() => list.querySelectorAll('[data-project-row]').length === 1, 'the project row');
         expect(texts(list.querySelectorAll('[data-project-row] .project-env'))).toEqual(['laptop / work']);
-        expect(list.querySelectorAll('[data-project-row] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(1);
+        expect(list.querySelectorAll('[data-project-row] [data-scope="avatar"][data-part="root"]').length).toBe(1);
 
         const edit = await mountLive(`/projects/${id}`, h);
         await until(() => edit.querySelector<HTMLInputElement>('input[name="project-name"]')?.value === 'agentic', 'the form on the record');

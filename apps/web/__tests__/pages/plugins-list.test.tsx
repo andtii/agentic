@@ -76,6 +76,12 @@ describe('/plugins (#637)', () => {
         expect(claude.getAttribute('href')).toBe('/plugins/claude-code');
         expect(claude.getAttribute('data-readiness')).toBe('ready');
         expect(text(claude.querySelector('[data-plugin-row-part="kind"]'))).toBe('harness');
+        // The row's parts are the kit on zero (#591): the tile an Avatar, the kind and feature tags and the readiness pill Badges.
+        expect(claude.querySelector('[data-plugin-row-part="tile"] [data-scope="avatar"][data-part="root"]')).not.toBeNull();
+        expect(claude.querySelector('[data-plugin-row-part="kind"] [data-scope="badge"][data-part="root"]')!.hasAttribute('data-tag')).toBe(true);
+        expect([...claude.querySelectorAll('[data-plugin-row-part="title"] [data-scope="badge"][data-part="root"]')].map((b) => text(b))).toContain('usage limits');
+        expect(claude.querySelector('[data-plugin-row-part="readiness"] [data-scope="badge"][data-part="root"]')).not.toBeNull();
+        expect(claude.querySelectorAll('[data-plugin-used] [data-plugin-dependent] [data-scope="avatar"][data-part="root"]').length).toBe(2);
         expect(text(claude.querySelector('[data-plugin-row-part="title"]'))).toContain('usage limits');
         expect(claude.querySelectorAll('[data-plugin-used] [data-plugin-dependent]').length).toBe(2);
         expect(text(claude.querySelector('[data-plugin-schedules]'))).toBe('1 schedule');
@@ -97,6 +103,7 @@ describe('/plugins (#637)', () => {
         expect(memory.getAttribute('data-plugin-row')).toBe('radio');
         expect(memory.hasAttribute('data-active')).toBe(true);
         expect(text(memory)).toContain('ACTIVE');
+        expect(text(memory.querySelector('[data-scope="badge"][data-part="root"][data-status="active"]'))).toBe('ACTIVE');
         const flat = row(root, 'agentic.memory.flat');
         expect(flat.hasAttribute('data-active')).toBe(false);
         expect(text(flat.querySelector('[data-plugin-row-part="consequence"]'))).toBe('switching into it drops conditions, evidence, superseding and expiry');

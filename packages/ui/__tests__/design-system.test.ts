@@ -129,8 +129,8 @@ describe('the agentic design system', () => {
     });
 
     it('holds one patch per re-tuned scope, plus the empty stubs later issues fill', () => {
-        const tuned = ['button', 'input', 'textarea', 'select', 'combobox', 'field', 'switch', 'badge', 'dialog', 'table', 'timeline', 'card', 'breadcrumbs', 'tabs', 'collapsible', 'toggle-group', 'skeleton', 'navbar', 'drawer', 'nav-list'];
-        const stubs = ['avatar', 'empty-state', 'progress', 'alert'];
+        const tuned = ['button', 'input', 'textarea', 'select', 'combobox', 'field', 'switch', 'badge', 'dialog', 'table', 'timeline', 'card', 'breadcrumbs', 'tabs', 'collapsible', 'toggle-group', 'skeleton', 'navbar', 'drawer', 'nav-list', 'avatar', 'empty-state', 'progress'];
+        const stubs = ['alert'];
         expect(Object.keys(patches).sort()).toEqual([...tuned, ...stubs].sort());
         for (const scope of tuned) expect(Object.keys(patches[scope]!).length, scope).toBeGreaterThan(0);
         for (const scope of stubs) expect(patches[scope], scope).toEqual({});

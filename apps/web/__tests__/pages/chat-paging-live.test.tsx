@@ -33,7 +33,7 @@ const threadRoot = (dom: ParentNode): HTMLElement => dom.querySelector<HTMLEleme
 const chip = (dom: ParentNode): HTMLButtonElement | null => dom.querySelector<HTMLButtonElement>('[data-scope="ai-thread"][data-part="earlier"]');
 const memberPill = (dom: ParentNode, name: string): string => {
     const row = [...dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member]')].find((el) => el.querySelector('[data-member-name]')?.textContent === name);
-    return row?.querySelector('[data-scope="ag-pill"]')?.textContent?.trim() ?? '';
+    return row?.querySelector('[data-scope="badge"][data-part="root"]')?.textContent?.trim() ?? '';
 };
 
 /** Scroll geometry jsdom does not compute: pin it, then scroll. */

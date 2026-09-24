@@ -101,9 +101,9 @@ test('demo 1: sign in, create an agent on anthropic-api, chat with it, watch the
     // Ada's row appears while her turn is still running (the streaming pill), then settles with text.
     const ada = messages.filter({ has: page.locator('[data-part="name"]', { hasText: 'Ada' }) }).first();
     await expect(ada, 'Ada answers (is the ANTHROPIC_API_KEY stored above a working key?)').toBeVisible({ timeout: 120_000 });
-    const sawStreaming = await ada.locator('[data-scope="ag-pill"][data-status="streaming"]').isVisible().catch(() => false);
+    const sawStreaming = await ada.locator('[data-scope="badge"][data-status="streaming"]').isVisible().catch(() => false);
     await expect(ada.locator('[data-part="body"]')).not.toHaveText('', { timeout: 120_000 });
-    await expect(ada.locator('[data-scope="ag-pill"][data-status="streaming"]')).toHaveCount(0, { timeout: 120_000 });
+    await expect(ada.locator('[data-scope="badge"][data-status="streaming"]')).toHaveCount(0, { timeout: 120_000 });
     const answer = (await ada.locator('[data-part="body"]').innerText()).trim();
     expect(answer.length).toBeGreaterThan(0);
     expect(answer.startsWith('echo:')).toBe(false);

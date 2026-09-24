@@ -49,7 +49,7 @@ describe('/sessions/:id (Session)', () => {
 
     it('marks an interrupted session with the named failure card and Resume, never auto-replaying', async () => {
         const dom = await mountRoute('/sessions/s3');
-        const card = dom.querySelector('[data-scope="ag-failure"][data-part="root"]')!;
+        const card = dom.querySelector('[data-scope="empty-state"][data-part="root"][data-failure]')!;
         expect(card.getAttribute('data-failure')).toBe('interrupted');
         expect(card.textContent).toContain('Resume');
         expect(card.textContent).toContain('Nothing was replayed');

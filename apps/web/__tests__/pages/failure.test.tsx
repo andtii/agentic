@@ -164,8 +164,8 @@ function sessionView(over: Partial<MockSessionView>): MockSessionView {
     };
 }
 
-const cardOf = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-scope="ag-failure"][data-part="root"]');
-const cardName = (dom: ParentNode) => dom.querySelector('[data-scope="ag-failure"][data-part="name"]')?.textContent?.trim();
+const cardOf = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-scope="empty-state"][data-part="root"][data-failure]');
+const cardName = (dom: ParentNode) => dom.querySelector('[data-failure-name]')?.textContent?.trim();
 
 describe('the session page names each state (fake signals over the page)', () => {
     let h: LiveHarness;
@@ -198,7 +198,7 @@ describe('the session page names each state (fake signals over the page)', () =>
         const dom = await mountView(sessionView({ state: 'error', error: { code: 'provider_error', message: 'The provider returned 500.', recoverable: false } }));
         expect(cardOf(dom)?.getAttribute('data-failure')).toBe('runtime');
         expect(cardName(dom)).toBe('Runtime error');
-        expect(dom.querySelector('[data-scope="ag-failure"][data-part="signal"]')?.textContent).toBe('error provider_error');
+        expect(dom.querySelector('[data-failure-signal]')?.textContent).toBe('error provider_error');
     });
 
     it('interrupted — the last turn did not end: "Interrupted", marked uncertain, Resume wired to the page', async () => {
@@ -298,7 +298,7 @@ describe('the chat page (live): a failure where the answer would have been, neve
         expect(cardOf(dom)?.getAttribute('data-failure')).toBe('task');
         expect(cardName(dom)).toBe('Task failed');
         expect(cardOf(dom)?.textContent).toContain('no-api-key');
-        expect(dom.querySelector('[data-scope="ag-failure"][data-part="signal"]')?.textContent).toBe('Task.error session-open');
+        expect(dom.querySelector('[data-failure-signal]')?.textContent).toBe('Task.error session-open');
         const link = cardOf(dom)?.querySelector('a');
         expect(link?.textContent).toContain('Open task');
         expect(link?.getAttribute('href')).toMatch(/^\/tasks\/task_/);

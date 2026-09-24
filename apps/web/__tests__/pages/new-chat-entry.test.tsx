@@ -75,7 +75,7 @@ describe('/chats/new (mock)', () => {
         expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('new-thing');
         const row = dom.querySelector<HTMLElement>('[data-project-folder="env_alien01_work"]')!;
         expect(text(row.querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('new-thing');
-        expect(text(row.querySelector('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]'))).toBe('repo');
+        expect(text(row.querySelector('[data-project-folder-meta] [data-scope="badge"][data-part="root"]'))).toBe('repo');
     });
 
     it('cancelling goes back to the list with the link replaced, and a link without a usable query is the plain dialog', async () => {

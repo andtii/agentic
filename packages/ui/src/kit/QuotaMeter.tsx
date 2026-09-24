@@ -7,12 +7,17 @@
  * reports nothing — "Not reported by provider — <reason>" (OPS-07, PLG-09).
  * With `zoneInHeader` (#452) the zone is said once in the header and each
  * window reads "Resets Thu 25 Sep 12:00".
+ *
+ * The bar is zero's `Progress` (a window without a number is indeterminate)
+ * in the status tone's role, `sm` when compact; `data-quota-bar` marks it.
  */
 import { component, type Define } from '@sigx/runtime-core';
+import { Progress } from '@sigx/zero';
 import { memberWindows, tightestWindow, type QuotaSnapshot, type QuotaWindow } from '@agentic/core';
 import { agQuotaAnatomy, agQuotaPanelAnatomy } from './anatomy.js';
 import { ageText, isQuotaStale, quotaPercent, quotaShortLabel, quotaTone, quotaUsedText, resetsShortText, resetsText } from './quota.js';
 import { Tag } from './StatusPill.js';
+import { roleOf } from './tone.js';
 
 const SCOPE = agQuotaAnatomy.scope;
 const PANEL = agQuotaPanelAnatomy.scope;
@@ -39,18 +44,18 @@ export const QuotaMeter = component<QuotaMeterProps>(({ props }) => () => {
     return (
         <div data-scope={SCOPE} data-part="root" data-tone={quotaTone(w.status)} data-status={w.status} data-mod-stale={props.stale ? '' : undefined} data-mod-compact={props.compact ? '' : undefined} data-window={w.id} title={props.compact ? [w.label, resets].filter(Boolean).join(' · ') : undefined} class={props.class}>
             <span data-scope={SCOPE} data-part="label">{props.compact ? quotaShortLabel(w) : w.label}</span>
-            <span
-                data-scope={SCOPE}
-                data-part="bar"
-                role="progressbar"
+            <Progress.Root
+                value={percent}
+                color={roleOf(quotaTone(w.status))}
+                size={props.compact ? 'sm' : undefined}
                 aria-label={w.label}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percent ?? undefined}
                 aria-valuetext={quotaUsedText(w)}
+                data-quota-bar=""
             >
-                <span data-scope={SCOPE} data-part="fill" style={`inline-size: ${percent ?? 0}%`} />
-            </span>
+                <Progress.Track>
+                    <Progress.Range />
+                </Progress.Track>
+            </Progress.Root>
             <span data-scope={SCOPE} data-part="used">{quotaUsedText(w)}</span>
             {resets && !props.compact ? <span data-scope={SCOPE} data-part="resets">{resets}</span> : null}
         </div>

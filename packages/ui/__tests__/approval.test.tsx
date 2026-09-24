@@ -88,7 +88,7 @@ describe('the approval card', () => {
         );
         const context = one(dom, 'ai-approval', 'context')!;
         expect([...context.querySelectorAll('dt')].map((dt) => dt.textContent)).toEqual(['Requested by', 'Runs on', 'Via']);
-        expect(context.querySelector('[data-scope="ag-agent-tile"]')).not.toBeNull();
+        expect(context.querySelector('[data-scope="avatar"][data-part="root"]')).not.toBeNull();
         expect(context.querySelector('[data-scope="ag-env-line"]')!.textContent).toBe('alien01/claude-code/work');
         expect(context.textContent).toContain('delegated by Atlas');
         const root = one(dom, 'ai-approval', 'root')!;

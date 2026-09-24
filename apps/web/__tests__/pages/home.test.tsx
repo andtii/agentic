@@ -49,9 +49,9 @@ describe('/ (Home)', () => {
         const rows = [...dom.querySelectorAll('[data-home-tasks] tbody tr')];
         expect(rows).toHaveLength(loadHome().tasks.length);
         const first = rows[0]!;
-        expect(first.querySelector('[data-scope="ag-pill"]')).not.toBeNull();
+        expect(first.querySelector('[data-scope="badge"][data-part="root"]')).not.toBeNull();
         expect(first.querySelector('[data-scope="ag-task-node"][data-part="wait"]')?.textContent).toBe('wait: child · 2 tasks');
-        expect(first.querySelector('[data-scope="ag-agent-tile"]')).not.toBeNull();
+        expect(first.querySelector('[data-scope="avatar"][data-part="root"]')).not.toBeNull();
         expect(first.querySelector('[data-scope="ag-env-line"]')?.textContent).toBe('platform/anthropic-api/byo-key');
         // The queued task on the offline machine prints its policy.
         expect(dom.querySelector('[data-home-tasks]')!.textContent).toContain('wait: environment-offline · policy queue');

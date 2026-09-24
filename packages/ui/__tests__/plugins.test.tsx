@@ -51,7 +51,7 @@ describe('SecretField', () => {
         expect(field()!.hasAttribute('name')).toBe(false);
         expect(field()!.getAttribute('autocomplete')).toBe('off');
         expect(root.textContent).toContain('NOT SET');
-        expect(one(root, 'ag-pill', 'root')!.getAttribute('data-tone')).toBe('needs-you');
+        expect(one(root, 'badge', 'root')!.getAttribute('data-tone')).toBe('needs-you');
         expect(root.querySelector('form')!.getAttribute('method')).toBe('post');
     });
 
@@ -127,10 +127,10 @@ describe('ReadinessBadge', () => {
         ['no-kek', 'NO KEY STORE', 'needs-you', false]
     ] as const)('%s is the handoff pill %s (%s)', (status, label, tone, hollow) => {
         expect(READINESS[status]).toEqual({ label, tone, hollow });
-        const pill = one(mount(<ReadinessBadge readiness={{ status }} />), 'ag-pill', 'root')!;
+        const pill = one(mount(<ReadinessBadge readiness={{ status }} />), 'badge', 'root')!;
         expect(pill.textContent).toBe(label);
         expect(pill.getAttribute('data-tone')).toBe(tone);
-        expect(pill.hasAttribute('data-mod-hollow')).toBe(hollow);
+        expect(pill.getAttribute('data-variant')).toBe(hollow ? 'outline' : 'soft');
     });
 
     it('has a label and a product tone for every status core can report', () => {
@@ -138,7 +138,7 @@ describe('ReadinessBadge', () => {
         for (const status of STATUSES) {
             expect(TONES).toContain(READINESS[status].tone);
             const root = mount(<ReadinessBadge readiness={{ status }} />);
-            const pill = one(root, 'ag-pill', 'root')!;
+            const pill = one(root, 'badge', 'root')!;
             expect(pill.getAttribute('data-tone')).toBe(READINESS[status].tone);
             expect(pill.hasAttribute('data-state')).toBe(false);
             expect(root.textContent).toBe(READINESS[status].label);
@@ -240,7 +240,7 @@ describe('PluginRow', () => {
         expect(seen).toEqual([]);
         // the rest of the row is the link
         rowPart(root, 'name')!.click();
-        rowPart(root, 'readiness')!.querySelector<HTMLElement>('[data-scope="ag-pill"]')!.click();
+        rowPart(root, 'readiness')!.querySelector<HTMLElement>('[data-scope="badge"][data-part="root"]')!.click();
         expect(seen).toEqual(['click', 'click']);
     });
 
@@ -270,8 +270,8 @@ describe('PluginRow', () => {
         const row = active.querySelector<HTMLElement>('[data-plugin-row="radio"]')!;
         expect(row.hasAttribute('data-active')).toBe(true);
         expect(rowPart(active, 'radio')!.childElementCount).toBe(1);
-        expect(one(active, 'ag-pill', 'root')!.textContent).toBe('ACTIVE');
-        expect(one(active, 'ag-pill', 'root')!.getAttribute('data-tone')).toBe('live');
+        expect(one(active, 'badge', 'root')!.textContent).toBe('ACTIVE');
+        expect(one(active, 'badge', 'root')!.getAttribute('data-tone')).toBe('live');
         expect(active.textContent).not.toContain('Make active');
 
         let made = 0;
@@ -280,7 +280,7 @@ describe('PluginRow', () => {
         let clicks = 0;
         link.addEventListener('click', () => clicks++);
         expect(rowPart(other, 'radio')!.childElementCount).toBe(0);
-        expect(one(other, 'ag-pill', 'root')).toBeNull();
+        expect(one(other, 'badge', 'root')).toBeNull();
         expect(rowPart(other, 'consequence')!.textContent).toBe('switching into it drops conditions');
         buttonNamed(other, 'Make active').click();
         expect(made).toBe(1);
@@ -296,7 +296,7 @@ describe('ConnectorTile', () => {
         expect(tile.getAttribute('type')).toBe('button');
         expect(tile.getAttribute('aria-pressed')).toBe('false');
         expect(tile.getAttribute('data-connector')).toBe('google-calendar');
-        expect(one(root, 'ag-agent-tile', 'monogram')!.textContent).toBe('GC');
+        expect(one(root, 'avatar', 'fallback')!.textContent).toBe('GC');
         expect(root.querySelector('[data-connector-part="transport"]')!.getAttribute('style')).toContain('text-transform: uppercase');
         expect(root.querySelector('[data-connector-part="description"]')!.textContent).toBe('Read and create events.');
         expect(root.querySelector('[data-connector-part="connected"]')).toBeNull();

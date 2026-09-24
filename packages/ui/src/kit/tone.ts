@@ -8,11 +8,39 @@
 import type { TaskStatus, WaitReason } from '@agentic/core';
 import type { Tone } from './vocabulary.js';
 
+/**
+ * The zero colour role a tone paints with — what `Badge`, `EmptyState`,
+ * `Progress` and `Timeline.Marker` take as `color`. Both greys (`muted`,
+ * `dim`) are `neutral`, which the design system's patches draw as the
+ * muted ink; the tone itself stays on the root as `data-tone`.
+ */
+export type ToneRole = 'primary' | 'info' | 'warning' | 'error' | 'neutral';
+
+export const TONE_ROLES: Record<Tone, ToneRole> = {
+    live: 'primary',
+    working: 'info',
+    'needs-you': 'warning',
+    failed: 'error',
+    muted: 'neutral',
+    dim: 'neutral'
+};
+
+/** The colour role for a tone. */
+export function roleOf(tone: Tone): ToneRole {
+    return TONE_ROLES[tone];
+}
+
+/** A row of the table: the tone, the dot, the label. */
 export interface PillSpec {
     readonly tone: Tone;
     /** A ring instead of a filled dot: nothing is happening (queued, cancelled, offline, unknown, denied). */
     readonly hollow: boolean;
     readonly label: string;
+}
+
+/** A row plus the colour role its tone paints with — what `pillFor` answers. */
+export interface PillLook extends PillSpec {
+    readonly role: ToneRole;
 }
 
 /** Task status, machine presence, auth, tool-call phases — every enum the pill shows. */
@@ -52,10 +80,10 @@ export type PillStatus = keyof typeof PILLS;
 const _everyTaskStatus: Record<TaskStatus, PillSpec> = PILLS;
 void _everyTaskStatus;
 
-/** The pill for a status; unknown strings are free text in the muted tone with a solid dot. */
-export function pillFor(status: string): PillSpec {
-    const known = (PILLS as Record<string, PillSpec>)[status];
-    return known ?? { tone: 'muted', hollow: false, label: status };
+/** The pill for a status, with its role; unknown strings are free text in the muted tone with a solid dot. */
+export function pillFor(status: string): PillLook {
+    const row: PillSpec = (PILLS as Record<string, PillSpec>)[status] ?? { tone: 'muted', hollow: false, label: status };
+    return { ...row, role: roleOf(row.tone) };
 }
 
 /**

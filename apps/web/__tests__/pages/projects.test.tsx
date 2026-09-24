@@ -56,7 +56,7 @@ describe('/projects (mock)', () => {
         expect(rows.map((r) => r.getAttribute('data-project-row'))).toEqual(['p_agentic', 'p_docs']);
         expect(texts([...rows[0]!.querySelectorAll('.project-env')])).toEqual(['alien01 / work', 'alien01 / personal']);
         expect(texts([...rows[0]!.querySelectorAll('.project-feature')])).toEqual(['Git']);
-        expect(rows[0]!.querySelectorAll('[data-member-tiles] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(3);
+        expect(rows[0]!.querySelectorAll('[data-member-tiles] [data-scope="avatar"][data-part="root"]').length).toBe(3);
         expect(texts([...rows[1]!.querySelectorAll('.project-env')])).toEqual(['alien01 / personal']);
         expect(rows[0]!.querySelector('a')!.getAttribute('href')).toBe('/projects/p_agentic');
         expect(text(topbarFor({ name: 'projects', path: '/projects', params: {} })?.actions?.() as never)).toBe('');
@@ -88,7 +88,7 @@ describe('/projects/new from a folder (#336)', () => {
         expect(page(dom, 'project')).not.toBeNull();
         expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
         expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('x');
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toContain('repo');
+        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toContain('repo');
         expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
         expect(text(row(dom, 'env_nuclab_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('No folder on this environment');
     });
@@ -130,7 +130,7 @@ describe('the project form (mock)', () => {
         await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
         expect(text(row(dom, 'env_alien01_work').querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('agentic');
         // The build's git feature (#335) detects the badge and suggests itself on the row.
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
+        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
         // Now every empty row offers Find; the offline machine's row says why it cannot.
         expect(buttonIn(row(dom, 'env_alien01_personal'), 'Find')).toBeTruthy();
         expect(row(dom, 'env_nuclab_work').querySelector<HTMLButtonElement>('button[disabled]')).not.toBeNull();
@@ -174,7 +174,7 @@ describe('the project form (mock)', () => {
         expect(feature().querySelector('[data-form="schema"]')).toBeNull();
         await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
         // The badge said "repo": the plugin's detect suggested the feature, the row shows it, and the settings opened on the origin.
-        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="ag-pill"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
+        expect(texts([...row(dom, 'env_alien01_work').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
         expect(feature().hasAttribute('data-on')).toBe(true);
         expect(feature().querySelector<HTMLInputElement>('input[name="feature-agentic.feature.git.origin"]')!.value).toBe(AGENTIC_ORIGIN);
         expect(feature().querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);

@@ -11,7 +11,7 @@ import { component, type Define } from '@sigx/runtime-core';
 import { Skeleton } from '@sigx/zero';
 
 const Bar = component<Define.Prop<'width', string> & Define.Prop<'height', string>>(({ props }) => () => (
-    <Skeleton.Root class="ag-skeleton-bar">
+    <Skeleton.Root>
         <span style={`display: block; inline-size: ${props.width ?? '100%'}; block-size: ${props.height ?? '14px'}`} aria-hidden="true" />
     </Skeleton.Root>
 ), { name: 'SkeletonBar' });

@@ -72,11 +72,11 @@ describe('the thread over mockAgent', () => {
         const roots = all(dom, 'ai-message', 'root');
         expect(roots.map((r) => r.getAttribute('data-placement'))).toEqual(['end', 'start']);
         expect(all(dom, 'ai-message', 'name').map((m) => m.textContent)).toEqual(['You', 'triage']);
-        const tiles = all(dom, 'ag-agent-tile', 'root');
-        expect(tiles.map((t) => t.hasAttribute('data-mod-circle'))).toEqual([true, false]);
+        const tiles = all(dom, 'avatar', 'root');
+        expect(tiles.map((t) => t.getAttribute('data-shape') === 'circle')).toEqual([true, false]);
         // Nothing streams once the turn ended, and nobody described the rows: no env line, no time.
         expect(one(dom, 'ai-message', 'environment')).toBeNull();
-        expect(dom.querySelector('[data-scope="ag-pill"][data-status="streaming"]')).toBeNull();
+        expect(dom.querySelector('[data-scope="badge"][data-status="streaming"]')).toBeNull();
     });
 
     it('pauses on scroll-up — the window freezes while the agent streams on — and the anchor resumes the tail', async () => {
@@ -207,7 +207,7 @@ describe('the thread over mockAgent', () => {
         expect(one(card, 'ai-tool-call', 'meta')!.textContent).toBe('awaiting approval');
         expect(one(card, 'ai-approval', 'root')).not.toBeNull();
         // Mid-turn: the assistant row carries the STREAMING pill.
-        expect(dom.querySelector('[data-scope="ag-pill"][data-status="streaming"]')).not.toBeNull();
+        expect(dom.querySelector('[data-scope="badge"][data-status="streaming"]')).not.toBeNull();
 
         buttonNamed(card, 'Allow for this session').click();
         await turn;
@@ -273,8 +273,8 @@ describe('the thread over a static transcript', () => {
         expect(all(dom, 'ai-message', 'environment')).toHaveLength(2);
         expect(all(dom, 'ai-message', 'time').map((t) => t.textContent)).toEqual(['14:02', '14:09', '14:09']);
         expect(all(dom, 'ai-message', 'time')[1]!.getAttribute('datetime')).toBe('2026-09-17T14:09:00Z');
-        expect(all(dom, 'ag-agent-tile', 'root').map((t) => t.getAttribute('data-hue'))).toEqual([null, '2', '3']);
-        const streaming = all(dom, 'ai-message', 'root').map((r) => r.querySelector('[data-scope="ag-pill"][data-status="streaming"]') !== null);
+        expect(all(dom, 'avatar', 'root').map((t) => t.getAttribute('data-hue'))).toEqual([null, '2', '3']);
+        const streaming = all(dom, 'ai-message', 'root').map((r) => r.querySelector('[data-scope="badge"][data-status="streaming"]') !== null);
         expect(streaming).toEqual([false, false, true]);
         expect(one(dom, 'ai-thread', 'root')!.getAttribute('aria-live')).toBe('polite');
         expectAnatomy(dom, aiMessageAnatomy);

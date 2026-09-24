@@ -5,11 +5,14 @@
  * only way to tell agent from user at 18 px, so keep it. Hue never means
  * status: it is one of the four identity slots, assigned by creation
  * order and stored on the agent.
+ *
+ * Rendered as zero's `Avatar` with the `shape` axis (square for an agent,
+ * circle for a person) and the monogram as its `Fallback`. The size and the
+ * hue are data hooks (`data-tile`, `data-hue`) the design system's avatar
+ * patch turns into `--ag-tile` and `--ag-hue`, so the ramp lives there.
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { agAgentTileAnatomy } from './anatomy.js';
-
-const SCOPE = agAgentTileAnatomy.scope;
+import { Avatar } from '@sigx/zero';
 
 /** The identity hue slots the design defines. */
 export type AgentHue = 1 | 2 | 3 | 4;
@@ -43,23 +46,19 @@ export type AgentTileProps =
     & Define.Prop<'class', string>;
 
 export const AgentTile = component<AgentTileProps>(({ props }) => () => {
-    const size = props.size ?? 32;
     const hue = props.person ? undefined : props.hue;
-    const style = `--ag-tile: ${size}px${hue ? `; --ag-hue: var(--ag-agent-${hue})` : ''}`;
     return (
-        <span
-            data-scope={SCOPE}
-            data-part="root"
+        <Avatar.Root
+            axes={{ shape: props.person ? 'circle' : 'square' }}
             data-hue={hue}
-            data-mod-circle={props.person ? '' : undefined}
-            style={style}
+            data-tile={props.size ?? 32}
             role={props.labelled ? 'img' : undefined}
             aria-label={props.labelled ? props.name : undefined}
             aria-hidden={props.labelled ? undefined : 'true'}
             title={props.labelled ? undefined : props.name}
             class={props.class}
         >
-            <span data-scope={SCOPE} data-part="monogram">{props.monogram ?? monogramOf(props.name)}</span>
-        </span>
+            <Avatar.Fallback>{props.monogram ?? monogramOf(props.name)}</Avatar.Fallback>
+        </Avatar.Root>
     );
 }, { name: 'AgentTile' });

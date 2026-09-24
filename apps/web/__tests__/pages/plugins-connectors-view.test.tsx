@@ -107,7 +107,7 @@ describe('/plugins?kind=connector (#638, mock)', () => {
         expect(text(row.querySelector('[data-plugin-row-part="description"]'))).toBe('api.githubcopilot.com/mcp · 38 tools');
         expect(text(row.querySelector('[data-plugin-row-part="kind"]'))).toBe('mcp');
         expect(readinessOf(github)).toBe('ready');
-        expect(github.querySelectorAll('[data-connector-deps] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(1);
+        expect(github.querySelectorAll('[data-connector-deps] [data-scope="avatar"][data-part="root"]').length).toBe(1);
         expect(github.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
 
         expect(text(rowOf(root, 'gmail').querySelector('[data-plugin-row-part="description"]'))).toBe('you@example.com · connected 20 Sep');
@@ -271,7 +271,7 @@ describe('/plugins?kind=connector (#638, live)', () => {
         await h.app.as(owner).actor(AgentActor, agentKey(WS, ada)).update({ connectors: [{ id: 'acme' }] }, 'pick acme');
         const dom = await mountLive('/plugins?kind=connector', h, <LiveConnectorsView />);
         await until(() => !!rowOf(dom, 'acme') && readinessOf(rowOf(dom, 'acme')) === 'ready', 'the row');
-        await until(() => rowOf(dom, 'acme').querySelectorAll('[data-connector-deps] [data-scope="ag-agent-tile"][data-part="root"]').length === 1, 'its dependent');
+        await until(() => rowOf(dom, 'acme').querySelectorAll('[data-connector-deps] [data-scope="avatar"][data-part="root"]').length === 1, 'its dependent');
 
         rowOf(dom, 'acme').querySelector<HTMLButtonElement>('[data-connector-remove] button')!.click();
         await until(() => popup(dom) !== null, 'the in-use dialog');

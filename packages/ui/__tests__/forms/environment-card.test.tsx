@@ -48,7 +48,7 @@ describe('EnvironmentCard', () => {
         const root = mount(<EnvironmentCard environment={e} machine={m} />);
         expect(card(root).getAttribute('data-env-state')).toBe(state);
         expect(card(root).getAttribute('data-tone')).toBe(tone);
-        expect(root.querySelector('[data-scope="ag-pill"][data-part="label"]')!.textContent).toBe(pill);
+        expect(root.querySelector('[data-scope="badge"][data-part="root"]')!.textContent).toBe(pill);
         expect(part(root, 'fix') !== null).toBe(fix);
     });
 
@@ -66,7 +66,7 @@ describe('EnvironmentCard', () => {
         const slots = [...root.querySelectorAll('[data-scope="ag-env-card"][data-part="slot"]')];
         expect(slots.map((s) => s.hasAttribute('data-used'))).toEqual([true, false]);
         expect(part(root, 'queued')!.textContent).toBe('1 queued');
-        expect(part(root, 'default-for')!.querySelector('[data-scope="ag-agent-tile"]')!.getAttribute('aria-label')).toBe('Forge');
+        expect(part(root, 'default-for')!.querySelector('[data-scope="avatar"][data-part="root"]')!.getAttribute('aria-label')).toBe('Forge');
         expect(root.querySelector('[data-scope="status"]')!.getAttribute('data-color')).toBe('success');
         expect(root.querySelector('button')).toBeNull();
     });

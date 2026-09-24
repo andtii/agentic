@@ -14,8 +14,8 @@ describe('/agents roster', () => {
             expect(card.getAttribute('href')).toBe(`/agents/${p.id}`);
             expect(text(card.querySelector('[data-agent-card-name]'))).toBe(p.config.name);
             expect(text(card.querySelector('[data-agent-card-role]'))).toBe(p.role);
-            expect(card.querySelector('[data-scope="ag-agent-tile"]')?.getAttribute('data-hue')).toBe(String(p.hue));
-            expect(text(card.querySelector('[data-scope="ag-pill"] [data-part="label"]'))).toBe(presencePill(p.presence).label ?? p.presence.toUpperCase());
+            expect(card.querySelector('[data-scope="avatar"][data-part="root"]')?.getAttribute('data-hue')).toBe(String(p.hue));
+            expect(text(card.querySelector('[data-scope="badge"][data-part="root"]'))).toBe(presencePill(p.presence).label ?? p.presence.toUpperCase());
             const stats = [...card.querySelectorAll('[data-agent-card-stats] dd')].map(text);
             expect(stats).toEqual([`v${p.agent.configVersion}`, String(p.memories.length), String(p.correctionsThisWeek)]);
             const dts = [...card.querySelectorAll('[data-agent-card-stats] dt')].map(text);

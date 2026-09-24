@@ -199,9 +199,9 @@ describe('the session view', () => {
         expect(sessionHead.value?.id).toBe(sessionId);
         // The turn ends and the session stays live, idle (#393); what the pill says of an idle live session is #398's.
         await until(() => sessionHead.value?.view.state === 'idle', 'the head to follow the turn end');
-        expect(dom.querySelector('[data-session-head] [data-scope="ag-pill"]')!.textContent).not.toMatch(/active/i);
+        expect(dom.querySelector('[data-session-head] [data-scope="badge"][data-part="root"]')!.textContent).not.toMatch(/active/i);
         const missing = await mountLive('/sessions/nope', h);
-        await until(() => missing.querySelector('[data-scope="ag-empty"]') !== null, 'the not-found state');
+        await until(() => missing.querySelector('[data-scope="empty-state"][data-part="root"]') !== null, 'the not-found state');
         expect(missing.textContent).toContain('No session with that id');
     });
 });

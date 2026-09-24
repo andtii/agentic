@@ -2,16 +2,16 @@
  * The six named failure states (OPS-04): each renders its own name, kind,
  * tone, signal and action — no two collapse into one look.
  */
-import { FAILURES, FAILURE_KINDS, FailureCard, OfflineBanner, EventsLostRow, eventsLostText, failureSpec } from '@agentic/ui';
+import { FAILURES, FAILURE_KINDS, FailureCard, OfflineBanner, EventsLostRow, eventsLostText, failureSpec, roleOf } from '@agentic/ui';
 import { KINDS } from '../../../src/design-system';
 import { buttonNamed, mount, one } from '../../helpers';
 
 describe('FailureCard', () => {
     it('renders all six kinds with distinct names, kinds, tones and actions', () => {
         const root = mount(<div>{FAILURE_KINDS.map((kind) => <FailureCard kind={kind} />)}</div>);
-        const cards = [...root.querySelectorAll<HTMLElement>('[data-scope="ag-failure"][data-part="root"]')];
+        const cards = [...root.querySelectorAll<HTMLElement>('[data-scope="empty-state"][data-part="root"][data-failure]')];
         expect(cards).toHaveLength(6);
-        const names = cards.map((c) => one(c, 'ag-failure', 'name')!.textContent);
+        const names = cards.map((c) => c.querySelector('[data-failure-name]')!.textContent);
         const kinds = cards.map((c) => c.getAttribute('data-kind'));
         const actions = cards.map((c) => c.querySelector('[data-scope="button"]')!.textContent!.trim());
         expect(new Set(names).size).toBe(6);
@@ -32,14 +32,19 @@ describe('FailureCard', () => {
         ['interrupted', 'failed', 'last event is not turn-end', 'warning']
     ] as const)('%s is %s with its signal and icon', (kind, tone, signal, icon) => {
         const root = mount(<FailureCard kind={kind} />);
-        const card = one(root, 'ag-failure', 'root')!;
+        const card = one(root, 'empty-state', 'root')!;
         expect(card.getAttribute('data-tone')).toBe(tone);
+        // zero's EmptyState in the tone's role; the kind axis names the state.
+        expect(card.getAttribute('data-color')).toBe(roleOf(tone));
+        expect(card.getAttribute('data-kind')).toBe(FAILURES[kind].axis);
         expect(card.getAttribute('data-failure')).toBe(kind);
+        // The name and signal are the title row.
+        expect(one(card, 'empty-state', 'title')!.querySelector('[data-failure-name]')!.textContent).toBe(FAILURES[kind].name);
         expect(card.getAttribute('role')).toBe('status');
         expect(card.getAttribute('aria-label')).toBe(FAILURES[kind].name);
-        expect(one(card, 'ag-failure', 'signal')!.textContent).toBe(signal);
+        expect(card.querySelector('[data-failure-signal]')!.textContent).toBe(signal);
         expect(card.querySelector('svg')!.getAttribute('data-icon')).toBe(icon);
-        expect(one(card, 'ag-failure', 'detail')!.textContent).toBe(failureSpec(kind).detail);
+        expect(one(card, 'empty-state', 'description')!.textContent).toBe(failureSpec(kind).detail);
     });
 
     it('disables the browser-offline action, and wires button and link actions', () => {
@@ -48,7 +53,7 @@ describe('FailureCard', () => {
 
         const clicks: string[] = [];
         const runtime = mount(<FailureCard kind="runtime" detail="claude-code exited with code 1." action={{ onAction: () => clicks.push('retry') }} />);
-        expect(one(runtime, 'ag-failure', 'detail')!.textContent).toBe('claude-code exited with code 1.');
+        expect(one(runtime, 'empty-state', 'description')!.textContent).toBe('claude-code exited with code 1.');
         buttonNamed(runtime, 'Retry turn').click();
         expect(clicks).toEqual(['retry']);
 
@@ -56,10 +61,10 @@ describe('FailureCard', () => {
         const link = task.querySelector<HTMLAnchorElement>('a[data-scope="button"]')!;
         expect(link.getAttribute('href')).toBe('/tasks/t_8f2c');
         expect(link.textContent!.trim()).toBe('Open task');
-        expect(one(task, 'ag-failure', 'signal')!.textContent).toBe('Task.status · t_8f2c');
+        expect(task.querySelector('[data-failure-signal]')!.textContent).toBe('Task.status · t_8f2c');
 
         const bare = mount(<FailureCard kind="interrupted" noAction />);
-        expect(one(bare, 'ag-failure', 'actions')).toBeNull();
+        expect(one(bare, 'empty-state', 'actions')).toBeNull();
     });
 });
 

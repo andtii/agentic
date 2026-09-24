@@ -33,7 +33,7 @@ describe('/machines', () => {
         const offline = root.querySelector(`[data-machine-group][aria-label="${offlineMachine.name}"]`)!;
         expect(offline.querySelector('[data-machine-queued]')!.textContent).toContain('will not move to another account or machine by itself');
         expect(groups[0]!.querySelector('[data-machine-queued]')).toBeNull();
-        expect(root.querySelector('[data-scope="ag-empty"]')).toBeNull();
+        expect(root.querySelector('[data-scope="empty-state"][data-part="root"]')).toBeNull();
     });
 
     it('each environment card carries its account\'s limits (#270)', async () => {
@@ -45,7 +45,7 @@ describe('/machines', () => {
     it('with no machine shows the platform row plus the dashed "Pair a machine" card', async () => {
         const root = await mountAt('/machines', <MachinesList machines={[]} />);
         expect(root.querySelector('[data-machine-group][data-platform]')).not.toBeNull();
-        const empty = root.querySelector('[data-scope="ag-empty"][data-part="root"]')!;
+        const empty = root.querySelector('[data-scope="empty-state"][data-part="root"]')!;
         expect(empty.getAttribute('data-empty')).toBe('machines');
         expect(empty.hasAttribute('data-mod-outline')).toBe(true);
     });
@@ -83,7 +83,7 @@ describe('/machines/:id', () => {
 
     it('shows the not-found card for an unknown id', async () => {
         const root = await mountAt('/machines/nope', <Machine />);
-        expect(root.querySelector('[data-scope="ag-empty"]')!.textContent).toContain('No machine with id nope');
+        expect(root.querySelector('[data-scope="empty-state"][data-part="root"]')!.textContent).toContain('No machine with id nope');
     });
 });
 
@@ -154,7 +154,7 @@ describe('/settings', () => {
         expect(matrix.querySelectorAll('tbody tr').length).toBe(4);
         expect(matrix.querySelectorAll('tbody input[role="switch"]').length).toBe(8);
         expect(root.querySelector('[data-api-masked]')!.textContent).toBe('sk-ant-…9f2c');
-        expect(root.querySelector('[data-api-key] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('KEY OK');
+        expect(root.querySelector('[data-api-key] [data-scope="badge"][data-part="root"]')!.textContent).toBe('KEY OK');
         // Every field has a label.
         // A zero Select posts through an aria-hidden `<select>`; its labelled control is the trigger.
         for (const input of root.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"]), select:not([data-part="hidden-input"]), [data-scope="select"][data-part="trigger"]')) {
@@ -183,8 +183,8 @@ describe('/history', () => {
         const times = [...table.querySelectorAll('[data-history-row] code')].map(c => c.textContent);
         expect(times.slice(0, 3)).toEqual(['14:20:03', '14:09:40', '14:02:12']);
         expect(table.querySelector('[data-day-row] [data-day-label]')!.textContent).toBe('Thursday 17 September');
-        expect(table.querySelector('[data-history-row][data-kind="approval-asked"] [data-scope="ag-pill"]')!.getAttribute('data-tone')).toBe('needs-you');
-        expect(table.querySelector('[data-history-row][data-kind="interrupted"] [data-scope="ag-pill"]')!.getAttribute('data-tone')).toBe('failed');
+        expect(table.querySelector('[data-history-row][data-kind="approval-asked"] [data-scope="badge"][data-part="root"]')!.getAttribute('data-tone')).toBe('needs-you');
+        expect(table.querySelector('[data-history-row][data-kind="interrupted"] [data-scope="badge"][data-part="root"]')!.getAttribute('data-tone')).toBe('failed');
         expect(table.querySelectorAll('[data-history-row]').length).toBe(opsHistory.length);
     });
 
@@ -214,11 +214,11 @@ describe('/usage', () => {
         expect(colWidths(table)).toEqual(USAGE_COLS.split(' ').map(t => (t.endsWith('fr') ? 'auto' : t)));
         const forge = table.querySelector('[data-usage-row="forge"]')!;
         expect(forge.querySelector('[data-cost]')!.textContent).toBe('n/a');
-        expect(forge.querySelector('[data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('NOT REPORTED');
-        expect(forge.querySelector('[data-scope="ag-pill"]')!.hasAttribute('data-mod-hollow')).toBe(true);
+        expect(forge.querySelector('[data-scope="badge"][data-part="root"]')!.textContent).toBe('NOT REPORTED');
+        expect(forge.querySelector('[data-scope="badge"][data-part="root"]')!.getAttribute('data-variant')).toBe('outline');
         const scout = table.querySelector('[data-usage-row="scout"]')!;
         expect(scout.querySelector('[data-cost]')!.textContent).toBe('~$6.52');
-        expect(scout.querySelector('[data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('PARTLY ESTIMATED');
+        expect(scout.querySelector('[data-scope="badge"][data-part="root"]')!.textContent).toBe('PARTLY ESTIMATED');
         for (const cost of table.querySelectorAll('[data-cost]')) expect(cost.textContent).not.toMatch(/^\$?0(\.00)?$/);
         expect(root.querySelectorAll('[data-stat]').length).toBe(4);
         expect(root.querySelectorAll('[data-bar]').length).toBe(17);
