@@ -91,6 +91,9 @@ describe('the update model (#367)', () => {
         expect(restartWarning({ restarts: 4, lastExit: { at: NOW - 60_000, reason: 'crashed', code: 1 } }, NOW, 'UTC')).toBe('The daemon restarted 4 times — last exit: crashed (code 1) at 17 Sep 14:19.');
         expect(restartWarning({ restarts: 2, lastExit: { at: NOW, reason: 'crashed' } }, NOW)).toBeNull();
         expect(restartWarning({ restarts: 5, lastExit: { at: NOW - 2 * 60 * 60_000, reason: 'crashed' } }, NOW)).toBeNull();
+        // #695: the count is cumulative, so the fifth planned update is not a crash loop.
+        expect(restartWarning({ restarts: 5, lastExit: { at: NOW - 60_000, reason: 'update', code: 75 } }, NOW)).toBeNull();
+        expect(restartWarning({ restarts: 5, lastExit: { at: NOW - 60_000, reason: 'stop', code: 0 } }, NOW)).toBeNull();
     });
 
     it('badges a machine by the most pressing thing, and "Update all" takes only machines that can go', () => {
