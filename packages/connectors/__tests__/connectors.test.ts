@@ -357,6 +357,49 @@ describe('gmailConnectorPlugin', () => {
             'trigger:new-email'
         ]);
     });
+
+    it('declares its 9 tools; send, reply and trash ask, the rest allow (PLG-09, #632)', () => {
+        const tools = gmailConnectorPlugin.tools ?? [];
+        expect(tools).toHaveLength(9);
+        expect(Object.fromEntries(tools.map((t) => [t.name, t.defaultMode]))).toEqual({
+            'gmail__send-email': 'ask',
+            'gmail__reply-to-message': 'ask',
+            'gmail__trash-message': 'ask',
+            'gmail__create-draft': 'allow',
+            'gmail__modify-labels': 'allow',
+            'gmail__search-messages': 'allow',
+            'gmail__get-message': 'allow',
+            'gmail__get-thread': 'allow',
+            'gmail__get-attachment': 'allow'
+        });
+        const send = gmailSpec.operations.find((op) => op.id === 'send-email')!;
+        expect(tools.find((t) => t.name === 'gmail__send-email')).toEqual({
+            name: 'gmail__send-email',
+            title: send.label,
+            ...(send.description ? { description: send.description } : {}),
+            defaultMode: 'ask'
+        });
+    });
+});
+
+describe('conduitConnectorManifest tools', () => {
+    it('names tools under the plugin id and derives the mode from the hints unless askByDefault names the operation', () => {
+        const spec = {
+            ...gmailSpec,
+            operations: gmailSpec.operations.filter((op) => ['search-messages', 'trash-message', 'modify-labels', 'new-email'].includes(op.id))
+        };
+        const m = conduitConnectorManifest(spec, { id: 'gmail-work', hosts: [] });
+        // A trigger is not a tool; a search is allowed, a write without hints too, and trash (destructive in the spec) asks on its hint alone.
+        expect(m.tools?.map((t) => t.name)).toEqual(['gmail-work__search-messages', 'gmail-work__modify-labels', 'gmail-work__trash-message']);
+        expect(m.tools?.find((t) => t.name === 'gmail-work__search-messages')?.defaultMode).toBe('allow');
+        expect(m.tools?.find((t) => t.name === 'gmail-work__modify-labels')?.defaultMode).toBe('allow');
+        expect(m.tools?.find((t) => t.name === 'gmail-work__trash-message')?.defaultMode).toBe('ask');
+        const asked = conduitConnectorManifest(spec, { id: 'gmail-work', hosts: [], askByDefault: ['search-messages'] });
+        expect(asked.tools?.find((t) => t.name === 'gmail-work__search-messages')?.defaultMode).toBe('ask');
+        // A destructive hint asks on its own.
+        const destructive = { ...spec, operations: spec.operations.map((op) => (op.id === 'modify-labels' ? { ...op, destructive: true } : op)) } as typeof spec;
+        expect(conduitConnectorManifest(destructive, { hosts: [] }).tools?.find((t) => t.name === 'gmail__modify-labels')?.defaultMode).toBe('ask');
+    });
 });
 
 describe('createConnectorEngine', () => {
