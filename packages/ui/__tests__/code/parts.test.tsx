@@ -1,11 +1,11 @@
 /**
  * The Changes and Files parts (#563): lists, session bar, header, the
- * ask-about-a-line composer, `Go to file`, the file tree, the Monaco theme
+ * ask-about-a-line composer, `Go to file` (zero's Combobox), the file tree (zero's TreeView), the Monaco theme
  * built from tokens, and the scopes' place in the design system.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mergeManifests, validateDesignSystem, type ZeroManifest } from '@sigx/zero-kit';
 import type { ChangeCommit, ChangedFile, FsTreeEntry } from '@agentic/core';
 import { all, buttonNamed, mount, one, tick, waitFor } from '../helpers';
@@ -145,6 +145,12 @@ describe('asking about a line', () => {
 
 describe('Go to file', () => {
     const PATHS = ['packages/ui/src/shell/shell.css', 'packages/ui/src/shell/Drawer.tsx', 'packages/core/src/workdir.ts', 'README.md'];
+    const type = async (input: HTMLInputElement, value: string): Promise<void> => {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await tick();
+    };
+    const options = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('[role="option"]')];
 
     it('ranks file-name matches first', () => {
         expect(findPaths(PATHS, 'drawer')).toEqual(['packages/ui/src/shell/Drawer.tsx']);
@@ -153,27 +159,48 @@ describe('Go to file', () => {
         expect(findPaths(PATHS, '')).toEqual([]);
     });
 
-    it('lists matches as a listbox, moves with the arrows, and picks with Enter', async () => {
+    it('is zero\'s Combobox: typing filters by the ranking, the arrows move, Enter picks', async () => {
         const picked: string[] = [];
         const root = mount(<GoToFile paths={PATHS} onPick={(p) => picked.push(p)} hotkey />);
-        const input = one(root, 'ag-find', 'input') as HTMLInputElement;
-        input.value = 'src';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        await tick();
-        const results = all(root, 'ag-find', 'result');
-        expect(results.length).toBe(3);
+        const input = one(root, 'combobox', 'input') as HTMLInputElement;
+        expect(input.getAttribute('role')).toBe('combobox');
+        await type(input, 'src');
+        expect(options(root)).toHaveLength(3);
         expect(input.getAttribute('aria-expanded')).toBe('true');
+        await type(input, 'drawer');
+        expect(options(root).map((o) => o.textContent)).toEqual(['‎packages/ui/src/shell/Drawer.tsx‎']);
+        await type(input, 'shcss');
+        expect(options(root)[0]!.textContent).toContain('shell.css');
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
         await tick();
-        expect(all(root, 'ag-find', 'result')[1]!.getAttribute('aria-selected')).toBe('true');
+        expect(input.getAttribute('aria-activedescendant')).toBe(options(root)[0]!.id);
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        expect(picked).toHaveLength(1);
-        expect(one(root, 'ag-find', 'results')).toBeNull();
-        // Ctrl+P from anywhere focuses the search.
+        await tick();
+        expect(picked).toEqual(['packages/ui/src/shell/shell.css']);
+        // A pick leaves an empty, closed search.
+        expect(input.value).toBe('');
+        expect(input.getAttribute('aria-expanded')).toBe('false');
+        // Ctrl+P from anywhere focuses the search; the hint is zero's Kbd.
         (document.activeElement as HTMLElement | null)?.blur();
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true }));
         expect(document.activeElement).toBe(input);
-        expect(root.querySelector('kbd')!.textContent).toBe('Ctrl P');
+        const kbd = one(root, 'kbd', 'root')!;
+        expect(kbd.tagName).toBe('KBD');
+        expect(kbd.textContent).toBe('Ctrl P');
+    });
+
+    it('windows a large folder: 5000 paths keep fewer than 100 options in the DOM', async () => {
+        const many = Array.from({ length: 5000 }, (_, i) => `src/module-${i}/file-${i}.ts`);
+        const root = mount(<GoToFile paths={many} onPick={() => undefined} />);
+        const input = one(root, 'combobox', 'input') as HTMLInputElement;
+        await type(input, 'file');
+        const shown = options(root);
+        expect(shown.length).toBeGreaterThan(0);
+        expect(shown.length).toBeLessThan(100);
+        // The window's options say where they stand in the whole list.
+        expect(shown[0]!.getAttribute('aria-setsize')).toBe('5000');
+        await type(input, 'file-4999');
+        expect(options(root)[0]!.textContent).toContain('src/module-4999/file-4999.ts');
     });
 });
 
@@ -189,8 +216,11 @@ describe('the file tree', () => {
             { name: 'drawer.test.ts', path: 'packages/ui/drawer.test.ts', type: 'file', change: 'added' }
         ]
     };
+    const treeitems = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    const visibleItems = (root: HTMLElement): HTMLElement[] => all(root, 'ag-file-tree', 'item').filter((i) => !i.closest('[hidden]'));
+    const key = (el: Element, k: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); };
 
-    it('opens the way to the selected file, loading each folder once, with change dots', async () => {
+    it('is an APG tree on zero\'s TreeView, opened the way to the selected file, with change dots', async () => {
         const loaded: string[] = [];
         const load = async (path: string) => {
             loaded.push(path);
@@ -199,36 +229,71 @@ describe('the file tree', () => {
         const root = mount(<FileTree load={load} selected="packages/ui/shell.css" onSelect={() => undefined} />);
         await waitFor(() => all(root, 'ag-file-tree', 'item').length === 5);
         expect(loaded.sort()).toEqual(['', 'packages', 'packages/ui']);
+        const tree = one(root, 'tree-view', 'tree')!;
+        expect(tree.getAttribute('role')).toBe('tree');
+        expect(tree.getAttribute('aria-labelledby')).toBe(one(root, 'tree-view', 'label')!.id);
         const items = all(root, 'ag-file-tree', 'item');
         expect(items.map((i) => i.getAttribute('data-path'))).toEqual(['packages', 'packages/ui', 'packages/ui/shell.css', 'packages/ui/drawer.test.ts', 'README.md']);
-        expect(items.map((i) => i.getAttribute('aria-level'))).toEqual(['1', '2', '3', '3', '1']);
+        // Folders: the treeitem is TreeView's branch around the row; files: the row is the treeitem.
+        expect(treeitems(root).map((i) => i.getAttribute('aria-level'))).toEqual(['1', '2', '3', '3', '1']);
+        expect(treeitems(root)[0]!.getAttribute('aria-expanded')).toBe('true');
         const selected = items[2]!;
+        expect(selected.getAttribute('role')).toBe('treeitem');
         expect(selected.getAttribute('aria-selected')).toBe('true');
         expect(selected.getAttribute('tabindex')).toBe('0');
         expect(selected.querySelector('[data-part="dot"]')!.getAttribute('data-tone')).toBe('working');
         expect(items[3]!.querySelector('[data-part="dot"]')!.getAttribute('data-tone')).toBe('live');
-        expect(one(root, 'ag-file-tree', 'root')!.getAttribute('role')).toBe('tree');
     });
 
-    it('expands folders on click, picks files, and moves with the keyboard', async () => {
+    it('loads a folder\'s children when it is expanded, once', async () => {
+        const load = vi.fn(async (p: string) => FOLDERS[p] ?? []);
+        const picked: string[] = [];
+        const root = mount(<FileTree load={load} onSelect={(e) => picked.push(e.path)} />);
+        await waitFor(() => all(root, 'ag-file-tree', 'item').length === 2);
+        expect(load.mock.calls.map((c) => c[0])).toEqual(['']);
+        const branch = treeitems(root)[0]!;
+        expect(branch.getAttribute('aria-expanded')).toBe('false');
+        all(root, 'ag-file-tree', 'item')[0]!.click();
+        await tick();
+        expect(branch.getAttribute('aria-expanded')).toBe('true');
+        await waitFor(() => all(root, 'ag-file-tree', 'item').length === 3);
+        expect(load.mock.calls.map((c) => c[0])).toEqual(['', 'packages']);
+        // Collapse and open again: the children stay, nothing reloads.
+        all(root, 'ag-file-tree', 'item')[0]!.click();
+        await tick();
+        expect(branch.getAttribute('aria-expanded')).toBe('false');
+        all(root, 'ag-file-tree', 'item')[0]!.click();
+        await tick();
+        expect(load).toHaveBeenCalledTimes(2);
+        all(root, 'ag-file-tree', 'item').find((i) => i.getAttribute('data-path') === 'README.md')!.click();
+        expect(picked).toEqual(['README.md']);
+    });
+
+    it('moves with the arrow keys and typeahead; Enter opens a file, Right a folder', async () => {
         const picked: string[] = [];
         const root = mount(<FileTree load={async (p) => FOLDERS[p] ?? []} onSelect={(e) => picked.push(e.path)} />);
         await waitFor(() => all(root, 'ag-file-tree', 'item').length === 2);
-        const packages = all(root, 'ag-file-tree', 'item')[0]!;
-        expect(packages.getAttribute('aria-expanded')).toBe('false');
-        packages.click();
-        await waitFor(() => all(root, 'ag-file-tree', 'item').length === 3);
+        const packages = treeitems(root)[0]!;
+        packages.focus();
+        key(packages, 'ArrowDown');
+        expect(document.activeElement?.getAttribute('data-path')).toBe('README.md');
+        key(document.activeElement!, 'p');
+        expect(document.activeElement).toBe(packages);
+        key(packages, 'ArrowRight');
+        await waitFor(() => visibleItems(root).length === 3);
         expect(packages.getAttribute('aria-expanded')).toBe('true');
-        // Right on the open "ui" row's parent moves down; Right on "ui" opens it.
-        const tree = one(root, 'ag-file-tree', 'root')!;
-        tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-        tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-        await waitFor(() => all(root, 'ag-file-tree', 'item').length === 5);
-        tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-        tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        key(packages, 'ArrowRight');
+        const ui = document.activeElement as HTMLElement;
+        expect(ui.getAttribute('aria-level')).toBe('2');
+        key(ui, 'Enter');
+        // Enter on a folder opens it rather than selecting it.
+        await waitFor(() => visibleItems(root).length === 5);
+        expect(ui.getAttribute('aria-selected')).toBe('false');
+        key(ui, 'ArrowDown');
+        key(document.activeElement!, 'Enter');
         expect(picked).toEqual(['packages/ui/shell.css']);
-        all(root, 'ag-file-tree', 'item').find((i) => i.getAttribute('data-path') === 'README.md')!.click();
-        expect(picked).toEqual(['packages/ui/shell.css', 'README.md']);
+        key(document.activeElement!, 'ArrowLeft');
+        expect(document.activeElement).toBe(ui);
     });
 
     it('shows a folder that failed to load, and the legend', async () => {
