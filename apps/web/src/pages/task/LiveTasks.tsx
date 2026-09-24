@@ -11,7 +11,7 @@ import { component, signal, useHead, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
+import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, ErrorNote, FilterChips, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
 import { Age } from '../../components/Age';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
@@ -123,7 +123,7 @@ export const LiveActiveTasks = component(() => {
                     : tasks.loading
                         ? <p data-panel-note aria-busy="true">Loading tasks…</p>
                         : <EmptyState variant="generic" caption="No active tasks. Post in a chat to start one." slots={{ actions: () => <Link to="/tasks">All tasks</Link> }} />}
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                 <ConfirmDialog
                     model={() => st.stopAll}
                     title="Stop every active task?"
@@ -155,13 +155,12 @@ export const LiveTasks = component(() => {
         return (
             <Page title="Tasks" page="tasks" hideTitle>
                 <SectionHeading count={`${all.length} total`}>Tasks</SectionHeading>
-                <div data-filter-chips role="group" aria-label="Filter by status">
-                    {TASK_FILTERS.map((f) => (
-                        <button type="button" data-chip aria-pressed={st.filter === f.value ? 'true' : 'false'} onClick={() => { st.filter = f.value; }}>
-                            {f.label} <span data-chip-count>{counts[f.value]}</span>
-                        </button>
-                    ))}
-                </div>
+                <FilterChips
+                    label="Filter by status"
+                    model={() => st.filter}
+                    options={TASK_FILTERS.map((f) => ({ value: f.value, label: f.label, count: counts[f.value] }))}
+                    onValueChange={(v: string) => { st.filter = v as TaskFilter; }}
+                />
                 {signedOut
                     ? <EmptyState variant="generic" title="Sign in to see your tasks" caption="Tasks belong to your workspace." />
                     : rows.length
@@ -177,7 +176,7 @@ export const LiveTasks = component(() => {
                         : tasks.loading
                             ? <p data-panel-note aria-busy="true">Loading tasks…</p>
                             : <EmptyState variant="generic" caption={st.filter === 'all' ? 'No tasks yet. Post in a chat to start one.' : `No ${st.filter} tasks.`} />}
-                {tasks.error ? <p data-chat-error role="alert">{tasks.error.message}</p> : null}
+                {tasks.error ? <ErrorNote data-chat-error="">{tasks.error.message}</ErrorNote> : null}
                 <LiveStartTask />
             </Page>
         );

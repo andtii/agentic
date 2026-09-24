@@ -11,7 +11,7 @@
 import { component, signal, watch, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { ChangedFile, ChangeScope, FsError, FsReadResult, FsReadRev, WorkspaceAnswer } from '@agentic/core';
-import { Button, ChangeList, ChangesPanel, CodeDiff, CommitList, EmptyState, FileHeader, Icon, LineComposer, Segmented, fileSizeText, hunkAt, splitPath, type DiffMode, type LineRef } from '@agentic/ui';
+import { Button, ChangeList, ChangesPanel, CodeDiff, CommitList, EmptyState, ErrorNote, FileHeader, Icon, LineComposer, Segmented, fileSizeText, hunkAt, splitPath, type DiffMode, type LineRef } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId } from '../components/topbar';
 import { dataMode } from '../data-mode';
@@ -169,7 +169,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
                 </div>
             );
         }
-        if (texts.error) return <p data-files-note role="alert">{texts.error.message}</p>;
+        if (texts.error) return <ErrorNote data-files-note="">{texts.error.message}</ErrorNote>;
         if (texts.binary) return <p data-files-note>Binary file · {fileSizeText(texts.binary.size)} — nothing to diff.</p>;
         if (texts.original === undefined || texts.modified === undefined) return <p data-files-note aria-busy="true">Loading diff…</p>;
         const agent = props.ctx.agent;
@@ -255,8 +255,8 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
                         {state.snapshotAt ? ` · showing what ${f.machineName} last reported at ${(f.time ?? String)(state.snapshotAt)}` : ` · nothing fetched from ${f.machineName} yet`}
                     </p>
                 ) : null}
-                {folderGone ? <p data-files-banner data-tone="failed" role="alert">Folder no longer on {f.machineName}</p> : null}
-                {state.error && !folderGone ? <p data-files-banner data-tone="failed" role="alert">{state.error.message}</p> : null}
+                {folderGone ? <ErrorNote data-files-banner="" data-tone="failed">Folder no longer on {f.machineName}</ErrorNote> : null}
+                {state.error && !folderGone ? <ErrorNote data-files-banner="" data-tone="failed">{state.error.message}</ErrorNote> : null}
                 <div data-files-body data-has-file={cur.file ? '' : undefined}>
                     <ChangesPanel note={note}>
                         {autoBranch ? <p data-files-note data-changes-empty>No uncommitted changes</p> : null}

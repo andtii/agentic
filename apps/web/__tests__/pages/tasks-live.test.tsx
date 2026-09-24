@@ -37,7 +37,7 @@ async function seed(objective: string, agentId?: AgentId) {
 
 const rows = (dom: ParentNode) => [...dom.querySelectorAll<HTMLElement>('[data-page="tasks"] tbody tr, [data-home-tasks] tbody tr')];
 const statusOf = (row: Element) => row.querySelector('[data-cell-status] [data-scope="badge"][data-part="root"]')!.getAttribute('data-status');
-const chip = (dom: ParentNode, label: string) => [...dom.querySelectorAll<HTMLButtonElement>('[data-chip]')].find((b) => b.textContent!.trim().startsWith(label))!;
+const chip = (dom: ParentNode, label: string) => [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chips] [data-part="item"]')].find((b) => b.textContent!.trim().startsWith(label))!;
 
 describe('/tasks (live)', () => {
     it('lists a task created through chat with its status, its wait reason and a link to the tree; the chips filter', async () => {

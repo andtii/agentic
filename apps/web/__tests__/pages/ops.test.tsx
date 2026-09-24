@@ -198,14 +198,14 @@ describe('/history', () => {
 
     it('filters by kind with pressed chips', async () => {
         const root = await mountAt('/history', <HistoryView entries={opsHistory} />);
-        const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-filter-chip]')];
+        const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-filter-chips] [data-part="item"]')];
         expect(chips.map(c => c.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false']);
         chips.find(c => c.textContent === 'Approvals')!.click();
         await tick();
         const rows = [...root.querySelectorAll('[data-history-row]')];
         expect(rows.length).toBe(filterHistory(opsHistory, 'approvals').length);
         expect(rows.every(r => ['approval', 'approval-asked'].includes(r.getAttribute('data-kind')!))).toBe(true);
-        expect(root.querySelector('[data-filter-chip][aria-pressed="true"]')!.textContent).toBe('Approvals');
+        expect(root.querySelector('[data-filter-chips] [aria-pressed="true"]')!.textContent).toBe('Approvals');
     });
 
     it('groupByDay orders days and keeps newest first inside a day', () => {

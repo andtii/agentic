@@ -1,6 +1,7 @@
 import { component, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { useActorState } from '@sigx/actors/app';
+import { Progress } from '@sigx/zero';
 import { AgentTile, Button, ConfirmDialog, DataTable, EmptyState, EnvironmentLine, SectionHeading, StatusPill, WaitReasonLine } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../actors/defs';
 import { workspaceKeyOf } from '../actors/keys';
@@ -158,9 +159,9 @@ export const Home = component(() => {
                             <strong data-spend-value>${view.spend.monthUsd.toFixed(2)}</strong>
                             <span data-spend-limit>of ${view.spend.limitUsd.toFixed(2)} limit</span>
                         </p>
-                        <div data-spend-bar role="progressbar" aria-label="Month spend against the limit" aria-valuenow={spendPct} aria-valuemin={0} aria-valuemax={100}>
-                            <span style={`inline-size: ${spendPct}%`} />
-                        </div>
+                        <Progress.Root value={spendPct} color="primary" size="sm" aria-label="Month spend against the limit" data-spend-bar="">
+                            <Progress.Track><Progress.Range /></Progress.Track>
+                        </Progress.Root>
                         <p data-panel-note>{view.spend.note}</p>
                     </Panel>
                     <Panel label="Usage limits" slots={{ aside: () => <Link to="/usage">All limits</Link> }}>

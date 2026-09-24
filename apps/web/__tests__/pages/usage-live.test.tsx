@@ -68,6 +68,10 @@ describe('/usage (live)', () => {
 
         // The cards: the month's total split into its reported and estimated parts, the guessed and the unpriced turns counted.
         expect(text(stat(dom, 'Estimated share').querySelector('[data-stat-value]'))).toBe('~$0.30');
+        // Each card is zero's Stats (#594); an estimate colours its figure through the Stats colour.
+        expect([stat(dom, 'Estimated share').getAttribute('data-scope'), stat(dom, 'Estimated share').getAttribute('data-color')]).toEqual(['stats', 'warning']);
+        expect(stat(dom, 'Not reported').hasAttribute('data-color')).toBe(false);
+        expect(stat(dom, 'Not reported').querySelector('[data-scope="stats"][data-part="value"]')).toBe(stat(dom, 'Not reported').querySelector('[data-stat-value]'));
         expect(text(stat(dom, 'Not reported').querySelector('[data-stat-value]'))).toBe('2 turns');
         expect(text(stat(dom, 'Turns recorded').querySelector('[data-stat-value]'))).toBe('6');
         const spend = dom.querySelector('[data-stat][aria-label$="spend"]')!;

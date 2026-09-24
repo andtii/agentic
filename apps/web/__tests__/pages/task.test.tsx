@@ -10,12 +10,12 @@ describe('/tasks (Tasks)', () => {
         const cols = [...dom.querySelectorAll('colgroup col')].map((c) => (c.getAttribute('style') ?? '').replace(/;$/, ''));
         expect(cols).toEqual(['width: 100px', '', 'width: 140px', 'width: 270px', 'width: 60px']);
         expect(dom.querySelectorAll('tbody tr')).toHaveLength(loadTasks().length);
-        const chips = [...dom.querySelectorAll<HTMLButtonElement>('[data-chip]')];
+        const chips = [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chips] [data-part="item"]')];
         expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);
         chips.find((c) => c.textContent!.startsWith('Waiting'))!.click();
         await tick();
         expect(dom.querySelectorAll('tbody tr')).toHaveLength(loadTasks().filter((t) => t.status === 'waiting').length);
-        expect(dom.querySelector('[data-chip][aria-pressed="true"]')!.textContent).toContain('Waiting');
+        expect(dom.querySelector('[data-filter-chips] [aria-pressed="true"]')!.textContent).toContain('Waiting');
     });
 });
 

@@ -19,7 +19,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { TaskId, TaskTransition, WaitReason } from '@agentic/core';
 import type { TaskTree, TaskView } from '@agentic/platform';
-import { AgentTile, ConfirmDialog, EmptyState, EnvironmentLine, Label, StatusPill, TaskNode, TimelineList, type Tone } from '@agentic/ui';
+import { AgentTile, ConfirmDialog, EmptyState, EnvironmentLine, ErrorNote, Label, StatusPill, TaskNode, TimelineList, type Tone } from '@agentic/ui';
 import { KeyValue } from '../../components/KeyValue';
 import { Page } from '../../components/Page';
 import { Panel } from '../../components/Panel';
@@ -169,7 +169,7 @@ export const LiveTask = component<{ id: string }>(({ props }) => {
                     {failure ? <FailureNotice state={failure} onResume={() => { void resume(); }} busy={st.recovering} /> : null}
                     {offline ? <p data-task-wait role="status">{machineOfflineText(offline, machineName(offline.machineId), formatTime)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link></p> : null}
                     {!failure && interruption?.resume === 'resumed' ? <p data-interruption-note role="note">{interruptionLine(interruption)}</p> : null}
-                    {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                    {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                 </section>
 
                 <aside data-task-rail aria-label="Selected task">

@@ -4,23 +4,7 @@
 [data-kv-stack] { display: flex; flex-direction: column; gap: var(--space-2xs); }
 [data-kv-stack] > small { font-size: var(--text-sm); color: var(--ag-text-dim); }
 [data-ref] { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ag-text-muted); }
-[data-chip] {
-    appearance: none;
-    block-size: var(--ag-pill-h);
-    padding-inline: var(--space-sm);
-    border: var(--border) solid var(--ag-line-strong);
-    border-radius: var(--radius-selector);
-    background: transparent;
-    color: var(--ag-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: var(--weight-medium);
-    letter-spacing: var(--tracking-wide);
-    cursor: pointer;
-}
-[data-chip][aria-pressed="true"] { background: color-mix(in oklab, var(--color-primary) 15%, transparent); border-color: var(--color-primary); color: var(--color-base-content); }
-[data-chip]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-[data-chip-count] { color: var(--ag-text-dim); }
+
 [data-uncertain-note] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-warning); }
 
 /* ---- tasks / task (#88): fluid + 460, gap 28 ---- */
@@ -34,7 +18,7 @@
 [data-task-tree] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 [data-tree-nodes] { display: flex; flex-direction: column; gap: var(--space-sm); }
 [data-task-rail] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
-[data-task-rail] [data-scope="timeline"][data-part="item"] { grid-template-columns: 0 auto minmax(0, 1fr); }
+
 [data-not-stopped] { margin: 0; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-error); }
 [data-result-text] { margin: 0; color: var(--ag-text-muted); }
 
