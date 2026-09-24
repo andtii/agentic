@@ -148,30 +148,7 @@
     gap: 10px;
 }
 
-/* ---- brand ---------------------------------------------------------- */
-
-[data-scope="ai-shell"][data-part="brand"] {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: var(--weight-semibold);
-    letter-spacing: var(--tracking-tight);
-    color: var(--color-base-content);
-}
-
-[data-scope="ai-shell"][data-part="brand-mark"] {
-    display: inline-grid;
-    place-items: center;
-    inline-size: 28px;
-    block-size: 28px;
-    border-radius: var(--radius-field);
-    background: var(--color-primary);
-    color: var(--color-primary-content);
-    font-weight: var(--weight-bold);
-    font-size: var(--text-lg);
-}
+/* ---- brand: the wordmark and its tile are the ai-shell recipe (@agentic/ui/fragment) ---- */
 
 /* ---- main ---------------------------------------------------------- */
 
@@ -199,8 +176,6 @@
     min-block-size: 0;
     padding-inline: var(--space-xs);
 }
-
-[data-scope="ai-shell"][data-part="sidebar-spacer"] { flex: 1 1 auto; }
 
 [data-scope="ai-shell"][data-part="connection"] {
     padding: 10px var(--space-md);

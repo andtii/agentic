@@ -21,11 +21,11 @@ const tint = (ink: string): Record<string, string> => ({ background: `color-mix(
 /** The plain code surface: 22 px mono rows on the page ground. */
 const code: RecipeInput = {
     component: 'ag-code',
-    tokens: { '--ag-code-row': '22px' },
+    tokens: { '--ag-code-row': '22px', '--ag-code-gutter': '116px' },
     parts: {
         root: {
             base: { display: 'block', flex: '1 1 auto', overflow: 'auto', minInlineSize: '0', minBlockSize: '0', padding: 'var(--space-sm) 0', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--color-base-content)', background: 'var(--color-base-100)' },
-            selectors: { '&[data-kind="viewer"]': { paddingBlock: '10px' } }
+            selectors: { '&[data-kind="viewer"]': { paddingBlock: 'calc(var(--space-sm) + var(--space-2xs))' } }
         },
         row: {
             base: { display: 'grid', gridTemplateColumns: '48px 48px 20px minmax(max-content, 1fr)', alignItems: 'center', minBlockSize: 'var(--ag-code-row)', minInlineSize: '100%', inlineSize: 'max-content' },
@@ -40,7 +40,7 @@ const code: RecipeInput = {
             }
         },
         num: {
-            base: { ...bare, cursor: 'default', blockSize: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingInlineEnd: '10px', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
+            base: { ...bare, cursor: 'default', blockSize: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingInlineEnd: 'calc(var(--space-sm) + var(--space-2xs))', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
             selectors: {
                 '[data-kind="viewer"] &': { paddingInlineEnd: '0' },
                 '&:is(button)': { cursor: 'pointer' },
@@ -81,8 +81,11 @@ const code: RecipeInput = {
         },
         widget: {
             // Pinned to the visible width while the rows scroll sideways under it.
-            base: { position: 'sticky', insetInlineStart: '0', margin: '6px var(--space-lg) var(--space-sm) 116px', fontFamily: 'var(--font-sans)' },
-            selectors: { '[data-kind="viewer"] > &': { marginInlineStart: '71px' }, '[data-mode="split"] > &': { marginInlineStart: '68px' } }
+            // Its start edge lines up with the code column: the gutter tracks it sits past, as a token per layout.
+            base: { position: 'sticky', insetInlineStart: '0', margin: 'var(--space-xs) var(--space-lg) var(--space-sm) var(--ag-code-gutter)', fontFamily: 'var(--font-sans)' },
+            selectors: { '[data-kind="viewer"] > &': { '--ag-code-gutter': '71px' }, '[data-mode="split"] > &': { '--ag-code-gutter': '68px' } },
+            // Phones: the widget takes the width.
+            at: { 'below-md': { base: { marginInline: 'var(--space-sm)' } } }
         },
         notice: { base: { margin: '0', padding: 'var(--space-lg) var(--space-xl)', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)' } }
     }
@@ -123,12 +126,12 @@ const changes: RecipeInput = {
     component: 'ag-changes',
     parts: {
         root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)', minBlockSize: '100%', boxSizing: 'border-box', padding: 'var(--space-lg) var(--space-md)' } },
-        group: { base: { display: 'flex', flexDirection: 'column', gap: '4px', minInlineSize: '0' } },
-        heading: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: '0 10px' } },
+        group: { base: { display: 'flex', flexDirection: 'column', gap: 'calc(2 * var(--space-2xs))', minInlineSize: '0' } },
+        heading: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: '0 calc(var(--space-sm) + var(--space-2xs))' } },
         label: { base: { ...label, flex: '1' } },
         aside: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
         item: {
-            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', blockSize: '40px', padding: '0 10px', boxSizing: 'border-box', border: 'var(--border) solid transparent', borderRadius: 'var(--radius-field)', textDecoration: 'none', color: 'var(--color-base-content)', transition: `background ${motion}` },
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', blockSize: '40px', padding: '0 calc(var(--space-sm) + var(--space-2xs))', boxSizing: 'border-box', border: 'var(--border) solid transparent', borderRadius: 'var(--radius-field)', textDecoration: 'none', color: 'var(--color-base-content)', transition: `background ${motion}` },
             selectors: {
                 '&:hover': { background: 'var(--color-base-200)' },
                 '&:focus-visible': { ...ring, outlineOffset: '-2px' },
@@ -142,11 +145,11 @@ const changes: RecipeInput = {
         },
         // Truncated from the start so the last folder stays visible: rtl with `&lrm;` guards in the markup.
         folder: { base: { ...ellipsis, direction: 'rtl', textAlign: 'left', fontFamily: mono, fontSize: '10px', color: 'var(--ag-text-dim)' } },
-        commit: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: '6px 10px', color: 'var(--ag-text-dim)' }, selectors: { '& > svg': { flexShrink: '0' } } },
+        commit: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: 'var(--space-xs) calc(var(--space-sm) + var(--space-2xs))', color: 'var(--ag-text-dim)' }, selectors: { '& > svg': { flexShrink: '0' } } },
         subject: { base: { ...ellipsis, fontFamily: 'var(--font-sans)', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)', color: 'var(--color-base-content)' } },
-        meta: { base: { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minInlineSize: '0', fontFamily: mono, fontSize: '10px', color: 'var(--ag-text-dim)' } },
-        empty: { base: { margin: '0', padding: '6px 10px', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
-        note: { base: { display: 'flex', alignItems: 'flex-start', gap: 'var(--space-sm)', margin: 'auto 0 0', padding: '0 10px', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', textWrap: 'pretty' }, selectors: { '& > svg': { flexShrink: '0', marginBlockStart: '1px' } } }
+        meta: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--border)', flex: '1', minInlineSize: '0', fontFamily: mono, fontSize: '10px', color: 'var(--ag-text-dim)' } },
+        empty: { base: { margin: '0', padding: 'var(--space-xs) calc(var(--space-sm) + var(--space-2xs))', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
+        note: { base: { display: 'flex', alignItems: 'flex-start', gap: 'var(--space-sm)', margin: 'auto 0 0', padding: '0 calc(var(--space-sm) + var(--space-2xs))', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', textWrap: 'pretty' }, selectors: { '& > svg': { flexShrink: '0', marginBlockStart: 'var(--border)' } } }
     }
 };
 
@@ -165,7 +168,7 @@ const fileTree: RecipeInput = {
                 alignItems: 'center',
                 gap: 'var(--space-xs)',
                 blockSize: '28px',
-                padding: '0 10px',
+                padding: '0 calc(var(--space-sm) + var(--space-2xs))',
                 borderRadius: 'var(--radius-selector)',
                 color: 'var(--color-base-content)',
                 cursor: 'pointer',
@@ -190,9 +193,9 @@ const fileTree: RecipeInput = {
             base: { inlineSize: '6px', blockSize: '6px', borderRadius: '50%', flexShrink: '0', background: 'var(--color-info)' },
             selectors: { '&[data-tone="live"]': { background: 'var(--color-primary)' }, '&[data-tone="failed"]': { background: 'var(--color-error)' }, '&[data-tone="dim"]': { background: 'var(--ag-text-dim)' } }
         },
-        status: { base: { margin: '0', padding: '0 10px 0 28px', blockSize: '28px', display: 'flex', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } },
+        status: { base: { margin: '0', padding: '0 calc(var(--space-sm) + var(--space-2xs)) 0 calc(var(--space-xl) + var(--space-sm))', blockSize: '28px', display: 'flex', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } },
         legend: {
-            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', padding: '0 10px', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' },
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', padding: '0 calc(var(--space-sm) + var(--space-2xs))', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' },
             selectors: { '& > [data-spacer]': { flex: '1' }, '& > [data-mono]': { fontFamily: mono } }
         }
     }
@@ -207,7 +210,7 @@ const find: RecipeInput = {
     component: 'ag-find',
     parts: {
         root: {
-            base: { position: 'relative', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', blockSize: '34px', padding: '0 10px', boxSizing: 'border-box', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-field)', color: 'var(--ag-text-dim)' },
+            base: { position: 'relative', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', blockSize: '34px', padding: '0 calc(var(--space-sm) + var(--space-2xs))', boxSizing: 'border-box', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-field)', color: 'var(--ag-text-dim)' },
             selectors: {
                 '&:focus-within': { borderColor: 'var(--ag-text-dim)' },
                 '& > [data-scope="field"]': { flex: '1', minInlineSize: '0' },
@@ -230,10 +233,14 @@ const find: RecipeInput = {
 const sessionBar: RecipeInput = {
     component: 'ag-session-bar',
     parts: {
-        root: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-2xl)', flexShrink: '0', padding: '0 var(--space-2xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)', background: 'var(--color-base-200)' } },
-        tabs: { base: { display: 'flex', gap: 'var(--space-2xl)', flexShrink: '0' } },
+        root: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-2xl)', flexShrink: '0', padding: '0 var(--space-2xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)', background: 'var(--color-base-200)' },
+            // Phones (docs/design/HANDOFF.md, "Responsive behaviour"): the bar wraps — tabs, then who and where, then the view's controls.
+            at: { 'below-md': { base: { flexWrap: 'wrap', gap: '0 var(--space-lg)', padding: '0 var(--space-lg)' } } }
+        },
+        tabs: { base: { display: 'flex', gap: 'var(--space-2xl)', flexShrink: '0' }, at: { 'below-md': { base: { gap: 'var(--space-lg)' } } } },
         tab: {
-            base: { display: 'inline-flex', alignItems: 'center', blockSize: '44px', padding: '0 2px', boxSizing: 'border-box', borderBlockEnd: '2px solid transparent', fontSize: 'var(--text-md)', fontWeight: 'var(--weight-medium)', color: 'var(--ag-text-muted)', textDecoration: 'none', whiteSpace: 'nowrap' },
+            base: { display: 'inline-flex', alignItems: 'center', blockSize: '44px', padding: '0 var(--space-2xs)', boxSizing: 'border-box', borderBlockEnd: '2px solid transparent', fontSize: 'var(--text-md)', fontWeight: 'var(--weight-medium)', color: 'var(--ag-text-muted)', textDecoration: 'none', whiteSpace: 'nowrap' },
             selectors: {
                 '&:hover': { color: 'var(--color-base-content)' },
                 '&:focus-visible': { ...ring, outlineOffset: '-2px' },
@@ -241,8 +248,11 @@ const sessionBar: RecipeInput = {
             }
         },
         count: { base: { marginInlineStart: 'var(--space-xs)', fontFamily: mono, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-dim)' } },
-        divider: { base: { inlineSize: '1px', blockSize: '20px', flexShrink: '0', background: 'var(--ag-line-strong)' } },
-        context: { base: { display: 'flex', alignItems: 'center', gap: '10px', minInlineSize: '0', flex: '1' } },
+        divider: { base: { inlineSize: '1px', blockSize: '20px', flexShrink: '0', background: 'var(--ag-line-strong)' }, at: { 'below-md': { base: { display: 'none' } } } },
+        context: {
+            base: { display: 'flex', alignItems: 'center', gap: 'calc(var(--space-sm) + var(--space-2xs))', minInlineSize: '0', flex: '1' },
+            at: { 'below-md': { base: { flexBasis: '100%', paddingBlockEnd: 'var(--space-sm)' } } }
+        },
         env: { base: { ...ellipsis, fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
         branch: {
             base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', blockSize: '24px', padding: '0 var(--space-sm)', minInlineSize: '0', boxSizing: 'border-box', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-selector)', fontFamily: mono, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)', color: 'var(--color-base-content)', whiteSpace: 'nowrap' },
@@ -251,6 +261,7 @@ const sessionBar: RecipeInput = {
         ahead: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
         controls: {
             base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexShrink: '0', marginInlineStart: 'auto' },
+            at: { 'below-md': { base: { flexBasis: '100%', flexWrap: 'wrap', marginInlineStart: '0', paddingBlockEnd: 'var(--space-sm)' } } },
             selectors: { '& [data-intent="icon"]': { inlineSize: '32px', blockSize: '32px', minBlockSize: '32px', background: 'transparent', color: 'var(--ag-text-muted)' } }
         }
     }
@@ -261,7 +272,7 @@ const fileHeader: RecipeInput = {
     component: 'ag-file-header',
     parts: {
         // Wraps: a page's actions ("Edited by", Open diff, Mention in chat) drop under the path rather than scroll the page.
-        root: { base: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-sm) var(--space-md)', padding: '14px var(--space-xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)' } },
+        root: { base: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-sm) var(--space-md)', padding: 'calc(var(--space-md) + var(--space-2xs)) var(--space-xl)', minInlineSize: '0', borderBlockEnd: 'var(--border) solid var(--ag-line)' } },
         path: { base: { ...ellipsis, fontFamily: mono, fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)' } },
         name: { base: { color: 'var(--color-base-content)', fontWeight: 'var(--weight-semibold)' } },
         sep: { base: { color: 'var(--ag-text-muted)' } },
@@ -281,7 +292,7 @@ const fileHeader: RecipeInput = {
 const lineComposer: RecipeInput = {
     component: 'ag-line-composer',
     parts: {
-        root: { base: { display: 'flex', flexDirection: 'column', gap: '10px', margin: '0', padding: 'var(--space-md)', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-box)', background: 'var(--color-base-200)', color: 'var(--color-base-content)', fontFamily: 'var(--font-sans)' } },
+        root: { base: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--space-sm) + var(--space-2xs))', margin: '0', padding: 'var(--space-md)', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-box)', background: 'var(--color-base-200)', color: 'var(--color-base-content)', fontFamily: 'var(--font-sans)' } },
         head: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0' } },
         title: { base: { ...ellipsis, flex: '1', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' } },
         ref: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
@@ -289,7 +300,7 @@ const lineComposer: RecipeInput = {
         input: {
             base: { display: 'block' },
             selectors: {
-                '& [data-scope="textarea"][data-part="textarea"]': { inlineSize: '100%', boxSizing: 'border-box', padding: '10px', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' }
+                '& [data-scope="textarea"][data-part="textarea"]': { inlineSize: '100%', boxSizing: 'border-box', padding: 'calc(var(--space-sm) + var(--space-2xs))', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' }
             }
         },
         foot: {

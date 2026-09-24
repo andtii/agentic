@@ -17,7 +17,7 @@ const ROUTES: { path: string; page: string; table?: { selector: string; cols: st
 ];
 
 async function colWidths(page: Page, selector: string): Promise<string[]> {
-    return page.locator(`${selector} colgroup > col`).evaluateAll((cols) => cols.map((c) => (c as HTMLElement).style.width || 'auto'));
+    return page.locator(`${selector} colgroup > col`).evaluateAll((cols) => cols.map((c) => (c as HTMLElement).style.getPropertyValue('--table-column-width') || 'auto'));
 }
 
 for (const route of ROUTES) {

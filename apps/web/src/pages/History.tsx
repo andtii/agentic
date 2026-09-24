@@ -70,16 +70,16 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
                             const agent = e.actor === 'you' ? undefined : opsAgent(e.actor);
                             return (
                                 <DataTable.Row data-history-row={e.id} data-kind={e.kind}>
-                                    <DataTable.Cell><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
-                                    <DataTable.Cell><Tag tone={KIND_TONE[e.kind]}>{kindLabel(e.kind)}</Tag></DataTable.Cell>
-                                    <DataTable.Cell>
+                                    <DataTable.Cell column={0}><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
+                                    <DataTable.Cell column={1}><Tag tone={KIND_TONE[e.kind]}>{kindLabel(e.kind)}</Tag></DataTable.Cell>
+                                    <DataTable.Cell column={2}>
                                         <span data-agent-cell>
                                             {agent ? <AgentTile name={agent.name} hue={agent.hue} size={22} /> : <AgentTile name="Andii" person size={22} />}
                                             <span>{agent ? agent.name : 'You'}</span>
                                         </span>
                                     </DataTable.Cell>
-                                    <DataTable.Cell><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
-                                    <DataTable.Cell><Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link></DataTable.Cell>
+                                    <DataTable.Cell column={3}><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
+                                    <DataTable.Cell column={4}><Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link></DataTable.Cell>
                                 </DataTable.Row>
                             );
                         })

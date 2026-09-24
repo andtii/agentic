@@ -15,9 +15,19 @@ const patch: RecipePatch = {
                 gap: 'var(--space-sm)',
                 boxShadow: 'none',
                 fontSize: 'var(--text-md)',
-                transition: `background ${motion}, border-color ${motion}, filter ${motion}`
+                transition: `background ${motion}, border-color ${motion}, filter ${motion}`,
+                // A label never wraps: the button grows, the row wraps.
+                whiteSpace: 'nowrap'
             },
-            states: { 'focus-visible': ring }
+            states: { 'focus-visible': ring },
+            selectors: { '& > span': { whiteSpace: 'nowrap' } },
+            // Phones: the 48 px touch height; an icon button stays square.
+            at: {
+                'below-md': {
+                    base: { minBlockSize: 'var(--ag-control-h-touch)' },
+                    selectors: { '&[data-intent="icon"]': { minInlineSize: 'var(--ag-control-h-touch)' } }
+                }
+            }
         }
     },
     variants: {

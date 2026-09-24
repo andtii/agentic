@@ -83,17 +83,17 @@ const ScheduleRow = component<{ ws: string; id: string; tz: string; agents: Agen
         const policy = env && !env.online ? `${env.machineName} is offline · policy: ${v.offlinePolicy === 'queue' ? 'queue until it returns' : v.offlinePolicy === 'fail' ? 'fail' : 'fall back to the platform runtime'}` : null;
         return (
             <DataTable.Row data-schedule={s.id} data-enabled={s.enabled ? '' : undefined}>
-                <DataTable.Cell><Tag>{s.kind}</Tag></DataTable.Cell>
-                <DataTable.Cell>
+                <DataTable.Cell column={0}><Tag>{s.kind}</Tag></DataTable.Cell>
+                <DataTable.Cell column={1}>
                     <span data-schedule-what>
                         <span data-schedule-title>{s.what}</span>
                         {policy ? <span data-policy-line>{policy}</span> : null}
                     </span>
                 </DataTable.Cell>
-                <DataTable.Cell><code data-mono data-dim>{s.when}</code></DataTable.Cell>
-                <DataTable.Cell><code data-mono data-strong={s.enabled ? '' : undefined} data-next-run>{s.nextRun}</code></DataTable.Cell>
-                <DataTable.Cell><RunsOn schedule={s} agents={props.agents} environments={props.environments} /></DataTable.Cell>
-                <DataTable.Cell>
+                <DataTable.Cell column={2}><code data-mono data-dim>{s.when}</code></DataTable.Cell>
+                <DataTable.Cell column={3}><code data-mono data-strong={s.enabled ? '' : undefined} data-next-run>{s.nextRun}</code></DataTable.Cell>
+                <DataTable.Cell column={4}><RunsOn schedule={s} agents={props.agents} environments={props.environments} /></DataTable.Cell>
+                <DataTable.Cell column={5}>
                     <Switch label={`Enable ${s.what}`} hideLabel model={() => st.on} disabled={st.busy} onCheckedChange={(on: boolean) => { void toggle(on); }} />
                 </DataTable.Cell>
             </DataTable.Row>

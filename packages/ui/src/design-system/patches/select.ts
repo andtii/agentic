@@ -1,8 +1,10 @@
 import type { RecipePatch } from '@sigx/zero-kit/define';
 import { fieldBase, fieldStates } from './shared.js';
 
-// The shared field chrome (`fieldBase` / `fieldStates`), as on `input`.
+// The shared field chrome (`fieldBase` / `fieldStates`), as on `input`. `xs` is the 24 px select inside a
+// chip (the agent form's per-tool mode), a pill's height rather than daisy's 32 px.
 const patch: RecipePatch = {
+    variants: { size: { xs: { trigger: { base: { height: '24px', paddingBlock: '0' } } } } },
     parts: {
         trigger: {
             base: { ...fieldBase, paddingInline: 'var(--space-md)', fontWeight: 'var(--weight-normal)' },

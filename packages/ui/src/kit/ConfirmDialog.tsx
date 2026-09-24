@@ -46,10 +46,10 @@ export const ConfirmDialog = component<ConfirmDialogProps>(({ props, slots, emit
                 {props.description ? <Dialog.Description>{props.description}</Dialog.Description> : null}
                 {dependents.length ? (
                     <div data-confirm-dependents="">
-                        <p style="margin: 0 0 var(--space-xs); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--ag-text-dim)">
+                        <p>
                             {props.dependentsLabel ?? `Affects ${dependents.length}`}
                         </p>
-                        <ul style="margin: 0 0 var(--space-lg); padding-inline-start: var(--space-lg); font-size: var(--text-md)">
+                        <ul>
                             {dependents.map((name) => <li>{name}</li>)}
                         </ul>
                     </div>

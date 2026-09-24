@@ -4,7 +4,7 @@ import { NEEDS, sortNeeds, loadHome } from '../../src/mock/workspace';
 import { needsYouCount } from '../../src/nav';
 import { mountRoute, page, all, texts } from './mount';
 import { Panel } from '../../src/components/Panel';
-import { mountAt, text } from './helpers';
+import { colWidths, mountAt, text } from './helpers';
 
 describe('/ (Home)', () => {
     it('renders the home page with its three regions and the tasks table template', async () => {
@@ -15,8 +15,7 @@ describe('/ (Home)', () => {
         expect(dom.querySelector('[data-home-rail]')?.getAttribute('aria-label')).toBe('Today, spend and limits');
         expect(dom.querySelector('[data-home-tasks]')?.getAttribute('aria-label')).toBe('Active tasks');
         // The table carries the handoff's column template as <col> widths.
-        const cols = [...dom.querySelectorAll('[data-home-tasks] colgroup col')].map((c) => (c.getAttribute('style') ?? '').replace(/;$/, ''));
-        expect(cols).toEqual(['width: 100px', '', 'width: 140px', 'width: 270px', 'width: 60px']);
+        expect(colWidths(dom.querySelector('[data-home-tasks]')!)).toEqual(['100px', 'auto', '140px', '270px', '60px']);
         expect(HOME_TASK_COLS).toBe('100px 1fr 140px 270px 60px');
     });
 

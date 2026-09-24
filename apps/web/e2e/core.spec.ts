@@ -30,7 +30,7 @@ test.describe('core flow', () => {
         await expect(page.locator('[data-scope="drawer"][data-part="panel"][data-l-dock-above] [data-scope="nav-list"] [data-scope="badge"]')).toHaveText(String(open));
         // Approvals first, then input, then interrupted.
         await expect(needs.first()).toHaveAttribute('data-kind', 'approval');
-        await expect(page.locator('[data-home-tasks] colgroup col').first()).toHaveAttribute('style', /width: 100px/);
+        await expect(page.locator('[data-home-tasks] colgroup col').first()).toHaveAttribute('style', /--table-column-width: ?100px/);
 
         // The approval item's "Open chat" leads to the chat.
         await needs.first().getByRole('link', { name: 'Open chat' }).click();

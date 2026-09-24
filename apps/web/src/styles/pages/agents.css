@@ -154,13 +154,6 @@
     gap: 40px;
     align-items: start;
 }
-[data-page="agent"] [data-scope="ai-form"][data-part="summary"] {
-    grid-column: 1 / -1;
-    padding: var(--space-md) var(--space-lg);
-    border: var(--border) solid var(--color-error);
-    border-radius: var(--radius-box);
-    color: var(--color-error);
-}
 [data-page="agent"] [data-scope="ai-form"][data-part="sections"] {
     min-inline-size: 0;
 }
@@ -204,7 +197,8 @@
     gap: var(--space-lg);
     align-items: start;
 }
-/* multi-selects: zero's combobox tags (styled by the design system) in mono; the per-tool mode select inline and compact */
+/* multi-selects: zero's combobox tags (styled by the design system) in mono; the per-tool mode select inline (its label is
+   Field.Label visuallyHidden, its 24 px the select patch's xs) */
 [data-page="agent"] [data-scope="combobox"][data-part="tag"] {
     font-family: var(--font-mono);
 }
@@ -213,25 +207,6 @@
     align-items: center;
     gap: var(--space-xs);
     margin: 0;
-}
-/* the per-tool mode label names its select for assistive tech; the tag shows the tool name + select only */
-[data-page="agent"] [data-scope="combobox"][data-part="tag"] [data-scope="field"][data-part="label"] {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    margin: -1px;
-    padding: 0;
-    border: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-}
-/* still forced (#592): the select patch's base height (32 px) beats Field.Root size="xs" — reported on #595 */
-[data-page="agent"] [data-scope="combobox"][data-part="tag"] [data-scope="select"][data-part="trigger"] {
-    min-block-size: 24px;
-    block-size: 24px;
-    padding-block: 0;
-    font-size: var(--text-xs);
 }
 [data-page="agent"] [data-scope="ai-form"][data-part="policy-row"] {
     display: flex;

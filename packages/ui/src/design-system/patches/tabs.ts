@@ -12,7 +12,7 @@ const patch: RecipePatch = {
                 color: 'var(--ag-text-muted)',
                 borderRadius: '0',
                 borderBlockEnd: '2px solid transparent',
-                marginBlockEnd: '-1px',
+                marginBlockEnd: 'calc(-1 * var(--border))',
                 transition: `color ${motion}, border-color ${motion}`
             },
             states: { active: { background: 'transparent', boxShadow: 'none', color: 'var(--color-base-content)', borderBlockEndColor: 'var(--color-primary)' }, 'focus-visible': ring }

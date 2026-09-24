@@ -23,7 +23,7 @@ const patch: RecipePatch = {
         link: {
             base: {
                 position: 'relative',
-                gap: '10px',
+                gap: 'calc(var(--space-sm) + var(--space-2xs))',
                 blockSize: '38px',
                 padding: '0 var(--space-md)',
                 transition: `background ${motion}, color ${motion}`

@@ -168,12 +168,17 @@ test.describe('phone', () => {
 
     test('tables become stacked cards captioned by their column heads, and machines fold to 52 px environment rows', async ({ page }) => {
         await page.goto('/schedules');
-        const row = page.locator('[data-ag-table] [data-scope="table"][data-part="body"] > [data-scope="table"][data-part="row"]').first();
-        expect(await row.evaluate((el) => getComputedStyle(el).display)).toBe('flex');
+        // zero's stacked mode (`Table.Root stack="md"`): each row one block, each cell opening with its column's label.
+        const table = page.locator('[data-scope="table"][data-part="root"][data-l-stack="md"]').first();
+        const row = table.locator('[data-scope="table"][data-part="body"] > [data-scope="table"][data-part="row"]').first();
+        expect(await row.evaluate((el) => getComputedStyle(el).display)).toBe('block');
         const cell = row.locator('[data-scope="table"][data-part="cell"]').first();
-        expect(await cell.evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"Kind"');
+        await expect(cell.locator('[data-scope="table"][data-part="cell-label"]')).toHaveText('Kind');
+        await expect(cell.locator('[data-scope="table"][data-part="cell-label"]')).toBeVisible();
+        // The actions column is named for assistive tech only, so its cell prints no label.
+        expect(await row.locator('[data-scope="table"][data-part="cell"]').last().locator('[data-part="cell-label"]').count()).toBe(0);
         // The head row is read, not seen: clipped to a pixel, off the layout.
-        expect(await page.locator('[data-ag-table] [data-scope="table"][data-part="head"]').first().evaluate((el) => `${getComputedStyle(el).position} ${el.getBoundingClientRect().width}`)).toBe('absolute 1');
+        expect(await table.locator('[data-scope="table"][data-part="head"]').evaluate((el) => `${getComputedStyle(el).position} ${el.getBoundingClientRect().width}`)).toBe('absolute 1');
 
         await page.goto('/machines');
         const env = page.locator('[data-scope="ag-env-card"][data-part="root"]').first();

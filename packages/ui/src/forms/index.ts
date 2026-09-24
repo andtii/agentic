@@ -39,7 +39,9 @@ export type { SchemaFormApi, SchemaFormProps } from './schema-form.js';
 // `componentExportName(scope)` for the map field's `ag-*` scope — the fragment contract.
 export { MapField as AgMapField } from './fields.js';
 
-export { AgentForm } from './agent-form.js';
+// `AiForm`: the name an api-declaring design system's generated `./components` imports for the `ai-form` scope.
+export { AgentForm, AgentForm as AiForm } from './agent-form.js';
+export { aiFormAnatomy } from './anatomy.js';
 export type { AccountOption, AgentFormApi, AgentFormProps, AgentFormRailProps, AgentFormLayout, AgentFormWorkdirProps } from './agent-form.js';
 
 export { EnvironmentCard, environmentStatus } from './environment-card.js';

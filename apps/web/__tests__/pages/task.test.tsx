@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { loadTask, loadTasks } from '../../src/mock/workspace';
 import { topbarFor } from '../../src/components/topbar';
 import { mountRoute, page, all, texts, tick } from './mount';
+import { colWidths } from './helpers';
 
 describe('/tasks (Tasks)', () => {
     it('renders every task in the Home table template with filter chips by status', async () => {
         const dom = await mountRoute('/tasks');
         expect(page(dom, 'tasks')).not.toBeNull();
-        const cols = [...dom.querySelectorAll('colgroup col')].map((c) => (c.getAttribute('style') ?? '').replace(/;$/, ''));
-        expect(cols).toEqual(['width: 100px', '', 'width: 140px', 'width: 270px', 'width: 60px']);
+        expect(colWidths(dom)).toEqual(['100px', 'auto', '140px', '270px', '60px']);
         expect(dom.querySelectorAll('tbody tr')).toHaveLength(loadTasks().length);
         const chips = [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chips] [data-part="item"]')];
         expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false', 'false']);

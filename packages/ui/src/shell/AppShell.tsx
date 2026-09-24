@@ -1,6 +1,7 @@
 import { component, signal, type Define, type JSXElement } from '@sigx/runtime-core';
 import { Badge, Drawer, Navbar, NavList, type PartProps } from '@sigx/zero';
 import { Icon, type IconName } from '../kit/icons';
+import { SHELL_SCOPE } from './anatomy';
 
 /** One navigation entry. `badge` is the Home count: open inbox items of kind approval, input or interrupted. */
 export interface NavItem {
@@ -129,7 +130,7 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
     };
 
     const nav = () => (
-        <div data-scope="ai-shell" data-part="nav" onClick={onNavClick}>
+        <div data-scope={SHELL_SCOPE} data-part="nav" onClick={onNavClick}>
             <NavList.Root label="Main">
                 {groups().map((group, index) => (
                     // The first group has no heading, so its label names it; the rest are named by their heading.
@@ -145,16 +146,16 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
     );
 
     const brandMark = () => (
-        <span data-scope="ai-shell" data-part="brand">
-            <span data-scope="ai-shell" data-part="brand-mark" aria-hidden="true">a/</span>
-            <span data-scope="ai-shell" data-part="brand-name">{brand()}</span>
+        <span data-scope={SHELL_SCOPE} data-part="brand">
+            <span data-scope={SHELL_SCOPE} data-part="brand-mark" aria-hidden="true">a/</span>
+            <span data-scope={SHELL_SCOPE} data-part="brand-name">{brand()}</span>
         </span>
     );
 
     const foot = () => (
         <>
-            {slots.connection ? <div data-scope="ai-shell" data-part="connection">{slots.connection()}</div> : null}
-            {slots.user ? <div data-scope="ai-shell" data-part="user">{slots.user()}</div> : null}
+            {slots.connection ? <div data-scope={SHELL_SCOPE} data-part="connection">{slots.connection()}</div> : null}
+            {slots.user ? <div data-scope={SHELL_SCOPE} data-part="user">{slots.user()}</div> : null}
         </>
     );
 
@@ -162,17 +163,17 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
     const backLink = (href: string) => {
         const icon = <Icon name="back" size={20} />;
         return (
-            <span data-scope="ai-shell" data-part="back">
+            <span data-scope={SHELL_SCOPE} data-part="back">
                 {slots.back ? slots.back({ href, icon }) : <a href={href} aria-label="Back">{icon}</a>}
             </span>
         );
     };
 
     return () => (
-        <div data-scope="ai-shell" data-part="root">
+        <div data-scope={SHELL_SCOPE} data-part="root">
             <Drawer.Root model={() => state.open} modal={{ below: 'md' }} placement="start" label="Navigation">
                 <Drawer.Panel>
-                    <div data-scope="ai-shell" data-part="drawer-head">
+                    <div data-scope={SHELL_SCOPE} data-part="drawer-head">
                         {brandMark()}
                         <Drawer.Close asChild>
                             {(p: PartProps) => <button type="button" aria-label="Close" {...p}><Icon name="close" size={20} /></button>}
@@ -180,32 +181,32 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
                     </div>
                     <Drawer.Title visuallyHidden>{`${brand()} navigation`}</Drawer.Title>
                     {nav()}
-                    <div data-scope="ai-shell" data-part="sidebar-spacer" aria-hidden="true" />
+                    <div data-scope={SHELL_SCOPE} data-part="sidebar-spacer" aria-hidden="true" />
                     {foot()}
                 </Drawer.Panel>
-                <div data-scope="ai-shell" data-part="body">
-                    <div data-scope="ai-shell" data-part="bar" data-regime={props.back ? 'detail' : 'root'}>
+                <div data-scope={SHELL_SCOPE} data-part="body">
+                    <div data-scope={SHELL_SCOPE} data-part="bar" data-regime={props.back ? 'detail' : 'root'}>
                         <Navbar.Root>
                             <Navbar.Start>
                                 <Drawer.Trigger asChild>
                                     {(p: PartProps) => <button type="button" aria-label="Menu" {...p}><Icon name="menu" size={20} /></button>}
                                 </Drawer.Trigger>
                                 {props.back ? backLink(props.back) : null}
-                                <div data-scope="ai-shell" data-part="breadcrumb">{slots.breadcrumb?.()}</div>
+                                <div data-scope={SHELL_SCOPE} data-part="breadcrumb">{slots.breadcrumb?.()}</div>
                                 {props.title ? (
-                                    <div data-scope="ai-shell" data-part="title">
-                                        <span data-scope="ai-shell" data-part="title-text">{props.title}</span>
-                                        {slots.subtitle ? <span data-scope="ai-shell" data-part="subtitle">{slots.subtitle()}</span> : null}
+                                    <div data-scope={SHELL_SCOPE} data-part="title">
+                                        <span data-scope={SHELL_SCOPE} data-part="title-text">{props.title}</span>
+                                        {slots.subtitle ? <span data-scope={SHELL_SCOPE} data-part="subtitle">{slots.subtitle()}</span> : null}
                                     </div>
                                 ) : brandMark()}
                             </Navbar.Start>
                             <Navbar.End>
-                                <div data-scope="ai-shell" data-part="actions">{slots.actions?.()}</div>
-                                {slots.phoneAction ? <div data-scope="ai-shell" data-part="phone-action">{slots.phoneAction()}</div> : null}
+                                <div data-scope={SHELL_SCOPE} data-part="actions">{slots.actions?.()}</div>
+                                {slots.phoneAction ? <div data-scope={SHELL_SCOPE} data-part="phone-action">{slots.phoneAction()}</div> : null}
                             </Navbar.End>
                         </Navbar.Root>
                     </div>
-                    <main data-scope="ai-shell" data-part="main" data-flush={props.flush ? '' : undefined}>{slots.default?.()}</main>
+                    <main data-scope={SHELL_SCOPE} data-part="main" data-flush={props.flush ? '' : undefined}>{slots.default?.()}</main>
                 </div>
             </Drawer.Root>
         </div>

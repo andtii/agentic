@@ -39,6 +39,7 @@ import {
     type LimitKey,
     type RuntimeOption
 } from './agent-model.js';
+import { FORM_SCOPE } from './anatomy.js';
 import { MultiSelectField, NumberField, SelectField, SwitchField, TextField, TextareaField, type FieldOption } from './fields.js';
 import { Button } from '../kit/Button.js';
 import { ErrorNote } from '../kit/ErrorNote.js';
@@ -193,7 +194,7 @@ function modelOptions(models: readonly string[], defaultModel: string | undefine
 function runtimeFix(runtime: RuntimeOption | undefined): JSXElement | null {
     if (!runtime?.hint || !runtime.href) return null;
     return (
-        <p data-scope="ai-form" data-part="hint" data-runtime-fix={runtime.value}>
+        <p data-scope={FORM_SCOPE} data-part="hint" data-runtime-fix={runtime.value}>
             <a href={runtime.href}>{runtime.hrefLabel ?? 'Set it up'}</a>
         </p>
     );
@@ -326,22 +327,22 @@ export const AgentForm = component<AgentFormProps>(
             // group. In the sections layout the legend is visually hidden and a title-and-hint column
             // sits beside the controls; the stack layout shows the legend as the heading.
             const section = (key: string, title: string, body: JSXElement | JSXElement[]) => (
-                <fieldset data-scope="ai-form" data-part="section" data-section={key} disabled={props.disabled}>
-                    <legend data-scope="ai-form" data-part="section-title" data-visually-hidden={sections ? '' : undefined}>{title}</legend>
+                <fieldset data-scope={FORM_SCOPE} data-part="section" data-section={key} disabled={props.disabled}>
+                    <legend data-scope={FORM_SCOPE} data-part="section-title" data-visually-hidden={sections ? '' : undefined}>{title}</legend>
                     {sections ? (
-                        <div data-scope="ai-form" data-part="section-head" aria-hidden="true">
-                            <span data-scope="ai-form" data-part="section-heading">{title}</span>
-                            <p data-scope="ai-form" data-part="section-hint">{SECTION_HINTS[key]}</p>
+                        <div data-scope={FORM_SCOPE} data-part="section-head" aria-hidden="true">
+                            <span data-scope={FORM_SCOPE} data-part="section-heading">{title}</span>
+                            <p data-scope={FORM_SCOPE} data-part="section-hint">{SECTION_HINTS[key]}</p>
                         </div>
                     ) : null}
-                    {sections ? <div data-scope="ai-form" data-part="section-body">{body}</div> : body}
+                    {sections ? <div data-scope={FORM_SCOPE} data-part="section-body">{body}</div> : body}
                 </fieldset>
             );
 
             const approvalRows = APPROVAL_CATEGORIES.map((c) =>
                 segmented ? (
-                    <div key={c} data-scope="ai-form" data-part="policy-row">
-                        <div data-scope="ai-form" data-part="policy-label">
+                    <div key={c} data-scope={FORM_SCOPE} data-part="policy-row">
+                        <div data-scope={FORM_SCOPE} data-part="policy-label">
                             <span>{CATEGORY_LABELS[c]}</span>
                             <small>{CATEGORY_HINTS[c]}</small>
                         </div>
@@ -377,8 +378,8 @@ export const AgentForm = component<AgentFormProps>(
                                 slots={{
                                     tag: ({ value, label }) => (
                                         <Field.Root size="xs">
-                                            <Field.Label>Mode for {label}</Field.Label>
-                                            <Select.Root model={() => draft.toolModes[value]} name={F.toolMode(value)} items={TOOL_MODE_OPTIONS} itemValue={(o) => o.value} />
+                                            <Field.Label visuallyHidden>Mode for {label}</Field.Label>
+                                            <Select.Root size="xs" model={() => draft.toolModes[value]} name={F.toolMode(value)} items={TOOL_MODE_OPTIONS} itemValue={(o) => o.value} />
                                         </Field.Root>
                                     )
                                 }}
@@ -389,7 +390,7 @@ export const AgentForm = component<AgentFormProps>(
 
                     {section('approval', 'Approval policy', (
                         <>
-                            {segmented ? null : <p data-scope="ai-form" data-part="hint">Per tool category. The first matching rule wins; a category without a rule falls back to the tool's own mode.</p>}
+                            {segmented ? null : <p data-scope={FORM_SCOPE} data-part="hint">Per tool category. The first matching rule wins; a category without a rule falls back to the tool's own mode.</p>}
                             {approvalRows}
                             {draft.approvalExtra.length ? <input type="hidden" name={F.approvalExtra} value={JSON.stringify(draft.approvalExtra)} /> : null}
                         </>
@@ -447,7 +448,7 @@ export const AgentForm = component<AgentFormProps>(
                     {rail ? null : section('save', 'Save', (
                         <>
                             <TextField model={() => draft.reason} name={F.reason} label="Reason for this change" description="Recorded with the new configuration version." />
-                            <div data-scope="ai-form" data-part="actions">
+                            <div data-scope={FORM_SCOPE} data-part="actions">
                                 <Button type="submit" intent="primary" disabled={props.disabled}>
                                     {props.submitLabel ?? 'Save'}
                                 </Button>
@@ -464,12 +465,12 @@ export const AgentForm = component<AgentFormProps>(
             const summary = count ? <ErrorNote data-form-summary="">{count === 1 ? 'One field needs attention.' : `${count} fields need attention.`}</ErrorNote> : null;
 
             return (
-                <form data-scope="ai-form" data-part="root" data-form="agent" data-layout={props.layout ?? 'stack'} action={props.action} method={props.method ?? 'post'} onSubmit={onSubmit}>
+                <form data-scope={FORM_SCOPE} data-part="root" data-form="agent" data-layout={props.layout ?? 'stack'} action={props.action} method={props.method ?? 'post'} onSubmit={onSubmit}>
                     {rail ? null : summary}
                     {rail ? (
                         <>
-                            <div data-scope="ai-form" data-part="sections">{summary}{body}</div>
-                            <aside data-scope="ai-form" data-part="rail">{rail({ ...api, config: source() })}</aside>
+                            <div data-scope={FORM_SCOPE} data-part="sections">{summary}{body}</div>
+                            <aside data-scope={FORM_SCOPE} data-part="rail">{rail({ ...api, config: source() })}</aside>
                         </>
                     ) : body}
                 </form>

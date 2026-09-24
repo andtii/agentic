@@ -295,7 +295,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                 <div data-scope={SCOPE} data-part="input">
                     <Combobox.Root trigger="@" anchor={caretAnchor} items={mentionItems()} itemKey={mentionKey} itemLabel={mentionLabel} filter={false} model:inputValue={() => st.query}>
                         <Textarea.Root model={() => st.draft} minRows={props.minRows ?? 1} maxRows={props.maxRows ?? 8} disabled={props.disabled} name="message">
-                            <Textarea.Label>Message</Textarea.Label>
+                            <Textarea.Label visuallyHidden>Message</Textarea.Label>
                             <Textarea.Textarea
                                 ref={(h: TextareaHandle | null) => {
                                     box = h;

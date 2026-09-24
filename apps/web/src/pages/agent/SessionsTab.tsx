@@ -45,16 +45,16 @@ export const SessionsTab = component<SessionsTabProps>(({ props }) => () => {
                     const profile = props.agent ?? agentProfile(s.agentId);
                     return (
                         <DataTable.Row>
-                            <DataTable.Cell><Link to={`/sessions/${s.id}`} class="mono">{s.id}</Link></DataTable.Cell>
-                            <DataTable.Cell>
+                            <DataTable.Cell column={0}><Link to={`/sessions/${s.id}`} class="mono">{s.id}</Link></DataTable.Cell>
+                            <DataTable.Cell column={1}>
                                 <Row gap="sm" align="center">
                                     <AgentTile name={agent?.name ?? s.agentId} hue={profile?.hue} size={22} />
                                     <span>{agent?.name ?? s.agentId}</span>
                                 </Row>
                             </DataTable.Cell>
-                            <DataTable.Cell><EnvironmentLine machine={s.environment.machine} runtime={s.environment.runtime} account={s.environment.account} /></DataTable.Cell>
-                            <DataTable.Cell><StatusPill status={s.status} /></DataTable.Cell>
-                            <DataTable.Cell><span data-align="end" class="mono" data-tone="dim">{age(s.startedAt, undefined, props.zone)}</span></DataTable.Cell>
+                            <DataTable.Cell column={2}><EnvironmentLine machine={s.environment.machine} runtime={s.environment.runtime} account={s.environment.account} /></DataTable.Cell>
+                            <DataTable.Cell column={3}><StatusPill status={s.status} /></DataTable.Cell>
+                            <DataTable.Cell column={4}><span class="mono" data-tone="dim">{age(s.startedAt, undefined, props.zone)}</span></DataTable.Cell>
                         </DataTable.Row>
                     );
                 })}

@@ -140,17 +140,17 @@ export const LiveUsage = component(() => {
                 >
                     {rows.map((row) => (
                         <DataTable.Row data-usage-row={row.id} data-quality={row.quality}>
-                            <DataTable.Cell>
+                            <DataTable.Cell column={0}>
                                 <span data-agent-cell>
                                     {row.agent ? <AgentTile name={row.agent.name} hue={row.agent.hue} size={22} /> : null}
                                     <span data-ellipsis title={row.label}>{row.label}</span>
                                     <span data-usage-sub>{row.sub}</span>
                                 </span>
                             </DataTable.Cell>
-                            <DataTable.Cell><code data-mono>{row.turns}</code></DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-cost={row.quality} data-dim={row.cost === null ? '' : undefined}>{costText(row.cost)}</code></DataTable.Cell>
-                            <DataTable.Cell><StatusPill status={row.quality} hollow {...(row.quality === 'estimated' ? { tone: 'needs-you' as const, label: 'ESTIMATED' } : {})} /></DataTable.Cell>
+                            <DataTable.Cell column={1}><code data-mono>{row.turns}</code></DataTable.Cell>
+                            <DataTable.Cell column={2}><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
+                            <DataTable.Cell column={3}><code data-mono data-cost={row.quality} data-dim={row.cost === null ? '' : undefined}>{costText(row.cost)}</code></DataTable.Cell>
+                            <DataTable.Cell column={4}><StatusPill status={row.quality} hollow {...(row.quality === 'estimated' ? { tone: 'needs-you' as const, label: 'ESTIMATED' } : {})} /></DataTable.Cell>
                         </DataTable.Row>
                     ))}
                 </DataTable>

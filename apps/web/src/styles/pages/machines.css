@@ -168,6 +168,6 @@
     [data-machine-head], [data-machine-hero] { flex-wrap: wrap; gap: var(--space-md); }
     [data-code-cells] { gap: var(--space-sm); }
     [data-code-cell] { inline-size: auto; flex: 1 1 0; block-size: 64px; font-size: 28px; }
-    /* long mono strings wrap inside the cards (shared.css does the same for the old [data-card]) */
+    /* long mono strings wrap inside the cards */
     [data-card-body] code { overflow-wrap: anywhere; }
 }

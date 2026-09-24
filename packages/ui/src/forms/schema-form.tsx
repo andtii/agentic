@@ -19,6 +19,7 @@ import { batch, computed, signal, watch } from '@sigx/reactivity';
 import type { ConfigNumberProperty, ConfigSchema, ConfigStringArrayProperty, ConfigStringProperty } from '@agentic/core';
 import { Button } from '../kit/Button.js';
 import { ErrorNote } from '../kit/ErrorNote.js';
+import { FORM_SCOPE } from './anatomy.js';
 import { MapField, MultiSelectField, NumberField, SelectField, SwitchField, TextField } from './fields.js';
 import { fromSchemaDraft, schemaFields, toSchemaDraft, validateSchemaDraft, type SchemaDraft, type SchemaErrors, type SchemaField } from './schema-model.js';
 
@@ -148,14 +149,14 @@ export const SchemaForm = component<SchemaFormProps>(
             const stray = Object.entries(err).filter(([key]) => !drawn.has(key));
             const busy = !!props.disabled || !!props.saving;
             return (
-                <form data-scope="ai-form" data-part="root" data-form="schema" action={props.action} method={props.method ?? 'post'} onSubmit={onSubmit} noValidate>
+                <form data-scope={FORM_SCOPE} data-part="root" data-form="schema" action={props.action} method={props.method ?? 'post'} onSubmit={onSubmit} noValidate>
                     {fields.length === 0 ? (
-                        <p data-scope="ai-form" data-part="hint" data-empty="">
+                        <p data-scope={FORM_SCOPE} data-part="hint" data-empty="">
                             Nothing to configure.
                         </p>
                     ) : (
-                        <fieldset data-scope="ai-form" data-part="section" data-section="config" disabled={busy}>
-                            <legend data-scope="ai-form" data-part="section-title" data-visually-hidden="">
+                        <fieldset data-scope={FORM_SCOPE} data-part="section" data-section="config" disabled={busy}>
+                            <legend data-scope={FORM_SCOPE} data-part="section-title" data-visually-hidden="">
                                 Configuration
                             </legend>
                             {fields.map((f) => control(f, err))}
@@ -170,7 +171,7 @@ export const SchemaForm = component<SchemaFormProps>(
                         </ErrorNote>
                     ) : null}
                     {props.hideActions || fields.length === 0 ? null : (
-                        <div data-scope="ai-form" data-part="actions">
+                        <div data-scope={FORM_SCOPE} data-part="actions">
                             <Button type="submit" intent="primary" loading={props.saving} disabled={props.disabled}>
                                 {props.submitLabel ?? 'Save'}
                             </Button>

@@ -2,30 +2,43 @@
  * `DataTable` — zero's `Table` with the handoff's column templates
  * (`docs/design/HANDOFF.md` → "Layout and shell", tables). `cols` is the
  * grid template the artboard was drawn with (`100px 1fr 140px 270px 60px`):
- * fixed tracks become `<col>` widths, `fr` tracks share the slack. Head
- * row 10 / 16 in the mono label voice, body rows 14 / 16 — both from the
- * table recipe. The whole row is not clickable: the ref or name cell is
+ * fixed tracks become the column spec's widths, `fr` tracks share the slack.
+ * Head row 10 / 16 in the mono label voice, body rows 14 / 16 — both from
+ * the table recipe. The whole row is not clickable: the ref or name cell is
  * the link. While `loading`, three skeleton rows stand in for the body.
  *
- * Below 768 px the table becomes stacked cards ("Responsive behaviour"):
- * one card per row, each cell captioned by its column head. That is CSS in
- * `kitCss` on the `data-ag-table` wrapper, not a second markup, so the
- * server render never has to guess the viewport and hydration matches.
+ * Below `md` the table becomes stacked cards ("Responsive behaviour"): zero's
+ * `Table.Root stack="md"` makes each row one block and prints each cell's
+ * column label inside it (the `cell-label` part) — for every cell that names
+ * its `column`, which is why callers write `<DataTable.Cell column={i}>`. The
+ * geometry is zero's structure layer, the card chrome the `table` patch; the
+ * server render never has to guess the viewport and hydration matches. Below
+ * `xl` the drawn widths yield (the `table` patch's `column` rule).
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { Skeleton, Table } from '@sigx/zero';
+import { Skeleton, Table, VisuallyHidden, type TableColumn } from '@sigx/zero';
 
 export interface DataColumn {
     readonly label: string;
     /** Right-align numbers and ages. */
     readonly align?: 'start' | 'end';
-    /** Visually hidden head text (an actions column). */
+    /** Visually hidden head text (an actions column); a stacked cell prints no label for it. */
     readonly hidden?: boolean;
 }
 
-/** `"100px 1fr 140px"` → one `<col>` width per track; `fr` tracks are `auto`. */
+/** `"100px 1fr 140px"` → one column width per track; `fr` tracks are `auto`. */
 export function parseCols(cols: string): (string | undefined)[] {
     return cols.trim().split(/\s+/).map((track) => (track.endsWith('fr') ? undefined : track));
+}
+
+/** The zero column spec: a hidden column has no `label`, so a stacked cell prints none for it. */
+export function tableColumns(cols: string, columns: readonly DataColumn[]): TableColumn[] {
+    const widths = parseCols(cols);
+    return columns.map((c, i) => ({
+        ...(c.hidden ? {} : { label: c.label }),
+        ...(widths[i] ? { width: widths[i] } : {}),
+        ...(c.align ? { align: c.align } : {})
+    }));
 }
 
 export type DataTableProps =
@@ -35,34 +48,23 @@ export type DataTableProps =
     & Define.Prop<'label', string, true>
     & Define.Prop<'loading', boolean>
     & Define.Prop<'class', string>
-    /** The body rows: `DataTable.Row` / `DataTable.Cell` (zero's `Table.Row` / `Table.Cell`). */
+    /** The body rows: `DataTable.Row` / `DataTable.Cell column={i}` (zero's `Table.Row` / `Table.Cell`). */
     & Define.Slot<'default'>;
 
 const Root = component<DataTableProps>(({ props, slots }) => () => {
-    const widths = parseCols(props.cols);
-    if (__DEV__ && widths.length !== props.columns.length) {
-        throw new Error(`[@agentic/ui] DataTable: ${widths.length} tracks in cols but ${props.columns.length} columns`);
+    if (__DEV__ && parseCols(props.cols).length !== props.columns.length) {
+        throw new Error(`[@agentic/ui] DataTable: ${parseCols(props.cols).length} tracks in cols but ${props.columns.length} columns`);
     }
-    // Below 768 px the kit CSS stacks each row into a card and captions every
-    // cell with its column head, read from these custom properties.
-    const captions = props.columns
-        .map((c, i) => `--ag-col-${i + 1}: ${JSON.stringify(c.hidden ? '' : c.label)}`)
-        .join('; ');
     return (
-        <div data-ag-table="" style={captions}>
-        <Table.Root class={props.class} mods={{ hover: true }}>
-            <colgroup>
-                {widths.map((w) => <col style={w ? `width: ${w}` : undefined} />)}
-            </colgroup>
+        <Table.Root class={props.class} columns={tableColumns(props.cols, props.columns)} stack="md" mods={{ hover: true }}>
             <Table.Caption>
-                <span data-visually-hidden="">{props.label}</span>
+                <VisuallyHidden>{props.label}</VisuallyHidden>
             </Table.Caption>
+            {/* The head row names every column, a hidden one too: its label is read, not seen. */}
             <Table.Head>
                 <Table.Row>
-                    {props.columns.map((c) => (
-                        <Table.HeaderCell>
-                            <span data-align={c.align} data-visually-hidden={c.hidden ? '' : undefined}>{c.label}</span>
-                        </Table.HeaderCell>
+                    {props.columns.map((c, i) => (
+                        <Table.HeaderCell column={i}>{c.hidden ? <VisuallyHidden>{c.label}</VisuallyHidden> : c.label}</Table.HeaderCell>
                     ))}
                 </Table.Row>
             </Table.Head>
@@ -73,7 +75,7 @@ const Root = component<DataTableProps>(({ props, slots }) => () => {
                             {props.columns.map(() => (
                                 <Table.Cell>
                                     <Skeleton.Root model={() => true}>
-                                        <span data-visually-hidden="">Loading</span>
+                                        <VisuallyHidden>Loading</VisuallyHidden>
                                     </Skeleton.Root>
                                 </Table.Cell>
                             ))}
@@ -82,7 +84,6 @@ const Root = component<DataTableProps>(({ props, slots }) => () => {
                     : slots.default?.()}
             </Table.Body>
         </Table.Root>
-        </div>
     );
 }, { name: 'DataTable' });
 

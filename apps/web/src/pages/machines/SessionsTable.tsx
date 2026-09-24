@@ -27,13 +27,13 @@ export const SessionsTable = component<SessionsTableProps>(({ props }) => () => 
             const heavy = s.load != null && s.load.rss >= TELEMETRY_LIMITS.sessionRss;
             return (
                 <DataTable.Row>
-                    <DataTable.Cell><Link to={`/sessions/${s.id}`} class="ag-ref">{s.id}</Link></DataTable.Cell>
-                    <DataTable.Cell><span data-ellipsis title={s.task}>{s.task}</span></DataTable.Cell>
-                    <DataTable.Cell><span data-agent-cell><AgentTile name={agent.name} hue={agent.hue} size={22} /><span>{agent.name}</span></span></DataTable.Cell>
-                    <DataTable.Cell><code data-mono>{s.environment}</code></DataTable.Cell>
-                    <DataTable.Cell><span data-mono data-session-load="cpu">{sessionCpuText(s.load)}</span></DataTable.Cell>
-                    <DataTable.Cell><span data-mono data-session-load="memory" data-tone={heavy ? 'warning' : undefined}>{sessionMemoryText(s.load)}</span></DataTable.Cell>
-                    <DataTable.Cell><StatusPill status={s.status} label={s.status === 'waiting' ? 'AWAITING' : undefined} /></DataTable.Cell>
+                    <DataTable.Cell column={0}><Link to={`/sessions/${s.id}`} class="ag-ref">{s.id}</Link></DataTable.Cell>
+                    <DataTable.Cell column={1}><span data-ellipsis title={s.task}>{s.task}</span></DataTable.Cell>
+                    <DataTable.Cell column={2}><span data-agent-cell><AgentTile name={agent.name} hue={agent.hue} size={22} /><span>{agent.name}</span></span></DataTable.Cell>
+                    <DataTable.Cell column={3}><code data-mono>{s.environment}</code></DataTable.Cell>
+                    <DataTable.Cell column={4}><span data-mono data-session-load="cpu">{sessionCpuText(s.load)}</span></DataTable.Cell>
+                    <DataTable.Cell column={5}><span data-mono data-session-load="memory" data-tone={heavy ? 'warning' : undefined}>{sessionMemoryText(s.load)}</span></DataTable.Cell>
+                    <DataTable.Cell column={6}><StatusPill status={s.status} label={s.status === 'waiting' ? 'AWAITING' : undefined} /></DataTable.Cell>
                 </DataTable.Row>
             );
         })}
