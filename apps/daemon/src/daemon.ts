@@ -1226,10 +1226,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         }
         const { command } = frame;
         // A turn the runtime opened on its own and never filled (#604) is not what the prompt should wait behind.
-        if (command.type === 'prompt') {
-            if (ghostIn(s)) await reap(s, 'a prompt arrived');
-            s.asked.add(command.turnId);
-        }
+        if (command.type === 'prompt' && ghostIn(s)) await reap(s, 'a prompt arrived');
         // A prompt that would start a turn beyond the environment's concurrency is answered `busy` (#394): the platform
         // parks its task and prompts again when a turn ends here. A session already running one is left to the runtime
         // (a steer, or its own `busy`). The slot is taken before the reply is known so two prompts cannot share it.
@@ -1254,6 +1251,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
             }
             s.running = true;
         }
+        // Only a prompt that goes out is one the platform asked for: one refused above never reaches the runtime.
+        if (command.type === 'prompt') s.asked.add(command.turnId);
         let reply = await s.served.handleCommand(command);
         // Refused by the runtime while this daemon saw no turn (#604): one it opened on its own that `watchTurns` has not
         // caught up with yet. Once seen, a ghost is cancelled and the prompt tried once more.
