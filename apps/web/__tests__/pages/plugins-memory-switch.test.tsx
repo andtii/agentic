@@ -61,3 +61,27 @@ describe('/plugins/:id — making a memory plugin active (#243)', () => {
         expect((await h.app.as(owner).actor(FlatMemory, memoryActorKey(WS, `agent:${ada}`)).exportPage(null, 10)).entries).toEqual([]);
     }, 20_000);
 });
+
+describe('/plugins — Make active on the memory radio list (#637)', () => {
+    // The list also holds the (closed) Add A2A peer dialog: find the move's confirmation by its title.
+    const moveDialog = () => [...document.querySelectorAll<HTMLElement>('[role="alertdialog"]')].find((d) => d.textContent?.includes('Make Flat memory active?')) ?? null;
+    const row = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-rows] [data-plugin-row][data-plugin="${id}"]`);
+
+    it('the flat row says what it drops; Make active shows the dry run, and confirming moves the memories and the ACTIVE mark', async () => {
+        const dom = await mountLive('/plugins?kind=memory', h);
+        await until(() => row(dom, FLAT_MEMORY_PLUGIN_ID)?.querySelector('button') != null, 'the Make active button');
+        expect(row(dom, DEFAULT_MEMORY_PLUGIN_ID)!.hasAttribute('data-active')).toBe(true);
+        expect(row(dom, FLAT_MEMORY_PLUGIN_ID)!.querySelector('[data-plugin-row-part="consequence"]')!.textContent).toContain('drops conditions');
+
+        buttonNamed(row(dom, FLAT_MEMORY_PLUGIN_ID)!, 'Make active').click();
+        await until(() => moveDialog() !== null, 'the confirmation with the dry run');
+        expect(moveDialog()!.textContent).toContain('2 memories of 2 move from Memory to Flat memory.');
+        // The click opened the dialog, not the plugin's page.
+        expect(dom.querySelector('[data-plugin-detail]')).toBeNull();
+
+        buttonNamed(moveDialog()!, 'Move 2 memories and make active').click();
+        await until(async () => (await registry().overview()).active.memory === FLAT_MEMORY_PLUGIN_ID, 'the flat plugin to become active');
+        await until(() => row(dom, FLAT_MEMORY_PLUGIN_ID)?.hasAttribute('data-active') === true, 'the ACTIVE mark to move');
+        expect(row(dom, DEFAULT_MEMORY_PLUGIN_ID)!.hasAttribute('data-active')).toBe(false);
+    }, 20_000);
+});

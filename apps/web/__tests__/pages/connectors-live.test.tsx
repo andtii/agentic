@@ -62,7 +62,8 @@ const setSelect = (el: HTMLSelectElement, value: string): void => {
 describe('/plugins: MCP servers (live)', () => {
     it('add → tested, with its tools → an agent picks it → remove refuses and names the agent → removes on confirm', async () => {
         const ada = await h.agent('Ada');
-        const dom = await mountLive('/plugins', h);
+        // MCP servers are managed in the Connectors view (#637 took them off the list).
+        const dom = await mountLive('/plugins?kind=connector', h);
         await until(() => dom.querySelector('[data-plugin-connectors] [data-plugin-none]')?.textContent?.includes('No connectors') === true, 'the empty connector list');
 
         buttonNamed(dom, 'Add MCP server').click();
@@ -106,11 +107,11 @@ describe('/plugins: MCP servers (live)', () => {
         expect((await registry().secrets()).map((s) => s.name)).toContain('acme-tools.token');
         expect(await registry().openSecret('acme-tools.token', 'acme-tools')).toBe(TOKEN);
 
-        // The row and the catalogue's card show it; the token shows nowhere.
+        // The row shows it, and the plugins menu counts it; the token shows nowhere.
         const row = () => dom.querySelector<HTMLElement>('[data-connector="acme-tools"]')!;
         await until(() => row().querySelectorAll('[data-connector-tools] li').length === 2, 'the tools on the row');
         expect(text(row())).toContain('2 tools');
-        await until(() => dom.querySelector('[data-plugin-group="connector"] [data-plugin="acme-tools"]') !== null, 'the connector card');
+        await until(() => dom.querySelector('[data-plugins-menu] [data-category="connector"] [data-count]')?.textContent === '1', 'the menu to count the connector');
         expect(dom.innerHTML).not.toContain(TOKEN);
         expect(JSON.stringify(await h.app.as(owner).actor(AuditActor, auditKey(WS)).list())).not.toContain(TOKEN);
 

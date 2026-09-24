@@ -9,12 +9,12 @@ import { createServerRouter } from '../../src/router';
 import { mountRoute, page } from './mount';
 
 describe('plugins routes (#628)', () => {
-    it('/plugins renders the catalogue inside the plugins layout, with no menu yet', async () => {
+    it('/plugins renders the list inside the plugins layout, beside the category menu (#637)', async () => {
         const root = await mountRoute('/plugins');
         const layout = root.querySelector('[data-plugins-layout]')!;
         expect(layout).not.toBeNull();
-        expect(layout.querySelector('[data-plugins-menu]')).toBeNull();
-        expect(layout.querySelector('[data-plugins-content] [data-page="plugins"] [data-plugin-catalogue]')).not.toBeNull();
+        expect(layout.querySelector('[data-plugins-menu] [data-category-menu]')).not.toBeNull();
+        expect(layout.querySelector('[data-plugins-content] [data-page="plugins"] [data-plugin-list]')).not.toBeNull();
     });
 
     it('?kind=connector renders the Connectors view in the layout', async () => {
