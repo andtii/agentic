@@ -13,16 +13,17 @@ import { component, signal, useData, useHead, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { runtimeKindOf, type PermissionScope } from '@agentic/core';
-import type { Dependents, MemorySwitchReport, SlotKind } from '@agentic/platform';
-import { ConfirmDialog, EmptyState } from '@agentic/ui';
+import type { Dependents, SlotKind } from '@agentic/platform';
+import { EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
-import { isInUse, memorySwitchText, registryErrorText } from './model';
+import { isInUse, registryErrorText } from './model';
 import { PluginDetail, type SecretWrite } from './PluginDetail';
 import { useWorkspaceReadiness } from './readiness';
 import { usePluginSwitches } from './switches';
+import { useMemorySwitch } from './useMemorySwitch';
 import { LiveRuntimeMachines } from './RuntimeMachines';
 import { GenerateKeys } from '../../push/GenerateKeys';
 import { VAPID_SECRET, WEB_PUSH_PLUGIN } from '../../push/model';
@@ -114,45 +115,18 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
     };
     const grant = (scope: PermissionScope): Promise<void> => act((k) => actor(defs.Registry, k).grant(props.id, [scope]));
     const revoke = (scope: PermissionScope): Promise<void> => act((k) => actor(defs.Registry, k).revoke(props.id, [scope]));
-    /** A memory plugin's dry run, while its confirmation is open (#243). */
-    const move = signal<{ preview: MemorySwitchReport | null }>({ preview: null });
-    const activate = (): Promise<void> => act(async (k) => {
-        const kind = plugin()!.manifest.kind as SlotKind;
-        // A memory plugin holds data: show what moving it keeps and drops, and move only on confirm.
-        if (kind === 'memory') {
-            move.preview = await actor(defs.Registry, k).previewActivation(kind, props.id);
-            return;
-        }
-        await actor(defs.Registry, k).activate(kind, props.id);
-        if (usedBy.hasValue) await usedBy.refresh();
-    });
-    const confirmMove = (): Promise<void> => act(async (k) => {
-        try {
-            await actor(defs.Registry, k).activate('memory', props.id, { migrate: true });
-        } finally {
-            move.preview = null;
-        }
-        if (usedBy.hasValue) await usedBy.refresh();
-    });
     const nameOf = (id: string): string => ready.overview()?.plugins.find((p) => p.manifest.id === id)?.manifest.name ?? id;
-    const moveDialog = () => {
-        const report = move.preview;
-        if (!report) return null;
-        const text = memorySwitchText(report, nameOf, (id) => agents.lookup(id).name);
-        return (
-            <ConfirmDialog
-                model={() => move.preview !== null}
-                title={text.title}
-                description={text.description}
-                {...(text.scopes.length ? { dependents: text.scopes, dependentsLabel: `Memories by scope · ${text.scopes.length}` } : {})}
-                confirmLabel={text.confirmLabel}
-                cancelLabel={`Keep ${nameOf(report.from)}`}
-                danger={false}
-                busy={st.busy}
-                onConfirm={() => { void confirmMove(); }}
-                onCancel={() => { move.preview = null; }}
-            />
-        );
+    const memory = useMemorySwitch({
+        defs,
+        run: act,
+        busy: () => st.busy,
+        nameOf,
+        agentName: (id) => agents.lookup(id).name,
+        onActivated: async () => { if (usedBy.hasValue) await usedBy.refresh(); }
+    });
+    const activate = (): Promise<void> => {
+        const p = plugin();
+        return p ? memory.activate(p.manifest.kind as SlotKind, props.id) : Promise.resolve();
     };
 
     const remove = async (): Promise<void> => {
@@ -218,7 +192,7 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                 {switches.left()[props.id] ? <p data-plugin-left role="status">Disabled. New work cannot use it; running work finishes.</p> : null}
                 {st.error || switches.error() ? <p data-chat-error role="alert">{st.error || switches.error()}</p> : null}
                 {switches.dialog()}
-                {moveDialog()}
+                {memory.dialog()}
             </OpsPage>
         );
     };
