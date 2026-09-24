@@ -242,9 +242,25 @@ test.describe('phone', () => {
         expect((await connect.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         const close = sheet.getByRole('button', { name: 'Close preview' });
         expect((await close.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+        // It is a modal: a named dialog, focus moved to its Close, the columns under it inert.
+        await expect(page.getByRole('dialog', { name: 'Gmail' })).toBeVisible();
+        await expect(sheet).toHaveAttribute('aria-modal', 'true');
+        await expect(close).toBeFocused();
+        await expect(page.locator('[data-add-main]')).toHaveAttribute('inert', /.*/);
+        await expect(page.locator('[data-add-side]')).toHaveAttribute('inert', /.*/);
         await close.click();
         await expect(sheet).toBeHidden();
         await expect(page).not.toHaveURL(/selected=/);
+        await expect(page.locator('[data-add-main]')).not.toHaveAttribute('inert', /.*/);
+
+        // Escape closes it too, and focus goes back to the tile that opened it.
+        const tile = page.locator('[data-add-main] button[data-connector="gmail"]');
+        await tile.click();
+        await expect(close).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(sheet).toBeHidden();
+        await expect(page).not.toHaveURL(/selected=/);
+        await expect(tile).toBeFocused();
 
         // Connect from the sheet runs the flow to the agent step, which the sheet no longer covers.
         await page.locator('[data-add-main] button[data-connector="gmail"]').click();

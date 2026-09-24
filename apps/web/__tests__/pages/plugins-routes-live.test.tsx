@@ -1,7 +1,7 @@
 /**
  * `/plugins?kind=connector` over the real wire (#628): on the platform the
  * Connectors view draws the workspace's MCP servers (`LiveConnectorsView`) inside
- * the plugins layout, not the catalogue the mock branch falls back to.
+ * the plugins layout.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defineRegistry, generateWorkspaceKek, importWorkspaceKek } from '@agentic/platform';

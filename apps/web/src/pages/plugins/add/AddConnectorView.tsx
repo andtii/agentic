@@ -8,12 +8,14 @@
  *   and "See all N" — or, with a query or a category, a flat grid. A connected tile is dimmed and opens its plugin.
  * - Right, 380 px: the `?selected=` listing's preview and `Connect <name>`. Below 1280 px it drops under the tiles;
  *   below 768 px the page is one column and the preview is a full-screen sheet with Connect docked at its foot (#641).
+ *   On a phone that sheet is a modal: `role="dialog"`, focus moves to its Close, Escape closes it, and the columns
+ *   under it are `inert`; focus goes back to the tile that opened it.
  *
  * Connecting runs the existing flows through the page's `AddConnectorPort` (mock or live): a conduit connector's
  * sign-in, or the MCP form prefilled from the listing. Then `?next=agents` swaps the middle column for the step that
  * adds the connector to the agents you pick — none by default. Nothing here grants anything (PLG-04).
  */
-import { component, signal, useHead, type Define } from 'sigx';
+import { component, onMounted, onUnmounted, signal, useHead, watch, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { AgentTile, Button, CategoryMenu, ConnectorTile, Icon, Label, SearchField, Segmented, Tag, type AgentHue } from '@agentic/ui';
 import { CONNECTOR_CATEGORIES, CONNECTOR_LISTINGS, categoryCounts, listingPluginId, listingsByCategory, type ConnectorListing } from '../../../plugins/listings';
@@ -57,6 +59,9 @@ export type AddConnectorViewProps =
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** The listing `?selected=` names: by its id, or by the plugin id it installs as (the sign-in callback's). */
+/** The phone breakpoint (`--below-md`): the preview is a full-screen modal sheet below it. */
+export const SHEET_MEDIA = '(max-width: 767px)';
+
 const listingFor = (selected: string | undefined): ConnectorListing | undefined =>
     selected ? CONNECTOR_LISTINGS.find((l) => l.id === selected) ?? CONNECTOR_LISTINGS.find((l) => listingPluginId(l) === selected) : undefined;
 
@@ -78,6 +83,47 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         picked: [],
         saving: false,
         saveError: ''
+    });
+    /** Below `SHEET_MEDIA` — set on the client only, so a server render draws no modal. */
+    const phone = signal({ on: false });
+
+    const closePreview = (): void => { const { selected: _selected, ...rest } = query(); go(rest); };
+    /** The preview is a modal sheet: a phone, a listing selected, and not on the agent step. */
+    const sheetOpen = (): boolean => {
+        const q = query();
+        return phone.on && !!listingFor(q.selected) && q.next !== 'agents';
+    };
+
+    onMounted(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+        const mq = window.matchMedia(SHEET_MEDIA);
+        const sync = (): void => { phone.on = mq.matches; };
+        sync();
+        mq.addEventListener('change', sync);
+        // Escape closes the sheet — unless the MCP dialog is open over it, which handles its own Escape.
+        const onKey = (e: KeyboardEvent): void => {
+            if (e.key !== 'Escape' || st.dialog || !sheetOpen()) return;
+            e.preventDefault();
+            closePreview();
+        };
+        document.addEventListener('keydown', onKey);
+        // Focus into the sheet on open (its Close), and back to the tile that opened it on close.
+        let opener: string | undefined;
+        const stop = watch(sheetOpen, (open) => {
+            if (open) {
+                opener = query().selected;
+                requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-add-preview][data-sheet] [data-preview-close] button')?.focus());
+            } else if (opener) {
+                const id = opener;
+                opener = undefined;
+                requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-add-grid] [data-connector="${CSS.escape(id)}"]`)?.focus());
+            }
+        }, { immediate: true });
+        onUnmounted(() => {
+            mq.removeEventListener('change', sync);
+            document.removeEventListener('keydown', onKey);
+            stop.stop();
+        });
     });
 
     const search = (value: string): void => {
@@ -160,11 +206,11 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         />
     );
 
-    const side = (q: AddQuery, connected: ReadonlySet<string>) => {
+    const side = (q: AddQuery, connected: ReadonlySet<string>, covered: boolean) => {
         const counts = categoryCounts(CONNECTOR_LISTINGS, connected, q.show ?? 'everything');
         const base = { ...(q.q ? { q: q.q } : {}), ...(q.show ? { show: q.show } : {}) };
         return (
-            <aside data-add-side aria-label="Connector filters">
+            <aside data-add-side aria-label="Connector filters" inert={covered || undefined}>
                 <CategoryMenu
                     label="Connector categories"
                     current={q.category ?? 'all'}
@@ -194,11 +240,11 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         );
     };
 
-    const browse = (q: AddQuery, connected: ReadonlySet<string>) => {
+    const browse = (q: AddQuery, connected: ReadonlySet<string>, covered: boolean) => {
         const shown = visibleListings(CONNECTOR_LISTINGS, connected, q);
         const flat = !!q.q?.trim() || !!q.category;
         return (
-            <div data-add-main>
+            <div data-add-main inert={covered || undefined}>
                 <header data-add-head>
                     <div>
                         <h1>Add a connector</h1>
@@ -232,23 +278,24 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         );
     };
 
-    const preview = (listing: ConnectorListing | undefined, connected: ReadonlySet<string>, step: boolean) => {
+    const preview = (listing: ConnectorListing | undefined, connected: ReadonlySet<string>, step: boolean, modal: boolean) => {
         if (!listing) return <aside data-add-preview data-empty><p>Pick a connector to see what it adds and what it will ask for.</p></aside>;
         const isConnected = connected.has(listingPluginId(listing));
         const asks = [...(listing.asks.signIn ? [listing.asks.signIn] : []), ...listing.asks.scopes];
         return (
-            <aside data-add-preview data-connector={listing.id} data-sheet={step ? undefined : ''} aria-label={`${listing.name} preview`}>
+            <aside data-add-preview data-connector={listing.id} data-sheet={step ? undefined : ''}
+                {...(modal ? { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'add-preview-title' } : { 'aria-label': `${listing.name} preview` })}>
                 <div data-preview-head>
                     <AgentTile name={listing.name} size={44} />
                     <div>
-                        <h2>{listing.name}</h2>
+                        <h2 id="add-preview-title">{listing.name}</h2>
                         <div data-preview-meta>
                             <Tag>{transportLabel(listing.transport)}</Tag>
                             <code data-mono>{listing.publisher.toLowerCase()} · {listing.version}</code>
                         </div>
                     </div>
                     {/* The phone's full-screen sheet (#641) closes back to the list; hidden wider, where the preview is a column. */}
-                    {step ? null : <span data-preview-close><Button intent="icon" icon="close" label="Close preview" onClick={() => { const { selected: _selected, ...rest } = query(); go(rest); }} /></span>}
+                    {step ? null : <span data-preview-close><Button intent="icon" icon="close" label="Close preview" onClick={closePreview} /></span>}
                 </div>
                 <p data-preview-description>{listing.description}</p>
                 <div data-preview-group="tools">
@@ -331,12 +378,13 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         const connected = props.port.connected();
         const listing = listingFor(q.selected);
         const stepPlugin = q.next === 'agents' ? q.plugin ?? (listing ? listingPluginId(listing) : undefined) : undefined;
+        const modal = sheetOpen();
         const dialogListing = st.mcp && st.mcp !== 'blank' ? st.mcp : undefined;
         return (
             <section data-page="connector-add" aria-label="Add a connector">
-                {side(q, connected)}
-                {stepPlugin ? agentsStep(listing, stepPlugin) : browse(q, connected)}
-                {preview(listing, connected, !!stepPlugin)}
+                {side(q, connected, modal)}
+                {stepPlugin ? agentsStep(listing, stepPlugin) : browse(q, connected, modal)}
+                {preview(listing, connected, !!stepPlugin, modal)}
                 <AddConnectorDialog
                     model={() => st.dialog}
                     busy={st.busy}
