@@ -680,6 +680,15 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(byKey.get(`${K1}:run:${ok.requestId}`)).toMatchObject({ by: 'user:u1', data: { machineId: M1, environmentId: E1, cwd: '/work/app', argv: ['npm', 'ci'], exitCode: 0 } });
         expect(byKey.get(`${K1}:run:${failed.requestId}`)).toMatchObject({ data: { argv: ['npm', 'ci'], error: 'timeout' } });
         expect(await worktrees()).toHaveLength(1);
+
+        // A long command line is cut in the summary and kept whole in the data.
+        const long = { ...run, argv: ['echo', 'x'.repeat(500)] };
+        const big = await machine(K1).fsRequest(E1, long);
+        await respond(big.requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } });
+        await until(async () => (await commands()).length === 3, 'the long command');
+        const entry = (await commands()).find((e) => e.key === `${K1}:run:${big.requestId}`)!;
+        expect(entry.summary.length).toBeLessThan(200);
+        expect(entry.data).toMatchObject({ argv: long.argv });
     });
 
     it('times out an unanswered request through the liveness reminder; a late answer still lands', async () => {

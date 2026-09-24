@@ -72,6 +72,9 @@ function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root:
     return undefined;
 }
 
+/** How much of a command line a `workdir.command-run` summary shows (#618). */
+const RUN_SUMMARY_CHARS = 120;
+
 /** A `run` (#617) is refused here, like a files op: a daemon without the `run` feature, a `cwd` outside the roots. */
 function runRefusal(s: MachineState, environment: EnvironmentDescriptor, cwd: string): FsError | undefined {
     if (!s.features?.includes('run')) return { code: 'unsupported', message: 'the daemon does not run project commands (no run feature); update it' };
@@ -1362,7 +1365,9 @@ export function defineMachineActor(ports: MachinePorts) {
             /** A project command the daemon ran, or refused (#618), audited once per request (OPS-03). */
             async function auditRun(r: FsRequestRecord, at: number, outcome: { readonly exitCode?: number; readonly error?: string }): Promise<void> {
                 if (r.op.kind !== 'run') return;
-                const command = r.op.argv.join(' ');
+                // The summary names the command in short; `data.argv` keeps it whole.
+                const joined = r.op.argv.join(' ');
+                const command = joined.length > RUN_SUMMARY_CHARS ? `${joined.slice(0, RUN_SUMMARY_CHARS - 1)}…` : joined;
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:run:${r.requestId}`,
                     kind: 'workdir.command-run',

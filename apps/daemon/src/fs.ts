@@ -310,6 +310,8 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
 
     const pruned = await runGit(git, ['-C', repo.real, 'worktree', 'prune'], { timeoutMs: checkTimeout });
     if (pruned.code === 'timeout') return fail('timeout', 'git worktree prune did not finish');
+    // A failed prune leaves stale entries that would read as a worktree still in place: say so rather than decide on them.
+    if (pruned.code !== 0) return fail('internal', `git worktree prune failed: ${pruned.stderr}`);
     const list = await runGit(git, ['-C', repo.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs: checkTimeout });
     if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
     if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
@@ -325,6 +327,9 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
     if (holder) return fail('branch-exists', `branch ${op.branch} is checked out at ${holder.path}`);
 
     const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
+    if (known.code === 'timeout') return fail('timeout', 'git show-ref did not finish');
+    // `--verify --quiet` exits 1 for a branch that is not there; anything else is git failing, not an answer.
+    if (known.code !== 0 && known.code !== 1) return fail('internal', `git show-ref failed: ${known.stderr}`);
     const recreate = known.code === 0;
     const args = recreate ? ['worktree', 'add', '--', path, op.branch] : ['worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])];
     const added = await runGit(git, ['-C', repo.real, ...args], { timeoutMs: options.worktreeTimeoutMs });
