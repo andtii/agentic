@@ -58,12 +58,12 @@ export function assertPluginManifest(value: unknown): asserts value is PluginMan
         const name = (s as { name: string }).name;
         if (!scopeCovered(scopes, `secret:${name}`)) bad(`secret "${name}" needs a secret:${name} permission`);
     }
-    // Optional, never null: `tools` (PLG-09) is either absent or a list of uniquely named tools, each starting in a `ToolMode`.
+    // Optional, never null: `tools` (PLG-09) is either absent or a list of uniquely named tools, each with an optional `defaultMode` (a `ToolMode`; absent reads as `allow`).
     const tools = m.tools === undefined ? [] : m.tools;
     if (!Array.isArray(tools)) bad('tools');
     const toolNames = new Set<string>();
     for (const t of tools as unknown[]) {
-        if (!isRecord(t) || typeof t.name !== 'string' || t.name === '') bad(`tool ${JSON.stringify(t)}`);
+        if (!isRecord(t) || typeof t.name !== 'string' || t.name.trim() === '') bad(`tool ${JSON.stringify(t)}`);
         const { name, title, description, defaultMode } = t as Record<string, unknown>;
         if (toolNames.has(name as string)) bad(`tool "${String(name)}" is declared twice`);
         toolNames.add(name as string);

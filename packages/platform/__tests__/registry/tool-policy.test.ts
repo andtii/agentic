@@ -197,6 +197,7 @@ describe('assertPluginManifest: tools[]', () => {
         expect(bad([{ name: 'a' }, { name: 'a' }])).toBe(true);
         expect(bad([{ name: 'a', defaultMode: 'maybe' }])).toBe(true);
         expect(bad([{ name: '' }])).toBe(true);
+        expect(bad([{ name: '   ' }])).toBe(true);
         expect(bad([{ name: 'a', title: 3 }])).toBe(true);
         expect(bad(null)).toBe(true);
         expect(bad({ a: 1 })).toBe(true);
