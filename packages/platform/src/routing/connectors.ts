@@ -42,6 +42,13 @@
  * (`CONNECTOR_CALL_TOOL`, run by `callPlatformConnector`) — through the same
  * opener and context as a local session, so refresh and `needsReauth` behave
  * the same and no token or OAuth client ever reaches the machine.
+ *
+ * `network:` grants (#642; PLG-04): every connector the platform opens gets its plugin's granted `network:` hosts as
+ * `allowedHosts` (from the gate's `networkHosts`), and the opener runs its fetch behind that allowlist (`guardFetch` of
+ * `@agentic/mcp`, `guardHttp` of `@agentic/connectors`): a request to any other host fails with an error that names
+ * the scope. A Streamable HTTP connector whose own host is not granted is not opened at all — nor placed on a
+ * daemon's spec, nor given credentials — and the agent is told why. A stdio server is out of reach: it is a process
+ * on a machine, and the platform cannot see what it connects to.
  */
 
 import type { ApprovalRule, ConnectorCredentials, ConnectorToolDeclaration, OpenSpecConnector, PlatformConnectorTools, Principal, WorkspaceId } from '@agentic/core';
@@ -59,6 +66,8 @@ export interface McpConnectorOpenInput {
     readonly url: string;
     readonly bearer?: string;
     readonly headers?: Readonly<Record<string, string>>;
+    /** The hosts of the plugin's granted `network:` scopes (#642): the opener's fetch reaches these only. Absent: no allowlist. */
+    readonly allowedHosts?: readonly string[];
 }
 
 /** What the app's opener is handed for one conduit connector: ids only — the opener resolves the OAuth client and the account's tokens itself. */
@@ -71,6 +80,8 @@ export interface ConduitConnectorOpenInput {
     readonly connector: string;
     /** The conduit account id the owner connected. */
     readonly account: string;
+    /** The hosts of the plugin's granted `network:` scopes (#642): the engine's fetch reaches these only. Absent: no allowlist. */
+    readonly allowedHosts?: readonly string[];
 }
 
 /** One connector for the app's opener, by the engine that opens it. */
@@ -166,16 +177,40 @@ interface Outcome {
 /** Why a revoked `tools:` grant leaves a connector out (#636; PLG-04) — on both paths. */
 export const TOOLS_REVOKED_REASON = 'tools permission revoked';
 
+/** Whether `url` is on `hosts` — by host (with its port) or by hostname, as a `network:<url.host>` scope names it. */
+function networkHostAllowed(hosts: readonly string[], url: URL): boolean {
+    return hosts.includes(url.host) || hosts.includes(url.hostname);
+}
+
+/**
+ * Why a Streamable HTTP connector may not reach its own server (#642; PLG-04): its plugin's `network:<host>` scope is
+ * not granted. Names the scope only — never the URL's path or query. `undefined` when it may, when it is not an HTTP
+ * one, or when the gate answer predates the allowlist.
+ */
+function networkRevoked(c: GateConnector): string | undefined {
+    if (c.networkHosts === undefined || c.url === undefined || (c.transport ?? 'streamable-http') !== 'streamable-http') return undefined;
+    let url: URL;
+    try {
+        url = new URL(c.url);
+    } catch {
+        return undefined;
+    }
+    return networkHostAllowed(c.networkHosts, url) ? undefined : `network permission revoked: network:${url.host} is not granted (/plugins/${c.pluginId ?? c.id})`;
+}
+
 /** Why a connector the gate did not find usable is left out — the same words on both paths. */
 function notReady(c: GateConnector): string | undefined {
     if (c.state === 'missing') return 'no such connector is set up in this workspace';
     if (c.state === 'disabled') return `its plugin is turned off (/plugins/${c.pluginId ?? c.id})`;
     if (c.toolsGranted === false) return TOOLS_REVOKED_REASON;
-    return undefined;
+    return networkRevoked(c);
 }
 
-/** Ready, with its plugin's `tools:` scope still granted: a connector a session may reach (#636). */
-const usable = (c: GateConnector): boolean => c.state === 'ready' && c.toolsGranted !== false;
+/** Ready, with its plugin's `tools:` scope still granted and its server's `network:` host too: a connector a session may reach (#636, #642). */
+const usable = (c: GateConnector): boolean => c.state === 'ready' && c.toolsGranted !== false && networkRevoked(c) === undefined;
+
+/** The opener's `allowedHosts`, when the gate answer carries them (#642) — a plain copy: it may be read out of actor state. */
+const allowedHostsOf = (c: GateConnector): { allowedHosts?: readonly string[] } => (c.networkHosts !== undefined ? { allowedHosts: [...c.networkHosts] } : {});
 
 /**
  * The workspace tool policy of the agent's connectors as approval constraints (#636; OPS-02, AC-12): one rule per
@@ -230,7 +265,7 @@ async function openOne(c: GateConnector, input: OpenSessionConnectorsInput): Pro
         const bearer = c.auth?.bearer !== undefined ? await need(c.auth.bearer) : undefined;
         const headers: Record<string, string> = {};
         for (const [header, name] of Object.entries(c.auth?.headers ?? {})) headers[header] = await need(name);
-        const opened = await input.opener({ kind: 'mcp', id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}) }, input.context);
+        const opened = await input.opener({ kind: 'mcp', id: c.id, url: c.url, ...(bearer !== undefined ? { bearer } : {}), ...(Object.keys(headers).length ? { headers } : {}), ...allowedHostsOf(c) }, input.context);
         await record({ state: 'ok' }, opened.toolNames);
         return { opened };
     } catch (e) {
@@ -261,7 +296,7 @@ async function openConduit(c: GateConnector, input: OpenSessionConnectorsInput):
     if (!input.opener) return skip('this deployment cannot open conduit connectors');
     const record = recorder(c, input);
     try {
-        const opened = await input.opener({ kind: 'conduit', id: c.id, pluginId, connector: c.connector, account: c.account }, input.context);
+        const opened = await input.opener({ kind: 'conduit', id: c.id, pluginId, connector: c.connector, account: c.account, ...allowedHostsOf(c) }, input.context);
         await record({ state: 'ok' }, opened.toolNames);
         return { opened };
     } catch (e) {
@@ -556,7 +591,7 @@ export async function callPlatformConnector(input: CallPlatformConnectorInput): 
     };
     let opened: OpenedConnector;
     try {
-        opened = await input.opener({ kind: 'conduit', id: c.id, pluginId: c.pluginId ?? c.id, connector: c.connector, account: c.account }, context);
+        opened = await input.opener({ kind: 'conduit', id: c.id, pluginId: c.pluginId ?? c.id, connector: c.connector, account: c.account, ...allowedHostsOf(c) }, context);
     } catch (e) {
         throw failed(e);
     }

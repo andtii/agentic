@@ -43,6 +43,8 @@ export interface McpHttpClientOptions extends McpClientBaseOptions {
     readonly headers?: Readonly<Record<string, string>>;
     readonly fetch?: FetchLike;
     readonly timeoutMs?: number;
+    /** The connector plugin's granted `network:` hosts (#642): any other host is refused before a request leaves. */
+    readonly allowedHosts?: readonly string[];
     readonly transport?: undefined;
 }
 

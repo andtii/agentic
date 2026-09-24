@@ -280,8 +280,8 @@ describe('platform-run connectors over the daemon’s tool.call (#534)', () => {
         });
         expect(JSON.stringify(answer)).not.toContain(CLIENT_SECRET);
         expect(JSON.stringify(answer)).not.toContain('acct_1');
-        // Ids only, the session's own agent principal, the plugin's secrets.
-        expect(conduit.opens).toEqual([{ input: { kind: 'conduit', id: 'gmail', pluginId: 'gmail', connector: 'gmail', account: 'acct_1' }, context: expect.objectContaining({ workspaceId: WS, principal: expect.objectContaining({ kind: 'agent', sessionId: SESSION }) }) }]);
+        // Ids only (and the granted network: hosts, #642), the session's own agent principal, the plugin's secrets.
+        expect(conduit.opens).toEqual([{ input: { kind: 'conduit', id: 'gmail', pluginId: 'gmail', connector: 'gmail', account: 'acct_1', allowedHosts: ['gmail.googleapis.com', 'oauth2.googleapis.com'] }, context: expect.objectContaining({ workspaceId: WS, principal: expect.objectContaining({ kind: 'agent', sessionId: SESSION }) }) }]);
         // What the open found is recorded on the connector, as on the local path.
         expect((await app.as(owner).actor(RegistryWithGmail, registryKey(WS)).getConnector('gmail'))?.status.state).toBe('ok');
     });

@@ -8,7 +8,7 @@ Design: `docs/architecture.md` §9, "connectors that sign in" (#536).
 
 | Export | What it does |
 |---|---|
-| `createConnectorEngine({ secret, accounts, transient, locks, clients, redirectUri, http? })` | `createConduit` with the stores and the OAuth client injected. Specs default to every connector of `@aigntiq/conduit-connectors`. |
+| `createConnectorEngine({ secret, accounts, transient, locks, clients, redirectUri, http?, allowedHosts? })` | `createConduit` with the stores and the OAuth client injected. Specs default to every connector of `@aigntiq/conduit-connectors`. `allowedHosts` (the plugin's granted `network:` hosts, #642) puts `http` behind `guardHttp`: any other host fails with `ConnectorNetworkError` (`network_not_granted`, naming the scope), which a tool call surfaces as a "Permission denied" `ConnectorToolError`. |
 | `conduitTools(engine, { id, connector, account, owner })` | One connected account as `{ tools, toolNames, close }`, the platform's `OpenedConnector` shape. |
 | `clientFromSecrets(openSecret, pluginId)` | conduit's `ClientResolver` from the connector plugin's own `<pluginId>-client-id` / `<pluginId>-client-secret` secrets. |
 | `connectorClientSecretNames(pluginId)` | those two names. Registry secret names are workspace-wide, so each conduit connector plugin names its own OAuth client (#548). |

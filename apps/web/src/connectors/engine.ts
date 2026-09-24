@@ -40,6 +40,8 @@ export interface WorkspaceEngineInput {
     readonly engineSecret: string;
     readonly redirectUri: string;
     readonly http?: ConnectorHttp;
+    /** The hosts of the connector plugin's granted `network:` scopes (#642): a session's engine reaches these only. Absent: no allowlist. */
+    readonly allowedHosts?: readonly string[];
 }
 
 /** The workspace's conduit engine, as `principal`. Cheap: nothing is read until a call needs it. */
@@ -50,7 +52,8 @@ export function workspaceConnectorEngine(input: WorkspaceEngineInput): Connector
         ...connectorAccountStores(client),
         clients: clientFromSecrets((name) => input.secret(name), input.pluginId),
         redirectUri: input.redirectUri,
-        ...(input.http ? { http: input.http } : {})
+        ...(input.http ? { http: input.http } : {}),
+        ...(input.allowedHosts ? { allowedHosts: input.allowedHosts } : {})
     });
 }
 

@@ -252,6 +252,9 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return wanted.every((scope) => scopeCovered(p.grantedPermissions, scope));
     };
 
+    /** The hosts of the plugin's granted `network:<host>` scopes (PLG-04): what its connector may reach (#642). */
+    const networkHosts = (p: PluginRecord): string[] => p.grantedPermissions.filter((s) => s.startsWith('network:')).map((s) => s.slice('network:'.length));
+
     /**
      * A connector an agent names, as a session would open it (#240): its record and its plugin, looked up by the
      * connector id — or, for a ref naming the plugin, the first connector registered under it.
@@ -273,7 +276,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 tools: record.tools,
                 status: record.status,
                 toolPolicy: restrictedTools(ctx, p),
-                toolsGranted: toolsGranted(p)
+                toolsGranted: toolsGranted(p),
+                networkHosts: networkHosts(p)
             };
         }
         const config = mergedConfig(p);
@@ -297,7 +301,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
             tools: record.tools,
             status: record.status,
             toolPolicy: restrictedTools(ctx, p),
-            toolsGranted: toolsGranted(p)
+            toolsGranted: toolsGranted(p),
+            networkHosts: networkHosts(p)
         };
     };
 

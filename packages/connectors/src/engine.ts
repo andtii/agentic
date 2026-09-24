@@ -12,6 +12,7 @@
 
 import { createConduit, type AccountStore, type ClientResolver, type Conduit, type ConnectorSource, type HttpClient, type LockProvider, type TransientStore } from '@aigntiq/conduit';
 import { connectorCatalog } from '@aigntiq/conduit-connectors';
+import { guardHttp } from './network.js';
 
 export interface ConnectorEngineOptions {
     /** The workspace's random secret (≥ 32 characters): signs OAuth state and keys the credential cipher. */
@@ -27,6 +28,11 @@ export interface ConnectorEngineOptions {
     readonly redirectUri: string;
     /** `fetch` replacement (tests). Default `globalThis.fetch`. */
     readonly http?: HttpClient;
+    /**
+     * The hosts of the connector plugin's granted `network:` scopes (#642; PLG-04). Set: every request goes through
+     * `guardHttp`, so a host not on it fails with `ConnectorNetworkError` naming the scope. Absent: no allowlist.
+     */
+    readonly allowedHosts?: readonly string[];
     /** Where connector specs come from. Default: every connector of `@aigntiq/conduit-connectors`. */
     readonly sources?: ConnectorSource | ConnectorSource[];
     /** Clock, epoch ms (tests). */
@@ -58,7 +64,7 @@ export function createConnectorEngine(options: ConnectorEngineOptions): Connecto
         locks: options.locks,
         clients: options.clients,
         redirectUri: options.redirectUri,
-        ...(options.http ? { http: options.http } : {}),
+        ...(options.allowedHosts ? { http: guardHttp(options.http ?? ((request) => fetch(request)), options.allowedHosts) } : options.http ? { http: options.http } : {}),
         ...(options.now ? { now: options.now } : {})
     });
 }

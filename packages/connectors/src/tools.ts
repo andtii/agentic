@@ -29,6 +29,7 @@ import {
 } from '@aigntiq/conduit';
 import { defineTool, type AnyTool, type StandardSchemaV1, type ToolAnnotations } from '@sigx/ai';
 import type { ConnectorEngine } from './engine.js';
+import { ConnectorNetworkError } from './network.js';
 
 export interface ConduitToolsOptions {
     /** The connector id in the workspace; its tools are named `<id>__<operation>`. */
@@ -135,6 +136,8 @@ const issuesText = (issues: readonly InputIssue[] | undefined): string => (issue
 
 /** What the agent reads when a call fails. Unknown errors are passed on as they are. */
 function toolError(e: unknown, tool: string, connectorName: string): unknown {
+    // The platform refused, not the provider: the scope is named, the request is not (#642).
+    if (e instanceof ConnectorNetworkError) return new ConnectorToolError(`Permission denied: ${e.message}.`, tool, e.code, { cause: e });
     if (e instanceof ConduitAuthError && e.needsReauth) {
         return new ConnectorToolError(
             `The ${connectorName} account this connector uses needs to be reconnected: its sign-in expired or was revoked. ` +
