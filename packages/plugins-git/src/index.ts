@@ -365,8 +365,8 @@ export const GIT_PRESETS: readonly ProjectFeaturePreset[] = [
     {
         id: 'command',
         label: 'Your own command',
-        description: "the repo's own script makes the worktree; fill in the create command and where it puts the folder",
-        settings: { worktreeStrategy: 'command', worktreeCreate: '' }
+        description: "the repo's own script makes the worktree: fill in the create command, and the folder template if it puts the worktree anywhere but the default",
+        settings: { worktreeStrategy: 'command', worktreeCreate: '', worktreePath: null, branchTemplate: null }
     }
 ];
 

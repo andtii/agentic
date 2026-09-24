@@ -393,6 +393,12 @@ describe('settings form seam (#621)', () => {
         expect(sibling).not.toHaveProperty('branchTemplate');
         const back = applyProjectFeaturePreset(sibling, gitFeaturePlugin.presets![0]!);
         expect(back).not.toHaveProperty('worktreePath');
+        // Every preset clears the templates another may have set.
+        for (const p of gitFeaturePlugin.presets!) {
+            const after = applyProjectFeaturePreset({ ...sibling, branchTemplate: 'x-{chatId8}' }, p);
+            if (!('worktreePath' in p.settings) || p.settings['worktreePath'] === null) expect(after, p.id).not.toHaveProperty('worktreePath');
+            expect(after, p.id).not.toHaveProperty('branchTemplate');
+        }
         for (const p of gitFeaturePlugin.presets!) expect(validateConfig(gitFeatureManifest.projectSettings, Object.fromEntries(Object.entries(p.settings).filter(([, v]) => v !== null))).ok, p.id).toBe(true);
         expect(gitFeaturePlugin.settingsErrors).toBe(gitSettingsErrors);
     });

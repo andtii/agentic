@@ -246,7 +246,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                         <div data-project-feature-presets role="group" aria-label={`${m.name} presets`}>
                                             <span data-project-feature-presets-label>Start from</span>
                                             {catalogue()[m.id]!.presets!.map((p) => (
-                                                <Button intent="default" disabled={!!props.busy} label={p.description ? `${p.label}: ${p.description}` : p.label} onClick={() => applyPreset(m, p)}>{p.label}</Button>
+                                                <Button key={p.id} intent="default" disabled={!!props.busy} label={p.description ? `${p.label}: ${p.description}` : p.label} onClick={() => applyPreset(m, p)}>{p.label}</Button>
                                             ))}
                                         </div>
                                     ) : null}
@@ -263,12 +263,12 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                         />
                                     ) : null}
                                     {enabled(m.id) && pluginErrors(m).length ? (
-                                        <ul data-project-feature-errors role="alert">{pluginErrors(m).map((e) => <li>{e}</li>)}</ul>
+                                        <ul data-project-feature-errors role="alert">{pluginErrors(m).map((e) => <li key={e}>{e}</li>)}</ul>
                                     ) : null}
                                     {enabled(m.id) && catalogue()[m.id]?.previewSettings ? (
                                         <dl data-project-feature-preview aria-label={`What the ${m.name} settings do`}>
                                             {catalogue()[m.id]!.previewSettings!({ project: { name: st.name }, settings: settingsNow(m), ...(Object.values(st.folders)[0] ? { folder: Object.values(st.folders)[0]! } : {}) }).map((l) => (
-                                                <div data-project-feature-preview-line><dt>{l.label}</dt><dd>{l.value}</dd></div>
+                                                <div key={l.label} data-project-feature-preview-line><dt>{l.label}</dt><dd>{l.value}</dd></div>
                                             ))}
                                         </dl>
                                     ) : null}

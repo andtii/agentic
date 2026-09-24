@@ -97,9 +97,14 @@ export const SchemaForm = component<SchemaFormProps>(
         const load = (config: Readonly<Record<string, unknown>>) => {
             Object.assign(draft, toSchemaDraft(props.schema, config));
         };
+        // Built once per edit: the getter keys the watch on the config's JSON and hands the config itself along.
+        let last: Record<string, unknown> = built(draft);
         watch(
-            () => JSON.stringify(built(draft)),
-            () => emit('change', built(draft))
+            () => {
+                last = built(draft);
+                return JSON.stringify(last);
+            },
+            () => emit('change', last)
         );
         expose({ reset, submit, errors: () => errors.value, dirty, draft, value: () => built(draft), load });
 
