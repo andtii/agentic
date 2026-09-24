@@ -218,7 +218,7 @@ export const CONNECTOR_LISTINGS: readonly ConnectorListing[] = [
         secret: 'Atlassian service account API key'
     }),
     remoteMcp({
-        id: 'monday',
+        id: 'monday.com',
         name: 'monday.com',
         service: 'monday.com',
         category: 'project-tracking',

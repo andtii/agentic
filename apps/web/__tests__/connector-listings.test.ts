@@ -7,7 +7,7 @@ import { gmailConnectorPlugin } from '@agentic/connectors';
 import { mcpConnectorSetup } from '@agentic/mcp';
 import { pluginCatalogue } from '../src/plugins/catalogue';
 import { CONNECTOR_CATEGORIES, CONNECTOR_LISTINGS, categoryCounts, listingsByCategory, matchListing, type ConnectorListing } from '../src/plugins/listings';
-import { connectorOptions, validateConnectorDraft } from '../src/pages/plugins/connector';
+import { connectorIdOf, connectorOptions, validateConnectorDraft } from '../src/pages/plugins/connector';
 
 const byId = (id: string): ConnectorListing => {
     const l = CONNECTOR_LISTINGS.find((x) => x.id === id);
@@ -88,7 +88,8 @@ describe('every listing can be connected', () => {
         const preset = l.mcpPreset!;
         expect(l.transport).toBe('mcp');
         expect(new URL(preset.url).protocol).toBe('https:');
-        const draft = { name: l.id, url: preset.url, auth: preset.auth ?? 'none', header: preset.header ?? '', secret: preset.auth && preset.auth !== 'none' ? 'token' : '' };
+        expect(connectorIdOf(l.name)).toBe(l.id);
+        const draft = { name: l.name, url: preset.url, auth: preset.auth ?? 'none', header: preset.header ?? '', secret: preset.auth && preset.auth !== 'none' ? 'token' : '' };
         expect(validateConnectorDraft(draft, new Set())).toEqual({});
         const { manifest } = mcpConnectorSetup(connectorOptions(draft));
         expect(manifest.id).toBe(l.id);
