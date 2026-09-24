@@ -8,7 +8,8 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
  * full row. Project `phone-400` only.
  */
 const shell = (part: string) => `[data-scope="ai-shell"][data-part="${part}"]`;
-const drawerPanel = '[data-scope="drawer"][data-part="panel"]';
+/** The shell's navigation drawer — the responsive one; the chat's context panel is a plain modal drawer. */
+const drawerPanel = '[data-scope="drawer"][data-part="panel"][data-l-dock-above="md"]';
 
 const ROUTES = ['/', '/chats/c1', '/projects', '/projects/new', '/projects/p_agentic', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage'];
 
@@ -18,8 +19,7 @@ async function noHorizontalScroll(page: Page, path: string) {
 }
 
 /**
- * The drawer slides in over 200 ms (`shell.css` → "200 ms slide with the scrim
- * fading in"), and while its `translate` is animating the panel sits on a
+ * The drawer slides in (zero-daisyui's sheet slide, `--duration-slow`), and while its `translate` is animating the panel sits on a
  * composited layer at a fractional offset — every box inside it then measures
  * a hair off (44.00001…, 20.000001…), so exact `toBe(n)` sizes flake (#276).
  * Waiting for the element's own and its subtree's animations to finish puts
@@ -50,8 +50,8 @@ test.describe('phone', () => {
 
     test('the drawer is 312 px with 50 px items and the connection strip at its foot, and closes with focus back on Menu', async ({ page }) => {
         await page.goto('/');
-        // A root route shows the menu; the sidebar is gone; the title is the page.
-        await expect(page.locator(shell('sidebar'))).toBeHidden();
+        // A root route shows the menu; the docked sidebar is gone; the title is the page.
+        await expect(page.locator(drawerPanel)).toBeHidden();
         const menu = page.getByRole('button', { name: 'Menu' });
         expect((await menu.boundingBox())?.width).toBe(44);
         await expect(page.locator(shell('title-text'))).toHaveText('Home');
@@ -62,9 +62,9 @@ test.describe('phone', () => {
         // Measure only once the slide has finished, or every box inside reads a sub-pixel off (#276).
         await animationsSettled(panel);
         expect(Math.round((await panel.boundingBox())?.width ?? 0)).toBe(312);
-        const item = panel.locator('[data-part="nav-item"]').first();
+        const item = panel.locator('[data-scope="nav-list"][data-part="link"]').first();
         expect(Math.round((await item.boundingBox())?.height ?? 0)).toBe(50);
-        expect(await item.locator('a').evaluate((a) => getComputedStyle(a).fontSize)).toBe('16px');
+        expect(await item.evaluate((a) => getComputedStyle(a).fontSize)).toBe('16px');
         expect(Math.round(await item.locator('svg').evaluate((s) => s.getBoundingClientRect().width))).toBe(20);
         await expect(panel.locator(shell('connection'))).toBeVisible();
 
@@ -126,7 +126,7 @@ test.describe('phone', () => {
 
         // The one right slot opens the members-and-tasks panel as an end drawer.
         await page.locator(shell('phone-action')).getByRole('button', { name: 'Tasks in this chat' }).click();
-        const drawer = page.locator(drawerPanel).filter({ has: page.locator('[data-context-drawer]') });
+        const drawer = page.locator('[data-scope="drawer"][data-part="panel"]').filter({ has: page.locator('[data-context-drawer]') });
         await expect(drawer).toBeVisible();
         await expect(drawer.getByRole('link', { name: 'Open tree' })).toBeVisible();
         await page.keyboard.press('Escape');
