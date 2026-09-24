@@ -214,6 +214,57 @@ describe('Session turns (local path)', () => {
         expect(await starts()).toHaveLength(2);
     });
 
+    it('closes a turn whose event stream just ends as interrupted — never left running (#605)', async () => {
+        // A runtime whose stream stops after `turn-start`: no eviction, no error, and no `turn-end` either.
+        const ending: SessionFactory = async (runtime, c) => {
+            if (runtime !== 'anthropic-api') return null;
+            const inner = await agent.session({ policy: allowAll, signal: c.signal });
+            // A plain iterator, not a generator: `return()` must let go at once, as the runtime's own does, even mid-`next()`.
+            const subscribe = (from?: EventCursor): AsyncIterable<AgentEvent> => ({
+                [Symbol.asyncIterator]() {
+                    const it = inner.subscribe(from)[Symbol.asyncIterator]();
+                    let over = false;
+                    return {
+                        async next(): Promise<IteratorResult<AgentEvent>> {
+                            if (over) return { value: undefined, done: true };
+                            const next = await it.next();
+                            if (!next.done && next.value.type === 'turn-start') over = true;
+                            return next;
+                        },
+                        async return(): Promise<IteratorResult<AgentEvent>> {
+                            over = true;
+                            void it.return?.();
+                            return { value: undefined, done: true };
+                        }
+                    };
+                }
+            });
+            const session = new Proxy(inner, {
+                get(target, key) {
+                    if (key === 'subscribe') return subscribe;
+                    const value = Reflect.get(target, key, target) as unknown;
+                    return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+                }
+            });
+            return { session, agentId: agent.id, capabilities: agent.capabilities };
+        };
+        const Ending = defineSessionActor({ factory: ending, commands: sink });
+        const other = testActorApp([Ending, ChatStub]);
+        await other.start();
+        try {
+            const s = other.as(owner).actor(Ending, KEY);
+            await s.open(spec);
+            await s.prompt('hello', 't1');
+            await until(async () => !(await s.get()).running, 'the turn to close');
+            const end = (await s.events()).find((e) => e.type === 'turn-end' && e.turnId === 't1')!;
+            expect(isInterruptedTurnEnd(end)).toBe(true);
+            expect(end).toMatchObject({ stopReason: 'error' });
+            expect((await s.get()).status).toBe('idle');
+        } finally {
+            await other.stop();
+        }
+    });
+
     it('closes an evicted turn as interrupted on the next activation — replay-equal, never re-run', async () => {
         await session().open(spec);
         await session().prompt('slow', 't1');

@@ -39,7 +39,7 @@ import { inboxKey, type NotificationInput, type NotificationRef } from '../notif
 import { answerText, describeRule, needOf, policyRequestOf, requestRecordOf, requestRecordsOf, requestRef, ruleFor, sessionGrantsOf, shapeAnswers, type RequestEvent, type RequestRecord, type RequestResolvedEvent, type SessionGrant } from '../policy/requests.js';
 import { correctionOf, instructionProposals, lastUserText, learningAccess, learningPluginFor, memoryAccess, renderMemoryBlock, retrieveMemories, taskOutcomeOf, turnStatusOf, withMemoryBlock, type LearningPorts, type MemoryOpener } from '../task/driver.js';
 import type { AnswerFollowUp, OpenedSession, SessionOpenSpec, SessionPorts } from './ports.js';
-import { applySessionEntry, optionsOf, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
+import { applySessionEntry, optionsOf, specOptions, bytesOf, type DetachedAnswer, currentTaskId, cursorAfter, EMPTY_TURN_EVENTS, jsonBytes, eventsAfter, findEvent, initialSessionState, isWholeEvent, knownEvents, PAGE_BYTES, parseSessionKey, platformCursor, requestById, RETAINED_PAGES, WINDOW_BYTES, type CorrectionRecord, type LearningRecord, type SessionEntry, type SessionPatch, type SessionState } from './state.js';
 import { SessionPage, sessionPageKey } from './page.js';
 import { appendEntry, boundTranscript, createTranscriptStore } from './store.js';
 
@@ -998,8 +998,15 @@ export function defineSessionActor(ports: SessionPorts) {
                     // A steered prompt joined the running turn: nothing new to drive.
                     const starts = !s.running;
                     const task = taskId ?? s.spec?.taskId;
-                    if (starts) await appendEntry(ctx, set({ running: { turnId, commandId: command.commandId, input: command.input, startedAt: at, ...(task ? { taskId: task } : {}) }, status: 'running' }));
+                    // The frames and the reply travel apart (#605): a daemon turn whose `turn-end` is in already is over. It is
+                    // never `running` again (nothing would end it), and the end it missed, the reply in the chat, runs now.
+                    const over = starts && s.mode !== 'local' && findEvent(s, (e) => e.type === 'turn-end' && e.turnId === turnId) !== undefined;
+                    if (starts && !over) await appendEntry(ctx, set({ running: { turnId, commandId: command.commandId, input: command.input, startedAt: at, ...(task ? { taskId: task } : {}) }, status: 'running' }));
                     await appendEntry(ctx, { t: 'reply', command, reply: replied, at, ...(taskId ? { taskId } : {}) } satisfies SessionEntry);
+                    if (over) {
+                        await finishTurn(ctx, turnId, task);
+                        return;
+                    }
                     if (starts && s.mode === 'local') {
                         lives.get(ctx.key)?.turns.add(turnId);
                         await ctx.tasks.start('drive', { turnId });
@@ -1324,6 +1331,9 @@ export function defineSessionActor(ports: SessionPorts) {
                                     await appendEntry(ctx, set({ running: { turnId: ev.turnId, commandId: ev.turnId, input: ev.input, startedAt: now(), implicit: true } }));
                                     await publishChat(ctx, { kind: 'status', status: 'typing', ref: ev.turnId });
                                 }
+                                // Its first sign of work (#605): the router's re-check never cancels an implicit turn that carries something.
+                                const idle = s.running?.implicit && !s.running.content ? s.running : undefined;
+                                if (idle && ev.turnId === idle.turnId && !EMPTY_TURN_EVENTS.has(ev.type)) await appendEntry(ctx, set({ running: { ...idle, content: true } }));
                                 const runningTurn = s.running?.turnId;
                                 // An implicit turn works no task (#510): its usage, reply and learning are the session's, never the opening task's.
                                 const runningTask = s.running?.implicit ? undefined : s.running?.taskId ?? s.spec?.taskId;
@@ -1526,7 +1536,12 @@ export function defineSessionActor(ports: SessionPorts) {
                     for (;;) {
                         const next = await Promise.race([it.next(), aborted]);
                         // Deactivating: leave `running` in place — the next activation closes the turn as interrupted.
-                        if (signal.aborted || next.done) return;
+                        if (signal.aborted) return;
+                        // The stream ended with no `turn-end` (#605): nothing will end the turn, so it is over as far as the record can tell.
+                        if (next.done) {
+                            await ctx.turn((c) => finishInterrupted(c, turnId));
+                            return;
+                        }
                         const ev = next.value;
                         await ctx.turn((c) => appendEvent(c, ev));
                         const verdict = await ctx.turn((c) => recordUsage(c, ev, taskId));

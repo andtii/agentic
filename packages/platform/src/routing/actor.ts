@@ -213,6 +213,22 @@ export const MACHINE_LOST_CODE = 'machine-lost';
 /** The reminder that watches the routes waiting `machine-offline` (#366). */
 export const MACHINE_LOST_REMINDER = 'machine-lost';
 
+/**
+ * The reminder that re-checks routes parked `waiting-capacity` / `waiting-turn` (#605): a lost `slotFreed` or
+ * `turn-end`, or a turn that never ends, must not leave a message waiting forever.
+ */
+export const PARKED_RECHECK_REMINDER = 'parked-recheck';
+
+/** How often a parked route is re-checked (#605): the reminder floor, `REMINDER_FLOOR_MS`, nothing tighter. */
+export const PARKED_RECHECK_MS = 60_000;
+
+/**
+ * How long an implicit turn may run empty (no event beyond `turn-start` / `state` / `config` / `usage`) before the
+ * re-check cancels it (#605). A runtime that opens one it never ends (signalxjs/ai#193) would otherwise hold its
+ * session, and its environment's slot, for good. Longer than the daemon's own reaper (#604), which gets there first.
+ */
+export const GHOST_TURN_MS = 20_000;
+
 /** The reminder floor (architecture §2): nothing is checked more often. */
 const REMINDER_FLOOR_MS = 60_000;
 
@@ -349,6 +365,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const driverOf = ports.driver ?? ((ws: WorkspaceId): Principal => userPrincipal(ws, ws));
     const audit = ports.audit ?? auditPort();
     const projectFeatures = ports.projectFeatures ?? {};
+    const ghostTurnMs = ports.ghostTurnMs ?? GHOST_TURN_MS;
     /** Per activation (by actor key): what `prompt` pokes so the `follow` supervisor rescans the routes. */
     const wakers = new Map<string, () => void>();
     /** The definition itself, once built: the follower re-enters through it (`turnEnded`, a method turn of its own). */
@@ -362,15 +379,15 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const definition = defineActor({
         type: ROUTING_TYPE,
         authorize: [sameWorkspace],
-        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
+        methodAuthorize: { run: taskDriver, turnEnded: taskDriver, deliverAnswer: taskDriver, questionCancelled: taskDriver, machineOnline: machineOnly, machineOffline: machineOnly, autoResume: taskDriver, expireOffline: taskDriver, recheck: taskDriver, sessionOpened: machineOnly, sessionClosed: machineOnly, slotFreed: machineOnly, promptRefused: machineOnly, report: ownTask, endSession: userOrExternal },
         state: (): RoutingState => initialRoutingState(),
         /** The machine-lost reminder (#366): `expireOffline` runs as its own turn under the driver, one-way. */
         onReminder: async (ctx, name) => {
-            if (name !== MACHINE_LOST_REMINDER) return;
+            if (name !== MACHINE_LOST_REMINDER && name !== PARKED_RECHECK_REMINDER) return;
             const ids = parseRoutingKey(ctx.key);
             if (!ids) return;
-            const client = actor(self!, ctx.key).with({ context: asPrincipal(driverOf(ids.workspaceId)), oneWay: true }) as unknown as { expireOffline(): Promise<void> };
-            await client.expireOffline().catch(() => undefined);
+            const client = actor(self!, ctx.key).with({ context: asPrincipal(driverOf(ids.workspaceId)), oneWay: true }) as unknown as { expireOffline(): Promise<void>; recheck(): Promise<void> };
+            await (name === MACHINE_LOST_REMINDER ? client.expireOffline() : client.recheck()).catch(() => undefined);
         },
         methods: (ctx) => {
             const ids = parseRoutingKey(ctx.key);
@@ -444,6 +461,14 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 await park(route, { kind: 'capacity', environmentId, position: ahead + 1 }, `environment ${environmentId} on machine ${route.machineId} is at capacity; waiting for a turn to end`, route.sessionId);
                 route.status = 'waiting-capacity';
                 touch(route);
+                await armRecheck();
+            }
+
+            /** The re-check reminder (#605): armed while any route waits on a slot or on another turn, cleared when none does. */
+            async function armRecheck(): Promise<void> {
+                const parked = Object.values(ctx.state.routes).some((r) => r.status === 'waiting-capacity' || r.status === 'waiting-turn');
+                if (!parked) await ctx.reminders.clear(PARKED_RECHECK_REMINDER);
+                else if (!(await ctx.reminders.list()).includes(PARKED_RECHECK_REMINDER)) await ctx.reminders.set(PARKED_RECHECK_REMINDER, { due: Math.max(REMINDER_FLOOR_MS, PARKED_RECHECK_MS) });
             }
 
             /** The chat as the route's agent sees it — `fileAccess` and `history` answer for that agent (CHT-04, MEM-11). */
@@ -547,6 +572,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     if (!info.capabilities?.steer) {
                         route.status = 'waiting-turn';
                         touch(route);
+                        await armRecheck();
                         return 'busy';
                     }
                 }
@@ -1575,6 +1601,59 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         if (first && !route.chatId) await session(sessionId).close().catch(() => undefined);
                     }
                     await armLost();
+                    await ctx.save();
+                },
+
+                /**
+                 * The parked-route re-check (#605; EXE-09, OPS-05), on `PARKED_RECHECK_REMINDER`. Every route waiting on a slot
+                 * or on another turn looks at what is in its way: its own session, and for a slot, every session holding one
+                 * in its environment. An implicit turn there that has run empty for `ghostTurnMs` is cancelled
+                 * (`Session.cancel`, a command the daemon passes to the runtime); its `turn-end` then frees the session and the
+                 * slot the ordinary way (`turnEnded`, `slotFreed`). A route whose blocker is already gone, a `slotFreed` or
+                 * `turn-end` it never heard, is prompted now. Re-armed while anything is still parked.
+                 */
+                async recheck(): Promise<void> {
+                    const at = now();
+                    const parked = () => Object.values(ctx.state.routes).filter((r) => (r.status === 'waiting-capacity' || r.status === 'waiting-turn') && r.sessionId !== undefined);
+                    const inTheWay = new Set<SessionId>();
+                    const views = new Map<MachineId, MachineView>();
+                    const view = async (id: MachineId): Promise<MachineView> => views.get(id) ?? views.set(id, await machine(id).get()).get(id)!;
+                    for (const route of parked()) {
+                        inTheWay.add(route.sessionId!);
+                        if (route.status !== 'waiting-capacity' || !route.machineId || !route.environmentId) continue;
+                        for (const h of runningIn(await view(route.machineId), route.environmentId)) inTheWay.add(h.sessionId as SessionId);
+                    }
+                    for (const id of inTheWay) {
+                        const running = await session(id)
+                            .get()
+                            .then((info) => info.running, () => undefined);
+                        if (!running?.implicit || running.content || at - running.startedAt < ghostTurnMs) continue;
+                        console.warn(`[routing] ${ctx.key}: cancelling turn ${running.turnId} of session ${id}: the runtime started it on its own and it carried nothing for ${at - running.startedAt} ms`);
+                        await session(id)
+                            .cancel()
+                            .catch(() => undefined);
+                    }
+                    views.clear();
+                    for (const route of parked()) {
+                        if (ctx.state.routes[route.taskId] !== route) continue;
+                        const sessionId = route.sessionId!;
+                        if (route.status === 'waiting-turn') {
+                            const info = await session(sessionId)
+                                .get()
+                                .catch(() => undefined);
+                            if (!info || info.running) continue;
+                            await activate(route, `the turn in the way of session ${sessionId} is over (re-check)`, sessionId);
+                            await prompt(route);
+                        } else if (route.machineId && route.environmentId) {
+                            const m = await view(route.machineId);
+                            if (!m.activeSessions.some((h) => h.sessionId === sessionId && h.status === 'open') || freeSlots(m, route.environmentId) <= 0) continue;
+                            await activate(route, `a slot is free in environment ${route.environmentId} (re-check)`, sessionId);
+                            await prompt(route);
+                            views.delete(route.machineId);
+                        }
+                    }
+                    await ctx.reminders.clear(PARKED_RECHECK_REMINDER);
+                    await armRecheck();
                     await ctx.save();
                 },
 
