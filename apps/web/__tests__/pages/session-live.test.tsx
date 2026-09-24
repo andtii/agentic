@@ -118,6 +118,39 @@ describe('session feeds', () => {
         expect(errors).toEqual([]);
         feed.disconnect();
     });
+
+    it('a feed whose tail fails follows again from where it stopped, and the turn still streams into it (#606)', async () => {
+        const { sessionId, session, agentId } = await startTurn();
+        let tails = 0;
+        const flaky: SessionActorClient = {
+            get: () => session.get(),
+            prompt: (...a) => session.prompt(...a),
+            respond: (...a) => session.respond(...a),
+            cancel: (...a) => session.cancel(...a),
+            configure: (...a) => session.configure(...a),
+            close: (...a) => session.close(...a),
+            tail: (from) => {
+                // The first tail drops after a couple of events, the way a socket does: the feed must not go silent.
+                if (++tails > 1) return session.tail(from);
+                const inner = session.tail(from);
+                return {
+                    async *[Symbol.asyncIterator]() {
+                        let n = 0;
+                        for await (const ev of inner) {
+                            yield ev;
+                            if (++n === 2) throw new Error('the socket dropped');
+                        }
+                    }
+                };
+            }
+        };
+        const errors: Error[] = [];
+        const feed = openFeed(flaky, sessionId, agentId, (e) => errors.push(e));
+        await until(() => feed.transcript.state === 'idle' && text(feed) === 'abcdefghij', 'the whole turn in the feed', 5_000);
+        expect(tails).toBeGreaterThan(1);
+        expect(errors).toEqual([]);
+        feed.disconnect();
+    });
 });
 
 describe('the session view', () => {
