@@ -18,7 +18,7 @@
  * Pure data: the kit import is type-only, so `dist/design-system.js` loads
  * in a Node build script without the kit's Node-only barrel.
  */
-import type { CustomTokenDecl, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
+import type { ContrastPairDecl, CustomTokenDecl, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
 import { tokens as daisy } from '@sigx/zero-daisyui';
 import { kitScopes } from '../kit/vocabulary.js';
 import { codeScopes } from '../code/vocabulary.js';
@@ -174,15 +174,40 @@ export const KINDS = ['approval', 'input', 'interrupted', 'offline', 'machine', 
  */
 export const AG_MODIFIERS = ['hollow', 'outline', 'compact', 'selected', 'current', 'stale', 'loading'] as const;
 
+/**
+ * The contrast floors the handoff's inks rely on, measured by the kit's
+ * `validateDesignSystem` in every theme beside its role / `-content` pairs —
+ * the build and `zero:validate --strict` fail when one drops below its floor.
+ */
+export const contrast: ContrastPairDecl[] = [
+    { fg: 'ag-text-dim', bg: 'color-base-300', min: 4.5, description: 'text-dim is the floor: 4.6:1 on base-300 per the handoff; do not go darker' },
+    { fg: 'ag-text-muted', bg: 'color-base-200', min: 4.5, description: 'secondary text on the card / sidebar surface' },
+    { fg: 'color-base-content', bg: 'color-base-100', min: 7, description: 'body text on the page ground (AAA)' },
+    ...(['ag-agent-1', 'ag-agent-2', 'ag-agent-3', 'ag-agent-4'] as const).map((fg) => ({
+        fg,
+        bg: 'color-base-200',
+        min: 3,
+        description: 'the agent monogram on its tile, against the sidebar / card surface'
+    })),
+    ...(['color-primary', 'color-info', 'color-warning', 'color-error'] as const).map((fg) => ({
+        fg,
+        bg: 'color-base-100',
+        min: 4.5,
+        description: 'a state colour read as ink on the page ground'
+    }))
+];
+
 export const tokens: TokensInput<Roles, typeof system> = {
     roles: daisy.roles,
     custom,
     variants: daisy.variants,
     modifiers: [...(daisy.modifiers ?? []), ...AG_MODIFIERS],
     axes: { ...daisy.axes, tone: [...TONES], kind: [...KINDS] },
-    breakpoints: daisy.breakpoints,
+    // daisy's sm / md / lg, plus the handoff's 1280 regime.
+    breakpoints: { ...daisy.breakpoints, xl: '80rem' },
     scopes: { ...daisy.scopes, ...kitScopes, ...codeScopes },
     system,
+    contrast,
     // A single-scheme design system names its one theme as `defaultLight` (the
     // `:root` default) and omits `defaultDark`; `:root` takes its scheme.
     defaultLight: THEME,

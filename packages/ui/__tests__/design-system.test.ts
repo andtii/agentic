@@ -1,17 +1,19 @@
 /**
  * The `agentic` design system, held to what the kit checks (validation
  * against zero's manifest with the fragment merged) and to what it does not:
- * the kit contrast-checks role / `-content` and base pairs only, so the
- * `--ag-*` inks the handoff relies on are measured here.
+ * the recipes are daisy's patched per scope by `extendDesignSystem`, and the
+ * `--ag-*` inks' contrast floors are declared in `tokens.contrast`, where the
+ * kit measures them.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileTokensCss, mergeManifests, validateDesignSystem, type ZeroManifest } from '@sigx/zero-kit';
-import { AGENT_HUES, AG_MODIFIERS, KINDS, THEME, TONES, custom, designSystem, palette, tokens } from '../src/design-system';
+import { AGENT_HUES, AG_MODIFIERS, KINDS, THEME, TONES, custom, designSystem, patches, tokens } from '../src/design-system';
 import { fragment } from '../src/fragment';
 import { tokens as daisy } from '@sigx/zero-daisyui';
+import { designSystem as daisyDesignSystem } from '@sigx/zero-daisyui/design-system';
 
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
 // A path, not `new URL(...)`: happy-dom replaces the global URL, which node:fs refuses.
@@ -22,20 +24,6 @@ const handoff = JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', '.
 };
 
 const theme = tokens.themes[THEME]!;
-
-/** WCAG 2.x relative luminance of a `#rrggbb`. */
-function luminance(hex: string): number {
-    const c = hex.replace('#', '');
-    const [r, g, b] = [0, 2, 4].map((i) => {
-        const v = parseInt(c.slice(i, i + 2), 16) / 255;
-        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-    }) as [number, number, number];
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-const contrast = (a: string, b: string): number => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
-    return (hi + 0.05) / (lo + 0.05);
-};
 
 describe('the agentic design system', () => {
     it('validates against zero\'s manifest with the ai-* fragment merged, with no errors', () => {
@@ -94,25 +82,58 @@ describe('the agentic design system', () => {
         expect(css).toContain('--text-md: 13px;');
     });
 
-    it('keeps the handoff\'s inks readable where the kit does not measure them', () => {
-        // text-dim is the floor: 4.6:1 on base-300 per the handoff; do not go darker.
-        expect(contrast(palette['text-dim'], palette['base-300'])).toBeGreaterThanOrEqual(4.5);
-        expect(contrast(palette['text-muted'], palette['base-200'])).toBeGreaterThanOrEqual(4.5);
-        expect(contrast(palette.text, palette['base-100'])).toBeGreaterThanOrEqual(7);
-        // The monogram on a tile is text at 3:1 minimum against the sidebar / card surface.
-        for (const hue of AGENT_HUES) expect(contrast(hue, palette['base-200']), hue).toBeGreaterThanOrEqual(3);
-        // The four state colours each read as ink on the page ground.
-        for (const ink of [palette.live, palette.working, palette['needs-you'], palette.failed]) {
-            expect(contrast(ink, palette['base-100']), ink).toBeGreaterThanOrEqual(4.5);
-        }
+    it('declares the handoff\'s contrast floors in tokens.contrast, for the kit to measure in every theme', () => {
+        const pairs = (designSystem.tokens.contrast ?? []).map(({ fg, bg, min }) => `${fg} / ${bg} >= ${min}`);
+        expect(pairs).toEqual([
+            'ag-text-dim / color-base-300 >= 4.5',
+            'ag-text-muted / color-base-200 >= 4.5',
+            'color-base-content / color-base-100 >= 7',
+            'ag-agent-1 / color-base-200 >= 3',
+            'ag-agent-2 / color-base-200 >= 3',
+            'ag-agent-3 / color-base-200 >= 3',
+            'ag-agent-4 / color-base-200 >= 3',
+            'color-primary / color-base-100 >= 4.5',
+            'color-info / color-base-100 >= 4.5',
+            'color-warning / color-base-100 >= 4.5',
+            'color-error / color-base-100 >= 4.5'
+        ]);
+        // A floor the theme misses fails validation — the kit really measures the pairs.
+        const broken = { ...designSystem, tokens: { ...designSystem.tokens, contrast: [{ fg: 'ag-text-dim', bg: 'color-base-300', min: 10 }] } };
+        const result = validateDesignSystem(broken, mergeManifests(zeroManifest, fragment));
+        expect(result.errors.map((e) => e.rule)).toContain('contrast-floor');
     });
 
     it('declares the product axes and modifiers the kit issues wire, beside daisy\'s', () => {
         expect(tokens.axes).toEqual({ ...daisy.axes, tone: [...TONES], kind: [...KINDS] });
-        expect(tokens.breakpoints).toEqual(daisy.breakpoints);
+        // daisy's ramp, plus the handoff's 1280 regime.
+        expect(tokens.breakpoints).toEqual({ ...daisy.breakpoints, xl: '80rem' });
+        expect(compileTokensCss(tokens)).toContain('--breakpoint-xl: 80rem;');
         for (const mod of AG_MODIFIERS) expect(tokens.modifiers).toContain(mod);
         for (const mod of ['wide', 'block', 'square', 'circle', 'active', 'zebra', 'hover']) expect(tokens.modifiers).toContain(mod);
         for (const v of ['solid', 'outline', 'soft', 'ghost', 'dash', 'link']) expect(tokens.variants).toContain(v);
+    });
+
+    it('is derived from daisy by extendDesignSystem — the control-room tokens, one theme, daisy\'s api carried', () => {
+        expect(designSystem.derivedFrom?.name).toBe(daisyDesignSystem.name);
+        expect(Object.keys(designSystem.derivedFrom!.patches).sort()).toEqual(Object.keys(patches).sort());
+        const derived = designSystem.tokens;
+        expect(Object.keys(derived.themes)).toEqual([THEME]);
+        expect(derived.defaultLight).toBe(THEME);
+        expect(derived.defaultDark).toBeUndefined();
+        expect(derived.themes[THEME]).toEqual(tokens.themes[THEME]);
+        expect(derived.custom).toEqual(tokens.custom);
+        expect(derived.system).toEqual(tokens.system);
+        expect(derived.breakpoints).toEqual(tokens.breakpoints);
+        expect(derived.modifiers).toEqual(tokens.modifiers);
+        expect(designSystem.api).toBe(daisyDesignSystem.api);
+    });
+
+    it('holds one patch per re-tuned scope, plus the empty stubs later issues fill', () => {
+        const tuned = ['button', 'input', 'textarea', 'select', 'combobox', 'field', 'switch', 'badge', 'dialog', 'table', 'timeline', 'card', 'breadcrumbs', 'tabs', 'collapsible', 'toggle-group', 'skeleton', 'navbar'];
+        const stubs = ['avatar', 'empty-state', 'drawer', 'nav-list', 'progress', 'alert'];
+        expect(Object.keys(patches).sort()).toEqual([...tuned, ...stubs].sort());
+        for (const scope of tuned) expect(Object.keys(patches[scope]!).length, scope).toBeGreaterThan(0);
+        for (const scope of stubs) expect(patches[scope], scope).toEqual({});
     });
 
     it('overrides daisy\'s recipes in place — one recipe per scope, daisy\'s axes intact', () => {

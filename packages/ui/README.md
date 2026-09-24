@@ -18,7 +18,7 @@ import { installThemes } from '@agentic/ui/design-system';
 installThemes();
 ```
 
-`withOverride(recipes, scope, patch)` replaces a daisy recipe in place with the patch deep-merged (arrays and scalars replace, `compoundVariants` append) — one recipe per scope, never two. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
+The design system is `extendDesignSystem(daisy, …)` from `@sigx/zero-kit/define`: each re-tuned daisy scope has one `RecipePatch` in `src/design-system/patches/<scope>.ts` (objects merge per key, arrays and scalars replace, `null` deletes, a `compoundVariants` entry merges into daisy's with the same `match`) — one recipe per scope, never two. The handoff's contrast floors over the `--ag-*` inks are `tokens.contrast` pairs, measured by the kit's validator in every theme; the breakpoints are daisy's plus `xl: 80rem`. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
 
 ## Layout tier (`src/layout`)
 
