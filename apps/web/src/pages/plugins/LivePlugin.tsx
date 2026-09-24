@@ -124,7 +124,10 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
         agentName: (id) => agents.lookup(id).name,
         onActivated: async () => { if (usedBy.hasValue) await usedBy.refresh(); }
     });
-    const activate = (): Promise<void> => memory.activate(plugin()!.manifest.kind as SlotKind, props.id);
+    const activate = (): Promise<void> => {
+        const p = plugin();
+        return p ? memory.activate(p.manifest.kind as SlotKind, props.id) : Promise.resolve();
+    };
 
     const remove = async (): Promise<void> => {
         const k = key();

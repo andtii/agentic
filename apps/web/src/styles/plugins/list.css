@@ -1,1 +1,3 @@
 /* /plugins redesign (#625): list — owned by its page issue. */
+/* The layout (`PluginsLayout`): the menu beside the view once there is a menu; until then the view is the page. */
+[data-plugins-layout]:has(> [data-plugins-menu]) { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2xl); }
