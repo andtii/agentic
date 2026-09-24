@@ -12,7 +12,7 @@
  * ] }
  * ```
  *
- * `concurrency` is how many turns may run at once in the environment (default 1) — not how many sessions may be
+ * `concurrency` is how many turns may run at once in the environment (no limit when absent, #694) — not how many sessions may be
  * open: a chat member's session stays open between messages and costs nothing until it is prompted (#394).
  */
 
@@ -44,9 +44,9 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
         if (!isText(row.runtime, 256)) errors.push(`${at}.runtime is required (e.g. "claude-code")`);
         if (row.profileDir !== undefined && !isText(row.profileDir)) errors.push(`${at}.profileDir must be a path`);
         if (!Array.isArray(row.cwdRoots) || row.cwdRoots.length === 0 || !row.cwdRoots.every((r) => isText(r))) errors.push(`${at}.cwdRoots must be a non-empty list of paths`);
-        // One turn at a time per environment unless the row says more: a second prompt waits, a second session does not (#394).
-        const concurrency = row.concurrency ?? 1;
-        if (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1) errors.push(`${at}.concurrency must be a whole number ≥ 1`);
+        // No limit unless the row sets one (#694); with one, a prompt beyond it waits, a second session does not (#394).
+        const concurrency = row.concurrency;
+        if (concurrency !== undefined && (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1)) errors.push(`${at}.concurrency must be a whole number ≥ 1`);
         if (row.accountLabel !== undefined && !isText(row.accountLabel, 256)) errors.push(`${at}.accountLabel must be text`);
         if (row.allowBypassPermissions !== undefined && typeof row.allowBypassPermissions !== 'boolean') errors.push(`${at}.allowBypassPermissions must be true or false`);
         if (errors.length !== before) return;
@@ -57,7 +57,7 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
             runtime: row.runtime as string,
             ...(row.profileDir === undefined ? {} : { profileDir: row.profileDir as string }),
             cwdRoots: row.cwdRoots as string[],
-            concurrency: concurrency as number,
+            ...(concurrency === undefined ? {} : { concurrency: concurrency as number }),
             ...(row.accountLabel === undefined ? {} : { accountLabel: row.accountLabel as string }),
             // Set here, by `env add --allow-bypass`, or by an `env.request` the platform admits only to an elevated owner (#453, #355); a replace keeps it (`addEnvironment`).
             ...(row.allowBypassPermissions === true ? { allowBypassPermissions: true } : {})

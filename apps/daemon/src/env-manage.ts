@@ -86,7 +86,8 @@ export async function answerEnvRequest(op: EnvOp, c: EnvManageContext): Promise<
         }
 
         // An existing environment keeps what the request leaves out (`replace` alone would drop them).
-        const concurrency = input.concurrency ?? existing?.concurrency;
+        // A number sets the limit, `null` clears it (no limit, #694), absent keeps the environment's.
+        const concurrency = input.concurrency === null ? undefined : (input.concurrency ?? existing?.concurrency);
         const accountLabel = input.accountLabel ?? existing?.accountLabel;
         // `allowBypassPermissions` (#355): `true` sets, `false` clears, absent keeps — the platform admits turning it on to an elevated owner only.
         const allowBypassPermissions = typeof input.allowBypassPermissions === 'boolean' ? input.allowBypassPermissions : undefined;

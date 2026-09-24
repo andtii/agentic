@@ -50,7 +50,7 @@ export function environmentStatus(env: EnvironmentDescriptor, machine?: MachineI
             break;
     }
     const { active, max } = env.concurrency;
-    if (active >= max) return { state: 'busy', label: `Busy (${active}/${max})`, color: 'warning', tone: 'working' };
+    if (max !== undefined && active >= max) return { state: 'busy', label: `Busy (${active}/${max})`, color: 'warning', tone: 'working' };
     return { state: 'ready', label: 'Ready', color: 'success', tone: 'live' };
 }
 
@@ -129,7 +129,10 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
             const machine = props.machine;
             const status = environmentStatus(env, machine);
             const fix = authFixLine(env);
-            const slots = Array.from({ length: Math.max(env.concurrency.max, 0) }, (_, i) => i < env.concurrency.active);
+            const { active, max } = env.concurrency;
+            // No limit (#694): no meter, only the count.
+            const slots = max === undefined ? [] : Array.from({ length: Math.max(max, 0) }, (_, i) => i < active);
+            const running = max === undefined ? `${active} running · no limit` : `${active} of ${max} running`;
             return (
                 <article data-scope={SCOPE} data-part="root" data-tone={status.tone} data-env-state={status.state} data-mod-selected={props.selected ? '' : undefined} aria-label={env.name}>
                     <div data-scope={SCOPE} data-part="header">
@@ -148,12 +151,12 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
                             {env.account.identity ? ` (${env.account.identity})` : ''}
                         </span>
                     </p>
-                    <div data-scope={SCOPE} data-part="capacity" role="img" aria-label={`${env.concurrency.active} of ${env.concurrency.max} ${env.concurrency.max === 1 ? 'turn' : 'turns'} running`}>
+                    <div data-scope={SCOPE} data-part="capacity" role="img" aria-label={max === undefined ? `${active} ${active === 1 ? 'turn' : 'turns'} running, no limit` : `${active} of ${max} ${max === 1 ? 'turn' : 'turns'} running`}>
                         <span data-scope={SCOPE} data-part="meter" aria-hidden="true">
                             {slots.map((used) => <span data-scope={SCOPE} data-part="slot" data-used={used ? '' : undefined} />)}
                         </span>
                         <span data-scope={SCOPE} data-part="count">
-                            {env.concurrency.active} of {env.concurrency.max} running
+                            {running}
                         </span>
                         {props.queued ? <span data-scope={SCOPE} data-part="queued">{props.queued} queued</span> : null}
                         {props.load !== undefined ? <span data-scope={SCOPE} data-part="load" title={environmentLoadTitle(props.load, env.runtime)}>{environmentLoadText(props.load)}</span> : null}

@@ -273,6 +273,10 @@ describe('daemon frame schemas', () => {
         expect(platformFrame.safeParse({ v: V, t: 'env.request', requestId: 'env_5', op: 'rename', environmentId: env.id }).success).toBe(false);
         expect(platformFrame.safeParse({ ...put, environment: { ...put.environment, cwdRoots: [] } }).success).toBe(false);
         expect(platformFrame.safeParse({ ...put, environment: { ...put.environment, concurrency: 0 } }).success).toBe(false);
+        // `null` clears the limit (#694); a hello's environment without `max` has none.
+        expect(platformFrame.safeParse({ ...put, environment: { ...put.environment, concurrency: null } }).success).toBe(true);
+        const hello = { ...daemonCases.hello.valid, environments: [{ ...env, concurrency: { active: 0 } }] };
+        expect(daemonFrame.safeParse(hello).success).toBe(true);
     });
 
     it('hello and env may carry the machine policy; an env.response carries result or error, never both', () => {

@@ -99,7 +99,7 @@ describe('agentic-daemon end to end', () => {
         expect(hello.machineId).toBe(TEST_MACHINE);
         expect(hello.environments.map((e) => [e.id, e.name, e.concurrency.max])).toEqual([
             ['env_work', 'Work', 2],
-            ['env_home', 'Home', 1]
+            ['env_home', 'Home', undefined]
         ]);
         expect(hello.environments.every((e) => e.machineId === TEST_MACHINE && e.account.authStatus === 'ok')).toBe(true);
         expect(JSON.stringify(hello)).not.toContain('profileDir');

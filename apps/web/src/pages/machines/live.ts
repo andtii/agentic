@@ -194,7 +194,7 @@ export function doctorChecksOf(doctor: MachineDoctorView): DoctorCheck[] {
  * daemon's `concurrency.active` is only what it said at its last `hello` / `env`, so a card read from it goes stale.
  */
 export function liveCapacity(view: Pick<MachineView, 'environments' | 'activeSessions' | 'pending' | 'draining'>): EnvironmentDescriptor[] {
-    return view.environments.map((e) => ({ ...e, concurrency: { max: e.concurrency.max, active: activeIn(view, e.id) } }));
+    return view.environments.map((e) => ({ ...e, concurrency: { ...e.concurrency, active: activeIn(view, e.id) } }));
 }
 
 /** The doctor card's footnote on the platform: the verdicts are the daemon's, re-run there. */

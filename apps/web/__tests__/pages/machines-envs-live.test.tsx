@@ -321,6 +321,11 @@ describe('the machine setup model', () => {
         expect(inputOf(base)).toEqual({ name: 'b', runtime: 'claude-code', cwdRoots: ['C:\\Dev\\b'] });
         const edited = draftOf(env('m' as MachineId, 'env_w', 'work', 'ok'));
         expect(inputOf({ ...edited, accountLabel: 'Work account' })).toEqual({ id: 'env_w', name: 'work', runtime: 'claude-code', cwdRoots: ['C:\\Dev'], concurrency: 4, accountLabel: 'Work account' });
+        // Emptying the limit clears it (#694); an environment that had none sends nothing and stays unlimited.
+        expect(inputOf({ ...edited, concurrency: null })).toMatchObject({ concurrency: null });
+        const unlimited = draftOf({ ...env('m' as MachineId, 'env_w', 'work', 'ok'), concurrency: { active: 0 } });
+        expect(unlimited.concurrency).toBeNull();
+        expect(inputOf(unlimited)).not.toHaveProperty('concurrency');
     });
 
     it('files the environment audit kinds under Machines, linked to the machine and toned by outcome', () => {

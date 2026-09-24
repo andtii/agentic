@@ -35,9 +35,9 @@ describe('env-store', () => {
         expect(newEnvironmentId('…', new Set())).toBe('env_environment');
     });
 
-    it('add allocates the profile dir under the config dir and defaults concurrency', () => {
+    it('add allocates the profile dir under the config dir and sets no concurrency limit (#694)', () => {
         const { environments, environment } = addEnvironment([], input(), paths());
-        expect(environment).toEqual({ id: 'env_work', name: 'Work', runtime: 'claude-code', profileDir: profileDirFor(paths(), 'env_work'), cwdRoots: [dir], concurrency: 1 });
+        expect(environment).toEqual({ id: 'env_work', name: 'Work', runtime: 'claude-code', profileDir: profileDirFor(paths(), 'env_work'), cwdRoots: [dir] });
         expect(environments).toEqual([environment]);
     });
 

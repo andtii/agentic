@@ -467,13 +467,15 @@ export function activeIn(view: CapacityView, environmentId: EnvironmentId | stri
 }
 
 /**
- * Free slots in an environment as the daemon last described it — `concurrency.max` minus the turns running; `0` for an
+ * Free slots in an environment as the daemon last described it — `concurrency.max` minus the turns running, unbounded
+ * when it has no `max` (#694); `0` for an
  * unknown environment, and `0` while a drain covers it (#365): a prompt parks on capacity until the drain ends.
  */
 export function freeSlots(view: CapacityView, environmentId: EnvironmentId | string): number {
     const env = view.environments.find((e) => e.id === environmentId);
     if (!env) return 0;
     if (view.draining && (view.draining.runtime === undefined || view.draining.runtime === env.runtime)) return 0;
+    if (env.concurrency.max === undefined) return Number.POSITIVE_INFINITY;
     return Math.max(0, env.concurrency.max - activeIn(view, environmentId));
 }
 

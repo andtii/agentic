@@ -21,8 +21,8 @@ export interface LocalEnvironment {
     /** The runtime's per-account config dir (`CLAUDE_CONFIG_DIR` for Claude Code). */
     readonly profileDir?: string;
     readonly cwdRoots: readonly string[];
-    /** Maximum concurrent sessions in this environment. */
-    readonly concurrency: number;
+    /** Turns running at once in this environment; absent means no limit (#694). */
+    readonly concurrency?: number;
     readonly accountLabel?: string;
     /**
      * Sessions here may run in a mode that asks about nothing (#450: Claude Code's `bypassPermissions`). Set on the
@@ -122,7 +122,7 @@ export function toEnvironmentDescriptor(
             ...(inspection.identity === undefined ? {} : { identity: inspection.identity })
         },
         cwdRoots: [...env.cwdRoots],
-        concurrency: { max: env.concurrency, active },
+        concurrency: env.concurrency === undefined ? { active } : { max: env.concurrency, active },
         isolation: inspection.isolation,
         ...(doctor === undefined ? {} : { doctor }),
         ...(models === undefined ? {} : { models: [...models] }),

@@ -21,7 +21,10 @@ export interface EnvironmentDraft {
     runtime: string;
     /** One folder per line, as typed. */
     roots: string;
+    /** Turns at once; `null` is no limit (#694). */
     concurrency: number | null;
+    /** The environment had a limit when the dialog opened: clearing it is sent as an explicit `null`. */
+    hadLimit?: boolean;
     accountLabel: string;
     /** Sessions here may run in a mode that asks about nothing (#450, #482): turning it on needs elevation. */
     allowBypass: boolean;
@@ -125,7 +128,8 @@ export function draftOf(env: EnvironmentDescriptor): EnvironmentDraft {
         name: env.name,
         runtime: env.runtime,
         roots: env.cwdRoots.join('\n'),
-        concurrency: env.concurrency.max,
+        concurrency: env.concurrency.max ?? null,
+        hadLimit: env.concurrency.max !== undefined,
         accountLabel: env.account.label === env.name ? '' : env.account.label,
         allowBypass: env.allowBypassPermissions === true,
         hadBypass: env.allowBypassPermissions === true
@@ -194,13 +198,13 @@ export function validateDraft(draft: EnvironmentDraft, context: DraftContext): D
         if (relative) errors.roots = `${relative} is not a full path on this machine.`;
         else if (outside) errors.roots = `${outside} is outside the folders this machine allows (${allowed.join(', ')}).`;
     }
-    if (draft.concurrency !== null && (!Number.isInteger(draft.concurrency) || draft.concurrency < 1)) errors.concurrency = 'At least one session at a time.';
+    if (draft.concurrency !== null && (!Number.isInteger(draft.concurrency) || draft.concurrency < 1)) errors.concurrency = 'At least one turn at a time, or empty for no limit.';
     return errors;
 }
 
 /**
- * The request `putEnvironment` sends; an unset concurrency or label leaves the daemon's (or the environment's own)
- * value. `allowBypassPermissions` goes only when it is on, or to turn it off where it was on (the daemon keeps the
+ * The request `putEnvironment` sends; an empty concurrency is no limit — sent as `null` to clear a limit the environment
+ * had (#694) — and an empty label leaves the environment's own value. `allowBypassPermissions` goes only when it is on, or to turn it off where it was on (the daemon keeps the
  * flag when the field is absent, #479).
  */
 export function inputOf(draft: EnvironmentDraft): EnvironmentInput {
@@ -210,7 +214,7 @@ export function inputOf(draft: EnvironmentDraft): EnvironmentInput {
         name: draft.name.trim(),
         runtime: draft.runtime,
         cwdRoots: rootsOf(draft.roots),
-        ...(draft.concurrency !== null ? { concurrency: draft.concurrency } : {}),
+        ...(draft.concurrency !== null ? { concurrency: draft.concurrency } : draft.hadLimit ? { concurrency: null } : {}),
         ...(label ? { accountLabel: label } : {}),
         ...(draft.allowBypass ? { allowBypassPermissions: true } : draft.hadBypass ? { allowBypassPermissions: false } : {})
     };

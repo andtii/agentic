@@ -890,7 +890,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         if (drainingFor !== undefined) return refuse(drainingFor, 'draining');
         // Turns in flight, never sessions open (#394): a live chat session costs nothing until it is prompted.
         const running = runningOn(env.id);
-        if (running >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running`);
+        if (env.concurrency !== undefined && running >= env.concurrency) return refuse(`environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running`);
 
         opening.set(sessionId, env.id);
         try {
@@ -1245,7 +1245,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             }
             const env = environments.find((e) => e.id === s.environmentId);
             const running = runningOn(s.environmentId);
-            if (env && running >= env.concurrency) {
+            if (env && env.concurrency !== undefined && running >= env.concurrency) {
                 send({ v: V, t: 'session.reply', sessionId, reply: { v: command.v, kind: 'error', commandId: command.commandId, code: 'busy', message: `environment ${env.name} is at capacity (${env.concurrency}): ${running} turn${running === 1 ? '' : 's'} running` } });
                 return;
             }
