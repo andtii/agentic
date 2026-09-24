@@ -3,19 +3,22 @@
  * boards): Transcript, Changes n and Files tabs — Changes only for a folder
  * under version control, Files only for a folder the machine can serve — then
  * the agent, `machine / account`, the branch and how far it is ahead of its
- * base, then the view's own controls (the default slot).
+ * base, then — on Changes and Files — the worktree picker (#622) and the view's own controls (the default slot).
  */
 import { component, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
 import type { ChangeSet } from '@agentic/core';
 import { SessionBar, type AgentHue, type SessionTab } from '@agentic/ui';
-import { changesHref, filesHref, transcriptHref, type SessionFiles, type SessionView } from './files';
+import { changesHref, filesHref, rootQuery, transcriptHref, type SessionFiles, type SessionView } from './files';
+import { WorktreePicker } from './worktrees';
 
 /** The tabs a session gets: Changes needs a VCS (unknown counts as yes until a `changes` answer says no). */
 export function sessionTabs(id: string, files: SessionFiles | null, current: SessionView, changes?: ChangeSet): SessionTab[] {
+    // Another worktree open for a look (#622) stays open across Changes and Files; the Transcript is the session's own.
+    const root = files ? rootQuery(files) : undefined;
     const tabs: SessionTab[] = [{ id: 'transcript', label: 'Transcript', href: transcriptHref(id), current: current === 'transcript' }];
-    if (files?.files && files.vcs !== false) tabs.push({ id: 'changes', label: 'Changes', href: changesHref(id), current: current === 'changes', ...(changes && changes.scope === 'uncommitted' ? { count: changes.files.length } : {}) });
-    if (files?.files) tabs.push({ id: 'files', label: 'Files', href: filesHref(id), current: current === 'files' });
+    if (files?.files && files.vcs !== false) tabs.push({ id: 'changes', label: 'Changes', href: changesHref(id, { root }), current: current === 'changes', ...(changes && changes.scope === 'uncommitted' ? { count: changes.files.length } : {}) });
+    if (files?.files) tabs.push({ id: 'files', label: 'Files', href: filesHref(id, undefined, root), current: current === 'files' });
     return tabs;
 }
 
@@ -46,6 +49,7 @@ export const SessionFilesBar = component<SessionFilesBarProps>(({ props, slots }
                     void router.push(tab.href);
                 }}
             >
+                {props.files?.worktrees && props.current !== 'transcript' ? <WorktreePicker id={props.id} current={props.current} files={props.files} /> : null}
                 {slots.default?.()}
             </SessionBar>
         );

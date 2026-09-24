@@ -115,3 +115,8 @@
     /* the phone's diff is unified (the handoff's mobile version): no layout switch */
     .ag-diff-layout { display: none; }
 }
+
+/* The worktree picker in the session bar (#622): another worktree of the repo, for a look. */
+[data-worktree-picker] { display: inline-flex; align-items: center; gap: var(--space-sm); min-inline-size: 0; font-size: var(--text-sm); }
+[data-worktree-picker-label] { color: var(--ag-text-muted); }
+[data-worktree-picker] select { min-inline-size: 0; max-inline-size: 240px; }

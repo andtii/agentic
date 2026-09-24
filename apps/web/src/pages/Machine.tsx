@@ -17,7 +17,7 @@ import { SessionsTable } from './machines/SessionsTable';
 import { SetupChecklist } from './machines/SetupChecklist';
 import { buildLabel, impactText } from './machines/update';
 import { loadText, loadTone, machineLoadOf, sessionLoadOf, warningText, type DefaultForAgent, type MachineLoad } from './machines/live';
-import { fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
+import { concurrencyCommand, fallbackCommand, failureText, isWithin, loginCommand, needsLogin, policyState, rootsOf, runtimesOf, type EnvFailure } from './machines/manage';
 import { LoginDialog } from './machines/LoginDialog';
 import { loginRelayable, type LoginView } from './machines/login';
 import { logErrorText, policyCardState, type LogState } from './machines/policy';
@@ -106,7 +106,12 @@ export type MachineViewProps =
     /** The pasted code (`answerLogin`), never kept by the page. */
     & Define.Event<'answerLogin', string>
     /** Cancel or close the sign-in dialog (`cancelLogin` while one runs). */
-    & Define.Event<'cancelLogin'>;
+    & Define.Event<'cancelLogin'>
+    /**
+     * `?env=<id>` (#652): the environment a link came to change — a chat waiting for a free slot links here. Its edit
+     * dialog opens once the machine can take the change; otherwise its card shows the command that changes the limit.
+     */
+    & Define.Prop<'focusEnv', string>;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -131,6 +136,22 @@ export const likelyRoot = (environments: readonly EnvironmentDescriptor[]): stri
  */
 export const MachineView = component<MachineViewProps>(({ props, emit, slots }) => {
     const ui = signal({ revoking: false, envOpen: false, editing: '', removing: '', removeOpen: false, renaming: false, name: '', renameAttempted: false, removingMachine: false, restarting: false, restartMode: 'drain' as 'drain' | 'now', logOpen: false });
+    // A link to one environment (#652) opens its edit dialog once, as soon as the page knows it and may change it.
+    let focused = '';
+    watch(
+        () => {
+            const id = props.focusEnv;
+            const known = !!id && props.environments.some((e) => e.id === id);
+            return known && policyState(props.policy) === 'on' && props.revokedAt === undefined && props.machine.online ? id! : '';
+        },
+        (id) => {
+            if (!id || id === focused) return;
+            focused = id;
+            ui.editing = id;
+            ui.envOpen = true;
+        },
+        { immediate: true }
+    );
     /** Scroll a card into view — the checklist's "go there" for the steps whose action is a card. Browser only. */
     const goTo = (selector: string): void => {
         if (typeof document === 'undefined') return;
@@ -193,7 +214,9 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
         const runtimes = props.runtimes ?? [];
         const actions = (env: EnvironmentDescriptor): JSXElement | null => {
             const login = needsLogin(env) && !revoked;
-            if (!login && !manageable) return null;
+            // The limit a link came to change, on a machine the web may not manage (#652): the command that changes it there.
+            const limit = !manageable && !revoked && props.focusEnv === env.id;
+            if (!login && !manageable && !limit) return null;
             return (
                 <>
                     {login && loginRelayable(env, props.capabilities, features) ? (
@@ -205,6 +228,12 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                         <div data-env-login>
                             <span data-env-login-text>Sign {env.account.label} in on {m.name}:</span>
                             <CommandWell command={loginCommand(env.id)} fallback={fallbackCommand(loginCommand(env.id), m.os)} />
+                        </div>
+                    ) : null}
+                    {limit ? (
+                        <div data-env-limit>
+                            <span data-env-limit-text>Web management is off on {m.name}. Change how many turns {env.name} runs at once there:</span>
+                            <CommandWell command={concurrencyCommand(env, env.concurrency.max + 1)} fallback={fallbackCommand(concurrencyCommand(env, env.concurrency.max + 1), m.os)} />
                         </div>
                     ) : null}
                     {manageable ? (
@@ -449,7 +478,7 @@ const mockEnvId = (machineId: string, name: string): string => `env_${machineId.
  * — the same folder rule the real one applies (#238), so every state of the
  * page can be walked through without a machine.
  */
-const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props }) => {
+const MockMachine = component<Define.Prop<'machine', OpsMachine, true> & Define.Prop<'focusEnv', string>>(({ props }) => {
     const router = useRouter();
     const telemetry = opsTelemetry[props.machine.id];
     const now = Date.now();
@@ -500,6 +529,7 @@ const MockMachine = component<Define.Prop<'machine', OpsMachine, true>>(({ props
     };
     return () => (
         <MachineView
+            {...(props.focusEnv ? { focusEnv: props.focusEnv } : {})}
             machine={{ ...props.machine, name: st.name }}
             environments={st.environments}
             sessions={sessionsOn(props.machine.id).map((s) => (telemetry ? { ...s, load: sessionLoadOf(telemetry, s.id) } : s))}
@@ -546,7 +576,9 @@ export const Machine = component(() => {
     const route = useRoute();
     return () => {
         const id = String(route.params.id);
-        if (dataMode() === 'live') return <LiveMachine id={id} />;
+        const env = route.query.env;
+        const focusEnv = typeof env === 'string' && env ? env : undefined;
+        if (dataMode() === 'live') return <LiveMachine id={id} {...(focusEnv ? { focusEnv } : {})} />;
         const m = opsMachine(id);
         if (!m) {
             return (
@@ -555,6 +587,6 @@ export const Machine = component(() => {
                 </OpsPage>
             );
         }
-        return <MockMachine machine={m} />;
+        return <MockMachine machine={m} {...(focusEnv ? { focusEnv } : {})} />;
     };
 });

@@ -59,6 +59,18 @@ export function shellArg(value: string): string {
 /** Signs an account in on the machine, in the environment's own profile directory (#235). */
 export const loginCommand = (environmentId: string): string => `agentic-daemon env login ${shellArg(environmentId)}`;
 
+/**
+ * Changes an environment's turn limit on the machine (#652), for when the web may not manage it: `env add --replace`
+ * rewrites the whole row, so every field it has goes along (its profile is kept) — only `--concurrency` changes.
+ */
+export function concurrencyCommand(env: EnvironmentDescriptor, concurrency: number): string {
+    const parts = ['agentic-daemon env add', `--id ${shellArg(env.id)}`, `--name ${shellArg(env.name)}`, `--runtime ${shellArg(env.runtime)}`, ...env.cwdRoots.map((r) => `--root ${shellArg(r)}`)];
+    if (env.account.label !== env.name) parts.push(`--account ${shellArg(env.account.label)}`);
+    if (env.allowBypassPermissions) parts.push('--allow-bypass');
+    parts.push(`--concurrency ${concurrency}`, '--replace');
+    return parts.join(' ');
+}
+
 /** Turns web management on for one folder, on the machine (#238). */
 export const allowRootCommand = (folder?: string): string => `agentic-daemon policy allow-root ${folder ? shellArg(folder) : '<folder>'}`;
 

@@ -8,4 +8,4 @@ export { usageLimitsOf } from './usage.js';
 export { defineMachineActor, toAgentCapabilities, LIVENESS, DEFAULT_HEARTBEAT_WINDOW_MS, DEFAULT_COMMAND_TIMEOUT_MS, DEFAULT_FS_TIMEOUT_MS, DEFAULT_ENV_TIMEOUT_MS, DEFAULT_HISTORY_TIMEOUT_MS, MACHINE_OFFLINE_CODE, UPDATE_COMPARE_EVERY_MS, HARNESS_DEADLINE_MS } from './actor.js';
 export { SYSTEM_UPDATES, DEFAULT_DRAIN_TIMEOUT_MS, MAX_DRAIN_TIMEOUT_MS, UPDATE_DEADLINE_GRACE_MS, CRASH_LOOP_RESTARTS, CRASH_LOOP_WINDOW_MS, checkChannel, checkUpdatePolicy, effectiveUpdates, inWindow, nextAutoUpdate } from './update.js';
 export { machineHistorySource } from './history.js';
-export { machineWorkspaceSource, type MachineFilesClient, type MachineWorkspaceOptions } from './files.js';
+export { machineWorkspaceSource, machineWorktrees, type MachineFilesClient, type MachineWorkspaceOptions } from './files.js';

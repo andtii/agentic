@@ -12,6 +12,7 @@ export const READINESS: Record<PluginReadinessStatus, PillSpec> = {
     'needs-config': { tone: 'needs-you', hollow: false, label: 'NEEDS SETUP' },
     'needs-secret': { tone: 'needs-you', hollow: false, label: 'NEEDS KEY' },
     'needs-grant': { tone: 'needs-you', hollow: false, label: 'NEEDS PERMISSION' },
+    'needs-sign-in': { tone: 'needs-you', hollow: false, label: 'NEEDS SIGN-IN' },
     'needs-machine': { tone: 'needs-you', hollow: false, label: 'NEEDS A MACHINE' },
     'no-kek': { tone: 'failed', hollow: false, label: 'CANNOT STORE KEYS' }
 };
@@ -32,6 +33,8 @@ export function readinessDetail(readiness: PluginReadiness): string | undefined 
             return missing ? `Not set yet: ${missing}.` : 'A key it needs is not set.';
         case 'needs-grant':
             return missing ? `Declared but not granted: ${missing}.` : 'A permission it declares is not granted.';
+        case 'needs-sign-in':
+            return 'Signed out. Sign in again to reconnect.';
         case 'needs-machine':
             return 'No paired machine offers an environment for this runtime.';
         case 'no-kek':

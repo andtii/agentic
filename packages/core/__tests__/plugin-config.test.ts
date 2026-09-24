@@ -1,5 +1,6 @@
 import {
     configDefaults,
+    defaultToolMode,
     isSingleSlot,
     pluginReadiness,
     SINGLE_SLOT_KINDS,
@@ -204,5 +205,46 @@ describe('pluginReadiness', () => {
 
     it('only a runtime that says it is daemon-hosted needs a machine', () => {
         expect(pluginReadiness(state({ ...daemon, kind: 'connector' }), facts())).toEqual({ status: 'ready' });
+    });
+
+    describe('needs-sign-in', () => {
+        it('a signed-out plugin needs signing in, with nothing else missing', () => {
+            expect(pluginReadiness(state(api), facts({ signedOut: ['anthropic-api'] }))).toEqual({ status: 'needs-sign-in', missing: [] });
+        });
+
+        it('only the plugin named signed out', () => {
+            expect(pluginReadiness(state(api), facts({ signedOut: ['gmail'] }))).toEqual({ status: 'ready' });
+        });
+
+        it('a missing grant still comes first', () => {
+            expect(pluginReadiness(state(api, { grantedPermissions: [] }), facts({ signedOut: ['anthropic-api'] }))).toEqual({
+                status: 'needs-grant',
+                missing: ['secret:anthropic-api-key']
+            });
+        });
+
+        it('so do disabled, config and secrets', () => {
+            const signedOut = facts({ signedOut: ['anthropic-api'] });
+            expect(pluginReadiness(state(api, { enabled: false }), signedOut).status).toBe('disabled');
+            expect(pluginReadiness(state(api, { config: { defaultModel: 'zzz' } }), signedOut).status).toBe('needs-config');
+            expect(pluginReadiness(state(api), { ...signedOut, secretNames: [] }).status).toBe('needs-secret');
+        });
+
+        it('comes before needs-machine', () => {
+            expect(pluginReadiness(state(daemon), facts({ signedOut: ['claude-code'] }))).toEqual({ status: 'needs-sign-in', missing: [] });
+        });
+    });
+});
+
+describe('defaultToolMode', () => {
+    it.each<[string, Parameters<typeof defaultToolMode>[0], ReturnType<typeof defaultToolMode>]>([
+        ['no hints', undefined, 'allow'],
+        ['empty hints', {}, 'allow'],
+        ['read-only', { readOnlyHint: true }, 'allow'],
+        ['destructive', { destructiveHint: true }, 'ask'],
+        ['read-only wins over destructive', { readOnlyHint: true, destructiveHint: true }, 'allow'],
+        ['explicitly neither', { readOnlyHint: false, destructiveHint: false }, 'allow']
+    ])('%s', (_, annotations, expected) => {
+        expect(defaultToolMode(annotations)).toBe(expected);
     });
 });

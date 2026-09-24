@@ -8,7 +8,7 @@
  */
 import { accountKeyFor, accountKeyOf, telemetryWarnings, type EnvironmentDescriptor, type MachineId, type MachineTelemetry, type ResourceSample, type TelemetryWarning } from '@agentic/core';
 import { formatBytes, type AgentHue, type FieldOption } from '@agentic/ui';
-import type { MachineDoctorView, MachineIndexEntry, MachineOs, MachineView, RoutingView } from '@agentic/platform';
+import { activeIn, type MachineDoctorView, type MachineIndexEntry, type MachineOs, type MachineView, type RoutingView } from '@agentic/platform';
 import type { DoctorCheck, OpsMachine, OpsSession } from '../../mock/ops';
 import type { AgentIdentity } from '../chat/live';
 import { dateTime, shortDate } from '../agent/format';
@@ -189,17 +189,25 @@ export function doctorChecksOf(doctor: MachineDoctorView): DoctorCheck[] {
     return checks;
 }
 
+/**
+ * The environments with the turns running in each counted from the Machine's own sessions (#652, `activeIn`) — the
+ * daemon's `concurrency.active` is only what it said at its last `hello` / `env`, so a card read from it goes stale.
+ */
+export function liveCapacity(view: Pick<MachineView, 'environments' | 'activeSessions' | 'pending' | 'draining'>): EnvironmentDescriptor[] {
+    return view.environments.map((e) => ({ ...e, concurrency: { max: e.concurrency.max, active: activeIn(view, e.id) } }));
+}
+
 /** The doctor card's footnote on the platform: the verdicts are the daemon's, re-run there. */
 export const LIVE_DOCTOR_FOOTNOTE = 'What the daemon reported at its last hello. Run `agentic-daemon doctor` on the machine to check again.';
 
 /**
- * EXE-12: tasks parked on this machine's environments because it is offline
- * (`waiting-offline` routes under the agent's `queue` policy), by environment.
+ * EXE-09/12: tasks parked on this machine's environments, by environment — because it is offline (`waiting-offline`
+ * routes under the agent's `queue` policy) or because every slot is taken (`waiting-capacity`, #652).
  */
 export function queuedByEnvironment(routing: RoutingView | undefined, machineId: MachineId | string): Record<string, number> {
     const out: Record<string, number> = {};
     for (const r of routing?.routes ?? []) {
-        if (r.status !== 'waiting-offline' || !r.environmentId) continue;
+        if ((r.status !== 'waiting-offline' && r.status !== 'waiting-capacity') || !r.environmentId) continue;
         if (r.machineId !== undefined && r.machineId !== machineId) continue;
         out[r.environmentId] = (out[r.environmentId] ?? 0) + 1;
     }

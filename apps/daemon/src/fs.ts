@@ -9,10 +9,11 @@
  * `realpath` of the path and of every root, so neither `..` nor a symlink or
  * junction can reach outside a root. All reads then go through the resolved
  * path. Git badges are read from files (`.git`, `HEAD`, `config`); only a
- * worktree creation runs `git`, through `runGit` with no shell.
+ * worktree creation runs `git`, through `runGit` with no shell. A `run`
+ * (#618) is `run.ts`'s.
  */
 
-import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, FS_WORKTREES_MAX, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
 import { LIMITS } from '@agentic/daemon-protocol';
 import type { Dirent } from 'node:fs';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
@@ -23,6 +24,7 @@ import { answerFilesOp } from './files.js';
 import { checkWithinRoots, isMissing, withinRoots, type RootCheck } from './roots.js';
 import type { VcsProvider } from './vcs/provider.js';
 import { runGit } from './vcs/run.js';
+import { runCommand } from './run.js';
 
 export { checkWithinRoots, withinRoots, type RootCheck };
 
@@ -243,13 +245,58 @@ async function existingAncestor(path: string): Promise<string | undefined> {
 
 const fail = (code: FsErrorCode, message: string): { error: FsError } => ({ error: { code, message: message.slice(0, LIMITS.text) } });
 
+/** One entry of `git worktree list --porcelain`: its folder, the branch it has checked out (none when detached), and its state. */
+interface ListedWorktree {
+    readonly path: string;
+    readonly branch?: string;
+    /** Full commit id of HEAD. */
+    readonly head?: string;
+    readonly detached?: true;
+    readonly locked?: true;
+    readonly prunable?: true;
+}
+
+/** Parse `git worktree list --porcelain -z`: records of `key value` fields, each record ended by an empty field. */
+export function parseWorktreeList(out: string): ListedWorktree[] {
+    const listed: ListedWorktree[] = [];
+    let entry: { -readonly [K in keyof ListedWorktree]?: ListedWorktree[K] } = {};
+    const flush = () => {
+        if (entry.path !== undefined) listed.push(entry as ListedWorktree);
+        entry = {};
+    };
+    for (const field of out.split('\0')) {
+        if (field === '') flush();
+        else if (field.startsWith('worktree ')) entry.path = field.slice('worktree '.length);
+        else if (field.startsWith('branch refs/heads/')) entry.branch = field.slice('branch refs/heads/'.length);
+        else if (field.startsWith('HEAD ')) entry.head = field.slice('HEAD '.length);
+        else if (field === 'detached') entry.detached = true;
+        else if (field === 'locked' || field.startsWith('locked ')) entry.locked = true;
+        else if (field === 'prunable' || field.startsWith('prunable ')) entry.prunable = true;
+    }
+    flush();
+    return listed;
+}
+
+/** `a` and `b` name the same folder: both resolved through links, compared the way the platform's file system does. */
+async function sameFolder(a: string, b: string, platform: NodeJS.Platform): Promise<boolean> {
+    const real = async (p: string) => realpath(p).catch(() => resolve(p));
+    const [x, y] = await Promise.all([real(a), real(b)]);
+    return platform === 'win32' || platform === 'darwin' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/**
+ * The worktree of `branch` at `path` (#617, #618), idempotent: a worktree already there on `branch` is `reused`, a
+ * `branch` no worktree holds is checked out there again (`recreated`), anything else at `path` is
+ * `worktree-mismatch`, and a `branch` checked out in another folder is `branch-exists`. Only then
+ * `git worktree add -b`. Entries whose folder is gone are pruned first, so a worktree removed by hand counts as none.
+ */
 async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly string[], options: Required<Pick<FsOptions, 'git' | 'worktreeTimeoutMs'>> & { platform: NodeJS.Platform }): Promise<FsOutcome> {
     const { platform, git } = options;
     const repo = await checkWithinRoots(op.repo, roots, platform);
     if (!repo.ok) return fail(repo.code, repo.message);
     if (!(await gitInfo(repo.real))) return fail('not-a-repo', `${op.repo} is not a git repository or worktree`);
 
-    // The new folder: inside the roots, not there yet, and whatever of its parents exists resolves inside the roots too.
+    // The folder: inside the roots, and whatever of it (or of its parents) exists resolves inside the roots too.
     if (!isAbsolute(op.path) || !withinRoots(op.path, roots, platform)) return fail('outside-roots', `${op.path} is outside the working roots`);
     const path = resolve(op.path);
     // Only a successful lstat means taken; a permission or I/O error is not "exists" and reaches the caller as `internal`.
@@ -260,10 +307,9 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
             throw e;
         }
     );
-    if (taken) return fail('exists', `${op.path} already exists`);
-    const ancestor = await existingAncestor(path);
+    const ancestor = taken ? path : await existingAncestor(path);
     const parent = ancestor ? await checkWithinRoots(ancestor, roots, platform) : undefined;
-    if (!parent?.ok) return fail('outside-roots', `the parent of ${op.path} is outside the working roots`);
+    if (!parent?.ok) return fail('outside-roots', `${taken ? '' : 'the parent of '}${op.path} is outside the working roots`);
 
     const checkTimeout = Math.min(10_000, options.worktreeTimeoutMs);
     if (op.branch.startsWith('-')) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
@@ -271,17 +317,138 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
     if (format.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (format.code === 'timeout') return fail('timeout', 'git check-ref-format did not finish');
     if (format.code !== 0) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
-    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
-    if (known.code === 0) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
 
-    const added = await runGit(git, ['-C', repo.real, 'worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])], { timeoutMs: options.worktreeTimeoutMs });
-    if (added.code === 0) return { result: { kind: 'worktree', path, branch: op.branch } };
+    const pruned = await runGit(git, ['-C', repo.real, 'worktree', 'prune'], { timeoutMs: checkTimeout });
+    if (pruned.code === 'timeout') return fail('timeout', 'git worktree prune did not finish');
+    // A failed prune leaves stale entries that would read as a worktree still in place: say so rather than decide on them.
+    if (pruned.code !== 0) return fail('internal', `git worktree prune failed: ${pruned.stderr}`);
+    const list = await runGit(git, ['-C', repo.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs: checkTimeout });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    let at: ListedWorktree | undefined;
+    for (const w of listed) if (await sameFolder(w.path, path, platform)) at = w;
+    if (at) {
+        if (at.branch === op.branch) return { result: { kind: 'worktree', path, branch: op.branch, reused: true } };
+        return fail('worktree-mismatch', `${op.path} is the worktree of ${at.branch ? `branch ${at.branch}` : 'a detached HEAD'}, not ${op.branch}`);
+    }
+    if (taken) return fail('worktree-mismatch', `${op.path} already exists and is not a worktree of ${op.branch}`);
+    const holder = listed.find((w) => w.branch === op.branch);
+    if (holder) return fail('branch-exists', `branch ${op.branch} is checked out at ${holder.path}`);
+
+    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
+    if (known.code === 'timeout') return fail('timeout', 'git show-ref did not finish');
+    // `--verify --quiet` exits 1 for a branch that is not there; anything else is git failing, not an answer.
+    if (known.code !== 0 && known.code !== 1) return fail('internal', `git show-ref failed: ${known.stderr}`);
+    const recreate = known.code === 0;
+    const args = recreate ? ['worktree', 'add', '--', path, op.branch] : ['worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])];
+    const added = await runGit(git, ['-C', repo.real, ...args], { timeoutMs: options.worktreeTimeoutMs });
+    if (added.code === 0) return { result: { kind: 'worktree', path, branch: op.branch, ...(recreate ? { recreated: true as const } : {}) } };
     if (added.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (added.code === 'timeout') return fail('timeout', `git worktree add did not finish within ${options.worktreeTimeoutMs} ms`);
-    if (/a branch named .* already exists/i.test(added.stderr)) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
-    if (/already exists/i.test(added.stderr)) return fail('exists', `${op.path} already exists`);
+    if (/a branch named .* already exists|is already (checked out|used by worktree)/i.test(added.stderr)) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
+    if (/already exists/i.test(added.stderr)) return fail('worktree-mismatch', `${op.path} already exists`);
     if (/invalid reference|not a valid (object|commit)/i.test(added.stderr)) return fail('not-found', `base ${op.base ?? 'HEAD'} was not found in ${op.repo}`);
     return fail('internal', `git worktree add failed: ${added.stderr}`);
+}
+
+/**
+ * The worktrees of the repository `root` is in (#622), as `git worktree list` has them: the one `root` is in marked
+ * `current`, and one outside the roots marked `outside` (listed, but a session's Files cannot open it).
+ */
+/**
+ * `path` as the roots are written (#622): git names folders resolved through links (`/private/var/…` for a root under
+ * `/var` on macOS), but the platform checks a later request's `root` lexically against the roots as written — so a
+ * folder under a root's resolved form is answered under the root itself. Anything else is returned unchanged.
+ */
+async function asWritten(path: string, roots: readonly string[], platform: NodeJS.Platform): Promise<string> {
+    if (withinRoots(path, roots, platform)) return path;
+    for (const root of roots) {
+        const real = await realpath(resolve(root)).catch(() => undefined);
+        if (!real || real === resolve(root) || !withinRoots(path, [real], platform)) continue;
+        return join(resolve(root), path.slice(real.length));
+    }
+    return path;
+}
+
+async function worktrees(op: Extract<FsOp, { kind: 'worktrees' }>, roots: readonly string[], options: { readonly platform: NodeJS.Platform; readonly git: string }): Promise<FsOutcome> {
+    const { platform, git } = options;
+    const root = await checkWithinRoots(op.root, roots, platform);
+    if (!root.ok) return fail(root.code, root.message);
+    const top = await runGit(git, ['-C', root.real, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 });
+    if (top.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
+    if (top.code === 'timeout') return fail('timeout', 'git rev-parse did not finish');
+    if (top.code !== 0) return fail('not-a-repo', `${op.root} is not in a git repository`);
+    const list = await runGit(git, ['-C', root.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs: 10_000 });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const own = top.stdout.toString('utf8').trim();
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    const entries = [];
+    for (const w of listed.slice(0, FS_WORKTREES_MAX)) {
+        // git writes `/` on Windows too: answer in the machine's own syntax, like every other path, under the roots as written.
+        const path = await asWritten(resolve(w.path), roots, platform);
+        entries.push({
+            path,
+            ...(w.branch !== undefined && fitsId(w.branch) ? { branch: w.branch } : {}),
+            ...(w.head ? { head: w.head.slice(0, 7) } : {}),
+            ...(w.detached ? { detached: true as const } : {}),
+            ...(w.locked ? { locked: true as const } : {}),
+            ...(w.prunable ? { prunable: true as const } : {}),
+            ...((await sameFolder(w.path, own, platform)) ? { current: true as const } : {}),
+            // git names folders resolved through links: inside a root as written or as resolved.
+            ...(withinRoots(path, roots, platform) || withinRoots(path, root.realRoots, platform) ? {} : { outside: true as const })
+        });
+    }
+    return { result: { kind: 'worktrees', root: op.root, entries, truncated: listed.length > entries.length } };
+}
+
+/**
+ * Remove the worktree at `path` (#623), never by force: `git status` first, and a worktree with any change (untracked
+ * files too) is `dirty` and stays. A folder that is no worktree of `repo` is `removed: false`; one on another branch
+ * than `branch` is `worktree-mismatch`. With `deleteBranch`, `git branch -d` afterwards — an unmerged branch is kept.
+ */
+async function worktreeRemove(op: Extract<FsOp, { kind: 'worktree-remove' }>, roots: readonly string[], options: Required<Pick<FsOptions, 'git' | 'worktreeTimeoutMs'>> & { platform: NodeJS.Platform }): Promise<FsOutcome> {
+    const { platform, git } = options;
+    const repo = await checkWithinRoots(op.repo, roots, platform);
+    if (!repo.ok) return fail(repo.code, repo.message);
+    if (!(await gitInfo(repo.real))) return fail('not-a-repo', `${op.repo} is not a git repository or worktree`);
+    if (!isAbsolute(op.path) || !withinRoots(op.path, roots, platform)) return fail('outside-roots', `${op.path} is outside the working roots`);
+    if (op.branch?.startsWith('-')) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
+    const path = resolve(op.path);
+    const timeoutMs = Math.min(10_000, options.worktreeTimeoutMs);
+
+    const pruned = await runGit(git, ['-C', repo.real, 'worktree', 'prune'], { timeoutMs });
+    if (pruned.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
+    if (pruned.code === 'timeout') return fail('timeout', 'git worktree prune did not finish');
+    if (pruned.code !== 0) return fail('internal', `git worktree prune failed: ${pruned.stderr}`);
+    const list = await runGit(git, ['-C', repo.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    let at: ListedWorktree | undefined;
+    // The first entry is the main checkout: never removed.
+    for (const w of listed.slice(1)) if (await sameFolder(w.path, path, platform)) at = w;
+
+    let removed = false;
+    if (at) {
+        if (op.branch !== undefined && at.branch !== op.branch) return fail('worktree-mismatch', `${op.path} is the worktree of ${at.branch ? `branch ${at.branch}` : 'a detached HEAD'}, not ${op.branch}`);
+        const checked = await checkWithinRoots(path, roots, platform);
+        if (!checked.ok) return fail(checked.code, checked.message);
+        const status = await runGit(git, ['-C', checked.real, 'status', '--porcelain', '--untracked-files=all'], { timeoutMs });
+        if (status.code === 'timeout') return fail('timeout', 'git status did not finish');
+        if (status.code !== 0) return fail('internal', `git status failed: ${status.stderr}`);
+        if (status.stdout.toString('utf8').trim() !== '') return fail('dirty', `${op.path} has uncommitted changes; it was left as it is`);
+        const gone = await runGit(git, ['-C', repo.real, 'worktree', 'remove', '--', path], { timeoutMs: options.worktreeTimeoutMs });
+        if (gone.code === 'timeout') return fail('timeout', `git worktree remove did not finish within ${options.worktreeTimeoutMs} ms`);
+        if (gone.code !== 0) return /modified or untracked|contains (modified|untracked)|is dirty/i.test(gone.stderr) ? fail('dirty', `${op.path} has uncommitted changes; it was left as it is`) : fail('internal', `git worktree remove failed: ${gone.stderr}`);
+        removed = true;
+    }
+    if (!op.deleteBranch || op.branch === undefined) return { result: { kind: 'worktree-remove', path, removed } };
+    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs });
+    if (known.code !== 0) return { result: { kind: 'worktree-remove', path, removed, branchDeleted: false } };
+    const deleted = await runGit(git, ['-C', repo.real, 'branch', '-d', '--', op.branch], { timeoutMs });
+    return { result: { kind: 'worktree-remove', path, removed, branchDeleted: deleted.code === 0 } };
 }
 
 // ------------------------------------------------------------------- entry
@@ -297,6 +464,8 @@ export interface FsOptions {
     readonly worktreeTimeoutMs?: number;
     /** The VCS providers behind `tree` / `read` / `changes` (#561). Default: git, with `git` as the binary. */
     readonly vcs?: readonly VcsProvider[];
+    /** The environment a `run` command sees (#618). Default: the daemon's own. */
+    readonly runEnv?: NodeJS.ProcessEnv;
 }
 
 /** Answer one `fs.request` for the environment `environmentId` among `environments`. Never throws. */
@@ -313,8 +482,10 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
             return { result: await list(checked, env.cwdRoots, platform) };
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
+        if (op.kind === 'worktree-remove') return await worktreeRemove(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
-        if (op.kind === 'run') return fail('unsupported', 'this daemon does not run project commands yet');
+        if (op.kind === 'worktrees') return await worktrees(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
+        if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });

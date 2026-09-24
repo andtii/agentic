@@ -6,9 +6,12 @@
  * the credential the dialog took goes through `Registry.setSecret` and is
  * never written anywhere else. "Test connection" is `openMcpConnector` run
  * from the page with the values still in the form — the tools it lists, or
- * why it failed, are what `setConnectorStatus` records. Nothing here draws.
+ * why it failed, are what `setConnectorStatus` records, and the tools it
+ * found (with their read-only / destructive hints) are what the manifest
+ * declares, so each gets a policy row that starts where its hints say
+ * (PLG-09). Nothing here draws.
  */
-import { mcpConnectorSetup, openMcpConnector, type FetchLike, type McpHttpConnector } from '@agentic/mcp';
+import { connectorToolPrefix, mcpConnectorSetup, openMcpConnector, toolNameFor, type FetchLike, type McpHttpConnector } from '@agentic/mcp';
 import type { ConnectorRecord, ConnectorStatus, Dependents, PluginView } from '@agentic/platform';
 import type { PluginManifest } from '@agentic/core';
 
@@ -88,7 +91,24 @@ export function connectorOptions(draft: ConnectorDraft): McpHttpConnector {
     };
 }
 
-export type ConnectorProbe = { readonly ok: true; readonly tools: readonly string[] } | { readonly ok: false; readonly error: string };
+/**
+ * One tool the probe found, as the manifest declares it (`mcpConnector`'s `tools`).
+ * Built from the opened session's tools, so `name` is the sanitized, unprefixed
+ * name (a server's `delete.repo` arrives as `delete_repo`), not the raw
+ * `tools/list` name; it maps back to the same session name. A server `title` is
+ * not carried through, and a title-only tool shows its title as the description.
+ */
+export type ProbedTool = NonNullable<McpHttpConnector['tools']>[number];
+
+export type ConnectorProbe =
+    | {
+          readonly ok: true;
+          /** The tools' names as agents see them (`acme__ping`). */
+          readonly tools: readonly string[];
+          /** The same tools with their descriptions and hints, for the manifest's per-tool policy rows. */
+          readonly declared?: readonly ProbedTool[];
+      }
+    | { readonly ok: false; readonly error: string };
 
 /** A failure as the page shows it — with the credential cut out, should a server have echoed it back. */
 function probeError(e: unknown, secret: string): string {
@@ -116,11 +136,34 @@ export async function probeConnector(draft: ConnectorDraft, options: { readonly 
             ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {})
         });
         const tools = [...opened.toolNames];
+        const declared = opened.tools.map((t): ProbedTool => {
+            const a = t.annotations;
+            const annotations = {
+                ...(a?.readOnly !== undefined ? { readOnlyHint: a.readOnly } : {}),
+                ...(a?.destructive !== undefined ? { destructiveHint: a.destructive } : {}),
+                ...(a?.idempotent !== undefined ? { idempotentHint: a.idempotent } : {}),
+                ...(a?.openWorld !== undefined ? { openWorldHint: a.openWorld } : {})
+            };
+            const name = unprefixed(id, t.name);
+            return {
+                name,
+                // `mcpTool` falls back to the raw server name for a tool the server left undescribed; that is no
+                // description. Compare sanitized forms, so `delete.repo` is recognised as `delete_repo`'s own name.
+                ...(t.description && toolNameFor(t.description, connectorToolPrefix(id)) !== t.name ? { description: t.description } : {}),
+                ...(Object.keys(annotations).length ? { annotations } : {})
+            };
+        });
         await opened.close().catch(() => undefined);
-        return { ok: true, tools };
+        return { ok: true, tools, declared };
     } catch (e) {
         return { ok: false, error: probeError(e, secret) };
     }
+}
+
+/** A session tool name without its connector's prefix — the server's name, as `mcpConnector` takes it. */
+function unprefixed(id: string, name: string): string {
+    const prefix = connectorToolPrefix(id);
+    return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
 /** The Registry methods adding and removing a connector call — the actor client, structurally. */
@@ -135,10 +178,14 @@ export interface ConnectorRegistry {
 /**
  * Install the server: the plugin (enabled, its declared scopes granted), its
  * connector record, its credential, and — when the dialog tested it — what
- * the test found. Returns the id agents pick it by.
+ * the test found: the status, and the tools the manifest declares with their
+ * default modes. Untested, the manifest declares no tools; the plugin page
+ * reads the connector record's once a session has opened it. Returns the id
+ * agents pick it by.
  */
 export async function addConnector(registry: ConnectorRegistry, draft: ConnectorDraft, probe?: ConnectorProbe): Promise<string> {
-    const { manifest, connector } = mcpConnectorSetup(connectorOptions(draft));
+    const probed = probe?.ok ? (probe.declared ?? probe.tools.map((name) => ({ name: unprefixed(connectorIdOf(draft.name), name) }))) : undefined;
+    const { manifest, connector } = mcpConnectorSetup({ ...connectorOptions(draft), ...(probed ? { tools: probed } : {}) });
     await registry.register(manifest, { enabled: true, grant: 'declared' });
     await registry.putConnector(connector);
     for (const s of manifest.secrets ?? []) await registry.setSecret(s.name, draft.secret.trim());

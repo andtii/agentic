@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, UpdatePolicy, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -46,11 +46,13 @@ export const AUDIT_KINDS = [
     'plugin.granted',
     'plugin.activated',
     'project.changed',
+    'project.chat-released',
     'secret.opened',
     'session.interrupted',
     'session.resumed',
     'task.machine-lost',
-    'workdir.worktree-created'
+    'workdir.worktree-created',
+    'workdir.command-run'
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -318,6 +320,20 @@ export interface WorktreeCreatedData {
     /** Where the worktree was added: absolute, machine-native. */
     readonly path: string;
     readonly base?: string;
+    /** The branch existed with no worktree and was checked out again (#618). */
+    readonly recreated?: true;
+}
+
+/** A project command a machine ran on the owner's behalf (#618): what, where, and how it ended. */
+export interface CommandRunData {
+    readonly machineId: MachineId;
+    readonly environmentId: EnvironmentId;
+    readonly cwd: string;
+    readonly argv: readonly string[];
+    /** The exit code, when the command ran to its end. */
+    readonly exitCode?: number;
+    /** The refusal or failure (`not-found`, `timeout`, `outside-roots`, …) when it did not. */
+    readonly error?: string;
 }
 
 /**
@@ -363,6 +379,22 @@ export interface ProjectChangedData {
     readonly projectId: ProjectId;
     readonly name: string;
     readonly op: 'created' | 'updated' | 'removed';
+}
+
+/**
+ * `project.chat-released` (#623): a chat left a project, and one of the project's feature plugins tidied up after it
+ * on one environment (`onChatReleased`) — what it said it did, or why it could not.
+ */
+export interface ProjectChatReleasedData {
+    readonly chatId: ChatId;
+    readonly projectId: ProjectId;
+    readonly pluginId: string;
+    readonly environmentId: EnvironmentId;
+    readonly reason: ProjectFeatureReleaseReason;
+    /** What the plugin did, as it said. */
+    readonly outcome?: string;
+    /** Why it could not: the plugin's error, or the machine being offline. */
+    readonly error?: string;
 }
 
 /**
@@ -430,11 +462,13 @@ export interface AuditDataByKind {
     readonly 'plugin.granted': PluginGrantedData;
     readonly 'plugin.activated': PluginActivatedData;
     readonly 'project.changed': ProjectChangedData;
+    readonly 'project.chat-released': ProjectChatReleasedData;
     readonly 'secret.opened': SecretOpenedData;
     readonly 'session.interrupted': SessionInterruptedData;
     readonly 'session.resumed': SessionResumedData;
     readonly 'task.machine-lost': TaskMachineLostData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
+    readonly 'workdir.command-run': CommandRunData;
 }
 
 /** What an emitter hands `record` / `recordAudit`: one kind, its data, the common fields. */

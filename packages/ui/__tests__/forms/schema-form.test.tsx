@@ -216,3 +216,26 @@ describe('SchemaForm following a live read', () => {
         expect(api().draft.text.note).toBe('mine');
     });
 });
+
+describe('SchemaForm change and load (#621)', () => {
+    it('emits the sparse draft on every edit, and load replaces the draft without moving what it was opened on', async () => {
+        const changes: Record<string, unknown>[] = [];
+        const ref = { current: null as SchemaFormApi | null };
+        const Host = component(() => () => <SchemaForm ref={ref} schema={schema} value={{ endpoint: 'https://a.example/' }} onChange={(c) => changes.push(c)} />);
+        const root = mount(<Host />);
+        setText(input(root, 'note'), 'hello');
+        await tick();
+        expect(changes.at(-1)).toMatchObject({ endpoint: 'https://a.example/', note: 'hello' });
+        expect(ref.current!.value()).toEqual(changes.at(-1));
+
+        ref.current!.load({ ...ref.current!.value(), endpoint: 'https://preset.example/', note: undefined });
+        await tick();
+        expect(input(root, 'endpoint').value).toBe('https://preset.example/');
+        expect(input(root, 'note').value).toBe('');
+        expect(changes.at(-1)).toMatchObject({ endpoint: 'https://preset.example/' });
+        expect(ref.current!.dirty()).toBe(true);
+        ref.current!.reset();
+        await tick();
+        expect(input(root, 'endpoint').value).toBe('https://a.example/');
+    });
+});

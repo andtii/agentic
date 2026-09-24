@@ -18,7 +18,7 @@ import { dataMode } from '../data-mode';
 import { agentNamed, loadSession } from '../mock/workspace';
 import { LinkButton } from './ops/LinkButton';
 import { SessionFilesBar, envLineOf } from './session/bar';
-import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, useSessionChanges, type SessionFiles } from './session/files';
+import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, rootQuery, useSessionChanges, type SessionFiles } from './session/files';
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
@@ -138,7 +138,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
 
     const go = (next: { file?: string; scope?: ChangeScope; view?: DiffMode }): void => {
         const cur = q();
-        const href = changesHref(props.ctx.v.id, { file: 'file' in next ? next.file : (cur.file ?? undefined), scope: next.scope ?? cur.scope, view: next.view ?? cur.view });
+        const href = changesHref(props.ctx.v.id, { file: 'file' in next ? next.file : (cur.file ?? undefined), scope: next.scope ?? cur.scope, view: next.view ?? cur.view, root: rootQuery(files()) });
         // Opening a file is a step back can undo (the phone's full-screen diff); a layout or scope switch is not.
         void ('file' in next && next.scope === undefined ? router.push(href) : router.replace(href));
     };
@@ -165,7 +165,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
         if (texts.error?.code === 'too-large') {
             return (
                 <div data-files-state="too-large">
-                    <EmptyState variant="generic" title="This diff is too large to show here" caption={texts.error.message} slots={{ actions: () => <LinkButton to={filesHref(f.sessionId, file.path)} icon="file">Open in Files</LinkButton> }} />
+                    <EmptyState variant="generic" title="This diff is too large to show here" caption={texts.error.message} slots={{ actions: () => <LinkButton to={filesHref(f.sessionId, file.path, rootQuery(f))} icon="file">Open in Files</LinkButton> }} />
                 </div>
             );
         }
@@ -235,7 +235,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
                             variant="generic"
                             title={noFolder ? 'This session has no folder' : 'Not a git repository'}
                             caption={noFolder ? `${agent.name} runs on the platform, with no filesystem to show.` : `${displayRoot(f.root)} is not under version control; its files are still in Files.`}
-                            {...(noFolder ? {} : { slots: { actions: () => <LinkButton to={filesHref(v.id)} icon="folder">Open Files</LinkButton> } })}
+                            {...(noFolder ? {} : { slots: { actions: () => <LinkButton to={filesHref(v.id, undefined, rootQuery(f))} icon="folder">Open Files</LinkButton> } })}
                         />
                     </div>
                 </Page>
@@ -265,7 +265,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
                                 files={state.set.files}
                                 label={sc === 'branch' ? `Branch${state.set.base ? ` vs ${state.set.base}` : ''}` : 'Uncommitted'}
                                 {...(file ? { current: file.path } : {})}
-                                href={(x) => changesHref(v.id, { file: x.path, scope: cur.scope, view: cur.view })}
+                                href={(x) => changesHref(v.id, { file: x.path, scope: cur.scope, view: cur.view, root: rootQuery(files()) })}
                                 onOpen={(x, e) => { e.preventDefault(); go({ file: x.path }); }}
                                 empty={sc === 'branch' ? 'Nothing on this branch yet' : 'No uncommitted changes'}
                             />
@@ -275,7 +275,7 @@ export const ChangesView = component<{ ctx: SessionFrameContext }>(({ props }) =
                         ) : null}
                     </ChangesPanel>
                     <section data-files-main aria-label={file ? `Diff of ${file.path}` : 'Diff'}>
-                        {cur.file ? <a data-files-back href={changesHref(v.id, { scope: cur.scope, view: cur.view })} onClick={(e: MouseEvent) => { e.preventDefault(); go({ file: undefined }); }}><Icon name="back" size={16} />All changes</a> : null}
+                        {cur.file ? <a data-files-back href={changesHref(v.id, { scope: cur.scope, view: cur.view, root: rootQuery(files()) })} onClick={(e: MouseEvent) => { e.preventDefault(); go({ file: undefined }); }}><Icon name="back" size={16} />All changes</a> : null}
                         {file ? (
                             <FileHeader path={file.path} status={file.status} {...(file.added !== undefined ? { added: file.added } : {})} {...(file.removed !== undefined ? { removed: file.removed } : {})}>
                                 {f.fileActions?.(file.path) ?? null}

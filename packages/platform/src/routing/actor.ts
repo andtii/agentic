@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, pathWithin, projectFolderFor, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -102,7 +102,7 @@ import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
 import { daemonConnectors } from './connectors.js';
 import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
-import { machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
+import { featureSettings, machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, readMachine, type LocatedEnvironment } from './locate.js';
@@ -1889,6 +1889,55 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ctx.state.reports[taskId] = filed;
                     for (const r of Object.values(ctx.state.routes)) if (sharesTurn(r)) ctx.state.reports[r.taskId] = filed;
                     await ctx.save();
+                },
+
+                /**
+                 * A chat left project `projectId` (#623; `Chat.setProject`, one-way): every enabled feature plugin with
+                 * `onChatReleased` hears it once per environment the project has a folder on whose machine is online, with
+                 * that folder and its daemon. Best effort and after the fact: a chat still in the project is left alone
+                 * (so a stray call changes nothing), a throw never reaches the caller, and every call — or an offline
+                 * machine it could not reach — is audited `project.chat-released`.
+                 */
+                async chatReleased(chatId: ChatId, projectId: ProjectId, reason: ProjectFeatureReleaseReason): Promise<void> {
+                    const hooked = Object.entries(projectFeatures).filter(([, p]) => p.onChatReleased);
+                    if (!hooked.length) return;
+                    const summary = await chat(chatId)
+                        .get()
+                        .catch(() => undefined);
+                    if (reason === 'project-changed' && (!summary || summary.projectId === projectId)) return;
+                    const project = await as(Workspace, workspaceKey(workspaceId))
+                        .projects()
+                        .then((all) => all.find((p) => p.id === projectId), () => undefined);
+                    if (!project) return;
+                    const at = now();
+                    for (const id of enabledProjectFeatures(project)) {
+                        const plugin = Object.hasOwn(projectFeatures, id) ? projectFeatures[id] : undefined;
+                        if (!plugin?.onChatReleased) continue;
+                        const settings = featureSettings(plugin, project, id);
+                        for (const [environmentId, cwd] of Object.entries(project.folders) as [EnvironmentId, string | undefined][]) {
+                            if (!cwd) continue;
+                            const located = await locate(environmentId).catch(() => null);
+                            let outcome: string | undefined;
+                            let error: string | undefined;
+                            if (!located?.machine.online) error = `environment ${environmentId} is offline or no machine reports it`;
+                            else {
+                                try {
+                                    outcome = await plugin.onChatReleased({ project, settings, chatId, reason, environmentId, cwd, fs: machineFs(machine(located.machine.machineId), environmentId, { now }) });
+                                } catch (e) {
+                                    error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+                                }
+                                if (outcome === undefined && error === undefined) continue;
+                            }
+                            await audit.record(ctx, workspaceId, {
+                                key: `${ctx.key}:released:${chatId}:${projectId}:${id}:${environmentId}:${at}`,
+                                kind: 'project.chat-released',
+                                at,
+                                by: ROUTER,
+                                summary: `chat ${chatId} left project ${project.name}: ${id} on ${environmentId}: ${error ?? outcome}`,
+                                data: { chatId, projectId, pluginId: id, environmentId, reason, ...(outcome !== undefined ? { outcome } : {}), ...(error !== undefined ? { error } : {}) }
+                            }).catch(() => undefined);
+                        }
+                    }
                 },
 
                 /**

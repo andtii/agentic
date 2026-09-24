@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, pathWithin, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceAnswer, type WorkspaceId, type ChangeScope, type ChangeSet } from '@agentic/core';
+import { actorKey, DAEMON_LOG_MAX_LINES, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, pathWithin, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceAnswer, type WorkspaceId, type ChangeScope, type ChangeSet } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -63,13 +63,25 @@ function needsLiveness(s: MachineState): boolean {
 
 /**
  * Why the Machine answers a session-files request itself (#562), before a frame goes out: the daemon lacks the `files`
- * feature, or `root` is not inside the environment's `cwdRoots` (lexically — the daemon checks again after resolving links).
+ * feature (for `worktrees`, #622, the `worktrees` feature), or `root` is not inside the environment's `cwdRoots`
+ * (lexically — the daemon checks again after resolving links).
  */
-function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root: string): FsError | undefined {
-    if (!s.features?.includes('files')) return { code: 'unsupported', message: 'the daemon does not answer session files (no files feature); update it' };
+function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, op: Extract<FsOp, { root: string }>): FsError | undefined {
+    const root = op.root;
+    if (op.kind === 'worktrees') {
+        if (!s.features?.includes('worktrees')) return { code: 'unsupported', message: "the daemon does not list a repository's worktrees (no worktrees feature); update it" };
+    } else if (!s.features?.includes('files')) return { code: 'unsupported', message: 'the daemon does not answer session files (no files feature); update it' };
     const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
     if (!pathWithin(root, environment.cwdRoots, os)) return { code: 'outside-roots', message: `${root} is not inside the folders environment "${environment.id}" may use` };
     return undefined;
+}
+
+/** How much of a command line a `workdir.command-run` summary shows (#618). */
+const RUN_SUMMARY_CHARS = 120;
+
+/** How long a `run` (#617) may take on the daemon, on top of the usual answer time: what its deadline allows (#620). */
+function runTimeOf(op: FsOp): number {
+    return op.kind === 'run' ? Math.min(op.timeoutMs ?? FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS) : 0;
 }
 
 /** A `run` (#617) is refused here, like a files op: a daemon without the `run` feature, a `cwd` outside the roots. */
@@ -90,9 +102,12 @@ function failPendingHistory(s: MachineState, at: number, message: string): void 
     }
 }
 
-/** The session-files kinds (#559/#562): answered through the `fsAnswer` stream, gated by the daemon's `files` feature. */
-function isFilesOp(op: FsOp): op is Extract<FsOp, { kind: 'tree' | 'read' | 'changes' }> {
-    return op.kind === 'tree' || op.kind === 'read' || op.kind === 'changes';
+/**
+ * The session-files kinds (#559/#562), and a repository's `worktrees` (#622): read-only, open to session drivers,
+ * answered through the `fsAnswer` stream — gated by the daemon's `files` feature, `worktrees` by its own.
+ */
+function isFilesOp(op: FsOp): op is Extract<FsOp, { kind: 'tree' | 'read' | 'changes' | 'worktrees' }> {
+    return op.kind === 'tree' || op.kind === 'read' || op.kind === 'changes' || op.kind === 'worktrees';
 }
 
 /** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
@@ -1331,6 +1346,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.error = result ? { code: 'internal', message: `the daemon answered a ${r.op.kind} request with a ${result.kind} result` } : structuredClone(frame.error ?? { code: 'internal', message: 'fs.response carried neither result nor error' });
                     delete r.result;
                     fsAnswers.delete(answerKey(ctx.key, r.requestId));
+                    if (r.op.kind === 'run') await auditRun(r, at, { error: r.error.code });
                     return;
                 }
                 r.status = 'done';
@@ -1345,14 +1361,32 @@ export function defineMachineActor(ports: MachinePorts) {
                     return;
                 }
                 r.result = structuredClone(result);
-                if (r.op.kind !== 'worktree' || result.kind !== 'worktree') return;
+                if (r.op.kind === 'run' && result.kind === 'run') return auditRun(r, at, { exitCode: result.exitCode });
+                // A worktree already in place (#618) changed nothing on the machine: nothing to audit.
+                if (r.op.kind !== 'worktree' || result.kind !== 'worktree' || result.reused) return;
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:worktree:${r.requestId}`,
                     kind: 'workdir.worktree-created',
                     at,
                     by: r.by,
-                    summary: `worktree ${result.branch} added at ${result.path} on machine ${machineId}`,
-                    data: { machineId, environmentId: r.environmentId, repo: r.op.repo, branch: result.branch, path: result.path, ...(r.op.base ? { base: r.op.base } : {}) }
+                    summary: `worktree ${result.branch} ${result.recreated ? 're-created' : 'added'} at ${result.path} on machine ${machineId}`,
+                    data: { machineId, environmentId: r.environmentId, repo: r.op.repo, branch: result.branch, path: result.path, ...(r.op.base ? { base: r.op.base } : {}), ...(result.recreated ? { recreated: true as const } : {}) }
+                });
+            }
+
+            /** A project command the daemon ran, or refused (#618), audited once per request (OPS-03). */
+            async function auditRun(r: FsRequestRecord, at: number, outcome: { readonly exitCode?: number; readonly error?: string }): Promise<void> {
+                if (r.op.kind !== 'run') return;
+                // The summary names the command in short; `data.argv` keeps it whole.
+                const joined = r.op.argv.join(' ');
+                const command = joined.length > RUN_SUMMARY_CHARS ? `${joined.slice(0, RUN_SUMMARY_CHARS - 1)}…` : joined;
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:run:${r.requestId}`,
+                    kind: 'workdir.command-run',
+                    at,
+                    by: r.by,
+                    summary: `${command} in ${r.op.cwd} on machine ${machineId}: ${outcome.error ?? `exit ${outcome.exitCode}`}`,
+                    data: { machineId, environmentId: r.environmentId, cwd: r.op.cwd, argv: [...r.op.argv], ...outcome }
                 });
             }
 
@@ -1963,8 +1997,9 @@ export function defineMachineActor(ports: MachinePorts) {
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-                    if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate' || parsed.data.kind === 'run') && (ctx.principal as Principal | null)?.kind !== 'user') {
-                        throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : parsed.data.kind === 'locate' ? 'locate checkouts' : 'run a command'}`);
+                    const ownerOnly = { worktree: 'create a worktree', 'worktree-remove': 'remove a worktree', locate: 'locate checkouts', run: 'run a command' } as const;
+                    if (Object.hasOwn(ownerOnly, parsed.data.kind) && (ctx.principal as Principal | null)?.kind !== 'user') {
+                        throw new ServerFnError(403, `machine: only the owner may ${ownerOnly[parsed.data.kind as keyof typeof ownerOnly]}`);
                     }
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
@@ -1975,7 +2010,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const requestId = `fs_${crypto.randomUUID()}`;
                     const checked = parsed.data;
                     // Refused here, before a frame goes out: a daemon that cannot answer, a folder outside the roots.
-                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked.root) : checked.kind === 'run' ? runRefusal(s, environment, checked.cwd) : undefined;
+                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked) : checked.kind === 'run' ? runRefusal(s, environment, checked.cwd) : undefined;
                     if (!refusal && !send({ v: V, t: 'fs.request', requestId, environmentId, op: checked })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
                     const fs = (s.fs ??= {});
                     pruneFs(fs, at);
@@ -1983,7 +2018,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const by = principalLabel(ctx.principal);
                     const record: FsRequestRecord = refusal
                         ? { requestId, environmentId, op: structuredClone(checked), status: 'error', error: refusal, requestedAt: at, finishedAt: at, deadline: at, by }
-                        : { requestId, environmentId, op: structuredClone(checked), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs, by };
+                        : { requestId, environmentId, op: structuredClone(checked), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs + runTimeOf(checked), by };
                     fs[requestId] = record;
                     await armLiveness();
                     await ctx.save();
@@ -2586,7 +2621,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 for (const r of Object.values(s.fs)) {
                     if (r.status !== 'pending' || r.deadline > at) continue;
                     r.status = 'error';
-                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${fsTimeoutMs} ms` };
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${r.deadline - r.requestedAt} ms` };
                     r.finishedAt = at;
                 }
                 pruneFs(s.fs, at, false);

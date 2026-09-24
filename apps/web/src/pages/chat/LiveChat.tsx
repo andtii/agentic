@@ -37,13 +37,13 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
-import type { IndexedEntry } from '@agentic/platform';
+import { activeIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
 import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
 import { Page } from '../../components/Page';
-import { baseTurnId, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
+import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
-import { chatKeyOf, inboxKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
+import { chatKeyOf, inboxKeyOf, machineKeyOf, routingKeyOf, sessionKeyOf, taskIndexKeyOf, taskKeyOf } from '../../actors/keys';
 import { resolveAddressing, type MockChatSummary } from '../../mock/workspace';
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
@@ -54,7 +54,7 @@ import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
-import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
+import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
 import { LiveChatList, createChatWith } from './LiveChats';
 import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
@@ -92,6 +92,15 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // Why a member's turn was cut and where its resume stands (#368): the Audit's rows and the router's routes, live.
     const cuts = useInterruptionReads(defs, viewer);
     const machineNameOf = (id: string): string | undefined => workdirs.machines().find((m) => m.id === id)?.name;
+    // A message parked on its environment's capacity (#652): the machine its route runs on, read live only while one
+    // waits — the environment's name, its limit and the turns running there, so the notice says why and what to change.
+    const capacity = (): { machineId: string; environmentId: string } | undefined => {
+        const c = chatWaitsOf(index.value ?? [], props.id).capacity;
+        if (!c) return undefined;
+        const machineId = cuts.routes().find((r) => r.taskId === c.taskId)?.machineId ?? summary.value?.machineId ?? workdirs.machineOf(c.wait.environmentId);
+        return machineId ? { machineId, environmentId: c.wait.environmentId } : undefined;
+    };
+    const capacityMachine = useActorState(defs.Machine, () => { const ws = viewer.workspaceId; const c = capacity(); return ws && c && ([machineKeyOf(ws, c.machineId), 'get'] as const); }, { live: true });
     const interruptionOfTurn: InterruptionOfTurn = (turnId, agentId) => {
         const base = turnId ? baseTurnId(turnId) : undefined;
         const mine = cuts.routes().filter((r) => r.chatId === props.id && r.agentId === agentId);
@@ -218,7 +227,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
     // The topbar reads the title and members from here.
     const stopHead = effect(() => {
         const s = summary.value;
-        const members = s ? membersOf(s, waitingAgents(kept.list), workingAgents(index.value ?? [], props.id)) : [];
+        const members = s ? membersOf(s, waitingAgents(kept.list), workingAgents(index.value ?? [], props.id), queuedAgents(index.value ?? [], props.id)) : [];
         const identities = Object.fromEntries(members.map((m) => [m.agentId, directory.lookup(m.agentId)]));
         chatHead.value = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : props.id, members, identities, ...(s?.project ? { project: s.project } : {}), ...(s?.machine ? { machine: { ...s.machine, online: workdirs.machines().find((m) => m.id === s.machine!.id)?.online ?? false } } : s?.machineId ? { machine: { id: s.machineId, name: s.machineId, online: false } } : {}) };
     });
@@ -437,7 +446,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         }
         const entries = kept.list;
         const waiting = waitingAgents(entries);
-        const members = s ? membersOf(s, waiting, workingAgents(index.value ?? [], props.id)) : [];
+        const members = s ? membersOf(s, waiting, workingAgents(index.value ?? [], props.id), queuedAgents(index.value ?? [], props.id)) : [];
         const last = lastOf(entries, directory.lookup);
         // The open chat as a summary: nothing in it is unread — it is on screen.
         const chat: MockChatSummary = { id: props.id, title: s ? chatTitle(members, directory.lookup, s.title) : '…', members, lastLine: last.line, unread: 0, waiting: waiting.size > 0, updatedAt: last.at, ...(s?.projectId ? { projectId: s.projectId } : {}), ...(s?.machineId ? { machineId: s.machineId } : {}) };
@@ -453,8 +462,13 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const tasks = chatTasks(index.value ?? [], props.id);
         const failure = chatFailure(entries, feeds.list, interruptionOfTurn, machineNameOf);
         // A task of this chat waiting on its machine (#366): a wait, never a failure — the machine, since when, and the deadline.
-        const inChat = new Set(tasks.map((t) => t.id));
-        const offline = (index.value ?? []).flatMap((r) => (inChat.has(r.id) && r.status === 'waiting' && r.wait?.kind === 'machine-offline' ? [r.wait] : []))[0];
+        // One waiting for a free slot (#652): where, how full it is, and the link that changes the limit.
+        const waits = chatWaitsOf(index.value ?? [], props.id);
+        const offline = waits.offline;
+        const slot = waits.capacity;
+        const slotAt = slot ? capacity() : undefined;
+        const slotView = slot && slotAt && capacityMachine.value?.machineId === slotAt.machineId ? capacityMachine.value : undefined;
+        const slotEnv = slotView?.environments.find((e) => e.id === slot?.wait.environmentId);
         const empty = transcript.messages.length === 0;
         const loading = summary.loading && !s;
         return (
@@ -498,6 +512,12 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                     {offline ? (
                         <p data-chat-wait role="status">
                             {machineOfflineText(offline, machineNameOf(offline.machineId), time)} <Link to={`/machines/${offline.machineId}`}>Open machine</Link>
+                        </p>
+                    ) : null}
+                    {slot ? (
+                        <p data-chat-wait data-chat-wait-capacity role="status">
+                            {capacityWaitText(slot.wait, { ...(slotEnv ? { environment: slotEnv.name } : {}), ...(slotView ? { machine: slotView.name } : {}) }, slotView && slotEnv ? { active: activeIn(slotView, slotEnv.id), max: slotEnv.concurrency.max } : undefined)}
+                            {slotAt ? <> <Link to={`/machines/${slotAt.machineId}?env=${encodeURIComponent(slotAt.environmentId)}`}>Change limit</Link></> : null}
                         </p>
                     ) : null}
                     {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}

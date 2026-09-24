@@ -1,11 +1,11 @@
 /** `fs.request` against real temp trees (#188, #331): listing, the root checks, git badges with their origin, `locate` and `git worktree add`. */
 // @vitest-environment node
-import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, type EnvironmentId, type FsListResult, type FsLocateResult, type FsOp, type LocalEnvironment } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_RUN_OUTPUT_TAIL, type EnvironmentId, type FsListResult, type FsLocateResult, type FsOp, type LocalEnvironment } from '@agentic/core';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, withinRoots, type FsOptions, type FsOutcome } from '../src/fs';
+import { answerFsRequest, checkWithinRoots, gitInfo, originUrl, parseWorktreeList, withinRoots, type FsOptions, type FsOutcome } from '../src/fs';
 
 const hasGit = spawnSync('git', ['--version'], { windowsHide: true }).status === 0;
 /** A directory link: a junction on Windows (no privilege needed), a symlink elsewhere. */
@@ -312,13 +312,13 @@ describe.skipIf(!hasGit)('fs worktree (real git)', () => {
         expect(await ask({ kind: 'worktree', repo: path, branch: 'feat/b', base: 'main', path: second })).toEqual({ result: { kind: 'worktree', path: second, branch: 'feat/b' } });
     }, 60_000);
 
-    it('names branch-exists, invalid-branch, exists, not-a-repo and a target outside the roots', async () => {
+    it('names branch-exists, invalid-branch, worktree-mismatch, not-a-repo and a target outside the roots', async () => {
         const target = (n: string) => join(root, 'wts', n);
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'main', path: target('a') }))).toBe('branch-exists');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'bad..name', path: target('b') }))).toBe('invalid-branch');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: '-x', path: target('b') }))).toBe('invalid-branch');
         await mkdir(target('taken'), { recursive: true });
-        expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: target('taken') }))).toBe('exists');
+        expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: target('taken') }))).toBe('worktree-mismatch');
         expect(errorOf(await ask({ kind: 'worktree', repo: target('taken'), branch: 'ok', path: target('c') }))).toBe('not-a-repo');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: join(outside, 'wt') }))).toBe('outside-roots');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: `${root}/../wt` }))).toBe('outside-roots');
@@ -328,5 +328,149 @@ describe.skipIf(!hasGit)('fs worktree (real git)', () => {
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: join(root, 'escape', 'wt') }))).toBe('outside-roots');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', path: join(root, 'escape', 'deep', 'wt') }))).toBe('outside-roots');
         expect(errorOf(await ask({ kind: 'worktree', repo, branch: 'ok', base: 'no-such-ref', path: target('e') }))).toBe('not-found');
+    }, 60_000);
+
+    it('reuses a worktree already there, re-creates one removed by hand, and refuses another branch at the path (#618)', async () => {
+        const path = join(root, 'wts', 'chat-1');
+        const op = { kind: 'worktree', repo, branch: 'chat/1', path } as const;
+        expect(await ask(op)).toEqual({ result: { kind: 'worktree', path, branch: 'chat/1' } });
+        expect(await ask(op)).toEqual({ result: { kind: 'worktree', path, branch: 'chat/1', reused: true } });
+        // Asked from the worktree itself, the same answer.
+        expect(await ask({ ...op, repo: path })).toEqual({ result: { kind: 'worktree', path, branch: 'chat/1', reused: true } });
+
+        // Removed with the branch kept (`git worktree remove`, `pnpm wt rm`, …): checked out again, work intact.
+        await writeFile(join(path, 'work.txt'), 'w');
+        git(path, 'add', 'work.txt');
+        git(path, 'commit', '-q', '-m', 'work');
+        git(repo, 'worktree', 'remove', path);
+        expect(await ask(op)).toEqual({ result: { kind: 'worktree', path, branch: 'chat/1', recreated: true } });
+        expect(await stat(join(path, 'work.txt'))).toBeTruthy();
+        // Deleted from disk without git knowing: pruned, then re-created.
+        await rm(path, { recursive: true, force: true });
+        expect(await ask(op)).toEqual({ result: { kind: 'worktree', path, branch: 'chat/1', recreated: true } });
+
+        // Another branch's worktree at the path, and the branch checked out in another folder.
+        expect(errorOf(await ask({ ...op, branch: 'chat/2' }))).toBe('worktree-mismatch');
+        expect(errorOf(await ask({ ...op, path: join(root, 'wts', 'elsewhere') }))).toBe('branch-exists');
+    }, 60_000);
+});
+
+describe.skipIf(!hasGit)('fs worktrees (real git, #622)', () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { windowsHide: true, stdio: 'pipe' });
+
+    it('lists every worktree of the repo, the one root is in marked current, one outside the roots marked outside', async () => {
+        const repo = join(root, 'repo');
+        await mkdir(repo);
+        git(repo, 'init', '-q', '-b', 'main');
+        await writeFile(join(repo, 'README'), 'x');
+        git(repo, 'add', 'README');
+        git(repo, 'commit', '-q', '-m', 'init');
+        const wt = join(root, 'wts', 'feat');
+        git(repo, 'worktree', 'add', '-q', '-b', 'feat', wt);
+        const away = join(outside, 'away');
+        git(repo, 'worktree', 'add', '-q', '--detach', away);
+        git(repo, 'worktree', 'lock', wt);
+        await mkdir(join(wt, 'src'));
+
+        const outcome = await ask({ kind: 'worktrees', root: join(wt, 'src') });
+        if (!('result' in outcome) || outcome.result.kind !== 'worktrees') throw new Error(JSON.stringify(outcome));
+        const byPath = new Map(await Promise.all(outcome.result.entries.map(async (e) => [await realpath(e.path).catch(() => e.path), e] as const)));
+        expect(outcome.result).toMatchObject({ root: join(wt, 'src'), truncated: false });
+        expect(outcome.result.entries).toHaveLength(3);
+        expect(byPath.get(await realpath(repo))).toMatchObject({ branch: 'main', head: expect.stringMatching(/^[0-9a-f]{7}$/) });
+        expect(byPath.get(await realpath(repo))).not.toHaveProperty('current');
+        expect(byPath.get(await realpath(wt))).toMatchObject({ branch: 'feat', locked: true, current: true });
+        expect(byPath.get(await realpath(away))).toMatchObject({ detached: true, outside: true });
+        expect(byPath.get(await realpath(away))).not.toHaveProperty('branch');
+        // Inside the roots, each is named under the root as written — not git's resolved form (`/private/var` on macOS) —
+        // so the platform's lexical check admits it when it is opened as a `root`.
+        expect(outcome.result.entries.map((e) => e.path)).toEqual(expect.arrayContaining([repo, wt]));
+
+        expect(errorOf(await ask({ kind: 'worktrees', root: outside }))).toBe('outside-roots');
+        await mkdir(join(root, 'plain'));
+        expect(errorOf(await ask({ kind: 'worktrees', root: join(root, 'plain') }))).toBe('not-a-repo');
+    }, 60_000);
+});
+
+describe('parseWorktreeList (#618)', () => {
+    it('reads porcelain -z records: a branch, a detached HEAD, a bare repo', () => {
+        const out = ['worktree /r', 'HEAD abc', 'branch refs/heads/main', '', 'worktree /w', 'HEAD def', 'detached', 'locked reason', 'prunable gitdir file points to non-existent location', '', 'worktree /b', 'bare', '', ''].join('\0');
+        expect(parseWorktreeList(out)).toEqual([{ path: '/r', head: 'abc', branch: 'main' }, { path: '/w', head: 'def', detached: true, locked: true, prunable: true }, { path: '/b' }]);
+        expect(parseWorktreeList('')).toEqual([]);
+    });
+});
+
+describe('fs run (#618)', () => {
+    const node = process.execPath;
+    const run = (argv: string[], cwd = root, timeoutMs?: number) => ask({ kind: 'run', cwd, argv, ...(timeoutMs ? { timeoutMs } : {}) });
+
+    it('runs argv in the folder, never through a shell, and answers the exit code with both tails', async () => {
+        await mkdir(join(root, 'app'));
+        const outcome = await run([node, '-e', 'process.stdout.write(process.cwd()); process.stderr.write("e"); process.exit(3)', '$HOME;&|'], join(root, 'app'));
+        expect(outcome).toMatchObject({ result: { kind: 'run', exitCode: 3, stderrTail: 'e' } });
+        const cwd = 'result' in outcome && outcome.result.kind === 'run' ? outcome.result.stdoutTail : '';
+        expect(cwd).toBe(await realpath(join(root, 'app')));
+        // An argument that looks like shell syntax arrives as written.
+        expect(await run([node, '-e', 'process.stdout.write(process.argv[1])', '$HOME;&|'])).toMatchObject({ result: { exitCode: 0, stdoutTail: '$HOME;&|' } });
+    }, 30_000);
+
+    it('keeps only the tail of a long output', async () => {
+        const outcome = await run([node, '-e', `process.stdout.write('a'.repeat(${FS_RUN_OUTPUT_TAIL}) + 'z'.repeat(10))`]);
+        const out = 'result' in outcome && outcome.result.kind === 'run' ? outcome.result.stdoutTail : '';
+        expect(out).toHaveLength(FS_RUN_OUTPUT_TAIL);
+        expect(out.endsWith('z'.repeat(10))).toBe(true);
+    }, 30_000);
+
+    it('refuses a folder outside the roots or missing, names a missing program, and stops at its time', async () => {
+        expect(errorOf(await run([node, '-e', '0'], outside))).toBe('outside-roots');
+        expect(errorOf(await run([node, '-e', '0'], join(root, 'nope')))).toBe('not-found');
+        expect(errorOf(await run(['agentic-no-such-program-618']))).toBe('not-found');
+        // A script file, not `-e`: nothing for cmd.exe to read on Windows. Its whole tree is stopped at the time.
+        await writeFile(join(root, 'sleep.js'), 'setTimeout(function () {}, 60000);');
+        expect(errorOf(await run([node, join(root, 'sleep.js')], root, 1_000))).toBe('timeout');
+    }, 30_000);
+});
+
+describe.skipIf(!hasGit)('fs worktree-remove (real git, #623)', () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { windowsHide: true, stdio: 'pipe' });
+    let repo: string;
+    beforeEach(async () => {
+        repo = join(root, 'repo');
+        await mkdir(repo);
+        git(repo, 'init', '-q', '-b', 'main');
+        await writeFile(join(repo, 'README'), 'x');
+        git(repo, 'add', 'README');
+        git(repo, 'commit', '-q', '-m', 'init');
+    });
+    const branchExists = (b: string) => spawnSync('git', ['-C', repo, 'show-ref', '--verify', '--quiet', `refs/heads/${b}`]).status === 0;
+
+    it('removes a clean worktree and, when asked, its merged branch; an unmerged branch stays', async () => {
+        const path = join(root, 'wts', 'chat-1');
+        await ask({ kind: 'worktree', repo, branch: 'chat/1', path });
+        expect(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/1', deleteBranch: true })).toEqual({ result: { kind: 'worktree-remove', path, removed: true, branchDeleted: true } });
+        await expect(stat(path)).rejects.toThrow();
+        expect(branchExists('chat/1')).toBe(false);
+
+        const second = join(root, 'wts', 'chat-2');
+        await ask({ kind: 'worktree', repo, branch: 'chat/2', path: second });
+        await writeFile(join(second, 'work.txt'), 'w');
+        git(second, 'add', 'work.txt');
+        git(second, 'commit', '-q', '-m', 'work');
+        expect(await ask({ kind: 'worktree-remove', repo, path: second, branch: 'chat/2', deleteBranch: true })).toEqual({ result: { kind: 'worktree-remove', path: second, removed: true, branchDeleted: false } });
+        expect(branchExists('chat/2')).toBe(true);
+        // Nothing there any more: nothing to remove, and without deleteBranch the branch is not touched.
+        expect(await ask({ kind: 'worktree-remove', repo, path: second, branch: 'chat/2' })).toEqual({ result: { kind: 'worktree-remove', path: second, removed: false } });
+    }, 60_000);
+
+    it('keeps a dirty worktree, refuses another branch, never the main checkout, and stays inside the roots', async () => {
+        const path = join(root, 'wts', 'chat-3');
+        await ask({ kind: 'worktree', repo, branch: 'chat/3', path });
+        await writeFile(join(path, 'scratch.txt'), 'untracked');
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/3' }))).toBe('dirty');
+        expect(await stat(join(path, 'scratch.txt'))).toBeTruthy();
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/other' }))).toBe('worktree-mismatch');
+        expect(await ask({ kind: 'worktree-remove', repo, path: repo })).toEqual({ result: { kind: 'worktree-remove', path: repo, removed: false } });
+        expect(await stat(join(repo, 'README'))).toBeTruthy();
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path: join(outside, 'x') }))).toBe('outside-roots');
     }, 60_000);
 });

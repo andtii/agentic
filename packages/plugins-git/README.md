@@ -9,9 +9,11 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | Hook | Behaviour |
 |---|---|
 | `manifest` | id `agentic.feature.git`, kind `project-feature`, nothing workspace-wide to configure |
+| `presets`, `settingsErrors`, `previewSettings` | the project form's starting points (`GIT_PRESETS`: git default, inside the repo, sibling folders, your own command — each only fills fields), the template problems per setting (`gitSettingsErrors`), and the branch / folder / maker / setup a chat would get for the project's first folder (`previewGitSettings`) (#621) |
 | `detect(folder)` | true when the daemon's listing gave the folder a git badge (a repo or a worktree) |
 | `identityOf(folder)` | the badge's `origin`: the repo's identity across machines (compared with `sameOrigin`); the project form fills the `origin` setting from it |
 | `instructions(ctx)` | the project's `instructions` text, trimmed, into every session's `## Project` section |
+| `onChatReleased(input)` | with `worktreeCleanup: 'on-chat-leave'`, remove the chat's worktree when the chat leaves the project (#623) |
 | `beforeSession(input)` | with `worktreePerChat` on and a task from a chat: one `worktree` op per chat and environment, and the session opens in the worktree |
 
 ## Per-project settings (`features['agentic.feature.git']`)
@@ -21,22 +23,72 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `origin` | string | — | the origin remote URL as git writes it (`https://…` or `git@host:path`) |
 | `worktreePerChat` | boolean | `false` | give each chat its own branch and worktree |
 | `branchPrefix` | string | `chat/` | what a chat's branch name starts with |
+| `branchTemplate` | string | — | a chat's branch as a template: `{branchPrefix}`, `{chatId8}`, `{chatId}`, `{project}`; unset = `{branchPrefix}{chatId8}` |
+| `worktreePath` | string | `auto` | where a chat's worktree goes, as a template: the branch tokens plus `{repo}`, `{repoName}`, `{repoParent}`, `{branch}`, `{branchSlug}`; `auto` = `suggestWorktreePath` |
+| `worktreeStrategy` | `builtin` \| `command` | `builtin` | `builtin`: the daemon's `worktree` op (`git worktree add`); `command`: the project's own `worktreeCreate` makes it |
+| `worktreeCreate` | string | — | the create command, run in the project folder, as a template: every folder token plus `{path}`; quotes group an argument, nothing else is shell syntax |
+| `worktreeSetup` | string[] | — | commands run in order in a worktree just made (never in a reused one), same tokens |
+| `worktreeCleanup` | `never` \| `on-chat-leave` | `never` | `on-chat-leave`: when a chat is moved out of the project, its worktree is removed on every online machine — never one with uncommitted changes |
+| `worktreeDeleteBranch` | boolean | `false` | with cleanup on, delete the chat's branch afterwards if it is merged |
+| `worktreeRemove` | string | — | with cleanup on, the project's own remove command (e.g. `pnpm wt rm {branchSlug}`), run in the project folder; empty = the daemon's `worktree-remove` |
+| `reuseExisting` | boolean | `true` | a session folder other than the project's own that is already a linked worktree is used as it is |
+| `worktreeNotice` | string | the default notice | what the agent is told about its worktree: `{path}`, `{branch}`; blank = nothing |
 | `base` | string | — | the start point of a new chat branch; the checkout's HEAD when empty |
 | `instructions` | string | `''` | how to work in this repo |
 
 ## The worktree rule
 
-`branch = branchPrefix + short chat id` (the last 8 characters after `chat_`, lowercased) — the same on every environment of the chat, checked against a conservative subset of git's ref-name rules (`gitBranchFor`, `isValidBranchName`). `path = suggestWorktreePath(cwd, branch)` from `@agentic/core`: beside a checkout named `main` under `branches/`, a sibling of a worktree already under `branches/`, else `<repo>-worktrees/<slug>`; the OS is read from the folder's shape (`hostOsOfPath`). The plugin sends `{ kind: 'worktree', repo: cwd, branch, path, base? }` to the environment's daemon and returns the daemon's path as the session's `cwd`, plus one line for the prompt: ``This chat works on branch `…` in `…`.``
+Agentic imposes no worktree convention: every project names and places its chat worktrees its own way (#619, tracking #616), and the defaults keep the original behaviour.
 
-Nothing is remembered between tasks: a second task of the same chat (or the same chat after a restart) sends the same op and the daemon answers `branch-exists` or `exists`, which resolve deterministically to the same path. Any other daemon error (`not-a-repo`, `outside-roots`, `timeout`, `unsupported`, …) throws `git worktree <code>: <message>`, so the router parks the task `waiting { kind: 'project-feature' }` with that message and a later `Routing.run` tries again (EXE-12).
+- **Branch:** `branchTemplate` expanded (`chatWorktreeFor`), else `branchPrefix + short chat id` (the last 8 characters after `chat_`, lowercased; `gitBranchFor`). Either way it is checked against a conservative subset of git's ref-name rules (`isValidBranchName`).
+- **Folder:** `worktreePath` expanded, normalised for the folder's OS (`/` is fine in a template on Windows, `..` resolves), else `suggestWorktreePath(cwd, branch)` from `@agentic/core`: beside a checkout named `main` under `branches/`, a sibling of a worktree already under `branches/`, else `<repo>-worktrees/<slug>`.
+- Every token is deterministic for a chat, so every task and every environment of it lands in the same folder. An unknown token, an unbalanced brace, an invalid branch or a relative folder throws before any daemon round trip. `gitSettingsErrors(settings)` names the same problems per key, for a settings form.
 
-Out of scope here: push/pull, PR creation, worktree cleanup when a chat is deleted, clone.
+With `reuseExisting` (the default), a session folder that is not the project's own on that environment, and whose listing badge is a linked worktree (one the user picked for the chat or task, made in a terminal or anywhere else), is used as it is.
+
+Otherwise the plugin sends `{ kind: 'worktree', repo: cwd, branch, path, base? }`. The daemon makes it idempotent (#618): a worktree already there is `reused`, a branch whose folder was removed is `recreated`. The session opens in the daemon's path.
+
+Either way the agent gets the notice (`worktreeNotice`, default `DEFAULT_WORKTREE_NOTICE`): it is already isolated and should not create another worktree or leave the folder. So a repo guide written for terminal use ("create a worktree first") does not pull the agent out of the folder that Files and Changes watch.
+
+Every daemon error throws `git worktree <code>: <message>`, and the router parks the task `waiting { kind: 'project-feature' }` with that message (EXE-12). The errors include `worktree-mismatch` (something else at the folder), `branch-exists` (the branch is checked out in another folder), `not-a-repo`, `outside-roots`, `timeout` and `unsupported`.
+
+### The project's own tooling (#620)
+
+With `worktreeStrategy: 'command'` the plugin does not run `git worktree add`. It checks the folder first: a worktree of the branch already there is kept, and anything else there parks the task. Otherwise it runs `worktreeCreate` in the project folder through the daemon's `run` op. Afterwards the folder must be a worktree of the expected branch; a command that fails, makes nothing, or makes another branch parks the task with the tail of its output.
+
+`worktreeSetup` then runs in the new worktree, one command at a time. It runs after either strategy, but only when the worktree was just made or re-created, never when it was reused. The first failing command parks the task.
+
+Commands are split into argv (`splitCommand`) and expanded one argument at a time, so a path with spaces stays one argument. The daemon never runs them through a shell (#618). They run as the owner, only on a daemon with the `run` feature, with a working directory inside the environment's roots, and every run is audited (`workdir.command-run`).
+
+### Cleanup (#623)
+
+When a chat leaves the project (`Chat.setProject` to another project or none), the router calls `onChatReleased` once for every environment where the project has a folder and the machine is online. With `worktreeCleanup: 'on-chat-leave'`, the plugin removes the chat's own worktree: the one `chatWorktreeFor` names, never a worktree the user picked.
+
+It removes it in one of two ways:
+- **Built in:** the daemon's `worktree-remove`, never forced. A worktree with uncommitted or untracked changes is `dirty` and stays. With `worktreeDeleteBranch` it then runs `git branch -d`, so an unmerged branch is kept.
+- **Your own command:** `worktreeRemove`, run after `git status` shows the worktree clean.
+
+Every call is audited as `project.chat-released`, with what the plugin did or why it could not. Chats can't be deleted yet, so the `deleted` reason is reserved. There is no `on-merge` policy.
+
+### Examples
+
+| Convention | Settings |
+|---|---|
+| default | nothing: `chat/a1b2c3d4` in `<repo>-worktrees/chat-a1b2c3d4` (or `branches/` beside a `main` checkout) |
+| in-repo `.worktrees/` | `worktreePath: "{repo}/.worktrees/{branchSlug}"` |
+| sibling folders | `worktreePath: "{repoParent}/{repoName}-{branchSlug}"` |
+| `main/` + `branches/`, branch = folder | `branchTemplate: "chat-{chatId8}"`, `worktreePath: "{repoParent}/branches/{branchSlug}"` |
+| a repo script that makes and installs worktrees (this repo's `pnpm wt`) | the row above, plus `worktreeStrategy: "command"`, `worktreeCreate: "pnpm wt new {branchSlug}"` |
+| install dependencies in a new worktree | `worktreeSetup: ["npm ci"]` (or `["uv sync"]`, `["bundle install"]`, …) |
+
+Out of scope here: push/pull, PR creation, clone, removal when a branch merges.
 
 ## Layout
 
 | File | What |
 |---|---|
-| `src/index.ts` | `gitFeaturePlugin`, `gitFeatureManifest`, `gitProjectSettings`, `GIT_FEATURE_ID`, `gitBranchFor`, `isValidBranchName`, `hostOsOfPath`, `identityOf` |
+| `src/index.ts` | `gitFeaturePlugin`, `gitFeatureManifest`, `gitProjectSettings`, `GIT_FEATURE_ID`, `gitBranchFor`, `chatWorktreeFor`, `gitSettingsErrors`, `DEFAULT_WORKTREE_NOTICE`, `isValidBranchName`, `hostOsOfPath`, `identityOf` |
+| `src/templates.ts` | the `{token}` templates: `expandTemplate`, `templateError`, `templateTokens`, `slugOf`, the token lists; command lines: `splitCommand`, `expandCommand`, `commandError` |
 | `__tests__/git.test.ts` | the manifest, detect / identity / instructions, and `beforeSession` against a recording fake daemon |
 
 The router end to end (two machines, reuse, parking) is covered in `packages/platform/__tests__/routing/projects.test.ts`.

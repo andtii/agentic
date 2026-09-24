@@ -7,7 +7,7 @@ import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/a
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, machineWorkspaceSource, MAX_CHANGES_SNAPSHOTS, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, SNAPSHOT_MAX_COMMITS, SNAPSHOT_MAX_FILES, ToolCallError, type FsAnswer, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, machineWorkspaceSource, machineWorktrees, MAX_CHANGES_SNAPSHOTS, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, SNAPSHOT_MAX_COMMITS, SNAPSHOT_MAX_FILES, ToolCallError, type FsAnswer, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { initialMachineState, rememberChanges, snapshotOf } from '../../src/machine/state';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
@@ -600,6 +600,7 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
 
         const { respond } = await rawDaemon(['run']);
         expect(await statusOf(machine(K1, agentP).fsRequest(E1, run))).toBe(403);
+        expect(await statusOf(machine(K1, agentP).fsRequest(E1, { kind: 'worktree-remove', repo: '/work/app', path: '/work/wt/x' }))).toBe(403);
         const outside = await machine(K1).fsRequest(E1, { ...run, cwd: '/etc' });
         expect(await machine(K1).fsResult(outside.requestId)).toMatchObject({ status: 'error', error: { code: 'outside-roots' } });
         expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);
@@ -608,6 +609,25 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op: run });
         await respond(requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: 'done', stderrTail: '' } });
         expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { kind: 'run', exitCode: 0 } });
+    });
+
+    it("lists a repository's worktrees for a session driver, on a daemon with the worktrees feature, inside the roots (#622)", async () => {
+        const op = { kind: 'worktrees', root: '/work/app' } as const;
+        await rawDaemon(['files']);
+        expect(await machineWorktrees(machine(K1), E1, '/work/app')).toMatchObject({ error: { code: 'unsupported' } });
+        expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);
+
+        const { respond } = await rawDaemon(['files', 'worktrees']);
+        expect(await machineWorktrees(machine(K1, agentP), E1, '/etc')).toMatchObject({ error: { code: 'outside-roots' } });
+        const { requestId } = await machine(K1, agentP).fsRequest(E1, op);
+        expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op });
+        const result = { kind: 'worktrees', root: '/work/app', entries: [{ path: '/work/app', branch: 'main', current: true }, { path: '/work/app-wt/x', branch: 'x' }], truncated: false } as const;
+        await respond(requestId, { result });
+        const answers: FsAnswer[] = [];
+        for await (const a of machine(K1, agentP).fsAnswer(requestId)) answers.push(a);
+        expect(answers).toEqual([{ result }]);
+        // Held like the session-files answers, never on the saved record.
+        expect(((await app.storage.load('machine', K1))!.state as { fs: Record<string, { result?: unknown }> }).fs[requestId]!.result).toBeUndefined();
     });
 
     it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {
@@ -659,6 +679,38 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(await worktrees()).toHaveLength(1);
     });
 
+    it('audits a re-created worktree, not a reused one, and every project command with how it ended (#618)', async () => {
+        const { respond } = await rawDaemon(['run']);
+        const reused = await machine(K1).fsRequest(E1, worktree);
+        await respond(reused.requestId, { result: { kind: 'worktree', path: worktree.path, branch: 'feat/x', reused: true } });
+        expect(await machine(K1).fsResult(reused.requestId)).toMatchObject({ status: 'done', result: { reused: true } });
+        const recreated = await machine(K1).fsRequest(E1, worktree);
+        await respond(recreated.requestId, { result: { kind: 'worktree', path: worktree.path, branch: 'feat/x', recreated: true } });
+        await until(async () => (await worktrees()).length === 1, 'the re-created worktree');
+        expect((await worktrees())[0]).toMatchObject({ key: `${K1}:worktree:${recreated.requestId}`, summary: expect.stringContaining('re-created'), data: { recreated: true } });
+
+        const commands = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['workdir.command-run'] })).events;
+        const run = { kind: 'run', cwd: '/work/app', argv: ['npm', 'ci'] } as const;
+        const ok = await machine(K1).fsRequest(E1, run);
+        await respond(ok.requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } });
+        const failed = await machine(K1).fsRequest(E1, run);
+        await respond(failed.requestId, { error: { code: 'timeout', message: 'too slow' } });
+        await until(async () => (await commands()).length === 2, 'both commands');
+        const byKey = new Map((await commands()).map((e) => [e.key, e]));
+        expect(byKey.get(`${K1}:run:${ok.requestId}`)).toMatchObject({ by: 'user:u1', data: { machineId: M1, environmentId: E1, cwd: '/work/app', argv: ['npm', 'ci'], exitCode: 0 } });
+        expect(byKey.get(`${K1}:run:${failed.requestId}`)).toMatchObject({ data: { argv: ['npm', 'ci'], error: 'timeout' } });
+        expect(await worktrees()).toHaveLength(1);
+
+        // A long command line is cut in the summary and kept whole in the data.
+        const long = { ...run, argv: ['echo', 'x'.repeat(500)] };
+        const big = await machine(K1).fsRequest(E1, long);
+        await respond(big.requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } });
+        await until(async () => (await commands()).length === 3, 'the long command');
+        const entry = (await commands()).find((e) => e.key === `${K1}:run:${big.requestId}`)!;
+        expect(entry.summary.length).toBeLessThan(200);
+        expect(entry.data).toMatchObject({ argv: long.argv });
+    });
+
     it('times out an unanswered request through the liveness reminder; a late answer still lands', async () => {
         connect(K1, daemon(M1));
         await until(async () => (await machine(K1).get()).online, 'online');
@@ -671,6 +723,15 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         await machine(K1, asMachine(M1)).socketMessage(JSON.stringify({ v: 1, t: 'fs.response', requestId, result: { kind: 'list', path: '/work', entries: [], truncated: false } }));
         expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { path: '/work' } });
         expect((await machine(K1).fsResult(requestId)).error).toBeUndefined();
+    });
+
+    it('gives a project command its own time on top of the answer deadline (#620)', async () => {
+        await rawDaemon(['run']);
+        const { requestId } = await machine(K1).fsRequest(E1, { kind: 'run', cwd: '/work/app', argv: ['npm', 'ci'], timeoutMs: 60_000 });
+        await advance(TICK);
+        expect((await machine(K1).fsResult(requestId)).status).toBe('pending');
+        await advance(60_000);
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: `no answer from machine ${M1} within 90000 ms` } });
     });
 
     it('fails pending requests when the daemon disconnects', async () => {

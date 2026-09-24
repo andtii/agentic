@@ -99,6 +99,21 @@ describe('session files on the platform (#564)', () => {
         expect(liveSessionFiles('s1', { opened: true, spec: { agentId: 'atlas' } } as unknown as SessionInfo, undefined, client)!.files).toBe(false);
     });
 
+    it('lists worktrees and re-roots only on a daemon with the worktrees feature (#622)', async () => {
+        const { machineId, view } = await pairedMachine();
+        const client = machineClientFor(clientDefs(), WS);
+        const plain = liveSessionFiles('s1', info(machineId), view, client)!;
+        expect(plain.worktrees).toBeUndefined();
+        expect(plain.at).toBeUndefined();
+        const listed = liveSessionFiles('s1', info(machineId), { ...view, features: ['files', 'worktrees'] }, client, { hooks: { mention: () => undefined } })!;
+        expect(listed.worktrees).toBeTypeOf('function');
+        const other = listed.at!('/work/other');
+        expect(other).toMatchObject({ root: '/work/other', sessionRoot: IN_MEMORY_PROJECT_ROOT, files: true });
+        expect(other.mention).toBeUndefined();
+        expect(other.source).not.toBe(listed.source);
+        expect(other.worktrees).toBe(listed.worktrees);
+    });
+
     it('Changes reads the change set and the diff through the Machine', { timeout: 15_000 }, async () => {
         const { machineId, view } = await pairedMachine();
         const files = liveSessionFiles('s1' as SessionId, info(machineId), view, machineClientFor(clientDefs(), WS), { base: 'main' })!;

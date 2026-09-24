@@ -155,6 +155,7 @@ const principalOf = (ctx: ActorContext<ChatState>): Principal | null => (ctx.pri
 /** The slice of the Routing actor a removal reaches (`defineRoutingActor`, #399), one-way. */
 interface RoutingClient {
     endSession(chatId: ChatId, agentId: AgentId, reason: string, sessionId?: SessionId): Promise<void>;
+    chatReleased(chatId: ChatId, projectId: ProjectId, reason: 'project-changed'): Promise<void>;
 }
 
 /** Users and external clients post as the workspace user; an agent posts as itself. */
@@ -355,6 +356,8 @@ export interface ChatOptions {
      * as the caller — to end the session the chat bound to the leaving member
      * (`Routing.endSession`, #399), so removal ends the agent's session for
      * that chat (§6). Absent: the binding is dropped and the session lives on.
+     * `setProject` tells it, one-way, when the chat leaves a project
+     * (`Routing.chatReleased`, #623), so the project's feature plugins can tidy up.
      */
     readonly routing?: () => AnyActorDefinition;
     /**
@@ -574,7 +577,8 @@ export function defineChatActor(ports: ChatOptions = {}) {
              * feature plugins. Written as a visible note in the thread (a user message carrying
              * `project`, activating nobody), so the fold keeps the last one. Users, external
              * clients and member agents (a non-member agent is 403); an unknown project is 400.
-             * Idempotent. Recorded as `chat.project-set`.
+             * Idempotent. Recorded as `chat.project-set`. Leaving a project tells the router
+             * (`Routing.chatReleased`, #623), so the project's feature plugins can tidy up.
              */
             async setProject(projectId: ProjectId | null): Promise<ChatSummary> {
                 const principal = principalOf(ctx);
@@ -588,7 +592,8 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     if (!project) throw new ServerFnError(400, `Chat.setProject: no project ${projectId} in this workspace`);
                     name = project.name;
                 }
-                if ((ctx.state.projectId ?? null) === projectId) return summaryOf(ctx);
+                const left = ctx.state.projectId ?? null;
+                if (left === projectId) return summaryOf(ctx);
                 const text = projectId === null ? 'Project cleared' : `Project → ${name}`;
                 await archive(ctx);
                 const at = Date.now();
@@ -602,6 +607,12 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     summary: projectId === null ? `chat ${chatId} left its project` : `chat ${chatId} put in project ${name} (${projectId})`,
                     data: { chatId, projectId, ...(name !== undefined ? { name } : {}) }
                 });
+                // The project it left hears it (#623), one-way and best effort: its feature plugins tidy up after the chat.
+                const routing = left !== null ? ports.routing?.() : undefined;
+                if (routing && left !== null) {
+                    const router = ctx.actor(routing, routingKey(workspaceId)).with({ oneWay: true }) as unknown as RoutingClient;
+                    await router.chatReleased(chatId, left, 'project-changed').catch(() => undefined);
+                }
                 return summaryOf(ctx);
             },
 
