@@ -127,7 +127,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     const machinesOf = (): readonly MachineEntry[] => props.machines ?? [];
     // Mounted open (the tests): already on the opening project and its roster.
     const first = props.model?.value === true ? openingProject() : '';
-    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as string, machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
+    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project', machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';

@@ -81,7 +81,7 @@ export function provenanceLine(entry: MemoryEntry, zone?: string): string {
  */
 export const MemoryTab = component<MemoryTabProps>(({ props }) => {
     const state = signal({
-        filter: 'all' as string,
+        filter: 'all' as Filter,
         entries: props.profile.memories.map((e) => ({ ...e })) as MemoryEntry[],
         learning: props.profile.learning,
         correcting: null as MemoryEntry | null,
@@ -261,7 +261,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                     </Card>
                 </Col>
                 </aside>
-                <FormDialog model={() => state.correctOpen} title="Correct this memory" description="Your correction replaces the text and is recorded as stated by you." submitLabel="Save correction" onSubmit={confirmCorrect} onCancel={() => { state.correcting = null; }}>
+                <FormDialog model={() => state.correctOpen} title="Correct this memory" description="Your correction replaces the text and is recorded as stated by you." submitLabel="Save correction" onSubmit={confirmCorrect} onCancel={() => { state.correctOpen = false; state.correcting = null; }}>
                     <TextareaField model={() => state.correction} name="correction" label="Corrected text" rows={4} />
                 </FormDialog>
                 <ConfirmDialog model={() => state.deleteOpen} title="Delete this memory" description="Deleting removes it from every future session. Retire it instead to keep the history." dependents={state.deleting ? [state.deleting.text] : []} dependentsLabel="Deletes" confirmLabel="Delete memory" onConfirm={confirmDelete} />
