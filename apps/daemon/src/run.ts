@@ -81,8 +81,8 @@ export async function runCommand(op: Extract<FsOp, { kind: 'run' }>, roots: read
         child.on('error', (e: NodeJS.ErrnoException) => finish(e.code === 'ENOENT' ? fail('not-found', `${command} was not found on this machine`) : fail('internal', `${command} could not start: ${e.message}`)));
         child.on('close', (code) => {
             if (timedOut) return finish(fail('timeout', `${command} did not finish within ${timeoutMs} ms`));
-            // cmd.exe answers a program it cannot find with 9009.
-            if (windows && code === 9009) return finish(fail('not-found', `${command} was not found on this machine`));
+            // cmd.exe answers a program it cannot find with 9009, or (as `cmd /s /c` does) 1 and "is not recognized".
+            if (windows && (code === 9009 || (code !== 0 && /is not recognized as an internal or external command/i.test(err.text())))) return finish(fail('not-found', `${command} was not found on this machine`));
             finish({ result: { kind: 'run', exitCode: code ?? 1, stdoutTail: out.text(), stderrTail: err.text() } });
         });
     });
