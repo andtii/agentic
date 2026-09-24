@@ -14,7 +14,8 @@ import { Link, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId } from '@agentic/core';
-import { AgentTile, EmptyState, EnvironmentLine, Icon, Label, Row, Stack, StatusPill } from '@agentic/ui';
+import { AgentTile, EmptyState, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
+import { Col, Row, Stack } from '@sigx/zero';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -96,17 +97,19 @@ export const LiveAgents = component(() => {
                                         <Link to={`/agents/${a.id}`} class="agent-card">
                                             <Row gap="md" align="center">
                                                 <AgentTile name={a.name} hue={a.hue} size={44} />
-                                                <Stack gap="2xs" grow>
-                                                    <span data-agent-card-name="">{a.name}</span>
-                                                    <span data-agent-card-role="">{a.role}</span>
-                                                </Stack>
+                                                <Stack.Item grow>
+                                                    <Col gap="2xs">
+                                                        <span data-agent-card-name="">{a.name}</span>
+                                                        <span data-agent-card-role="">{a.role}</span>
+                                                    </Col>
+                                                </Stack.Item>
                                                 <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                                             </Row>
                                             <p data-agent-card-description="">{a.description ?? ''}</p>
-                                            <Stack gap="xs">
+                                            <Col gap="xs">
                                                 <Label>Default environment</Label>
                                                 <EnvironmentLine machine={a.environment.machine} runtime={a.environment.runtime} account={a.environment.account} tone="live" />
-                                            </Stack>
+                                            </Col>
                                             <CardStats agentId={a.id} configVersion={a.configVersion} />
                                         </Link>
                                     </li>

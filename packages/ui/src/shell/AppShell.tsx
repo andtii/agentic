@@ -2,7 +2,7 @@ import { component, onUnmounted, signal, type Define, type JSXElement } from '@s
 import { watch } from '@sigx/reactivity';
 import { Drawer, Navbar, type PartProps } from '@sigx/zero';
 import { Icon, type IconName } from '../kit/icons';
-import { useMediaQuery } from '../layout/use-media-query';
+import { useMediaQuery } from '@sigx/zero/behaviors';
 
 /** One navigation entry. `badge` is the Home count: open inbox items of kind approval, input or interrupted. */
 export interface NavItem {
@@ -64,9 +64,6 @@ export type AppShellProps =
     /** Sidebar foot: the signed-in user. */
     & Define.Slot<'user'>;
 
-/** The viewport width at which the drawer yields to the sidebar (`shell.css` agrees). */
-export const SHELL_BREAKPOINT = '(min-width: 768px)';
-
 function isActive(item: NavItem, path: string | undefined): boolean {
     if (!path) return false;
     if (item.href === '/') return path === '/';
@@ -92,7 +89,8 @@ function isActive(item: NavItem, path: string | undefined): boolean {
  */
 export const AppShell = component<AppShellProps>(({ props, slots }) => {
     const state = signal({ open: false });
-    const wide = useMediaQuery(SHELL_BREAKPOINT);
+    // The drawer yields to the sidebar from the design system's `md` up (`shell.css` agrees).
+    const wide = useMediaQuery({ above: 'md' }, { initial: false });
     // When the sidebar takes over, a drawer left open would sit on top of it.
     const stop = watch(() => wide.value, (isWide) => { if (isWide) state.open = false; });
     onUnmounted(() => stop());

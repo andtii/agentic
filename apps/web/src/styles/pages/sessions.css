@@ -1,0 +1,119 @@
+/* A session (#88), and its Changes and Files (#564). */
+@import '@agentic/ui/css/breakpoints';
+
+/* ---- session (#88): fluid + 400, gap 28 — under the session bar (#564), so the page is flush and the body pads ---- */
+[data-page="session"] { display: flex; flex-direction: column; min-inline-size: 0; }
+[data-session-body] {
+    padding: var(--ag-space-8);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-areas: "head head" "main rail";
+    gap: var(--ag-space-8);
+    align-items: start;
+}
+[data-session-head] { grid-area: head; display: flex; align-items: center; gap: var(--space-lg); flex-wrap: wrap; }
+[data-session-title] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
+[data-session-id] { font-family: var(--font-mono); font-size: 20px; font-weight: var(--weight-semibold); }
+[data-session-sub] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-session-main] { grid-area: main; display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
+[data-session-rail] { grid-area: rail; display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
+[data-event-log] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-family: var(--font-mono); font-size: var(--text-sm); }
+[data-event] { display: grid; grid-template-columns: 44px 110px minmax(0, 1fr); gap: var(--space-sm); padding-block: var(--space-xs); border-block-end: var(--border) solid var(--ag-line); color: var(--ag-text-muted); }
+[data-event]:last-child { border-block-end: 0; }
+[data-event-seq] { color: var(--ag-text-dim); }
+[data-event][data-kind="request"] { color: var(--color-warning); }
+[data-event-text] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-capabilities] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-capability] { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: var(--space-sm); align-items: center; }
+[data-capability][data-supported="true"] > svg { color: var(--color-primary); }
+[data-capability][data-supported="false"] { color: var(--ag-text-dim); }
+[data-capability-note] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-grants] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-grant] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+[data-grant] > code { font-size: var(--text-sm); background: var(--color-base-100); }
+
+/* → --below-xl once #585 lands */
+@media (max-width: 1279.98px) {
+    [data-session-body] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "main" "rail"; }
+}
+
+@media (--below-md) {
+    [data-session-head] { gap: var(--space-md); }
+    [data-event] { grid-template-columns: 44px minmax(0, 1fr); }
+    [data-event] > :nth-child(2) { grid-column: 2; }
+    [data-event] > :nth-child(3) { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
+}
+
+/* ---- a session's Changes and Files (#564): session bar, 300 px list or tree, the file on the right ---- */
+[data-page="session-changes"], [data-page="session-files"] {
+    display: flex;
+    flex-direction: column;
+    block-size: calc(100dvh - var(--ag-topbar-h));
+    min-inline-size: 0;
+}
+[data-files-empty] { padding: var(--ag-space-8); }
+[data-files-loading] { margin: 0; padding: var(--ag-space-8); }
+[data-files-banner] {
+    display: flex; align-items: center; gap: var(--space-sm);
+    margin: 0; padding: var(--space-sm) var(--space-xl);
+    border-block-end: var(--border) solid var(--ag-line);
+    background: color-mix(in oklab, var(--color-warning) 8%, transparent);
+    color: var(--color-warning);
+    font-size: var(--text-sm);
+}
+[data-files-banner][data-tone="failed"] { background: color-mix(in oklab, var(--color-error) 8%, transparent); color: var(--color-error); }
+/* "Edited by <tile> Edit at 14:09" in a file's header (#565): dim label, the agent's tile, the call as a link. */
+[data-file-edited] { display: inline-flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; white-space: nowrap; }
+[data-file-edited-label] { font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-file-edited] > a { font-size: var(--text-sm); }
+[data-files-body] {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+}
+[data-files-body] > [data-scope="ag-changes"][data-part="root"],
+[data-files-tree] {
+    min-block-size: 0;
+    overflow-y: auto;
+    border-inline-end: var(--border) solid var(--ag-line);
+}
+[data-files-tree] { display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-lg) var(--space-md); overflow: hidden; }
+[data-files-tree-scroll] { flex: 1 1 auto; min-block-size: 0; overflow-y: auto; margin-inline: calc(-1 * var(--space-2xs)); }
+[data-files-root] {
+    margin: 0;
+    font-family: var(--font-mono); font-size: 11px; color: var(--ag-text-dim);
+    direction: rtl; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-files-main] { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; }
+[data-files-surface] { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; }
+[data-files-note] { margin: 0; padding: var(--space-lg) var(--space-xl); color: var(--ag-text-muted); font-size: var(--text-sm); }
+[data-scope="ag-changes"] [data-files-note] { padding: 0; }
+[data-files-state] { padding: var(--ag-space-8); }
+[data-files-back] { display: none; }
+
+/* 768–1279: the session bar's controls take their own row rather than squeezing the branch */
+/* → (--above-md) and (--below-xl) once #585 lands */
+@media (--above-md) and (max-width: 1279.98px) {
+    [data-scope="ag-session-bar"][data-part="root"] { flex-wrap: wrap; row-gap: 0; }
+    [data-scope="ag-session-bar"][data-part="controls"] { flex-basis: 100%; justify-content: flex-end; padding-block-end: var(--space-sm); }
+}
+
+@media (--below-md) {
+    [data-session-body] { padding: var(--space-lg); }
+    [data-files-empty], [data-files-state], [data-files-loading] { padding: var(--space-lg); }
+    /* two screens: the list (or tree), and — once a file is chosen — the file full-screen with a back link */
+    [data-files-body] { grid-template-columns: minmax(0, 1fr); }
+    [data-files-body] > [data-scope="ag-changes"][data-part="root"], [data-files-tree] { border-inline-end: 0; }
+    [data-files-body][data-has-file] > :first-child { display: none; }
+    [data-files-body]:not([data-has-file]) > [data-files-main] { display: none; }
+    [data-files-back] {
+        display: flex; align-items: center; gap: var(--space-xs);
+        min-block-size: 44px; padding-inline: var(--space-lg);
+        border-block-end: var(--border) solid var(--ag-line);
+        color: var(--ag-text-muted); text-decoration: none; font-size: var(--text-sm);
+    }
+    [data-files-note], [data-files-banner] { padding-inline: var(--space-lg); }
+    /* the phone's diff is unified (the handoff's mobile version): no layout switch */
+    .ag-diff-layout { display: none; }
+}

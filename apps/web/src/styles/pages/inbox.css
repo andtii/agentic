@@ -1,0 +1,12 @@
+/* The inbox ("Needs you") on Home. */
+@import '@agentic/ui/css/breakpoints';
+
+[data-home-needs] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
+[data-needs-list] { display: flex; flex-direction: column; gap: var(--space-md); }
+[data-needs-row] { display: contents; }
+
+@media (--below-md) {
+    /* Home "Needs you · N open" is one line and the hint is dropped (docs/design/screenshots/MobileHome.png, #118) */
+    [data-home-needs] > [data-section-heading] > h2 { white-space: nowrap; }
+    [data-home-needs] > [data-section-heading] > [data-section-aside] { display: none; }
+}

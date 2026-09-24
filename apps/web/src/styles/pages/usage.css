@@ -1,0 +1,34 @@
+/* Usage (#90): stats, limits, bars. */
+@import '@agentic/ui/css/breakpoints';
+
+[data-usage-stats] { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-lg); }
+/* Provider limits (#270): one panel per account, three across on /usage, stacked on Home's rail. */
+[data-usage-limits] { display: flex; flex-direction: column; gap: var(--space-md); }
+[data-limits-grid] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-xl) var(--space-lg); }
+[data-usage-limits][data-compact] [data-limits-grid] { grid-template-columns: minmax(0, 1fr); gap: var(--space-md); }
+[data-limit-account] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
+[data-limit-caption] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-stat] { gap: var(--space-sm); }
+[data-stat-value] { font-family: var(--font-mono); font-size: var(--text-3xl); font-weight: var(--weight-semibold); line-height: 1.1; }
+[data-stat][data-tone="needs-you"] [data-stat-value] { color: var(--color-warning); }
+[data-stat][data-tone="muted"] [data-stat-value] { color: var(--ag-text-muted); }
+[data-stat-caption] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-bars] { display: flex; align-items: flex-end; gap: var(--space-sm); block-size: 120px; }
+[data-bar] { flex: 1 1 0; block-size: max(3px, var(--h)); background: var(--color-base-300); border-radius: 2px 2px 0 0; }
+[data-bar][data-today] { background: var(--color-primary); }
+[data-bars-foot] { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-bars-today] strong { color: var(--color-primary); font-weight: var(--weight-semibold); }
+[data-usage-sub] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+code[data-mono][data-cost="reported"] { color: var(--color-base-content); font-weight: var(--weight-semibold); }
+code[data-mono][data-cost="partly-estimated"] { color: var(--color-warning); font-weight: var(--weight-semibold); }
+code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
+
+/* → --below-xl once #585 lands */
+@media (max-width: 1279.98px) {
+    [data-usage-stats], [data-limits-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (--below-md) {
+    [data-usage-stats], [data-limits-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-bars] { block-size: 80px; }
+}

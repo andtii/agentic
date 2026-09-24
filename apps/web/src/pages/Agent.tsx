@@ -1,7 +1,8 @@
 import { component, signal, useHead } from 'sigx';
 import { Link, useRoute } from '@sigx/router';
 import { Tabs } from '@sigx/zero-daisyui/components';
-import { AgentTile, Button, EmptyState, EnvironmentLine, Row, Stack, StatusPill } from '@agentic/ui';
+import { AgentTile, Button, EmptyState, EnvironmentLine, StatusPill } from '@agentic/ui';
+import { Col, Row } from '@sigx/zero';
 import { Page } from '../components/Page';
 import { agentById } from '../mock/data';
 import { agentProfile } from '../mock/agents';
@@ -65,7 +66,7 @@ export const Agent = component(() => {
                     <header data-agent-header="">
                         <Row gap="lg" align="center">
                             <AgentTile name={agent.name} hue={profile.hue} size={52} />
-                            <Stack gap="2xs">
+                            <Col gap="2xs">
                                 <h1 data-page-title data-agent-name="">{agent.name}</h1>
                                 <div data-agent-sub="">
                                     <span data-agent-role="">{profile.role}</span>
@@ -73,7 +74,7 @@ export const Agent = component(() => {
                                         ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} fit="drop-machine" />
                                         : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}
                                 </div>
-                            </Stack>
+                            </Col>
                         </Row>
                         <Row gap="md" align="center">
                             <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
