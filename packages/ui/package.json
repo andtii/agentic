@@ -26,7 +26,10 @@
       "production": "./dist/design-system.prod.js",
       "import": "./dist/design-system.js"
     },
-    "./css": "./dist/ds/css/index.css",
+    "./css": {
+      "types": "./css.d.ts",
+      "default": "./dist/ds/css/index.css"
+    },
     "./css/tokens": "./dist/ds/css/tokens.css",
     "./css/breakpoints": "./dist/ds/css/breakpoints.css",
     "./register": {
@@ -40,7 +43,7 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && node scripts/emit-fragment.mjs && node scripts/build-design-system.mjs"
+    "build": "vite build && vite build --mode prod-dist && tsc -p tsconfig.build.json && sigx zero:fragment --strict && sigx zero:build ./dist/design-system.js --extra-manifest ./dist/fragment.js --out dist/ds"
   },
   "dependencies": {
     "@agentic/core": "workspace:*",
@@ -55,6 +58,7 @@
     "shiki": "^4.4.3"
   },
   "devDependencies": {
+    "@sigx/cli": "^0.12.0",
     "@sigx/vite": "catalog:",
     "typescript": "^7.0.2",
     "vite": "^8.0.3",
@@ -67,6 +71,6 @@
   },
   "sigx-zero": {
     "fragment": "./dist/fragment.js",
-    "requires": ">=0.4.0"
+    "requires": ">=0.5.0"
   }
 }
