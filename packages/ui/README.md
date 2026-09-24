@@ -165,8 +165,8 @@ The parts of a session's Changes and Files views (`docs/design/HANDOFF.md` → "
 - **`SessionBar`** (`ag-session-bar`): link tabs with counts (`aria-current="page"` on the open one), the agent tile, `machine / account`, the branch chip, "n ahead of base", and the view's controls in the default slot. It wraps below 768 px.
 - **`FileHeader`** (`ag-file-header`): status tile, the path as `dir/name` or spaced `breadcrumbs`, counts or `facts`, actions in the slot.
 - **`LineComposer`** (`ag-line-composer`): "Ask <agent> about line n", `file:line`, a textarea (Ctrl/Cmd+Enter sends, Escape cancels), the "Posts to …" note, Cancel and Send. It only collects the question; posting is the caller's.
-- **`GoToFile`** (`ag-find`): a combobox over known paths (`findPaths` ranks subsequence matches in the file name first); `hotkey` focuses it on Ctrl/Cmd+P. **`Kbd`** is the hint.
-- **`FileTree`** (`ag-file-tree`) and **`FileTreeLegend`** live in `src/_zero-gaps/` until zero ships a Tree (andtii/zero-wip#494): folders load through `load(path)` on first expand, the ancestors of `selected` open on mount, `version` reloads, ARIA tree semantics with arrow-key navigation.
+- **`GoToFile`** (`ag-find`): zero's `Combobox` over known paths, every match ranked by `findPaths` (subsequence matches in the file name first) and windowed with `virtual={virtualListbox}`, so a folder of thousands of files keeps a page of options in the DOM; `hotkey` focuses it on Ctrl/Cmd+P; `id` (default `ag-find`) lands on its root. **`Kbd`** is zero's `Kbd` with the keys as a `keys` prop.
+- **`FileTree`** (`ag-file-tree`) and **`FileTreeLegend`**: zero's `TreeView` (the APG tree: roving focus, arrow keys, typeahead, `aria-level`), each row an `ag-file-tree` `item` rendered `asChild` over TreeView's item or branch trigger. A folder loads through `load(path)` when it is expanded (`expandedValuesChange`) and its children render once they arrive; the ancestors of `selected` open on mount; `version` reloads; Enter or a click on a folder opens it, on a file calls `onSelect`.
 
 ### States (`src/kit/states`)
 

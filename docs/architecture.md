@@ -498,7 +498,6 @@ Routes (`@sigx/router`): `/` (inbox + active tasks), `/chats`, `/chats/new` (#33
   - `packages/ui/src/layout/` (Stack/Row/Col/Spacer, `layout.css`, `useMediaQuery`): replaceable by zero's layout tier, `useMediaQuery`, `getBreakpoints` (#584)
   - `pages.css`/`shell.css` hard-coded 640/768/1024 and 767.98/1279.98 px: replaceable by `--breakpoint-*` and `below-<bp>` recipe keys (#584, #595)
   - page form dialogs on `ConfirmDialog danger={false}`: replaceable by the kit `FormDialog` (plain `Dialog` + `<form>`, #586) (#592–#594)
-  - `_zero-gaps/FileTree.tsx` and the hand-rolled file finder: replaceable by `TreeView` and `Combobox` (#587)
   - `scripts/emit-fragment.mjs`, the hand-run fragment test, literal `version: 1`: replaceable by `sigx zero:fragment`, `zero:validate --package`, `FRAGMENT_VERSION` (#588)
   - the nav rendered twice; `shell.css` drawer width/slide: replaceable by `Drawer.Root modal={{ below: 'md' }}`, `Panel measure`, `NavList`, the app-shell composition (#589)
   - `<details>` in Reasoning/ToolCall; tool states mapped onto `loading/active/closed`; Composer keys on `<form>` and its hand-rolled mention listbox: replaceable by `Collapsible`, the lifecycle states, `Textarea` events/autosize, `Combobox trigger="@"` (#590)
