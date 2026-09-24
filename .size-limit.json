@@ -21,7 +21,7 @@
   {
     "name": "@agentic/plugins-git",
     "path": "packages/plugins-git/dist/index.js",
-    "limit": "4 KB"
+    "limit": "4.5 KB"
   },
   {
     "name": "@agentic/connectors",

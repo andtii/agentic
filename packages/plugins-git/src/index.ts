@@ -10,7 +10,7 @@
  * Edge-safe: `@agentic/core` only, no `node:` imports; it runs on the router.
  */
 
-import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeaturePreviewInput, type ProjectFeaturePreviewLine, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
 import { BRANCH_TOKENS, commandError, expandCommand, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError, type TemplateValues } from './templates.js';
 
 export { BRANCH_TOKENS, COMMAND_TOKENS, commandError, expandCommand, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, splitCommand, templateError, templateTokens } from './templates.js';
@@ -339,10 +339,71 @@ async function runArgv(fs: ProjectFeatureSessionInput['fs'], cwd: string, argv: 
     }
 }
 
+/**
+ * Starting points for the worktree settings (#621). Each only fills fields — every one stays editable, and none is
+ * special-cased anywhere — and each clears the fields the others set, so switching presets leaves no stray template.
+ */
+export const GIT_PRESETS: readonly ProjectFeaturePreset[] = [
+    {
+        id: 'git-default',
+        label: 'Git default',
+        description: 'git worktree add, beside a main checkout under branches/ or in <repo>-worktrees/',
+        settings: { worktreeStrategy: 'builtin', worktreePath: null, branchTemplate: null, worktreeCreate: null }
+    },
+    {
+        id: 'in-repo',
+        label: 'Inside the repo',
+        description: 'git worktree add into <repo>/.worktrees/ (add it to .gitignore)',
+        settings: { worktreeStrategy: 'builtin', worktreePath: '{repo}/.worktrees/{branchSlug}', branchTemplate: null, worktreeCreate: null }
+    },
+    {
+        id: 'sibling',
+        label: 'Sibling folders',
+        description: 'git worktree add beside the checkout, as <repo>-<branch>',
+        settings: { worktreeStrategy: 'builtin', worktreePath: '{repoParent}/{repoName}-{branchSlug}', branchTemplate: null, worktreeCreate: null }
+    },
+    {
+        id: 'command',
+        label: 'Your own command',
+        description: "the repo's own script makes the worktree: fill in the create command, and the folder template if it puts the worktree anywhere but the default",
+        settings: { worktreeStrategy: 'command', worktreeCreate: '', worktreePath: null, branchTemplate: null }
+    }
+];
+
+/** The chat a settings preview is shown for: any id works, the preview only shows the shape of the names. */
+export const PREVIEW_CHAT_ID = 'chat_a1b2c3d4';
+
+/**
+ * What the worktree settings would do for a folder of the project (#621): the branch and folder a chat would get,
+ * how the worktree is made and what runs in it. A settings problem is one `Problem` line, never a throw.
+ */
+export function previewGitSettings({ project, settings, folder }: ProjectFeaturePreviewInput): readonly ProjectFeaturePreviewLine[] {
+    if (settings['worktreePerChat'] !== true) return [{ label: 'Worktrees', value: 'off: sessions open in the project folder' }];
+    const cwd = folder?.path ?? '/path/to/repo';
+    try {
+        const { branch, path, values } = chatWorktreeFor(settings, { chatId: PREVIEW_CHAT_ID, cwd, projectName: project.name });
+        const create = templateSetting(settings, 'worktreeCreate');
+        const made = settings['worktreeStrategy'] === 'command' ? (create ? expandCommand(create, values).join(' ') : 'no create command yet') : 'git worktree add';
+        const setup = setupOf(settings).map((line) => expandCommand(line, values).join(' '));
+        return [
+            { label: 'Branch', value: branch },
+            { label: 'Folder', value: path },
+            { label: 'Made by', value: made },
+            { label: 'Then runs', value: setup.length ? setup.join(' → ') : 'nothing' },
+            ...(settings['reuseExisting'] !== false ? [{ label: 'Chosen worktree', value: 'kept as it is' }] : [])
+        ];
+    } catch (e) {
+        return [{ label: 'Problem', value: e instanceof Error ? e.message : String(e) }];
+    }
+}
+
 /** The git feature: `detect` on the git badge, `instructions` from the settings, `beforeSession` the worktree per chat. */
 export const gitFeaturePlugin: ProjectFeaturePlugin = {
     manifest: gitFeatureManifest,
     detect: (folder) => folder.git !== undefined,
     instructions: instructionsOf,
-    beforeSession
+    beforeSession,
+    presets: GIT_PRESETS,
+    settingsErrors: gitSettingsErrors,
+    previewSettings: previewGitSettings
 };

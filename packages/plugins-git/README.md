@@ -9,6 +9,7 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | Hook | Behaviour |
 |---|---|
 | `manifest` | id `agentic.feature.git`, kind `project-feature`, nothing workspace-wide to configure |
+| `presets`, `settingsErrors`, `previewSettings` | the project form's starting points (`GIT_PRESETS`: git default, inside the repo, sibling folders, your own command — each only fills fields), the template problems per setting (`gitSettingsErrors`), and the branch / folder / maker / setup a chat would get for the project's first folder (`previewGitSettings`) (#621) |
 | `detect(folder)` | true when the daemon's listing gave the folder a git badge (a repo or a worktree) |
 | `identityOf(folder)` | the badge's `origin`: the repo's identity across machines (compared with `sameOrigin`); the project form fills the `origin` setting from it |
 | `instructions(ctx)` | the project's `instructions` text, trimmed, into every session's `## Project` section |

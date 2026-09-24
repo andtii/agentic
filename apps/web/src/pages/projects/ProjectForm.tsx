@@ -9,7 +9,7 @@
  * a row whose checkout is of another repo warns and never blocks.
  */
 import { component, signal, watch, type Define } from 'sigx';
-import type { EnvironmentId, FsGitInfo, ProjectFeatureManifest, ProjectFeaturePlugin, ProjectPatch, ProjectRecord } from '@agentic/core';
+import { applyProjectFeaturePreset, configDefaults, type EnvironmentId, type FsGitInfo, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
 import { Button, ChipInput, ConfirmDialog, Label, SchemaForm, Switch, Tag, TextField, TextareaField, gitBadgeText, type SchemaFormApi, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
 import { projectFeatureCatalogue } from '../../plugins/features';
 import { MemberPicker } from '../chat/MemberPicker';
@@ -42,7 +42,7 @@ export type ProjectFormProps =
 
 export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const onOf = (features: Readonly<Record<string, unknown>>): Record<string, boolean> => Object.fromEntries(Object.keys(features).map((id) => [id, true]));
-    const st = signal<ProjectDraft & { attempted: boolean; finding: EnvironmentId | null; match: string; detected: Record<string, string[]>; removing: boolean; featureError: string; on: Record<string, boolean> }>({
+    const st = signal<ProjectDraft & { attempted: boolean; finding: EnvironmentId | null; match: string; detected: Record<string, string[]>; removing: boolean; featureError: string; on: Record<string, boolean>; live: Record<string, Record<string, unknown>> }>({
         ...projectDraftOf(props.project),
         ...(props.project ? {} : props.initial ?? {}),
         on: onOf(props.project?.features ?? {}),
@@ -51,7 +51,8 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         match: '',
         detected: {},
         removing: false,
-        featureError: ''
+        featureError: '',
+        live: {}
     });
     // The project landed after the form mounted (a live read): open on it, unless the person has started typing.
     watch(
@@ -65,6 +66,19 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     const features = (): readonly ProjectFeatureManifest[] => props.features ?? [];
     const origin = (): string | undefined => originOf(st.folders);
     const enabled = (id: string): boolean => Object.hasOwn(st.features, id);
+    /** A feature's settings as the draft has them now (#621), under the schema's defaults — what the router would hand the plugin. */
+    const settingsNow = (m: ProjectFeatureManifest): Readonly<Record<string, unknown>> => ({ ...configDefaults(m.projectSettings), ...(st.live[m.id] ?? st.features[m.id] ?? {}) });
+    /** The plugin's own problems with the draft (#621), each labelled with its setting's title. */
+    const pluginErrors = (m: ProjectFeatureManifest): string[] =>
+        Object.entries(catalogue()[m.id]?.settingsErrors?.(settingsNow(m)) ?? {}).map(([key, message]) => `${m.projectSettings.properties?.[key.split('.')[0]!]?.title ?? key}: ${message}`);
+    /** A preset laid over the draft as it is now; the form takes it as an edit, so every field stays the person's to change. */
+    const applyPreset = (m: ProjectFeatureManifest, preset: ProjectFeaturePreset): void => {
+        const api = apis[m.id];
+        const next = applyProjectFeaturePreset(api?.value() ?? st.features[m.id] ?? {}, preset);
+        if (api) api.load(next);
+        else st.features = { ...st.features, [m.id]: next };
+        st.live = { ...st.live, [m.id]: next };
+    };
     /** A row's badge; a prefilled one (#336) carries the origin and no HEAD, so it is the kind alone, not "detached". */
     const badgeText = (git: FsGitInfo): string => (git.branch || git.head ? gitBadgeText(git) : git.kind);
 
@@ -135,7 +149,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
         for (const m of features()) {
             if (!enabled(m.id)) continue;
             const api = apis[m.id];
-            if (api && !api.submit()) {
+            if ((api && !api.submit()) || pluginErrors(m).length) {
                 st.featureError = `Check the ${m.name} settings.`;
                 return;
             }
@@ -228,6 +242,14 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                         <Switch model={[st.on, m.id]} label={m.name} name={`project-feature-${m.id}-on`} disabled={!!props.busy} onCheckedChange={(on: boolean) => toggleFeature(m, on)} />
                                         <span data-project-feature-description>{m.description}</span>
                                     </div>
+                                    {enabled(m.id) && catalogue()[m.id]?.presets?.length ? (
+                                        <div data-project-feature-presets role="group" aria-label={`${m.name} presets`}>
+                                            <span data-project-feature-presets-label>Start from</span>
+                                            {catalogue()[m.id]!.presets!.map((p) => (
+                                                <Button key={p.id} intent="default" disabled={!!props.busy} label={p.description ? `${p.label}: ${p.description}` : p.label} onClick={() => applyPreset(m, p)}>{p.label}</Button>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                     {enabled(m.id) ? (
                                         <SchemaForm
                                             ref={(api: SchemaFormApi | null) => { apis[m.id] = api; }}
@@ -237,7 +259,18 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                             disabled={!!props.busy}
                                             hideActions
                                             onSubmit={(settings: Record<string, unknown>) => { st.features = { ...st.features, [m.id]: settings }; }}
+                                            onChange={(settings: Record<string, unknown>) => { st.live = { ...st.live, [m.id]: settings }; }}
                                         />
+                                    ) : null}
+                                    {enabled(m.id) && pluginErrors(m).length ? (
+                                        <ul data-project-feature-errors role="alert">{pluginErrors(m).map((e) => <li key={e}>{e}</li>)}</ul>
+                                    ) : null}
+                                    {enabled(m.id) && catalogue()[m.id]?.previewSettings ? (
+                                        <dl data-project-feature-preview aria-label={`What the ${m.name} settings do`}>
+                                            {catalogue()[m.id]!.previewSettings!({ project: { name: st.name }, settings: settingsNow(m), ...(Object.values(st.folders)[0] ? { folder: Object.values(st.folders)[0]! } : {}) }).map((l) => (
+                                                <div key={l.label} data-project-feature-preview-line><dt>{l.label}</dt><dd>{l.value}</dd></div>
+                                            ))}
+                                        </dl>
                                     ) : null}
                                 </li>
                             ))}
