@@ -1,8 +1,12 @@
 # agentic — shared agent guide
 
-> ⚠️ **BRANCH FIRST — never work on `main`.** Before touching ANY file, create a
+> ⚠️ **BRANCH FIRST — never work on `main`.** Before touching ANY file, run
+> `git branch --show-current`. If it prints a branch other than `main` and you are
+> under `<repo>/branches/`, you are already isolated (a `pnpm wt` worktree or an
+> agentic chat worktree): stay there and don't create another. Otherwise create a
 > worktree (`pnpm wt new <N-short-slug>`) and do everything from
-> `<repo>/branches/<N-short-slug>`. This applies to every change, however small —
+> `<repo>/branches/<N-short-slug>`. No `node_modules` in the worktree? Run
+> `pnpm install`. This applies to every change, however small —
 > editing or committing in the primary checkout (`<repo>/main`) causes conflicts
 > for parallel sessions. Check yourself before every commit:
 > `git branch --show-current` must print your worktree's branch name — if it
@@ -46,7 +50,8 @@ All work is tracked as sub-issues of the tracking issue
 
 1. Pick an open sub-issue without the `blocked` label whose **Depends on** issues
    are merged. Comment "taking this" so no other agent starts it.
-2. `pnpm wt new <N-short-slug>` from `<repo>/main`; work only inside
+2. Already in a worktree under `<repo>/branches/` (not on `main`)? Stay there.
+   Otherwise `pnpm wt new <N-short-slug>` from `<repo>/main`; work only inside
    `<repo>/branches/<N-short-slug>`. `git branch --show-current` must never print
    `main`.
 3. Read, in this order: the issue body, the `docs/architecture.md` section it
@@ -93,7 +98,8 @@ squash only; `scripts/apply-branch-protection.mjs` is the ruleset as code).
 
 1. **Issue first.** If no issue tracks the work, create one before writing code
    with the plan in its body (`.github/ISSUE_TEMPLATE/task.md` is the shape).
-2. **Worktree, always** (`pnpm wt new <N-short-slug>`). Never `git switch -c`
+2. **Worktree, always** — the one you are in if it is under `<repo>/branches/`
+   and not on `main`, else `pnpm wt new <N-short-slug>`. Never `git switch -c`
    in `<repo>/main` — parallel sessions share it.
 3. **Implement and verify.** Bug fix → write the failing test first (red), then
    fix (green). `pnpm typecheck` for any `.ts`; relevant `pnpm test` / `pnpm build`.
