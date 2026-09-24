@@ -26,8 +26,14 @@ test.describe('tablet', () => {
 
     test('keeps the sidebar and drops the rails under the main column in the handoff order', async ({ page }) => {
         await page.goto('/');
-        await expect(page.locator(shell('sidebar'))).toBeVisible();
-        expect((await page.locator(shell('sidebar')).boundingBox())?.width).toBe(232);
+        // The one navigation drawer is docked as the sidebar; no menu button, one nav landmark.
+        const sidebar = page.locator('[data-scope="drawer"][data-part="panel"][data-l-dock-above="md"]');
+        await expect(sidebar).toBeVisible();
+        await expect(sidebar).toHaveAttribute('data-l-dock', 'inline');
+        expect((await sidebar.boundingBox())?.width).toBe(232);
+        await expect(page.locator(`${shell('bar')} [data-scope="drawer"][data-part="trigger"]`)).toBeHidden();
+        await expect(page.getByRole('banner')).toHaveCount(1);
+        await expect(page.locator('nav:not([aria-label="Breadcrumb"])')).toHaveCount(1);
         await expectRailBelow(page, '[data-home-needs]', '[data-home-rail]');
 
         await page.goto('/tasks/t1-1');

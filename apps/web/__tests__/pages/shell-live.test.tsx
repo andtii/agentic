@@ -39,7 +39,7 @@ afterEach(async () => {
     h = null;
 });
 
-const badge = (dom: ParentNode): string | null => dom.querySelector('[data-scope="ai-shell"][data-part="badge"]')?.textContent ?? null;
+const badge = (dom: ParentNode): string | null => dom.querySelector('[data-scope="nav-list"] [data-scope="badge"]')?.textContent ?? null;
 const card = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-home-needs] [data-scope="ai-approval"][data-part="root"]');
 const signOut = (dom: ParentNode) => dom.querySelector<HTMLFormElement>('form[data-user-signout]');
 

@@ -1,5 +1,5 @@
 import { component, useData, useHead, type JSXElement } from 'sigx';
-import { Link, RouterView, useRoute } from '@sigx/router';
+import { Link, RouterView, useRoute, useRouter } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
 import { Breadcrumbs } from '@sigx/zero-daisyui/components';
 import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
@@ -96,6 +96,14 @@ export const App = component(() => {
         priority: -1
     });
     const route = useRoute();
+    const router = useRouter();
+    // The nav's anchors carry zero's NavList.Link parts, which the router's Link cannot take, so they
+    // navigate through the router as Link does: a plain left click, no modifier, not already handled.
+    const follow = (e: MouseEvent, to: string): void => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        void router.push(to);
+    };
     const topbar = () => topbarFor(route);
     const trail = () => trailFor(route, topbar());
     // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source.
@@ -114,7 +122,7 @@ export const App = component(() => {
                     title={titleOf(crumbs)}
                     back={backOf(crumbs)}
                     slots={{
-                        link: ({ item, icon }) => <Link to={item.href}>{icon}{item.label}</Link>,
+                        link: ({ item, icon, meta, props }) => <a {...props} onClick={(e: MouseEvent) => follow(e, item.href)}>{icon}{item.label}{meta}</a>,
                         back: ({ href, icon }) => <Link to={href}><span data-visually-hidden="">Back</span>{icon}</Link>,
                         actions: () => top?.actions?.() ?? null,
                         ...(top?.subtitle ? { subtitle: top.subtitle } : {}),

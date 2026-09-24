@@ -31,12 +31,12 @@ Pages lay out with zero's layout tier — `Row`, `Col`, `Stack.Item grow`, `Grid
 
 ## App shell (`src/shell`)
 
-`AppShell` is the handoff's shell: a sticky 232 px sidebar (brand, nav `groups` — the first unlabelled, the rest headed, each its own `<nav aria-label>` — with a per-item `badge`, then the `connection` and `user` slots) beside a 60 px topbar (`breadcrumb`, `actions` slots) and `<main>` (`flush` drops its padding). Below 768 px the sidebar becomes zero's modal `Drawer` (312 px, 50 px items, the same groups and foot behind a 44 px menu button) and the bar an app bar: `title` (the page), `back` (a detail route's parent, rendered through the `back` slot), the `subtitle` slot under the title and the `phoneAction` slot as the one right slot (else the last action). Router-agnostic: render your router's link in the `link` slot (it receives the item's `icon`); `currentPath` marks the active item. Import `@agentic/ui/shell.css` once. `ThemeToggle` is still exported for a design system with a light pair; the app does not render it (dark only).
+`AppShell` is the handoff's shell on zero's app-shell composition: one responsive `Drawer` (`modal={{ below: 'md' }}`) that is the sticky 232 px sidebar from md up and a 312 px modal sheet below, behind a 44 px menu button (50 px items); it renders docked on the server, so there is no flash, and a sheet left open closes when the viewport widens. The panel holds the brand, the navigation — one `NavList` (the page's one navigation landmark, labelled "Main"): nav `groups`, the first named by its label, the rest headed; the item matching `currentPath` gets `aria-current="page"`; a per-item `badge` renders as a warning `Badge` with an accessible label — then the `connection` and `user` slots. Beside it a 60 px topbar (`breadcrumb`, `actions` slots) and `<main>` (`flush` drops its padding); below 768 px the bar is an app bar: `title` (the page), `back` (a detail route's parent, rendered through the `back` slot), the `subtitle` slot under the title and the `phoneAction` slot as the one right slot (else the last action). Router-agnostic: the `link` slot receives the item, `active`, its `icon` and `meta` (the count) and `props`, the `NavList.Link` part props to spread on the anchor it renders. Import `@agentic/ui/shell.css` once (it `@import`s `@agentic/ui/css/breakpoints` for `@media (--below-md)`, so the app's CSS pipeline needs custom media, e.g. Lightning CSS `drafts.customMedia`). `ThemeToggle` is gone (no user).
 
 ```tsx
 <ThemeProvider>
     <AppShell brand="agentic" groups={NAV_GROUPS} currentPath={route.path} flush={isChat}
-        slots={{ link: ({ item }) => <Link to={item.href}>{item.label}</Link>, breadcrumb, actions, connection, user }}>
+        slots={{ link: ({ item, icon, meta, props }) => <a {...props} onClick={(e) => follow(e, item.href)}>{icon}{item.label}{meta}</a>, breadcrumb, actions, connection, user }}>
         <RouterView />
     </AppShell>
 </ThemeProvider>
