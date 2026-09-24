@@ -102,6 +102,24 @@ export interface ProjectFeatureSessionInput extends ProjectFeatureContext {
     readonly fs: ProjectFeatureFs;
 }
 
+/**
+ * Why a chat no longer works in a project (#623): it was moved to another project or out of any (`project-changed`),
+ * or deleted (`deleted`, once chats can be).
+ */
+export type ProjectFeatureReleaseReason = 'project-changed' | 'deleted';
+
+/**
+ * A chat left the project (#623), for one environment the project has a folder on: `cwd` is that folder, `fs` its
+ * daemon. What a plugin tidies up is its own business; the platform runs it best effort, after the fact.
+ */
+export interface ProjectFeatureChatReleaseInput extends ProjectFeatureContext {
+    readonly chatId: ChatId;
+    readonly reason: ProjectFeatureReleaseReason;
+    readonly environmentId: EnvironmentId;
+    readonly cwd: string;
+    readonly fs: ProjectFeatureFs;
+}
+
 /** What `beforeSession` may change: the folder the session opens in, and text appended to its system prompt. */
 export interface ProjectFeatureSessionEffect {
     readonly cwd?: string;
@@ -144,6 +162,9 @@ export interface ProjectFeaturePreviewLine {
  *   and before the session opens. A thrown error parks the task with its message
  *   (EXE-12: never a silent fallback).
  * - `instructions`: a fragment merged into every session's system prompt.
+ * - `onChatReleased` (#623): a chat left the project, once per environment the project has a folder on whose
+ *   machine is online. Best effort: it never blocks the move, a throw is audited with its message, and the text it
+ *   returns (what it did, if anything) goes on the audit record.
  * - `presets`, `settingsErrors`, `previewSettings` (#621): what the settings form offers beside the schema — named
  *   starting points, the problems a schema cannot express (a template's unknown token) by settings key, and what the
  *   settings would do for a folder of the project. Pure: the form runs them on every edit.
@@ -156,6 +177,7 @@ export interface ProjectFeaturePlugin {
     readonly presets?: readonly ProjectFeaturePreset[];
     settingsErrors?(settings: Readonly<Record<string, unknown>>): Readonly<Record<string, string>>;
     previewSettings?(input: ProjectFeaturePreviewInput): readonly ProjectFeaturePreviewLine[];
+    onChatReleased?(input: ProjectFeatureChatReleaseInput): Promise<string | undefined>;
 }
 
 /** `settings` with a preset's fields laid over them (#621): a `null` field cleared, an `undefined` one ignored, every other field kept as it was. */
