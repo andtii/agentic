@@ -535,15 +535,12 @@ describe('daemon', () => {
                 releases.put('manifest.json', JSON.stringify({ version: '0.2.0', channel: 'stable', publishedAt: 0, commit: 'abcdef0', protocol: 1, assets: {}, harnesses }));
                 return releases;
             }
-            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) =>
-                start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map((r) => harnessMissingDriver(r)), undefined, {
-                    harnesses: {
-                        store,
-                        fetch: releases.fetch,
-                        rebuild: (runtime) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime)),
-                        heal: { manifestUrl: releases.url('manifest.json') }
-                    }
+            const startHealing = async (releases: ReturnType<typeof fakeReleases>, store: ReturnType<typeof harnessStore>) => {
+                const build = (runtime: string) => (store.locate(runtime) ? agentDriver(runtime, mockAgent({ respond: async () => [{ text: 'hi' }] })) : harnessMissingDriver(runtime));
+                return start([env('env_c', { runtime: 'claude-code' })], BUILTIN.map(build), undefined, {
+                    harnesses: { store, fetch: releases.fetch, rebuild: build, heal: { manifestUrl: releases.url('manifest.json') } }
                 });
+            };
             const until = async (check: () => boolean) => {
                 for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 25));
                 expect(check()).toBe(true);
@@ -593,6 +590,41 @@ describe('daemon', () => {
                 expect(store.locate('codex-cli')?.version).toBe('1.0.0');
                 expect(store.locate('claude-code')).toBeUndefined();
                 expect(store.failures()).toEqual({});
+            });
+
+            it('a ready harness older than the build pins is updated on start and the old version pruned; a current one downloads nothing (#600)', async () => {
+                const releases = await servedRelease();
+                const old = await fakeHarnessZip(dir, 'claude-code', '0.9.0');
+                releases.put('harness-claude-code-old.zip', old.bytes);
+                let pin = '1.0.0';
+                const store = harnessStore({ root: join(dir, 'harnesses'), bundled: false, pinned: () => pin });
+                await store.setSelection(['claude-code']);
+                const staged = await store.stage('claude-code', old.asset(releases.url('harness-claude-code-old.zip')), { fetch: releases.fetch });
+                await store.activate('claude-code', staged.version);
+                expect(store.reports(['claude-code'])).toMatchObject([{ status: 'ready', installed: { version: '0.9.0' }, current: false }]);
+
+                const first = await startHealing(releases, store);
+                const frames = await collect(first.seat, (f) => f.some((x) => x.t === 'harnesses'));
+                expect(frames.find((f) => f.t === 'harnesses')).toMatchObject({ harnesses: [{ runtime: 'claude-code', status: 'ready', installed: { version: '1.0.0' }, current: true }, {}, {}] });
+                expect(store.locate('claude-code')?.version).toBe('1.0.0');
+                expect((await readdir(join(dir, 'harnesses', 'claude-code'))).sort()).toEqual(['1.0.0', 'current.json']);
+                expect(store.failures()).toEqual({});
+                await first.daemon.stop();
+
+                // Current: the next start does not even read the manifest.
+                releases.requests.length = 0;
+                const second = await startHealing(releases, store);
+                await new Promise((r) => setTimeout(r, 300));
+                expect(releases.requests).toEqual([]);
+                await second.daemon.stop();
+
+                // A pin the release cannot serve (offline): recorded, and the installed harness keeps running.
+                pin = '1.1.0';
+                const third = await startHealing(fakeReleases(), store);
+                await until(() => 'claude-code' in store.failures());
+                expect(store.locate('claude-code')?.version).toBe('1.0.0');
+                open(third.seat, 's1', 'env_c');
+                expect((await expectFrame(third.seat, 'session.opened')).sessionId).toBe('s1');
             });
         });
 

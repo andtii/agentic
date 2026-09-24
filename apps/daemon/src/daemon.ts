@@ -69,7 +69,8 @@
  *   environments, reported `harness-missing`; opening a session on one is
  *   refused with that code. Started with `harnesses.heal`, the daemon installs
  *   the selected harnesses it lacks in the background (the migration from builds
- *   that bundled the runtimes), a `harnesses` frame after each.
+ *   that bundled the runtimes), and updates a store harness that is not the
+ *   version this build pins (#600), a `harnesses` frame after each.
  *
  * The daemon never branches on a runtime id: it picks the driver whose
  * `runtime` matches the environment row.
@@ -1183,15 +1184,24 @@ export function createDaemon(options: DaemonOptions): Daemon {
     /**
      * The heal (#369), queued with the harness requests: every selected runtime this daemon has a driver for whose harness
      * is not ready is installed from `heal.manifestUrl` — stage, activate, driver rebuilt — and a `harnesses` frame goes
-     * out after each. Until then `session.open` on it is refused `harness-missing`. A failure is logged and recorded in
-     * the store (`doctor` shows it), and the next start tries again; it never stops the daemon.
+     * out after each. Until then `session.open` on it is refused `harness-missing`. A store harness that is ready but not
+     * the version this build pins (#600: a daemon update moved the pin on) is updated the same way, through the drain
+     * `harness.request update` takes, so the model list follows the pinned SDK. A failure is logged and recorded in the
+     * store (`doctor` shows it), and the next start tries again; it never stops the daemon.
      */
     function heal(manifestUrl: string): Promise<void> {
         const harness = options.harnesses!;
         const run = harnessWork.then(async () => {
-            const missing = harness.store.selected().filter((runtime) => drivers.has(runtime) && harness.store.state(runtime).status !== 'ready');
-            if (missing.length === 0 || stopped) return;
-            logger.info('harness: installing the selected harnesses this machine lacks', { runtimes: missing, manifest: manifestUrl });
+            // Not ready, or a store harness that is not the version this build pins.
+            const wanted = harness.store.selected().filter((runtime) => {
+                if (!drivers.has(runtime)) return false;
+                const s = harness.store.state(runtime);
+                if (s.status !== 'ready') return true;
+                const pin = harness.store.pinned(runtime);
+                return s.location.source === 'store' && pin !== undefined && s.location.version !== pin;
+            });
+            if (wanted.length === 0 || stopped) return;
+            logger.info('harness: installing missing or outdated selected harnesses', { runtimes: wanted, manifest: manifestUrl });
             const fail = async (runtime: string, message: string) => {
                 logger.warn('harness: install failed; retried on the next start', { runtime, error: message });
                 await harness.store.setFailure(runtime, message).catch(() => undefined);
@@ -1200,10 +1210,10 @@ export function createDaemon(options: DaemonOptions): Daemon {
             try {
                 manifest = await fetchReleaseManifest(manifestUrl, harness.fetch ?? fetch);
             } catch (e) {
-                for (const runtime of missing) await fail(runtime, (e as Error).message);
+                for (const runtime of wanted) await fail(runtime, (e as Error).message);
                 return;
             }
-            for (const runtime of missing) {
+            for (const runtime of wanted) {
                 if (stopped) return;
                 const asset = harnessAsset(manifest, runtime, harness.store.platform);
                 if (!asset) {
@@ -1212,7 +1222,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 }
                 try {
                     const staged = await harness.store.stage(runtime, asset, harness.fetch ? { fetch: harness.fetch } : {});
-                    if (!staged.already) await swapDriver(runtime, () => harness.store.activate(runtime, staged.version));
+                    if (!staged.already) await applyStaged(runtime, staged.version, 'drain');
                     await harness.store.setFailure(runtime, undefined).catch(() => undefined);
                     logger.info('harness: installed', { runtime, version: staged.version, healed: true });
                     if (socket) send({ v: V, t: 'harnesses', harnesses: harness.store.reports(drivers.keys()) });
@@ -1252,24 +1262,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 const { target } = frame;
                 if (!target) return fail('invalid', `${frame.op} names no target`);
                 const staged = await harness.store.stage(runtime, target, { onPhase: (phase) => status(phase), ...(harness.fetch ? { fetch: harness.fetch } : {}) });
-                if (!staged.already) {
-                    const detail = `the ${runtime} harness is being updated to ${staged.version}`;
-                    draining.set(runtime, detail);
-                    try {
-                        if (liveOn(runtime).length > 0) {
-                            status('draining');
-                            if (frame.mode === 'drain') await turnsEnded(runtime, harness.drainTimeoutMs ?? HARNESS_DRAIN_TIMEOUT_MS);
-                        }
-                        status('applying');
-                        const { reason, code } = STOP_CLOSES['harness-update'];
-                        for (const s of liveOn(runtime)) await closeSession(s.id, reason, code);
-                        await swapDriver(runtime, () => harness.store.activate(runtime, staged.version));
-                    } finally {
-                        draining.delete(runtime);
-                    }
-                    const leftovers = await harness.store.prune(runtime);
-                    if (leftovers.length) logger.warn('harness: old versions could not be removed', { runtime, leftovers });
-                }
+                if (!staged.already) await applyStaged(runtime, staged.version, frame.mode, status);
                 logger.info('harness: installed', { runtime, version: staged.version, ...(staged.already ? { already: true } : {}) });
             }
         } catch (e) {
@@ -1279,6 +1272,30 @@ export function createDaemon(options: DaemonOptions): Daemon {
         }
         status('done');
         send({ v: V, t: 'harnesses', harnesses: harness.store.reports(drivers.keys()) });
+    }
+
+    /**
+     * Switch `runtime` to its staged `version`: drain only that runtime (`drain` waits for its running turns up to
+     * `drainTimeoutMs`, `now` does not), close its sessions with code `harness-update`, swap the driver, prune the old
+     * versions. `harness.request` and the heal share it.
+     */
+    async function applyStaged(runtime: string, version: string, mode: 'drain' | 'now', status: (phase: HarnessPhase) => void = () => {}): Promise<void> {
+        const harness = options.harnesses!;
+        draining.set(runtime, `the ${runtime} harness is being updated to ${version}`);
+        try {
+            if (liveOn(runtime).length > 0) {
+                status('draining');
+                if (mode === 'drain') await turnsEnded(runtime, harness.drainTimeoutMs ?? HARNESS_DRAIN_TIMEOUT_MS);
+            }
+            status('applying');
+            const { reason, code } = STOP_CLOSES['harness-update'];
+            for (const s of liveOn(runtime)) await closeSession(s.id, reason, code);
+            await swapDriver(runtime, () => harness.store.activate(runtime, version));
+        } finally {
+            draining.delete(runtime);
+        }
+        const leftovers = await harness.store.prune(runtime);
+        if (leftovers.length) logger.warn('harness: old versions could not be removed', { runtime, leftovers });
     }
 
     /** Live sessions on `runtime`. */
