@@ -80,7 +80,7 @@ The catalogue data: each entry needs `category`, `transport`, `tools[]` with the
 | --- | --- |
 | Header | 52 px tile, name 24 / 600 + version, kind and transport tags, description, readiness pill, switch |
 | Account | Connectors only: who it is signed in as, where the OAuth client comes from, Reconnect and Sign out |
-| Tools | One row per tool with an allow / ask / deny segmented control. This is the workspace default; an agent's own approval policy can only make it stricter (the same `firstMatch` rule as delegation) |
+| Tools | One row per tool with an allow / ask / deny segmented control. A tool is keyed by the namespaced name sessions see, `<id>__<operation>` (`gmail__send-email`); the board's dot-style labels are display only. This is the workspace default; an agent's own approval policy can only make it stricter (the same `firstMatch` rule as delegation) |
 | Granted | Every `grantedPermissions` scope in mono with its reason from the manifest's `permissions[].reason`, and `Revoke`. Declared but not granted scopes follow with `Grant` |
 | Right rail | Used by (agents and schedules from `dependents()`), then Remove with its consequences stated before the button |
 
