@@ -67,7 +67,7 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v6
 
@@ -144,7 +144,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       # The manifest script and the stamp it reads (package.json, packages/core's protocol version).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             apps/daemon/package.json
