@@ -39,7 +39,7 @@ The plugins area replaces the three-column card catalogue with a category menu, 
 | Category menu | 232 px, left of the content. Built from `KIND_ORDER` with runtimes split by `RUNTIME_KIND_ORDER`, grouped as Runtimes (Harness, Model, Remote agents), Reach (Connectors, Notifications, Triggers, A2A), Keep (Memory, Learning), Projects (Project features). 34 px items with a mono count; empty categories show `0` in `text-dim` and stay clickable. Two items on top: All plugins, and Needs attention with an amber count badge. Selecting one sets `?kind=` |
 | Search | 440 px, `/` focuses it. Matches name, description, id, tool names and permission scopes (`network:`, `secret:`), so "googleapis" finds Gmail |
 | Status chips | All, On, Off, Needs setup, with counts. Combine with the category and search |
-| Needs attention | Shown when any enabled plugin's `pluginReadiness` is not `ready`. One line per plugin: tile, name, what it needs in words, and the fix as a button: `needs-secret` → Add key, `needs-machine` → Pair a machine, `needs-config` → Configure, `needs-grant` → Grant, `no-kek` → a link to the deployment docs |
+| Needs attention | Shown when any enabled plugin's `pluginReadiness` is not `ready`. One line per plugin: tile, name, what it needs in words, and the fix as a button: `needs-secret` → Add key, `needs-machine` → Pair a machine, `needs-config` → Configure, `needs-grant` → Grant, `needs-sign-in` → Sign in, `no-kek` → a link to the deployment docs |
 | Group | Mono label + one-line note (the existing `RUNTIME_KIND_NOTE`), then a bordered list |
 | Row | 60 px grid `36px 1fr 150px 150px 120px 44px 20px`: 32 px monogram tile, name + version + feature tags (`usage limits`) over a one-line description, kind tag, readiness pill, dependents as agent tiles (or "Used by 1 project", "No dependents"), switch, chevron. The whole row links to `/plugins/:id`; the switch stops propagation |
 | Single-slot kinds | Memory and Learning (`SINGLE_SLOT_KINDS`) render as a radio list: the active one has an `ACTIVE` pill, the others a `Make active` button. For memory, the row says what a switch drops (the fidelity report), and Make active opens the existing confirm with the migration report |
@@ -80,7 +80,7 @@ The catalogue data: each entry needs `category`, `transport`, `tools[]` with the
 | --- | --- |
 | Header | 52 px tile, name 24 / 600 + version, kind and transport tags, description, readiness pill, switch |
 | Account | Connectors only: who it is signed in as, where the OAuth client comes from, Reconnect and Sign out |
-| Tools | One row per tool with an allow / ask / deny segmented control. A tool is keyed by the namespaced name sessions see, `<id>__<operation>` (`gmail__send-email`); the board's dot-style labels are display only. This is the workspace default; an agent's own approval policy can only make it stricter (the same `firstMatch` rule as delegation) |
+| Tools | One row per tool with an allow / ask / deny segmented control. A tool is keyed by the namespaced name sessions see, `<id>__<operation>` (`gmail__send-email`); the board's dot-style labels are display only. This is the workspace default; an agent's own approval policy can only make it stricter (stricter wins through `constrainPolicy`, applied as a separate constraint beside delegation's ancestor constraints; docs/decisions.md 2026-09-24) |
 | Granted | Every `grantedPermissions` scope in mono with its reason from the manifest's `permissions[].reason`, and `Revoke`. Declared but not granted scopes follow with `Grant` |
 | Right rail | Used by (agents and schedules from `dependents()`), then Remove with its consequences stated before the button |
 
@@ -89,7 +89,7 @@ The catalogue data: each entry needs `category`, `transport`, `tools[]` with the
 The handoff's open questions for plugins are answered in [`docs/decisions.md`](../../decisions.md) (2026-09-24, plugins redesign):
 
 - [x] **Where the installable connector catalogue comes from:** a static list in the build. There is no remote index.
-- [x] **Per-tool policy:** a new Registry setting, the workspace default per plugin tool, applied to every session as an approval constraint. An agent's own policy can only make it stricter; it is never written into each agent's policy.
+- [x] **Per-tool policy:** a new Registry setting, the workspace default per plugin tool, applied to every session as its own approval constraint (compiled separately and combined stricter-wins with the agent's policy and any delegation constraints, never concatenated into them). An agent's own policy can only make it stricter; it is never written into each agent's policy.
 - [x] **NEEDS SIGN-IN:** `needs-sign-in` is added to core's `PluginReadinessStatus`, fed by a readiness fact derived from the connector's account.
 
 ## Design tokens
