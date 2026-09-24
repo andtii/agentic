@@ -86,7 +86,8 @@ beforeEach(async () => {
     sockets = new FakeSockets();
     const sink: CommandSink = { send: (t, cmd) => app.as(owner).actor(Machine, machineKey(t.workspaceId, t.machineId)).sendCommand(t.sessionId, cmd) };
     Session = defineSessionActor({ factory: () => null, commands: sink });
-    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine });
+    // Any implicit turn left empty is stale at once for the re-check (#605); nothing here fires the reminder on its own.
+    Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, ghostTurnMs: 0 });
     Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools });
     app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory, Chat]);
     await app.start();
@@ -322,12 +323,83 @@ describe('a turn the runtime starts itself holds the session and its slot (#510)
         };
         return {
             start: () => send({ type: 'turn-start', input: [] }),
+            /** A sign of work: a part, like a background task's result. */
+            content: (text = 'working') => send({ type: 'part-delta', partId: `${turnId}:p`, delta: text }),
             end: async (text = 'done in the background') => {
                 await send({ type: 'part-delta', partId: `${turnId}:p`, delta: text });
                 await send({ type: 'turn-end', stopReason: 'end_turn' });
-            }
+            },
+            /** What the daemon plays once the turn is cancelled. */
+            cancelled: () => send({ type: 'turn-end', stopReason: 'cancelled' })
         };
     }
+
+    const cancels = (machineId: MachineId, sessionId: string) => frames(machineId, 'session.command').filter((f) => f.sessionId === sessionId && (f.command as { type: string }).type === 'cancel');
+
+    it('one that stays empty is cancelled by the re-check, and the message waiting behind it runs (#605)', async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const chatId = await room(cc);
+        const first = await message(chatId, cc, 'what model are you', 't_1');
+        await settled('t_1');
+        const sid = first.sessionId!;
+
+        // A runtime that answers a model switch with a turn it never ends (signalxjs/ai#193).
+        const ghost = await implicitTurn(m1, sid);
+        await ghost.start();
+        await message(chatId, cc, '5 or 5.5', 't_2');
+        await until(async () => (await routing().get()).routes.find((r) => r.taskId === 't_2')?.status === 'waiting-turn', 't_2 waiting-turn');
+        expect(cancels(m1, sid)).toHaveLength(0);
+
+        await routing().recheck();
+        await until(() => cancels(m1, sid).length === 1, 'the ghost turn cancelled');
+        await ghost.cancelled();
+        await settled('t_2');
+        expect((await task('t_2').get()).status).toBe('completed');
+        expect(isIdle(await machine(m1).get())).toBe(true);
+    });
+
+    it("one that stays empty in another member's session is cancelled too: the slot it holds goes to the waiting member (#605)", async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const dev = await agent('agent_dev');
+        const chatId = await room(cc, dev);
+        const first = await message(chatId, cc, 'plan it', 't_cc');
+        await settled('t_cc');
+
+        const ghost = await implicitTurn(m1, first.sessionId!);
+        await ghost.start();
+        const b = await message(chatId, dev, 'build it', 't_dev');
+        expect(b.wait).toEqual({ kind: 'capacity', environmentId: E1, position: 1 });
+
+        await routing().recheck();
+        await until(() => cancels(m1, first.sessionId!).length === 1, 'the ghost turn cancelled');
+        await ghost.cancelled();
+        await settled('t_dev');
+        expect((await task('t_dev').get()).status).toBe('completed');
+    });
+
+    it('one that carries work is never cancelled by the re-check (#605)', async () => {
+        const m1 = await pairMachine('laptop');
+        const cc = await agent('agent_cc');
+        const chatId = await room(cc);
+        const first = await message(chatId, cc, 'plan it', 't_1');
+        await settled('t_1');
+        const sid = first.sessionId!;
+
+        const turn = await implicitTurn(m1, sid);
+        await turn.start();
+        await turn.content();
+        expect((await session(sid).get()).running).toMatchObject({ turnId: 'rt-1', implicit: true, content: true });
+        await message(chatId, cc, 'and now?', 't_2');
+        await until(async () => (await routing().get()).routes.find((r) => r.taskId === 't_2')?.status === 'waiting-turn', 't_2 waiting-turn');
+
+        await routing().recheck();
+        expect(cancels(m1, sid)).toHaveLength(0);
+        await turn.end('background work done');
+        await settled('t_2');
+        expect((await task('t_2').get()).status).toBe('completed');
+    });
 
     it('the session runs it and the machine counts it: a message to the same member waits for it, then runs', async () => {
         const m1 = await pairMachine('laptop');
