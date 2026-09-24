@@ -164,6 +164,7 @@ describe('Go to file', () => {
         const root = mount(<GoToFile paths={PATHS} onPick={(p) => picked.push(p)} hotkey />);
         const input = one(root, 'combobox', 'input') as HTMLInputElement;
         expect(input.getAttribute('role')).toBe('combobox');
+        expect(one(root, 'ag-find', 'root')!.id).toBe('ag-find');
         await type(input, 'src');
         expect(options(root)).toHaveLength(3);
         expect(input.getAttribute('aria-expanded')).toBe('true');

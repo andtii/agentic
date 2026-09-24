@@ -60,7 +60,7 @@ export type GoToFileProps =
     & Define.Prop<'shortcut', string>
     /** Focus on Ctrl/Cmd+P anywhere on the page. */
     & Define.Prop<'hotkey', boolean>
-    /** The search's id (on its root; the input's and the list's ids are zero's). */
+    /** The search's id, on its root; default `ag-find` (one per page). The input's and the list's ids are zero's. */
     & Define.Prop<'id', string>;
 
 export const GoToFile = component<GoToFileProps>(({ props }) => {
@@ -90,7 +90,7 @@ export const GoToFile = component<GoToFileProps>(({ props }) => {
     return () => {
         const shortcut = props.shortcut ?? 'Ctrl P';
         return (
-            <div data-scope={SCOPE} data-part="root" id={props.id} ref={(el: HTMLElement) => { root = el; }}>
+            <div data-scope={SCOPE} data-part="root" id={props.id ?? 'ag-find'} ref={(el: HTMLElement) => { root = el; }}>
                 <span data-scope={SCOPE} data-part="icon"><Icon name="search" size={14} /></span>
                 <Field.Root>
                     <Field.Label visuallyHidden>Find file</Field.Label>
