@@ -179,25 +179,25 @@ const usable = (c: GateConnector): boolean => c.state === 'ready' && c.toolsGran
 
 /**
  * The workspace tool policy of the agent's connectors as approval constraints (#636; OPS-02, AC-12): one rule per
- * ask / deny tool of each usable connector, `workspace:<plugin>:<tool>`. Constraints only tighten — the stricter of
+ * ask / deny tool name across the usable connectors, `workspace:<plugin>:<tool>` (the stricter outcome on a name clash). Constraints only tighten — the stricter of
  * the agent's answer and the workspace's wins — so a workspace `deny` beats an agent `allow`, and a workspace `ask`
  * never loosens an agent `deny`.
  */
 export function workspaceToolRules(connectors: readonly GateConnector[]): ApprovalRule[] {
-    const rules: ApprovalRule[] = [];
-    const seen = new Set<string>();
+    // One rule per tool name: two connectors can collide on a name, and first-match would make that order-dependent,
+    // so the stricter outcome wins (deny over ask) — constraints only tighten.
+    const byTool = new Map<string, ApprovalRule>();
     for (const c of connectors) {
         if (!usable(c)) continue;
         const plugin = c.pluginId ?? c.id;
         for (const [tool, outcome] of Object.entries(c.toolPolicy ?? {})) {
             if (outcome !== 'ask' && outcome !== 'deny') continue;
-            const id = `workspace:${plugin}:${tool}`;
-            if (seen.has(id)) continue;
-            seen.add(id);
-            rules.push({ id, match: { tools: [tool] }, outcome });
+            const prior = byTool.get(tool);
+            if (prior && (prior.outcome === 'deny' || outcome === 'ask')) continue;
+            byTool.set(tool, { id: `workspace:${plugin}:${tool}`, match: { tools: [tool] }, outcome });
         }
     }
-    return rules;
+    return [...byTool.values()];
 }
 
 /** Records what an open found — only when it differs from what the gate answer says the Registry has; never throws. */

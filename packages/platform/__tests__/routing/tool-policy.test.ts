@@ -110,6 +110,17 @@ describe('workspaceToolRules', () => {
             { id: 'workspace:gmail:gmail__archive', match: { tools: ['gmail__archive'] }, outcome: 'deny' }
         ]);
     });
+
+    it('emits one rule per tool name when two plugins collide on it; the stricter outcome wins', () => {
+        const rules = workspaceToolRules([
+            ready({ id: 'a', pluginId: 'a', toolPolicy: { shared__x: 'ask', shared__y: 'deny' } }),
+            ready({ id: 'b', pluginId: 'b', toolPolicy: { shared__x: 'deny', shared__y: 'ask' } })
+        ]);
+        expect(rules).toEqual([
+            { id: 'workspace:b:shared__x', match: { tools: ['shared__x'] }, outcome: 'deny' },
+            { id: 'workspace:a:shared__y', match: { tools: ['shared__y'] }, outcome: 'deny' }
+        ]);
+    });
 });
 
 describe('withWorkspaceRules: one first-match set that is the stricter of the ancestors and the workspace', () => {
