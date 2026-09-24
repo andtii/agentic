@@ -14,10 +14,17 @@
  * Capabilities name what works (`tools`, …) and, prefixed `unsupported:`,
  * what does not (resources, prompts, sampling, elicitation, …) — PLG-09 asks
  * for the gaps to be declared, and a manifest is where a reader looks first.
+ *
+ * Tools a probe found (`tools`) become `manifest.tools`: each under the name
+ * a session sees (`<namespace>__<tool>`), starting in the mode its MCP
+ * annotations suggest (`defaultToolMode`: destructive asks), so an MCP
+ * server gets the same per-tool policy rows as a conduit connector (PLG-09).
+ * Without a probe the manifest declares none.
  */
 
-import type { ConfigSchema, PermissionScope, PluginManifest, PluginSecretDeclaration } from '@agentic/core';
+import { defaultToolMode, type ConfigSchema, type PermissionScope, type PluginManifest, type PluginSecretDeclaration, type PluginToolDeclaration } from '@agentic/core';
 import { MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS } from './capabilities.js';
+import type { McpToolAnnotations } from './protocol.js';
 import { toolNameFor } from './tools.js';
 
 /** Capability strings a connector manifest carries: what works, then `unsupported:<op>` for each gap. */
@@ -36,6 +43,14 @@ export function connectorToolPrefix(id: string): string {
     return `${connectorNamespace(id)}__`;
 }
 
+/** One tool a probe of the server found, as `tools/list` gave it (its name unprefixed). */
+export interface McpConnectorTool {
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly annotations?: McpToolAnnotations;
+}
+
 export interface McpConnectorBase {
     /** Plugin id and connector id; its tools are namespaced `<id>__<tool>`. Letters, digits, `.`, `_`, `-`. */
     readonly id: string;
@@ -45,6 +60,8 @@ export interface McpConnectorBase {
     /** Extra permissions the host wants recorded (`memory:read`, say). */
     readonly permissions?: readonly { readonly scope: PermissionScope; readonly reason: string }[];
     readonly compat?: PluginManifest['compat'];
+    /** The tools a probe found; declared in `manifest.tools` under their session names. Omitted: none declared. */
+    readonly tools?: readonly McpConnectorTool[];
 }
 
 export interface McpHttpConnector extends McpConnectorBase {
@@ -144,6 +161,19 @@ function secretBindings(options: McpConnectorOptions): SecretBinding[] {
     return out;
 }
 
+/** The probed tools as manifest declarations: session name, default mode from the annotations; a name seen twice counts once. */
+function toolDeclarations(id: string, tools: readonly McpConnectorTool[]): PluginToolDeclaration[] {
+    const prefix = connectorToolPrefix(id);
+    const out: PluginToolDeclaration[] = [];
+    for (const t of tools) {
+        const name = toolNameFor(t.name, prefix);
+        if (out.some((d) => d.name === name)) continue;
+        const title = t.title ?? t.annotations?.title;
+        out.push({ name, ...(title ? { title } : {}), ...(t.description ? { description: t.description } : {}), defaultMode: defaultToolMode(t.annotations) });
+    }
+    return out;
+}
+
 export function mcpConnector(options: McpConnectorOptions): PluginManifest {
     checkId(options.id);
     const permissions: { scope: PermissionScope; reason: string }[] = [];
@@ -172,7 +202,8 @@ export function mcpConnector(options: McpConnectorOptions): PluginManifest {
         config,
         ...(secrets.length ? { secrets } : {}),
         permissions,
-        compat: options.compat ?? { platform: '*', core: '*' }
+        compat: options.compat ?? { platform: '*', core: '*' },
+        ...(options.tools ? { tools: toolDeclarations(options.id, options.tools) } : {})
     };
 }
 
