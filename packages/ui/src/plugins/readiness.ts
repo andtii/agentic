@@ -12,6 +12,7 @@ export const READINESS: Record<PluginReadinessStatus, PillSpec> = {
     'needs-config': { tone: 'needs-you', hollow: false, label: 'NEEDS SETUP' },
     'needs-secret': { tone: 'needs-you', hollow: false, label: 'NEEDS KEY' },
     'needs-grant': { tone: 'needs-you', hollow: false, label: 'NEEDS PERMISSION' },
+    'needs-sign-in': { tone: 'needs-you', hollow: false, label: 'NEEDS SIGN-IN' },
     'needs-machine': { tone: 'needs-you', hollow: false, label: 'NEEDS A MACHINE' },
     'no-kek': { tone: 'failed', hollow: false, label: 'CANNOT STORE KEYS' }
 };

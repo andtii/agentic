@@ -6,7 +6,7 @@ import { PluginCard, READINESS, ReadinessBadge, SecretField, TONES, readinessDet
 import { buttonNamed, mount, one, tick } from './helpers';
 
 const SECRET = 'sk-ant-test-0123456789';
-const STATUSES: PluginReadinessStatus[] = ['ready', 'disabled', 'needs-config', 'needs-secret', 'needs-grant', 'needs-machine', 'no-kek'];
+const STATUSES: PluginReadinessStatus[] = ['ready', 'disabled', 'needs-config', 'needs-secret', 'needs-grant', 'needs-sign-in', 'needs-machine', 'no-kek'];
 
 function setText(el: HTMLInputElement, value: string): void {
     el.value = value;
