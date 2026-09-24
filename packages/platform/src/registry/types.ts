@@ -8,7 +8,7 @@
  * to, and nothing else reaches it.
  */
 
-import type { AgentId, PermissionScope, PluginKind, PluginManifest, PluginState, ScheduleId } from '@agentic/core';
+import type { AgentId, PermissionScope, PluginKind, PluginManifest, PluginState, ScheduleId, ToolMode } from '@agentic/core';
 
 export const REGISTRY_STATE_VERSION = 1;
 
@@ -31,6 +31,12 @@ export interface PluginRecord extends PluginState {
      * is here and not granted was taken away by the owner and stays away.
      */
     readonly seenScopes?: readonly PermissionScope[];
+    /**
+     * The workspace-default mode the owner chose per tool (PLG-03, `setToolPolicy`), keyed by the namespaced
+     * tool name. A tool missing here runs on its manifest `defaultMode`, else `'allow'`. Optional: state
+     * written before #631 reads as it is, so there is no state-version bump.
+     */
+    readonly toolPolicy?: Readonly<Record<string, ToolMode>>;
 }
 
 /**
@@ -174,6 +180,13 @@ export interface GateConnector {
     /** What the last open or probe found, so a session reports only a change. */
     readonly tools?: readonly string[];
     readonly status?: ConnectorStatus;
+    /**
+     * Ready only: the plugin's tools whose effective mode is NOT `'allow'` (PLG-03) — what a session asks
+     * before (`'ask'`) or refuses (`'deny'`). A tool missing here is allowed.
+     */
+    readonly toolPolicy?: Readonly<Record<string, Exclude<ToolMode, 'allow'>>>;
+    /** Ready only: whether the plugin's `tools:<ns>` scope is covered by its `grantedPermissions` (PLG-04); #636 enforces it. */
+    readonly toolsGranted?: boolean;
 }
 
 /** One read for a page: every plugin, the active slots, which secrets are set (names only). */

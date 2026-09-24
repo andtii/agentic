@@ -17,6 +17,10 @@
  * - `configure` holds a config to the manifest's `ConfigSchema` (`bad-config`).
  * - Single-slot kinds (memory, learning) have one ACTIVE plugin: the owner's
  *   `activate` choice, else the first of the kind in the catalogue.
+ * - `setToolPolicy` stores the workspace-default allow / ask / deny of one of
+ *   a plugin's tools (PLG-03); `toolPolicy` reads the effective map — the
+ *   stored mode, else the manifest's `defaultMode`, else `'allow'` — and
+ *   `gate` hands a connector's ask / deny entries to Routing.
  * - `gate` answers Routing in one hop; `overview` and `dependentsAll` answer
  *   a page in one read each.
  * - `enable` / `disable` / `remove`: `disable` always succeeds and returns
@@ -35,7 +39,7 @@
  * Every mutation ends in `ctx.save()` inside the turn (Workers eviction rule).
  */
 
-import { configDefaults, isProjectFeatureManifest, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type WorkspaceId } from '@agentic/core';
+import { configDefaults, isProjectFeatureManifest, isSingleSlot, validateConfig, type AgentId, type PermissionScope, type PluginKind, type PluginManifest, type Principal, type ScheduleId, type ToolMode, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { AgentActor, agentKey, principalLabel } from '../agent/index.js';
@@ -49,7 +53,7 @@ import { Workspace } from '../workspace/index.js';
 import { computeDependents, type AgentRef, type ScheduleRef } from './dependents.js';
 import { BadConfigError, PluginDisabledError, RegistryError } from './errors.js';
 import { parseRegistryKey } from './key.js';
-import { assertName, assertPluginManifest, declaredScopes, isPermissionScope, scopeCovered } from './manifest.js';
+import { assertName, assertPluginManifest, declaredScopes, isPermissionScope, isToolMode, scopeCovered } from './manifest.js';
 import {
     REGISTRY_STATE_VERSION,
     type CatalogueEntry,
@@ -221,6 +225,33 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return p ? { id: p.manifest.id, enabled: p.enabled, config: mergedConfig(p) } : null;
     };
 
+    /** Every tool a plugin brings, sorted: the ones its manifest declares and the ones its connectors reported. */
+    const toolsOf = (ctx: Ctx, p: PluginRecord): string[] => {
+        const reported = Object.values(ctx.state.connectors).flatMap((c) => (c.pluginId === p.manifest.id ? c.tools : []));
+        return union((p.manifest.tools ?? []).map((t) => t.name), reported).sort();
+    };
+
+    /** The effective mode of every tool of `p` (PLG-03): what the owner stored, else the manifest's `defaultMode`, else `'allow'`. */
+    const effectiveToolPolicy = (ctx: Ctx, p: PluginRecord): Record<string, ToolMode> => {
+        const declared = new Map((p.manifest.tools ?? []).map((t) => [t.name, t.defaultMode] as const));
+        const stored = p.toolPolicy ?? {};
+        return Object.fromEntries(toolsOf(ctx, p).map((tool) => [tool, (Object.hasOwn(stored, tool) ? stored[tool] : undefined) ?? declared.get(tool) ?? 'allow']));
+    };
+
+    /** Only what is NOT allowed: a session asks before (`ask`) or refuses (`deny`) these; everything else runs. */
+    const restrictedTools = (ctx: Ctx, p: PluginRecord): Record<string, Exclude<ToolMode, 'allow'>> =>
+        Object.fromEntries(Object.entries(effectiveToolPolicy(ctx, p)).filter((e): e is [string, Exclude<ToolMode, 'allow'>] => e[1] !== 'allow'));
+
+    /**
+     * Whether the owner let the plugin expose its tools (PLG-04): every `tools:<ns>` scope its manifest declares is
+     * covered by its grants — `tools:<id>` when it declares none, which only a `tools:*` grant could cover.
+     */
+    const toolsGranted = (p: PluginRecord): boolean => {
+        const declared = declaredScopes(p.manifest).filter((s) => s.startsWith('tools:'));
+        const wanted = declared.length > 0 ? declared : [`tools:${p.manifest.id}` as PermissionScope];
+        return wanted.every((scope) => scopeCovered(p.grantedPermissions, scope));
+    };
+
     /**
      * A connector an agent names, as a session would open it (#240): its record and its plugin, looked up by the
      * connector id — or, for a ref naming the plugin, the first connector registered under it.
@@ -240,7 +271,9 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 ...(record.connector !== undefined ? { connector: record.connector } : {}),
                 ...(record.account !== undefined ? { account: record.account } : {}),
                 tools: record.tools,
-                status: record.status
+                status: record.status,
+                toolPolicy: restrictedTools(ctx, p),
+                toolsGranted: toolsGranted(p)
             };
         }
         const config = mergedConfig(p);
@@ -262,7 +295,9 @@ export function defineRegistry(options: RegistryOptions = {}) {
             ...(record.machine !== undefined ? { machine: record.machine } : {}),
             ...(auth ? { auth } : {}),
             tools: record.tools,
-            status: record.status
+            status: record.status,
+            toolPolicy: restrictedTools(ctx, p),
+            toolsGranted: toolsGranted(p)
         };
     };
 
@@ -270,6 +305,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
     const audit = (ctx: Ctx, event: AuditEventInput): Promise<void> => recordAudit(ctx, workspaceOf(ctx), event);
     /** Distinguishes `openSecret` calls that share a millisecond within one activation. */
     let opened = 0;
+    /** Distinguishes permission / tool-policy changes that share a millisecond within one activation (OPS-03). */
+    let changed = 0;
 
     type Refs = { readonly agents: readonly AgentRef[]; readonly schedules: readonly ScheduleRef[] };
 
@@ -355,6 +392,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             previewActivation: [ownerOnly],
             grant: [ownerOnly],
             revoke: [ownerOnly],
+            setToolPolicy: [ownerOnly],
             putConnector: [ownerOnly],
             removeConnector: [ownerOnly],
             setConnectorStatus: [ownerOnly],
@@ -363,7 +401,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             openSecret: [ownerOrAgent]
         },
         persistence: 'explicit',
-        reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 } },
+        reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 }, toolPolicy: { maxAge: 0 } },
         methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always', checkProjectSettings: 'always' },
         state: (): RegistryState => initialRegistryState(),
         methods: (ctx) => ({
@@ -591,12 +629,59 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 return view(ctx, next);
             },
 
+            /** Revoke declared scopes only, like `grant` (`not-declared`). Recorded with the scopes it actually took away (OPS-03). */
             async revoke(id: string, scopes: readonly PermissionScope[]): Promise<PluginView> {
                 const p = plugin(ctx, id);
+                const declared = declaredScopes(p.manifest);
+                for (const scope of scopes) {
+                    if (!isPermissionScope(scope)) throw new RegistryError('not-declared', `[registry] not a permission scope: ${String(scope)}`);
+                    if (!declared.includes(scope)) throw new RegistryError('not-declared', `[registry] "${id}" does not declare ${scope}`);
+                }
                 const drop = new Set<string>(scopes);
+                const removed = p.grantedPermissions.filter((s) => drop.has(s));
                 const next = patchPlugin(ctx, id, { grantedPermissions: p.grantedPermissions.filter((s) => !drop.has(s)) });
                 await ctx.save();
+                // Revoking what was not held changes nothing: no record.
+                if (removed.length > 0) {
+                    await audit(ctx, {
+                        key: `${ctx.key}:${id}:revoked:${next.updatedAt}:${removed.join(',')}:${changed++}`,
+                        kind: 'plugin.revoked',
+                        at: next.updatedAt,
+                        by: principalLabel(ctx.principal),
+                        summary: `plugin ${id} revoked ${removed.join(', ')}`,
+                        data: { pluginId: id, scopes: removed }
+                    });
+                }
                 return view(ctx, next);
+            },
+
+            /** The effective mode of every tool the plugin declares or its connectors reported, name order (PLG-03). A read. */
+            async toolPolicy(id: string): Promise<Record<string, ToolMode>> {
+                return effectiveToolPolicy(ctx, plugin(ctx, id));
+            },
+
+            /**
+             * Store the workspace-default mode of one of the plugin's tools (PLG-03). The tool must be one the manifest
+             * declares or a connector of the plugin reported (`unknown-tool`). Recorded when the effective mode changes.
+             */
+            async setToolPolicy(id: string, tool: string, mode: ToolMode): Promise<Record<string, ToolMode>> {
+                const p = plugin(ctx, id);
+                if (!isToolMode(mode)) throw new TypeError(`[registry] a tool mode is allow, ask or deny (got ${JSON.stringify(mode)})`);
+                const before = effectiveToolPolicy(ctx, p);
+                if (typeof tool !== 'string' || !Object.hasOwn(before, tool)) throw new RegistryError('unknown-tool', `[registry] "${id}" has no tool ${JSON.stringify(tool)}`);
+                const next = patchPlugin(ctx, id, { toolPolicy: { ...p.toolPolicy, [tool]: mode } });
+                await ctx.save();
+                if (before[tool] !== mode) {
+                    await audit(ctx, {
+                        key: `${ctx.key}:${id}:tool-policy:${next.updatedAt}:${tool}:${mode}:${changed++}`,
+                        kind: 'plugin.tool-policy',
+                        at: next.updatedAt,
+                        by: principalLabel(ctx.principal),
+                        summary: `plugin ${id} tool ${tool} set to ${mode}`,
+                        data: { pluginId: id, tool, mode }
+                    });
+                }
+                return effectiveToolPolicy(ctx, next);
             },
 
             async dependents(id: string): Promise<Dependents> {

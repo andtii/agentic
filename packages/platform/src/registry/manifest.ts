@@ -1,6 +1,6 @@
 /** Manifest and permission-scope validation — a bad manifest never becomes durable state (PLG-01, PLG-04). */
 
-import { isProjectFeatureManifest, type PermissionScope, type PluginKind, type PluginManifest } from '@agentic/core';
+import { isProjectFeatureManifest, type PermissionScope, type PluginKind, type PluginManifest, type ToolMode } from '@agentic/core';
 import { RegistryError } from './errors.js';
 
 export const PLUGIN_KINDS: readonly PluginKind[] = ['runtime', 'connector', 'memory', 'learning', 'notification', 'trigger', 'a2a', 'project-feature'];
@@ -12,6 +12,12 @@ const SCOPE_RE = /^(secret:(\*|[A-Za-z0-9._-]+)|machine:(\*|[A-Za-z0-9._-]+)|net
 
 export function isPermissionScope(value: unknown): value is PermissionScope {
     return typeof value === 'string' && SCOPE_RE.test(value);
+}
+
+export const TOOL_MODES: readonly ToolMode[] = ['allow', 'ask', 'deny'];
+
+export function isToolMode(value: unknown): value is ToolMode {
+    return TOOL_MODES.includes(value as ToolMode);
 }
 
 export function assertName(value: unknown, what: string): asserts value is string {
@@ -51,6 +57,19 @@ export function assertPluginManifest(value: unknown): asserts value is PluginMan
         // PLG-04: a secret the manifest names is one it must ask for.
         const name = (s as { name: string }).name;
         if (!scopeCovered(scopes, `secret:${name}`)) bad(`secret "${name}" needs a secret:${name} permission`);
+    }
+    // Optional, never null: `tools` (PLG-09) is either absent or a list of uniquely named tools, each with an optional `defaultMode` (a `ToolMode`; absent reads as `allow`).
+    const tools = m.tools === undefined ? [] : m.tools;
+    if (!Array.isArray(tools)) bad('tools');
+    const toolNames = new Set<string>();
+    for (const t of tools as unknown[]) {
+        if (!isRecord(t) || typeof t.name !== 'string' || t.name.trim() === '') bad(`tool ${JSON.stringify(t)}`);
+        const { name, title, description, defaultMode } = t as Record<string, unknown>;
+        if (toolNames.has(name as string)) bad(`tool "${String(name)}" is declared twice`);
+        toolNames.add(name as string);
+        if (title !== undefined && typeof title !== 'string') bad(`tool "${String(name)}" title`);
+        if (description !== undefined && typeof description !== 'string') bad(`tool "${String(name)}" description`);
+        if (defaultMode !== undefined && !isToolMode(defaultMode)) bad(`tool "${String(name)}" defaultMode "${String(defaultMode)}"`);
     }
     if (!isRecord(m.compat) || typeof m.compat.platform !== 'string' || typeof m.compat.core !== 'string') bad('compat');
     // A project feature (#332) declares the schema of what a project stores under `features[id]`.
