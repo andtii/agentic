@@ -32,9 +32,9 @@ catalog:
   "@sigx/richtext": ^0.4.0
   "@sigx/richtext-markdown": ^0.4.0
   "@sigx/richtext-shiki": ^0.4.0
-  "@sigx/zero": ^0.4.0
-  "@sigx/zero-kit": ^0.4.0
-  "@sigx/zero-daisyui": ^0.4.0
+  "@sigx/zero": ^0.5.0
+  "@sigx/zero-kit": ^0.5.0
+  "@sigx/zero-daisyui": ^0.5.0
   # Monaco wrapper — 0.9 adds the diff editor, line clicks and view zones (#560)
   "@sigx/monaco-editor": ^0.9.0
   # @sigx/ai* — 0.2.1 carries the plan-mode approval fix (signalxjs/ai#187)
