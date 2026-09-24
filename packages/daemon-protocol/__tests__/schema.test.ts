@@ -1,6 +1,6 @@
 /** Every frame kind: one valid frame parses, one invalid frame is refused with a field-level issue. */
 
-import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_READ_MAX_BYTES, FS_RUN_MAX_ARGS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL, isBinaryText, PLATFORM_FRAME_TYPES } from '@agentic/core';
+import { CHANGES_MAX_COMMITS, CHANGES_MAX_FILES, DAEMON_FRAME_TYPES, DAEMON_PROTOCOL_VERSION, FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_MATCHES, FS_READ_MAX_BYTES, FS_RUN_MAX_ARGS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL, FS_WORKTREES_MAX, isBinaryText, PLATFORM_FRAME_TYPES } from '@agentic/core';
 import { WIRE_PROTOCOL_VERSION } from '@sigx/ai-agent/wire';
 import type { DaemonFrame, DaemonFrameType, PlatformFrame, PlatformFrameType } from '../src/index';
 import {
@@ -534,6 +534,18 @@ describe('daemon frame schemas', () => {
         expect(response({ result: { kind: 'run', exitCode: 1, stdoutTail: 'o'.repeat(FS_RUN_OUTPUT_TAIL), stderrTail: '' } }).success).toBe(true);
         expect(response({ result: { kind: 'run', exitCode: 0, stdoutTail: 'o'.repeat(FS_RUN_OUTPUT_TAIL + 1), stderrTail: '' } }).success).toBe(false);
         expect(response({ result: { kind: 'run', exitCode: 0.5, stdoutTail: '', stderrTail: '' } }).success).toBe(false);
+    });
+
+    it('fs.request worktrees names a root; its answer lists at most FS_WORKTREES_MAX worktrees (#622)', () => {
+        const request = (op: Record<string, unknown>) => platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op });
+        expect(request({ kind: 'worktrees', root: '/work/app' }).success).toBe(true);
+        expect(request({ kind: 'worktrees', root: '' }).success).toBe(false);
+        expect(request({ kind: 'worktrees' }).success).toBe(false);
+        const response = (f: Record<string, unknown>) => daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', requestId: 'fs_1', ...f });
+        const entry = { path: '/work/app', branch: 'main', head: 'abc1234', current: true };
+        expect(response({ result: { kind: 'worktrees', root: '/work/app', entries: [entry, { path: '/w/x', head: 'def5678', detached: true, locked: true, prunable: true, outside: true }], truncated: false } }).success).toBe(true);
+        expect(response({ result: { kind: 'worktrees', root: '/work/app', entries: Array.from({ length: FS_WORKTREES_MAX + 1 }, () => entry), truncated: true } }).success).toBe(false);
+        expect(response({ result: { kind: 'worktrees', root: '/work/app', entries: [{ ...entry, current: false }], truncated: false } }).success).toBe(false);
     });
 
     it('fs.request locate names an origin, with an optional depth (#331)', () => {

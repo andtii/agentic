@@ -47,8 +47,8 @@ describe('contract type tests', () => {
         expectTypeOf<keyof PlatformConnectorCall>().toEqualTypeOf<'connectorId' | 'tool' | 'input'>();
     });
     it('fs operations and results are closed unions', () => {
-        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes' | 'run'>();
-        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes' | 'run'>();
+        expectTypeOf<Discriminant<FsOp, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes' | 'run' | 'worktrees'>();
+        expectTypeOf<Discriminant<FsResult, 'kind'>>().toEqualTypeOf<'list' | 'worktree' | 'locate' | 'tree' | 'read' | 'changes' | 'run' | 'worktrees'>();
         expectTypeOf<Extract<FsOp, { kind: 'locate' }>['origin']>().toEqualTypeOf<string>();
         expectTypeOf<'outside-roots'>().toMatchTypeOf<FsErrorCode>();
         expectTypeOf<'too-large'>().toMatchTypeOf<FsErrorCode>();

@@ -7,7 +7,7 @@ import { WIRE_PROTOCOL_VERSION, type WireCommand, type WireFrame } from '@sigx/a
 
 import { AuditActor, auditKey } from '../../src/audit/index';
 import { parseMachineToken, verifyMachineToken, workspaceKey } from '../../src/auth/index';
-import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, machineWorkspaceSource, MAX_CHANGES_SNAPSHOTS, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, SNAPSHOT_MAX_COMMITS, SNAPSHOT_MAX_FILES, ToolCallError, type FsAnswer, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
+import { DEFAULT_ENV_TIMEOUT_MS, defineMachineActor, ENV_RESULT_TTL_MS, freeSlots, FS_RESULT_TTL_MS, MACHINE_OFFLINE_CODE, machineKey, machineWorkspaceSource, machineWorktrees, MAX_CHANGES_SNAPSHOTS, MAX_ENV_REQUESTS, MAX_FS_REQUESTS, parseMachineKey, SNAPSHOT_MAX_COMMITS, SNAPSHOT_MAX_FILES, ToolCallError, type FsAnswer, type MachineSocketPort, type ToolCallInput } from '../../src/machine/index';
 import { initialMachineState, rememberChanges, snapshotOf } from '../../src/machine/state';
 import { defineSessionActor, type CommandSink, type SessionOpenSpec } from '../../src/session/index';
 import { PairingDirectory } from '../../src/pairing/index';
@@ -608,6 +608,25 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op: run });
         await respond(requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: 'done', stderrTail: '' } });
         expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { kind: 'run', exitCode: 0 } });
+    });
+
+    it("lists a repository's worktrees for a session driver, on a daemon with the worktrees feature, inside the roots (#622)", async () => {
+        const op = { kind: 'worktrees', root: '/work/app' } as const;
+        await rawDaemon(['files']);
+        expect(await machineWorktrees(machine(K1), E1, '/work/app')).toMatchObject({ error: { code: 'unsupported' } });
+        expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);
+
+        const { respond } = await rawDaemon(['files', 'worktrees']);
+        expect(await machineWorktrees(machine(K1, agentP), E1, '/etc')).toMatchObject({ error: { code: 'outside-roots' } });
+        const { requestId } = await machine(K1, agentP).fsRequest(E1, op);
+        expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op });
+        const result = { kind: 'worktrees', root: '/work/app', entries: [{ path: '/work/app', branch: 'main', current: true }, { path: '/work/app-wt/x', branch: 'x' }], truncated: false } as const;
+        await respond(requestId, { result });
+        const answers: FsAnswer[] = [];
+        for await (const a of machine(K1, agentP).fsAnswer(requestId)) answers.push(a);
+        expect(answers).toEqual([{ result }]);
+        // Held like the session-files answers, never on the saved record.
+        expect(((await app.storage.load('machine', K1))!.state as { fs: Record<string, { result?: unknown }> }).fs[requestId]!.result).toBeUndefined();
     });
 
     it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {

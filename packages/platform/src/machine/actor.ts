@@ -63,10 +63,14 @@ function needsLiveness(s: MachineState): boolean {
 
 /**
  * Why the Machine answers a session-files request itself (#562), before a frame goes out: the daemon lacks the `files`
- * feature, or `root` is not inside the environment's `cwdRoots` (lexically — the daemon checks again after resolving links).
+ * feature (for `worktrees`, #622, the `worktrees` feature), or `root` is not inside the environment's `cwdRoots`
+ * (lexically — the daemon checks again after resolving links).
  */
-function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root: string): FsError | undefined {
-    if (!s.features?.includes('files')) return { code: 'unsupported', message: 'the daemon does not answer session files (no files feature); update it' };
+function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, op: Extract<FsOp, { root: string }>): FsError | undefined {
+    const root = op.root;
+    if (op.kind === 'worktrees') {
+        if (!s.features?.includes('worktrees')) return { code: 'unsupported', message: "the daemon does not list a repository's worktrees (no worktrees feature); update it" };
+    } else if (!s.features?.includes('files')) return { code: 'unsupported', message: 'the daemon does not answer session files (no files feature); update it' };
     const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
     if (!pathWithin(root, environment.cwdRoots, os)) return { code: 'outside-roots', message: `${root} is not inside the folders environment "${environment.id}" may use` };
     return undefined;
@@ -98,9 +102,12 @@ function failPendingHistory(s: MachineState, at: number, message: string): void 
     }
 }
 
-/** The session-files kinds (#559/#562): answered through the `fsAnswer` stream, gated by the daemon's `files` feature. */
-function isFilesOp(op: FsOp): op is Extract<FsOp, { kind: 'tree' | 'read' | 'changes' }> {
-    return op.kind === 'tree' || op.kind === 'read' || op.kind === 'changes';
+/**
+ * The session-files kinds (#559/#562), and a repository's `worktrees` (#622): read-only, open to session drivers,
+ * answered through the `fsAnswer` stream — gated by the daemon's `files` feature, `worktrees` by its own.
+ */
+function isFilesOp(op: FsOp): op is Extract<FsOp, { kind: 'tree' | 'read' | 'changes' | 'worktrees' }> {
+    return op.kind === 'tree' || op.kind === 'read' || op.kind === 'changes' || op.kind === 'worktrees';
 }
 
 /** Fail every pending folder request with `timeout` (the daemon went away, or was revoked). */
@@ -2002,7 +2009,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const requestId = `fs_${crypto.randomUUID()}`;
                     const checked = parsed.data;
                     // Refused here, before a frame goes out: a daemon that cannot answer, a folder outside the roots.
-                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked.root) : checked.kind === 'run' ? runRefusal(s, environment, checked.cwd) : undefined;
+                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked) : checked.kind === 'run' ? runRefusal(s, environment, checked.cwd) : undefined;
                     if (!refusal && !send({ v: V, t: 'fs.request', requestId, environmentId, op: checked })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
                     const fs = (s.fs ??= {});
                     pruneFs(fs, at);

@@ -374,6 +374,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
+        if (op.kind === 'worktrees') return fail('unsupported', "this daemon does not list a repository's worktrees yet");
         if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
