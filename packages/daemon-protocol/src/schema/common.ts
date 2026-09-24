@@ -212,6 +212,7 @@ export const fsOp: z.ZodType<FsOp> = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('tree'), root: text.min(1), path: text }),
     z.object({ kind: z.literal('read'), root: text.min(1), path: text.min(1), rev: fsReadRev.optional(), base: name.optional() }),
     z.object({ kind: z.literal('changes'), root: text.min(1), scope: changeScope, base: name.optional() }),
+    z.object({ kind: z.literal('worktree-remove'), repo: text.min(1), path: text.min(1), branch: name.optional(), deleteBranch: z.boolean().optional() }),
     z.object({ kind: z.literal('run'), cwd: text.min(1), argv: z.array(text).min(1).max(FS_RUN_MAX_ARGS).refine((a) => a[0] !== '', { message: 'argv[0] names a program' }), timeoutMs: z.number().int().positive().max(FS_RUN_MAX_TIMEOUT_MS).optional() }),
     z.object({ kind: z.literal('worktrees'), root: text.min(1) })
 ]);
@@ -254,6 +255,7 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
         commits: z.array(z.object({ id: name, short: name, subject: text, at: nonNegativeInt, author: text })).max(CHANGES_MAX_COMMITS),
         truncated: z.boolean()
     }),
+    z.object({ kind: z.literal('worktree-remove'), path: text.min(1), removed: z.boolean(), branchDeleted: z.boolean().optional() }),
     z.object({ kind: z.literal('run'), exitCode: z.number().int(), stdoutTail: z.string().max(FS_RUN_OUTPUT_TAIL), stderrTail: z.string().max(FS_RUN_OUTPUT_TAIL) }),
     z.object({
         kind: z.literal('worktrees'),
@@ -280,7 +282,7 @@ export const fsResult: z.ZodType<FsResult> = z.discriminatedUnion('kind', [
     .refine((r) => r.kind !== 'read' || !(r.binary === true && r.lines !== undefined), { message: 'a binary read result carries metadata only, no lines' });
 
 export const fsError: z.ZodType<FsError> = z.object({
-    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'worktree-mismatch', 'internal']),
+    code: z.enum(['outside-roots', 'not-found', 'not-a-repo', 'branch-exists', 'invalid-branch', 'exists', 'timeout', 'unknown-environment', 'unsupported', 'too-large', 'worktree-mismatch', 'dirty', 'internal']),
     message: text
 });
 

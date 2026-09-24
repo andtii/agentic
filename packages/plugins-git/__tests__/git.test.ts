@@ -69,8 +69,8 @@ describe('manifest', () => {
         expect(Array.isArray(gitFeatureManifest.capabilities)).toBe(true);
         expect(gitFeatureManifest.permissions).toEqual([]);
         expect(gitFeatureManifest.compat).toEqual({ platform: '*', core: '*' });
-        expect(Object.keys(gitFeatureManifest.projectSettings.properties!)).toEqual(['origin', 'worktreePerChat', 'branchPrefix', 'branchTemplate', 'worktreePath', 'worktreeStrategy', 'worktreeCreate', 'worktreeSetup', 'reuseExisting', 'worktreeNotice', 'base', 'instructions']);
-        expect(configDefaults(gitFeatureManifest.projectSettings)).toEqual({ worktreePerChat: false, branchPrefix: DEFAULT_BRANCH_PREFIX, worktreeStrategy: 'builtin', reuseExisting: true, instructions: '' });
+        expect(Object.keys(gitFeatureManifest.projectSettings.properties!)).toEqual(['origin', 'worktreePerChat', 'branchPrefix', 'branchTemplate', 'worktreePath', 'worktreeStrategy', 'worktreeCreate', 'worktreeSetup', 'worktreeCleanup', 'worktreeDeleteBranch', 'worktreeRemove', 'reuseExisting', 'worktreeNotice', 'base', 'instructions']);
+        expect(configDefaults(gitFeatureManifest.projectSettings)).toEqual({ worktreePerChat: false, branchPrefix: DEFAULT_BRANCH_PREFIX, worktreeStrategy: 'builtin', worktreeCleanup: 'never', worktreeDeleteBranch: false, reuseExisting: true, instructions: '' });
         // Nothing workspace-wide to set.
         expect(validateConfig(gitFeatureManifest.config, {})).toEqual({ ok: true, value: {} });
     });
@@ -418,5 +418,49 @@ describe('settings form seam (#621)', () => {
         expect(command).toContainEqual({ label: 'Made by', value: 'pnpm wt new chat-a1b2c3d4' });
         expect(command.some((l) => l.label === 'Chosen worktree')).toBe(false);
         expect(preview({ project, settings: settingsOf({ worktreePerChat: true, worktreePath: '{repo}/{x}' }) })).toEqual([{ label: 'Problem', value: expect.stringContaining('{x}') }]);
+    });
+});
+
+describe('cleanup when a chat leaves the project (#623)', () => {
+    const release = (fs: ProjectFeatureFs, settings: Record<string, unknown>, cwd = '/work/agentic') =>
+        gitFeaturePlugin.onChatReleased!({ project, settings: settingsOf(settings), chatId: CHAT, reason: 'project-changed', environmentId: 'env_1' as EnvironmentId, cwd, fs });
+    const wt = `/work/agentic-worktrees/chat-${SHORT}`;
+
+    it('does nothing unless the project asks for cleanup of its chat worktrees', async () => {
+        const { fs, ops } = commandFs(new Map());
+        expect(await release(fs, { worktreePerChat: true })).toBeUndefined();
+        expect(await release(fs, { worktreeCleanup: 'on-chat-leave' })).toBeUndefined();
+        expect(ops).toEqual([]);
+    });
+
+    it("built in: one worktree-remove of the chat's own worktree, the branch only when asked; dirty is thrown for the audit", async () => {
+        const ops: FsOp[] = [];
+        const fs: ProjectFeatureFs = async (op) => (ops.push(op), op.kind === 'worktree-remove' ? { result: { kind: 'worktree-remove', path: op.path, removed: true, branchDeleted: true } } : { error: { code: 'unsupported', message: op.kind } });
+        expect(await release(fs, { worktreePerChat: true, worktreeCleanup: 'on-chat-leave', worktreeDeleteBranch: true })).toBe(`removed ${wt}; branch chat/${SHORT} deleted`);
+        expect(ops).toEqual([{ kind: 'worktree-remove', repo: '/work/agentic', path: wt, branch: `chat/${SHORT}`, deleteBranch: true }]);
+        const dirty: ProjectFeatureFs = async () => ({ error: { code: 'dirty', message: `${wt} has uncommitted changes; it was left as it is` } });
+        await expect(release(dirty, { worktreePerChat: true, worktreeCleanup: 'on-chat-leave' })).rejects.toThrow(/git worktree dirty/);
+    });
+
+    it("the project's own remove command runs only on a clean worktree of the chat's branch", async () => {
+        const settings = { worktreePerChat: true, worktreeCleanup: 'on-chat-leave', worktreeRemove: 'pnpm wt rm {branchSlug}' };
+        let status = '';
+        const badges = new Map<string, FsGitInfo>([[wt, { kind: 'worktree', branch: `chat/${SHORT}` }]]);
+        const { fs, ops } = commandFs(badges, (op) => ({ result: { kind: 'run', exitCode: 0, stdoutTail: op.argv[0] === 'git' ? status : '', stderrTail: '' } }));
+        expect(await release(fs, settings)).toBe(`removed ${wt} with \`pnpm wt rm chat-${SHORT}\``);
+        expect(ops.filter((o) => o.kind === 'run')).toEqual([
+            { kind: 'run', cwd: wt, argv: ['git', 'status', '--porcelain', '--untracked-files=all'] },
+            { kind: 'run', cwd: '/work/agentic', argv: ['pnpm', 'wt', 'rm', `chat-${SHORT}`] }
+        ]);
+        status = '?? scratch.txt';
+        ops.length = 0;
+        await expect(release(fs, settings)).rejects.toThrow(/dirty/);
+        expect(ops.filter((o) => o.kind === 'run')).toHaveLength(1);
+        // Not the chat's worktree (gone, or the user's own): nothing runs.
+        badges.set(wt, { kind: 'worktree', branch: 'mine' });
+        ops.length = 0;
+        expect(await release(fs, settings)).toBe(`no worktree of chat/${SHORT} at ${wt}`);
+        expect(ops.map((o) => o.kind)).toEqual(['list']);
+        expect(gitSettingsErrors(settingsOf({ worktreeRemove: 'rm "{path}' }))).toEqual({ worktreeRemove: expect.stringContaining('unclosed') });
     });
 });

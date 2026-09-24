@@ -517,6 +517,18 @@ describe('daemon frame schemas', () => {
         expect(response({ error: { code: 'worktree-mismatch', message: '/work/b holds another branch' } }).success).toBe(true);
     });
 
+    it('fs.request worktree-remove names the repo and folder; its result says what went, and dirty is a code (#623)', () => {
+        const request = (op: Record<string, unknown>) => platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op });
+        expect(request({ kind: 'worktree-remove', repo: '/work/app', path: '/work/wt/x', branch: 'chat/x', deleteBranch: true }).success).toBe(true);
+        expect(request({ kind: 'worktree-remove', repo: '/work/app', path: '/work/wt/x' }).success).toBe(true);
+        expect(request({ kind: 'worktree-remove', repo: '/work/app' }).success).toBe(false);
+        expect(request({ kind: 'worktree-remove', repo: '/work/app', path: '/work/wt/x', deleteBranch: 'yes' }).success).toBe(false);
+        const response = (f: Record<string, unknown>) => daemonFrameSchemas['fs.response'].safeParse({ v: V, t: 'fs.response', requestId: 'fs_1', ...f });
+        expect(response({ result: { kind: 'worktree-remove', path: '/work/wt/x', removed: true, branchDeleted: false } }).success).toBe(true);
+        expect(response({ result: { kind: 'worktree-remove', path: '/work/wt/x' } }).success).toBe(false);
+        expect(response({ error: { code: 'dirty', message: 'changes' } }).success).toBe(true);
+    });
+
     it('fs.request run carries argv in a cwd, bounded, and its result bounded tails (#617)', () => {
         const request = (op: Record<string, unknown>) => platformFrameSchemas['fs.request'].safeParse({ v: V, t: 'fs.request', requestId: 'fs_1', environmentId: env.id, op });
         const run = { kind: 'run', cwd: '/work/app', argv: ['pnpm', 'install'] };

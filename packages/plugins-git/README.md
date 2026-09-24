@@ -13,6 +13,7 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `detect(folder)` | true when the daemon's listing gave the folder a git badge (a repo or a worktree) |
 | `identityOf(folder)` | the badge's `origin`: the repo's identity across machines (compared with `sameOrigin`); the project form fills the `origin` setting from it |
 | `instructions(ctx)` | the project's `instructions` text, trimmed, into every session's `## Project` section |
+| `onChatReleased(input)` | with `worktreeCleanup: 'on-chat-leave'`, remove the chat's worktree when the chat leaves the project (#623) |
 | `beforeSession(input)` | with `worktreePerChat` on and a task from a chat: one `worktree` op per chat and environment, and the session opens in the worktree |
 
 ## Per-project settings (`features['agentic.feature.git']`)
@@ -27,6 +28,9 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `worktreeStrategy` | `builtin` \| `command` | `builtin` | `builtin`: the daemon's `worktree` op (`git worktree add`); `command`: the project's own `worktreeCreate` makes it |
 | `worktreeCreate` | string | — | the create command, run in the project folder, as a template: every folder token plus `{path}`; quotes group an argument, nothing else is shell syntax |
 | `worktreeSetup` | string[] | — | commands run in order in a worktree just made (never in a reused one), same tokens |
+| `worktreeCleanup` | `never` \| `on-chat-leave` | `never` | `on-chat-leave`: when a chat is moved out of the project, its worktree is removed on every online machine — never one with uncommitted changes |
+| `worktreeDeleteBranch` | boolean | `false` | with cleanup on, delete the chat's branch afterwards if it is merged |
+| `worktreeRemove` | string | — | with cleanup on, the project's own remove command (e.g. `pnpm wt rm {branchSlug}`), run in the project folder; empty = the daemon's `worktree-remove` |
 | `reuseExisting` | boolean | `true` | a session folder other than the project's own that is already a linked worktree is used as it is |
 | `worktreeNotice` | string | the default notice | what the agent is told about its worktree: `{path}`, `{branch}`; blank = nothing |
 | `base` | string | — | the start point of a new chat branch; the checkout's HEAD when empty |
@@ -56,6 +60,16 @@ With `worktreeStrategy: 'command'` the plugin does not run `git worktree add`. I
 
 Commands are split into argv (`splitCommand`) and expanded one argument at a time, so a path with spaces stays one argument. The daemon never runs them through a shell (#618). They run as the owner, only on a daemon with the `run` feature, with a working directory inside the environment's roots, and every run is audited (`workdir.command-run`).
 
+### Cleanup (#623)
+
+When a chat leaves the project (`Chat.setProject` to another project or none), the router calls `onChatReleased` once for every environment where the project has a folder and the machine is online. With `worktreeCleanup: 'on-chat-leave'`, the plugin removes the chat's own worktree: the one `chatWorktreeFor` names, never a worktree the user picked.
+
+It removes it in one of two ways:
+- **Built in:** the daemon's `worktree-remove`, never forced. A worktree with uncommitted or untracked changes is `dirty` and stays. With `worktreeDeleteBranch` it then runs `git branch -d`, so an unmerged branch is kept.
+- **Your own command:** `worktreeRemove`, run after `git status` shows the worktree clean.
+
+Every call is audited as `project.chat-released`, with what the plugin did or why it could not. Chats can't be deleted yet, so the `deleted` reason is reserved. There is no `on-merge` policy.
+
 ### Examples
 
 | Convention | Settings |
@@ -67,7 +81,7 @@ Commands are split into argv (`splitCommand`) and expanded one argument at a tim
 | a repo script that makes and installs worktrees (this repo's `pnpm wt`) | the row above, plus `worktreeStrategy: "command"`, `worktreeCreate: "pnpm wt new {branchSlug}"` |
 | install dependencies in a new worktree | `worktreeSetup: ["npm ci"]` (or `["uv sync"]`, `["bundle install"]`, …) |
 
-Out of scope here: push/pull, PR creation, clone. Cleanup (#623) is a follow-up.
+Out of scope here: push/pull, PR creation, clone, removal when a branch merges.
 
 ## Layout
 

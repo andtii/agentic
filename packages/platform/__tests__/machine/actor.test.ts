@@ -600,6 +600,7 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
 
         const { respond } = await rawDaemon(['run']);
         expect(await statusOf(machine(K1, agentP).fsRequest(E1, run))).toBe(403);
+        expect(await statusOf(machine(K1, agentP).fsRequest(E1, { kind: 'worktree-remove', repo: '/work/app', path: '/work/wt/x' }))).toBe(403);
         const outside = await machine(K1).fsRequest(E1, { ...run, cwd: '/etc' });
         expect(await machine(K1).fsResult(outside.requestId)).toMatchObject({ status: 'error', error: { code: 'outside-roots' } });
         expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);

@@ -57,7 +57,13 @@ export type FsOp =
      * Every worktree of the repository `root` belongs to (#622; the `worktrees` daemon feature), read-only: what a
      * session's Files / Changes may switch to for a look, without the session moving (EXE-12).
      */
-    | { readonly kind: 'worktrees'; readonly root: string };
+    | { readonly kind: 'worktrees'; readonly root: string }
+    /**
+     * Remove the worktree at `path` of `repo` (#623), never by force: one with uncommitted or untracked changes is
+     * `dirty` and stays, one on another branch than `branch` is `worktree-mismatch`. With `deleteBranch`, `branch` is
+     * then deleted if merged (`git branch -d`); an unmerged one is kept (`branchDeleted: false`).
+     */
+    | { readonly kind: 'worktree-remove'; readonly repo: string; readonly path: string; readonly branch?: string; readonly deleteBranch?: boolean };
 
 /** Which version of a file a `read` returns (#559). */
 export type FsReadRev = 'working' | 'head' | 'base';
@@ -245,7 +251,18 @@ export interface FsWorktreesResult {
     readonly truncated: boolean;
 }
 
-export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult | FsWorktreesResult;
+
+/** What a `worktree-remove` did (#623): `removed` false when no worktree was at `path`. */
+export interface FsWorktreeRemoveResult {
+    readonly kind: 'worktree-remove';
+    readonly path: string;
+    readonly removed: boolean;
+    /** Set when the branch was asked to go: whether it went. */
+    readonly branchDeleted?: boolean;
+}
+
+
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult | FsWorktreesResult | FsWorktreeRemoveResult;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -260,6 +277,8 @@ export type FsErrorCode =
     | 'too-large'
     /** A `worktree` whose `path` exists but is not `branch`'s worktree (#617). */
     | 'worktree-mismatch'
+    /** A `worktree-remove` of a worktree holding uncommitted or untracked changes (#623): left as it is. */
+    | 'dirty'
     | 'internal';
 
 export interface FsError {

@@ -132,6 +132,7 @@ export const FS_ERROR_TEXT: Record<FsErrorCode, string> = {
     unsupported: "The machine's daemon can't do this yet — update it",
     'too-large': 'That file is too large to show',
     'worktree-mismatch': 'Something other than that branch is already at the target path',
+    dirty: 'That worktree has uncommitted changes, so it was left as it is',
     internal: 'The machine hit an error while reading the folder'
 };
 

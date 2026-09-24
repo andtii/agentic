@@ -14,7 +14,7 @@
  * every machine, reused by the next task, parked when the daemon cannot.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DAEMON_PROTOCOL_VERSION, actorKey, type AgentId, type ChatId, type DaemonFrame, type EnvironmentId, type FsError, type FsOp, type FsResult, type MachineId, type OfflinePolicy, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, actorKey, type AgentId, type ChatId, type DaemonFrame, type EnvironmentId, type FsError, type FsOp, type FsResult, type MachineId, type OfflinePolicy, type ProjectFeatureChatReleaseInput, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { mcpConnectorSetup } from '@agentic/mcp';
 import { GIT_FEATURE_ID, gitBranchFor, gitFeatureManifest, gitFeaturePlugin } from '@agentic/plugins-git';
@@ -26,7 +26,7 @@ import { AgentActor, agentKey } from '../../src/agent/index';
 import { AuditActor } from '../../src/audit/index';
 import { capturingAuditPort } from '../../src/audit/index';
 import { generateWorkspaceKek, importWorkspaceKek, workspaceKey } from '../../src/auth/index';
-import { Chat, ChatPage } from '../../src/chat/index';
+import { Chat, ChatPage, defineChatActor } from '../../src/chat/index';
 import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
 import { defineRegistry, registryKey } from '../../src/registry/index';
@@ -150,7 +150,9 @@ beforeEach(async () => {
     Session = defineSessionActor({ factory: localFactory(), commands: sink });
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry: () => Registry, runtimes, audit, projectFeatures: { [GIT]: feature, [GIT_FEATURE_ID]: gitFeaturePlugin } });
     Machine = defineMachineActor({ socket: sockets, sessions: () => Session, routing: () => Routing, tools: createToolCallPort({ routing: () => Routing, sessions: () => Session }) });
-    app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory, Chat, ChatPage, Registry, AuditActor]);
+    // The chat tells the router when it leaves a project (#623): the same `chat` type, with the router port.
+    const RoutedChat = defineChatActor({ routing: () => Routing });
+    app = testActorApp([Routing, Session, Machine, TaskActor, AgentActor, Workspace, PairingDirectory, RoutedChat, ChatPage, Registry, AuditActor]);
     await app.start();
 });
 
@@ -539,5 +541,71 @@ describe('the git feature (#335)', () => {
         expect(sent?.system).toContain('## Project');
         expect(sent?.system).toContain('Branch first.');
         expect(sent?.system).not.toContain('isolated git worktree');
+    });
+});
+
+describe('a chat leaving its project (#623)', () => {
+    /** What `onChatReleased` did, set per test; every call recorded. */
+    let released: ProjectFeatureChatReleaseInput[];
+    beforeEach(() => {
+        released = [];
+        feature.onChatReleased = async (input) => {
+            released.push(input);
+            if (input.environmentId === E1) return `tidied ${input.cwd}`;
+            throw new Error('the daemon said no');
+        };
+    });
+    afterEach(() => {
+        delete (feature as { onChatReleased?: unknown }).onChatReleased;
+    });
+
+    it("tells the project's plugins once per environment with a folder, audits what each said, and a throw never undoes the move", async () => {
+        await onlineMachine();
+        const projectId = await project();
+        const { chatId } = await workspace().createChat({ projectId });
+        await chat(chatId).setProject(null);
+        await until(() => released.length > 0 && audit.events.filter((e) => e.kind === 'project.chat-released').length >= 2, 'the release to be heard and audited');
+        expect((await chat(chatId).get()).projectId).toBeUndefined();
+        // The machine reports both environments: the hook ran on each with the project's folder there.
+        expect(released.map((r) => [r.environmentId, r.cwd, r.chatId, r.reason, r.project.id])).toEqual([
+            [E1, '/work/agentic', chatId, 'project-changed', projectId],
+            [E2, '/other/agentic', chatId, 'project-changed', projectId]
+        ]);
+        const records = audit.events.filter((e) => e.kind === 'project.chat-released');
+        expect(records.map((e) => e.data)).toEqual([
+            { chatId, projectId, pluginId: GIT, environmentId: E1, reason: 'project-changed', outcome: 'tidied /work/agentic' },
+            { chatId, projectId, pluginId: GIT, environmentId: E2, reason: 'project-changed', error: 'the daemon said no' }
+        ]);
+    });
+
+    it('an environment whose machine is offline is audited as unreachable, and the hook is not run there', async () => {
+        const machineId = await onlineMachine();
+        const projectId = await project({ folders: { [E2]: null } });
+        const { chatId } = await workspace().createChat({ projectId });
+        sockets.close(machineKey(WS, machineId));
+        await machine(machineId, asMachine(machineId)).socketClosed();
+        await until(async () => !(await machine(machineId).get()).online, 'the machine to go offline');
+        await chat(chatId).setProject(null);
+        await until(() => audit.events.some((e) => e.kind === 'project.chat-released'), 'the unreachable release to be audited');
+        expect(released).toEqual([]);
+        expect(audit.events.find((e) => e.kind === 'project.chat-released')?.data).toMatchObject({ environmentId: E1, error: expect.stringContaining('offline') });
+    });
+
+    it('a throwing plugin is audited with its message; a chat still in the project, or a call for nothing, changes nothing', async () => {
+        await onlineMachine();
+        const projectId = await project({ folders: { [E2]: null } });
+        feature.onChatReleased = async (input) => {
+            released.push(input);
+            throw new Error('the daemon said no');
+        };
+        const { chatId } = await workspace().createChat({ projectId });
+        // A stray call while the chat is still in the project: nothing runs.
+        await routing().chatReleased(chatId, projectId, 'project-changed');
+        expect(released).toEqual([]);
+        const other = await workspace().upsertProject({ name: 'Other', folders: {}, connectors: [], features: {} });
+        await chat(chatId).setProject(other.id);
+        await until(() => audit.events.some((e) => e.kind === 'project.chat-released'), 'the failed release to be audited');
+        expect((await chat(chatId).get()).projectId).toBe(other.id);
+        expect(audit.events.find((e) => e.kind === 'project.chat-released')?.data).toEqual({ chatId, projectId, pluginId: GIT, environmentId: E1, reason: 'project-changed', error: 'the daemon said no' });
     });
 });
