@@ -17,6 +17,8 @@ export type AddConnectorDialogProps =
     & Define.Prop<'error', string>
     /** The probe; tests hand in one over a fake server. */
     & Define.Prop<'probe', (draft: ConnectorDraft) => Promise<ConnectorProbe>>
+    /** What each opening starts from — a listed server's name, URL and credential kind (the Add connector page, #639); default: empty. */
+    & Define.Prop<'initial', Partial<Omit<ConnectorDraft, 'secret'>>>
     & Define.Event<'add', AddConnectorRequest>
     & Define.Event<'cancel'>;
 
@@ -33,12 +35,13 @@ const probeKey = (d: ConnectorDraft): string => JSON.stringify([d.name.trim(), d
 export const AddConnectorDialog = component<AddConnectorDialogProps>(({ props, emit }) => {
     const draft = signal<ConnectorDraft>(emptyConnectorDraft());
     const st = signal<{ attempted: boolean; testing: boolean; probe: ConnectorProbe | null; probedFor: string }>({ attempted: false, testing: false, probe: null, probedFor: '' });
-    // Each opening starts empty: a credential typed last time does not linger.
+    // Each opening starts empty (or from `initial`): a credential typed last time does not linger. Keyed on
+    // `initial` too, so a page that sets it in the same turn as opening still prefills.
     watch(
-        () => props.model?.value === true,
+        () => (props.model?.value === true ? JSON.stringify(props.initial ?? {}) : null),
         (open) => {
-            if (!open) return;
-            Object.assign(draft, emptyConnectorDraft());
+            if (open === null) return;
+            Object.assign(draft, emptyConnectorDraft(), props.initial ?? {}, { secret: '' });
             Object.assign(st, { attempted: false, testing: false, probe: null, probedFor: '' });
         },
         { immediate: true }

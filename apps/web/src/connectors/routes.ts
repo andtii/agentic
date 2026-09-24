@@ -23,8 +23,9 @@
  * (both in the workspace's `ConnectorAccounts`), exchanges the code with
  * PKCE, seals the tokens and stores the account; the account id is written
  * onto the connector record, and the owner lands back on `returnTo` — a
- * same-site path only. Any failure lands on the plugin page with
- * `?connect_error=` instead of a raw error page.
+ * same-site path only — or, when the Add connector page started it with
+ * `?next=agents` (#639), on that page's step to choose agents. Any failure
+ * lands on the plugin page with `?connect_error=` instead of a raw error page.
  *
  * The redirect URI is the callback on the origin the request came in on —
  * the one the plugin page shows (`location.origin`) — so the provider sends
@@ -82,6 +83,19 @@ export function withParam(path: string, name: string, value: string): string {
     const params = [...url.searchParams].filter(([k]) => k !== name);
     params.push([name, value]);
     return `${url.pathname}?${params.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')}`;
+}
+
+/** The Add connector page's step after connecting (#639): `?next=agents` on the start route asks for it. */
+export const NEXT_PARAM = 'next';
+const NEXT_AGENTS = 'agents';
+
+/**
+ * Where a successful sign-in lands: `back` (the verified `returnTo`), or — when the Add connector page started it
+ * with `?next=agents`, which rides on `returnTo` — that page's choose-agents step for the plugin (#639).
+ */
+export function afterConnect(back: string, pluginId: string): string {
+    if (new URL(back, 'http://x').searchParams.get(NEXT_PARAM) !== NEXT_AGENTS) return back;
+    return `/plugins/connectors/add?selected=${encodeURIComponent(pluginId)}&${NEXT_PARAM}=${NEXT_AGENTS}`;
 }
 
 /** The plugin id of a `/plugins/:id` path. */
@@ -148,6 +162,8 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
     const start = async (request: Request, env: AuthMountEnv, principal: Principal, pluginId: string, connector: string): Promise<Response> => {
         const ws = principal.workspaceId as WorkspaceId;
         const page = connectorPluginPage(pluginId);
+        // `?next=agents` (the Add connector page, #639) rides on `returnTo`, so the callback can honour it.
+        const returnTo = new URL(request.url).searchParams.get(NEXT_PARAM) === NEXT_AGENTS ? withParam(page, NEXT_PARAM, NEXT_AGENTS) : page;
         try {
             const registry = registryAs(principal, ws);
             const plugin = await registry.get(pluginId);
@@ -162,10 +178,10 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
             const engine = engineFor(principal, ws, registry, pluginId, engineSecret, new URL(request.url).origin);
             // Reconnect the record's own account when it still exists, so its id (and every grant) stays.
             const account = record?.account !== undefined && (await engine.accounts.get(record.account, ws)) ? record.account : undefined;
-            const begun = await engine.auth.begin({ connector, method: await methodOf(engine, connector), owner: ws, returnTo: page, ...(account ? { account } : {}) });
+            const begun = await engine.auth.begin({ connector, method: await methodOf(engine, connector), owner: ws, returnTo, ...(account ? { account } : {}) });
             if (begun.type === 'connected') {
                 await registry.putConnector({ id: pluginId, pluginId, transport: 'conduit', connector, account: begun.account.id });
-                return redirect(withParam(page, CONNECTED_PARAM, '1'));
+                return redirect(withParam(afterConnect(returnTo, pluginId), CONNECTED_PARAM, '1'));
             }
             return redirect(begun.url);
         } catch (e) {
@@ -189,7 +205,7 @@ export function createConnectorMount(wiring: ConnectorMountWiring): (request: Re
             const { account, returnTo } = await engine.auth.complete({ callbackUrl: request.url });
             if (account.owner !== ws || account.connector !== connector) throw new Error('this sign-in belongs to another connector');
             await registry.putConnector({ id: pluginId, pluginId, transport: 'conduit', connector, account: account.id });
-            return redirect(withParam(sameSitePath(returnTo) ?? connectorPluginPage(pluginId), CONNECTED_PARAM, '1'));
+            return redirect(withParam(afterConnect(sameSitePath(returnTo) ?? connectorPluginPage(pluginId), pluginId), CONNECTED_PARAM, '1'));
         } catch (e) {
             return redirect(withParam(fallback, CONNECT_ERROR_PARAM, failureText(e)));
         }
