@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "build": "pnpm run zero:validate && vite build --app",
-    "zero:validate": "sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json --report --strict",
+    "zero:validate": "sigx zero:validate --package @agentic/ui --extra-manifest @agentic/ui --report --strict",
     "preview": "wrangler dev",
     "deploy": "wrangler deploy",
     "test:e2e": "playwright test",

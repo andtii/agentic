@@ -2,39 +2,39 @@
  * The data face of `@agentic/ui` — what a design system consumes.
  *
  * Pure data on purpose: the anatomy imports pull no component code and the
- * kit import is type-only, so a `build.mjs`-style Node script (or
- * `sigx zero:extend`, once a kit carrying it ships — andtii/zero-wip#482)
- * imports this entry without loading the sigx runtime. Declared to the ecosystem through `package.json`'s
- * `"sigx-zero"` field; `dist/fragment.json` is the same fragment as JSON for
- * the `--extra-manifest` path.
+ * kit import is type-only, so a Node script imports this entry without
+ * loading the sigx runtime. Declared to the ecosystem through `package.json`'s
+ * `"sigx-zero"` field and gated by `sigx zero:fragment --strict` in the build,
+ * which also writes `dist/fragment.json` for the `--extra-manifest` path.
  */
+import { FRAGMENT_VERSION } from '@sigx/zero/contract';
 import { aiComposerAnatomy } from '../composer/anatomy.js';
 import { aiApprovalAnatomy, aiMessageAnatomy, aiQuestionAnatomy, aiReasoningAnatomy, aiThreadAnatomy, aiToolCallAnatomy } from '../thread/anatomy.js';
 import { kitAnatomies } from '../kit/anatomy.js';
-import { recipes as transcriptRecipes } from './recipes.js';
+import { fragmentCss as rawFragmentCss, recipes as transcriptRecipes } from './recipes.js';
 import { recipes as kitRecipes } from '../kit/recipes.js';
 import { codeAnatomies } from '../code/anatomy.js';
 import { codeRecipes } from '../code/recipes.js';
+import { FALLBACKS, withFallbacks } from './fallbacks.js';
 
 /** The keyframes the streaming dot pulses on — raw CSS a design system appends verbatim (`DesignSystemInput.css`). */
-export { fragmentCss } from './recipes.js';
+export const fragmentCss = withFallbacks(rawFragmentCss, FALLBACKS);
 
-/** The recipe pack: the transcript's six scopes, the kit's `ag-*` scopes and the session files ones (#563). */
-export const recipes = [...transcriptRecipes, ...kitRecipes, ...codeRecipes];
+/**
+ * The recipe pack: the transcript's six scopes, the kit's `ag-*` scopes and
+ * the session files ones (#563). Every bare `var()` of the kit vocabulary or
+ * an `--ag-*` token carries a fallback (`fallbacks.ts`), so the pack paints
+ * on a target that defines none of them.
+ */
+export const recipes = withFallbacks([...transcriptRecipes, ...kitRecipes, ...codeRecipes], FALLBACKS);
 
 /**
  * The manifest fragment: `mergeManifests(zeroManifest, fragment)` (or
  * `--extra-manifest` pointing at the JSON copy) is how a design system opts
  * into covering these scopes.
- *
- * `version` is the fragment contract version this package was built against
- * (`FRAGMENT_VERSION` in `@sigx/zero-kit`) — a literal rather than the
- * constant, because the kit import must stay type-only for this entry to
- * remain loadable without the kit at runtime. `mergeManifests` hard-errors
- * on a mismatch, which is the point: a stale fragment fails by name.
  */
 export const fragment = {
-    version: 1,
+    version: FRAGMENT_VERSION,
     package: '@agentic/ui',
     components: [
         aiThreadAnatomy.toJSON(),

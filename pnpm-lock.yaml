@@ -608,6 +608,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@sigx/cli':
+        specifier: ^0.12.0
+        version: 0.12.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@sigx/reactivity':
         specifier: 'catalog:'
         version: 1.0.1
