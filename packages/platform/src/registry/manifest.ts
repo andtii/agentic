@@ -87,3 +87,13 @@ export function scopeCovered(granted: readonly PermissionScope[], scope: Permiss
     const family = scope.slice(0, scope.indexOf(':') + 1);
     return granted.includes(`${family}*` as PermissionScope);
 }
+
+/**
+ * The hosts a plugin's granted `network:<host>` scopes allow (#642; PLG-04) — the allowlist a connector's fetch runs
+ * behind. `undefined` when `network:*` is granted: like `scopeCovered`, the family wildcard covers every host, so
+ * there is no allowlist.
+ */
+export function grantedNetworkHosts(granted: readonly PermissionScope[]): string[] | undefined {
+    if (granted.includes('network:*' as PermissionScope)) return undefined;
+    return granted.filter((s) => s.startsWith('network:')).map((s) => s.slice('network:'.length));
+}

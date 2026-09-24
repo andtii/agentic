@@ -20,7 +20,7 @@
  *   built for a session never begins a sign-in, so its redirect URI is never
  *   sent anywhere; conduit only needs it to be a valid URL.
  */
-import type { Principal, WorkspaceId } from '@agentic/core';
+import type { PermissionScope, Principal, WorkspaceId } from '@agentic/core';
 import { clientFromSecrets, createConnectorEngine, CONNECTOR_ENGINE_SECRET, type ConnectorEngine } from '@agentic/connectors';
 import { ConnectorAccounts, asPrincipal, connectorAccountStores, connectorAccountsKey, type ConnectorAccountsClient } from '@agentic/platform';
 import { actor } from '@sigx/actors';
@@ -75,7 +75,7 @@ export function isSecretMissing(error: unknown): boolean {
 
 /** The slice of a Registry client (as the owner) the connector routes call. */
 export interface ConnectorRegistry {
-    get(id: string): Promise<{ readonly enabled: boolean } | null>;
+    get(id: string): Promise<{ readonly enabled: boolean; readonly grantedPermissions?: readonly PermissionScope[] } | null>;
     getConnector(id: string): Promise<{ readonly id: string; readonly pluginId: string; readonly transport: string; readonly connector?: string; readonly account?: string } | null>;
     putConnector(input: { readonly id: string; readonly pluginId: string; readonly transport: 'conduit'; readonly connector: string; readonly account?: string }): Promise<unknown>;
     openSecret(name: string, pluginId: string): Promise<string>;

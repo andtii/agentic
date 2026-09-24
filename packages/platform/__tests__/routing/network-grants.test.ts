@@ -8,7 +8,7 @@
  */
 // @vitest-environment node
 import { afterEach, describe, expect, it } from 'vitest';
-import type { WorkspaceId } from '@agentic/core';
+import type { PermissionScope, WorkspaceId } from '@agentic/core';
 import { gmailConnectorPlugin } from '@agentic/connectors';
 import { mcpConnector } from '@agentic/mcp';
 import { anthropicApiPlugin } from '@agentic/runtimes';
@@ -16,7 +16,7 @@ import { defineTool, type AnyTool } from '@sigx/ai';
 
 import { AuditActor } from '../../src/audit/index';
 import { generateWorkspaceKek, importWorkspaceKek } from '../../src/auth/index';
-import { defineRegistry, registryKey, type GateConnector } from '../../src/registry/index';
+import { defineRegistry, grantedNetworkHosts, registryKey, type GateConnector } from '../../src/registry/index';
 import { callPlatformConnector, connectorCredentials, ConnectorCredentialsError, daemonConnectors, openSessionConnectors, platformConnectorTools, type ConnectorOpenContext, type ConnectorOpenInput, type ConnectorOpener } from '../../src/routing/index';
 import { Workspace } from '../../src/workspace/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
@@ -71,6 +71,28 @@ describe('the gate answer carries the granted network: hosts', () => {
         expect(await hosts('acme')).toEqual(['acme.test']);
         await registry.revoke('acme', ['network:acme.test']);
         expect(await hosts('acme')).toEqual([]);
+    });
+
+    it('grantedNetworkHosts: the granted hosts; a network:* (never declarable today) would mean no allowlist, as scopeCovered reads it', () => {
+        expect(grantedNetworkHosts(['tools:acme', 'network:acme.test', 'network:api.acme.test:8443'])).toEqual(['acme.test', 'api.acme.test:8443']);
+        expect(grantedNetworkHosts(['tools:acme'])).toEqual([]);
+        expect(grantedNetworkHosts(['network:acme.test', 'network:*' as PermissionScope])).toBeUndefined();
+    });
+
+    it('configure refuses moving a connector’s URL to a host it declares no network: scope for, saying to add it again', async () => {
+        app = testActorApp([Registry, AuditActor, Workspace]);
+        await app.start();
+        const registry = app.as(owner).actor(Registry, registryKey(WS));
+        await registry.register(mcpConnector({ id: 'acme', name: 'Acme', transport: 'streamable-http', url: 'https://acme.test/mcp' }), { enabled: true, grant: 'declared' });
+        await registry.configure('acme', { url: 'https://acme.test/v2/mcp' });
+        const failure = await registry.configure('acme', { url: 'https://mirror.test/mcp' }).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toMatchObject({ code: 'bad-config' });
+        expect((failure as Error).message).toContain('url: mirror.test is not a host this connector was added with');
+        expect((failure as Error).message).toContain('add the connector again');
+        expect((await registry.get('acme'))!.config).toEqual({ url: 'https://acme.test/v2/mcp' });
     });
 });
 

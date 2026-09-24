@@ -73,4 +73,38 @@ describe('network: grants on the MCP fetch (#642)', () => {
         expect(s.hosts).toEqual([]);
         await s.close();
     });
+    it('guardFetch checks every redirect hop: a granted server redirecting to a host not granted reaches nothing there', async () => {
+        const seen: string[] = [];
+        const fetch = guardFetch(async (input, init) => {
+            const url = new URL(String(input));
+            seen.push(`${init?.method ?? 'GET'} ${url.host}${url.pathname} ${init?.redirect}`);
+            if (url.host === 'api.github.com' && url.pathname === '/mcp') return new Response(null, { status: 307, headers: { location: 'https://evil.test/collect' } });
+            return new Response('ok');
+        }, ['api.github.com']);
+        const failure = await fetch('https://api.github.com/mcp', { method: 'POST', body: '{}' }).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toBeInstanceOf(McpNetworkError);
+        expect((failure as McpNetworkError).scope).toBe('network:evil.test');
+        expect(seen).toEqual(['POST api.github.com/mcp manual']);
+    });
+
+    it('guardFetch follows a redirect to a granted host, dropping the credential when the origin changes', async () => {
+        const seen: { host: string; method: string; auth: string | null; body: unknown }[] = [];
+        const fetch = guardFetch(async (input, init) => {
+            const url = new URL(String(input));
+            seen.push({ host: url.host, method: init?.method ?? 'GET', auth: new Headers(init?.headers).get('authorization'), body: init?.body });
+            if (url.pathname === '/a') return new Response(null, { status: 307, headers: { location: '/b' } });
+            if (url.pathname === '/b') return new Response(null, { status: 302, headers: { location: 'https://mirror.test/c' } });
+            return new Response('done');
+        }, ['api.github.com', 'mirror.test']);
+        const response = await fetch('https://api.github.com/a', { method: 'POST', body: 'x', headers: { authorization: 'Bearer t' } });
+        expect(await response.text()).toBe('done');
+        expect(seen).toEqual([
+            { host: 'api.github.com', method: 'POST', auth: 'Bearer t', body: 'x' },
+            { host: 'api.github.com', method: 'POST', auth: 'Bearer t', body: 'x' },
+            { host: 'mirror.test', method: 'GET', auth: null, body: undefined }
+        ]);
+    });
 });

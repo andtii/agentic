@@ -23,13 +23,17 @@
  *   cursor the poll returns is saved by the Schedule in the same turn
  *   (`TriggerResult.cursor`), so the next poll skips what was delivered.
  *
+ * A revoked `network:` grant (#642; PLG-04) fences the poll too: the engine
+ * runs behind the plugin's granted hosts, and a refused host PAUSES the
+ * entry with an Inbox note naming the scope.
+ *
  * A failure worth retrying (Google down, a network error) throws, and the
  * Schedule retries the occurrence, then drops it — the cursor did not move,
  * so the next occurrence reads the same window again.
  */
 import type { AgentId, ScheduleId, TaskContract, TaskId, WorkspaceId } from '@agentic/core';
-import { CONNECTOR_ENGINE_SECRET, gmailArrivalText, pollGmail, runsTrigger, GMAIL_NEW_EMAIL_TRIGGER } from '@agentic/connectors';
-import { Inbox, Registry, TaskActor, asPrincipal, inboxKey, registryKey, taskKey, userPrincipal, type ScheduleFired, type TriggerHop, type TriggerPort, type TriggerResult } from '@agentic/platform';
+import { CONNECTOR_ENGINE_SECRET, ConnectorNetworkError, gmailArrivalText, pollGmail, runsTrigger, GMAIL_NEW_EMAIL_TRIGGER } from '@agentic/connectors';
+import { Inbox, Registry, TaskActor, asPrincipal, grantedNetworkHosts, inboxKey, registryKey, taskKey, userPrincipal, type ScheduleFired, type TriggerHop, type TriggerPort, type TriggerResult } from '@agentic/platform';
 import { actor } from '@sigx/actors';
 import { openPluginSecret, workspaceConnectorEngine, type ConnectorHttp, type ConnectorRegistry } from './engine';
 import { connectorPluginPage, connectorRedirectUri } from './paths';
@@ -93,6 +97,7 @@ async function pollConnector(event: ScheduleFired, hop: TriggerHop, options: Con
     const engineSecret = await openPluginSecret(registry, CONNECTOR_ENGINE_SECRET, pluginId);
     if (engineSecret === undefined) return pause(`${pluginId}'s account cannot be opened: connect it again at ${page}.`);
 
+    const allowedHosts = plugin.grantedPermissions === undefined ? undefined : grantedNetworkHosts(plugin.grantedPermissions);
     const engine = workspaceConnectorEngine({
         workspaceId: ws,
         pluginId,
@@ -100,14 +105,23 @@ async function pollConnector(event: ScheduleFired, hop: TriggerHop, options: Con
         secret: (name) => openPluginSecret(registry, name, pluginId),
         engineSecret,
         redirectUri: connectorRedirectUri(options.origin?.() ?? PLACEHOLDER_ORIGIN),
-        ...(options.http ? { http: options.http } : {})
+        ...(options.http ? { http: options.http } : {}),
+        // The plugin's granted `network:` hosts (#642): a revoked host is not polled either.
+        ...(allowedHosts !== undefined ? { allowedHosts } : {})
     });
     const account = await engine.accounts.get(record.account, ws);
     if (!account) return pause(`${pluginId}'s connected account is gone: connect it again at ${page}.`);
     const reconnect = `The sign-in for ${account.displayName ?? pluginId} expired or was revoked: reconnect it at ${page}.`;
     if (account.status === 'needsReauth') return pause(reconnect);
 
-    const poll = await pollGmail(engine, { account: record.account, owner: ws, connector: record.connector, ...(source.query ? { query: source.query } : {}), ...(event.cursor !== undefined ? { cursor: event.cursor } : {}), now: event.firedAt });
+    let poll: Awaited<ReturnType<typeof pollGmail>>;
+    try {
+        poll = await pollGmail(engine, { account: record.account, owner: ws, connector: record.connector, ...(source.query ? { query: source.query } : {}), ...(event.cursor !== undefined ? { cursor: event.cursor } : {}), now: event.firedAt });
+    } catch (e) {
+        // A revoked `network:` grant (#642) is the owner's choice, not an outage: pause, don't retry against it.
+        if (e instanceof ConnectorNetworkError) return pause(`${pluginId}'s ${e.scope} permission is revoked: grant it at ${page}.`);
+        throw e;
+    }
     if (poll.kind === 'needs-reauth') return pause(reconnect);
 
     const agentId: AgentId = event.agentId;

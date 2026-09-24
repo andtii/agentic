@@ -3,14 +3,14 @@
  * mailbox (`./google.ts`) from its own Durable Object alarm through the PRODUCTION trigger (`connectorTrigger`) — the
  * Registry, the workspace's `ConnectorAccounts` and the engine the sign-in routes built — and starts ONE task per new
  * message for the chosen agent. A re-poll starts no other; a revoked sign-in pauses the entry with an Inbox note;
- * an entry switched off does not poll.
+ * an entry switched off does not poll; a revoked `network:` grant (#642) keeps Gmail from being asked at all.
  */
 import { SELF, env, runDurableObjectAlarm } from 'cloudflare:test';
 import type { AgentId, ScheduleId, WorkspaceId } from '@agentic/core';
 import { AgentActor, Inbox, TaskActor, TaskIndex, Workspace, agentKey, defineScheduleActor, inboxKey, taskIndexKey, taskKey, workspaceKey, type ScheduleView } from '@agentic/platform';
 import { durableObjectName } from '@sigx/actors-cloudflare';
 import { triggeredTaskId } from '../../src/connectors/trigger';
-import { overHttp, registryOverHttp, setAnthropicKey, signIn } from './http';
+import { overHttp, registryOverHttp, setAnthropicKey, signIn, signInElevated } from './http';
 
 const ORIGIN = 'https://agentic.test';
 const Schedule = defineScheduleActor({ trigger: { fired: () => undefined } });
@@ -130,5 +130,18 @@ describe('worker: incoming Gmail starts agent work (#535)', () => {
         expect(after.enabled).toBe(false);
         expect(after.log.filter((l) => l.kind === 'fired')).toHaveLength(1);
         expect((await googleLog()).length).toBe(before);
+    }, TEST_MS);
+
+    it('a revoked network:gmail.googleapis.com grant fences the poll: Gmail is not asked, and the entry pauses naming the scope (#642)', async () => {
+        const { WS, agentId, key, schedule } = await setUp('gh_6421');
+        await schedule.create({ kind: 'agent-task', title: 'New Gmail → Mail', recurrence: { kind: 'at', at: Date.now() + 3_600_000 }, agentId, source: { kind: 'connector', connector: 'gmail' } });
+        await registryOverHttp(WS, await signInElevated('gh_6421')).revoke('gmail', ['network:gmail.googleapis.com']);
+        await deliver('mail9', 'Secret');
+        const before = (await googleLog()).filter((l) => l.includes('gmail.googleapis.com')).length;
+
+        const paused = await pollOnce(schedule, key);
+        expect(paused.enabled).toBe(false);
+        expect(paused.paused?.reason).toContain('network:gmail.googleapis.com permission is revoked: grant it at /plugins/gmail');
+        expect((await googleLog()).filter((l) => l.includes('gmail.googleapis.com')).length).toBe(before);
     }, TEST_MS);
 });

@@ -58,8 +58,9 @@ describe('gate({ connectors })', () => {
     it('the endpoint is the plugin config when the owner changed it there; nothing is asked → no connectors field', async () => {
         await reg().register(acme.manifest, { enabled: true, grant: 'declared' });
         await reg().putConnector(acme.connector);
-        await reg().configure('acme', { url: 'https://mcp2.acme.test/mcp' });
-        expect((await reg().gate({ connectors: ['acme'] })).connectors?.[0]?.url).toBe('https://mcp2.acme.test/mcp');
+        // On the host it declares `network:` for — another host is refused (#642, network-grants.test.ts).
+        await reg().configure('acme', { url: 'https://mcp.acme.test/v2/mcp' });
+        expect((await reg().gate({ connectors: ['acme'] })).connectors?.[0]?.url).toBe('https://mcp.acme.test/v2/mcp');
         expect(await reg().gate({})).not.toHaveProperty('connectors');
     });
 
@@ -86,7 +87,7 @@ describe('a conduit connector (#530)', () => {
         await reg().putConnector({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1' });
         expect(await reg().connectors()).toEqual([expect.objectContaining({ id: 'gmail', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' } })]);
         // A plugin config url is an MCP setting; it never reaches a conduit connector.
-        await reg().configure('gmail', { url: 'https://elsewhere.test/mcp' });
+        await reg().configure('gmail', { url: 'https://unused.test/elsewhere' });
         expect((await reg().gate({ connectors: ['gmail'] })).connectors).toEqual([
             { id: 'gmail', state: 'ready', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' }, toolPolicy: {}, toolsGranted: true, networkHosts: ['unused.test'] }
         ]);
