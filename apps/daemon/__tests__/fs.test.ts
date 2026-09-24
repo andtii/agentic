@@ -430,3 +430,47 @@ describe('fs run (#618)', () => {
         expect(errorOf(await run([node, join(root, 'sleep.js')], root, 1_000))).toBe('timeout');
     }, 30_000);
 });
+
+describe.skipIf(!hasGit)('fs worktree-remove (real git, #623)', () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { windowsHide: true, stdio: 'pipe' });
+    let repo: string;
+    beforeEach(async () => {
+        repo = join(root, 'repo');
+        await mkdir(repo);
+        git(repo, 'init', '-q', '-b', 'main');
+        await writeFile(join(repo, 'README'), 'x');
+        git(repo, 'add', 'README');
+        git(repo, 'commit', '-q', '-m', 'init');
+    });
+    const branchExists = (b: string) => spawnSync('git', ['-C', repo, 'show-ref', '--verify', '--quiet', `refs/heads/${b}`]).status === 0;
+
+    it('removes a clean worktree and, when asked, its merged branch; an unmerged branch stays', async () => {
+        const path = join(root, 'wts', 'chat-1');
+        await ask({ kind: 'worktree', repo, branch: 'chat/1', path });
+        expect(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/1', deleteBranch: true })).toEqual({ result: { kind: 'worktree-remove', path, removed: true, branchDeleted: true } });
+        await expect(stat(path)).rejects.toThrow();
+        expect(branchExists('chat/1')).toBe(false);
+
+        const second = join(root, 'wts', 'chat-2');
+        await ask({ kind: 'worktree', repo, branch: 'chat/2', path: second });
+        await writeFile(join(second, 'work.txt'), 'w');
+        git(second, 'add', 'work.txt');
+        git(second, 'commit', '-q', '-m', 'work');
+        expect(await ask({ kind: 'worktree-remove', repo, path: second, branch: 'chat/2', deleteBranch: true })).toEqual({ result: { kind: 'worktree-remove', path: second, removed: true, branchDeleted: false } });
+        expect(branchExists('chat/2')).toBe(true);
+        // Nothing there any more: nothing to remove, and without deleteBranch the branch is not touched.
+        expect(await ask({ kind: 'worktree-remove', repo, path: second, branch: 'chat/2' })).toEqual({ result: { kind: 'worktree-remove', path: second, removed: false } });
+    }, 60_000);
+
+    it('keeps a dirty worktree, refuses another branch, never the main checkout, and stays inside the roots', async () => {
+        const path = join(root, 'wts', 'chat-3');
+        await ask({ kind: 'worktree', repo, branch: 'chat/3', path });
+        await writeFile(join(path, 'scratch.txt'), 'untracked');
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/3' }))).toBe('dirty');
+        expect(await stat(join(path, 'scratch.txt'))).toBeTruthy();
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path, branch: 'chat/other' }))).toBe('worktree-mismatch');
+        expect(await ask({ kind: 'worktree-remove', repo, path: repo })).toEqual({ result: { kind: 'worktree-remove', path: repo, removed: false } });
+        expect(await stat(join(repo, 'README'))).toBeTruthy();
+        expect(errorOf(await ask({ kind: 'worktree-remove', repo, path: join(outside, 'x') }))).toBe('outside-roots');
+    }, 60_000);
+});

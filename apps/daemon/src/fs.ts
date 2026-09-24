@@ -403,6 +403,54 @@ async function worktrees(op: Extract<FsOp, { kind: 'worktrees' }>, roots: readon
     return { result: { kind: 'worktrees', root: op.root, entries, truncated: listed.length > entries.length } };
 }
 
+/**
+ * Remove the worktree at `path` (#623), never by force: `git status` first, and a worktree with any change (untracked
+ * files too) is `dirty` and stays. A folder that is no worktree of `repo` is `removed: false`; one on another branch
+ * than `branch` is `worktree-mismatch`. With `deleteBranch`, `git branch -d` afterwards — an unmerged branch is kept.
+ */
+async function worktreeRemove(op: Extract<FsOp, { kind: 'worktree-remove' }>, roots: readonly string[], options: Required<Pick<FsOptions, 'git' | 'worktreeTimeoutMs'>> & { platform: NodeJS.Platform }): Promise<FsOutcome> {
+    const { platform, git } = options;
+    const repo = await checkWithinRoots(op.repo, roots, platform);
+    if (!repo.ok) return fail(repo.code, repo.message);
+    if (!(await gitInfo(repo.real))) return fail('not-a-repo', `${op.repo} is not a git repository or worktree`);
+    if (!isAbsolute(op.path) || !withinRoots(op.path, roots, platform)) return fail('outside-roots', `${op.path} is outside the working roots`);
+    if (op.branch?.startsWith('-')) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
+    const path = resolve(op.path);
+    const timeoutMs = Math.min(10_000, options.worktreeTimeoutMs);
+
+    const pruned = await runGit(git, ['-C', repo.real, 'worktree', 'prune'], { timeoutMs });
+    if (pruned.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
+    if (pruned.code === 'timeout') return fail('timeout', 'git worktree prune did not finish');
+    if (pruned.code !== 0) return fail('internal', `git worktree prune failed: ${pruned.stderr}`);
+    const list = await runGit(git, ['-C', repo.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    let at: ListedWorktree | undefined;
+    // The first entry is the main checkout: never removed.
+    for (const w of listed.slice(1)) if (await sameFolder(w.path, path, platform)) at = w;
+
+    let removed = false;
+    if (at) {
+        if (op.branch !== undefined && at.branch !== op.branch) return fail('worktree-mismatch', `${op.path} is the worktree of ${at.branch ? `branch ${at.branch}` : 'a detached HEAD'}, not ${op.branch}`);
+        const checked = await checkWithinRoots(path, roots, platform);
+        if (!checked.ok) return fail(checked.code, checked.message);
+        const status = await runGit(git, ['-C', checked.real, 'status', '--porcelain', '--untracked-files=all'], { timeoutMs });
+        if (status.code === 'timeout') return fail('timeout', 'git status did not finish');
+        if (status.code !== 0) return fail('internal', `git status failed: ${status.stderr}`);
+        if (status.stdout.toString('utf8').trim() !== '') return fail('dirty', `${op.path} has uncommitted changes; it was left as it is`);
+        const gone = await runGit(git, ['-C', repo.real, 'worktree', 'remove', '--', path], { timeoutMs: options.worktreeTimeoutMs });
+        if (gone.code === 'timeout') return fail('timeout', `git worktree remove did not finish within ${options.worktreeTimeoutMs} ms`);
+        if (gone.code !== 0) return /modified or untracked|contains (modified|untracked)|is dirty/i.test(gone.stderr) ? fail('dirty', `${op.path} has uncommitted changes; it was left as it is`) : fail('internal', `git worktree remove failed: ${gone.stderr}`);
+        removed = true;
+    }
+    if (!op.deleteBranch || op.branch === undefined) return { result: { kind: 'worktree-remove', path, removed } };
+    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs });
+    if (known.code !== 0) return { result: { kind: 'worktree-remove', path, removed, branchDeleted: false } };
+    const deleted = await runGit(git, ['-C', repo.real, 'branch', '-d', '--', op.branch], { timeoutMs });
+    return { result: { kind: 'worktree-remove', path, removed, branchDeleted: deleted.code === 0 } };
+}
+
 // ------------------------------------------------------------------- entry
 
 export type FsOutcome = { readonly result: FsResult } | { readonly error: FsError };
@@ -434,6 +482,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
             return { result: await list(checked, env.cwdRoots, platform) };
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
+        if (op.kind === 'worktree-remove') return await worktreeRemove(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
         if (op.kind === 'worktrees') return await worktrees(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
         if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });

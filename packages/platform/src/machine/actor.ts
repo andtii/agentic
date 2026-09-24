@@ -1997,8 +1997,9 @@ export function defineMachineActor(ports: MachinePorts) {
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-                    if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate' || parsed.data.kind === 'run') && (ctx.principal as Principal | null)?.kind !== 'user') {
-                        throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : parsed.data.kind === 'locate' ? 'locate checkouts' : 'run a command'}`);
+                    const ownerOnly = { worktree: 'create a worktree', 'worktree-remove': 'remove a worktree', locate: 'locate checkouts', run: 'run a command' } as const;
+                    if (Object.hasOwn(ownerOnly, parsed.data.kind) && (ctx.principal as Principal | null)?.kind !== 'user') {
+                        throw new ServerFnError(403, `machine: only the owner may ${ownerOnly[parsed.data.kind as keyof typeof ownerOnly]}`);
                     }
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);

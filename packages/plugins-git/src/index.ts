@@ -10,7 +10,7 @@
  * Edge-safe: `@agentic/core` only, no `node:` imports; it runs on the router.
  */
 
-import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeaturePreviewInput, type ProjectFeaturePreviewLine, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureChatReleaseInput, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectFeaturePreviewInput, type ProjectFeaturePreviewLine, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
 import { BRANCH_TOKENS, commandError, expandCommand, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError, type TemplateValues } from './templates.js';
 
 export { BRANCH_TOKENS, COMMAND_TOKENS, commandError, expandCommand, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, splitCommand, templateError, templateTokens } from './templates.js';
@@ -78,6 +78,24 @@ export const gitProjectSettings: ConfigSchema = {
             title: 'Setup commands',
             description: 'Run in order in a worktree agentic just made (never in one it reused), e.g. `npm ci` or `uv sync`; the first failure parks the task.',
             items: { type: 'string' }
+        },
+        worktreeCleanup: {
+            type: 'string',
+            title: 'Remove chat worktrees',
+            description: '`never`: chat worktrees stay until you remove them. `on-chat-leave`: when a chat is moved out of the project, its worktree is removed on every machine that is online — never one with uncommitted changes.',
+            enum: ['never', 'on-chat-leave'],
+            default: 'never'
+        },
+        worktreeDeleteBranch: {
+            type: 'boolean',
+            title: 'Delete the chat branch too',
+            description: "With cleanup on: delete the chat's branch after its worktree, if it is merged (an unmerged branch is kept).",
+            default: false
+        },
+        worktreeRemove: {
+            type: 'string',
+            title: 'Remove command',
+            description: "With cleanup on: the project's own command to remove a chat worktree, run in the project folder, as a template with every folder token plus {path} — e.g. `pnpm wt rm {branchSlug}`. Empty: git worktree remove. A worktree with uncommitted changes is kept either way."
         },
         reuseExisting: {
             type: 'boolean',
@@ -221,6 +239,9 @@ export function gitSettingsErrors(settings: Readonly<Record<string, unknown>>): 
     if (settings['worktreeStrategy'] === 'command' && !create) errors['worktreeCreate'] = 'the command strategy needs a create command';
     const createError = create ? commandError(create) : undefined;
     if (createError) errors['worktreeCreate'] = createError;
+    const remove = templateSetting(settings, 'worktreeRemove');
+    const removeError = remove ? commandError(remove) : undefined;
+    if (removeError) errors['worktreeRemove'] = removeError;
     setupOf(settings).forEach((line, i) => {
         const error = commandError(line);
         if (error) errors[`worktreeSetup.${i}`] = error;
@@ -328,7 +349,7 @@ function run(fs: ProjectFeatureSessionInput['fs'], cwd: string, line: string, va
 }
 
 /** One `run` op; a daemon error or a non-zero exit throws with the tail of its output, so the task parks. */
-async function runArgv(fs: ProjectFeatureSessionInput['fs'], cwd: string, argv: readonly string[], what: 'create' | 'setup'): Promise<void> {
+async function runArgv(fs: ProjectFeatureSessionInput['fs'], cwd: string, argv: readonly string[], what: 'create' | 'setup' | 'remove'): Promise<void> {
     const answer = await fs({ kind: 'run', cwd, argv });
     const command = argv.join(' ');
     if (answer.error) throw new Error(`git worktree ${what} ${answer.error.code}: \`${command}\`: ${answer.error.message}`);
@@ -397,12 +418,46 @@ export function previewGitSettings({ project, settings, folder }: ProjectFeature
     }
 }
 
+/**
+ * A chat left the project (#623): with `worktreeCleanup: 'on-chat-leave'`, its worktree on this environment — the
+ * one `chatWorktreeFor` names, never a worktree the user chose — is removed. Built in through the daemon's
+ * `worktree-remove` (never forced; `worktreeDeleteBranch` then deletes a merged branch), or with the project's own
+ * `worktreeRemove` command after a `git status` shows the worktree clean. A worktree with changes throws `dirty`, so
+ * the audit says why it stayed. Returns what happened, for the audit.
+ */
+async function onChatReleased({ settings, project, chatId, cwd, fs }: ProjectFeatureChatReleaseInput): Promise<string | undefined> {
+    if (settings['worktreePerChat'] !== true || settings['worktreeCleanup'] !== 'on-chat-leave') return undefined;
+    const { branch, path, values } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
+    const deleteBranch = settings['worktreeDeleteBranch'] === true;
+    const command = templateSetting(settings, 'worktreeRemove');
+    if (!command) {
+        const answer = await fs({ kind: 'worktree-remove', repo: cwd, path, branch, deleteBranch });
+        if (answer.error) throw new Error(`git worktree ${answer.error.code}: ${answer.error.message}`);
+        if (answer.result.kind !== 'worktree-remove') throw new Error(`git worktree: the daemon answered with a ${answer.result.kind} result`);
+        const gone = answer.result.removed ? `removed ${path}` : `no worktree at ${path}`;
+        return deleteBranch ? `${gone}; branch ${branch} ${answer.result.branchDeleted ? 'deleted' : 'kept (not merged, or gone)'}` : gone;
+    }
+    const badge = await badgeOf(fs, path);
+    if (badge?.kind !== 'worktree' || badge.branch !== branch) return `no worktree of ${branch} at ${path}`;
+    const status = await fs({ kind: 'run', cwd: path, argv: ['git', 'status', '--porcelain', '--untracked-files=all'] });
+    if (status.error) throw new Error(`git worktree ${status.error.code}: ${status.error.message}`);
+    if (status.result.kind !== 'run' || status.result.exitCode !== 0) throw new Error(`git worktree: git status failed in ${path}`);
+    if (status.result.stdoutTail.trim() !== '') throw new Error(`git worktree dirty: ${path} has uncommitted changes; it was left as it is`);
+    const argv = expandCommand(command, values);
+    await runArgv(fs, cwd, argv, 'remove');
+    const by = `removed ${path} with \`${argv.join(' ')}\``;
+    if (!deleteBranch) return by;
+    const deleted = await fs({ kind: 'run', cwd, argv: ['git', 'branch', '-d', '--', branch] });
+    return `${by}; branch ${branch} ${deleted.result?.kind === 'run' && deleted.result.exitCode === 0 ? 'deleted' : 'kept (not merged)'}`;
+}
+
 /** The git feature: `detect` on the git badge, `instructions` from the settings, `beforeSession` the worktree per chat. */
 export const gitFeaturePlugin: ProjectFeaturePlugin = {
     manifest: gitFeatureManifest,
     detect: (folder) => folder.git !== undefined,
     instructions: instructionsOf,
     beforeSession,
+    onChatReleased,
     presets: GIT_PRESETS,
     settingsErrors: gitSettingsErrors,
     previewSettings: previewGitSettings
