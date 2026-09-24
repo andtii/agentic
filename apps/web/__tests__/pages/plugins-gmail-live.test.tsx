@@ -1,9 +1,9 @@
 /**
- * `/plugins/gmail` over the real wire (#533): the plugin page of a conduit connector draws its sign-in panel — the
- * redirect URI with Copy, the account's status from the workspace's `ConnectorAccounts`, Connect / Reconnect /
- * Disconnect, what agents can do (AGT-09) and the "Testing" consent screen's 7-day note — and offers no field for
- * the engine secret it generates itself. The status follows the account live: an account whose refresh Google
- * refused (`needsReauth`) shows Reconnect.
+ * `/plugins/gmail` over the real wire (#533, #640): the plugin page of a conduit connector draws its Account panel —
+ * who is signed in and since when, where the OAuth client comes from, the redirect URI with Copy until an account is
+ * connected, Connect / Reconnect / Sign out and the "Testing" consent screen's 7-day note — and its Tools panel lists
+ * what agents can do (AGT-09, PLG-09); it offers no field for the engine secret it generates itself. The status
+ * follows the account live: an account whose refresh Google refused (`needsReauth`) shows Reconnect.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { WorkspaceId } from '@agentic/core';
@@ -43,7 +43,7 @@ async function connected(status: StoredAccount['status']): Promise<void> {
 }
 
 describe('/plugins/gmail (live)', () => {
-    it('before anything is set up: the redirect URI, what is missing, what agents can do, the 7-day note — and no engine-secret field', async () => {
+    it('before anything is set up: the redirect URI, what is missing, the tools agents get, the 7-day note — and no engine-secret field', async () => {
         const dom = await mountLive('/plugins/gmail', h);
         await until(() => stateOf(dom) === 'not-connected', 'the panel');
         const p = panel(dom)!;
@@ -52,7 +52,10 @@ describe('/plugins/gmail (live)', () => {
         expect(text(p)).toContain('NOT CONNECTED');
         expect(buttonNamed(p, 'Connect').disabled).toBe(true);
         expect(text(p.querySelector('[data-connect-blocker]'))).toBe('Turn Gmail on first (the switch above).');
-        expect([...p.querySelectorAll('[data-operation]')].map((li) => li.getAttribute('data-operation'))).toEqual(['send-email', 'create-draft', 'reply-to-message', 'search-messages', 'get-message', 'get-thread', 'get-attachment', 'modify-labels', 'trash-message']);
+        expect(text(p.querySelector('[data-account-row="client"] dd'))).toBe('not saved yet — add it under Keys');
+        // What agents can do is the Tools panel: every tool the manifest declares, in its order, at its default mode.
+        await until(() => dom.querySelectorAll('#tools [data-tool-policy]').length === 9, 'the tools');
+        expect([...dom.querySelectorAll('#tools [data-tool-policy]')].map((row) => row.getAttribute('data-tool-policy'))).toEqual(['gmail__send-email', 'gmail__create-draft', 'gmail__reply-to-message', 'gmail__search-messages', 'gmail__get-message', 'gmail__get-thread', 'gmail__get-attachment', 'gmail__modify-labels', 'gmail__trash-message']);
         // The new-email trigger runs by polling (#535): no "Not yet" line.
         expect(p.querySelector('[data-connect-unsupported]')).toBeNull();
         expect(text(p.querySelector('[data-connect-testing]'))).toContain('expire after 7 days');
@@ -62,10 +65,11 @@ describe('/plugins/gmail (live)', () => {
 
         // On, then the client saved: Connect is offered without a reload.
         await registry().enable('gmail');
-        await until(() => text(panel(dom)?.querySelector('[data-connect-blocker]')).startsWith('Save the OAuth client ID and OAuth client secret'), 'the missing keys');
+        await until(() => text(panel(dom)?.querySelector('[data-connect-blocker]')) === 'Save the OAuth client ID and OAuth client secret under Keys first.', 'the missing keys');
         await registry().setSecret('gmail-client-id', 'cid');
         await registry().setSecret('gmail-client-secret', 'cs');
         await until(() => !panel(dom)?.querySelector('[data-connect-blocker]') && !buttonNamed(panel(dom)!, 'Connect').disabled, 'Connect enabled');
+        expect(text(panel(dom)!.querySelector('[data-account-row="client"] dd'))).toBe('your own · stored as two secrets');
     }, 20_000);
 
     it('an account whose sign-in expired shows Reconnect; renewed, it shows who is connected', async () => {
@@ -76,14 +80,17 @@ describe('/plugins/gmail (live)', () => {
         expect(text(p)).toContain('NEEDS RECONNECTING');
         expect(text(p.querySelector('[data-connect-text]'))).toContain('owner@example.com expired or was revoked');
         expect(buttonNamed(p, 'Reconnect').disabled).toBe(false);
-        expect(buttonNamed(p, 'Disconnect').disabled).toBe(false);
+        expect(buttonNamed(p, 'Sign out').disabled).toBe(false);
         expect([...p.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Connect')).toBe(false);
         // Never a credential on the page.
         expect(dom.innerHTML).not.toContain('NOT-A-TOKEN');
 
         await accounts().updateAccount({ ...account('active'), version: 2 }, 1);
         await until(() => stateOf(dom) === 'active', 'the account to read active');
-        expect(text(panel(dom)!.querySelector('[data-connect-text]'))).toContain('Connected as owner@example.com');
+        // Signed in as whom, and since when; the redirect URI is setup, so it goes once an account is connected.
+        expect(text(panel(dom)!.querySelector('[data-connect-text]'))).toBe('owner@example.com');
+        expect(text(panel(dom)!.querySelector('[data-account-row="signed-in"] [data-account-meta]'))).toBe('connected 1 Jan');
+        expect(panel(dom)!.querySelector('[data-connect-redirect]')).toBeNull();
     }, 20_000);
 
     it('a failed sign-in says why when the routes send the owner back', async () => {
@@ -92,7 +99,7 @@ describe('/plugins/gmail (live)', () => {
         expect(text(panel(dom)!.querySelector('[role="alert"]'))).toBe('Connecting failed: authorization was not granted: access_denied');
     });
 
-    it('Connect goes to the start route; Disconnect posts to the disconnect route', async () => {
+    it('Reconnect goes to the start route; Sign out posts to the disconnect route', async () => {
         await connected('active');
         const plugin = (await registry().get('gmail')) as PluginView;
         const went: string[] = [];
@@ -111,8 +118,8 @@ describe('/plugins/gmail (live)', () => {
         await until(() => stateOf(dom) === 'active', 'the account');
         buttonNamed(panel(dom)!, 'Reconnect').click();
         expect(went).toEqual(['/_agentic/connectors/gmail/start']);
-        buttonNamed(panel(dom)!, 'Disconnect').click();
-        await until(() => text(panel(dom)!.querySelector('[role="status"]')) === 'Disconnected.', 'the notice');
+        buttonNamed(panel(dom)!, 'Sign out').click();
+        await until(() => text(panel(dom)!.querySelector('[role="status"]')) === 'Signed out.', 'the notice');
         expect(posted).toEqual(['/_agentic/connectors/gmail/disconnect']);
     });
 });

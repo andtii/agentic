@@ -1,1 +1,60 @@
-/* /plugins redesign (#625): detail — owned by its page issue. */
+/* /plugins redesign (#625): detail — owned by its page issue (#640), board `PluginDetail`. */
+@import '@agentic/ui/css/breakpoints';
+
+/* The page: the header, then the panels beside a 360 px rail. */
+[data-plugin-detail] { gap: var(--space-xl); max-inline-size: none; }
+
+/* Header: 52 px tile, name 24 / 600 + mono version, kind and transport tags beside the description, readiness and switch right. */
+[data-plugin-detail] [data-plugin-detail-head] { align-items: center; gap: var(--space-lg); }
+[data-plugin-detail] [data-plugin-detail-title] { flex-grow: 1; gap: 6px; }
+[data-plugin-detail] [data-plugin-detail-name] { align-items: center; gap: 10px; font-family: inherit; font-size: 24px; line-height: 1.2; }
+[data-plugin-detail] [data-plugin-detail-version] { font-family: var(--font-mono); font-size: var(--text-md); }
+[data-plugin-detail] [data-plugin-detail-tags] { gap: var(--space-sm); }
+[data-plugin-detail] [data-plugin-detail-description] { font-size: var(--text-md); }
+[data-plugin-detail-status] { display: flex; align-items: center; gap: var(--space-lg); flex: none; }
+
+[data-plugin-detail-grid] { display: grid; grid-template-columns: minmax(0, 1fr) 360px; column-gap: 28px; row-gap: var(--space-lg); align-items: start; }
+[data-plugin-detail-main], [data-plugin-detail-rail] { display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
+[data-plugin-detail] [data-plugin-panel] { padding: 20px; gap: 10px; }
+
+/* A panel's label with a caption on the right (Tools). */
+[data-plugin-panel-head] { display: flex; align-items: center; gap: var(--space-sm); }
+[data-plugin-panel-caption] { margin-inline-start: auto; font-size: var(--text-xs); color: var(--ag-text-dim); text-align: end; }
+[data-tool-list] { display: flex; flex-direction: column; }
+
+/* Account: 150 px label column, one row per fact, divided by `line`. */
+[data-account-rows] { margin: 0; display: flex; flex-direction: column; }
+[data-account-rows] > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); column-gap: var(--space-lg); align-items: center; padding-block: 12px; border-block-end: var(--border) solid var(--ag-line); }
+[data-account-rows] dt { font-size: var(--text-sm); color: var(--ag-text-dim); }
+[data-account-rows] dd { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); min-inline-size: 0; font-size: var(--text-md); overflow-wrap: anywhere; }
+[data-account-rows] dd > [data-plugin-hint] { flex-basis: 100%; margin: 0; }
+[data-account-meta] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-plugin-detail] [data-connect-text] { color: inherit; }
+
+/* Granted: the scope in mono (260 px), its reason, and Revoke / Grant as a link. */
+[data-plugin-detail] [data-permission-list] li { display: flex; align-items: center; gap: 10px; padding-block: 9px; }
+[data-plugin-detail] [data-permission-list] li:last-child { border-block-end: var(--border) solid var(--ag-line); }
+[data-plugin-detail] [data-permission-scope] { inline-size: 260px; flex: none; font-size: var(--text-sm); }
+[data-plugin-detail] [data-permission-declared] [data-permission-scope] { padding-inline-start: 24px; }
+[data-plugin-detail] [data-permission-reason] { flex-grow: 1; min-inline-size: 0; font-size: var(--text-sm); color: var(--ag-text-dim); }
+[data-permission-action] { flex: none; padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-sm); color: var(--color-primary); text-decoration: underline; cursor: pointer; }
+[data-permission-action]:hover { color: var(--ag-link-hover); }
+[data-permission-action]:disabled { color: var(--ag-text-dim); cursor: default; }
+
+/* Used by: agent tiles with the name over the mono line saying how, then the note. */
+[data-plugin-detail-rail] [data-dependent-list] li { gap: 10px; border-block-end: 0; padding-block: var(--space-xs); }
+[data-dependent-name] { display: flex; flex-direction: column; min-inline-size: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+[data-plugin-detail-rail] [data-dependent-via] { margin-inline-start: 0; font-weight: var(--weight-normal); }
+[data-dependent-icon] { display: grid; place-items: center; inline-size: 28px; block-size: 28px; flex: none; color: var(--ag-text-muted); }
+[data-plugin-detail-rail] [data-plugin-hint], [data-plugin-detail-rail] [data-plugin-consequence] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-dim); text-wrap: pretty; }
+[data-plugin-detail-rail] [data-plugin-consequence] { color: var(--ag-text-muted); }
+
+/* Remove: the `failed` border and label; the consequence and every dependent before the button. */
+[data-plugin-detail-rail] [data-plugin-panel="remove"] { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; }
+[data-plugin-detail-rail] [data-plugin-panel="remove"][data-plugin-action] { border-color: color-mix(in oklab, var(--color-error) 27%, transparent); }
+[data-plugin-panel="remove"][data-plugin-action] [data-label] { color: var(--color-error) !important; }
+[data-remove-dependents] { margin: 0; padding-inline-start: var(--space-lg); font-size: var(--text-sm); color: var(--ag-text-muted); }
+
+@media (--below-xl) {
+    [data-plugin-detail-grid] { grid-template-columns: minmax(0, 1fr); }
+}
