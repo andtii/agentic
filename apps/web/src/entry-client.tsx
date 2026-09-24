@@ -3,6 +3,7 @@ import '@agentic/ui/css';
 import '@agentic/ui/shell.css';
 import './styles.css';
 import './styles/pages.css';
+import './styles/plugins.css';
 // Empty at runtime: augments `@sigx/zero`'s vocabulary with the theme, properties and per-scope axes.
 import '@agentic/ui/register';
 import { defineApp } from 'sigx';
