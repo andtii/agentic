@@ -7,7 +7,7 @@
  * (`sessionHead`), as the Transcript page does.
  */
 import { component, effect, onUnmounted, type Define, type JSXElement } from 'sigx';
-import { Link, useRouter } from '@sigx/router';
+import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { createId, type TaskId } from '@agentic/core';
@@ -20,7 +20,7 @@ import { agentNamed, loadSession, type MockSessionView } from '../../mock/worksp
 import { useWorkspaceZone, zoneFormat } from '../../time';
 import { useAgentDirectory } from '../chat/directory';
 import type { AgentIdentity } from '../chat/live';
-import type { SessionFiles } from './files';
+import { filesAtRoot, queryOf, type SessionFiles } from './files';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
 import { askInChat, liveEditedBy, mockChatHooks } from './chat-hooks';
 import { liveSessionFiles, machineClientFor, mockSessionFiles, useLiveFilesExtras } from './files-sources';
@@ -51,12 +51,15 @@ const Missing = (props: { title: string; page: string; id: string; caption?: str
 
 export const SessionFrame = component<SessionFrameProps>(({ props }) => {
     const router = useRouter();
+    const route = useRoute();
+    // `?root=` opens another worktree of the repo for a look (#622); the session stays in its own.
+    const render = (ctx: SessionFrameContext): JSXElement => props.render({ ...ctx, files: filesAtRoot(ctx.files, queryOf(route.query.root)) });
     return () => {
-        if (dataMode() === 'live') return <LiveSessionFrame id={props.id} title={props.title} page={props.page} render={props.render} />;
+        if (dataMode() === 'live') return <LiveSessionFrame id={props.id} title={props.title} page={props.page} render={render} />;
         const v = loadSession(props.id);
         if (!v) return <Missing title={props.title} page={props.page} id={props.id} />;
         const agent = agentNamed(v.agentId);
-        return props.render({ v, agent, files: mockSessionFiles(v, mockChatHooks(v, agent, (href) => { void router.push(href); })) });
+        return render({ v, agent, files: mockSessionFiles(v, mockChatHooks(v, agent, (href) => { void router.push(href); })) });
     };
 });
 

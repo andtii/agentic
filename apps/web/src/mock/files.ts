@@ -8,7 +8,7 @@
  * sample: three uncommitted files and two commits ahead of main.
  */
 import { diffLines } from '@agentic/ui';
-import type { ChangeCommit, ChangedFile, ChangeScope, ChangeSet, FileChangeStatus, FsReadRev, FsTreeEntry, WorkspaceAnswer, WorkspaceSource } from '@agentic/core';
+import type { ChangeCommit, ChangedFile, ChangeScope, ChangeSet, FileChangeStatus, FsReadRev, FsTreeEntry, FsWorktreesResult, WorkspaceAnswer, WorkspaceSource } from '@agentic/core';
 
 /** One file of a folder model: its text per revision; `null` (or absent) where it does not exist. */
 export interface MemoryFile {
@@ -303,4 +303,19 @@ export function mockSessionFolder(cwd: string): MemoryFolder | undefined {
     if (!cwd || cwd === '—') return undefined;
     if (cwd.endsWith('47-mobile-drawer')) return AGENTIC_47;
     return AGENTIC_MAIN;
+}
+
+/** The mock repository's worktrees (#622): `main`, the #47 branch, and a spike outside the working roots. */
+const AGENTIC_WORKTREES = [
+    { path: 'C:\\Dev\\agentic\\main', branch: 'main', head: '5572a6c' },
+    { path: 'C:\\Dev\\agentic\\branches\\47-mobile-drawer', branch: '47-mobile-drawer', head: '9c1e2d4' },
+    { path: 'D:\\spikes\\agentic-drawer', head: '1f0a9b3', detached: true as const, outside: true as const }
+];
+
+/** The worktrees of the mock repo a session folder is in, the one it is in marked `current`; `undefined` outside it. */
+export function mockWorktrees(root: string): WorkspaceAnswer<FsWorktreesResult> | undefined {
+    const fold = (p: string): string => p.toLowerCase().replace(/[\\/]+$/, '');
+    if (!fold(root).startsWith('c:\\dev\\agentic\\')) return undefined;
+    const entries = AGENTIC_WORKTREES.map((w) => (fold(root) === fold(w.path) || fold(root).startsWith(`${fold(w.path)}\\`) ? { ...w, current: true as const } : w));
+    return { result: { kind: 'worktrees', root, entries, truncated: false } };
 }

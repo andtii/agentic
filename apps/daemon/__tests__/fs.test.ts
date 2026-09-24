@@ -355,10 +355,44 @@ describe.skipIf(!hasGit)('fs worktree (real git)', () => {
     }, 60_000);
 });
 
+describe.skipIf(!hasGit)('fs worktrees (real git, #622)', () => {
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { windowsHide: true, stdio: 'pipe' });
+
+    it('lists every worktree of the repo, the one root is in marked current, one outside the roots marked outside', async () => {
+        const repo = join(root, 'repo');
+        await mkdir(repo);
+        git(repo, 'init', '-q', '-b', 'main');
+        await writeFile(join(repo, 'README'), 'x');
+        git(repo, 'add', 'README');
+        git(repo, 'commit', '-q', '-m', 'init');
+        const wt = join(root, 'wts', 'feat');
+        git(repo, 'worktree', 'add', '-q', '-b', 'feat', wt);
+        const away = join(outside, 'away');
+        git(repo, 'worktree', 'add', '-q', '--detach', away);
+        git(repo, 'worktree', 'lock', wt);
+        await mkdir(join(wt, 'src'));
+
+        const outcome = await ask({ kind: 'worktrees', root: join(wt, 'src') });
+        if (!('result' in outcome) || outcome.result.kind !== 'worktrees') throw new Error(JSON.stringify(outcome));
+        const byPath = new Map(await Promise.all(outcome.result.entries.map(async (e) => [await realpath(e.path).catch(() => e.path), e] as const)));
+        expect(outcome.result).toMatchObject({ root: join(wt, 'src'), truncated: false });
+        expect(outcome.result.entries).toHaveLength(3);
+        expect(byPath.get(await realpath(repo))).toMatchObject({ branch: 'main', head: expect.stringMatching(/^[0-9a-f]{7}$/) });
+        expect(byPath.get(await realpath(repo))).not.toHaveProperty('current');
+        expect(byPath.get(await realpath(wt))).toMatchObject({ branch: 'feat', locked: true, current: true });
+        expect(byPath.get(await realpath(away))).toMatchObject({ detached: true, outside: true });
+        expect(byPath.get(await realpath(away))).not.toHaveProperty('branch');
+
+        expect(errorOf(await ask({ kind: 'worktrees', root: outside }))).toBe('outside-roots');
+        await mkdir(join(root, 'plain'));
+        expect(errorOf(await ask({ kind: 'worktrees', root: join(root, 'plain') }))).toBe('not-a-repo');
+    }, 60_000);
+});
+
 describe('parseWorktreeList (#618)', () => {
     it('reads porcelain -z records: a branch, a detached HEAD, a bare repo', () => {
-        const out = ['worktree /r', 'HEAD abc', 'branch refs/heads/main', '', 'worktree /w', 'HEAD def', 'detached', '', 'worktree /b', 'bare', '', ''].join('\0');
-        expect(parseWorktreeList(out)).toEqual([{ path: '/r', branch: 'main' }, { path: '/w' }, { path: '/b' }]);
+        const out = ['worktree /r', 'HEAD abc', 'branch refs/heads/main', '', 'worktree /w', 'HEAD def', 'detached', 'locked reason', 'prunable gitdir file points to non-existent location', '', 'worktree /b', 'bare', '', ''].join('\0');
+        expect(parseWorktreeList(out)).toEqual([{ path: '/r', head: 'abc', branch: 'main' }, { path: '/w', head: 'def', detached: true, locked: true, prunable: true }, { path: '/b' }]);
         expect(parseWorktreeList('')).toEqual([]);
     });
 });
