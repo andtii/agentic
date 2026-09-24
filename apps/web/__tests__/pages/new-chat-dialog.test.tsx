@@ -77,6 +77,7 @@ describe('New chat (#315)', () => {
         await create();
         expect(created).toEqual([]);
         expect(document.querySelector('[data-new-chat-required]')!.textContent).toBe('Pick at least one agent.');
+        expect(document.querySelector('[data-new-chat-required]')!.getAttribute('role')).toBe('alert');
         await pick('forge');
         expect(card('forge').hasAttribute('data-picked')).toBe(true);
         expect(card('forge').querySelector('input[name="coordinator"]')).toBeNull();
@@ -271,5 +272,30 @@ describe('New chat on a machine (#414)', () => {
         await bare.pick('forge');
         await bare.create();
         expect(bare.created).toEqual([{ agentIds: ['forge'], coordinator: null, projectId: null, machineId: null }]);
+    });
+
+    it('is a form dialog whose zero controls post under the names the hand-made inputs had (#592)', async () => {
+        const d = await open({ machines: [MAC, PC], lastMachineId: 'm_mac', agents: withAccounts, prefill: { environmentId: 'env_nowhere' as EnvironmentId, path: '/tmp/thing' } });
+        await d.pick('forge');
+        const form = document.querySelector<HTMLFormElement>('form[data-form-dialog]')!;
+        expect(form.closest('[data-scope="dialog"][data-part="popup"]')!.getAttribute('role')).not.toBe('alertdialog');
+        // The machine and the folder choice are zero RadioGroups: one checked radio each, under the old names.
+        expect([...form.querySelectorAll('[data-new-chat-machine] [role="radiogroup"], [data-new-chat-prefill-choice] [role="radiogroup"]')]).toHaveLength(2);
+        const pc = form.querySelector<HTMLInputElement>('input[name="chat-machine"][value="m_pc"]')!;
+        pc.click();
+        await tick();
+        const project = form.querySelector<HTMLInputElement>('input[name="chat-prefill-mode"][value="project"]')!;
+        project.click();
+        await tick();
+        const fd = new FormData(form);
+        expect(fd.getAll('member')).toEqual(['forge']);
+        expect(fd.getAll('chat-machine')).toEqual(['m_pc']);
+        expect(fd.getAll('chat-prefill-mode')).toEqual(['project']);
+        // The submit button names the consequence; submitting hands the folder to the project form.
+        const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        expect(submit.textContent?.trim()).toBe('Create project');
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await tick();
+        expect(d.projectsRequested).toEqual([{ environmentId: 'env_nowhere', path: '/tmp/thing' }]);
     });
 });

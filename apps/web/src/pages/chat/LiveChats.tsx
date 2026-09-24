@@ -12,7 +12,7 @@ import { useActorState } from '@sigx/actors/app';
 import { useRoute, useRouter } from '@sigx/router';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
 import { projectFolderFor, type AgentId, type EnvironmentId, type MachineId, type ProjectId, type ProjectRecord } from '@agentic/core';
-import { EmptyState } from '@agentic/ui';
+import { EmptyState, ErrorNote } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { chatKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -216,7 +216,7 @@ export const LiveChats = component(() => {
             {!viewer.pending && !viewer.workspaceId
                 ? <EmptyState variant="generic" title="Sign in to see your chats" caption="Chats belong to your workspace." />
                 : <LiveChatList wide directory={directory} onNewChat={openNewChat} />}
-            {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+            {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             <NewChatDialog
                 model={() => newChatRequest.open}
                 agents={directory.all()}

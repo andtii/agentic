@@ -17,7 +17,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Tabs } from '@sigx/zero-daisyui/components';
 import type { AgentConfig, AgentConfigVersion, MemoryEntry } from '@agentic/core';
-import { AgentTile, Button, EmptyState, EnvironmentLine, StatusPill } from '@agentic/ui';
+import { AgentTile, Button, EmptyState, EnvironmentLine, ErrorNote, StatusPill } from '@agentic/ui';
 import { Col, Row } from '@sigx/zero';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -168,7 +168,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                         <Button intent="primary" icon="plus" onClick={() => openStartTask(id)}>Start task</Button>
                     </Row>
                 </header>
-                {st.error ? <p data-agent-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-agent-error="">{st.error}</ErrorNote> : null}
                 <Tabs model={() => st.tab}>
                     <Tabs.List>
                         <Tabs.Tab value="overview">Overview</Tabs.Tab>

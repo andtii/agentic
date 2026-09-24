@@ -41,8 +41,7 @@ pre > code { padding: 0; background: none; }
 /* a routed page's subtitle */
 [data-page-subtitle] { color: var(--ag-text-muted); }
 
-/* the sidebar's connection strip and user rows (replaced by @agentic/ui's parts in #87) */
-[data-user-avatar] { display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; border-radius: 9999px; background: var(--color-base-300); border: 1px solid var(--ag-line-strong); font-family: var(--font-mono); font-size: var(--text-xs); }
+/* the sidebar's user row: the avatar is zero's Avatar (#592), the name here */
 [data-user-name] { display: flex; flex-direction: column; gap: var(--space-2xs); }
 [data-user-name] > small { font-family: var(--font-mono); font-size: var(--text-xs); font-weight: var(--weight-normal); color: var(--ag-text-dim); }
 

@@ -1,8 +1,13 @@
 import { component, signal, type Define } from 'sigx';
-import { ConfirmDialog } from '@agentic/ui';
+import { Select } from '@sigx/zero';
+import { Checkbox, Field } from '@sigx/zero-daisyui/components';
+import { FormDialog, TextField } from '@agentic/ui';
 import type { MockChatMember } from '../../mock/workspace';
 import type { AgentLookup } from './live';
 import type { MachineEntry } from '../ops/environments';
+
+/** The coordinator's "None" and the machine's "No particular machine" as Select items: never an agent or machine id. */
+export const NONE = '*';
 
 /** What the dialog's confirm asks for — only what changed. */
 export interface ChatSettingsChange {
@@ -53,58 +58,74 @@ export function settingsChange(current: { title: string; coordinator: string | n
  * who is in the chat — adding a member is the context panel's "Add agent",
  * where history access is asked (CHT-04); leaving is here. The page mounts
  * it while it is open, so the form starts from the chat each time.
+ *
+ * A form on the kit `FormDialog` (#592): the title posts as `title` and each
+ * member ticked for removal as `remove`, as before; the coordinator and the
+ * machine are zero Selects that post nothing. Their "None" and "No
+ * particular machine" are items of their own (`NONE`), since zero's Select
+ * keeps `null` for "nothing chosen" and offers no way back to it.
  */
 export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, emit }) => {
     const coordinatorOf = (): string => props.members.find((m) => m.coordinator)?.agentId ?? '';
-    const st = signal({ title: props.title, coordinator: coordinatorOf(), remove: [] as string[], machineId: props.machineId ?? '' });
-    const machineChanged = (): boolean => st.machineId !== (props.machineId ?? '');
-    const toggle = (id: string, on: boolean): void => {
-        st.remove = on ? [...new Set([...st.remove, id])] : st.remove.filter((r) => r !== id);
+    const st = signal({ title: props.title, coordinator: (coordinatorOf() || NONE) as string | null, remove: [] as string[], machineId: (props.machineId || NONE) as string | null });
+    /** A Select's pick as `settingsChange` reads it: `''` for none. */
+    const picked = (v: string | null): string => (v && v !== NONE ? v : '');
+    const machineChanged = (): boolean => picked(st.machineId) !== (props.machineId ?? '');
+    const save = (): void => {
+        const form = { title: st.title, coordinator: picked(st.coordinator), remove: st.remove, machineId: picked(st.machineId) };
+        emit('save', settingsChange({ title: props.title, coordinator: coordinatorOf() || null, machineId: props.machineId ?? '' }, form));
     };
-    return () => (
-        <ConfirmDialog
-            model={props.model}
-            title="Chat settings"
-            description="Rename the chat, choose who answers when nobody is mentioned, move it to another machine, or take an agent out of it."
-            confirmLabel="Save settings"
-            danger={false}
-            busy={props.busy}
-            onConfirm={() => emit('save', settingsChange({ title: props.title, coordinator: coordinatorOf() || null, machineId: props.machineId ?? '' }, st))}
-            onCancel={() => emit('cancel')}
-        >
-            <label data-new-chat-coordinator data-chat-settings-title>
-                <span>Title</span>
-                <input type="text" name="title" maxLength={120} placeholder="Titled by its members" data-scope="input" data-part="input" value={st.title} onInput={(e: Event) => { st.title = (e.target as HTMLInputElement).value; }} />
-            </label>
-            <label data-new-chat-coordinator data-chat-settings-coordinator>
-                <span>Coordinator</span>
-                <select data-scope="select" data-part="select" value={st.coordinator} onChange={(e: Event) => { st.coordinator = (e.target as HTMLSelectElement).value; }}>
-                    <option value="">None</option>
-                    {props.members.filter((m) => !st.remove.includes(m.agentId)).map((m) => <option value={m.agentId}>{props.lookup(m.agentId).name}</option>)}
-                </select>
-            </label>
-            {props.machines?.length ? (
-                <label data-new-chat-coordinator data-chat-settings-machine>
-                    <span>Machine</span>
-                    <select data-scope="select" data-part="select" value={st.machineId} onChange={(e: Event) => { st.machineId = (e.target as HTMLSelectElement).value; }}>
-                        <option value="">No particular machine</option>
-                        {props.machines.map((m) => <option value={m.id}>{m.name}{m.online ? '' : ' (offline)'}</option>)}
-                    </select>
-                    {machineChanged() ? <span data-chat-settings-machine-note role="status">Each member starts a fresh session {st.machineId ? `on ${props.machines.find((m) => m.id === st.machineId)?.name ?? st.machineId}` : 'where it runs next'} at its next message; work in flight finishes where it runs; the chat's history stays.</span> : null}
-                </label>
-            ) : null}
-            <fieldset data-new-chat-members data-chat-settings-remove>
-                <legend>Remove from this chat</legend>
-                {props.members.length ? props.members.map((m) => {
-                    const a = props.lookup(m.agentId);
-                    return (
-                        <label>
-                            <input type="checkbox" name="remove" value={m.agentId} checked={st.remove.includes(m.agentId)} onChange={(e: Event) => toggle(m.agentId, (e.target as HTMLInputElement).checked)} />
-                            {' '}{a.name}{a.role ? <span data-member-role> · {a.role}</span> : null}
-                        </label>
-                    );
-                }) : <p data-panel-note>Nobody is in this chat yet.</p>}
-            </fieldset>
-        </ConfirmDialog>
-    );
+    return () => {
+        const machineId = picked(st.machineId);
+        return (
+            <FormDialog
+                model={props.model}
+                title="Chat settings"
+                description="Rename the chat, choose who answers when nobody is mentioned, move it to another machine, or take an agent out of it."
+                submitLabel="Save settings"
+                busy={props.busy}
+                onSubmit={save}
+                onCancel={() => emit('cancel')}
+            >
+                <div data-new-chat-coordinator data-chat-settings-title>
+                    <TextField model={() => st.title} name="title" label="Title" maxlength={120} placeholder="Titled by its members" />
+                </div>
+                <div data-new-chat-coordinator data-chat-settings-coordinator>
+                    <Field.Root>
+                        <Field.Label>Coordinator</Field.Label>
+                        <Select.Root
+                            model={() => st.coordinator}
+                            items={[NONE, ...props.members.filter((m) => !st.remove.includes(m.agentId)).map((m) => m.agentId)]}
+                            itemLabel={(id) => (id === NONE ? 'None' : props.lookup(id).name)}
+                        />
+                    </Field.Root>
+                </div>
+                {props.machines?.length ? (
+                    <div data-new-chat-coordinator data-chat-settings-machine>
+                        <Field.Root>
+                            <Field.Label>Machine</Field.Label>
+                            <Select.Root
+                                model={() => st.machineId}
+                                items={[{ id: NONE, name: 'No particular machine', online: true }, ...props.machines]}
+                                itemValue={(m) => m.id}
+                                itemLabel={(m) => `${m.name}${m.online ? '' : ' (offline)'}`}
+                            />
+                        </Field.Root>
+                        {machineChanged() ? <span data-chat-settings-machine-note role="status">Each member starts a fresh session {machineId ? `on ${props.machines.find((m) => m.id === machineId)?.name ?? machineId}` : 'where it runs next'} at its next message; work in flight finishes where it runs; the chat's history stays.</span> : null}
+                    </div>
+                ) : null}
+                <fieldset data-new-chat-members data-chat-settings-remove>
+                    <legend>Remove from this chat</legend>
+                    {props.members.length ? props.members.map((m) => {
+                        const a = props.lookup(m.agentId);
+                        return (
+                            <Checkbox.Root model={() => st.remove} name="remove" value={m.agentId}>
+                                {a.name}{a.role ? <span data-member-role> · {a.role}</span> : null}
+                            </Checkbox.Root>
+                        );
+                    }) : <p data-panel-note>Nobody is in this chat yet.</p>}
+                </fieldset>
+            </FormDialog>
+        );
+    };
 });

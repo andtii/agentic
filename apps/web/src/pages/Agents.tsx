@@ -1,10 +1,10 @@
 import { component, useHead } from 'sigx';
-import { Link } from '@sigx/router';
 import { AgentTile, Button, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
 import { Col, Row, Stack } from '@sigx/zero';
 import { agentProfiles, type AgentProfile } from '../mock/agents';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
+import { AgentCardLink } from './agent/AgentCardLink';
 import { openNewAgent } from './agent/head';
 import { LiveAgents } from './agent/LiveAgents';
 
@@ -38,7 +38,7 @@ export const Agents = component(() => {
                             const pill = presencePill(p.presence);
                             return (
                                 <li data-agent-card={p.id}>
-                                    <Link to={`/agents/${p.id}`} class="agent-card">
+                                    <AgentCardLink to={`/agents/${p.id}`}>
                                         <Row gap="md" align="center">
                                             <AgentTile name={p.config.name} hue={p.hue} size={44} />
                                             <Stack.Item grow>
@@ -61,7 +61,7 @@ export const Agents = component(() => {
                                             <div><dd>{p.memories.length}</dd><dt>memories</dt></div>
                                             <div><dd>{p.correctionsThisWeek}</dd><dt>corrections / wk</dt></div>
                                         </dl>
-                                    </Link>
+                                    </AgentCardLink>
                                 </li>
                             );
                         })}

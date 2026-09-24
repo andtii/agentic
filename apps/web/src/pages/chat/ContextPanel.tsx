@@ -1,7 +1,10 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { memberWindows, type AccountRef, type EnvironmentId, type ProjectRecord, type QuotaWindow, type RuntimeId, type SessionOptionsPatch, type WorkdirRef } from '@agentic/core';
-import { AgentTile, Button, ConfirmDialog, EnvironmentLine, Icon, Label, QuotaBadge, QuotaPanel, QuotaRings, StatusPill, WORKDIR_EMPTY, resetsShortText, ringWindows, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
+import { derivedModel } from '@sigx/zero/behaviors';
+import { RadioGroup, Select } from '@sigx/zero';
+import { Field } from '@sigx/zero-daisyui/components';
+import { AgentTile, Button, ConfirmDialog, EnvironmentLine, FormDialog, Icon, Label, QuotaBadge, QuotaPanel, QuotaRings, StatusPill, WORKDIR_EMPTY, resetsShortText, ringWindows, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { DEFAULT_PERMISSION_MODE, modeChoices, modelChoices, type MemberChoice } from './member-options';
 import { effectiveWorkdir } from '../projects/model';
@@ -10,6 +13,12 @@ import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspa
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
 
 export type HistoryAccessChoice = 'all' | 'from';
+
+/** The add-agent dialog's history access (CHT-04). */
+const HISTORY_ACCESS = [
+    { value: 'all', label: 'All history' },
+    { value: 'from', label: 'From now' }
+];
 
 export type ContextPanelProps =
     & Define.Prop<'chat', MockChatSummary, true>
@@ -84,6 +93,11 @@ const limitLine = (quota: ReturnType<typeof memberQuota>, model: string | undefi
  */
 export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
     const st = signal({ addAgent: false, stopChain: false, access: 'all' as HistoryAccessChoice, pick: '', picking: false, pickFor: '', resetFor: '', details: [] as readonly string[], optionFor: '', optionKey: 'model' as OptionKey, active: 0 });
+    /** The add-agent Select: the candidate the dialog would add — the first until one is picked. */
+    const pickModel = derivedModel<string | null>(
+        () => { const candidates = props.candidates ?? []; return (candidates.find((c) => c.id === st.pick) ?? candidates[0])?.id ?? null; },
+        (next) => { st.pick = next ?? ''; }
+    );
 
     /** Open (or close) a member's model / mode listbox on the entry in effect. */
     const toggleOption = (agentId: string, key: OptionKey, choices: readonly MemberChoice[], current: string | undefined): void => {
@@ -313,31 +327,37 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                         onCancel={() => { st.picking = false; }}
                     />
                 ) : null}
-                <ConfirmDialog
+                <FormDialog
                     model={() => st.addAgent}
                     title="Add an agent to this chat"
                     description="What may the agent read? Earlier messages are visible only if you allow all history (CHT-04)."
-                    confirmLabel="Add agent"
-                    danger={false}
-                    onConfirm={() => {
+                    submitLabel="Add agent"
+                    onSubmit={() => {
                         st.addAgent = false;
                         if (picked) emit('addAgent', { agentId: picked.id, access: st.access });
                     }}
+                    onCancel={() => { st.addAgent = false; }}
                 >
                     {candidates.length ? (
-                        <label data-agent-pick>
-                            <span>Agent</span>
-                            <select data-scope="select" data-part="select" value={picked?.id ?? ''} onChange={(e: Event) => { st.pick = (e.target as HTMLSelectElement).value; }}>
-                                {candidates.map((c) => <option value={c.id}>{c.name}{c.role ? ` · ${c.role}` : ''}</option>)}
-                            </select>
-                        </label>
+                        <div data-agent-pick>
+                            <Field.Root>
+                                <Field.Label>Agent</Field.Label>
+                                <Select.Root
+                                    model={pickModel}
+                                    items={candidates}
+                                    itemValue={(c) => c.id}
+                                    itemLabel={(c) => `${c.name}${c.role ? ` · ${c.role}` : ''}`}
+                                />
+                            </Field.Root>
+                        </div>
                     ) : null}
-                    <fieldset data-history-access>
-                        <legend>History access</legend>
-                        <label><input type="radio" name="history-access" value="all" checked={st.access === 'all'} onChange={() => { st.access = 'all'; }} /> All history</label>
-                        <label><input type="radio" name="history-access" value="from" checked={st.access === 'from'} onChange={() => { st.access = 'from'; }} /> From now</label>
-                    </fieldset>
-                </ConfirmDialog>
+                    <div data-history-access>
+                        <Field.Root>
+                            <Field.Label>History access</Field.Label>
+                            <RadioGroup.Root model={() => st.access} name="history-access" items={HISTORY_ACCESS} />
+                        </Field.Root>
+                    </div>
+                </FormDialog>
                 <ConfirmDialog
                     model={() => st.resetFor !== ''}
                     title={resetting ? `Start a new session for ${resetting}?` : 'Start a new session?'}

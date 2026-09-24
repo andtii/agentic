@@ -8,10 +8,11 @@ import { test, expect } from '@playwright/test';
 test('roster → agent → Config → Memory, with every config field labelled', async ({ page }, info) => {
     await page.goto('/agents');
     await expect(page.locator('[data-page-title]')).toHaveText('Agents');
-    const cards = page.locator('[data-agent-grid] a.agent-card');
+    // each card is zero's Card rendered as the link (#592)
+    const cards = page.locator('[data-agent-grid] [data-agent-card] > a[data-scope="card"]');
     await expect(cards).toHaveCount(3);
     // whole card is the link; the footer stats read config / memories / corrections
-    const builder = page.locator('[data-agent-card="a2"] a.agent-card');
+    const builder = page.locator('[data-agent-card="a2"] > a[data-scope="card"]');
     await expect(builder.locator('[data-agent-card-stats] dt')).toHaveText(['config', 'memories', 'corrections / wk']);
     await expect(page.locator('[data-agent-card="a3"] [data-agent-card-noenv]')).toHaveText('No environment');
 
@@ -62,9 +63,10 @@ test('roster → agent → Config → Memory, with every config field labelled',
     await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveText('Memory');
     await expect(page.locator('[data-memory-row]')).toHaveCount(7);
     await expect(page.locator('[data-memory-row][data-retired]')).toHaveCount(1);
-    // the filter chips are pressed buttons with counts
-    await page.locator('[data-filter-chip][data-kind="lesson"]').click();
-    await expect(page.locator('[data-filter-chip][data-kind="lesson"]')).toHaveAttribute('aria-pressed', 'true');
+    // the filter chips are the kit FilterChips: pressed buttons with counts (#592)
+    const lessons = page.locator('[data-memory-filters] [data-filter-chips]').getByRole('button', { name: /^Lessons/ });
+    await lessons.click();
+    await expect(lessons).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-memory-row]')).toHaveCount(3);
     // fluid list + 320 rail
     expect((await page.locator('[data-memory-rail]').boundingBox())?.width).toBe(320);

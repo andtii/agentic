@@ -7,10 +7,12 @@ describe('/agents roster', () => {
     it('renders one card link per agent with tile, role, pill, environment and the footer stats', async () => {
         const root = await mountAt('/agents', <Agents />);
         const profiles = agentProfiles();
-        const cards = [...root.querySelectorAll<HTMLAnchorElement>('[data-page="agents"] a.agent-card')];
+        // Each card is zero's Card rendered as the link (#592): the whole card is one <a>.
+        const cards = [...root.querySelectorAll<HTMLAnchorElement>('[data-page="agents"] [data-agent-card] > a[data-scope="card"][data-part="root"]')];
         expect(cards).toHaveLength(profiles.length);
         for (const [i, card] of cards.entries()) {
             const p = profiles[i]!;
+            expect(card.closest('[data-agent-card]')?.getAttribute('data-agent-card')).toBe(p.id);
             expect(card.getAttribute('href')).toBe(`/agents/${p.id}`);
             expect(text(card.querySelector('[data-agent-card-name]'))).toBe(p.config.name);
             expect(text(card.querySelector('[data-agent-card-role]'))).toBe(p.role);

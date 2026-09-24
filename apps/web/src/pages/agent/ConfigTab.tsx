@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
-import { AGENT_FIELDS as F, AgentForm, Button, Label, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
+import { AGENT_FIELDS as F, AgentForm, Button, ErrorNote, Label, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
 import { Col } from '@sigx/zero';
 import type { AgentConfig, AgentConfigVersion, EnvironmentId } from '@agentic/core';
 import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
@@ -155,7 +155,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                                     <Button intent="primary" type="submit" disabled={ui.busy}>Save as v{current() + 1}</Button>
                                     <Button onClick={() => form.reset()}>Reset</Button>
                                 </div>
-                                {ui.error ? <p data-save-error="" role="alert">{ui.error}</p> : null}
+                                {ui.error ? <ErrorNote data-save-error="">{ui.error}</ErrorNote> : null}
                             </Col>
                         </Card.Body>
                     </Card>

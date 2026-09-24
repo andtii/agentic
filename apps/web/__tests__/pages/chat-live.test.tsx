@@ -133,10 +133,11 @@ describe('/chats/:id (live)', () => {
         await until(() => texts(dom.querySelectorAll('[data-page="chat"] > [data-chat-context] [data-member-name]')).includes('Atlas'), 'the members');
         const panel = dom.querySelector('[data-page="chat"] > [data-chat-context]')!;
         panel.querySelector<HTMLButtonElement>('[data-link-button]')!.click();
-        await until(() => document.querySelectorAll('[data-agent-pick] option').length >= 1, 'the candidates');
-        // Only agents that are not members yet are offered; the dialog is zero's, so look from the document.
+        await until(() => document.querySelectorAll('[data-agent-pick] [role="option"]').length >= 1, 'the candidates');
+        // Only agents that are not members yet are offered, in zero's Select (#592); the dialog is zero's, so look from the document.
         const dialog = (): Element => document.querySelector('[data-agent-pick]')!.closest('[data-scope="dialog"]') ?? document.body;
-        expect(texts(dialog().querySelectorAll('[data-agent-pick] option'))).toEqual(['Forge · Builds things']);
+        expect(texts(dialog().querySelectorAll('[data-agent-pick] [role="option"]')).map((t) => t.replace('✓', '').trim())).toEqual(['Forge · Builds things']);
+        expect(texts(dialog().querySelectorAll('[data-agent-pick] [data-scope="select"][data-part="value"]'))).toEqual(['Forge · Builds things']);
         dialog().querySelector<HTMLInputElement>('input[name="history-access"][value="from"]')!.click();
         [...dialog().querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Add agent')!.click();
         await until(() => texts(panel.querySelectorAll('[data-member-name]')).includes('Forge'), 'the member to appear');

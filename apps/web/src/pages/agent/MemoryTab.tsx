@@ -1,7 +1,7 @@
 import { component, effect, onUnmounted, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
 import type { MemoryEntry, MemoryKind } from '@agentic/core';
-import { Button, ConfirmDialog, EmptyState, Icon, Label, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
+import { Button, ConfirmDialog, EmptyState, ErrorNote, FilterChips, FormDialog, Icon, Label, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
 import { Col } from '@sigx/zero';
 import { MEMORY_KINDS, memoryCounts, type AgentProfile } from '../../mock/agents';
 import { agentClock, shortDate, dateTime } from './format';
@@ -166,13 +166,12 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
             <div data-agent-memory="">
                 <Col gap="lg">
                     <div data-memory-toolbar="">
-                        <div data-memory-filters="" role="group" aria-label="Filter by kind">
-                            {chips.map((kind) => (
-                                <button type="button" data-filter-chip="" data-kind={kind} aria-pressed={state.filter === kind ? 'true' : 'false'} onClick={() => { state.filter = kind; }}>
-                                    <span>{KIND_LABELS[kind]}</span>
-                                    <span data-filter-count="">{counts[kind]}</span>
-                                </button>
-                            ))}
+                        <div data-memory-filters="">
+                            <FilterChips
+                                model={() => state.filter}
+                                label="Filter by kind"
+                                options={chips.map((kind) => ({ value: kind, label: KIND_LABELS[kind], count: counts[kind] }))}
+                            />
                         </div>
                         <a data-memory-export="" href={exportHref()} download={`${p.config.name.toLowerCase()}-memory.ndjson`}>
                             <Icon name="download" size={15} />
@@ -180,7 +179,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                         </a>
                     </div>
                     {props.source ? <p data-memory-source="">Stored by {props.source}, the workspace's active memory.</p> : null}
-                    {state.error ? <p data-memory-error="" role="alert">{state.error}</p> : null}
+                    {state.error ? <ErrorNote data-memory-error="">{state.error}</ErrorNote> : null}
                     {rows.length ? (
                         <ul data-memory-list="" aria-label="Memories">
                             {rows.map((e) => {
@@ -262,9 +261,9 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                     </Card>
                 </Col>
                 </aside>
-                <ConfirmDialog model={() => state.correctOpen} title="Correct this memory" description="Your correction replaces the text and is recorded as stated by you." confirmLabel="Save correction" danger={false} onConfirm={confirmCorrect}>
+                <FormDialog model={() => state.correctOpen} title="Correct this memory" description="Your correction replaces the text and is recorded as stated by you." submitLabel="Save correction" onSubmit={confirmCorrect} onCancel={() => { state.correctOpen = false; state.correcting = null; }}>
                     <TextareaField model={() => state.correction} name="correction" label="Corrected text" rows={4} />
-                </ConfirmDialog>
+                </FormDialog>
                 <ConfirmDialog model={() => state.deleteOpen} title="Delete this memory" description="Deleting removes it from every future session. Retire it instead to keep the history." dependents={state.deleting ? [state.deleting.text] : []} dependentsLabel="Deletes" confirmLabel="Delete memory" onConfirm={confirmDelete} />
             </div>
         );

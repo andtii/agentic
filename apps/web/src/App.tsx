@@ -1,7 +1,7 @@
 import { component, useData, useHead, type JSXElement } from 'sigx';
 import { Link, RouterView, useRoute, useRouter } from '@sigx/router';
 import { ThemeProvider, themeInitScript } from '@sigx/zero';
-import { Breadcrumbs } from '@sigx/zero-daisyui/components';
+import { Avatar, Breadcrumbs } from '@sigx/zero-daisyui/components';
 import { AppShell, Button, ConnectionStrip, connectionRows, OfflineBanner } from '@agentic/ui';
 import { NAV_GROUPS } from './nav';
 import { backOf, titleOf, trailFor } from './crumbs';
@@ -13,6 +13,18 @@ import { useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { useNeedsSource } from './pages/inbox';
+
+/**
+ * The signed-in person's mark in the sidebar foot: zero's `Avatar` as a
+ * circle (a person, never an agent's square), 28 px through the avatar
+ * patch's `data-tile`, the monogram as its fallback. Decorative: the name is
+ * written next to it.
+ */
+const userAvatar = (monogram: string): JSXElement => (
+    <Avatar.Root axes={{ shape: 'circle' }} data-tile={28} data-user-avatar="" aria-hidden="true">
+        <Avatar.Fallback>{monogram}</Avatar.Fallback>
+    </Avatar.Root>
+);
 
 /**
  * The sidebar foot in live mode (#143): the signed-in workspace, or — for
@@ -38,7 +50,7 @@ const UserFoot = component(() => {
         const ws = viewer.workspaceId ?? '…';
         return (
             <>
-                <span data-user-avatar aria-hidden="true">{initials(ws)}</span>
+                {userAvatar(initials(ws))}
                 <span data-user-name>Workspace<small>{ws}</small></span>
                 {viewer.workspaceId ? (
                     <form data-user-signout method="post" action="/auth/logout" style="margin-inline-start:auto">
@@ -53,7 +65,7 @@ const UserFoot = component(() => {
 /** The design track's user, what mock mode shows. */
 const mockUserFoot = (): JSXElement => (
     <>
-        <span data-user-avatar aria-hidden="true">WS</span>
+        {userAvatar('WS')}
         <span data-user-name>Workspace<small>ws:local</small></span>
     </>
 );

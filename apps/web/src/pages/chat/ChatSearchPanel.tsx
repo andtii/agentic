@@ -1,5 +1,6 @@
 import { component, signal, type Define } from 'sigx';
-import { Button } from '@agentic/ui';
+import { Input } from '@sigx/zero-daisyui/components';
+import { Button, ErrorNote } from '@agentic/ui';
 import type { IndexedEntry } from '@agentic/platform';
 import { entryLine, type AgentLookup, type TimeText } from './live';
 
@@ -38,12 +39,16 @@ export const ChatSearchPanel = component<ChatSearchPanelProps>(({ props, emit })
     return () => (
         <section data-chat-find aria-label="Search this chat" style="display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-lg) var(--space-2xl); border-block-end: var(--border) solid var(--ag-line);">
             <form data-chat-search role="search" onSubmit={(e: Event) => { e.preventDefault(); void run(); }}>
-                <label data-visually-hidden for="chat-find">Search this chat</label>
-                <input id="chat-find" type="search" placeholder="Search this chat" data-scope="input" data-part="input" value={st.q} onInput={(e: Event) => { st.q = (e.target as HTMLInputElement).value; }} />
+                <Input.Root model={() => st.q} type="search" autocomplete="off">
+                    <Input.Label visuallyHidden>Search this chat</Input.Label>
+                    <Input.Control>
+                        <Input.Input placeholder="Search this chat" />
+                    </Input.Control>
+                </Input.Root>
                 <Button type="submit" disabled={st.busy || !st.q.trim()}>Search</Button>
                 <Button intent="icon" icon="close" label="Close search" onClick={() => emit('close')} />
             </form>
-            {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+            {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             {st.asked ? (
                 st.hits.length ? (
                     <ul data-chat-rows data-chat-hits aria-label={`Messages matching ${st.asked}`}>
