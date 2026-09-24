@@ -465,8 +465,7 @@
     color: var(--ag-text-dim);
 }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     [data-page="agent"] [data-agent-memory] { grid-template-columns: minmax(0, 1fr); }
     [data-page="agent"] [data-agent-overview] { grid-template-columns: minmax(0, 1fr); }
     [data-page="agent"] [data-scope="ai-form"][data-layout="sections"] { grid-template-columns: minmax(0, 1fr); }

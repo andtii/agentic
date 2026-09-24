@@ -32,8 +32,7 @@
 [data-grant] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
 [data-grant] > code { font-size: var(--text-sm); background: var(--color-base-100); }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     [data-session-body] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "main" "rail"; }
 }
 
@@ -93,8 +92,7 @@
 [data-files-back] { display: none; }
 
 /* 768–1279: the session bar's controls take their own row rather than squeezing the branch */
-/* → (--above-md) and (--below-xl) once #585 lands */
-@media (--above-md) and (max-width: 1279.98px) {
+@media (--above-md) and (--below-xl) {
     [data-scope="ag-session-bar"][data-part="root"] { flex-wrap: wrap; row-gap: 0; }
     [data-scope="ag-session-bar"][data-part="controls"] { flex-basis: 100%; justify-content: flex-end; padding-block-end: var(--space-sm); }
 }

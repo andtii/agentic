@@ -23,8 +23,7 @@ code[data-mono][data-cost="reported"] { color: var(--color-base-content); font-w
 code[data-mono][data-cost="partly-estimated"] { color: var(--color-warning); font-weight: var(--weight-semibold); }
 code[data-mono][data-cost="not-reported"] { color: var(--ag-text-dim); }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     [data-usage-stats], [data-limits-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

@@ -170,8 +170,7 @@
 [data-context-drawer] [data-chat-context] { border: 0; padding: 0; }
 [data-chat-summary] { color: var(--color-warning); }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     [data-scope="button"].ag-chat-tasks { display: inline-flex; }
     /* Chat keeps list + thread; the context panel sits behind the tasks button */
     [data-page="chat"] { grid-template-columns: 280px minmax(0, 1fr); }

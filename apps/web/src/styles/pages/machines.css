@@ -163,8 +163,7 @@
 [data-code-dot] { inline-size: 8px; block-size: 8px; border-radius: 9999px; background: var(--color-warning); }
 [data-pair-rail] { padding-block-start: var(--space-sm); }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     [data-machine-grid] { grid-template-columns: minmax(0, 1fr); }
     /* three-column card grids become two */
     [data-env-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }

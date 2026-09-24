@@ -1,4 +1,5 @@
 /* Home (#88): the inbox row beside the rail, the first-run checklist, today and spend. */
+@import '@agentic/ui/css/breakpoints';
 
 /* ---- home (#88): minmax(0, 1fr) + 340 for the inbox row, tasks table full width, gap 28 ---- */
 [data-page="home"] {
@@ -22,8 +23,7 @@
 [data-spend-bar] { block-size: 6px; border-radius: 9999px; background: var(--ag-line); overflow: hidden; }
 [data-spend-bar] > span { display: block; block-size: 100%; background: var(--color-primary); }
 
-/* → --below-xl once #585 lands */
-@media (max-width: 1279.98px) {
+@media (--below-xl) {
     /* fixed right rails drop under the main column: Home, Task, Session, Machine, Memory */
     [data-page="home"] { grid-template-columns: minmax(0, 1fr); }
 }
