@@ -51,7 +51,7 @@ import { LinkButton } from '../ops/LinkButton';
 import { OpsPage } from '../ops/OpsPage';
 import { CLIENT_TIMEOUT_MS } from '../workdir/model';
 import { machineHead } from './head';
-import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, machineLoadOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
+import { LIVE_DOCTOR_FOOTNOTE, defaultForByEnvironment, doctorChecksOf, liveCapacity, machineLoadOf, machineOf, queuedByEnvironment, sessionsOf } from './live';
 import { answerFailure, callFailure, runtimesOf } from './manage';
 import { browserPendingStore, elevateUrl, isElevationRequired, savePending, takePending, type PendingChange, type PendingKind } from './elevate';
 import { ElevateDialog } from './ElevateDialog';
@@ -64,7 +64,7 @@ import { loginCallFailure, type LoginView } from './login';
 /** An environment draft as it comes back from the pending store: the shape `putEnvironment` takes, or nothing. */
 const isEnvironmentInput = (v: unknown): v is EnvironmentInput => !!v && typeof v === 'object' && typeof (v as EnvironmentInput).name === 'string' && typeof (v as EnvironmentInput).runtime === 'string' && Array.isArray((v as EnvironmentInput).cwdRoots);
 
-export const LiveMachine = component<{ id: string }>(({ props }) => {
+export const LiveMachine = component<{ id: string; focusEnv?: string }>(({ props }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const router = useRouter();
@@ -346,8 +346,9 @@ export const LiveMachine = component<{ id: string }>(({ props }) => {
         return (
             <>
                 <MachineView
+                    {...(props.focusEnv ? { focusEnv: props.focusEnv } : {})}
                     machine={machineOf(v, id, now)}
-                    environments={v.environments}
+                    environments={liveCapacity(v)}
                     sessions={sessionsOf(v, objectives.value ?? {}, now)}
                     doctor={doctor.value ? doctorChecksOf(doctor.value) : []}
                     footnote={LIVE_DOCTOR_FOOTNOTE}

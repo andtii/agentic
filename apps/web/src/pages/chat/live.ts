@@ -6,7 +6,7 @@
  * authors). Nothing here touches a hook or the DOM, so every rule is
  * unit-testable and `LiveChat.tsx` stays wiring.
  */
-import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WorkdirRef } from '@agentic/core';
+import { isChatFilePart, isTerminal, parseChatFileUri, type AccountRef, type AgentId, type ChatEntry, type ChatFilePart, type ChatId, type MachineId, type MessageId, type ProjectId, type PromptPart, type TaskContract, type TaskId, type WaitReason, type WorkdirRef } from '@agentic/core';
 import type { AgentView, ChatSummary, InboxNotification, IndexedEntry, SessionInfo, TaskIndexRow } from '@agentic/platform';
 import { createTranscript, type AgentCapabilities, type AgentEvent, type Decision } from '@sigx/ai-agent';
 import type { AgentMessage, AgentPart, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
@@ -89,14 +89,15 @@ const NOBODY: ReadonlySet<string> = new Set();
  * member in `waiting` has a request open in this chat (`openRequests`) —
  * it reads WAITING, ahead of anything else. A member reads ACTIVE while it
  * works a task of this chat's tree (`working`, #258: `workingAgents` over
- * the task index) and IDLE otherwise. Every member holds a live session for
- * the life of the chat (#393), so `sessions` says nothing about whether it
- * is working (#398) and is not read here.
+ * the task index), QUEUED while its message waits for a free slot on its
+ * environment (`queued`, #652: `queuedAgents`), and IDLE otherwise. Every
+ * member holds a live session for the life of the chat (#393), so `sessions`
+ * says nothing about whether it is working (#398) and is not read here.
  */
-export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY): MockChatMember[] {
+export function membersOf(summary: ChatSummary, waiting: ReadonlySet<string> = NOBODY, working: ReadonlySet<string> = NOBODY, queued: ReadonlySet<string> = NOBODY): MockChatMember[] {
     return Object.entries(summary.members).map(([agentId, m]) => ({
         agentId,
-        status: waiting.has(agentId) ? 'waiting' : working.has(agentId) ? 'active' : 'idle',
+        status: waiting.has(agentId) ? 'waiting' : working.has(agentId) ? 'active' : queued.has(agentId) ? 'queued' : 'idle',
         ...(summary.coordinator === agentId ? { coordinator: true } : {}),
         history: m.historyFrom === 0 ? { access: 'all' } : { access: 'from', at: m.since },
         ...(m.workdir ? { workdir: m.workdir } : {}),
@@ -288,12 +289,8 @@ export function chatTasks(rows: readonly TaskIndexRow[], chatId: string, cap: nu
 /** A task in flight: running, or waiting on a child it delegated (its work goes on elsewhere). Parked work — offline, capacity, budget, a plugin — and a task waiting on the user are not. */
 const inFlight = (r: TaskIndexRow): boolean => r.status === 'active' || (r.status === 'waiting' && r.wait?.kind === 'child');
 
-/**
- * The agents working a task of this chat's tree right now (#258, #398): each in-flight row whose chain of parents
- * ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. This is what reads ACTIVE
- * in the members panel: the work, never the existence of a session.
- */
-export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
+/** Whether a row belongs to this chat's tree: its chain of parents ends at a root whose origin is this chat. */
+function inChatTree(rows: readonly TaskIndexRow[], chatId: string): (r: TaskIndexRow) => boolean {
     const byId = new Map<string, TaskIndexRow>(rows.map((r) => [r.id, r]));
     const inChat = new Map<string, boolean>();
     const belongs = (r: TaskIndexRow): boolean => {
@@ -305,9 +302,52 @@ export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Se
         inChat.set(r.id, yes);
         return yes;
     };
+    return belongs;
+}
+
+/**
+ * The agents working a task of this chat's tree right now (#258, #398): each in-flight row whose chain of parents
+ * ends at a root of this chat — the same tree `chatTasks` draws, uncapped, in one pass. This is what reads ACTIVE
+ * in the members panel: the work, never the existence of a session.
+ */
+export function workingAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
+    const belongs = inChatTree(rows, chatId);
     const out = new Set<string>();
     for (const r of rows) if (inFlight(r) && belongs(r)) out.add(r.assignee);
     return out;
+}
+
+const waitsOn = <K extends WaitReason['kind']>(r: TaskIndexRow, kind: K): r is TaskIndexRow & { wait: Extract<WaitReason, { kind: K }> } => r.status === 'waiting' && r.wait?.kind === kind;
+
+/** The agents of this chat's tree whose message waits for a free slot on its environment (#652): what reads QUEUED. */
+export function queuedAgents(rows: readonly TaskIndexRow[], chatId: string): Set<string> {
+    const belongs = inChatTree(rows, chatId);
+    const out = new Set<string>();
+    for (const r of rows) if (waitsOn(r, 'capacity') && belongs(r)) out.add(r.assignee);
+    return out;
+}
+
+/** A task of the chat parked on its environment's capacity (#652): which task, whose, and the wait. */
+export interface CapacityWait {
+    readonly taskId: string;
+    readonly agentId: string;
+    readonly wait: Extract<WaitReason, { kind: 'capacity' }>;
+}
+
+/**
+ * The waits the chat says out loud under the thread (#366, #652): the first task of its tree waiting on its machine
+ * (`machine-offline`) and the first waiting for a free slot (`capacity`) — uncapped, unlike the panel's `chatTasks`.
+ */
+export function chatWaitsOf(rows: readonly TaskIndexRow[], chatId: string): { offline?: Extract<WaitReason, { kind: 'machine-offline' }>; capacity?: CapacityWait } {
+    const belongs = inChatTree(rows, chatId);
+    let offline: Extract<WaitReason, { kind: 'machine-offline' }> | undefined;
+    let capacity: CapacityWait | undefined;
+    for (const r of rows) {
+        if (!offline && waitsOn(r, 'machine-offline') && belongs(r)) offline = r.wait;
+        // The one first in line speaks for the rest: its position is the smallest.
+        if (waitsOn(r, 'capacity') && belongs(r) && (!capacity || r.wait.position < capacity.wait.position)) capacity = { taskId: r.id, agentId: r.assignee, wait: r.wait };
+    }
+    return { ...(offline ? { offline } : {}), ...(capacity ? { capacity } : {}) };
 }
 
 // ---- scrollback (#398) ----------------------------------------------------------
