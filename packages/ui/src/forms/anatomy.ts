@@ -3,8 +3,9 @@
  * around zero's fields (#89, #232). Declared with zero's public
  * `defineAnatomy`, pure data like the kit's, so the fragment entry lists the
  * scope and the components write `aiFormAnatomy.scope` instead of a literal.
- * No recipe: the app lays the form out (`apps/web/src/styles/pages/`), the
- * fields inside are zero's.
+ * Its recipe (`fragment/recipes.ts`) only spaces the button row; the app
+ * lays the form out (`apps/web/src/styles/pages/`), the fields inside are
+ * zero's.
  */
 import { defineAnatomy } from '@sigx/zero/anatomy';
 

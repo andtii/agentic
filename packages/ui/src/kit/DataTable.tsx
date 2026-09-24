@@ -72,8 +72,8 @@ const Root = component<DataTableProps>(({ props, slots }) => () => {
                 {props.loading
                     ? [0, 1, 2].map(() => (
                         <Table.Row>
-                            {props.columns.map(() => (
-                                <Table.Cell>
+                            {props.columns.map((_, i) => (
+                                <Table.Cell column={i}>
                                     <Skeleton.Root model={() => true}>
                                         <VisuallyHidden>Loading</VisuallyHidden>
                                     </Skeleton.Root>

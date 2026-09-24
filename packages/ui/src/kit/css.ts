@@ -11,6 +11,10 @@
  * - `ConfirmDialog`'s list of dependents inside zero's dialog popup: the
  *   mono label over the named list.
  *
+ * `[data-visually-hidden]` is zero's own rule (`@sigx/zero/css`, `css/base.css`,
+ * `@layer zero.structure`), which every entry loads before `@agentic/ui/css`;
+ * the kit's copy of it went with #595.
+ *
  * Everything responsive lives in the recipes (`below-md` / `below-xl` keys
  * and the `table` / `button` patches), so the breakpoint ramp is the only
  * source of a width.

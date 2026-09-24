@@ -111,6 +111,8 @@ describe('DataTable', () => {
         const root = mount(<DataTable cols="1fr 1fr 1fr" columns={columns} label="t" loading />);
         expect(root.querySelectorAll('tbody tr').length).toBe(3);
         expect(root.querySelectorAll('tbody [data-scope="skeleton"]').length).toBe(9);
+        // Stacked, a loading row is captioned like a real one.
+        expect([...root.querySelectorAll('tbody tr')[0]!.querySelectorAll('[data-part="cell-label"]')].map((l) => l.textContent)).toEqual(['Status', 'Objective', 'Age']);
     });
 
     it('refuses a template that does not match the columns in development', () => {

@@ -4,7 +4,8 @@
  * and foot, and the app bar and content column beside it. Declared with
  * zero's public `defineAnatomy`, pure data, so the fragment entry lists the
  * scope and the component writes `aiShellAnatomy.scope` instead of a
- * literal. No recipe: `shell.css` lays the regions out; the drawer, the bar
+ * literal. Its recipe (`fragment/recipes.ts`) draws the brand and the
+ * sidebar spacer; `shell.css` lays the regions out, and the drawer, the bar
  * and the navigation are the design system's.
  */
 import { defineAnatomy } from '@sigx/zero/anatomy';
