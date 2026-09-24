@@ -388,6 +388,8 @@ describe('fs run (#618)', () => {
         expect(errorOf(await run([node, '-e', '0'], outside))).toBe('outside-roots');
         expect(errorOf(await run([node, '-e', '0'], join(root, 'nope')))).toBe('not-found');
         expect(errorOf(await run(['agentic-no-such-program-618']))).toBe('not-found');
-        expect(errorOf(await run([node, '-e', 'setTimeout(() => {}, 60000)'], root, 300))).toBe('timeout');
+        // A script file, not `-e`: nothing for cmd.exe to read on Windows. Its whole tree is stopped at the time.
+        await writeFile(join(root, 'sleep.js'), 'setTimeout(function () {}, 60000);');
+        expect(errorOf(await run([node, join(root, 'sleep.js')], root, 1_000))).toBe('timeout');
     }, 30_000);
 });

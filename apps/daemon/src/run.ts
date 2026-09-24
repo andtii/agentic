@@ -3,8 +3,8 @@
  * worktree its own way. `argv` is never joined into a shell string on POSIX: `argv[0]` is spawned with the rest as its
  * arguments. On Windows a `.cmd` shim (`pnpm`, `npm`) only starts through `cmd.exe`, so there the line is built with
  * `quoteArg`, as `env login` does. `cwd` is checked against the roots lexically and after `realpath`, and the command
- * runs in the resolved folder. Past its time the process group is killed and the answer is `timeout`; a non-zero exit
- * is still a result, with the tails of both streams.
+ * runs in the resolved folder. Past its time the process tree is killed (the group on POSIX, `taskkill /t` on Windows)
+ * and the answer is `timeout`; a non-zero exit is still a result, with the tails of both streams.
  */
 
 import { FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, FS_RUN_OUTPUT_TAIL, type FsError, type FsOp, type FsResult } from '@agentic/core';
@@ -60,8 +60,13 @@ export async function runCommand(op: Extract<FsOp, { kind: 'run' }>, roots: read
         };
         const timer = setTimeout(() => {
             timedOut = true;
-            // The whole group on POSIX (an installer spawns children); Windows kills the shell it started.
-            if (!windows && child.pid !== undefined) {
+            // The whole tree: an installer spawns children, and on Windows the command itself is cmd.exe's child —
+            // left alive, it would hold the pipes open and the run would never close.
+            if (child.pid !== undefined) {
+                if (windows) {
+                    spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill('SIGKILL'));
+                    return;
+                }
                 try {
                     process.kill(-child.pid, 'SIGKILL');
                     return;
