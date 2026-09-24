@@ -1,5 +1,5 @@
 import type { EnvironmentId, PluginManifest, ProjectFeatureManifest, ProjectId, ProjectRecord } from '../src/index';
-import { enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, projectFolderFor } from '../src/index';
+import { applyProjectFeaturePreset, enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, projectFolderFor } from '../src/index';
 
 const env = (id: string) => id as EnvironmentId;
 
@@ -33,6 +33,13 @@ describe('enabledProjectFeatures', () => {
     it('lists the feature ids that have settings', () => {
         expect(enabledProjectFeatures(project)).toEqual(['git']);
         expect(enabledProjectFeatures({ features: {} })).toEqual([]);
+    });
+});
+
+describe('applyProjectFeaturePreset (#621)', () => {
+    it('lays the preset over the settings, clears a null field, keeps the rest', () => {
+        const preset = { id: 'in-repo', label: 'In the repo', settings: { worktreePath: '{repo}/.worktrees/{branchSlug}', branchTemplate: null } };
+        expect(applyProjectFeaturePreset({ worktreePerChat: true, branchTemplate: 'x-{chatId8}', worktreePath: 'auto' }, preset)).toEqual({ worktreePerChat: true, worktreePath: '{repo}/.worktrees/{branchSlug}' });
     });
 });
 
