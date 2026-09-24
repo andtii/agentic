@@ -1,1 +1,123 @@
-/* /plugins redesign (#625): add — owned by its page issue. */
+/*
+ * /plugins/connectors/add (#639; board `AddConnector`): three columns edge to edge under the topbar — the 220 px
+ * filters, the browse column, the 380 px preview. The shell's main padding is dropped for this page only.
+ */
+@import '@agentic/ui/css/breakpoints';
+
+[data-scope="ai-shell"][data-part="main"]:has([data-page="connector-add"]) { padding: 0; }
+
+[data-page="connector-add"] {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) 380px;
+    min-block-size: calc(100dvh - var(--ag-topbar-h, 60px));
+}
+
+/* ---- left: categories, Show, Not listed? ---- */
+/* The two side columns stay in view while the middle scrolls: "Not listed?" and Connect sit at the viewport's foot. */
+[data-add-side],
+[data-add-preview] {
+    position: sticky;
+    inset-block-start: var(--ag-topbar-h, 60px);
+    align-self: start;
+    block-size: calc(100dvh - var(--ag-topbar-h, 60px));
+    overflow-y: auto;
+}
+[data-add-side] {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    box-sizing: border-box;
+    padding: 20px 12px;
+    border-inline-end: var(--border) solid var(--ag-line);
+}
+/* The kit menu draws its own 232 px column; here it is the top of this one. */
+[data-add-side] [data-category-menu] { inline-size: auto !important; padding: 0 !important; border: 0 !important; }
+[data-add-show] { display: flex; flex-direction: column; gap: 6px; padding: 18px 0 0; }
+[data-add-show] > :first-child { padding: 0 10px; }
+[data-add-show] [data-segmented] { flex-direction: column; align-items: stretch; margin: 0 6px; }
+[data-add-show] [data-segmented] button { justify-content: flex-start; text-align: start; }
+[data-add-unlisted] {
+    margin: auto 6px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: 12px;
+    border: var(--border) solid var(--ag-line);
+    border-radius: var(--radius-box);
+}
+[data-add-unlisted] p { margin: 0; font-size: var(--text-sm); color: var(--ag-text-dim); text-wrap: pretty; }
+
+/* ---- middle: title, search, sections ---- */
+[data-add-main] {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    min-inline-size: 0;
+    box-sizing: border-box;
+    padding: 24px 28px;
+}
+[data-add-head] { display: flex; align-items: center; gap: 16px; }
+[data-add-head] > div { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
+[data-add-head] h1 { margin: 0; font-size: 24px; font-weight: var(--weight-semibold); }
+[data-add-head] p { margin: 0; color: var(--ag-text-muted); }
+[data-add-main] [data-search-field] { inline-size: 100% !important; margin-block-start: -10px; }
+[data-add-section] { display: flex; flex-direction: column; gap: 10px; }
+[data-add-section-head] { display: flex; align-items: center; gap: 8px; }
+[data-add-section-head] h2 { margin: 0; font-size: 14px; font-weight: var(--weight-semibold); }
+[data-add-section-head] [data-count] { flex-grow: 1; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-add-section-head] a { font-size: var(--text-sm); }
+[data-add-grid] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+[data-add-grid] [data-connected] { opacity: 0.72; }
+[data-add-none] { margin: 0; color: var(--ag-text-dim); }
+
+/* ---- the agent step ---- */
+[data-add-agents] { display: flex; flex-direction: column; margin: 0; padding: 0; border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); }
+[data-add-agent] { display: flex; align-items: center; gap: 12px; min-block-size: 56px; padding: 0 16px; cursor: pointer; }
+[data-add-agent] + [data-add-agent] { border-block-start: var(--border) solid var(--ag-line); }
+[data-add-agent-name] { font-weight: var(--weight-semibold); }
+[data-add-agent] [data-dim] { color: var(--ag-text-dim); font-size: var(--text-sm); }
+[data-add-step-actions] { display: flex; gap: var(--space-sm); }
+
+/* ---- right: the preview ---- */
+[data-add-preview] {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-sizing: border-box;
+    padding: 24px;
+    border-inline-start: var(--border) solid var(--ag-line);
+    background: var(--color-base-200);
+}
+[data-add-preview][data-empty] p { margin: 0; color: var(--ag-text-dim); }
+[data-preview-head] { display: flex; align-items: center; gap: 12px; }
+[data-preview-head] > div { display: flex; flex-direction: column; gap: 4px; min-inline-size: 0; }
+[data-preview-head] h2 { margin: 0; font-size: 18px; font-weight: var(--weight-semibold); }
+[data-preview-meta] { display: flex; align-items: center; gap: 8px; }
+[data-preview-meta] code { font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-preview-description] { margin: 0; color: var(--ag-text-muted); text-wrap: pretty; }
+[data-preview-group] { display: flex; flex-direction: column; gap: 2px; }
+[data-preview-group] ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+[data-preview-group] li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+[data-preview-group] li svg { color: var(--ag-text-muted); flex-shrink: 0; }
+[data-preview-group] code { font-size: var(--text-sm); color: var(--color-base-content); overflow-wrap: anywhere; }
+[data-preview-group] [data-dim] { font-size: var(--text-sm); color: var(--ag-text-dim); }
+[data-preview-group] p { margin: 0; font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-preview-group] p[data-dim] { color: var(--ag-text-dim); }
+[data-preview-group="runs-on"] { gap: 6px; }
+[data-preview-foot] { margin-block-start: auto; display: flex; flex-direction: column; gap: 8px; }
+[data-preview-foot] [data-dim] { margin: 0; font-size: var(--text-xs); color: var(--ag-text-dim); text-align: center; }
+[data-preview-foot] [data-scope="button"], [data-preview-foot] button, [data-preview-foot] a { min-block-size: 44px; }
+
+/* ---- narrower: the preview moves under the list, then everything stacks ---- */
+@media (--below-xl) {
+    [data-page="connector-add"] { grid-template-columns: 220px minmax(0, 1fr); }
+    [data-add-preview] { grid-column: 2; position: static; block-size: auto; border-inline-start: 0; border-block-start: var(--border) solid var(--ag-line); }
+}
+@media (--below-md) {
+    [data-page="connector-add"] { grid-template-columns: minmax(0, 1fr); }
+    [data-add-side] { position: static; block-size: auto; border-inline-end: 0; border-block-end: var(--border) solid var(--ag-line); }
+    [data-add-preview] { grid-column: 1; }
+    [data-add-main] { padding: 20px 16px; }
+    [data-add-grid] { grid-template-columns: minmax(0, 1fr); }
+}
