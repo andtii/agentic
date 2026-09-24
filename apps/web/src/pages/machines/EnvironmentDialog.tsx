@@ -86,7 +86,7 @@ export const EnvironmentDialog = component<EnvironmentDialogProps>(({ props, emi
                             ))}
                         </div>
                     ) : null}
-                    <NumberField model={() => d.concurrency} name="env-concurrency" label="Sessions at once" min={1} step={1} placeholder="1" error={errorOf('concurrency')} disabled={props.busy} />
+                    <NumberField model={() => d.concurrency} name="env-concurrency" label="Turns at once" description="How many agents may work in this environment at the same time; a message beyond it waits for a free slot. Open chats cost nothing until they work." min={1} step={1} placeholder="1" error={errorOf('concurrency')} disabled={props.busy} />
                     <TextField model={() => d.accountLabel} name="env-account" label="Account label" description="How the account shows in pickers; the environment's name when empty." disabled={props.busy} />
                     <SwitchField model={() => d.allowBypass} name="env-bypass" label="Allow bypassPermissions" description="Claude Code may run every tool unasked in this environment. Turning it on asks you to confirm with GitHub once." disabled={props.busy} />
                     {failure && !field ? <p data-env-failure role="alert">{failureText(failure)}</p> : null}
