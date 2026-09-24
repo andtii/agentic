@@ -109,6 +109,31 @@ export interface ProjectFeatureSessionEffect {
 }
 
 /**
+ * A named starting point for a project's settings (#621): picking it fills the fields it names, and every field stays
+ * editable afterwards — a preset is a shortcut, never a mode the platform special-cases. A field set to `null` is
+ * cleared (back to the schema's default), so a preset can undo another's template.
+ */
+export interface ProjectFeaturePreset {
+    readonly id: string;
+    readonly label: string;
+    readonly description?: string;
+    readonly settings: Readonly<Record<string, unknown>>;
+}
+
+/** What a feature's settings would do for one folder (#621): the sample it is shown for, then labelled values. */
+export interface ProjectFeaturePreviewInput {
+    readonly project: Pick<ProjectRecord, 'name'>;
+    readonly settings: Readonly<Record<string, unknown>>;
+    /** A folder of the project, when it has one — the preview is for it. */
+    readonly folder?: ProjectFolderInfo;
+}
+
+export interface ProjectFeaturePreviewLine {
+    readonly label: string;
+    readonly value: string;
+}
+
+/**
  * The code half of a project feature plugin, beside its manifest in the
  * catalogue like every other kind. Everything is optional, and it all runs on
  * the platform: a plugin composes the daemon's generic folder operations and
@@ -119,12 +144,28 @@ export interface ProjectFeatureSessionEffect {
  *   and before the session opens. A thrown error parks the task with its message
  *   (EXE-12: never a silent fallback).
  * - `instructions`: a fragment merged into every session's system prompt.
+ * - `presets`, `settingsErrors`, `previewSettings` (#621): what the settings form offers beside the schema — named
+ *   starting points, the problems a schema cannot express (a template's unknown token) by settings key, and what the
+ *   settings would do for a folder of the project. Pure: the form runs them on every edit.
  */
 export interface ProjectFeaturePlugin {
     readonly manifest: ProjectFeatureManifest;
     detect?(folder: ProjectFolderInfo): boolean;
     beforeSession?(input: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined>;
     instructions?(ctx: ProjectFeatureContext): string | undefined;
+    readonly presets?: readonly ProjectFeaturePreset[];
+    settingsErrors?(settings: Readonly<Record<string, unknown>>): Readonly<Record<string, string>>;
+    previewSettings?(input: ProjectFeaturePreviewInput): readonly ProjectFeaturePreviewLine[];
+}
+
+/** `settings` with a preset's fields laid over them (#621): a `null` field cleared, an `undefined` one ignored, every other field kept as it was. */
+export function applyProjectFeaturePreset(settings: Readonly<Record<string, unknown>>, preset: ProjectFeaturePreset): Record<string, unknown> {
+    const next: Record<string, unknown> = { ...settings };
+    for (const [key, value] of Object.entries(preset.settings)) {
+        if (value === null) delete next[key];
+        else if (value !== undefined) next[key] = value;
+    }
+    return next;
 }
 
 /** The project's folder on `environmentId`, or `undefined` when it has none there. */
