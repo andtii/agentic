@@ -80,7 +80,7 @@ export function splitCommand(line: string): string[] {
     for (const c of line) {
         if (quote) {
             if (c === quote) quote = null;
-            else current += c;
+            else current = (current ?? '') + c;
         } else if (c === '"' || c === "'") {
             quote = c;
             current ??= '';
