@@ -100,7 +100,7 @@ import { Workspace } from '../workspace/index.js';
 import { FALLBACK_RUNTIME } from '../registry/dependents.js';
 import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
-import { daemonConnectors } from './connectors.js';
+import { daemonConnectors, withWorkspaceRules, workspaceToolRules } from './connectors.js';
 import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
 import { featureSettings, machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
@@ -317,8 +317,15 @@ function optionsDrift(has: SessionOptions | undefined, want: SessionOptions | un
 
 const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
 
-/** What the daemon compiles the session policy from (#121): the agent's rules and grants, and the ancestors' rules on a delegated task (AC-12) — the same input `sessionPolicy` takes on the local path. */
-const openSpecPolicy = (route: Route): OpenSpecPolicy => ({ rules: route.config.approvalPolicy, grants: route.config.tools, ...(route.constraints?.length ? { constraints: route.constraints } : {}) });
+/**
+ * What the daemon compiles the session policy from (#121): the agent's rules and grants, and as constraints the
+ * ancestors' rules on a delegated task (AC-12) merged with the workspace tool policy of its connectors (#636) — the same
+ * input `sessionPolicy` takes on the local path.
+ */
+const openSpecPolicy = (route: Route): OpenSpecPolicy => {
+    const constraints = withWorkspaceRules(route.constraints ?? [], workspaceToolRules(route.plugins?.connectors ?? []));
+    return { rules: route.config.approvalPolicy, grants: route.config.tools, ...(constraints.length ? { constraints } : {}) };
+};
 
 /** How many caught-up messages a reused session's prompt carries at most (#393) — the activation's own window. */
 const CATCH_UP_WINDOW = 50;
