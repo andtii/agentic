@@ -25,7 +25,7 @@ import { mockAgent } from '@sigx/ai-agent/testing';
 import { AgentActor, agentKey } from '../../src/agent/index';
 import { AuditActor } from '../../src/audit/index';
 import { capturingAuditPort } from '../../src/audit/index';
-import { generateWorkspaceKek, importWorkspaceKek, workspaceKey } from '../../src/auth/index';
+import { generateWorkspaceKek, importWorkspaceKek, mintAgentPrincipal, workspaceKey } from '../../src/auth/index';
 import { Chat, ChatPage, defineChatActor } from '../../src/chat/index';
 import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
@@ -576,6 +576,25 @@ describe('a chat leaving its project (#623)', () => {
             { chatId, projectId, pluginId: GIT, environmentId: E1, reason: 'project-changed', outcome: 'tidied /work/agentic' },
             { chatId, projectId, pluginId: GIT, environmentId: E2, reason: 'project-changed', error: 'the daemon said no' }
         ]);
+    });
+
+    it('a member agent moving the chat still reaches the daemon as the workspace owner: owner-only ops are not refused', async () => {
+        await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const projectId = await project({ folders: { [E2]: null } });
+        const { chatId } = await workspace().createChat({ projectId });
+        await chat(chatId).addAgent(a, 'all');
+        const answers: (FsError | undefined)[] = [];
+        feature.onChatReleased = async (input) => {
+            released.push(input);
+            answers.push((await input.fs({ kind: 'worktree-remove', repo: input.cwd, path: `${input.cwd}-worktrees/x` })).error);
+            return 'asked';
+        };
+        const asAgent = mintAgentPrincipal({ workspaceId: WS, agentId: a, sessionId: 'sess_a' as SessionId });
+        await app.as(asAgent).actor(Chat, actorKey(WS, 'chat', chatId)).setProject(null);
+        await until(() => answers.length > 0, 'the plugin to ask the daemon');
+        // The in-memory daemon cannot remove worktrees; what matters is that the Machine let the request through (no 403).
+        expect(answers[0]?.message ?? '').not.toMatch(/only the owner/);
     });
 
     it('an environment whose machine is offline is audited as unreachable, and the hook is not run there', async () => {
