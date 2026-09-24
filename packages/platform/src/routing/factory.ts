@@ -11,7 +11,8 @@
  * silent fallback to the deployment's environment.
  * Sessions open under the policy compiled from the agent's config
  * (`sessionPolicy`: approval rules, tool grants, then allow), constrained by
- * the ancestors' rules on a delegated task (AC-12) — `policy` overrides it.
+ * the ancestors' rules on a delegated task (AC-12) and by the workspace tool
+ * policy of the agent's connectors (#636) — `policy` overrides it.
  * An `ask` decision raises a `request` the user answers from any client
  * through `Session.respond` (OPS-02); on the daemon path the same rules
  * travel as `OpenSpec.policy` and the daemon compiles them (#121). With a
@@ -32,7 +33,7 @@ import { registryKey } from '../registry/key.js';
 import type { ConnectorStatus, GateConnector, RegistryGate } from '../registry/types.js';
 import type { OpenedSession, SessionFactory, SessionFactoryContext } from '../session/ports.js';
 import type { SessionMemory } from '../task/driver.js';
-import { connectorPolicy, openSessionConnectors, type ConnectorOpener } from './connectors.js';
+import { connectorPolicy, openSessionConnectors, withWorkspaceRules, workspaceToolRules, type ConnectorOpener } from './connectors.js';
 import { createActorToolPorts, type AgentPrincipal } from './tools.js';
 
 /** What a local runtime is handed besides the factory context: its plugin's config and the way to its secrets. */
@@ -196,7 +197,9 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                     ...(connectors.tools.length ? { tools: connectors.tools } : {}),
                     ...(connectors.unavailable.length ? { unavailableConnectors: connectors.unavailable } : {})
                 });
-                const policy = connectorPolicy(options.policy ?? sessionPolicy(c.spec), connectors.annotations);
+                // The workspace tool policy of its connectors constrains the agent's own (#636): it can only tighten it.
+                const approvalConstraints = withWorkspaceRules(c.spec.approvalConstraints ?? [], workspaceToolRules(plugin.connectors));
+                const policy = connectorPolicy(options.policy ?? sessionPolicy({ config: c.spec.config, ...(approvalConstraints.length ? { approvalConstraints } : {}) }), connectors.annotations);
                 const session = await built.agent.session({ policy, signal: c.signal, ...(c.resume ? { resume: c.resume } : {}) });
                 return {
                     session,

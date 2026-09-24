@@ -44,7 +44,7 @@
  * the same and no token or OAuth client ever reaches the machine.
  */
 
-import type { ConnectorCredentials, ConnectorToolDeclaration, OpenSpecConnector, PlatformConnectorTools, Principal, WorkspaceId } from '@agentic/core';
+import type { ApprovalRule, ConnectorCredentials, ConnectorToolDeclaration, OpenSpecConnector, PlatformConnectorTools, Principal, WorkspaceId } from '@agentic/core';
 import type { PlatformAgentDeps } from '@agentic/runtimes';
 import type { Policy, ToolAnnotations } from '@sigx/ai-agent';
 import type { ConnectorStatus, GateConnector } from '../registry/types.js';
@@ -163,11 +163,41 @@ interface Outcome {
     readonly unavailable?: UnavailableConnector;
 }
 
-/** Why a connector the gate did not find ready is left out — the same words on both paths. */
+/** Why a revoked `tools:` grant leaves a connector out (#636; PLG-04) — on both paths. */
+export const TOOLS_REVOKED_REASON = 'tools permission revoked';
+
+/** Why a connector the gate did not find usable is left out — the same words on both paths. */
 function notReady(c: GateConnector): string | undefined {
     if (c.state === 'missing') return 'no such connector is set up in this workspace';
     if (c.state === 'disabled') return `its plugin is turned off (/plugins/${c.pluginId ?? c.id})`;
+    if (c.toolsGranted === false) return TOOLS_REVOKED_REASON;
     return undefined;
+}
+
+/** Ready, with its plugin's `tools:` scope still granted: a connector a session may reach (#636). */
+const usable = (c: GateConnector): boolean => c.state === 'ready' && c.toolsGranted !== false;
+
+/**
+ * The workspace tool policy of the agent's connectors as approval constraints (#636; OPS-02, AC-12): one rule per
+ * ask / deny tool of each usable connector, `workspace:<plugin>:<tool>`. Constraints only tighten — the stricter of
+ * the agent's answer and the workspace's wins — so a workspace `deny` beats an agent `allow`, and a workspace `ask`
+ * never loosens an agent `deny`.
+ */
+export function workspaceToolRules(connectors: readonly GateConnector[]): ApprovalRule[] {
+    const rules: ApprovalRule[] = [];
+    const seen = new Set<string>();
+    for (const c of connectors) {
+        if (!usable(c)) continue;
+        const plugin = c.pluginId ?? c.id;
+        for (const [tool, outcome] of Object.entries(c.toolPolicy ?? {})) {
+            if (outcome !== 'ask' && outcome !== 'deny') continue;
+            const id = `workspace:${plugin}:${tool}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            rules.push({ id, match: { tools: [tool] }, outcome });
+        }
+    }
+    return rules;
 }
 
 /** Records what an open found — only when it differs from what the gate answer says the Registry has; never throws. */
@@ -279,6 +309,36 @@ export async function openSessionConnectors(input: OpenSessionConnectorsInput): 
     };
 }
 
+/**
+ * The approval constraints a session opens under (#636; AC-12): the ancestors' (`route.constraints`, a delegated
+ * task's chain) with the workspace's rules (`workspaceToolRules`) in front, so that ONE first-match set gives the
+ * stricter of the two answers for every request — what `OpenSpecPolicy.constraints` carries, with no protocol change.
+ * Plain concatenation would not: the ancestors' set holds the parent agents' own rules, `allow` ones included, and
+ * behind a parent's `allow gmail__send-email` a workspace `deny` would never be reached; in front of a parent's
+ * `deny`, a workspace `ask` would hide it. So each workspace rule leads a block scoped to its one tool: a `deny` is the
+ * block (nothing is stricter); an `ask` is preceded by every ancestor rule that could match that tool, narrowed to it
+ * and with its outcome raised to at least `ask` (an ancestor `deny` keeps its id and wins, anything else asks under the
+ * workspace's id). A request for that tool always stops in its block; any other request falls through to the
+ * ancestors' rules unchanged.
+ */
+export function withWorkspaceRules(ancestors: readonly ApprovalRule[], workspace: readonly ApprovalRule[]): ApprovalRule[] {
+    const out: ApprovalRule[] = [];
+    for (const w of workspace) {
+        const tool = w.match.tools?.length === 1 ? w.match.tools[0] : undefined;
+        if (w.outcome !== 'ask' || tool === undefined) {
+            out.push(w);
+            continue;
+        }
+        for (const a of ancestors) {
+            if (a.match.tools && !a.match.tools.includes(tool)) continue;
+            const deny = a.outcome === 'deny';
+            out.push({ ...a, id: deny ? a.id : w.id, match: { ...a.match, tools: [tool] }, outcome: deny ? 'deny' : 'ask' });
+        }
+        out.push(w);
+    }
+    return [...out, ...ancestors];
+}
+
 /** A plain copy of a gate answer's `auth` — it may be read out of actor state, which does not clone. */
 function plainAuth(auth: NonNullable<GateConnector['auth']>): NonNullable<OpenSpecConnector['auth']> {
     return {
@@ -360,7 +420,7 @@ export interface ConnectorCredentialsInput {
  * under the connector plugin's own `secret:` grants (audited by the Registry). Returned, never recorded.
  */
 export async function connectorCredentials(input: ConnectorCredentialsInput): Promise<ConnectorCredentials> {
-    const c = input.connectors.find((x) => x.id === input.connectorId && x.state === 'ready');
+    const c = input.connectors.find((x) => x.id === input.connectorId && usable(x));
     if (!c) throw new ConnectorCredentialsError('not-named', `connector "${input.connectorId}" is not one this session may open`);
     const pluginId = c.pluginId ?? c.id;
     const need = async (name: string): Promise<string> => {
@@ -382,7 +442,7 @@ export async function connectorCredentials(input: ConnectorCredentialsInput): Pr
 }
 
 /** A connector a daemon-hosted session reaches on the platform (#534): a ready conduit connector the owner connected. */
-const platformRun = (c: GateConnector): boolean => c.state === 'ready' && c.transport === 'conduit' && conduitUnconnected(c) === undefined;
+const platformRun = (c: GateConnector): boolean => usable(c) && c.transport === 'conduit' && conduitUnconnected(c) === undefined;
 
 export interface PlatformConnectorToolsInput {
     /** The calling session's gate answer (`spec.plugins.connectors`). */
@@ -469,7 +529,7 @@ export interface CallPlatformConnectorInput extends Omit<PlatformConnectorToolsI
  * result goes back to the machine; a failure is a message the agent may read, with every secret opened for it blanked.
  */
 export async function callPlatformConnector(input: CallPlatformConnectorInput): Promise<unknown> {
-    const c = input.connectors.find((x) => x.id === input.connectorId && x.state === 'ready' && x.transport === 'conduit');
+    const c = input.connectors.find((x) => x.id === input.connectorId && usable(x) && x.transport === 'conduit');
     if (!c) throw new PlatformConnectorError('not-named', `connector "${input.connectorId}" is not one this session may use on the platform`);
     const why = conduitUnconnected(c);
     if (why !== undefined || c.connector === undefined || c.account === undefined) throw new PlatformConnectorError('unsupported', `connector "${c.id}": ${why ?? 'it names no conduit connector'}`);
