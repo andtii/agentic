@@ -1,18 +1,21 @@
 /**
- * `/plugins/:id` on the platform (#233): one plugin out of the Registry's
- * live `overview()`, its dependents out of one `dependentsAll()`, and every
- * change as a direct owner-only Registry call — `configure`, `setSecret` /
- * `deleteSecret`, `grant` / `revoke`, `activate`, `remove`. Making a memory
+ * `/plugins/:id` on the platform (#233, #640): one plugin out of the
+ * Registry's live `overview()`, its dependents out of one `dependentsAll()`,
+ * its tools' modes out of a live `toolPolicy(id)`, its connector records out
+ * of a live `connectors()`, and every change as a direct owner-only Registry
+ * call — `configure`, `setSecret` / `deleteSecret`, `setToolPolicy` (drawn at
+ * once, rolled back if refused), `grant` / `revoke`, `activate`, `remove`. Making a memory
  * plugin active asks `previewActivation` first and moves the memories with
  * `activate(…, { migrate: true })` only once the owner confirms (#243). A
  * refusal is shown where it belongs (the form, the one secret, the page) and nothing
  * is written. A secret's value goes to `setSecret` and nowhere else: it is
  * never put in page state, the URL, a log or an error string.
  */
-import { component, signal, useData, useHead, type Define } from 'sigx';
+import { component, effect, onUnmounted, signal, useData, useHead, type Define } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
-import { runtimeKindOf, type PermissionScope } from '@agentic/core';
+import { useActorState } from '@sigx/actors/app';
+import { runtimeKindOf, type PermissionScope, type ToolMode } from '@agentic/core';
 import type { Dependents, SlotKind } from '@agentic/platform';
 import { EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -20,7 +23,8 @@ import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
 import { OpsPage } from '../ops/OpsPage';
 import { isInUse, registryErrorText } from './model';
-import { PluginDetail, type SecretWrite } from './PluginDetail';
+import { PluginDetail, type SecretWrite, type ToolPolicyWrite } from './PluginDetail';
+import { endpointOf, pluginHead, toolRows, transportOf } from './detail-model';
 import { useWorkspaceReadiness } from './readiness';
 import { usePluginSwitches } from './switches';
 import { useMemorySwitch } from './useMemorySwitch';
@@ -51,6 +55,15 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
         },
         async (k): Promise<Dependents | undefined> => (await actor(defs.Registry, (k as readonly string[])[1]!).dependentsAll()).find((d) => d.pluginId === props.id)
     );
+    // The tools' effective modes (PLG-03) and the connector records (transport, endpoint, reported tools), both live.
+    const policy = useActorState(defs.Registry, () => { const k = key(); return !!k && !!plugin() && ([k, 'toolPolicy', props.id] as const); }, { live: true });
+    const connectors = useActorState(defs.Registry, () => { const k = key(); return !!k && ([k, 'connectors'] as const); }, { live: true });
+    // The topbar reads the crumb from here.
+    const stopHead = effect(() => {
+        const p = plugin();
+        pluginHead.value = p ? { id: props.id, name: p.manifest.name, kind: p.manifest.kind } : null;
+    });
+    onUnmounted(() => { stopHead(); pluginHead.value = null; });
     const switches = usePluginSwitches({
         defs,
         key,
@@ -59,9 +72,35 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
         agentName: (id) => agents.lookup(id).name,
         onChanged: () => { if (usedBy.hasValue) void usedBy.refresh(); }
     });
-    const st = signal<{ saving: boolean; saved: boolean; configError: string; secretBusy: string | null; secretErrors: Record<string, string>; busy: boolean; forceRemove: boolean; error: string }>({
-        saving: false, saved: false, configError: '', secretBusy: null, secretErrors: {}, busy: false, forceRemove: false, error: ''
+    const st = signal<{ saving: boolean; saved: boolean; configError: string; secretBusy: string | null; secretErrors: Record<string, string>; busy: boolean; forceRemove: boolean; error: string; optimistic: Record<string, ToolMode> }>({
+        saving: false, saved: false, configError: '', secretBusy: null, secretErrors: {}, busy: false, forceRemove: false, error: '', optimistic: {}
     });
+
+    /**
+     * One tool's workspace-default mode (PLG-03): drawn at once, written with `setToolPolicy`, and held until the
+     * live policy has it; a refusal rolls the row back to what the Registry says and names why.
+     */
+    const setToolPolicy = async (w: ToolPolicyWrite): Promise<void> => {
+        const k = key();
+        if (!k || Object.hasOwn(st.optimistic, w.tool)) return;
+        st.optimistic = { ...st.optimistic, [w.tool]: w.mode };
+        st.error = '';
+        try {
+            await actor(defs.Registry, k).setToolPolicy(props.id, w.tool, w.mode);
+        } catch (e) {
+            st.error = `${w.tool} stays as it was: ${registryErrorText(e)}`;
+        }
+        try {
+            // The write landed; a failed refresh is caught up by the live subscription.
+            await policy.refresh();
+        } catch {
+            /* ignore */
+        } finally {
+            const { [w.tool]: _done, ...rest } = st.optimistic;
+            void _done;
+            st.optimistic = rest;
+        }
+    };
 
     const configure = async (config: Record<string, unknown>): Promise<void> => {
         const k = key();
@@ -148,6 +187,7 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
 
     return () => {
         const p = plugin();
+        const record = connectors.value?.find((c) => c.pluginId === props.id);
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return (
             <OpsPage page="plugin" title={p?.manifest.name ?? 'Plugin'}>
@@ -167,22 +207,24 @@ export const LivePlugin = component<LivePluginProps>(({ props }) => {
                                     agentOf={agents.lookup}
                                     toggle={() => switches.switchFor(p)}
                                     managedSecrets={managedSecretsOf(p.manifest)}
+                                    transport={transportOf(p.manifest, connectors.value ?? [])}
+                                    tools={toolRows(p.manifest, policy.value ?? undefined, st.optimistic, record?.tools)}
+                                    endpoint={p.manifest.kind === 'connector' && !isConduitConnector(p.manifest) ? endpointOf(p, record, ready.overview()!.secretNames) : undefined}
+                                    // A conduit connector (Gmail, #533): who is signed in, the OAuth client, Connect / Reconnect / Sign out.
+                                    account={() => (isConduitConnector(p.manifest) && viewer.workspaceId
+                                        ? <LiveConduitConnect plugin={p} workspaceId={viewer.workspaceId} secretNames={ready.overview()!.secretNames} hasKek={ready.overview()!.hasKek} defs={defs} query={route.query} />
+                                        : null)}
                                     extra={() => (p.manifest.id === WEB_PUSH_PLUGIN && viewer.workspaceId
                                         ? <GenerateKeys plugin={p} workspaceId={viewer.workspaceId} hasKek={ready.overview()!.hasKek} hasPrivateKey={ready.overview()!.secretNames.includes(VAPID_SECRET)} defs={defs} />
-                                        // A conduit connector (Gmail, #533): the redirect URI, Connect / Reconnect / Disconnect and the account.
-                                        : isConduitConnector(p.manifest) && viewer.workspaceId
-                                            ? (
-                                                <>
-                                                    <LiveConduitConnect plugin={p} workspaceId={viewer.workspaceId} secretNames={ready.overview()!.secretNames} hasKek={ready.overview()!.hasKek} defs={defs} query={route.query} />
-                                                    {/* A trigger this deployment runs (#535): new email wakes an agent. */}
-                                                    {hasTrigger(p.manifest) ? <LiveConnectorTrigger plugin={p} workspaceId={viewer.workspaceId} defs={defs} /> : null}
-                                                </>
-                                            )
+                                        // A trigger this deployment runs (#535): new email wakes an agent.
+                                        : isConduitConnector(p.manifest) && viewer.workspaceId && hasTrigger(p.manifest)
+                                            ? <LiveConnectorTrigger plugin={p} workspaceId={viewer.workspaceId} defs={defs} />
                                             // A harness runtime (#370): the machines that have it or lack it.
                                             : runtimeKindOf(p.manifest) === 'harness' ? <LiveRuntimeMachines runtime={p.manifest.id} name={p.manifest.name} /> : null)}
                                     onConfigure={(config: Record<string, unknown>) => { void configure(config); }}
                                     onSaveSecret={(w: SecretWrite) => { void saveSecret(w); }}
                                     onRemoveSecret={(name: string) => { void removeSecret(name); }}
+                                    onToolPolicy={(w: ToolPolicyWrite) => { void setToolPolicy(w); }}
                                     onGrant={(scope: PermissionScope) => { void grant(scope); }}
                                     onRevoke={(scope: PermissionScope) => { void revoke(scope); }}
                                     onActivate={() => { void activate(); }}
