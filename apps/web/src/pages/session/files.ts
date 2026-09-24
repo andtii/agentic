@@ -7,7 +7,7 @@
  * snapshot while the machine is offline.
  */
 import { signal, watch, type JSXElement } from 'sigx';
-import type { ChangeScope, ChangeSet, FsError, WorkspaceSource } from '@agentic/core';
+import type { ChangeScope, ChangeSet, FsError, FsWorktreesResult, WorkspaceAnswer, WorkspaceSource } from '@agentic/core';
 import type { DiffMode, LineRef } from '@agentic/ui';
 
 /** A question about one line of a diff (#565 posts it to the session's chat with the hunk attached). */
@@ -50,13 +50,37 @@ export interface SessionFiles {
     readonly mention?: (path: string) => void;
     /** #565: what goes before "copy path" in a file's header ("Edited by <tile> Edit at 14:09"). */
     readonly fileActions?: (path: string) => JSXElement | null;
+    /**
+     * #622: the worktrees of the session folder's repository, the session's own marked `current` — what the views may
+     * switch to for a look. Absent (a daemon without the `worktrees` feature, no folder), no switcher.
+     */
+    readonly worktrees?: () => Promise<WorkspaceAnswer<FsWorktreesResult>>;
+    /** #622: the same views over another worktree's folder. The session itself stays in its own folder (EXE-12). */
+    readonly at?: (root: string) => SessionFiles;
+    /** #622: set on the files `at` made: the session's own folder, which `root` is not. */
+    readonly sessionRoot?: string;
 }
+
+/**
+ * The files a view shows for the `?root=` query (#622): the session's own, or — when the query names another folder
+ * and the files can move — the same views over that worktree.
+ */
+export function filesAtRoot(files: SessionFiles, root: string | undefined): SessionFiles {
+    return root && files.at && root !== files.root ? files.at(root) : files;
+}
+
+/** The `?root=` a view keeps in its links: the worktree it shows, when that is not the session's own folder (#622). */
+export const rootQuery = (files: Pick<SessionFiles, 'root' | 'sessionRoot'>): string | undefined => (files.sessionRoot !== undefined ? files.root : undefined);
 
 export type SessionView = 'transcript' | 'changes' | 'files';
 
-/** `/sessions/:id/changes` with its query: the file, the scope and the view (unified is the default and left out). */
-export function changesHref(id: string, q: { file?: string; scope?: ChangeScope; view?: DiffMode } = {}): string {
+/**
+ * `/sessions/:id/changes` with its query: the file, the scope and the view (unified is the default and left out), and
+ * the worktree shown when it is not the session's own (#622).
+ */
+export function changesHref(id: string, q: { file?: string; scope?: ChangeScope; view?: DiffMode; root?: string } = {}): string {
     const params = new URLSearchParams();
+    if (q.root) params.set('root', q.root);
     if (q.file) params.set('file', q.file);
     if (q.scope) params.set('scope', q.scope);
     if (q.view && q.view !== 'unified') params.set('view', q.view);
@@ -64,9 +88,10 @@ export function changesHref(id: string, q: { file?: string; scope?: ChangeScope;
     return `/sessions/${encodeURIComponent(id)}/changes${s ? `?${s}` : ''}`;
 }
 
-/** `/sessions/:id/files` at `path`. */
-export function filesHref(id: string, path?: string): string {
-    return `/sessions/${encodeURIComponent(id)}/files${path ? `?path=${encodeURIComponent(path)}` : ''}`;
+/** `/sessions/:id/files` at `path`, in another worktree than the session's own when `root` says (#622). */
+export function filesHref(id: string, path?: string, root?: string): string {
+    const q = [...(root ? [`root=${encodeURIComponent(root)}`] : []), ...(path ? [`path=${encodeURIComponent(path)}`] : [])].join('&');
+    return `/sessions/${encodeURIComponent(id)}/files${q ? `?${q}` : ''}`;
 }
 
 export const transcriptHref = (id: string): string => `/sessions/${encodeURIComponent(id)}`;

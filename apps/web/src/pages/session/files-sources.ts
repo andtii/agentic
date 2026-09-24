@@ -4,17 +4,45 @@
  * machine through `machineWorkspaceSource` — the folder is the session's
  * `spec.cwd`, the base the project git feature's `base` setting, the views
  * offered decided by `workspaceCapabilities` from the machine's features.
+ * Either way the files can be re-rooted at another worktree of the repo (#622).
  */
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { workspaceCapabilities, type ChangeScope, type EnvironmentId, type ProjectRecord } from '@agentic/core';
-import { machineWorkspaceSource, type MachineFilesClient, type MachineView, type SessionInfo } from '@agentic/platform';
+import { workspaceCapabilities, type ChangeScope, type EnvironmentId, type ProjectRecord, type WorkspaceSource } from '@agentic/core';
+import { machineWorkspaceSource, machineWorktrees, type MachineFilesClient, type MachineView, type SessionInfo } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { chatKeyOf, machineKeyOf } from '../../actors/keys';
-import { memoryWorkspaceSource, mockSessionFolder } from '../../mock/files';
+import { memoryWorkspaceSource, mockSessionFolder, mockWorktrees } from '../../mock/files';
 import { chatSummary, formatTime, type MockSessionView } from '../../mock/workspace';
 import { useProjects } from '../projects/live';
 import type { ChangesSnapshot, LineQuestion, SessionFiles } from './files';
+
+/**
+ * `files` over another worktree's folder (#622): the same machine and chat, `source` / `snapshot` rebuilt by `rooted`
+ * for `root`, the worktree list still the session's own. The chat hooks are left out — a question, a mention and
+ * "Edited by" are about the session's own files. Only a folder the repository lists as one of its worktrees — inside
+ * the roots, its folder there — is read: any other `?root=` is refused, so a crafted link opens nothing but a worktree.
+ */
+function atWorktree(files: SessionFiles, root: string, rooted: (root: string) => Pick<SessionFiles, 'files' | 'vcs' | 'source' | 'snapshot'>): SessionFiles {
+    const { ask: _ask, mention: _mention, fileActions: _fileActions, at: _at, source: _source, snapshot: _snapshot, vcs: _vcs, ...rest } = files;
+    const moved = rooted(root);
+    let listed: Promise<boolean> | undefined;
+    const allowed = async (): Promise<boolean> => {
+        listed ??= (async () => {
+            const answer = files.worktrees ? await files.worktrees() : undefined;
+            return !!answer?.result?.entries.some((e) => e.path === root && !e.outside && !e.prunable);
+        })();
+        return listed;
+    };
+    const refused = { error: { code: 'outside-roots' as const, message: `${root} is not a worktree of this session's repository` } };
+    const source: WorkspaceSource | null = moved.source && {
+        tree: async (path) => ((await allowed()) ? moved.source!.tree(path) : refused),
+        read: async (path, rev) => ((await allowed()) ? moved.source!.read(path, rev) : refused),
+        changes: async (scope) => ((await allowed()) ? moved.source!.changes(scope) : refused)
+    };
+    const snapshot = moved.snapshot && (async (scope: ChangeScope) => ((await allowed()) ? moved.snapshot!(scope) : null));
+    return { ...rest, ...moved, source, ...(snapshot ? { snapshot } : {}), root, sessionRoot: files.root };
+}
 
 /** What the pages ask a machine: the files requests and, for the offline view, its last `changes` snapshot. */
 export type MachineFilesPort = MachineFilesClient & { changesSnapshot?(environmentId: EnvironmentId, root: string, scope: ChangeScope): Promise<ChangesSnapshot | null> };
@@ -27,24 +55,28 @@ export const mockQuestions: LineQuestion[] = [];
  * hooks (#565, `mockChatHooks`); the Transcript page's bar needs none. A question is also kept in `mockQuestions`.
  */
 export function mockSessionFiles(v: MockSessionView, hooks: Pick<SessionFiles, 'ask' | 'mention' | 'fileActions'> = {}): SessionFiles {
-    const folder = mockSessionFolder(v.cwd);
     const chat = v.chatId ? chatSummary(v.chatId) : undefined;
-    return {
+    const rooted = (root: string): Pick<SessionFiles, 'files' | 'vcs' | 'source'> => {
+        const folder = mockSessionFolder(root);
+        return { files: folder !== undefined, ...(folder ? { vcs: folder.vcs !== undefined } : {}), source: folder ? memoryWorkspaceSource(folder) : null };
+    };
+    const worktrees = mockWorktrees(v.cwd);
+    const files: SessionFiles = {
         sessionId: v.id,
         root: v.cwd,
-        files: folder !== undefined,
-        ...(folder ? { vcs: folder.vcs !== undefined } : {}),
-        source: folder ? memoryWorkspaceSource(folder) : null,
+        ...rooted(v.cwd),
         machineName: v.machine.name,
         online: v.machine.online,
         ...(chat ? { chat: { id: chat.id, title: chat.title } } : {}),
         time: formatTime,
+        ...(worktrees ? { worktrees: async () => worktrees } : {}),
         ...hooks,
         ask: async (q) => {
             mockQuestions.push(q);
             await hooks.ask?.(q);
         }
     };
+    return worktrees ? { ...files, at: (root) => atWorktree(files, root, rooted) } : files;
 }
 
 /** The project git feature's `base` setting, when the project names one. */
@@ -75,18 +107,25 @@ export function liveSessionFiles(
     const caps = workspaceCapabilities({ folder: !!machineId && !!env && !!cwd, ...(machine?.features ? { features: machine.features } : {}) });
     const online = machine?.online ?? false;
     const c = machineId && client ? client(machineId) : null;
-    return {
+    const rooted = (root: string): Pick<SessionFiles, 'files' | 'source' | 'snapshot'> => ({
+        files: caps.files,
+        source: caps.files && c && env ? machineWorkspaceSource(c, env, root, extra.base !== undefined ? { base: extra.base } : {}) : null,
+        ...(c?.changesSnapshot && env ? { snapshot: (scope: ChangeScope) => c.changesSnapshot!(env, root, scope) } : {})
+    });
+    // A daemon with the `worktrees` feature (#622) lists the repository's worktrees; the views may open another for a look.
+    const listed = caps.files && c && env && machine?.features?.includes('worktrees');
+    const files: SessionFiles = {
         sessionId: id,
         root: cwd,
-        files: caps.files,
-        source: caps.files && c && env ? machineWorkspaceSource(c, env, cwd, extra.base !== undefined ? { base: extra.base } : {}) : null,
+        ...rooted(cwd),
         machineName: machine?.name ?? machineId ?? 'the machine',
         online,
-        ...(c?.changesSnapshot && env ? { snapshot: (scope: ChangeScope) => c.changesSnapshot!(env, cwd, scope) } : {}),
         ...(extra.chat ? { chat: extra.chat } : {}),
         ...(extra.time ? { time: extra.time } : {}),
+        ...(listed ? { worktrees: () => machineWorktrees(c, env, cwd) } : {}),
         ...extra.hooks
     };
+    return listed ? { ...files, at: (root) => atWorktree(files, root, rooted) } : files;
 }
 
 /**

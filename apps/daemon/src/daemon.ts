@@ -518,7 +518,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const updater = options.update ? createUpdateClient({ send, runningTurns: () => [...sessions.values()].filter((s) => s.running).length, logger }, options.update) : undefined;
     // The optional frame families this daemon answers (#359): each feature adds itself.
     // `files` (#561): a session folder's tree, files and changes — always answered; without git a folder just has no VCS.
-    const features: DaemonFeature[] = ['files', 'run', ...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : []), ...(options.login ? (['login'] as const) : [])];
+    const features: DaemonFeature[] = ['files', 'run', 'worktrees', ...(updater ? (['update'] as const) : []), ...(options.harnesses ? (['harness'] as const) : []), ...(options.webPolicy ? (['policy'] as const) : []), ...(options.logTail ? (['log'] as const) : []), ...(options.login ? (['login'] as const) : [])];
     /** The sign-ins running (#484), one per environment: the request they answer and the relay to feed or end. */
     const logins = new Map<EnvironmentId, { readonly requestId: string; readonly relay: LoginRelay }>();
     const version = options.daemonVersion ?? DAEMON_VERSION;

@@ -16,7 +16,7 @@ import { dataMode } from '../data-mode';
 import { agentNamed, loadSession } from '../mock/workspace';
 import { LinkButton } from './ops/LinkButton';
 import { SessionFilesBar, envLineOf } from './session/bar';
-import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, useSessionChanges, type SessionFiles } from './session/files';
+import { changesHref, displayRoot, filesHref, queryOf, relativeToRoot, rootQuery, useSessionChanges, type SessionFiles } from './session/files';
 import { SessionFrame, type SessionFrameContext } from './session/frame';
 import { sessionHead } from './session/LiveSession';
 import { sessionTrail } from './session/trail';
@@ -126,7 +126,7 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
         return answer.result.entries;
     };
 
-    const open = (p: string | undefined): void => { void router.push(filesHref(props.ctx.v.id, p)); };
+    const open = (p: string | undefined): void => { void router.push(filesHref(props.ctx.v.id, p, rootQuery(props.ctx.files))); };
 
     const viewer = (p: string | undefined): JSXElement => {
         const f = files();
@@ -179,11 +179,11 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
                         <FileTreeLegend ignoredHidden={st.ignoredHidden} />
                     </aside>
                     <section data-files-main aria-label={p ? p : 'File'}>
-                        {p ? <a data-files-back href={filesHref(v.id)} onClick={(e: MouseEvent) => { e.preventDefault(); open(undefined); }}><Icon name="back" size={16} />All files</a> : null}
+                        {p ? <a data-files-back href={filesHref(v.id, undefined, rootQuery(props.ctx.files))} onClick={(e: MouseEvent) => { e.preventDefault(); open(undefined); }}><Icon name="back" size={16} />All files</a> : null}
                         {p ? (
                             <FileHeader path={p} breadcrumbs {...(change ? { status: change } : {})} facts={fileFacts(text.lines, text.size)}>
                                 {f.fileActions?.(p) ?? null}
-                                {change && vcs ? <LinkButton to={changesHref(v.id, { file: p })}>Open diff</LinkButton> : null}
+                                {change && vcs ? <LinkButton to={changesHref(v.id, { file: p, root: rootQuery(props.ctx.files) })}>Open diff</LinkButton> : null}
                                 {f.mention ? <Button icon="chats" onClick={() => f.mention?.(p)}>Mention in chat</Button> : null}
                                 <Button intent="icon" icon="copy" label="Copy path" onClick={() => copyPath(p)} />
                             </FileHeader>

@@ -17,8 +17,8 @@ import { agentNamed, loadSession } from '../../src/mock/workspace';
 import { createServerRouter } from '../../src/router';
 import { ChangesView } from '../../src/pages/SessionChanges';
 import { FilesView, fileFacts } from '../../src/pages/SessionFiles';
-import { changesHref, filesHref, type SessionFiles } from '../../src/pages/session/files';
-import { gitBaseOf, mockQuestions } from '../../src/pages/session/files-sources';
+import { changesHref, filesAtRoot, filesHref, rootQuery, type SessionFiles } from '../../src/pages/session/files';
+import { gitBaseOf, mockQuestions, mockSessionFiles } from '../../src/pages/session/files-sources';
 import { sessionTabs } from '../../src/pages/session/bar';
 import { mountRoute, texts, tick } from './mount';
 
@@ -244,6 +244,67 @@ describe('/sessions/:id/files', () => {
     it('counts lines and bytes in the header', () => {
         expect(fileFacts(82, 2150)).toBe('82 lines · 2.1 KB');
         expect(fileFacts(1, 12)).toBe('1 line · 12 B');
+    });
+});
+
+describe('the worktree picker (#622)', () => {
+    const picker = (dom: ParentNode) => dom.querySelector<HTMLSelectElement>('[data-worktree-picker] select');
+    const options = (dom: ParentNode) => [...picker(dom)!.querySelectorAll('option')].map((o) => ({ label: o.textContent, disabled: o.disabled, selected: o.value === picker(dom)!.value }));
+
+    it("lists the repo's worktrees on Changes, the session's own chosen, one outside the roots disabled", async () => {
+        const dom = await mountRoute('/sessions/s1/changes');
+        await until(() => picker(dom) !== null, 'the picker');
+        expect(options(dom)).toEqual([
+            { label: 'main', disabled: false, selected: false },
+            { label: '47-mobile-drawer (this session)', disabled: false, selected: true },
+            { label: 'detached 1f0a9b3 (outside the working roots)', disabled: true, selected: false }
+        ]);
+    });
+
+    it('opens another worktree for a look through ?root=, the tabs keeping it; the session keeps its own folder', async () => {
+        const main = 'C:\\Dev\\agentic\\main';
+        const dom = await mountRoute(filesHref('s1', undefined, main));
+        await until(() => dom.querySelector('[data-files-root]') !== null && picker(dom) !== null, 'the files at main');
+        expect(dom.querySelector('[data-files-root]')!.textContent).toContain('C:/Dev/agentic/main');
+        expect(options(dom).find((o) => o.selected)?.label).toBe('main');
+        const hrefs = [...dom.querySelectorAll<HTMLAnchorElement>('[data-scope="ag-session-bar"][data-part="tab"]')].map((a) => a.getAttribute('href'));
+        expect(hrefs).toEqual(['/sessions/s1', changesHref('s1', { root: main }), filesHref('s1', undefined, main)]);
+        // No chat hooks over another worktree: "Edited by" and "Mention in chat" are about the session's own files.
+        expect(dom.textContent).not.toContain('Mention in chat');
+        expect(loadSession('s1')!.cwd).toBe('C:\\Dev\\agentic\\branches\\47-mobile-drawer');
+    });
+
+    it('draws no picker without a worktree list, or with one worktree', async () => {
+        const plain: SessionFiles = { sessionId: 's1', root: '/w', files: true, vcs: true, source: memoryWorkspaceSource(mockSessionFolder('/w')!), machineName: 'alien01', online: true };
+        expect(picker(await mountView('changes', plain))).toBeNull();
+        const one: SessionFiles = { ...plain, worktrees: async () => ({ result: { kind: 'worktrees', root: '/w', entries: [{ path: '/w', branch: 'main', current: true }], truncated: false } }) };
+        const dom = await mountView('changes', one);
+        await tick();
+        await tick();
+        expect(picker(dom)).toBeNull();
+    });
+
+    it('filesAtRoot re-roots only files that can move, and only to another folder', () => {
+        const v = loadSession('s1')!;
+        const own = mockSessionFiles(v);
+        expect(filesAtRoot(own, undefined)).toBe(own);
+        expect(filesAtRoot(own, own.root)).toBe(own);
+        const at = filesAtRoot(own, 'C:\\Dev\\agentic\\main');
+        expect(at).toMatchObject({ root: 'C:\\Dev\\agentic\\main', sessionRoot: own.root, files: true, vcs: true });
+        expect(at.ask).toBeUndefined();
+        expect(rootQuery(at)).toBe('C:\\Dev\\agentic\\main');
+        expect(rootQuery(own)).toBeUndefined();
+        expect(changesHref('s1', { root: 'C:\\x', file: 'a.ts' })).toBe('/sessions/s1/changes?root=C%3A%5Cx&file=a.ts');
+    });
+
+    it('reads another folder only when the repository lists it as a worktree: a crafted ?root= opens nothing', async () => {
+        const own = mockSessionFiles(loadSession('s1')!);
+        const listed = filesAtRoot(own, 'C:\\Dev\\agentic\\main');
+        expect((await listed.source!.tree('')).result).toBeDefined();
+        const crafted = filesAtRoot(own, 'C:\\Dev\\secrets');
+        expect(await crafted.source!.tree('')).toEqual({ error: { code: 'outside-roots', message: expect.stringContaining('is not a worktree') } });
+        expect((await crafted.source!.changes('uncommitted')).error?.code).toBe('outside-roots');
+        expect((await crafted.source!.read('README.md')).error?.code).toBe('outside-roots');
     });
 });
 

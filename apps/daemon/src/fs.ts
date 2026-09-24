@@ -13,7 +13,7 @@
  * (#618) is `run.ts`'s.
  */
 
-import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
+import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, FS_WORKTREES_MAX, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
 import { LIMITS } from '@agentic/daemon-protocol';
 import type { Dirent } from 'node:fs';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
@@ -245,25 +245,35 @@ async function existingAncestor(path: string): Promise<string | undefined> {
 
 const fail = (code: FsErrorCode, message: string): { error: FsError } => ({ error: { code, message: message.slice(0, LIMITS.text) } });
 
-/** One entry of `git worktree list --porcelain`: its folder and the branch it has checked out (none when detached). */
+/** One entry of `git worktree list --porcelain`: its folder, the branch it has checked out (none when detached), and its state. */
 interface ListedWorktree {
     readonly path: string;
     readonly branch?: string;
+    /** Full commit id of HEAD. */
+    readonly head?: string;
+    readonly detached?: true;
+    readonly locked?: true;
+    readonly prunable?: true;
 }
 
 /** Parse `git worktree list --porcelain -z`: records of `key value` fields, each record ended by an empty field. */
 export function parseWorktreeList(out: string): ListedWorktree[] {
     const listed: ListedWorktree[] = [];
-    let path: string | undefined;
-    let branch: string | undefined;
+    let entry: { -readonly [K in keyof ListedWorktree]?: ListedWorktree[K] } = {};
+    const flush = () => {
+        if (entry.path !== undefined) listed.push(entry as ListedWorktree);
+        entry = {};
+    };
     for (const field of out.split('\0')) {
-        if (field === '') {
-            if (path !== undefined) listed.push(branch !== undefined ? { path, branch } : { path });
-            path = branch = undefined;
-        } else if (field.startsWith('worktree ')) path = field.slice('worktree '.length);
-        else if (field.startsWith('branch refs/heads/')) branch = field.slice('branch refs/heads/'.length);
+        if (field === '') flush();
+        else if (field.startsWith('worktree ')) entry.path = field.slice('worktree '.length);
+        else if (field.startsWith('branch refs/heads/')) entry.branch = field.slice('branch refs/heads/'.length);
+        else if (field.startsWith('HEAD ')) entry.head = field.slice('HEAD '.length);
+        else if (field === 'detached') entry.detached = true;
+        else if (field === 'locked' || field.startsWith('locked ')) entry.locked = true;
+        else if (field === 'prunable' || field.startsWith('prunable ')) entry.prunable = true;
     }
-    if (path !== undefined) listed.push(branch !== undefined ? { path, branch } : { path });
+    flush();
     return listed;
 }
 
@@ -342,6 +352,57 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
     return fail('internal', `git worktree add failed: ${added.stderr}`);
 }
 
+/**
+ * The worktrees of the repository `root` is in (#622), as `git worktree list` has them: the one `root` is in marked
+ * `current`, and one outside the roots marked `outside` (listed, but a session's Files cannot open it).
+ */
+/**
+ * `path` as the roots are written (#622): git names folders resolved through links (`/private/var/…` for a root under
+ * `/var` on macOS), but the platform checks a later request's `root` lexically against the roots as written — so a
+ * folder under a root's resolved form is answered under the root itself. Anything else is returned unchanged.
+ */
+async function asWritten(path: string, roots: readonly string[], platform: NodeJS.Platform): Promise<string> {
+    if (withinRoots(path, roots, platform)) return path;
+    for (const root of roots) {
+        const real = await realpath(resolve(root)).catch(() => undefined);
+        if (!real || real === resolve(root) || !withinRoots(path, [real], platform)) continue;
+        return join(resolve(root), path.slice(real.length));
+    }
+    return path;
+}
+
+async function worktrees(op: Extract<FsOp, { kind: 'worktrees' }>, roots: readonly string[], options: { readonly platform: NodeJS.Platform; readonly git: string }): Promise<FsOutcome> {
+    const { platform, git } = options;
+    const root = await checkWithinRoots(op.root, roots, platform);
+    if (!root.ok) return fail(root.code, root.message);
+    const top = await runGit(git, ['-C', root.real, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 });
+    if (top.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
+    if (top.code === 'timeout') return fail('timeout', 'git rev-parse did not finish');
+    if (top.code !== 0) return fail('not-a-repo', `${op.root} is not in a git repository`);
+    const list = await runGit(git, ['-C', root.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs: 10_000 });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const own = top.stdout.toString('utf8').trim();
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    const entries = [];
+    for (const w of listed.slice(0, FS_WORKTREES_MAX)) {
+        // git writes `/` on Windows too: answer in the machine's own syntax, like every other path, under the roots as written.
+        const path = await asWritten(resolve(w.path), roots, platform);
+        entries.push({
+            path,
+            ...(w.branch !== undefined && fitsId(w.branch) ? { branch: w.branch } : {}),
+            ...(w.head ? { head: w.head.slice(0, 7) } : {}),
+            ...(w.detached ? { detached: true as const } : {}),
+            ...(w.locked ? { locked: true as const } : {}),
+            ...(w.prunable ? { prunable: true as const } : {}),
+            ...((await sameFolder(w.path, own, platform)) ? { current: true as const } : {}),
+            // git names folders resolved through links: inside a root as written or as resolved.
+            ...(withinRoots(path, roots, platform) || withinRoots(path, root.realRoots, platform) ? {} : { outside: true as const })
+        });
+    }
+    return { result: { kind: 'worktrees', root: op.root, entries, truncated: listed.length > entries.length } };
+}
+
 // ------------------------------------------------------------------- entry
 
 export type FsOutcome = { readonly result: FsResult } | { readonly error: FsError };
@@ -374,7 +435,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
-        if (op.kind === 'worktrees') return fail('unsupported', "this daemon does not list a repository's worktrees yet");
+        if (op.kind === 'worktrees') return await worktrees(op, env.cwdRoots, { platform, git: options.git ?? 'git' });
         if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
