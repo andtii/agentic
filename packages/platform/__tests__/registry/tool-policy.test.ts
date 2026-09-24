@@ -99,6 +99,21 @@ describe('setToolPolicy(id, tool, mode)', () => {
         expect(await auditOf('plugin.tool-policy')).toEqual([]);
     });
 
+    it('audits every change even when two land in the same millisecond', async () => {
+        await installGmail();
+        vi.useFakeTimers({ toFake: ['Date'] });
+        try {
+            vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+            await reg().setToolPolicy('gmail', 'gmail__search', 'ask');
+            await reg().setToolPolicy('gmail', 'gmail__search', 'deny');
+            await reg().setToolPolicy('gmail', 'gmail__search', 'ask');
+        } finally {
+            vi.useRealTimers();
+        }
+        const modes = (await auditOf('plugin.tool-policy')).map((e) => (e.data as { mode: string }).mode);
+        expect(modes.sort()).toEqual(['ask', 'ask', 'deny']);
+    });
+
     it('rejects a tool neither declared nor reported with unknown-tool, and a mode that is not a ToolMode; nothing is stored', async () => {
         await installGmail();
         expect(isRegistryError(await reg().setToolPolicy('gmail', 'gmail__drop-table', 'deny').catch((e: unknown) => e), 'unknown-tool')).toBe(true);

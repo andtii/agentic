@@ -305,6 +305,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
     const audit = (ctx: Ctx, event: AuditEventInput): Promise<void> => recordAudit(ctx, workspaceOf(ctx), event);
     /** Distinguishes `openSecret` calls that share a millisecond within one activation. */
     let opened = 0;
+    /** Distinguishes permission / tool-policy changes that share a millisecond within one activation (OPS-03). */
+    let changed = 0;
 
     type Refs = { readonly agents: readonly AgentRef[]; readonly schedules: readonly ScheduleRef[] };
 
@@ -399,7 +401,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
             openSecret: [ownerOrAgent]
         },
         persistence: 'explicit',
-        reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 } },
+        reads: { list: { maxAge: 0 }, overview: { maxAge: 0 }, connectors: { maxAge: 0 }, secrets: { maxAge: 0 }, toolPolicy: { maxAge: 0 } },
         methodReentrancy: { get: 'always', isEnabled: 'always', requireEnabled: 'always', gate: 'always', getConnector: 'always', exportRows: 'always', checkProjectSettings: 'always' },
         state: (): RegistryState => initialRegistryState(),
         methods: (ctx) => ({
@@ -642,7 +644,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 // Revoking what was not held changes nothing: no record.
                 if (removed.length > 0) {
                     await audit(ctx, {
-                        key: `${ctx.key}:${id}:revoked:${next.updatedAt}:${removed.join(',')}`,
+                        key: `${ctx.key}:${id}:revoked:${next.updatedAt}:${removed.join(',')}:${changed++}`,
                         kind: 'plugin.revoked',
                         at: next.updatedAt,
                         by: principalLabel(ctx.principal),
@@ -671,7 +673,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 await ctx.save();
                 if (before[tool] !== mode) {
                     await audit(ctx, {
-                        key: `${ctx.key}:${id}:tool-policy:${next.updatedAt}:${tool}`,
+                        key: `${ctx.key}:${id}:tool-policy:${next.updatedAt}:${tool}:${mode}:${changed++}`,
                         kind: 'plugin.tool-policy',
                         at: next.updatedAt,
                         by: principalLabel(ctx.principal),
