@@ -40,20 +40,26 @@ describe('connectorOptions', () => {
 });
 
 describe('probeConnector', () => {
-    const server = (expect: { header: string; value: string }): typeof fetch =>
+    const server = (expect: { header: string; value: string }, tools: readonly object[] = [{ name: 'ping', inputSchema: { type: 'object' } }]): typeof fetch =>
         (async (_input: RequestInfo | URL, init?: RequestInit) => {
             if (init?.method === 'DELETE') return new Response(null, { status: 200 });
             const got = new Headers(init?.headers).get(expect.header);
             if (got !== expect.value) return new Response(`denied for ${got}`, { status: 403 });
             const message = JSON.parse(String(init?.body)) as { id?: number; method: string };
             if (message.id === undefined) return new Response(null, { status: 202 });
-            const result = message.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 's', version: '1' } } : { tools: [{ name: 'ping', inputSchema: { type: 'object' } }] };
+            const result = message.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 's', version: '1' } } : { tools };
             return new Response(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), { headers: { 'content-type': 'application/json' } });
         }) as typeof fetch;
 
     it('lists the tools under the connector namespace, sending the key in its header', async () => {
         const answer = await probeConnector(draft({ name: 'Acme', url: 'https://acme.test/mcp', auth: 'header', header: 'X-Api-Key', secret: 'k-1' }), { fetch: server({ header: 'x-api-key', value: 'k-1' }) });
         expect(answer).toEqual({ ok: true, tools: ['acme__ping'], declared: [{ name: 'ping' }] });
+    });
+
+    it('does not declare an undescribed tool\'s own name as its description, even when sanitizing changed it', async () => {
+        const tools = [{ name: 'delete.repo', inputSchema: { type: 'object' } }];
+        const answer = await probeConnector(draft({ name: 'Acme', url: 'https://acme.test/mcp', auth: 'header', header: 'X-Api-Key', secret: 'k-1' }), { fetch: server({ header: 'x-api-key', value: 'k-1' }, tools) });
+        expect(answer).toEqual({ ok: true, tools: ['acme__delete_repo'], declared: [{ name: 'delete_repo' }] });
     });
 
     it('says why it failed, with the credential cut out even when the server echoes it', async () => {

@@ -11,7 +11,7 @@
  * declares, so each gets a policy row that starts where its hints say
  * (PLG-09). Nothing here draws.
  */
-import { connectorToolPrefix, mcpConnectorSetup, openMcpConnector, type FetchLike, type McpHttpConnector } from '@agentic/mcp';
+import { connectorToolPrefix, mcpConnectorSetup, openMcpConnector, toolNameFor, type FetchLike, type McpHttpConnector } from '@agentic/mcp';
 import type { ConnectorRecord, ConnectorStatus, Dependents, PluginView } from '@agentic/platform';
 import type { PluginManifest } from '@agentic/core';
 
@@ -147,8 +147,9 @@ export async function probeConnector(draft: ConnectorDraft, options: { readonly 
             const name = unprefixed(id, t.name);
             return {
                 name,
-                // `mcpTool` falls back to the name for a tool the server left undescribed; that is no description.
-                ...(t.description && t.description !== name ? { description: t.description } : {}),
+                // `mcpTool` falls back to the raw server name for a tool the server left undescribed; that is no
+                // description. Compare sanitized forms, so `delete.repo` is recognised as `delete_repo`'s own name.
+                ...(t.description && toolNameFor(t.description, connectorToolPrefix(id)) !== t.name ? { description: t.description } : {}),
                 ...(Object.keys(annotations).length ? { annotations } : {})
             };
         });
