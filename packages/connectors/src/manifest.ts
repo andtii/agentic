@@ -5,13 +5,14 @@
  * secret, the hosts it calls and its tool namespace. Its capabilities name every operation an agent can
  * call (`operation:<id>`) and, prefixed `unsupported:`, what the connector
  * has that agentic does not run yet; a trigger it runs is `trigger:<id>` (#535).
+ * Its `tools` list every tool it adds, each with the mode it starts in (PLG-09).
  */
 
 import type { ConnectorSpec } from '@aigntiq/conduit';
-import type { PermissionScope, PluginManifest } from '@agentic/core';
+import { defaultToolMode, type PermissionScope, type PluginManifest, type PluginToolDeclaration } from '@agentic/core';
 import gmail from '@aigntiq/conduit-connectors/gmail';
 import { connectorClientSecretNames, CONNECTOR_ENGINE_SECRET } from './clients.js';
-import { connectorNamespace, isToolOperation } from './tools.js';
+import { connectorNamespace, connectorToolName, isToolOperation, operationAnnotations } from './tools.js';
 import { runsTrigger } from './triggers/gmail.js';
 
 export interface ConduitConnectorManifestOptions {
@@ -19,6 +20,8 @@ export interface ConduitConnectorManifestOptions {
     readonly hosts: readonly string[];
     /** Plugin id. Default: the connector's id. */
     readonly id?: string;
+    /** Operation ids whose tools start in `ask` whatever their hints (a send, a trash). */
+    readonly askByDefault?: readonly string[];
 }
 
 /** Capability strings: the operations agents can call, then `unsupported:<kind>:<id>` for the rest. */
@@ -27,6 +30,19 @@ export function conduitCapabilities(spec: ConnectorSpec): string[] {
     // A trigger agentic runs (#535) is a capability; any other is listed as not supported yet.
     for (const op of spec.operations) if (op.kind === 'trigger') out.push(runsTrigger(spec.id, op.id) ? `trigger:${op.id}` : `unsupported:trigger:${op.id}`);
     return out;
+}
+
+/** One declaration per tool operation: its session name, label, description and starting mode. */
+export function conduitToolDeclarations(spec: ConnectorSpec, id: string = spec.id, askByDefault: readonly string[] = []): PluginToolDeclaration[] {
+    return spec.operations.filter(isToolOperation).map((op) => {
+        const hints = operationAnnotations(op);
+        return {
+            name: connectorToolName(id, op.id),
+            title: op.label,
+            ...(op.description ? { description: op.description } : {}),
+            defaultMode: askByDefault.includes(op.id) ? 'ask' : defaultToolMode({ readOnlyHint: hints?.readOnly, destructiveHint: hints?.destructive })
+        };
+    });
 }
 
 export function conduitConnectorManifest(spec: ConnectorSpec, options: ConduitConnectorManifestOptions): PluginManifest {
@@ -54,9 +70,14 @@ export function conduitConnectorManifest(spec: ConnectorSpec, options: ConduitCo
             { name: CONNECTOR_ENGINE_SECRET, title: 'Connector engine secret', description: 'Generated on the first Connect. It signs the sign-in handshake and seals connected accounts; removing it disconnects them.', required: false }
         ],
         permissions,
-        compat: { platform: '*', core: '*' }
+        compat: { platform: '*', core: '*' },
+        tools: conduitToolDeclarations(spec, id, options.askByDefault)
     };
 }
 
 /** Gmail (`@aigntiq/conduit-connectors/gmail`): the first catalogue entry. */
-export const gmailConnectorPlugin: PluginManifest = conduitConnectorManifest(gmail, { hosts: ['gmail.googleapis.com', 'oauth2.googleapis.com'] });
+export const gmailConnectorPlugin: PluginManifest = conduitConnectorManifest(gmail, {
+    hosts: ['gmail.googleapis.com', 'oauth2.googleapis.com'],
+    // Sending and trashing act on the owner's behalf in ways a read does not: they ask first.
+    askByDefault: ['send-email', 'trash-message']
+});
