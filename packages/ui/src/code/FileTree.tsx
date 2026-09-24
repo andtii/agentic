@@ -60,13 +60,17 @@ export type FileTreeProps =
 export const FileTree = component<FileTreeProps>(({ props }) => {
     const st = signal({ folders: {} as Record<string, FolderState>, expanded: [] as string[], selected: props.selected ?? '' });
 
+    /** Bumped by a refresh: a load started before it lands nowhere. */
+    let generation = 0;
     const loadFolder = (path: string): void => {
         const folder = st.folders[path];
         if (folder?.entries || folder?.loading) return;
         st.folders[path] = { loading: true };
+        const started = generation;
+        const settle = (state: FolderState): void => { if (started === generation) st.folders[path] = state; };
         props.load(path).then(
-            (entries) => { st.folders[path] = { entries }; },
-            (error: unknown) => { st.folders[path] = { error: error instanceof Error ? error.message : String(error) }; }
+            (entries) => settle({ entries }),
+            (error: unknown) => settle({ error: error instanceof Error ? error.message : String(error) })
         );
     };
     const expand = (dirs: readonly string[]): void => {
@@ -83,7 +87,10 @@ export const FileTree = component<FileTreeProps>(({ props }) => {
         st.selected = path ?? '';
         openTo(path);
     });
-    watch(() => props.version, () => {
+    // A re-render can re-run the watch with the same version; only a new one refreshes.
+    watch(() => props.version, (version, previous) => {
+        if (version === previous) return;
+        generation++;
         st.folders = {};
         loadFolder('');
         for (const dir of st.expanded) loadFolder(dir);

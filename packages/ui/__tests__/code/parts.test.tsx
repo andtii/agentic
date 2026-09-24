@@ -6,6 +6,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { component } from '@sigx/runtime-core';
+import { signal } from '@sigx/reactivity';
 import { mergeManifests, validateDesignSystem, type ZeroManifest } from '@sigx/zero-kit';
 import type { ChangeCommit, ChangedFile, FsTreeEntry } from '@agentic/core';
 import { all, buttonNamed, mount, one, tick, waitFor } from '../helpers';
@@ -295,6 +297,23 @@ describe('the file tree', () => {
         expect(picked).toEqual(['packages/ui/shell.css']);
         key(document.activeElement!, 'ArrowLeft');
         expect(document.activeElement).toBe(ui);
+    });
+
+    it('a refresh drops a load still in flight: the stale answer never lands', async () => {
+        const answers: Array<(entries: FsTreeEntry[]) => void> = [];
+        const load = (): Promise<FsTreeEntry[]> => new Promise((resolve) => answers.push(resolve));
+        const state = signal({ version: 0 });
+        const Host = component(() => () => <FileTree load={load} version={state.version} onSelect={() => undefined} />);
+        const root = mount(<Host />);
+        await waitFor(() => answers.length === 1);
+        state.version = 1;
+        await waitFor(() => answers.length === 2);
+        answers[1]!([{ name: 'fresh.ts', path: 'fresh.ts', type: 'file' }]);
+        await waitFor(() => all(root, 'ag-file-tree', 'item').length === 1);
+        answers[0]!([{ name: 'stale.ts', path: 'stale.ts', type: 'file' }]);
+        await tick();
+        expect(all(root, 'ag-file-tree', 'item').map((i) => i.getAttribute('data-path'))).toEqual(['fresh.ts']);
+        expect(answers).toHaveLength(2);
     });
 
     it('shows a folder that failed to load, and the legend', async () => {
