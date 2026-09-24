@@ -95,6 +95,10 @@ All work is tracked as sub-issues of the tracking issue
 Mandatory for every agent-driven change, including one-line fixes. Never commit
 straight to `main` — it is protected (PR, resolved review threads, green CI,
 squash only; `scripts/apply-branch-protection.mjs` is the ruleset as code).
+A branch need **not** be up to date with `main` to merge (`--no-strict`, #685):
+parallel sessions merge faster than CI runs, and merge queue is unavailable on a
+user-owned repo. Rebase only on a real conflict. CI still runs on every push to
+`main`; if a merge turns it red, fixing `main` comes before anything else.
 
 1. **Issue first.** If no issue tracks the work, create one before writing code
    with the plan in its body (`.github/ISSUE_TEMPLATE/task.md` is the shape).
