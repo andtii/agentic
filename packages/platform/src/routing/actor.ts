@@ -219,8 +219,8 @@ export const MACHINE_LOST_REMINDER = 'machine-lost';
  */
 export const PARKED_RECHECK_REMINDER = 'parked-recheck';
 
-/** How often a parked route is re-checked (#605). */
-export const PARKED_RECHECK_MS = 30_000;
+/** How often a parked route is re-checked (#605): the reminder floor, `REMINDER_FLOOR_MS`, nothing tighter. */
+export const PARKED_RECHECK_MS = 60_000;
 
 /**
  * How long an implicit turn may run empty (no event beyond `turn-start` / `state` / `config` / `usage`) before the
