@@ -539,10 +539,10 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
     const settled = (requestId: string, principal: Principal = owner) => until(async () => (await machine(K1, principal).fsResult(requestId)).status !== 'pending', `fs.response for ${requestId}`);
 
     /** A daemon this test speaks for by hand: its hello goes in, nothing answers unless the test sends `fs.response`. */
-    async function rawDaemon() {
+    async function rawDaemon(features?: readonly string[]) {
         sockets.connected.add(K1);
         const asDaemon = machine(K1, asMachine(M1));
-        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {} }));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {}, ...(features ? { features } : {}) }));
         const respond = (requestId: string, body: object) => asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'fs.response', requestId, ...body }));
         return { asDaemon, respond };
     }
@@ -589,6 +589,25 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
 
         expect(await statusOf(machine(K1).fsResult('fs_nope'))).toBe(404);
         expect(await statusOf(machine(K1).fsRequest(E1, list('')))).toBe(400);
+    });
+
+    it('lets only the owner run a project command, on a daemon with the run feature, inside the roots (#617)', async () => {
+        const run = { kind: 'run', cwd: '/work/app', argv: ['pnpm', 'install'] } as const;
+        await rawDaemon();
+        const old = await machine(K1).fsRequest(E1, run);
+        expect(await machine(K1).fsResult(old.requestId)).toMatchObject({ status: 'error', error: { code: 'unsupported' } });
+        expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);
+
+        const { respond } = await rawDaemon(['run']);
+        expect(await statusOf(machine(K1, agentP).fsRequest(E1, run))).toBe(403);
+        const outside = await machine(K1).fsRequest(E1, { ...run, cwd: '/etc' });
+        expect(await machine(K1).fsResult(outside.requestId)).toMatchObject({ status: 'error', error: { code: 'outside-roots' } });
+        expect(sockets.frames(K1).some((f) => f.t === 'fs.request')).toBe(false);
+
+        const { requestId } = await machine(K1).fsRequest(E1, run);
+        expect(sockets.frames(K1).find((f) => f.t === 'fs.request')).toEqual({ v: 1, t: 'fs.request', requestId, environmentId: E1, op: run });
+        await respond(requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: 'done', stderrTail: '' } });
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'done', result: { kind: 'run', exitCode: 0 } });
     });
 
     it('refuses an unknown environment (404), an offline machine (503) and a revoked one (403)', async () => {
@@ -1253,10 +1272,10 @@ describe('Machine offline and closed sessions (#366)', () => {
     let heardByChat: SessionEvent[];
 
     /** A daemon the test speaks for itself: its hello, then whatever frames the test sends. */
-    async function rawDaemon() {
+    async function rawDaemon(features?: readonly string[]) {
         sockets.connected.add(K1);
         const asDaemon = machine(K1, asMachine(M1));
-        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {} }));
+        await asDaemon.socketMessage(JSON.stringify({ v: 1, t: 'hello', machineId: M1, daemonVersion: '1', os: 'linux', environments: [inMemoryEnvironment(M1, E1)], capabilities: [], resume: {}, ...(features ? { features } : {}) }));
         return asDaemon;
     }
 

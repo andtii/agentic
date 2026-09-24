@@ -28,9 +28,9 @@ export interface DaemonBuild {
  * `hello.features` lists the feature; an older daemon drops a frame it cannot decode and keeps the socket. `policy`
  * (`policy.request`, #355), `log` (`log.request`) and `login` (`login.*`) follow the same rule; a restart from the web
  * is an `update.request { target: 'restart' }` and rides `update`. `files` (#559) is the read-only `fs.request` kinds
- * `tree`, `read` and `changes` over a session's folder.
+ * `tree`, `read` and `changes` over a session's folder; `run` (#617) the `fs.request` kind `run`, a project command.
  */
-export type DaemonFeature = 'update' | 'harness' | 'policy' | 'log' | 'login' | 'files';
+export type DaemonFeature = 'update' | 'harness' | 'policy' | 'log' | 'login' | 'files' | 'run';
 
 /**
  * Why the host ended a session (#359), beside the human `reason`: the reason is for people, the code for the platform,

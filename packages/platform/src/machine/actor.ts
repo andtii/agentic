@@ -72,6 +72,14 @@ function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root:
     return undefined;
 }
 
+/** A `run` (#617) is refused here, like a files op: a daemon without the `run` feature, a `cwd` outside the roots. */
+function runRefusal(s: MachineState, environment: EnvironmentDescriptor, cwd: string): FsError | undefined {
+    if (!s.features?.includes('run')) return { code: 'unsupported', message: 'the daemon does not run project commands (no run feature); update it' };
+    const os = s.os === 'windows' || s.os === 'darwin' || s.os === 'linux' ? s.os : 'linux';
+    if (!pathWithin(cwd, environment.cwdRoots, os)) return { code: 'outside-roots', message: `${cwd} is not inside the folders environment "${environment.id}" may use` };
+    return undefined;
+}
+
 /** Fail every pending history request (#397): the daemon went away, or was revoked — the Session asks again on its next read. */
 function failPendingHistory(s: MachineState, at: number, message: string): void {
     for (const r of Object.values(s.history ?? {})) {
@@ -1941,8 +1949,8 @@ export function defineMachineActor(ports: MachinePorts) {
                 async fsRequest(environmentId: EnvironmentId, op: FsOp): Promise<FsRequested> {
                     const parsed = fsOpSchema.safeParse(op);
                     if (!parsed.success) throw new ServerFnError(400, `machine: invalid fs op: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
-                    if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate') && (ctx.principal as Principal | null)?.kind !== 'user') {
-                        throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : 'locate checkouts'}`);
+                    if ((parsed.data.kind === 'worktree' || parsed.data.kind === 'locate' || parsed.data.kind === 'run') && (ctx.principal as Principal | null)?.kind !== 'user') {
+                        throw new ServerFnError(403, `machine: only the owner may ${parsed.data.kind === 'worktree' ? 'create a worktree' : parsed.data.kind === 'locate' ? 'locate checkouts' : 'run a command'}`);
                     }
                     const s = ctx.state;
                     if (s.revokedAt !== undefined && s.revokedAt !== null) throw new ServerFnError(403, `machine "${machineId}" is revoked`);
@@ -1953,7 +1961,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const requestId = `fs_${crypto.randomUUID()}`;
                     const checked = parsed.data;
                     // Refused here, before a frame goes out: a daemon that cannot answer, a folder outside the roots.
-                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked.root) : undefined;
+                    const refusal = isFilesOp(checked) ? filesRefusal(s, environment, checked.root) : checked.kind === 'run' ? runRefusal(s, environment, checked.cwd) : undefined;
                     if (!refusal && !send({ v: V, t: 'fs.request', requestId, environmentId, op: checked })) throw new ServerFnError(503, `machine "${machineId}" has no open socket`);
                     const fs = (s.fs ??= {});
                     pruneFs(fs, at);
