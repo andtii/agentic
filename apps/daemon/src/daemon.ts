@@ -162,6 +162,12 @@ export interface DaemonOptions {
     readonly reinspectMs?: number;
     /** How long a platform tool call may take. Default 10 minutes. */
     readonly toolTimeoutMs?: number;
+    /**
+     * How long a turn nobody prompted may stay open without carrying anything before it is cancelled (#604): a runtime
+     * that opens an implicit turn it never ends would otherwise hold its session and its environment's slot forever.
+     * Default 10 s.
+     */
+    readonly ghostTurnMs?: number;
     readonly daemonVersion?: string;
     readonly os?: 'windows' | 'darwin' | 'linux';
     /** Overrides the socket URL derived from `credentials.url`. */
@@ -337,7 +343,35 @@ interface LiveSession {
     running: boolean;
     /** `watchTurns`: aborted when the session closes. */
     readonly turns: AbortController;
+    /** The turn open now, as `watchTurns` sees it (#604). */
+    turn: OpenTurn | undefined;
+    /** The turn ids the platform prompted: a `turn-start` outside them is one the runtime opened on its own. */
+    readonly asked: Set<string>;
+    /** `configure`, `prompt` and `close`, one at a time and in the order they came (#604). */
+    commands: Promise<void>;
 }
+
+/** A turn as `watchTurns` follows it (#604). */
+interface OpenTurn {
+    readonly id: string;
+    /** Opened by the runtime, not by a prompt: an implicit turn. */
+    readonly implicit: boolean;
+    /** It carried something: an event beyond `EMPTY_TURN_EVENTS`. */
+    content: boolean;
+    /** Resolved by its `turn-end`. */
+    readonly ended: Promise<void>;
+    readonly end: () => void;
+    reaper?: ReturnType<typeof setTimeout>;
+}
+
+/** Events that say nothing about the work: a turn made only of these is empty. A runtime `ext` (a status, a rate limit) is a sign of life. */
+const EMPTY_TURN_EVENTS: ReadonlySet<string> = new Set(['turn-start', 'state', 'config', 'usage']);
+/** `ghostTurnMs` by default. */
+const GHOST_TURN_MS = 10_000;
+/** How long a cancelled ghost turn may take to end before the prompt goes ahead regardless: the adapter's interrupt grace and then some. */
+const GHOST_END_WAIT_MS = 10_000;
+/** How long a prompt the runtime refused `busy` waits for `watchTurns` to see the turn in its way. */
+const GHOST_SETTLE_MS = 500;
 
 /**
  * Whether two refs name the same runtime session (#389): by `id` and, for a harness that stamps generations, `data.epoch`
@@ -411,6 +445,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const titleRecheckMs = options.titleRecheckMs ?? TITLE_RECHECK_MS;
     const reinspectMs = options.reinspectMs ?? 30_000;
     const toolTimeoutMs = options.toolTimeoutMs ?? 10 * 60_000;
+    const ghostTurnMs = options.ghostTurnMs ?? GHOST_TURN_MS;
     const drivers = new Map(options.drivers.map((d) => [d.runtime, d]));
     const log = options.eventLog;
     const retention: RetentionPolicy = { maxBytes: options.retention?.maxBytes ?? DEFAULT_LOG_MAX_BYTES };
@@ -674,7 +709,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 void openSession(frame);
                 return;
             case 'session.command':
-                void command(frame);
+                void inOrder(frame);
                 return;
             case 'session.close':
                 void closeSession(frame.sessionId, 'closed');
@@ -884,7 +919,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
             // The platform records none of it; the id a resume needs travels as `session.ref` once the runtime reports it (#389).
             const ref = opened.session.ref;
             const base = spec.resume !== undefined ? await reopenedBase(sessionId, ref) : served.head;
-            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, ...(opened.title ? { title: opened.title } : {}), ...(opened.pid ? { pid: opened.pid } : {}), lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController() };
+            const live: LiveSession = { id: sessionId, environmentId: env.id, runtime: env.runtime, session: opened.session, served, capabilities: opened.capabilities, base, sentRef: ref, ...(opened.title ? { title: opened.title } : {}), ...(opened.pid ? { pid: opened.pid } : {}), lastSent: base, tapped: base, pump: undefined, running: false, turns: new AbortController(), turn: undefined, asked: new Set(), commands: Promise.resolve() };
             sessions.set(sessionId, live);
             watchTurns(live);
             logger.info('session: opened', { session: sessionId, environment: env.id, runtime: env.runtime, ...(spec.resume !== undefined ? { resumedAt: base } : {}) });
@@ -973,16 +1008,86 @@ export function createDaemon(options: DaemonOptions): Daemon {
                 for await (const frame of s.served.events(s.served.head, { signal: s.turns.signal })) {
                     if (s.turns.signal.aborted) return;
                     if (frame.kind !== 'event') continue;
-                    if (frame.event.type === 'turn-start') s.running = true;
-                    else if (frame.event.type === 'turn-end') {
+                    const event = frame.event;
+                    if (event.type === 'turn-start') {
+                        s.running = true;
+                        if (event.turnId !== undefined) opened(s, event.turnId);
+                    } else if (event.type === 'turn-end') {
                         s.running = false;
+                        if (event.turnId !== undefined) closed(s, event.turnId);
                         void probeTitle(s);
+                    } else if (s.turn && !s.turn.content && event.turnId === s.turn.id && !EMPTY_TURN_EVENTS.has(event.type)) {
+                        s.turn.content = true;
+                        clearTimeout(s.turn.reaper);
                     }
                 }
             } catch (e) {
                 if (!s.turns.signal.aborted) logger.warn('session: turn watch failed', { session: s.id, error: e });
             }
         })();
+    }
+
+    /**
+     * A turn started (#604). One the platform did not prompt is the runtime's own: if it stays empty for `ghostTurnMs`
+     * it is cancelled, so a runtime that never ends it cannot hold the session and its slot.
+     */
+    function opened(s: LiveSession, turnId: string): void {
+        if (s.turn) closed(s, s.turn.id);
+        let end!: () => void;
+        const ended = new Promise<void>((r) => (end = r));
+        const turn: OpenTurn = { id: turnId, implicit: !s.asked.has(turnId), content: false, ended, end };
+        s.turn = turn;
+        if (turn.implicit) turn.reaper = setTimeout(() => void reap(s, `it stayed empty for ${ghostTurnMs} ms`), ghostTurnMs);
+    }
+
+    function closed(s: LiveSession, turnId: string): void {
+        s.asked.delete(turnId);
+        const turn = s.turn;
+        if (!turn || turn.id !== turnId) return;
+        clearTimeout(turn.reaper);
+        s.turn = undefined;
+        turn.end();
+    }
+
+    /** An open turn nobody prompted that has carried nothing (#604): a ghost. */
+    const ghostIn = (s: LiveSession): OpenTurn | undefined => (s.turn?.implicit && !s.turn.content ? s.turn : undefined);
+
+    /**
+     * Cancel a ghost turn and wait (bounded) for its `turn-end` (#604). The runtime ends it `cancelled`, and the slot
+     * frees the way it does for any turn: here, on the Machine, and for the routes parked behind it.
+     */
+    async function reap(s: LiveSession, why: string): Promise<void> {
+        const ghost = ghostIn(s);
+        if (!ghost || !sessions.has(s.id)) return;
+        clearTimeout(ghost.reaper);
+        logger.warn('session: cancelling a turn the runtime opened on its own and never ended', { session: s.id, turn: ghost.id, why });
+        await s.session.cancel().catch((e: unknown) => logger.warn('session: cancelling the ghost turn failed', { session: s.id, error: e }));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([ghost.ended, new Promise<void>((r) => (timer = setTimeout(r, GHOST_END_WAIT_MS)))]);
+        clearTimeout(timer);
+    }
+
+    /** Whether a ghost turn shows up within `GHOST_SETTLE_MS`: `watchTurns` reads the log a little behind the runtime. */
+    async function settledGhost(s: LiveSession): Promise<boolean> {
+        for (let waited = 0; waited < GHOST_SETTLE_MS; waited += 25) {
+            if (ghostIn(s)) return true;
+            await new Promise((r) => setTimeout(r, 25));
+        }
+        return ghostIn(s) !== undefined;
+    }
+
+    /**
+     * `session.command` in order, per session (#604): a `configure` completes before the `prompt` sent after it, so the
+     * prompt never races the runtime's answer to it. `cancel` and `respond` go straight through: they are what
+     * unblocks a turn, and must not wait behind one.
+     */
+    function inOrder(frame: PlatformFrameOf<'session.command'>): Promise<void> {
+        const run = (): Promise<void> => command(frame).catch((e: unknown) => logger.error('session: command failed', { session: frame.sessionId, error: e }));
+        const s = sessions.get(frame.sessionId);
+        if (!s || frame.command.type === 'cancel' || frame.command.type === 'respond') return run();
+        const next = s.commands.then(run);
+        s.commands = next;
+        return next;
     }
 
     /**
@@ -1120,6 +1225,8 @@ export function createDaemon(options: DaemonOptions): Daemon {
             return;
         }
         const { command } = frame;
+        // A turn the runtime opened on its own and never filled (#604) is not what the prompt should wait behind.
+        if (command.type === 'prompt' && ghostIn(s)) await reap(s, 'a prompt arrived');
         // A prompt that would start a turn beyond the environment's concurrency is answered `busy` (#394): the platform
         // parks its task and prompts again when a turn ends here. A session already running one is left to the runtime
         // (a steer, or its own `busy`). The slot is taken before the reply is known so two prompts cannot share it.
@@ -1144,8 +1251,19 @@ export function createDaemon(options: DaemonOptions): Daemon {
             }
             s.running = true;
         }
-        const reply = await s.served.handleCommand(command);
+        // Only a prompt that goes out is one the platform asked for: one refused above never reaches the runtime.
+        if (command.type === 'prompt') s.asked.add(command.turnId);
+        let reply = await s.served.handleCommand(command);
+        // Refused by the runtime while this daemon saw no turn (#604): one it opened on its own that `watchTurns` has not
+        // caught up with yet. Once seen, a ghost is cancelled and the prompt tried once more.
+        if (starts && command.type === 'prompt' && reply.kind === 'error' && reply.code === 'busy' && (await settledGhost(s))) {
+            await reap(s, 'the runtime refused a prompt over it');
+            // The ghost's `turn-end` cleared `running`: the prompt takes its slot back before it is sent again.
+            s.running = true;
+            reply = await s.served.handleCommand(command);
+        }
         if (starts && reply.kind !== 'ack') s.running = false;
+        if (command.type === 'prompt' && reply.kind !== 'ack') s.asked.delete(command.turnId);
         send({ v: V, t: 'session.reply', sessionId, reply });
         if (command.type === 'close' && reply.kind === 'ack') await closeSession(sessionId, 'closed by command');
     }
@@ -1157,6 +1275,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
         stopPump(s);
         s.turns.abort();
         clearTimeout(s.titleRecheck);
+        if (s.turn) closed(s, s.turn.id);
         s.running = false;
         for (const [callId, pending] of pendingTools) {
             if (pending.frame.sessionId !== sessionId) continue;
