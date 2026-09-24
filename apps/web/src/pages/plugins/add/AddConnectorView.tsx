@@ -58,10 +58,10 @@ export type AddConnectorViewProps =
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** The listing `?selected=` names: by its id, or by the plugin id it installs as (the sign-in callback's). */
 /** The phone breakpoint (`--below-md`): the preview is a full-screen modal sheet below it. */
 export const SHEET_MEDIA = '(max-width: 767px)';
 
+/** The listing `?selected=` names: by its id, or by the plugin id it installs as (the sign-in callback's). */
 const listingFor = (selected: string | undefined): ConnectorListing | undefined =>
     selected ? CONNECTOR_LISTINGS.find((l) => l.id === selected) ?? CONNECTOR_LISTINGS.find((l) => listingPluginId(l) === selected) : undefined;
 
