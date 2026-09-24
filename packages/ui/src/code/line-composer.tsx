@@ -2,9 +2,11 @@
  * "Ask <agent> about line n" (#563): the inline composer a diff or viewer
  * renders under the selected line. It only collects the question; where it
  * goes (the session's chat, with the hunk attached) is the caller's. Enter
- * inserts a newline, Ctrl/Cmd+Enter sends, Escape cancels.
+ * inserts a newline, Ctrl/Cmd+Enter sends, Escape cancels — the keys of
+ * zero's `Textarea`, which autosizes from two rows.
  */
 import { component, onMounted, signal, type Define } from '@sigx/runtime-core';
+import { Textarea, type TextareaHandle } from '@sigx/zero';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { Button } from '../kit/Button.js';
 import { agLineComposerAnatomy } from './anatomy.js';
@@ -25,14 +27,12 @@ export type LineComposerProps =
 
 export const LineComposer = component<LineComposerProps>(({ props }) => {
     const st = signal({ text: '' });
-    let input: HTMLTextAreaElement | null = null;
+    let input: TextareaHandle | null = null;
     onMounted(() => input?.focus());
     const send = (): void => {
         const text = st.text.trim();
         if (text && !props.sending) props.onSend(text);
     };
-    // Derived from props, not a counter, so a server render and the hydrating client name it alike.
-    const id = (): string => `ag-line-composer-${props.fileRef.replace(/[^A-Za-z0-9_-]/g, '_')}`;
     return () => (
         <form
             data-scope={SCOPE}
@@ -48,25 +48,23 @@ export const LineComposer = component<LineComposerProps>(({ props }) => {
                 <span data-scope={SCOPE} data-part="title">Ask {props.agent.name} about line {props.line}</span>
                 <span data-scope={SCOPE} data-part="ref">{props.fileRef}</span>
             </div>
-            <label for={id()} data-visually-hidden="">Question about this line</label>
-            <textarea
-                id={id()}
-                data-scope={SCOPE}
-                data-part="input"
-                rows={2}
-                value={st.text}
-                ref={(el: HTMLTextAreaElement) => { input = el; }}
-                onInput={(e: Event) => { st.text = (e.target as HTMLTextAreaElement).value; }}
-                onKeyDown={(e: KeyboardEvent) => {
-                    if (e.key === 'Escape') {
-                        e.preventDefault();
-                        props.onCancel();
-                    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                        e.preventDefault();
-                        send();
-                    }
-                }}
-            />
+            <div data-scope={SCOPE} data-part="input">
+                <Textarea.Root model={() => st.text} minRows={2}>
+                    <Textarea.Label visuallyHidden>Question about this line</Textarea.Label>
+                    <Textarea.Textarea
+                        ref={(h: TextareaHandle | null) => { input = h; }}
+                        onKeydown={(e: KeyboardEvent) => {
+                            if (e.key === 'Escape') {
+                                e.preventDefault();
+                                props.onCancel();
+                            } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                e.preventDefault();
+                                send();
+                            }
+                        }}
+                    />
+                </Textarea.Root>
+            </div>
             <div data-scope={SCOPE} data-part="foot">
                 {props.note ? <span data-scope={SCOPE} data-part="note">{props.note}</span> : null}
                 <Button onClick={() => props.onCancel()}>Cancel</Button>

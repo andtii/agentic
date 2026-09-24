@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { expectAnatomy } from '@sigx/zero/testing';
 import { signal } from '@sigx/reactivity';
 import { component } from '@sigx/runtime-core';
-import { Composer, NOBODY_HINT, aiComposerAnatomy, appendToDraft, type ComposerInsert } from '../src/composer';
+import { Composer, MAX_MENTIONS, NOBODY_HINT, aiComposerAnatomy, appendToDraft, type ComposerInsert } from '../src/composer';
 import { mount, one, all, buttonNamed, tick } from './helpers';
 
 const people = [
@@ -23,6 +23,11 @@ function type(dom: ParentNode, value: string): void {
     ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+/** The mention popup — zero's Combobox listbox — and its options. */
+const popup = (dom: ParentNode): HTMLElement => dom.querySelector<HTMLElement>('[data-scope="ai-composer"][data-part="input"] [data-scope="combobox"][data-part="popup"]')!;
+const options = (dom: ParentNode): HTMLElement[] => [...popup(dom).querySelectorAll<HTMLElement>('[data-scope="combobox"][data-part="item"]')];
+const isOpen = (dom: ParentNode): boolean => popup(dom).getAttribute('data-state') === 'open';
+
 function key(dom: ParentNode, key: string, init: KeyboardEventInit = {}): KeyboardEvent {
     const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
     textarea(dom).dispatchEvent(e);
@@ -35,7 +40,9 @@ describe('the composer', () => {
         expectAnatomy(dom, aiComposerAnatomy);
         expect(dom.querySelector('[data-scope="textarea"][data-part="textarea"]')).not.toBeNull();
         expect(dom.querySelector('[data-scope="button"][data-part="root"]')).not.toBeNull();
-        expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(true);
+        // The textarea sits in zero's Combobox (trigger mode), which owns the mention popup.
+        expect(textarea(dom).closest('[data-scope="combobox"][data-part="root"]')).not.toBeNull();
+        expect(dom.querySelector('[data-scope="ai-composer"][data-part="mentions"]')).toBeNull();
     });
 
     it('Enter sends the trimmed draft and clears the box; Shift+Enter does not', async () => {
@@ -52,6 +59,17 @@ describe('the composer', () => {
         expect(textarea(dom).value).toBe('');
     });
 
+    it('an IME composition\'s Enter does not send', () => {
+        const sent: string[] = [];
+        const dom = mount(<Composer onSend={(t) => sent.push(t)} />);
+        type(dom, 'nihon');
+        const composing = key(dom, 'Enter', { isComposing: true });
+        expect(composing.defaultPrevented).toBe(false);
+        expect(sent).toEqual([]);
+        key(dom, 'Enter');
+        expect(sent).toEqual(['nihon']);
+    });
+
     it('the Send button submits the form, and an empty draft sends nothing', () => {
         const sent: string[] = [];
         const dom = mount(<Composer onSend={(t) => sent.push(t)} />);
@@ -62,16 +80,20 @@ describe('the composer', () => {
         expect(sent).toEqual(['go']);
     });
 
-    // The attribute, not `.rows`: happy-dom's reflection returns a string.
-    it('grows with its lines, within bounds', async () => {
+    // zero's autosize: `field-sizing: content` between the row bounds the textarea carries — no row counting here.
+    it('autosizes between minRows and maxRows (1–8 by default)', async () => {
         const dom = mount(<Composer onSend={() => {}} maxRows={4} />);
-        expect(textarea(dom).getAttribute('rows')).toBe('1');
+        const ta = textarea(dom);
+        expect(ta.hasAttribute('data-autosize')).toBe(true);
+        expect(ta.getAttribute('rows')).toBe('1');
+        expect(ta.style.getPropertyValue('--textarea-min-rows')).toBe('1');
+        expect(ta.style.getPropertyValue('--textarea-max-rows')).toBe('4');
         type(dom, 'a\nb\nc');
         await tick();
-        expect(textarea(dom).getAttribute('rows')).toBe('3');
-        type(dom, '1\n2\n3\n4\n5\n6');
-        await tick();
-        expect(textarea(dom).getAttribute('rows')).toBe('4');
+        expect(ta.getAttribute('rows')).toBe('1');
+        const tall = textarea(mount(<Composer onSend={() => {}} minRows={2} />));
+        expect(tall.getAttribute('rows')).toBe('2');
+        expect(tall.style.getPropertyValue('--textarea-max-rows')).toBe('8');
     });
 
     it('during a turn, Send waits unless the agent steers, and Cancel appears only when it can cancel', () => {
@@ -201,7 +223,10 @@ describe('the composer', () => {
             expect(chips[1]!.querySelector('img')).toBeNull();
             expect(chips[1]!.querySelector('[data-icon="file"]')).not.toBeNull();
             expect(one(chips[1]!, 'ai-composer', 'spinner')).toBeNull();
-            expect(one(chips[2]!, 'ai-composer', 'attachment-error')!.textContent).toBe('Too large');
+            const note = chips[2]!.querySelector('[data-attachment-error]')!;
+            expect(note.getAttribute('data-scope')).toBe('alert');
+            expect(note.getAttribute('role')).toBe('alert');
+            expect(note.textContent).toBe('Too large');
             expectAnatomy(dom, aiComposerAnatomy);
         });
 
@@ -251,91 +276,91 @@ describe('the composer', () => {
             expect(attach.getAttribute('data-intent')).toBe('icon');
             attach.click();
             expect(attached).toEqual([1]);
-            expect(one(dom, 'ai-composer', 'keys')!.textContent).toBe('Enter to send · Shift+Enter newline');
+            const keys = one(dom, 'ai-composer', 'keys')!;
+            expect(keys.textContent).toBe('Enter to send · Shift+Enter newline');
+            expect([...keys.querySelectorAll('kbd[data-scope="kbd"]')].map((k) => k.textContent)).toEqual(['Enter', 'Shift', 'Enter']);
             expect(buttonNamed(dom, 'Send').getAttribute('data-intent')).toBe('primary');
             expect(buttonNamed(dom, 'Send').getAttribute('type')).toBe('submit');
         });
     });
 
     describe('@mentions', () => {
-        it('opens on an @-token, filters as it is typed, and highlights the first match', async () => {
-            const dom = mount(<Composer onSend={() => {}} mentions={people} />);
+        it('opens on an @-token, ranks prefix matches first, and highlights the first', async () => {
+            const dom = mount(<Composer onSend={() => {}} mentions={[...people, { id: 'mal', label: 'Malice' }]} />);
+            expect(isOpen(dom)).toBe(false);
             type(dom, 'ask @al');
             await tick();
-            const list = one(dom, 'ai-composer', 'mentions')!;
-            expect(list.hidden).toBe(false);
-            expect(list.getAttribute('data-state')).toBe('open');
-            expect(all(dom, 'ai-composer', 'mention').map((el) => el.textContent)).toEqual(['Alice', 'Albert']);
-            expect(all(dom, 'ai-composer', 'mention')[0]!.getAttribute('data-highlighted')).toBe('');
-            expect(all(dom, 'ai-composer', 'mention')[1]!.hasAttribute('data-highlighted')).toBe(false);
+            expect(isOpen(dom)).toBe(true);
+            expect(options(dom).map((el) => el.textContent)).toEqual(['Alice', 'Albert', 'Malice']);
+            expect(options(dom)[0]!.hasAttribute('data-highlighted')).toBe(true);
+            expect(options(dom)[1]!.hasAttribute('data-highlighted')).toBe(false);
             expectAnatomy(dom, aiComposerAnatomy);
         });
 
-        it('wires the textarea to the popup as a combobox that tracks the highlighted option', async () => {
+        it('lists at most MAX_MENTIONS', async () => {
+            const many = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, label: `Person ${i}` }));
+            const dom = mount(<Composer onSend={() => {}} mentions={many} />);
+            type(dom, '@p');
+            await tick();
+            expect(options(dom)).toHaveLength(MAX_MENTIONS);
+        });
+
+        it('wires the textarea to the popup as a combobox while it is open', async () => {
             const dom = mount(<Composer onSend={() => {}} mentions={people} />);
             await tick();
             const ta = textarea(dom);
-            const list = one(dom, 'ai-composer', 'mentions')!;
-            expect(ta.getAttribute('role')).toBe('combobox');
             expect(ta.getAttribute('aria-autocomplete')).toBe('list');
-            expect(ta.getAttribute('aria-controls')).toBe(list.id);
-            expect(ta.getAttribute('aria-expanded')).toBe('false');
+            expect(ta.getAttribute('aria-controls')).toBe(popup(dom).id);
             expect(ta.hasAttribute('aria-activedescendant')).toBe(false);
 
             type(dom, '@al');
             await tick();
-            const options = all(dom, 'ai-composer', 'mention');
-            expect(options.every((o) => o.id !== '')).toBe(true);
-            expect(new Set(options.map((o) => o.id)).size).toBe(options.length);
+            expect(ta.getAttribute('role')).toBe('combobox');
             expect(ta.getAttribute('aria-expanded')).toBe('true');
-            expect(ta.getAttribute('aria-activedescendant')).toBe(options[0]!.id);
-
-            const albert = options[1]!.id;
+            expect(ta.getAttribute('aria-activedescendant')).toBe(options(dom)[0]!.id);
             key(dom, 'ArrowDown');
             await tick();
-            expect(ta.getAttribute('aria-activedescendant')).toBe(albert);
-            // The id follows the mention, not its position in the filtered list.
-            type(dom, '@alb');
-            await tick();
-            expect(all(dom, 'ai-composer', 'mention')[0]!.id).toBe(albert);
+            expect(ta.getAttribute('aria-activedescendant')).toBe(options(dom)[1]!.id);
 
             key(dom, 'Escape');
             await tick();
-            expect(ta.getAttribute('aria-expanded')).toBe('false');
+            expect(isOpen(dom)).toBe(false);
             expect(ta.hasAttribute('aria-activedescendant')).toBe(false);
         });
 
-        it('arrows move the highlight and Enter picks — into the draft, not into a send', async () => {
+        it('with the popup open, Enter picks the mention into the draft and does not send', async () => {
             const sent: string[] = [];
             const dom = mount(<Composer onSend={(t) => sent.push(t)} mentions={people} />);
             type(dom, '@al');
             await tick();
             key(dom, 'ArrowDown');
             await tick();
-            expect(all(dom, 'ai-composer', 'mention')[1]!.getAttribute('data-highlighted')).toBe('');
             key(dom, 'Enter');
             await tick();
             expect(sent).toEqual([]);
             expect(textarea(dom).value).toBe('@Albert ');
-            expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(true);
+            expect(isOpen(dom)).toBe(false);
+            // Popup closed: Enter sends again.
+            key(dom, 'Enter');
+            expect(sent).toEqual(['@Albert']);
         });
 
         it('a click picks, Escape dismisses, and a space ends the token', async () => {
             const dom = mount(<Composer onSend={() => {}} mentions={people} />);
             type(dom, 'hi @b');
             await tick();
-            all(dom, 'ai-composer', 'mention')[0]!.click();
+            options(dom)[0]!.click();
             await tick();
             expect(textarea(dom).value).toBe('hi @Bob ');
             type(dom, 'hi @Bob @a');
             await tick();
-            expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(false);
+            expect(isOpen(dom)).toBe(true);
             key(dom, 'Escape');
             await tick();
-            expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(true);
+            expect(isOpen(dom)).toBe(false);
             type(dom, 'hi @Bob @a ');
             await tick();
-            expect(one(dom, 'ai-composer', 'mentions')!.hidden).toBe(true);
+            expect(isOpen(dom)).toBe(false);
         });
     });
 });

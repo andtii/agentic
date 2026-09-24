@@ -125,7 +125,8 @@ export const agLineComposerAnatomy = defineAnatomy('ag-line-composer', {
     head: { element: 'div', parent: 'root' },
     title: { element: 'span', parent: 'head', tokens: ['color', 'text'] },
     ref: { element: 'span', parent: 'head', tokens: ['color', 'text'] },
-    input: { element: 'textarea', parent: 'root', tokens: ['color', 'radius-field', 'text'] },
+    /** Holds zero's `Textarea` (autosizing from two rows). */
+    input: { element: 'div', parent: 'root', tokens: ['color', 'radius-field', 'text'] },
     foot: { element: 'div', parent: 'root' },
     note: { element: 'span', parent: 'foot', tokens: ['color', 'text'] }
 });

@@ -1,14 +1,21 @@
 /**
  * `Composer` — the prompt box (`ai-composer`, `docs/design/HANDOFF.md` →
  * `ai-composer`): the addressing row ("To" + recipient chips + hint), zero's
- * `Textarea` that grows with its lines, an `@mention` popup, the
- * attachments strip, and the action row — attach, the key hint, Cancel
- * while a turn can be cancelled, `Send` primary.
+ * `Textarea` autosizing between `minRows` and `maxRows`, an `@mention` popup
+ * (zero's `Combobox` in trigger mode around the textarea), the attachments
+ * strip, and the action row — attach, the key hint, Cancel while a turn can
+ * be cancelled, `Send` primary.
  *
- * Enter sends, Shift+Enter breaks a line. While a turn runs Send stays
- * enabled only when the agent can be steered (`steers`), and Cancel appears
- * only when it can be cancelled (`canCancel`) — capabilities, never who the
- * agent is. Who the message goes to is the page's resolution (mentions ∩
+ * Enter sends, Shift+Enter breaks a line, and an IME composition's Enter
+ * belongs to the composition — the textarea's own `onKeydown`. While the
+ * mention popup is open its keys come first (zero runs them before
+ * `onKeydown`): Enter or Tab picks the highlighted mention and does not
+ * send, the arrows move, Escape dismisses. The popup lists at most
+ * `MAX_MENTIONS`, prefix matches before substring ones (`filterMentions`).
+ *
+ * While a turn runs Send stays enabled only when the agent can be steered
+ * (`steers`), and Cancel appears only when it can be cancelled
+ * (`canCancel`) — capabilities, never who the agent is. Who the message goes to is the page's resolution (mentions ∩
  * members, else the coordinator, else the single member, else nobody) —
  * this component only shows it.
  *
@@ -17,7 +24,7 @@
  * a drag-and-drop onto the card — and all three emit one `files` event with
  * a `File[]`. The composer never uploads: the host turns files into
  * `attachments` (with a `status`) and the strip renders them — a thumbnail
- * when there is a `previewUrl`, a spinner while `uploading`, the error line
+ * when there is a `previewUrl`, a spinner while `uploading`, the error note
  * on `error`, and a remove button. Send waits while any chip is uploading
  * and goes with an empty draft when there are attachments. While a drag
  * carrying files hovers, the root carries zero's governed `highlighted`
@@ -29,23 +36,18 @@
  * spaced, with the caret after it — also on mount, so a page opened with
  * a prefill starts with it. The composer still owns the draft; `draft`
  * reports every change an insert makes, as typing does through `input`.
- *
- * Keys are read on the FORM: zero's `Textarea.Textarea` declares no key or
- * input handlers of its own (andtii/zero-wip#481), and the events
- * bubble to the root either way — one listener, filtered on the target.
- * The same gap means the textarea takes no ARIA props, so its combobox
- * attributes (`aria-controls` / `aria-expanded` / `aria-activedescendant`)
- * are synced onto the element after every render.
  */
-import { component, onMounted, onUpdated, type Define } from '@sigx/runtime-core';
+import { component, type Define } from '@sigx/runtime-core';
 import { watch } from '@sigx/reactivity';
-import { Textarea, dataAttr } from '@sigx/zero';
+import { Combobox, Kbd, Textarea, dataAttr, type TextareaHandle } from '@sigx/zero';
+import { caretAnchor } from '@sigx/zero/behaviors';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { Button } from '../kit/Button.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { Icon } from '../kit/icons.js';
 import { formatBytes } from '../thread/text.js';
 import { aiComposerAnatomy } from './anatomy.js';
-import { filterMentions, insertMention, mentionAt, rowsFor, type Mention, type MentionQuery } from './mentions.js';
+import { filterMentions, type Mention } from './mentions.js';
 
 const SCOPE = aiComposerAnatomy.scope;
 
@@ -132,39 +134,20 @@ export type ComposerProps =
     & Define.Prop<'accept', string, false>
     /** Text to put into the draft (`@file:<path> `); each new `id` inserts once. */
     & Define.Prop<'insert', ComposerInsert, false>
-    /** Autogrow bounds in rows. Default 1–8. */
+    /** Autosize bounds in rows (`Textarea.Root minRows` / `maxRows`). Default 1–8. */
     & Define.Prop<'minRows', number, false>
     & Define.Prop<'maxRows', number, false>;
 
-let seq = 0;
+const mentionKey = (m: Mention): string => m.id;
+const mentionLabel = (m: Mention): string => m.label;
 
 export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
-    const st = signal({ draft: '', caret: 0, highlighted: 0, dismissed: false, dragging: false });
-    const listId = `ai-composer-mentions-${++seq}`;
-    let form: HTMLFormElement | null = null;
+    /** `query` is the mention token at the caret — the Combobox's `inputValue`. */
+    const st = signal({ draft: '', query: '', dragging: false });
+    let box: TextareaHandle | null = null;
     let picker: HTMLInputElement | null = null;
     /** `dragenter` / `dragleave` fire per child crossed — a depth count says when the drag really left. */
     let dragDepth = 0;
-
-    const textarea = (): HTMLTextAreaElement | null => form?.querySelector('textarea') ?? null;
-
-    /** A stable option id per mention, so the active descendant survives refiltering. */
-    const optionId = (m: Mention): string => `${listId}-${m.id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
-
-    const syncAria = (): void => {
-        const el = textarea();
-        if (!el) return;
-        el.setAttribute('role', 'combobox');
-        el.setAttribute('aria-autocomplete', 'list');
-        el.setAttribute('aria-controls', listId);
-        const isOpen = open();
-        el.setAttribute('aria-expanded', String(isOpen));
-        const active = isOpen ? matches()[st.highlighted] : undefined;
-        if (active) el.setAttribute('aria-activedescendant', optionId(active));
-        else el.removeAttribute('aria-activedescendant');
-    };
-    onMounted(syncAria);
-    onUpdated(syncAria);
 
     const uploading = (): boolean => props.attachments?.some((a) => a.status === 'uploading') === true;
     const hasAttachments = (): boolean => (props.attachments?.length ?? 0) > 0;
@@ -214,33 +197,24 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
         picker?.click();
     };
 
-    /** The token under the caret and the entries matching it — the popup's whole state. */
-    const query = (): MentionQuery | undefined => (props.mentions?.length ? mentionAt(st.draft, st.caret) : undefined);
-    const matches = (): Mention[] => {
-        const q = query();
-        return q ? filterMentions(props.mentions ?? [], q.query) : [];
-    };
-    const open = (): boolean => !st.dismissed && matches().length > 0;
+    /** The popup's list, ranked and capped here — the Combobox shows it as given (`filter={false}`). */
+    const mentionItems = (): Mention[] => (props.mentions?.length ? filterMentions(props.mentions, st.query) : []);
 
     const send = (): void => {
         const text = st.draft.trim();
         if ((!text && !hasAttachments()) || !canSend()) return;
         st.draft = '';
-        st.caret = 0;
         emit('send', text);
         // The composer keeps focus after send.
-        textarea()?.focus();
+        box?.focus();
     };
 
-    const pick = (m: Mention): void => {
-        const q = query();
-        if (!q) return;
-        const next = insertMention(st.draft, q, m);
-        st.draft = next.text;
-        st.caret = next.caret;
-        st.highlighted = 0;
-        const el = textarea();
-        if (el) queueMicrotask(() => el.setSelectionRange(next.caret, next.caret));
+    /** Enter sends, Shift+Enter is a newline, a composition's Enter is the IME's. The open popup's keys never get here. */
+    const onKeydown = (e: KeyboardEvent): void => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            send();
+        }
     };
 
     // A host's insert: appended, caret after it, focus in the box; the host hears the new draft.
@@ -253,64 +227,19 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
             const text = insert.text;
             if (!text) return;
             st.draft = appendToDraft(st.draft, text);
-            st.caret = st.draft.length;
-            st.dismissed = true;
             emit('draft', st.draft);
-            const el = textarea();
-            if (el) {
-                queueMicrotask(() => {
-                    // The page arrived with the insert: focus the box without scrolling the page to it.
-                    el.focus({ preventScroll: true });
-                    el.setSelectionRange(st.caret, st.caret);
-                });
-            }
+            queueMicrotask(() => {
+                const el = box?.element;
+                if (!el) return;
+                // The page arrived with the insert: focus the box without scrolling the page to it.
+                box?.focus({ preventScroll: true });
+                el.setSelectionRange(el.value.length, el.value.length);
+            });
         },
         { immediate: true }
     );
 
-    const onInput = (e: Event): void => {
-        const el = e.target as HTMLTextAreaElement | null;
-        if (!el || el.tagName !== 'TEXTAREA') return;
-        st.draft = el.value;
-        st.caret = el.selectionStart ?? el.value.length;
-        st.dismissed = false;
-        st.highlighted = 0;
-    };
-
-    const onKeydown = (e: KeyboardEvent): void => {
-        if ((e.target as HTMLElement | null)?.tagName !== 'TEXTAREA') return;
-        if (open()) {
-            const list = matches();
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                st.highlighted = (st.highlighted + 1) % list.length;
-                return;
-            }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                st.highlighted = (st.highlighted - 1 + list.length) % list.length;
-                return;
-            }
-            if (e.key === 'Enter' || e.key === 'Tab') {
-                e.preventDefault();
-                pick(list[st.highlighted] ?? list[0]!);
-                return;
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                st.dismissed = true;
-                return;
-            }
-        }
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-            e.preventDefault();
-            send();
-        }
-    };
-
     return () => {
-        const list = matches();
-        const isOpen = open();
         const busy = props.busy === true;
         const recipients = props.recipients;
         const hint = recipients ? (props.hint ?? (recipients.length === 0 ? NOBODY_HINT : undefined)) : undefined;
@@ -319,15 +248,10 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                 data-scope={SCOPE}
                 data-part="root"
                 data-highlighted={dataAttr(st.dragging)}
-                ref={(el: HTMLFormElement | null) => {
-                    form = el;
-                }}
                 onSubmit={(e: Event) => {
                     e.preventDefault();
                     send();
                 }}
-                onInput={onInput}
-                onKeydown={onKeydown}
                 onPaste={onPaste}
                 onDragenter={onDragenter}
                 onDragover={onDragover}
@@ -361,11 +285,7 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                                     <span data-scope={SCOPE} data-part="attachment-name">{a.name}</span>
                                     {a.size !== undefined && <span data-scope={SCOPE} data-part="attachment-size">{formatBytes(a.size)}</span>}
                                     {status === 'uploading' && <span data-scope={SCOPE} data-part="spinner" role="status" aria-label={`Uploading ${a.name}`} />}
-                                    {status === 'error' && (
-                                        <span data-scope={SCOPE} data-part="attachment-error" role="alert">
-                                            {a.error ?? 'Upload failed'}
-                                        </span>
-                                    )}
+                                    {status === 'error' && <ErrorNote data-attachment-error="">{a.error ?? 'Upload failed'}</ErrorNote>}
                                     <Button intent="icon" icon="close" label={`Remove ${a.name}`} onClick={() => emit('removeAttachment', a.id)} />
                                 </li>
                             );
@@ -373,27 +293,18 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                     </ul>
                 )}
                 <div data-scope={SCOPE} data-part="input">
-                    <Textarea.Root model={() => st.draft} rows={rowsFor(st.draft, props.minRows ?? 1, props.maxRows ?? 8)} disabled={props.disabled} name="message">
-                        <Textarea.Label>Message</Textarea.Label>
-                        <Textarea.Textarea placeholder={props.placeholder ?? (busy && props.steers ? 'Steer the running turn…' : 'Message the chat. @ to address an agent, otherwise the coordinator answers.')} />
-                    </Textarea.Root>
-                    <ul id={listId} role="listbox" aria-label="Mentions" data-scope={SCOPE} data-part="mentions" data-state={isOpen ? 'open' : 'closed'} hidden={!isOpen}>
-                        {list.map((m, i) => (
-                            <li
-                                key={m.id}
-                                id={optionId(m)}
-                                role="option"
-                                aria-selected={i === st.highlighted}
-                                data-scope={SCOPE}
-                                data-part="mention"
-                                data-highlighted={dataAttr(i === st.highlighted)}
-                                onMousedown={(e: Event) => e.preventDefault()}
-                                onClick={() => pick(m)}
-                            >
-                                {m.label}
-                            </li>
-                        ))}
-                    </ul>
+                    <Combobox.Root trigger="@" anchor={caretAnchor} items={mentionItems()} itemKey={mentionKey} itemLabel={mentionLabel} filter={false} model:inputValue={() => st.query}>
+                        <Textarea.Root model={() => st.draft} minRows={props.minRows ?? 1} maxRows={props.maxRows ?? 8} disabled={props.disabled} name="message">
+                            <Textarea.Label>Message</Textarea.Label>
+                            <Textarea.Textarea
+                                ref={(h: TextareaHandle | null) => {
+                                    box = h;
+                                }}
+                                placeholder={props.placeholder ?? (busy && props.steers ? 'Steer the running turn…' : 'Message the chat. @ to address an agent, otherwise the coordinator answers.')}
+                                onKeydown={onKeydown}
+                            />
+                        </Textarea.Root>
+                    </Combobox.Root>
                 </div>
                 <div data-scope={SCOPE} data-part="actions">
                     <Button intent="icon" icon="attach" label="Attach file" disabled={props.disabled} onClick={openPicker} />
@@ -415,7 +326,9 @@ export const Composer = component<ComposerProps>(({ props, emit, signal }) => {
                             el.value = '';
                         }}
                     />
-                    <span data-scope={SCOPE} data-part="keys">Enter to send · Shift+Enter newline</span>
+                    <span data-scope={SCOPE} data-part="keys">
+                        <Kbd>Enter</Kbd> to send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> newline
+                    </span>
                     {busy && props.canCancel && (
                         <Button intent="default" icon="stop" onClick={() => emit('cancel')}>
                             Cancel

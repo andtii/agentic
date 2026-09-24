@@ -27,7 +27,7 @@ async function live(agent: Agent, opts: { policy?: boolean; window?: number } = 
 }
 
 const rows = (dom: ParentNode) => all(dom, 'ai-thread', 'row');
-/** Every rendered part element: a rich-text root per text part, a card per tool part, a details per reasoning part. */
+/** Every rendered part element: a rich-text root per text part, a card per tool part, a block per reasoning part. */
 const parts = (dom: ParentNode) => dom.querySelectorAll('[data-scope="ai-message"] [data-scope="richtext"][data-part="root"], [data-scope="ai-tool-call"][data-part="root"], [data-scope="ai-reasoning"][data-part="root"]');
 
 /** A scripted turn of `n` parts — text and tool calls alternating. */
@@ -218,7 +218,7 @@ describe('the thread over mockAgent', () => {
         expect(dom.textContent).toContain('done');
     });
 
-    it('a denied call reads as closed, with the reason on the card', async () => {
+    it('a denied call reads as denied, with the reason on the card', async () => {
         const agent = mockAgent({ script: [[{ tool: { name: 'rm', output: 'gone' } }, { text: 'after' }]] });
         const { dom, view } = await live(agent, { policy: false });
         const turn = view.prompt('go');
@@ -227,7 +227,7 @@ describe('the thread over mockAgent', () => {
         buttonNamed(dom, 'Deny').click();
         await turn;
         await tick();
-        expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe('closed');
+        expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe('denied');
         expect(one(dom, 'ai-tool-call', 'status')!.textContent).toBe('DENIED');
         expect(one(dom, 'ai-tool-call', 'error')!.textContent).toBe('The operator denied this call.');
     });

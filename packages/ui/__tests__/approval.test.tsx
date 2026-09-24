@@ -58,6 +58,17 @@ describe('the approval card', () => {
         expect(seen).toHaveLength(1);
     });
 
+    it('says why on the kit ErrorNote when the answer did not get through, and re-enables', async () => {
+        const dom = mount(<ApprovalPrompt request={request} onRespond={() => Promise.reject(new Error('session is closed'))} />);
+        buttonNamed(dom, 'Allow once').click();
+        await tick();
+        const note = dom.querySelector('[data-scope="ai-approval"] [data-approval-error]')!;
+        expect(note.getAttribute('data-scope')).toBe('alert');
+        expect(note.getAttribute('role')).toBe('alert');
+        expect(note.textContent).toBe('Could not answer: session is closed');
+        expect(buttonNamed(dom, 'Allow once').disabled).toBe(false);
+    });
+
     it('opens no description for a request with no message, and no rule without one', () => {
         const dom = mount(<ApprovalPrompt request={{ ...request, message: '  ', toolName: undefined }} onRespond={() => {}} toolName="Read" />);
         expect(one(dom, 'ai-approval', 'description')).toBeNull();
