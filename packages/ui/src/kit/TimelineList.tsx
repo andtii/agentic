@@ -28,7 +28,7 @@ export type TimelineListProps =
 export const TimelineList = component<TimelineListProps>(({ props }) => () => (
     <Timeline.Root orientation="vertical" aria-label={props.label} class={props.class}>
         {props.entries.map((entry) => (
-            <Timeline.Item>
+            <Timeline.Item key={entry.id}>
                 <Timeline.Marker color={roleOf(entry.tone ?? 'muted')} data-tone={entry.tone ?? 'muted'} />
                 <Timeline.Content>
                     <span data-timeline-text="">{entry.text}</span>{' '}
