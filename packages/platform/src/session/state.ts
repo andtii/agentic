@@ -112,7 +112,15 @@ export interface RunningTurn {
     readonly startedAt: number;
     readonly taskId?: TaskId;
     readonly implicit?: true;
+    /**
+     * An implicit turn carried work (#605): an event beyond `turn-start` / `state` / `config` / `usage`. One that never
+     * does, and never ends, is what the router's re-check cancels.
+     */
+    readonly content?: true;
 }
+
+/** Events that say nothing about a turn's work (#605). A runtime `ext` (a status, a rate limit) is a sign of life. */
+export const EMPTY_TURN_EVENTS: ReadonlySet<string> = new Set(['turn-start', 'state', 'config', 'usage']);
 
 /**
  * One command by its idempotency key: what was sent while its reply is out and, once known, the reply.

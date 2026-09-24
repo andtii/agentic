@@ -368,6 +368,21 @@ describe('a turn the runtime starts itself (#510)', () => {
         await d.stop();
     });
 
+    it('an ack that lands after its whole turn does not leave the session running, and the reply still reaches the chat (#605)', async () => {
+        const d = await daemonSession('session_6');
+        await session('session_6').prompt('first', 'tC', undefined, undefined, { taskId: B });
+        // The frames and the reply travel apart: the turn's `turn-end` is in before its ack.
+        const replies = await d.handle();
+        await until(() => d.upstreamHas('turn-end', 'tC'), 'turn C to end upstream');
+        await d.forward();
+        for (const r of replies) await d.asMachine.commandReplied(r);
+        const info = await session('session_6').get();
+        expect(info.running).toBeUndefined();
+        expect(info.status).toBe('idle');
+        expect(received.at(-1)).toMatchObject({ kind: 'message', taskId: B, parts: [{ type: 'text', text: 'echo: first' }] });
+        await d.stop();
+    });
+
     it('hostEnded cuts it like any other turn: interrupted, the record idle, no task named', async () => {
         const d = await daemonSession('session_5');
         await d.asMachine.noteRef({ agent: 'claude-code', v: 1, id: 'sess-real' });

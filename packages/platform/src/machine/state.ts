@@ -34,6 +34,8 @@ export interface HostedSession {
      * (`onSessionFrame`) or the session's closure. What capacity counts — with the prompts still pending, see `runningIn`.
      */
     running?: { readonly turnId: string; readonly since: number };
+    /** The last turn a `turn-end` closed (#605): a prompt ack that lands after it does not take the slot again. */
+    lastEnded?: string;
 }
 
 /** An `openSession` waiting for capacity in its environment (EXE-09). */

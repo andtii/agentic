@@ -58,6 +58,11 @@ export interface RoutingPorts {
     readonly store?: WorkspaceStore;
     /** Clock for tests. Default `Date.now`. */
     readonly now?: () => number;
+    /**
+     * How long an implicit turn may run without carrying anything before the re-check cancels it (#605). Default
+     * `GHOST_TURN_MS` (20 s).
+     */
+    readonly ghostTurnMs?: number;
     /** Session id allocation for tests. Default `createId('session')`. */
     readonly newSessionId?: () => SessionId;
 }
