@@ -40,6 +40,9 @@ export type SegmentedProps =
     /** The group's accessible name. */
     & Define.Prop<'label', string, true>
     & Define.Prop<'disabled', boolean>
+    /** Posts the chosen value under this name (zero's hidden `<select>`), so a form needs no hidden input beside it. */
+    & Define.Prop<'name', string>
+    & Define.Prop<'form', string>
     & Define.Prop<'class', string>
     & Define.Event<'valueChange', string>;
 
@@ -48,7 +51,7 @@ export const Segmented = component<SegmentedProps>(({ props, emit }) => {
     // keeps a click on the pressed segment from clearing it: a segmented
     // control always has one value. The group binds the model directly.
     return () => (
-        <ToggleGroup.Root model={props.model} deselectable={false} onValueChange={(value: string) => emit('valueChange', value)} label={props.label} disabled={props.disabled} class={props.class} data-segmented="">
+        <ToggleGroup.Root model={props.model} deselectable={false} onValueChange={(value: string) => emit('valueChange', value)} label={props.label} name={props.name} form={props.form} disabled={props.disabled} class={props.class} data-segmented="">
             {props.options.map((option) => (
                 <ToggleGroup.Item value={option.value} disabled={option.disabled} asChild>
                     {(part) => (

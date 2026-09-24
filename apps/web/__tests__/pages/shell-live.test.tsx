@@ -7,6 +7,7 @@
 import { describe, it, expect, afterAll, afterEach, beforeAll, vi } from 'vitest';
 import type { MessageId, TaskId } from '@agentic/core';
 import { AgentActor, TaskActor, Workspace, agentKey, taskKey, workspaceKey } from '@agentic/platform';
+import { installThemes } from '@agentic/ui/design-system';
 import { App } from '../../src/App';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
 import { buttonNamed, mountAt, tick } from './helpers';
@@ -21,6 +22,8 @@ vi.mock('../../src/api/sign-in.server', () => ({
 const domSettings = () => (window as unknown as { happyDOM: { settings: { disableCSSFileLoading: boolean; handleDisabledFileLoadingAsSuccess: boolean } } }).happyDOM.settings;
 let before: { disableCSSFileLoading: boolean; handleDisabledFileLoadingAsSuccess: boolean } | null = null;
 beforeAll(() => {
+    // As both entries do: the shell asks the design system's `md` breakpoint.
+    installThemes();
     const settings = domSettings();
     before = { disableCSSFileLoading: settings.disableCSSFileLoading, handleDisabledFileLoadingAsSuccess: settings.handleDisabledFileLoadingAsSuccess };
     settings.disableCSSFileLoading = true;

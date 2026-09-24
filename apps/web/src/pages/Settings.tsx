@@ -1,5 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
+import { virtualListbox } from '@sigx/zero/virtual-listbox';
 import { Button, ConfirmDialog, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { opsSettings, type NotificationRow } from '../mock/ops';
 import { OpsPage } from './ops/OpsPage';
@@ -57,7 +58,7 @@ export const SettingsView = component<SettingsViewProps>(({ props }) => {
             <form id="settings-form" data-settings-form onSubmit={(e: Event) => e.preventDefault()}>
                 <Section title="Time" hint="Used by every schedule and reminder.">
                     <div data-settings-pair>
-                        <SelectField name="time-zone" label="Time zone" model={() => draft.timeZone} options={props.timeZones.map(z => ({ value: z, label: z }))} />
+                        <SelectField name="time-zone" label="Time zone" model={() => draft.timeZone} options={props.timeZones.map(z => ({ value: z, label: z }))} virtual={virtualListbox} />
                         <SelectField name="default-environment" label="Default environment" model={() => draft.environment} options={props.environmentOptions} />
                     </div>
                 </Section>

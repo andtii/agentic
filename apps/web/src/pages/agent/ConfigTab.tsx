@@ -1,6 +1,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
-import { AGENT_FIELDS as F, AgentForm, Button, Label, Stack, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
+import { AGENT_FIELDS as F, AgentForm, Button, Label, TextField, VersionItem, type AccountOption, type AgentFormRailProps, type AgentFormWorkdirProps, type FieldOption } from '@agentic/ui';
+import { Col } from '@sigx/zero';
 import type { AgentConfig, AgentConfigVersion, EnvironmentId } from '@agentic/core';
 import { mockWorkdirEnvironments, type WorkdirEnvironments } from '../workdir/environments';
 import { WorkdirInput } from '../workdir/WorkdirInput';
@@ -142,12 +143,12 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
         const pending = proposed();
         return (
             <div data-agent-rail="">
-            <Stack gap="lg">
+            <Col gap="lg">
                 {dirty ? (
                     <div data-save-card="">
                     <Card>
                         <Card.Body>
-                            <Stack gap="md">
+                            <Col gap="md">
                                 <span data-save-title=""><span data-save-dot="" aria-hidden="true" />Unsaved changes</span>
                                 <TextField model={() => form.draft.reason} name={F.reason} label="Reason for this version" />
                                 <div data-save-actions="">
@@ -155,7 +156,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                                     <Button onClick={() => form.reset()}>Reset</Button>
                                 </div>
                                 {ui.error ? <p data-save-error="" role="alert">{ui.error}</p> : null}
-                            </Stack>
+                            </Col>
                         </Card.Body>
                     </Card>
                     </div>
@@ -163,7 +164,7 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                 <div data-versions-card="">
                 <Card>
                     <Card.Body>
-                        <Stack gap="md">
+                        <Col gap="md">
                             <Label>Versions</Label>
                             <ul data-versions-list="">
                                 {pending ? (
@@ -176,11 +177,11 @@ export const ConfigTab = component<ConfigTabProps>(({ props }) => {
                                 ))}
                             </ul>
                             <p data-apply-line="">{applyLine(props.store ? props.profile.activeOnOlder : state.activeOnOlder, current())}</p>
-                        </Stack>
+                        </Col>
                     </Card.Body>
                 </Card>
                 </div>
-            </Stack>
+            </Col>
             </div>
         );
     };

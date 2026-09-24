@@ -9,6 +9,7 @@
 import { component, type Define } from '@sigx/runtime-core';
 import { Combobox, Field, Input, NumberInput, Select, Switch, Textarea, type InputType } from '@sigx/zero';
 import { derivedModel } from '@sigx/zero/behaviors';
+import type { ListboxWindowing } from '@sigx/zero/virtual-listbox';
 import { agMapFieldAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
 import type { MapRow } from './schema-model.js';
@@ -131,7 +132,15 @@ export type SelectFieldProps = Define.Model<string> &
     Common &
     Define.Prop<'options', readonly FieldOption[], true> &
     /** Shown while nothing is chosen; a model of `''` is nothing chosen and posts nothing. */
-    Define.Prop<'placeholder', string>;
+    Define.Prop<'placeholder', string> &
+    /**
+     * Windows a long list (a few hundred time zones): pass `virtualListbox`
+     * from `@sigx/zero/virtual-listbox`, so a field that never windows does
+     * not carry it. Options with a `group` window under their headings.
+     */
+    Define.Prop<'virtual', ListboxWindowing> &
+    /** Under `virtual`: an option's height before it is measured, in px (zero's default is 36). */
+    Define.Prop<'estimateItemSize', number>;
 
 /**
  * zero's `Select.Root` over the options as data. Its value model is
@@ -158,6 +167,9 @@ export const SelectField = component<SelectFieldProps>(({ props }) => {
                 itemValue={(o) => o.value}
                 itemLabel={(o) => o.label ?? o.value}
                 itemDisabled={(o) => !!o.disabled}
+                itemGroup={(o) => o.group}
+                virtual={props.virtual}
+                estimateItemSize={props.estimateItemSize}
                 name={props.name}
                 placeholder={placeholder()}
                 required={props.required}

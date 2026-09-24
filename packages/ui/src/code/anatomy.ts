@@ -64,34 +64,26 @@ export const agChangesAnatomy = defineAnatomy('ag-changes', {
 });
 
 /**
- * The folder tree (zero has no Tree yet — andtii/zero-wip#494, `_zero-gaps/`):
- * 28 px rows, 14 px per level, chevron, icon, mono 12 name, a 6 px change
- * dot (`working` modified, `live` added), the selected row on `base-300`.
+ * The folder tree's product row over zero's `TreeView` (#587): each row is a
+ * TreeView item or branch trigger rendered `asChild` — 28 px, chevron (the
+ * TreeView branch indicator) or its blank, icon, mono 12 name, a 6 px change
+ * dot (`working` modified, `live` added), the selected row on `base-300` —
+ * plus a folder's loading or error line and the legend under the tree.
  */
 export const agFileTreeAnatomy = defineAnatomy('ag-file-tree', {
-    root: { element: 'div' },
-    item: { element: 'div', parent: 'root', tokens: ['color', 'radius-selector'] },
-    toggle: { element: 'span', parent: 'item', tokens: ['color'] },
+    item: { element: 'div', flags: ['selected', 'focus-visible'], tokens: ['color', 'radius-selector'] },
+    toggle: { element: 'span', parent: 'item' },
     icon: { element: 'span', parent: 'item', tokens: ['color'] },
     name: { element: 'span', parent: 'item', tokens: ['text'] },
     dot: { element: 'span', parent: 'item', tokens: ['color'] },
-    group: { element: 'div', parent: 'root' },
-    status: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
-    legend: { element: 'div', parent: 'root', tokens: ['color', 'text'] }
+    status: { element: 'p', tokens: ['color', 'text'] },
+    legend: { element: 'div', tokens: ['color', 'text'] }
 });
 
-/** The `Go to file` search: icon, input, a `Kbd` hint. */
+/** The `Go to file` search: icon, zero's `Combobox` over the paths, a zero `Kbd` hint. */
 export const agFindAnatomy = defineAnatomy('ag-find', {
     root: { element: 'div', tokens: ['color', 'radius-field'] },
-    icon: { element: 'span', parent: 'root', tokens: ['color'] },
-    input: { element: 'input', parent: 'root', tokens: ['color', 'text'] },
-    results: { element: 'ul', parent: 'root', tokens: ['color', 'radius-field'] },
-    result: { element: 'li', parent: 'results', tokens: ['color', 'text'] }
-});
-
-/** A keyboard hint: mono 10 on a `line-strong` outline. */
-export const agKbdAnatomy = defineAnatomy('ag-kbd', {
-    root: { element: 'kbd', tokens: ['color', 'radius-selector', 'text'] }
+    icon: { element: 'span', parent: 'root', tokens: ['color'] }
 });
 
 /**
@@ -145,7 +137,6 @@ export const codeAnatomies = [
     agChangesAnatomy,
     agFileTreeAnatomy,
     agFindAnatomy,
-    agKbdAnatomy,
     agSessionBarAnatomy,
     agFileHeaderAnatomy,
     agLineComposerAnatomy

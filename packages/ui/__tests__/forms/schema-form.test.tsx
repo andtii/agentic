@@ -179,10 +179,10 @@ describe('SchemaForm', () => {
         const { root, form, state } = mountForm({ stale: 1 }, closed);
         submit(form);
         await tick();
-        expect(root.querySelector('[data-part="summary"]')!.textContent).toContain('stale: Is not a setting of this plugin');
+        expect(root.querySelector('[data-form-summary]')!.textContent).toContain('stale: Is not a setting of this plugin');
         state.error = 'bad-config';
         await tick();
-        expect(root.querySelector('[data-part="summary"]')!.getAttribute('role')).toBe('alert');
+        expect(root.querySelector('[data-form-summary]')!.getAttribute('role')).toBe('alert');
     });
 
     it('reset() returns to the stored config', () => {

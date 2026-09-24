@@ -1,6 +1,6 @@
 /**
- * The controls: Button intents on the daisy axes, the segmented control's
- * `aria-pressed` and tones, the switch's `role="switch"`, the confirm
+ * The controls: Button intents on zero's `Button.Root` (and its `href`
+ * link mode), the segmented control's `aria-pressed`, tones and posted `name`, the switch's `role="switch"`, the confirm
  * dialog's dependents and consequence.
  */
 import { signal } from '@sigx/runtime-core';
@@ -41,15 +41,60 @@ describe('Button', () => {
         expect(button.querySelector('span')).toBeNull();
     });
 
-    it('keeps the label while loading, swaps the icon for the spinner part, disables and announces busy', () => {
-        const root = mount(<Button intent="primary" icon="check" loading>Allow once</Button>);
+    it('keeps the label while loading, swaps the icon for the spinner part, blocks activation but keeps focus, and announces busy', () => {
+        let clicks = 0;
+        const root = mount(<Button intent="primary" icon="check" loading onClick={() => clicks++}>Allow once</Button>);
         const button = root.querySelector('button')!;
         expect(button.textContent).toBe('Allow once');
         expect(button.querySelector('svg')).toBeNull();
         expect(button.getAttribute('data-state')).toBe('loading');
         expect(button.querySelector('[data-scope="button"][data-part="spinner"]')).not.toBeNull();
-        expect(button.disabled).toBe(true);
+        // zero's loading: aria-disabled, not the native disabled, so the pressed button keeps focus.
+        expect(button.disabled).toBe(false);
+        expect(button.getAttribute('aria-disabled')).toBe('true');
         expect(button.getAttribute('aria-busy')).toBe('true');
+        button.focus();
+        expect(document.activeElement).toBe(button);
+        button.click();
+        expect(clicks).toBe(0);
+    });
+
+    it('is disabled natively when disabled, and posts its form attributes', () => {
+        const root = mount(<Button type="submit" form="editor" name="action" value="save" disabled>Save</Button>);
+        const button = root.querySelector('button')!;
+        expect(button.disabled).toBe(true);
+        expect(button.getAttribute('type')).toBe('submit');
+        expect(button.getAttribute('form')).toBe('editor');
+        expect(button.getAttribute('name')).toBe('action');
+        expect(button.getAttribute('value')).toBe('save');
+    });
+
+    it('with href renders a link wearing the same anatomy and intent axes', () => {
+        const clicks: MouseEvent[] = [];
+        const root = mount(<Button href="/sessions/s_1" intent="wait" icon="check" class="x" onClick={(e) => clicks.push(e)}>Open session</Button>);
+        expect(root.querySelector('button')).toBeNull();
+        const link = root.querySelector('a')!;
+        expect(link.getAttribute('href')).toBe('/sessions/s_1');
+        expect(link.getAttribute('data-scope')).toBe('button');
+        expect(link.getAttribute('data-part')).toBe('root');
+        expect(link.getAttribute('data-intent')).toBe('wait');
+        expect(link.getAttribute('data-color')).toBe('warning');
+        expect(link.getAttribute('data-variant')).toBe('solid');
+        expect(link.getAttribute('class')).toBe('x');
+        expect(link.querySelector('svg')!.getAttribute('data-icon')).toBe('check');
+        expect(link.textContent).toBe('Open session');
+        link.addEventListener('click', (e) => e.preventDefault());
+        link.click();
+        expect(clicks).toHaveLength(1);
+    });
+
+    it('a disabled link is announced and inert', () => {
+        let clicks = 0;
+        const root = mount(<Button href="/x" disabled onClick={() => clicks++}>Go</Button>);
+        const link = root.querySelector('a')!;
+        expect(link.getAttribute('aria-disabled')).toBe('true');
+        link.click();
+        expect(clicks).toBe(0);
     });
 
     it('emits clicks and spans the row with block', () => {
@@ -87,6 +132,18 @@ describe('Segmented', () => {
         state.policy = 'allow';
         await tick();
         expect(items.map((i) => i.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    });
+
+    it('posts its value under `name` through the group, one field', async () => {
+        const state = signal({ policy: 'ask' });
+        const root = mount(<form><Segmented label="Policy" name="policy" options={options} model={() => state.policy} /></form>);
+        await tick();
+        const form = root.querySelector('form')!;
+        expect(form.querySelector('input[type="hidden"]')).toBeNull();
+        expect(new FormData(form).getAll('policy')).toEqual(['ask']);
+        root.querySelectorAll<HTMLButtonElement>('[data-scope="toggle-group"][data-part="item"]')[0]!.click();
+        await tick();
+        expect(new FormData(form).getAll('policy')).toEqual(['allow']);
     });
 
     it('paints the selected segment at 15 % of its meaning colour', () => {

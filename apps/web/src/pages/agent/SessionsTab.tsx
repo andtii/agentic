@@ -1,6 +1,7 @@
 import { component, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, DataTable, EmptyState, EnvironmentLine, Row, StatusPill, type AgentHue } from '@agentic/ui';
+import { AgentTile, DataTable, EmptyState, EnvironmentLine, StatusPill, type AgentHue } from '@agentic/ui';
+import { Row } from '@sigx/zero';
 import { agentById } from '../../mock/data';
 import { agentProfile, sessionRows, type SessionRow } from '../../mock/agents';
 import { age } from './format';

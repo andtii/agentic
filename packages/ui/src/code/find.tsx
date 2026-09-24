@@ -1,16 +1,20 @@
 /**
  * `Go to file` (#563): a search over the paths the caller knows (the tree's
  * loaded folders plus the changed files), matched as a subsequence and
- * ranked by where the match lands, as a combobox with a listbox. With
- * `hotkey`, Ctrl/Cmd+P focuses it from anywhere on the page.
+ * ranked by where the match lands. zero's `Combobox` (#587) over the ranked
+ * paths, windowed (`virtual={virtualListbox}`) so a large folder keeps a
+ * page of options in the DOM. With `hotkey`, Ctrl/Cmd+P focuses it from
+ * anywhere on the page.
  */
 import { component, onMounted, onUnmounted, signal, type Define } from '@sigx/runtime-core';
+import { Combobox, Field } from '@sigx/zero';
+import { virtualListbox } from '@sigx/zero/virtual-listbox';
 import { Icon } from '../kit/icons.js';
 import { agFindAnatomy } from './anatomy.js';
 import { Kbd } from './parts.js';
 
 const SCOPE = agFindAnatomy.scope;
-/** At most this many matches are listed. */
+/** `findPaths`' default limit. `GoToFile` lists every match, windowed. */
 export const FIND_MAX_RESULTS = 20;
 
 /**
@@ -56,90 +60,53 @@ export type GoToFileProps =
     & Define.Prop<'shortcut', string>
     /** Focus on Ctrl/Cmd+P anywhere on the page. */
     & Define.Prop<'hotkey', boolean>
-    /** The input's id and the stem of the list and option ids; default `ag-find` (one per page). Stable, so server and client agree. */
+    /** The search's id, on its root; default `ag-find` (one per page). The input's and the list's ids are zero's. */
     & Define.Prop<'id', string>;
 
 export const GoToFile = component<GoToFileProps>(({ props }) => {
-    const st = signal({ query: '', active: 0, open: false });
-    let input: HTMLInputElement | null = null;
+    const st = signal({ query: '', value: null as string | null });
+    let root: HTMLElement | null = null;
+    const input = (): HTMLInputElement | null => root?.querySelector<HTMLInputElement>('[data-scope="combobox"][data-part="input"]') ?? null;
     const onKey = (e: KeyboardEvent): void => {
         if (props.hotkey && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'p') {
             e.preventDefault();
-            input?.focus();
-            input?.select();
+            input()?.focus();
+            input()?.select();
         }
     };
     onMounted(() => window.addEventListener('keydown', onKey));
     onUnmounted(() => window.removeEventListener('keydown', onKey));
-    const pick = (path: string): void => {
-        st.query = '';
-        st.open = false;
+    const pick = (path: string | null): void => {
+        if (!path) return;
         props.onPick(path);
+        // After the Combobox has written the label into the input: a pick leaves an empty search.
+        queueMicrotask(() => {
+            st.value = null;
+            st.query = '';
+        });
     };
+    /** Every match, best first; with no query, every path (the list is windowed). */
+    const items = (): readonly string[] => (st.query.trim() ? findPaths(props.paths, st.query, Number.POSITIVE_INFINITY) : props.paths);
     return () => {
-        const results = st.open ? findPaths(props.paths, st.query) : [];
-        const active = Math.min(st.active, Math.max(0, results.length - 1));
         const shortcut = props.shortcut ?? 'Ctrl P';
-        const id = props.id ?? 'ag-find';
         return (
-            <div data-scope={SCOPE} data-part="root">
+            <div data-scope={SCOPE} data-part="root" id={props.id ?? 'ag-find'} ref={(el: HTMLElement) => { root = el; }}>
                 <span data-scope={SCOPE} data-part="icon"><Icon name="search" size={14} /></span>
-                <label for={id} data-visually-hidden="">Find file</label>
-                <input
-                    id={id}
-                    type="search"
-                    data-scope={SCOPE}
-                    data-part="input"
-                    placeholder={props.placeholder ?? 'Go to file'}
-                    autoComplete="off"
-                    role="combobox"
-                    aria-expanded={results.length > 0 ? 'true' : 'false'}
-                    aria-controls={`${id}-list`}
-                    aria-activedescendant={results.length ? `${id}-${active}` : undefined}
-                    value={st.query}
-                    ref={(el: HTMLInputElement) => { input = el; }}
-                    onInput={(e: Event) => {
-                        st.query = (e.target as HTMLInputElement).value;
-                        st.active = 0;
-                        st.open = true;
-                    }}
-                    onBlur={() => setTimeout(() => { st.open = false; }, 120)}
-                    onKeyDown={(e: KeyboardEvent) => {
-                        if (e.key === 'ArrowDown' && results.length) {
-                            e.preventDefault();
-                            st.active = (active + 1) % results.length;
-                        } else if (e.key === 'ArrowUp' && results.length) {
-                            e.preventDefault();
-                            st.active = (active - 1 + results.length) % results.length;
-                        } else if (e.key === 'Enter' && results[active]) {
-                            e.preventDefault();
-                            pick(results[active]!);
-                        } else if (e.key === 'Escape') {
-                            st.query = '';
-                            st.open = false;
-                        }
-                    }}
-                />
+                <Field.Root>
+                    <Field.Label visuallyHidden>Find file</Field.Label>
+                    <Combobox.Root
+                        items={items()}
+                        filter={false}
+                        virtual={virtualListbox}
+                        estimateItemSize={30}
+                        model={() => st.value}
+                        model:inputValue={() => st.query}
+                        placeholder={props.placeholder ?? 'Go to file'}
+                        onValueChange={pick}
+                        slots={{ item: ({ item }: { item: string }) => `‎${item}‎` }}
+                    />
+                </Field.Root>
                 {shortcut ? <Kbd keys={shortcut} /> : null}
-                {results.length ? (
-                    <ul data-scope={SCOPE} data-part="results" id={`${id}-list`} role="listbox" aria-label="Matching files">
-                        {results.map((path, i) => (
-                            <li
-                                data-scope={SCOPE}
-                                data-part="result"
-                                id={`${id}-${i}`}
-                                role="option"
-                                aria-selected={i === active ? 'true' : 'false'}
-                                onMouseDown={(e: MouseEvent) => {
-                                    e.preventDefault();
-                                    pick(path);
-                                }}
-                            >
-                                {`\u200E${path}\u200E`}
-                            </li>
-                        ))}
-                    </ul>
-                ) : null}
             </div>
         );
     };

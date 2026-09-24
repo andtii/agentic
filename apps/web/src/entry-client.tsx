@@ -1,6 +1,5 @@
 import '@sigx/zero/css';
 import '@agentic/ui/css';
-import '@agentic/ui/layout.css';
 import '@agentic/ui/shell.css';
 import './styles.css';
 import './styles/pages.css';

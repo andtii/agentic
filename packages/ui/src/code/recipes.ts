@@ -150,43 +150,47 @@ const changes: RecipeInput = {
     }
 };
 
-/** The folder tree: 28 px rows, 14 px per level from 10 px, folders in `text`, files in `text-muted`. */
+/**
+ * The folder tree's row (#587): zero's `TreeView` lays the tree out and
+ * indents each folder's group; the row is the handoff's — 28 px, folders in
+ * `text`, files in `text-muted`, the selection on `base-300` rather than the
+ * design system's accent fill.
+ */
 const fileTree: RecipeInput = {
     component: 'ag-file-tree',
-    tokens: { '--ag-tree-indent': '14px', '--ag-level': '0' },
     parts: {
-        root: { base: { display: 'flex', flexDirection: 'column', gap: '1px', minInlineSize: '0' } },
-        group: { base: { display: 'flex', flexDirection: 'column', gap: '1px' } },
         item: {
             base: {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 'var(--space-xs)',
                 blockSize: '28px',
-                paddingBlock: '0',
-                paddingInlineEnd: '10px',
-                paddingInlineStart: 'calc(10px + var(--ag-level) * var(--ag-tree-indent))',
+                padding: '0 10px',
                 borderRadius: 'var(--radius-selector)',
                 color: 'var(--color-base-content)',
                 cursor: 'pointer',
                 outline: 'none',
                 userSelect: 'none'
             },
+            states: {
+                selected: { background: 'var(--color-base-300)', color: 'var(--color-base-content)' },
+                'focus-visible': { boxShadow: 'inset 0 0 0 2px var(--color-primary)' }
+            },
             selectors: {
                 '&[data-type="file"]': { color: 'var(--ag-text-muted)' },
                 '&:hover': { background: 'var(--color-base-200)' },
-                '&:focus-visible': { boxShadow: 'inset 0 0 0 2px var(--color-primary)' },
-                '&[aria-selected="true"]': { background: 'var(--color-base-300)', color: 'var(--color-base-content)' }
+                // The folder chevron is TreeView's indicator (it turns on open); the file row's blank keeps names aligned.
+                '& > [data-scope="tree-view"][data-part="branch-indicator"]': { display: 'inline-flex', inlineSize: '12px', flexShrink: '0', color: 'var(--ag-text-dim)', opacity: '1' }
             }
         },
-        toggle: { base: { display: 'inline-flex', inlineSize: '12px', flexShrink: '0', color: 'var(--ag-text-dim)' } },
+        toggle: { base: { display: 'inline-flex', inlineSize: '12px', flexShrink: '0' } },
         icon: { base: { display: 'inline-flex', flexShrink: '0', color: 'var(--ag-text-dim)' } },
-        name: { base: { ...ellipsis, flex: '1', fontFamily: mono, fontSize: 'var(--text-sm)' }, selectors: { '[aria-selected="true"] > &': { fontWeight: 'var(--weight-semibold)' } } },
+        name: { base: { ...ellipsis, flex: '1', fontFamily: mono, fontSize: 'var(--text-sm)' }, selectors: { '[data-selected] > &': { fontWeight: 'var(--weight-semibold)' } } },
         dot: {
             base: { inlineSize: '6px', blockSize: '6px', borderRadius: '50%', flexShrink: '0', background: 'var(--color-info)' },
             selectors: { '&[data-tone="live"]': { background: 'var(--color-primary)' }, '&[data-tone="failed"]': { background: 'var(--color-error)' }, '&[data-tone="dim"]': { background: 'var(--ag-text-dim)' } }
         },
-        status: { base: { margin: '0', padding: '0 10px', paddingInlineStart: 'calc(28px + var(--ag-level) * var(--ag-tree-indent))', blockSize: '28px', display: 'flex', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } },
+        status: { base: { margin: '0', padding: '0 10px 0 28px', blockSize: '28px', display: 'flex', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } },
         legend: {
             base: { display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', padding: '0 10px', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' },
             selectors: { '& > [data-spacer]': { flex: '1' }, '& > [data-mono]': { fontFamily: mono } }
@@ -194,33 +198,31 @@ const fileTree: RecipeInput = {
     }
 };
 
-/** `Go to file`: 34 px, an outline field with the search icon and a `Ctrl P` hint. */
+/**
+ * `Go to file`: 34 px, an outline field with the search icon, zero's
+ * `Combobox` (its control flattened into this field, its popup the results
+ * list) and a zero `Kbd` hint.
+ */
 const find: RecipeInput = {
     component: 'ag-find',
     parts: {
         root: {
             base: { position: 'relative', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', blockSize: '34px', padding: '0 10px', boxSizing: 'border-box', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-field)', color: 'var(--ag-text-dim)' },
-            selectors: { '&:focus-within': { borderColor: 'var(--ag-text-dim)' } }
+            selectors: {
+                '&:focus-within': { borderColor: 'var(--ag-text-dim)' },
+                '& > [data-scope="field"]': { flex: '1', minInlineSize: '0' },
+                '& [data-scope="combobox"][data-part="control"]': { blockSize: '32px', minBlockSize: '0', padding: '0', border: 'none', background: 'transparent', boxShadow: 'none' },
+                '& [data-scope="combobox"][data-part="input"]': { padding: '0', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' },
+                '& [data-scope="combobox"][data-part="input"]::-webkit-search-cancel-button': { display: 'none' },
+                // No disclosure button: the list is a search's results, opened by typing.
+                '& [data-scope="combobox"][data-part="trigger"]': { display: 'none' },
+                '& [data-scope="combobox"][data-part="popup"]': { maxBlockSize: '320px', overflow: 'auto' },
+                // Paths truncate from the start so the file name stays visible: rtl with `&lrm;` guards in the markup.
+                '& [data-scope="combobox"][data-part="item"]': { ...ellipsis, display: 'block', direction: 'rtl', textAlign: 'left', fontFamily: mono, fontSize: 'var(--text-sm)' },
+                '& > [data-scope="kbd"]': { flexShrink: '0', fontFamily: mono, fontSize: '10px', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-dim)', background: 'transparent', borderColor: 'var(--ag-line-strong)', borderBlockEndWidth: 'var(--border)' }
+            }
         },
-        icon: { base: { display: 'inline-flex', flexShrink: '0' } },
-        input: {
-            base: { flex: '1', minInlineSize: '0', blockSize: '100%', padding: '0', border: 'none', outline: 'none', background: 'transparent', color: 'var(--color-base-content)', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' },
-            selectors: { '&::placeholder': { color: 'var(--ag-text-dim)' }, '&::-webkit-search-cancel-button': { display: 'none' } }
-        },
-        results: {
-            base: { position: 'absolute', insetInline: '-1px', insetBlockStart: 'calc(100% + 4px)', zIndex: '10', margin: '0', padding: '4px', listStyle: 'none', maxBlockSize: '320px', overflow: 'auto', background: 'var(--color-base-300)', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-field)', boxShadow: '0 12px 32px #00000099' }
-        },
-        result: {
-            base: { ...ellipsis, direction: 'rtl', textAlign: 'left', padding: '6px var(--space-sm)', borderRadius: 'var(--radius-selector)', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)', cursor: 'pointer' },
-            selectors: { '&[aria-selected="true"]': { background: 'var(--color-base-200)', color: 'var(--color-base-content)' } }
-        }
-    }
-};
-
-const kbd: RecipeInput = {
-    component: 'ag-kbd',
-    parts: {
-        root: { base: { display: 'inline-block', padding: '1px 5px', flexShrink: '0', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: '3px', fontFamily: mono, fontSize: '10px', lineHeight: '1.4', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } }
+        icon: { base: { display: 'inline-flex', flexShrink: '0' } }
     }
 };
 
@@ -295,4 +297,4 @@ const lineComposer: RecipeInput = {
     }
 };
 
-export const codeRecipes: RecipeInput[] = [code, statusTile, diffCounts, changes, fileTree, find, kbd, sessionBar, fileHeader, lineComposer];
+export const codeRecipes: RecipeInput[] = [code, statusTile, diffCounts, changes, fileTree, find, sessionBar, fileHeader, lineComposer];

@@ -4,8 +4,9 @@
  * header uses. VCS-neutral: they read core's `FileChangeStatus`, not git.
  */
 import { component, type Define } from '@sigx/runtime-core';
+import { Kbd as ZeroKbd } from '@sigx/zero';
 import type { FileChangeStatus } from '@agentic/core';
-import { agDiffCountsAnatomy, agKbdAnatomy, agStatusTileAnatomy } from './anatomy.js';
+import { agDiffCountsAnatomy, agStatusTileAnatomy } from './anatomy.js';
 
 /** The letter and tone each change status is drawn with. */
 export const CHANGE_STATUS: Record<FileChangeStatus, { readonly letter: string; readonly tone: 'working' | 'live' | 'failed' | 'dim'; readonly label: string }> = {
@@ -64,5 +65,5 @@ export const DiffCounts = component<DiffCountsProps>(({ props }) => () => {
 
 export type KbdProps = Define.Prop<'keys', string, true>;
 
-/** A keyboard hint (`Ctrl P`). */
-export const Kbd = component<KbdProps>(({ props }) => () => <kbd data-scope={agKbdAnatomy.scope} data-part="root">{props.keys}</kbd>, { name: 'Kbd' });
+/** A keyboard hint (`Ctrl P`): zero's `Kbd` (#587), with the keys as a prop. */
+export const Kbd = component<KbdProps>(({ props }) => () => <ZeroKbd.Root>{props.keys}</ZeroKbd.Root>, { name: 'Kbd' });
