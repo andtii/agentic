@@ -122,7 +122,7 @@ export const App = component(() => {
                     title={titleOf(crumbs)}
                     back={backOf(crumbs)}
                     slots={{
-                        link: ({ item, icon, meta, props }) => <a {...props} onClick={(e: MouseEvent) => follow(e, item.href)}>{icon}{item.label}{meta}</a>,
+                        link: ({ item, icon, meta, props }) => <a {...props} onClick={(e: MouseEvent) => { props.onClick?.(e); follow(e, item.href); }}>{icon}{item.label}{meta}</a>,
                         back: ({ href, icon }) => <Link to={href}><span data-visually-hidden="">Back</span>{icon}</Link>,
                         actions: () => top?.actions?.() ?? null,
                         ...(top?.subtitle ? { subtitle: top.subtitle } : {}),
