@@ -187,11 +187,11 @@ export function runtimeKindOf(manifest: Pick<PluginManifest, 'kind' | 'capabilit
     return undefined;
 }
 
-export type PluginReadinessStatus = 'ready' | 'disabled' | 'needs-config' | 'needs-secret' | 'needs-grant' | 'needs-machine' | 'no-kek';
+export type PluginReadinessStatus = 'ready' | 'disabled' | 'needs-config' | 'needs-secret' | 'needs-grant' | 'needs-sign-in' | 'needs-machine' | 'no-kek';
 
 export interface PluginReadiness {
     readonly status: PluginReadinessStatus;
-    /** What is missing: config paths, secret names, scopes, or the runtime id without an environment. */
+    /** What is missing: config paths, secret names, scopes, or the runtime id without an environment; empty for `needs-sign-in`. */
     readonly missing?: readonly string[];
 }
 
@@ -203,6 +203,8 @@ export interface PluginReadinessFacts {
     readonly environments: readonly { readonly runtime: RuntimeId }[];
     /** Whether the deployment can seal secrets at all (`WORKSPACE_KEK`). */
     readonly hasKek: boolean;
+    /** Ids of the plugins whose connection is signed out and needs signing in again (OPS-04). */
+    readonly signedOut?: readonly string[];
 }
 
 function covered(granted: readonly PermissionScope[], scope: PermissionScope): boolean {
@@ -214,7 +216,7 @@ function covered(granted: readonly PermissionScope[], scope: PermissionScope): b
 /**
  * Whether a plugin can be used now, and the first thing in the way: disabled,
  * then config, then secrets (no key to seal them with, or not set), then
- * ungranted declared scopes, then — for a daemon-hosted runtime — no
+ * ungranted declared scopes, then a connection signed out, then — for a daemon-hosted runtime — no
  * environment of that runtime on any machine.
  */
 export function pluginReadiness(state: PluginState, facts: PluginReadinessFacts): PluginReadiness {
@@ -226,6 +228,7 @@ export function pluginReadiness(state: PluginState, facts: PluginReadinessFacts)
     if (unset.length > 0) return facts.hasKek ? { status: 'needs-secret', missing: unset } : { status: 'no-kek', missing: unset };
     const ungranted = [...new Set(manifest.permissions.map((p) => p.scope))].filter((scope) => !covered(state.grantedPermissions, scope));
     if (ungranted.length > 0) return { status: 'needs-grant', missing: ungranted };
+    if (facts.signedOut?.includes(manifest.id)) return { status: 'needs-sign-in', missing: [] };
     if (manifest.kind === 'runtime' && manifest.capabilities.includes(DAEMON_HOSTED_CAPABILITY) && !facts.environments.some((e) => e.runtime === manifest.id)) {
         return { status: 'needs-machine', missing: [manifest.id] };
     }

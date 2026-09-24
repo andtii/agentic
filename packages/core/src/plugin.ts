@@ -1,5 +1,6 @@
 /** Plugin declarations (PLG-01..05). The config schema, its validation and readiness live in `plugin-config.ts`. */
 
+import type { ToolMode } from './agent.js';
 import type { ConfigSchema, PluginSecretDeclaration } from './plugin-config.js';
 
 export type PluginKind = 'runtime' | 'connector' | 'memory' | 'learning' | 'notification' | 'trigger' | 'a2a' | 'project-feature';
@@ -26,6 +27,15 @@ export function isSingleSlot(kind: PluginKind): boolean {
     return SINGLE_SLOT_KINDS.includes(kind);
 }
 
+/** A tool a plugin brings, by the namespaced name sessions see (`gmail__send-email`). */
+export interface PluginToolDeclaration {
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    /** The mode the tool starts in until the workspace picks one; `defaultToolMode` derives one from tool hints. */
+    readonly defaultMode?: ToolMode;
+}
+
 export interface PluginManifest {
     readonly id: string;
     readonly version: string;
@@ -38,6 +48,8 @@ export interface PluginManifest {
     readonly secrets?: readonly PluginSecretDeclaration[];
     readonly permissions: readonly { readonly scope: PermissionScope; readonly reason: string }[];
     readonly compat: { readonly platform: string; readonly core: string };
+    /** The tools the plugin brings, each with the mode it starts in (PLG-09). */
+    readonly tools?: readonly PluginToolDeclaration[];
 }
 
 export interface PluginState {
