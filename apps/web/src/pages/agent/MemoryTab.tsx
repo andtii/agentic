@@ -1,7 +1,8 @@
 import { component, effect, onUnmounted, signal, type Define } from 'sigx';
 import { Card } from '@sigx/zero-daisyui/components';
 import type { MemoryEntry, MemoryKind } from '@agentic/core';
-import { Button, ConfirmDialog, EmptyState, Icon, Label, Stack, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
+import { Button, ConfirmDialog, EmptyState, Icon, Label, StatusPill, Switch, Tag, TextareaField } from '@agentic/ui';
+import { Col } from '@sigx/zero';
 import { MEMORY_KINDS, memoryCounts, type AgentProfile } from '../../mock/agents';
 import { agentClock, shortDate, dateTime } from './format';
 
@@ -163,7 +164,7 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
         const rows = visible();
         return (
             <div data-agent-memory="">
-                <Stack gap="lg">
+                <Col gap="lg">
                     <div data-memory-toolbar="">
                         <div data-memory-filters="" role="group" aria-label="Filter by kind">
                             {chips.map((kind) => (
@@ -216,12 +217,12 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                     ) : (
                         <EmptyState variant="generic" title="No memories yet" caption="What this agent learns from sessions and your corrections shows up here." />
                     )}
-                </Stack>
+                </Col>
                 <aside data-memory-rail="" aria-label="Memory settings">
-                <Stack gap="lg">
+                <Col gap="lg">
                     <Card>
                         <Card.Body>
-                            <Stack gap="sm">
+                            <Col gap="sm">
                                 <Label>Scopes this agent can read</Label>
                                 <ul data-memory-scopes="">
                                     {p.scopes.map((s) => (
@@ -233,20 +234,20 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                                     ))}
                                 </ul>
                                 <p data-tone="muted">Joining a chat never exposes the private scope to other agents.</p>
-                            </Stack>
+                            </Col>
                         </Card.Body>
                     </Card>
                     <Card>
                         <Card.Body>
-                            <Stack gap="sm">
+                            <Col gap="sm">
                                 <Label>Supplied to the runtime</Label>
                                 <p data-tone="muted">Up to 20 entries or 4 KB are retrieved per task and placed in the system prompt. Claude Code's own memory files are runtime-owned and not shown here.</p>
-                            </Stack>
+                            </Col>
                         </Card.Body>
                     </Card>
                     <Card>
                         <Card.Body>
-                            <Stack gap="sm">
+                            <Col gap="sm">
                                 <div data-learning-head="">
                                     <Label>Learning</Label>
                                     <Switch model={() => state.learning} label="Learn from sessions" hideLabel />
@@ -256,10 +257,10 @@ export const MemoryTab = component<MemoryTabProps>(({ props }) => {
                                     <div><dt>Corrections this week</dt><dd>{p.correctionsThisWeek}</dd></div>
                                     <div><dt>Repeated mistakes</dt><dd>{p.repeatedMistakes}</dd></div>
                                 </dl>
-                            </Stack>
+                            </Col>
                         </Card.Body>
                     </Card>
-                </Stack>
+                </Col>
                 </aside>
                 <ConfirmDialog model={() => state.correctOpen} title="Correct this memory" description="Your correction replaces the text and is recorded as stated by you." confirmLabel="Save correction" danger={false} onConfirm={confirmCorrect}>
                     <TextareaField model={() => state.correction} name="correction" label="Corrected text" rows={4} />

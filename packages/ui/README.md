@@ -20,18 +20,13 @@ installThemes();
 
 The design system is `extendDesignSystem(daisy, …)` from `@sigx/zero-kit/define`: each re-tuned daisy scope has one `RecipePatch` in `src/design-system/patches/<scope>.ts` (objects merge per key, arrays and scalars replace, `null` deletes, a `compoundVariants` entry merges into daisy's with the same `match`) — one recipe per scope, never two. The handoff's contrast floors over the `--ag-*` inks are `tokens.contrast` pairs, measured by the kit's validator in every theme; the breakpoints are daisy's plus `xl: 80rem`. Validate with `sigx zero:validate ./node_modules/@agentic/ui/dist/design-system.js --extra-manifest ./node_modules/@agentic/ui/dist/fragment.json` (the web app's build does).
 
-## Layout tier (`src/layout`)
+## Layout
 
-Stand-in for zero's layout tier until a release ships it (andtii/zero-wip#473 landed on main). `Stack`, `Row`, `Col` render one `data-scope="stack"` carrier with `data-orientation`; `Spacer` takes the free space. Layout facts are `data-l-*` attributes whose values are the design system's `--space-*` ramp (`gap`, `pad`) or flex keywords (`align`, `justify`, `wrap`, `grow`); per-breakpoint overrides put the breakpoint in prefix position (`at={{ md: { gap: 'lg' } }}` → `data-l-md-gap="lg"`). Import `@agentic/ui/layout.css` once. `useMediaQuery(query)` is the SSR-safe `matchMedia` signal.
+Pages lay out with zero's layout tier — `Row`, `Col`, `Stack.Item grow`, `Grid`, `Container` from `@sigx/zero` — whose CSS this design system's build compiles from its own spacing ramp; there is no local layout tier. App CSS queries the ramp's breakpoints through `@agentic/ui/css/breakpoints` (`@custom-media --above-md` / `--below-md` and friends), which needs Lightning CSS with `drafts.customMedia`; in code, `useMediaQuery({ above: 'md' })` from `@sigx/zero/behaviors` after `installThemes()`.
 
-```tsx
-import { Row, Col, Spacer } from '@agentic/ui';
-
-<Row gap="md" align="center" at={{ md: { gap: 'xl' } }}>
-    <Col grow>…</Col>
-    <Spacer />
-    <button>Save</button>
-</Row>
+```css
+@import '@agentic/ui/css/breakpoints';
+@media (--below-md) { … }
 ```
 
 ## App shell (`src/shell`)

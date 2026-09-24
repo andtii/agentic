@@ -1,0 +1,8 @@
+/* History (#90). */
+
+[data-filter-chip] { appearance: none; block-size: var(--ag-control-h); padding-inline: var(--space-md); border-radius: var(--radius-field); border: var(--border) solid var(--ag-line-strong); background: transparent; color: var(--ag-text-muted); font: inherit; font-size: var(--text-md); font-weight: var(--weight-medium); cursor: pointer; }
+[data-filter-chip]:hover { color: var(--color-base-content); border-color: var(--ag-text-dim); }
+[data-filter-chip][aria-pressed="true"] { background: var(--color-base-300); color: var(--color-base-content); }
+[data-filter-chip]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-day-row] > td { padding-block: var(--space-sm); background: var(--color-base-100); }
+[data-day-label] { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--ag-text-dim); }

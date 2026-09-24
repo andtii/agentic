@@ -17,7 +17,8 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { Tabs } from '@sigx/zero-daisyui/components';
 import type { AgentConfig, AgentConfigVersion, MemoryEntry } from '@agentic/core';
-import { AgentTile, Button, EmptyState, EnvironmentLine, Row, Stack, StatusPill } from '@agentic/ui';
+import { AgentTile, Button, EmptyState, EnvironmentLine, StatusPill } from '@agentic/ui';
+import { Col, Row } from '@sigx/zero';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { agentKeyOf, memoryKeyOf } from '../../actors/keys';
@@ -151,7 +152,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                 <header data-agent-header="">
                     <Row gap="lg" align="center">
                         <AgentTile name={agent.name} hue={profile.hue} size={52} />
-                        <Stack gap="2xs">
+                        <Col gap="2xs">
                             <h1 data-page-title data-agent-name="">{agent.name}</h1>
                             <div data-agent-sub="">
                                 <span data-agent-role="">{profile.role}</span>
@@ -159,7 +160,7 @@ export const LiveAgent = component<{ id: string }>(({ props }) => {
                                     ? <EnvironmentLine machine={profile.environment.machine} runtime={profile.environment.runtime} account={profile.environment.account} fit="drop-machine" />
                                     : <span data-agent-noenv="" data-tone="needs-you">No environment</span>}
                             </div>
-                        </Stack>
+                        </Col>
                     </Row>
                     <Row gap="md" align="center">
                         <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />

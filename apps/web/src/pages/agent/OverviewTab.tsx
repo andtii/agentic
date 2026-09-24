@@ -1,7 +1,8 @@
 import { component, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { Card } from '@sigx/zero-daisyui/components';
-import { EnvironmentLine, Label, SectionHeading, Stack, StatusPill } from '@agentic/ui';
+import { EnvironmentLine, Label, SectionHeading, StatusPill } from '@agentic/ui';
+import { Col } from '@sigx/zero';
 import type { MockAgent } from '../../mock/data';
 import { sessionRows, type AgentProfile, type SessionRow } from '../../mock/agents';
 import { age } from './format';
@@ -21,21 +22,21 @@ export const OverviewTab = component<OverviewTabProps>(({ props }) => () => {
     const recent = sessions.slice(0, 5);
     return (
         <div data-agent-overview="">
-            <Stack gap="lg">
+            <Col gap="lg">
                 <p data-agent-overview-description="">{p.config.description}</p>
-                <Stack gap="xs">
+                <Col gap="xs">
                     <Label>Default environment</Label>
                     {p.environment
                         ? <EnvironmentLine machine={p.environment.machine} runtime={p.environment.runtime} account={p.environment.account} tone="live" />
                         : <span data-tone="needs-you">No environment</span>}
-                </Stack>
+                </Col>
                 <dl data-agent-stats="">
                     <div><dd>v{props.agent.configVersion}</dd><dt>config</dt></div>
                     <div><dd>{p.memories.length}</dd><dt>memories</dt></div>
                     <div><dd>{p.correctionsThisWeek}</dd><dt>corrections / wk</dt></div>
                     <div><dd>{sessions.length}</dd><dt>sessions</dt></div>
                 </dl>
-            </Stack>
+            </Col>
             <div data-agent-recent="">
             <Card>
                 <Card.Body>

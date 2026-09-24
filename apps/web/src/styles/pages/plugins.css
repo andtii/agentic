@@ -1,0 +1,57 @@
+/* Plugins and a plugin (#90, #233): the catalogue, connectors, permissions. */
+@import '@agentic/ui/css/breakpoints';
+
+.ag-link { font-size: var(--text-md); }
+[data-runtime-machine] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); padding-block: var(--space-sm); font-size: var(--text-md); }
+[data-runtime-machine] + [data-runtime-machine] { border-block-start: var(--border) solid var(--ag-line); }
+[data-runtime-machine-version] { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-plugin-grid] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-lg); }
+[data-plugin-section] { display: flex; flex-direction: column; gap: var(--space-xs); }
+[data-plugin-granted] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2xs); font-family: var(--font-mono); font-size: var(--text-sm); }
+[data-plugin-granted] li { display: flex; align-items: center; gap: var(--space-xs); }
+[data-plugin-granted] svg { color: var(--color-primary); }
+[data-plugin-unsupported] { font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-plugin-used] { display: inline-flex; align-items: center; gap: var(--space-xs); }
+[data-plugin-schedules] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+/* The catalogue (#233): one section per kind, the cards on the kit's `ag-plugin-card`. */
+[data-plugin-catalogue] { display: flex; flex-direction: column; gap: var(--space-2xl); }
+[data-plugin-group] { display: flex; flex-direction: column; gap: var(--space-md); }
+[data-connector-error] { color: var(--color-error); }
+/* #241: the Add MCP server button beside the heading; the tools a connector lists, on their own line. */
+[data-connectors-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+[data-connector-list] li [data-connector-tools], [data-connector-probe] [data-connector-tools] { flex-basis: 100%; list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-sm); color: var(--ag-text-dim); }
+[data-add-connector] { display: flex; flex-direction: column; gap: var(--space-md); margin-bottom: var(--space-lg); }
+[data-connector-test], [data-connector-probe] { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); }
+/* One plugin, `/plugins/:id` (#233): a head row, then one panel per concern. */
+[data-plugin-detail] { display: flex; flex-direction: column; gap: var(--space-xl); max-inline-size: 760px; }
+[data-plugin-detail-head] { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-lg); }
+[data-plugin-detail-title] { display: flex; flex-direction: column; gap: var(--space-sm); min-inline-size: 0; }
+[data-plugin-detail-name] { margin: 0; display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-sm); font-family: var(--font-mono); font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+[data-plugin-detail-version] { font-size: var(--text-sm); font-weight: var(--weight-normal); color: var(--ag-text-dim); }
+[data-plugin-detail-tags] { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); }
+[data-plugin-detail-description] { margin: 0; font-size: var(--text-md); color: var(--ag-text-muted); }
+[data-permission-list], [data-dependent-list] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+[data-permission-list] li { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; align-items: center; gap: var(--space-md); padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); font-size: var(--text-sm); }
+[data-permission-list] li:last-child, [data-dependent-list] li:last-child { border-block-end: 0; }
+[data-permission-scope] { display: inline-flex; align-items: center; gap: var(--space-xs); min-inline-size: 0; overflow-wrap: anywhere; }
+[data-permission-scope] svg { flex: none; color: var(--color-primary); }
+[data-permission]:not([data-granted]) [data-permission-scope] { color: var(--ag-text-muted); }
+[data-permission-reason] { color: var(--ag-text-muted); }
+[data-dependent-list] li { display: flex; align-items: center; gap: var(--space-sm); padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); font-size: var(--text-sm); }
+[data-dependent-via] { margin-inline-start: auto; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-plugin-action] { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-md); font-size: var(--text-sm); color: var(--ag-text-muted); }
+/* A conduit connector's sign-in panel (#533): status, actions, what agents can do. */
+[data-connect-status], [data-connect-actions] { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm) var(--space-md); font-size: var(--text-sm); }
+[data-connect-text] { color: var(--ag-text-muted); }
+[data-connect-operations] { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-lg); font-size: var(--text-sm); }
+[data-connect-operations] li { display: flex; align-items: baseline; gap: var(--space-xs); }
+
+@media (--below-xl) {
+    [data-plugin-grid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (--below-md) {
+    [data-plugin-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-permission-list] li { grid-template-columns: minmax(0, 1fr); gap: var(--space-xs); }
+    [data-permission-list] li > [data-scope="button"] { justify-self: start; }
+}

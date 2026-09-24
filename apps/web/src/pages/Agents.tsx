@@ -1,6 +1,7 @@
 import { component, useHead } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, Button, EnvironmentLine, Icon, Label, Row, Stack, StatusPill } from '@agentic/ui';
+import { AgentTile, Button, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
+import { Col, Row, Stack } from '@sigx/zero';
 import { agentProfiles, type AgentProfile } from '../mock/agents';
 import { defineTopbar } from '../components/topbar';
 import { dataMode } from '../data-mode';
@@ -40,19 +41,21 @@ export const Agents = component(() => {
                                     <Link to={`/agents/${p.id}`} class="agent-card">
                                         <Row gap="md" align="center">
                                             <AgentTile name={p.config.name} hue={p.hue} size={44} />
-                                            <Stack gap="2xs" grow>
-                                                <span data-agent-card-name="">{p.config.name}</span>
-                                                <span data-agent-card-role="">{p.role}</span>
-                                            </Stack>
+                                            <Stack.Item grow>
+                                                <Col gap="2xs">
+                                                    <span data-agent-card-name="">{p.config.name}</span>
+                                                    <span data-agent-card-role="">{p.role}</span>
+                                                </Col>
+                                            </Stack.Item>
                                             <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                                         </Row>
                                         <p data-agent-card-description="">{p.config.description}</p>
-                                        <Stack gap="xs">
+                                        <Col gap="xs">
                                             <Label>Default environment</Label>
                                             {p.environment
                                                 ? <EnvironmentLine machine={p.environment.machine} runtime={p.environment.runtime} account={p.environment.account} tone="live" />
                                                 : <span data-agent-card-noenv="" data-tone="needs-you">No environment</span>}
-                                        </Stack>
+                                        </Col>
                                         <dl data-agent-card-stats="">
                                             <div><dd>v{p.agent.configVersion}</dd><dt>config</dt></div>
                                             <div><dd>{p.memories.length}</dd><dt>memories</dt></div>

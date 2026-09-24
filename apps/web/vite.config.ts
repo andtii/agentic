@@ -19,6 +19,12 @@ export default defineConfig(({ command }) => ({
         sigx({ ssr: { entry: 'src/entry-server.tsx', adapter: cloudflare() } }),
         sigxServer()
     ],
+    // Lightning CSS compiles the design system's `@custom-media` breakpoints (`@agentic/ui/css/breakpoints`)
+    // that the page stylesheets query (`@media (--below-md)`).
+    css: {
+        transformer: 'lightningcss',
+        lightningcss: { drafts: { customMedia: true } }
+    },
     oxc: {
         jsx: {
             runtime: 'automatic',
