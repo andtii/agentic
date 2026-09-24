@@ -9,7 +9,8 @@
  * `realpath` of the path and of every root, so neither `..` nor a symlink or
  * junction can reach outside a root. All reads then go through the resolved
  * path. Git badges are read from files (`.git`, `HEAD`, `config`); only a
- * worktree creation runs `git`, through `runGit` with no shell.
+ * worktree creation runs `git`, through `runGit` with no shell. A `run`
+ * (#618) is `run.ts`'s.
  */
 
 import { FS_LIST_MAX_ENTRIES, FS_LOCATE_MAX_DEPTH, FS_LOCATE_MAX_MATCHES, sameOrigin, type FsEntry, type FsError, type FsErrorCode, type FsGitInfo, type FsLocateResult, type FsOp, type FsResult, type LocalEnvironment } from '@agentic/core';
@@ -23,6 +24,7 @@ import { answerFilesOp } from './files.js';
 import { checkWithinRoots, isMissing, withinRoots, type RootCheck } from './roots.js';
 import type { VcsProvider } from './vcs/provider.js';
 import { runGit } from './vcs/run.js';
+import { runCommand } from './run.js';
 
 export { checkWithinRoots, withinRoots, type RootCheck };
 
@@ -243,13 +245,48 @@ async function existingAncestor(path: string): Promise<string | undefined> {
 
 const fail = (code: FsErrorCode, message: string): { error: FsError } => ({ error: { code, message: message.slice(0, LIMITS.text) } });
 
+/** One entry of `git worktree list --porcelain`: its folder and the branch it has checked out (none when detached). */
+interface ListedWorktree {
+    readonly path: string;
+    readonly branch?: string;
+}
+
+/** Parse `git worktree list --porcelain -z`: records of `key value` fields, each record ended by an empty field. */
+export function parseWorktreeList(out: string): ListedWorktree[] {
+    const listed: ListedWorktree[] = [];
+    let path: string | undefined;
+    let branch: string | undefined;
+    for (const field of out.split('\0')) {
+        if (field === '') {
+            if (path !== undefined) listed.push(branch !== undefined ? { path, branch } : { path });
+            path = branch = undefined;
+        } else if (field.startsWith('worktree ')) path = field.slice('worktree '.length);
+        else if (field.startsWith('branch refs/heads/')) branch = field.slice('branch refs/heads/'.length);
+    }
+    if (path !== undefined) listed.push(branch !== undefined ? { path, branch } : { path });
+    return listed;
+}
+
+/** `a` and `b` name the same folder: both resolved through links, compared the way the platform's file system does. */
+async function sameFolder(a: string, b: string, platform: NodeJS.Platform): Promise<boolean> {
+    const real = async (p: string) => realpath(p).catch(() => resolve(p));
+    const [x, y] = await Promise.all([real(a), real(b)]);
+    return platform === 'win32' || platform === 'darwin' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/**
+ * The worktree of `branch` at `path` (#617, #618), idempotent: a worktree already there on `branch` is `reused`, a
+ * `branch` no worktree holds is checked out there again (`recreated`), anything else at `path` is
+ * `worktree-mismatch`, and a `branch` checked out in another folder is `branch-exists`. Only then
+ * `git worktree add -b`. Entries whose folder is gone are pruned first, so a worktree removed by hand counts as none.
+ */
 async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly string[], options: Required<Pick<FsOptions, 'git' | 'worktreeTimeoutMs'>> & { platform: NodeJS.Platform }): Promise<FsOutcome> {
     const { platform, git } = options;
     const repo = await checkWithinRoots(op.repo, roots, platform);
     if (!repo.ok) return fail(repo.code, repo.message);
     if (!(await gitInfo(repo.real))) return fail('not-a-repo', `${op.repo} is not a git repository or worktree`);
 
-    // The new folder: inside the roots, not there yet, and whatever of its parents exists resolves inside the roots too.
+    // The folder: inside the roots, and whatever of it (or of its parents) exists resolves inside the roots too.
     if (!isAbsolute(op.path) || !withinRoots(op.path, roots, platform)) return fail('outside-roots', `${op.path} is outside the working roots`);
     const path = resolve(op.path);
     // Only a successful lstat means taken; a permission or I/O error is not "exists" and reaches the caller as `internal`.
@@ -260,10 +297,9 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
             throw e;
         }
     );
-    if (taken) return fail('exists', `${op.path} already exists`);
-    const ancestor = await existingAncestor(path);
+    const ancestor = taken ? path : await existingAncestor(path);
     const parent = ancestor ? await checkWithinRoots(ancestor, roots, platform) : undefined;
-    if (!parent?.ok) return fail('outside-roots', `the parent of ${op.path} is outside the working roots`);
+    if (!parent?.ok) return fail('outside-roots', `${taken ? '' : 'the parent of '}${op.path} is outside the working roots`);
 
     const checkTimeout = Math.min(10_000, options.worktreeTimeoutMs);
     if (op.branch.startsWith('-')) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
@@ -271,15 +307,32 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
     if (format.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (format.code === 'timeout') return fail('timeout', 'git check-ref-format did not finish');
     if (format.code !== 0) return fail('invalid-branch', `${op.branch} is not a valid branch name`);
-    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
-    if (known.code === 0) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
 
-    const added = await runGit(git, ['-C', repo.real, 'worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])], { timeoutMs: options.worktreeTimeoutMs });
-    if (added.code === 0) return { result: { kind: 'worktree', path, branch: op.branch } };
+    const pruned = await runGit(git, ['-C', repo.real, 'worktree', 'prune'], { timeoutMs: checkTimeout });
+    if (pruned.code === 'timeout') return fail('timeout', 'git worktree prune did not finish');
+    const list = await runGit(git, ['-C', repo.real, 'worktree', 'list', '--porcelain', '-z'], { timeoutMs: checkTimeout });
+    if (list.code === 'timeout') return fail('timeout', 'git worktree list did not finish');
+    if (list.code !== 0) return fail('internal', `git worktree list failed: ${list.stderr}`);
+    const listed = parseWorktreeList(list.stdout.toString('utf8'));
+    let at: ListedWorktree | undefined;
+    for (const w of listed) if (await sameFolder(w.path, path, platform)) at = w;
+    if (at) {
+        if (at.branch === op.branch) return { result: { kind: 'worktree', path, branch: op.branch, reused: true } };
+        return fail('worktree-mismatch', `${op.path} is the worktree of ${at.branch ? `branch ${at.branch}` : 'a detached HEAD'}, not ${op.branch}`);
+    }
+    if (taken) return fail('worktree-mismatch', `${op.path} already exists and is not a worktree of ${op.branch}`);
+    const holder = listed.find((w) => w.branch === op.branch);
+    if (holder) return fail('branch-exists', `branch ${op.branch} is checked out at ${holder.path}`);
+
+    const known = await runGit(git, ['-C', repo.real, 'show-ref', '--verify', '--quiet', `refs/heads/${op.branch}`], { timeoutMs: checkTimeout });
+    const recreate = known.code === 0;
+    const args = recreate ? ['worktree', 'add', '--', path, op.branch] : ['worktree', 'add', '-b', op.branch, '--', path, ...(op.base ? [op.base] : [])];
+    const added = await runGit(git, ['-C', repo.real, ...args], { timeoutMs: options.worktreeTimeoutMs });
+    if (added.code === 0) return { result: { kind: 'worktree', path, branch: op.branch, ...(recreate ? { recreated: true as const } : {}) } };
     if (added.code === 'missing') return fail('unsupported', 'git is not installed on this machine');
     if (added.code === 'timeout') return fail('timeout', `git worktree add did not finish within ${options.worktreeTimeoutMs} ms`);
-    if (/a branch named .* already exists/i.test(added.stderr)) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
-    if (/already exists/i.test(added.stderr)) return fail('exists', `${op.path} already exists`);
+    if (/a branch named .* already exists|is already (checked out|used by worktree)/i.test(added.stderr)) return fail('branch-exists', `branch ${op.branch} already exists in ${op.repo}`);
+    if (/already exists/i.test(added.stderr)) return fail('worktree-mismatch', `${op.path} already exists`);
     if (/invalid reference|not a valid (object|commit)/i.test(added.stderr)) return fail('not-found', `base ${op.base ?? 'HEAD'} was not found in ${op.repo}`);
     return fail('internal', `git worktree add failed: ${added.stderr}`);
 }
@@ -297,6 +350,8 @@ export interface FsOptions {
     readonly worktreeTimeoutMs?: number;
     /** The VCS providers behind `tree` / `read` / `changes` (#561). Default: git, with `git` as the binary. */
     readonly vcs?: readonly VcsProvider[];
+    /** The environment a `run` command sees (#618). Default: the daemon's own. */
+    readonly runEnv?: NodeJS.ProcessEnv;
 }
 
 /** Answer one `fs.request` for the environment `environmentId` among `environments`. Never throws. */
@@ -314,7 +369,7 @@ export async function answerFsRequest(environments: readonly LocalEnvironment[],
         }
         if (op.kind === 'worktree') return await worktree(op, env.cwdRoots, { platform, git: options.git ?? 'git', worktreeTimeoutMs: options.worktreeTimeoutMs ?? 60_000 });
         if (op.kind === 'locate') return { result: await locate(op, env.cwdRoots, platform) };
-        if (op.kind === 'run') return fail('unsupported', 'this daemon does not run project commands yet');
+        if (op.kind === 'run') return await runCommand(op, env.cwdRoots, { platform, ...(options.runEnv ? { env: options.runEnv } : {}) });
         return await answerFilesOp(op, env.cwdRoots, { platform, ...(options.git ? { git: options.git } : {}), ...(options.vcs ? { providers: options.vcs } : {}) });
     } catch (e) {
         logger.warn('fs: request failed', { environment: environmentId, op: op.kind, error: e });

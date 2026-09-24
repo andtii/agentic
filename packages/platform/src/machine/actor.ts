@@ -1331,6 +1331,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     r.error = result ? { code: 'internal', message: `the daemon answered a ${r.op.kind} request with a ${result.kind} result` } : structuredClone(frame.error ?? { code: 'internal', message: 'fs.response carried neither result nor error' });
                     delete r.result;
                     fsAnswers.delete(answerKey(ctx.key, r.requestId));
+                    if (r.op.kind === 'run') await auditRun(r, at, { error: r.error.code });
                     return;
                 }
                 r.status = 'done';
@@ -1345,14 +1346,30 @@ export function defineMachineActor(ports: MachinePorts) {
                     return;
                 }
                 r.result = structuredClone(result);
-                if (r.op.kind !== 'worktree' || result.kind !== 'worktree') return;
+                if (r.op.kind === 'run' && result.kind === 'run') return auditRun(r, at, { exitCode: result.exitCode });
+                // A worktree already in place (#618) changed nothing on the machine: nothing to audit.
+                if (r.op.kind !== 'worktree' || result.kind !== 'worktree' || result.reused) return;
                 await recordAudit(ctx, workspaceId, {
                     key: `${ctx.key}:worktree:${r.requestId}`,
                     kind: 'workdir.worktree-created',
                     at,
                     by: r.by,
-                    summary: `worktree ${result.branch} added at ${result.path} on machine ${machineId}`,
-                    data: { machineId, environmentId: r.environmentId, repo: r.op.repo, branch: result.branch, path: result.path, ...(r.op.base ? { base: r.op.base } : {}) }
+                    summary: `worktree ${result.branch} ${result.recreated ? 're-created' : 'added'} at ${result.path} on machine ${machineId}`,
+                    data: { machineId, environmentId: r.environmentId, repo: r.op.repo, branch: result.branch, path: result.path, ...(r.op.base ? { base: r.op.base } : {}), ...(result.recreated ? { recreated: true as const } : {}) }
+                });
+            }
+
+            /** A project command the daemon ran, or refused (#618), audited once per request (OPS-03). */
+            async function auditRun(r: FsRequestRecord, at: number, outcome: { readonly exitCode?: number; readonly error?: string }): Promise<void> {
+                if (r.op.kind !== 'run') return;
+                const command = r.op.argv.join(' ');
+                await recordAudit(ctx, workspaceId, {
+                    key: `${ctx.key}:run:${r.requestId}`,
+                    kind: 'workdir.command-run',
+                    at,
+                    by: r.by,
+                    summary: `${command} in ${r.op.cwd} on machine ${machineId}: ${outcome.error ?? `exit ${outcome.exitCode}`}`,
+                    data: { machineId, environmentId: r.environmentId, cwd: r.op.cwd, argv: [...r.op.argv], ...outcome }
                 });
             }
 

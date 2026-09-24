@@ -89,7 +89,7 @@ describe('history model', () => {
         expect(kindLabel(worktree)).toBe('worktree created');
         expect(toneOf(worktree)).toBe('live');
         expect(refOf(worktree)).toEqual({ label: 'feat/x', href: '/machines/m1' });
-        expect(auditQueryOf({ kind: 'environments', agentId: null, window: 'all' }, 0).kinds).toEqual(['environment.chosen', 'workdir.worktree-created']);
+        expect(auditQueryOf({ kind: 'environments', agentId: null, window: 'all' }, 0).kinds).toEqual(['environment.chosen', 'workdir.worktree-created', 'workdir.command-run']);
     });
 
     it('files the machine security kinds (#355) under Machines, worded, toned and led to the machine', () => {
