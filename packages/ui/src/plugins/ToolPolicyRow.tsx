@@ -10,7 +10,7 @@
  */
 import { component, type Define } from '@sigx/runtime-core';
 import type { ToolMode } from '@agentic/core';
-import { Segmented, type SegmentedOption } from '../kit/Segmented.js';
+import { Segmented, type SegmentedOption, type SegmentedProps } from '../kit/Segmented.js';
 
 const MODES: readonly SegmentedOption[] = [
     { value: 'allow', label: 'allow', tone: 'live' },
@@ -34,6 +34,6 @@ export const ToolPolicyRow = component<ToolPolicyRowProps>(({ props, emit }) => 
             <span data-tool-policy-part="name" style="font-family: var(--font-mono); font-size: var(--text-sm); font-weight: var(--weight-semibold); overflow-wrap: anywhere">{props.name}</span>
             {props.description ? <span data-tool-policy-part="description" style="font-size: var(--text-sm); color: var(--ag-text-dim)">{props.description}</span> : null}
         </span>
-        <Segmented model={props.model as never} label={`Approval for ${props.name}`} options={MODES} disabled={props.disabled || props.pending} onValueChange={(v) => emit('valueChange', v as ToolMode)} />
+        <Segmented model={props.model as SegmentedProps['model']} label={`Approval for ${props.name}`} options={MODES} disabled={props.disabled || props.pending} onValueChange={(v) => emit('valueChange', v as ToolMode)} />
     </div>
 ), { name: 'ToolPolicyRow' });

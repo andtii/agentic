@@ -75,8 +75,18 @@ const cell = 'display: flex; align-items: center; gap: var(--space-sm); min-inli
 /** Keeps a control's click and keydown inside its slot: the row link never sees them. */
 const stop = (e: Event): void => e.stopPropagation();
 
+/**
+ * A click on the slot's own empty space (not a control inside it) would still
+ * follow the row link, since `stopPropagation` does not cancel the default
+ * action: cancel it there, and leave clicks on the controls untouched.
+ */
+const stopClick = (e: Event): void => {
+    e.stopPropagation();
+    if (e.target === e.currentTarget) e.preventDefault();
+};
+
 function slotCell(part: string, content: JSXElement | JSXElement[] | undefined, style = cell): JSXElement {
-    return <span data-plugin-row-part={part} style={style} onClick={stop} onKeydown={stop}>{content}</span>;
+    return <span data-plugin-row-part={part} style={style} onClick={stopClick} onKeydown={stop}>{content}</span>;
 }
 
 export const PluginRow = component<PluginRowProps>(({ props, slots }) => () => {

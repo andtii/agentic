@@ -244,6 +244,16 @@ describe('PluginRow', () => {
         expect(seen).toEqual(['click', 'click']);
     });
 
+    it('a click on the empty space of a slot cancels the row link; a click on the control inside does not', () => {
+        const root = mount(<PluginRow name="Linear" variant="connector" href="/plugins/linear" slots={{ toggle: () => <button type="button">toggle</button> }} />);
+        const empty = new MouseEvent('click', { bubbles: true, cancelable: true });
+        rowPart(root, 'toggle')!.dispatchEvent(empty);
+        expect(empty.defaultPrevented).toBe(true);
+        const onControl = new MouseEvent('click', { bubbles: true, cancelable: true });
+        buttonNamed(root, 'toggle').dispatchEvent(onControl);
+        expect(onControl.defaultPrevented).toBe(false);
+    });
+
     it('the connector variant: its own grid, the mono account line, the transport and an inline fix', () => {
         const root = mount(<PluginRow name="Linear" variant="connector" description="mcp.linear.app · token expired" kind="mcp" readiness={{ status: 'needs-sign-in' }} slots={{ fix: () => <button type="button">Sign in</button> }} />);
         const row = root.querySelector<HTMLElement>('[data-plugin-row]')!;
