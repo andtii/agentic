@@ -103,8 +103,7 @@ describe('needs-sign-in over the live reads', () => {
         expect(before.gmail?.status).toBe('needs-sign-in');
         expect(Object.entries(before).filter(([, r]) => r.status === 'needs-sign-in').map(([id]) => id)).toEqual(['gmail']);
 
-        await accounts().deleteAccount('acct_1');
-        await accounts().createAccount(account('active'));
+        expect(await accounts().updateAccount({ ...account('active'), version: 2 }, 1)).toBe(true);
         expect((await readiness()).gmail?.status).toBe('ready');
     }, 20_000);
 });
