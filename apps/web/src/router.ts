@@ -16,6 +16,7 @@ import { Machine } from './pages/Machine';
 import { Schedules } from './pages/Schedules';
 import { Plugins } from './pages/Plugins';
 import { Plugin } from './pages/Plugin';
+import { AddConnector } from './pages/AddConnector';
 import { Settings } from './pages/Settings';
 import { Pair } from './pages/Pair';
 import { History } from './pages/History';
@@ -44,6 +45,8 @@ export const routes: RouteRecordRaw[] = [
     { path: '/machines/:id', name: 'machine', component: Machine },
     { path: '/schedules', name: 'schedules', component: Schedules },
     { path: '/plugins', name: 'plugins', component: Plugins },
+    // `/plugins/connectors/add` before `/plugins/:id`, so the add page is never read as a plugin id (#628).
+    { path: '/plugins/connectors/add', name: 'connector-add', component: AddConnector },
     { path: '/plugins/:id', name: 'plugin', component: Plugin },
     { path: '/settings', name: 'settings', component: Settings },
     { path: '/pair', name: 'pair', component: Pair },

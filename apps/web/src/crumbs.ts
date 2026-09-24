@@ -36,9 +36,19 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     schedules: { label: 'Schedules', href: '/schedules' },
     plugins: { label: 'Plugins', href: '/plugins' },
     plugin: { label: 'Plugins', href: '/plugins' },
+    'connector-add': { label: 'Plugins', href: '/plugins' },
     settings: { label: 'Settings', href: '/settings' },
     history: { label: 'History', href: '/history' },
     usage: { label: 'Usage', href: '/usage' }
+};
+
+/** Fixed trails for routes deeper than section › entity that carry no id. */
+export const TRAILS: Record<string, readonly { label: string; href: string }[]> = {
+    'connector-add': [
+        { label: 'Plugins', href: '/plugins' },
+        { label: 'Connectors', href: '/plugins?kind=connector' },
+        { label: 'Add connector', href: '/plugins/connectors/add' }
+    ]
 };
 
 /**
@@ -49,6 +59,8 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
  */
 export function trailFor(route: TopbarRoute, contribution: TopbarContribution | undefined): Crumb[] {
     if (contribution?.trail?.length) return contribution.trail.map((c, i, all) => ({ label: c.label, href: c.href, ...(i === all.length - 1 ? { current: true } : {}) }));
+    const fixed = TRAILS[String(route.name ?? '')];
+    if (fixed) return fixed.map((c, i, all) => ({ ...c, ...(i === all.length - 1 ? { current: true } : {}) }));
     const root = CRUMBS[String(route.name ?? '')];
     if (!root) return [];
     const id = route.params.id;

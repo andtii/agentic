@@ -1,0 +1,9 @@
+/*
+ * The plugins redesign (#625), one stylesheet per page so each page issue
+ * owns its own file: the list, the Connectors view, Add connector, a plugin.
+ */
+@import './plugins/list.css';
+@import './plugins/connectors.css';
+@import './plugins/add.css';
+@import './plugins/detail.css';
+
