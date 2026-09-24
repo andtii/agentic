@@ -52,7 +52,12 @@ export type FsOp =
      * (within the roots), never through a shell. How a project creates or prepares a worktree its own way. At most
      * `timeoutMs` (default `FS_RUN_DEFAULT_TIMEOUT_MS`, capped at `FS_RUN_MAX_TIMEOUT_MS`), then `timeout`.
      */
-    | { readonly kind: 'run'; readonly cwd: string; readonly argv: readonly string[]; readonly timeoutMs?: number };
+    | { readonly kind: 'run'; readonly cwd: string; readonly argv: readonly string[]; readonly timeoutMs?: number }
+    /**
+     * Every worktree of the repository `root` belongs to (#622; the `worktrees` daemon feature), read-only: what a
+     * session's Files / Changes may switch to for a look, without the session moving (EXE-12).
+     */
+    | { readonly kind: 'worktrees'; readonly root: string };
 
 /** Which version of a file a `read` returns (#559). */
 export type FsReadRev = 'working' | 'head' | 'base';
@@ -213,7 +218,34 @@ export interface ChangeSet {
     readonly truncated: boolean;
 }
 
-export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult;
+/** One worktree of a repository (#622), as `git worktree list` has it. */
+export interface FsWorktreeEntry {
+    /** Absolute, machine-native. */
+    readonly path: string;
+    /** The checked-out branch; absent when HEAD is detached (or the repo is bare). */
+    readonly branch?: string;
+    /** Short id of HEAD. */
+    readonly head?: string;
+    readonly detached?: true;
+    readonly locked?: true;
+    /** Its folder is gone; `git worktree prune` would drop it. */
+    readonly prunable?: true;
+    /** The worktree `root` itself is in. */
+    readonly current?: true;
+    /** Outside the environment's `cwdRoots`: listed, but nothing in it can be read. */
+    readonly outside?: true;
+}
+
+export interface FsWorktreesResult {
+    readonly kind: 'worktrees';
+    readonly root: string;
+    /** The main worktree first, then the linked ones as git lists them. */
+    readonly entries: readonly FsWorktreeEntry[];
+    /** More than `FS_WORKTREES_MAX` worktrees: only the first ones are listed. */
+    readonly truncated: boolean;
+}
+
+export type FsResult = FsListResult | FsWorktreeResult | FsLocateResult | FsTreeResult | FsReadResult | ChangeSet | FsRunResult | FsWorktreesResult;
 
 export type FsErrorCode =
     | 'outside-roots'
@@ -251,6 +283,8 @@ export const FS_READ_MAX_BYTES = 480 * 1024;
 export const CHANGES_MAX_FILES = 500;
 /** …and this many commits. */
 export const CHANGES_MAX_COMMITS = 100;
+/** A `worktrees` answer lists at most this many (#622). */
+export const FS_WORKTREES_MAX = 100;
 /** A `run` without `timeoutMs` stops after this long (#617)… */
 export const FS_RUN_DEFAULT_TIMEOUT_MS = 10 * 60_000;
 /** …and none runs longer than this. */
