@@ -1,7 +1,8 @@
 /** The Add MCP server dialog's model (#241): ids, validation, what `mcpConnector` gets, and the connection test. */
 import { describe, expect, it } from 'vitest';
 import { mcpConnectorSetup } from '@agentic/mcp';
-import { connectorIdOf, connectorOptions, connectorStatusLabel, emptyConnectorDraft, probeConnector, validateConnectorDraft, type ConnectorDraft } from '../../src/pages/plugins/connector';
+import type { PluginManifest } from '@agentic/core';
+import { addConnector, connectorIdOf, connectorOptions, connectorStatusLabel, emptyConnectorDraft, probeConnector, validateConnectorDraft, type ConnectorDraft, type ConnectorProbe, type ConnectorRegistry } from '../../src/pages/plugins/connector';
 
 const draft = (patch: Partial<ConnectorDraft>): ConnectorDraft => ({ ...emptyConnectorDraft(), ...patch });
 
@@ -52,7 +53,7 @@ describe('probeConnector', () => {
 
     it('lists the tools under the connector namespace, sending the key in its header', async () => {
         const answer = await probeConnector(draft({ name: 'Acme', url: 'https://acme.test/mcp', auth: 'header', header: 'X-Api-Key', secret: 'k-1' }), { fetch: server({ header: 'x-api-key', value: 'k-1' }) });
-        expect(answer).toEqual({ ok: true, tools: ['acme__ping'] });
+        expect(answer).toEqual({ ok: true, tools: ['acme__ping'], declared: [{ name: 'ping' }] });
     });
 
     it('says why it failed, with the credential cut out even when the server echoes it', async () => {
@@ -64,6 +65,70 @@ describe('probeConnector', () => {
     it('fails on an unreachable server without throwing', async () => {
         const answer = await probeConnector(draft({ name: 'Down', url: 'https://down.test/mcp' }), { fetch: (async () => { throw new TypeError('fetch failed'); }) as typeof fetch });
         expect(answer).toMatchObject({ ok: false });
+    });
+});
+
+describe('addConnector', () => {
+    /** A Registry that keeps what it was handed. */
+    const registry = () => {
+        const got: { manifest?: PluginManifest; status?: unknown; tools?: readonly string[] } = {};
+        const r: ConnectorRegistry = {
+            register: async (manifest) => {
+                got.manifest = manifest;
+                return {} as never;
+            },
+            putConnector: async () => ({}) as never,
+            setSecret: async () => undefined,
+            setConnectorStatus: async (_id, status, tools) => {
+                got.status = status;
+                got.tools = tools;
+                return {} as never;
+            },
+            remove: async () => ({}) as never
+        };
+        return { r, got };
+    };
+    /** A server listing a read-only, a destructive and an unhinted tool. */
+    const server = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return new Response(null, { status: 200 });
+        const message = JSON.parse(String(init?.body)) as { id?: number; method: string };
+        if (message.id === undefined) return new Response(null, { status: 202 });
+        const tools = [
+            { name: 'list_items', description: 'List items', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } },
+            { name: 'delete_item', description: 'Delete an item', inputSchema: { type: 'object' }, annotations: { destructiveHint: true, readOnlyHint: false } },
+            { name: 'ping', inputSchema: { type: 'object' } }
+        ];
+        const result = message.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 's', version: '1' } } : { tools };
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const acme = draft({ name: 'Acme Tools', url: 'https://acme.test/mcp' });
+
+    it('registers a manifest whose tools match the probe, destructive ones asking', async () => {
+        const probe = await probeConnector(acme, { fetch: server });
+        expect(probe.ok).toBe(true);
+        const { r, got } = registry();
+        expect(await addConnector(r, acme, probe)).toBe('acme-tools');
+        expect(got.manifest?.tools).toEqual([
+            { name: 'acme-tools__list_items', description: 'List items', defaultMode: 'allow' },
+            { name: 'acme-tools__delete_item', description: 'Delete an item', defaultMode: 'ask' },
+            { name: 'acme-tools__ping', defaultMode: 'allow' }
+        ]);
+        expect(got.manifest?.tools?.map((t) => t.name)).toEqual(probe.ok ? probe.tools : []);
+        expect(got.status).toEqual({ state: 'ok' });
+        expect(got.tools).toEqual(['acme-tools__list_items', 'acme-tools__delete_item', 'acme-tools__ping']);
+    });
+
+    it('declares the names alone from a probe that carries no details, and no tools without a probe or after a failed one', async () => {
+        const names: ConnectorProbe = { ok: true, tools: ['acme-tools__ping'] };
+        const a = registry();
+        await addConnector(a.r, acme, names);
+        expect(a.got.manifest?.tools).toEqual([{ name: 'acme-tools__ping', defaultMode: 'allow' }]);
+        const b = registry();
+        await addConnector(b.r, acme);
+        expect(b.got.manifest).not.toHaveProperty('tools');
+        const c = registry();
+        await addConnector(c.r, acme, { ok: false, error: 'down' });
+        expect(c.got.manifest).not.toHaveProperty('tools');
     });
 });
 
