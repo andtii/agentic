@@ -197,8 +197,8 @@ describe('the runtimes card (#370)', () => {
         const pending = await card({ current: request({ phase: 'draining' }) });
         const cc = rowEl(pending.section, 'claude-code');
         expect(text(cc.querySelector('[data-harness-pending] [data-card-text]'))).toBe('Updating Claude Code to 2.1.0 (when its turns end).');
-        expect(cc.querySelector('[data-update-phase="draining"]')!.getAttribute('data-state')).toBe('current');
-        expect(cc.querySelector('[data-update-phase="verifying"]')!.getAttribute('data-state')).toBe('done');
+        expect(cc.querySelector('[data-update-phase="draining"]')!.getAttribute('data-phase-state')).toBe('current');
+        expect(cc.querySelector('[data-update-phase="verifying"]')!.getAttribute('data-phase-state')).toBe('done');
         expect(text(cc.querySelector('[data-update-draining]'))).toContain('Waiting for 2 running turns on Claude Code');
         expect(buttonNamed(rowEl(pending.section, 'copilot-cli'), 'Install').disabled).toBe(true);
         expect(rowEl(pending.section, 'codex-cli').querySelector('[data-harness-pending]')).toBeNull();
@@ -232,7 +232,7 @@ describe('/machines/:id, /machines and /plugins/:id on mock data (#370)', () => 
         expect(options).toEqual(Object.keys(opsHarnessStates));
         buttonNamed(rowEl(section, 'copilot-cli'), 'Install').click();
         await tick();
-        expect(rowEl(root, 'copilot-cli').querySelector('[data-update-phase="downloading"]')!.getAttribute('data-state')).toBe('current');
+        expect(rowEl(root, 'copilot-cli').querySelector('[data-update-phase="downloading"]')!.getAttribute('data-phase-state')).toBe('current');
         change(section, 'select[name="harness-preview"]', 'no-feature');
         await tick();
         expect(root.querySelector('[data-harness-card] [data-update-reinstall]')).not.toBeNull();

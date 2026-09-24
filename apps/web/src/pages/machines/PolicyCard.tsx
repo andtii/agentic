@@ -9,8 +9,9 @@
  * daemon that predates web-set policy keeps the local `allow-root` well.
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
+import { Card } from '@sigx/zero';
 import type { HostOs, MachinePolicy } from '@agentic/core';
-import { Button, Label, StatusPill, TextField } from '@agentic/ui';
+import { Button, ErrorNote, Label, StatusPill, TextField } from '@agentic/ui';
 import { dateTime, WORKSPACE_ZONE } from '../agent/format';
 import { CommandWell } from './CommandWell';
 import { allowRootCommand, fallbackCommand, policyState } from './manage';
@@ -71,8 +72,13 @@ export const PolicyCard = component<PolicyCardProps>(({ props, emit, slots }) =>
         if (state === 'no-feature') {
             const local = policyState(policy);
             return (
-                <section data-card data-policy-card data-policy-state={state} id="machine-folders" aria-label="Folders the web may use">
-                    <div data-label-row><Label>Folders the web may use</Label></div>
+                <Card.Root asChild>
+                {(card) => (
+                <section {...card} data-policy-card data-policy-state={state} id="machine-folders" aria-label="Folders the web may use">
+                    <Card.Header>
+                        <div data-label-row><Card.Title><Label>Folders the web may use</Label></Card.Title></div>
+                    </Card.Header>
+                    <Card.Body data-card-body="">
                     {local === 'on' ? (
                         <>
                             <p data-card-text>Set on the machine: {policy!.allowedRoots.join(', ')}. The daemon predates web-set folders — to change them from here, reinstall it once from the Pair page; until then, <code>agentic-daemon policy allow-root</code> on the machine.</p>
@@ -89,7 +95,10 @@ export const PolicyCard = component<PolicyCardProps>(({ props, emit, slots }) =>
                         </div>
                     )}
                     {slots.default?.()}
+                    </Card.Body>
                 </section>
+                )}
+                </Card.Root>
             );
         }
         const desired = props.desired;
@@ -112,11 +121,16 @@ export const PolicyCard = component<PolicyCardProps>(({ props, emit, slots }) =>
                         : 'Nothing allowed yet: the web cannot add environments on this machine until a folder is.';
         const waiting = desired && !desired.converged && !dirty && !busy && !locked && state !== 'off';
         return (
-            <section data-card data-policy-card data-policy-state={state} data-dirty={dirty ? '' : undefined} id="machine-folders" aria-label="Folders the web may use">
-                <div data-label-row>
-                    <Label>Folders the web may use</Label>
-                    <StatusPill status={state} label={BADGE[state].label} tone={BADGE[state].tone} />
-                </div>
+            <Card.Root asChild>
+            {(card) => (
+            <section {...card} data-policy-card data-policy-state={state} data-dirty={dirty ? '' : undefined} id="machine-folders" aria-label="Folders the web may use">
+                <Card.Header>
+                    <div data-label-row>
+                        <Card.Title><Label>Folders the web may use</Label></Card.Title>
+                        <StatusPill status={state} label={BADGE[state].label} tone={BADGE[state].tone} />
+                    </div>
+                </Card.Header>
+                <Card.Body data-card-body="">
                 <p data-card-text>{lead}</p>
                 {waiting ? <p data-card-text data-policy-waiting role="status">{desired.lastAuto && !desired.lastAuto.converged ? 'The machine refused this set when it last connected. Change it, or fix the folder on the machine and reconnect the daemon.' : 'Waiting for the machine to apply this set.'}</p> : null}
                 {rows.length ? (
@@ -150,11 +164,14 @@ export const PolicyCard = component<PolicyCardProps>(({ props, emit, slots }) =>
                         </div>
                     </>
                 )}
-                {props.failure ? <p data-policy-failure role="alert">{props.failure}</p> : null}
+                {props.failure ? <ErrorNote data-policy-failure="">{props.failure}</ErrorNote> : null}
                 {props.notice ? <p data-policy-notice role="status">{props.notice}</p> : null}
                 <p data-card-text data-policy-foot>Changing these asks you to confirm with GitHub once. The daemon still refuses network shares and its own folders, and <code>agentic-daemon policy lock</code> on the machine always wins.</p>
                 {slots.default?.()}
+                </Card.Body>
             </section>
+            )}
+            </Card.Root>
         );
     };
 });

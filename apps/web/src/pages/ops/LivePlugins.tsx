@@ -12,7 +12,7 @@
 import { component, signal, useData, useHead, type Define } from 'sigx';
 import { actor } from '@sigx/actors';
 import type { Dependents, PluginView, SlotKind } from '@agentic/platform';
-import { EmptyState, Icon, Label } from '@agentic/ui';
+import { EmptyState, ErrorNote, Icon, Label } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -125,7 +125,7 @@ export const LivePlugins = component<Define.Prop<'kind', string>>(({ props }) =>
                     </section>
                 ) : null}
 
-                {error ? <p data-chat-error role="alert">{error}</p> : null}
+                {error ? <ErrorNote data-chat-error="">{error}</ErrorNote> : null}
                 {switches.dialog()}
                 {memory.dialog()}
             </PluginListView>

@@ -326,15 +326,25 @@ describe('/machines/:id — the setup checklist, Restart… and the daemon log (
         await say(m.daemon, hello(m.machineId, [], WEB));
         const dom = await mountLive(`/machines/${m.machineId}`, h);
         await until(() => dom.querySelector('[data-daemon-log]') !== null, 'the disclosure');
+        // zero's Collapsible: the trigger opens it, and the first open asks for the tail.
         const details = dom.querySelector<HTMLDetailsElement>('[data-daemon-log]')!;
-        details.open = true;
-        details.dispatchEvent(new Event('toggle'));
+        expect(details.getAttribute('data-scope')).toBe('collapsible');
+        details.querySelector<HTMLElement>('summary')!.click();
         await until(() => frames.some((f) => f.t === 'log.request'), 'the request');
+        expect(details.open).toBe(true);
         expect(last('log.request').lines).toBe(200);
         await say(m.daemon, { t: 'log.response', requestId: last('log.request').requestId, result: { lines: ['{"msg":"daemon: started"}', '{"msg":"welcome"}'], truncated: true } });
         await until(() => dom.querySelector('[data-daemon-log-lines]') !== null, 'the lines');
         expect(dom.querySelector('[data-daemon-log-lines]')!.textContent).toBe('{"msg":"daemon: started"}\n{"msg":"welcome"}');
         expect(details.textContent).toContain('The last 2 lines — the file holds more');
+        // Closing and opening again keeps what was read: only the first open asks.
+        details.querySelector<HTMLElement>('summary')!.click();
+        await tick();
+        expect(details.open).toBe(false);
+        details.querySelector<HTMLElement>('summary')!.click();
+        await tick();
+        expect(details.open).toBe(true);
+        expect(frames.filter((f) => f.t === 'log.request')).toHaveLength(1);
 
         button(details, 'Refresh').click();
         await until(() => frames.filter((f) => f.t === 'log.request').length === 2, 'the second request');

@@ -1,9 +1,11 @@
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
+import { Card } from '@sigx/zero';
 import type { HostOs } from '@agentic/core';
 import type { HarnessResultView } from '@agentic/platform';
-import { Button, ConfirmDialog, Label, SelectField, StatusPill, type Tone } from '@agentic/ui';
+import { Button, ConfirmDialog, ErrorNote, Label, SelectField, StatusPill, type Tone } from '@agentic/ui';
 import { CommandWell } from './CommandWell';
+import { PhaseTimeline } from './PhaseTimeline';
 import { harnessImpactText, harnessSteps, outcomeLine, pendingLine, removeBlocked, versionLine, type HarnessRow, type HarnessTurn } from './harness';
 import { reinstallCommand } from './update';
 
@@ -74,11 +76,16 @@ export const HarnessCard = component<HarnessCardProps>(({ props, emit, slots }) 
         const removing = row(ui.removing);
         const mode = ui.mode === 'now' ? 'now' : 'drain';
         return (
-            <section data-card data-harness-card id="runtimes" aria-label="Runtimes on this machine">
-                <div data-label-row>
-                    <Label>Runtimes on this machine</Label>
-                    {props.able && props.rows.some((r) => r.update) ? <span data-label-aside>{props.rows.filter((r) => r.update).length} with an update</span> : null}
-                </div>
+            <Card.Root asChild>
+            {(card) => (
+            <section {...card} data-harness-card id="runtimes" aria-label="Runtimes on this machine">
+                <Card.Header>
+                    <div data-label-row>
+                        <Card.Title><Label>Runtimes on this machine</Label></Card.Title>
+                        {props.able && props.rows.some((r) => r.update) ? <span data-label-aside>{props.rows.filter((r) => r.update).length} with an update</span> : null}
+                    </div>
+                </Card.Header>
+                <Card.Body data-card-body="">
 
                 {!props.able ? (
                     <div data-update-reinstall>
@@ -111,23 +118,24 @@ export const HarnessCard = component<HarnessCardProps>(({ props, emit, slots }) 
                                     {mine?.status === 'pending' ? (
                                         <div data-harness-pending>
                                             <p data-card-text>{pendingLine(mine)}</p>
-                                            <ol data-update-phases>
-                                                {harnessSteps(mine).map((s) => (
-                                                    <li data-update-phase={s.phase} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>
-                                                        <span data-update-phase-label>{s.label}</span>
-                                                        {s.phase === 'draining' && s.state === 'current' && r.running.length ? (
-                                                            <div data-update-draining>
-                                                                <span>Waiting for {r.running.length === 1 ? 'a running turn' : `${r.running.length} running turns`} on {r.name}:</span>
-                                                                {turnLinks(r.running)}
-                                                            </div>
-                                                        ) : null}
-                                                    </li>
-                                                ))}
-                                            </ol>
+                                            <PhaseTimeline
+                                                steps={harnessSteps(mine)}
+                                                label={`${r.name}: phases`}
+                                                detail={(s) => (s.phase === 'draining' && s.state === 'current' && r.running.length ? (
+                                                    <div data-update-draining>
+                                                        <span>Waiting for {r.running.length === 1 ? 'a running turn' : `${r.running.length} running turns`} on {r.name}:</span>
+                                                        {turnLinks(r.running)}
+                                                    </div>
+                                                ) : null)}
+                                            />
                                         </div>
                                     ) : null}
-                                    {outcome ? <p data-harness-outcome data-tone={mine?.status === 'error' ? 'failed' : undefined} role={mine?.status === 'error' ? 'alert' : 'status'}>{outcome}</p> : null}
-                                    {failure ? <p data-harness-error role="alert">{failure}</p> : null}
+                                    {outcome
+                                        ? mine?.status === 'error'
+                                            ? <ErrorNote data-harness-outcome="" data-tone="failed">{outcome}</ErrorNote>
+                                            : <p data-harness-outcome role="status">{outcome}</p>
+                                        : null}
+                                    {failure ? <ErrorNote data-harness-error="">{failure}</ErrorNote> : null}
                                     <div data-card-actions>
                                         {canInstall ? <Button intent="primary" loading={busy} disabled={blocked} label={`Install ${r.name}`} onClick={() => emit('request', { op: 'install', runtime: r.runtime, mode: 'drain' })}>{r.status === 'broken' ? 'Reinstall' : 'Install'}</Button> : null}
                                         {r.update ? <Button intent="primary" disabled={blocked} label={`Update ${r.name}`} onClick={() => { ui.mode = 'drain'; ui.updating = r.runtime; }}>Update…</Button> : null}
@@ -140,8 +148,9 @@ export const HarnessCard = component<HarnessCardProps>(({ props, emit, slots }) 
                     </ul>
                 ) : null}
 
-                {props.reinstall && props.able ? <p data-harness-error role="alert">The daemon said it cannot manage its runtimes. Reinstall it once with the one-line installer.</p> : null}
+                {props.reinstall && props.able ? <ErrorNote data-harness-error="">The daemon said it cannot manage its runtimes. Reinstall it once with the one-line installer.</ErrorNote> : null}
                 {slots.default?.()}
+                </Card.Body>
 
                 <ConfirmDialog
                     model={() => ui.updating !== ''}
@@ -178,6 +187,8 @@ export const HarnessCard = component<HarnessCardProps>(({ props, emit, slots }) 
                     onConfirm={() => { const r = removing; ui.removing = ''; if (r) emit('request', { op: 'remove', runtime: r.runtime, mode: 'drain' }); }}
                 />
             </section>
+            )}
+            </Card.Root>
         );
     };
 });

@@ -6,7 +6,7 @@
  * page owns the round trip (`LiveMachine`); this is the view.
  */
 import { component, signal, watch, type Define, type JSXElement } from 'sigx';
-import { ConfirmDialog, TextField } from '@agentic/ui';
+import { ErrorNote, FormDialog, TextField } from '@agentic/ui';
 import { loginErrorText, loginPhaseText, type LoginView } from './login';
 
 export type LoginDialogProps =
@@ -42,15 +42,15 @@ export const LoginDialog = component<LoginDialogProps>(({ props, emit }) => {
         const done = phase === 'done';
         const waitingPaste = !!action?.expectsPaste && (phase === 'action' || phase === 'waiting') && !ui.sent;
         return (
-            <ConfirmDialog
+            // The submit follows the phase: Try again after a failure, Send code while the runtime waits for a paste, Close once done; busy (Waiting…) otherwise.
+            <FormDialog
                 model={props.model}
                 title={`Sign ${props.accountLabel} in on ${props.machineName}`}
                 description={loginPhaseText(login, props.machineName)}
-                confirmLabel={failed ? 'Try again' : waitingPaste ? 'Send code' : done ? 'Close' : 'Waiting…'}
+                submitLabel={failed ? 'Try again' : waitingPaste ? 'Send code' : done ? 'Close' : 'Waiting…'}
                 cancelLabel={done ? 'Close' : 'Cancel'}
-                danger={false}
                 busy={props.busy === true || (!failed && !waitingPaste && !done)}
-                onConfirm={() => { if (failed) emit('retry'); else if (waitingPaste) send(); else if (done) emit('cancel'); }}
+                onSubmit={() => { if (failed) emit('retry'); else if (waitingPaste) send(); else if (done) emit('cancel'); }}
                 onCancel={() => emit('cancel')}
             >
                 <div data-login-body data-login-phase={phase ?? 'requesting'} data-login-kind={action?.kind}>
@@ -62,16 +62,14 @@ export const LoginDialog = component<LoginDialogProps>(({ props, emit }) => {
                         </div>
                     ) : null}
                     {waitingPaste ? (
-                        <div onKeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); send(); } }}>
-                            <TextField model={() => ui.code} name="login-code" label="Code from the sign-in page" required error={ui.attempted && !ui.code.trim() ? 'Paste the code the page showed you.' : undefined} disabled={props.busy} />
-                        </div>
+                        <TextField model={() => ui.code} name="login-code" label="Code from the sign-in page" required error={ui.attempted && !ui.code.trim() ? 'Paste the code the page showed you.' : undefined} disabled={props.busy} />
                     ) : null}
                     {ui.sent && !failed && !done ? <p data-env-note>Code sent — the runtime is checking it.</p> : null}
                     {phase === 'waiting' && !action?.expectsPaste ? <p data-env-note>Waiting for the runtime to see the sign-in…</p> : null}
-                    {failed && login?.error ? <p data-env-failure role="alert">{loginErrorText(login.error)}</p> : null}
+                    {failed && login?.error ? <ErrorNote data-env-failure="">{loginErrorText(login.error)}</ErrorNote> : null}
                     <p data-login-foot>The login stays on {props.machineName}; the platform only sees whether the account can authenticate.{action?.expectsPaste ? ' A pasted code is handed to the runtime once and kept nowhere.' : ''}</p>
                 </div>
-            </ConfirmDialog>
+            </FormDialog>
         );
     };
 });

@@ -75,7 +75,7 @@ const change = (root: ParentNode, selector: string, value: string): void => {
 };
 const card = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-update-card]');
 const stateOf = (dom: ParentNode) => card(dom)?.getAttribute('data-update-state');
-const phaseState = (dom: ParentNode, phase: string) => card(dom)?.querySelector(`[data-update-phase="${phase}"]`)?.getAttribute('data-state');
+const phaseState = (dom: ParentNode, phase: string) => card(dom)?.querySelector(`[data-update-phase="${phase}"]`)?.getAttribute('data-phase-state');
 
 describe('/machines/:id — the update card (#367, live)', () => {
     it('updates when idle: the request goes out, the phases follow the daemon live, and the new build lands as "Updated to"', { timeout: 15_000 }, async () => {
@@ -96,7 +96,7 @@ describe('/machines/:id — the update card (#367, live)', () => {
 
         await say(m.daemon, { t: 'update.status', requestId: sent.requestId, phase: 'downloading', progress: { bytes: 25, total: 100 } });
         await until(() => phaseState(dom, 'downloading') === 'current', 'downloading');
-        await until(() => card(dom)!.querySelector<HTMLProgressElement>('[data-update-progress]')?.value === 25, 'the progress bar');
+        await until(() => card(dom)!.querySelector('[data-update-progress]')?.getAttribute('aria-valuenow') === '25', 'the progress bar');
         await say(m.daemon, { t: 'update.status', requestId: sent.requestId, phase: 'restarting' });
         await until(() => phaseState(dom, 'restarting') === 'current', 'restarting');
         expect(phaseState(dom, 'verifying')).toBe('done');

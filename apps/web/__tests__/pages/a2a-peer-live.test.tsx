@@ -11,7 +11,7 @@ import { AgentActor, agentKey, defineRegistry, generateWorkspaceKek, importWorks
 import { RUNTIME_PLUGINS } from '@agentic/runtimes';
 import { EMPTY_PEER_DRAFT, peerDraftErrors, peerRuntimeId, peerSetup } from '../../src/pages/plugins/a2a-peer';
 import { buttonNamed, setText, text } from './helpers';
-import { WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
+import { WS, mountLive, owner, startLive, tick, until, type LiveHarness } from './live-harness';
 
 const KEK = generateWorkspaceKek();
 const Registry = defineRegistry({ kek: () => importWorkspaceKek(KEK), catalogue: [...RUNTIME_PLUGINS] });
@@ -53,6 +53,13 @@ describe('/plugins: Add A2A peer (live)', () => {
         buttonNamed(dom, 'Add A2A peer').click();
         await until(() => field('peer-name') !== null, 'the dialog');
 
+        // A FormDialog: the empty required fields block the submit; a blank name is the dialog's own refusal.
+        expect(document.querySelector('[data-a2a-peer-fields]')!.closest('form[data-form-dialog]')).not.toBeNull();
+        buttonNamed(document, 'Add peer').click();
+        await tick();
+        expect(field('peer-name')!.validity.valueMissing).toBe(true);
+        setText(field('peer-name')!, '   ');
+        setText(field('peer-card-url')!, 'https://research.example.com/.well-known/agent-card.json');
         buttonNamed(document, 'Add peer').click();
         await until(() => text(document.querySelector('[data-a2a-peer-fields]')).includes('Give the peer a name.'), 'the refusal');
         expect((await registry().list()).some((p) => p.manifest.id.startsWith('a2a.'))).toBe(false);

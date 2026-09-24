@@ -1,8 +1,9 @@
 import { component, signal, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
+import { Alert, Card, Collapsible } from '@sigx/zero';
 import type { CapabilityReport, DaemonFeature, EnvironmentDescriptor, EnvironmentInput, MachinePolicy } from '@agentic/core';
 import type { MachineUpdateView } from '@agentic/platform';
-import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, TextField } from '@agentic/ui';
+import { Button, ConfirmDialog, EmptyState, ErrorNote, FormDialog, Icon, Label, SelectField, StatusPill, TextField } from '@agentic/ui';
 import { doctorChecks, doctorFootnote, environmentsOf, opsAgent, opsDaemonLog, opsMachine, opsPolicy, opsQuota, opsTelemetry, opsUpdate, queuedFor, sessionsOn, type DoctorCheck, type OpsMachine, type OpsSession } from '../mock/ops';
 import { dataMode } from '../data-mode';
 import { CommandWell } from './machines/CommandWell';
@@ -260,9 +261,11 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     <StatusPill status={m.online ? 'online' : 'offline'} label={revoked ? 'REVOKED' : undefined} />
                 </header>
                 {load?.warnings.length ? (
-                    <p data-machine-pressure role="alert">
-                        {load.warnings.map((w) => <span>{warningText(w, props.sessions, (id) => (props.agents ?? opsAgent)(id).name)}</span>)}
-                    </p>
+                    <Alert.Root color="warning" size="sm" data-machine-pressure="">
+                        <Alert.Description>
+                            {load.warnings.map((w) => <span>{warningText(w, props.sessions, (id) => (props.agents ?? opsAgent)(id).name)}</span>)}
+                        </Alert.Description>
+                    </Alert.Root>
                 ) : null}
 
                 {!revoked ? <SetupChecklist steps={steps} disabled={offline ? ['environment'] : []} onAction={onStep} /> : null}
@@ -308,7 +311,7 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     onConfirm={() => { if (removing) emit('removeEnvironment', removing.id); }}
                     onCancel={() => { ui.removeOpen = false; }}
                 >
-                    {removeFailure ? <p data-env-failure role="alert">{failureText(removeFailure)}</p> : null}
+                    {removeFailure ? <ErrorNote data-env-failure="">{failureText(removeFailure)}</ErrorNote> : null}
                 </ConfirmDialog>
                 </>) : null}
 
@@ -337,121 +340,146 @@ export const MachineView = component<MachineViewProps>(({ props, emit, slots }) 
                     </section>
 
                     <aside data-machine-rail>
-                        <section data-card aria-label="Doctor">
-                            <div data-label-row>
-                                <Label>Doctor · account isolation</Label>
-                                <Button intent="default" onClick={() => emit('recheck')}>Run again</Button>
-                            </div>
-                            <ul data-doctor-list>
-                                {props.doctor.map(check => (
-                                    <li data-doctor-check data-ok={check.ok ? '' : undefined}>
-                                        <Icon name={check.ok ? 'check' : 'close'} size={15} label={check.ok ? 'passed' : 'failed'} />
-                                        <span data-doctor-text>{check.text}</span>
-                                        <span data-doctor-note>{check.note}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                            <p data-doctor-foot>{props.footnote ?? doctorFootnote}</p>
-                        </section>
-
-                        <section data-card aria-label="This machine" data-machine-manage>
-                            <div data-label-row><Label>This machine</Label></div>
-                            <p data-card-text>Rename it, restart its daemon, or remove it from this workspace. Removing revokes its token first; its environments and logins stay on the machine.</p>
-                            <div data-card-actions>
-                                <Button intent="default" onClick={() => { ui.name = m.name; ui.renameAttempted = false; ui.renaming = true; }}>Rename</Button>
-                                {restartable ? <Button intent="default" disabled={offline || restart?.status === 'pending'} onClick={() => { ui.restartMode = 'drain'; ui.restarting = true; }}>Restart…</Button> : null}
-                                <Button intent="danger" onClick={() => { ui.removingMachine = true; }}>Remove from workspace</Button>
-                            </div>
-                            {restart?.status === 'pending' ? <p data-machine-restart role="status">Restarting {restart.mode === 'now' ? 'now' : 'when idle'} — the daemon comes back on its own; the update card follows it.</p> : null}
-                            {restart?.status === 'error' ? <p data-machine-restart data-tone="failed" role="alert">{restart.message}</p> : null}
-                            {features.includes('log') && !revoked ? (
-                                <details data-daemon-log onToggle={(e: Event) => { const open = (e.currentTarget as HTMLDetailsElement).open; ui.logOpen = open; if (open && !log) emit('readLog'); }}>
-                                    <summary>Daemon log</summary>
-                                    <div data-daemon-log-body>
+                        <Card.Root asChild>
+                            {(card) => (
+                                <section {...card} aria-label="Doctor" data-machine-doctor>
+                                    <Card.Header>
                                         <div data-label-row>
-                                            <span data-label-aside>{log?.status === 'done' ? `The last ${log.lines?.length ?? 0} lines${log.truncated ? ' — the file holds more' : ''}` : log?.status === 'pending' ? 'Reading…' : 'Token-redacted, read from the machine.'}</span>
-                                            <Button intent="default" disabled={offline || log?.status === 'pending'} loading={log?.status === 'pending'} onClick={() => emit('readLog')}>Refresh</Button>
+                                            <Card.Title><Label>Doctor · account isolation</Label></Card.Title>
+                                            <Button intent="default" onClick={() => emit('recheck')}>Run again</Button>
                                         </div>
-                                        {log?.status === 'done' ? (log.lines?.length ? <pre data-daemon-log-lines>{log.lines.join('\n')}</pre> : <p data-env-note>The log is empty.</p>) : null}
-                                        {log?.status === 'error' && log.error ? <p data-env-failure role="alert">{logErrorText(log.error)}</p> : null}
-                                        {offline && !log ? <p data-env-note>The machine is offline. The log can be read while its daemon is connected.</p> : null}
-                                    </div>
-                                </details>
-                            ) : null}
-                            <ConfirmDialog
-                                model={() => ui.restarting}
-                                title={`Restart the daemon on ${m.name}?`}
-                                description={`${impactText(impact)} Nothing is downloaded: the same build comes back, and idle sessions re-open with their next message.`}
-                                confirmLabel={ui.restartMode === 'now' && impact.runningTurns.length ? `Interrupt ${impact.runningTurns.length} and restart` : 'Restart'}
-                                cancelLabel="Not now"
-                                danger={false}
-                                onCancel={() => { ui.restarting = false; }}
-                                onConfirm={() => { ui.restarting = false; emit('restart', ui.restartMode); }}
-                            >
-                                <SelectField
-                                    model={() => ui.restartMode}
-                                    name="restart-mode"
-                                    label="When"
-                                    options={[{ value: 'drain', label: 'When idle — after the running turns end' }, { value: 'now', label: impact.runningTurns.length ? `Now — interrupt ${plural(impact.runningTurns.length, 'running turn', 'running turns')}` : 'Now' }]}
-                                />
-                                {impact.runningTurns.length ? (
-                                    <div data-update-impact>
-                                        <p data-update-impact-label>Running turns · {impact.runningTurns.length}</p>
-                                        <ul data-update-turns>{impact.runningTurns.map((t) => <li data-update-turn={t.sessionId}>{(props.agents ?? opsAgent)(t.agentId).name} · {t.sessionId}</li>)}</ul>
-                                    </div>
-                                ) : null}
-                            </ConfirmDialog>
-                            <ConfirmDialog
-                                model={() => ui.renaming}
-                                title={`Rename ${m.name}`}
-                                description="How the machine shows on every page. The daemon keeps its token."
-                                confirmLabel="Rename"
-                                danger={false}
-                                onConfirm={() => {
-                                    ui.renameAttempted = true;
-                                    if (!ui.name.trim()) return;
-                                    ui.renaming = false;
-                                    if (ui.name.trim() !== m.name) emit('rename', ui.name.trim());
-                                }}
-                                onCancel={() => { ui.renaming = false; }}
-                            >
-                                <TextField model={() => ui.name} name="machine-name" label="Name" required error={ui.renameAttempted && !ui.name.trim() ? 'A name is required.' : undefined} />
-                            </ConfirmDialog>
-                            <ConfirmDialog
-                                model={() => ui.removingMachine}
-                                title={`Remove ${m.name} from this workspace?`}
-                                description={`Its daemon token is revoked first, so it cannot connect again. ${revoked ? '' : disconnected} It leaves the Machines page; pairing it again brings it back. Credentials and environments stay on the machine.`}
-                                dependents={props.sessions.map(s => `${s.id} · ${s.task}`)}
-                                dependentsLabel={`Sessions that become disconnected · ${active}`}
-                                confirmLabel={`Remove ${m.name}`}
-                                cancelLabel="Keep it"
-                                onCancel={() => { ui.removingMachine = false; }}
-                                onConfirm={() => { ui.removingMachine = false; emit('removeMachine'); }}
-                            />
-                        </section>
+                                    </Card.Header>
+                                    <Card.Body data-card-body="">
+                                        <ul data-doctor-list>
+                                            {props.doctor.map(check => (
+                                                <li data-doctor-check data-ok={check.ok ? '' : undefined}>
+                                                    <Icon name={check.ok ? 'check' : 'close'} size={15} label={check.ok ? 'passed' : 'failed'} />
+                                                    <span data-doctor-text>{check.text}</span>
+                                                    <span data-doctor-note>{check.note}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        <p data-doctor-foot>{props.footnote ?? doctorFootnote}</p>
+                                    </Card.Body>
+                                </section>
+                            )}
+                        </Card.Root>
 
-                        <section data-card data-tone="failed" aria-label="Revoke">
-                            <div data-label-row><Label>Revoke</Label></div>
-                            {revoked ? (
-                                <p data-card-text data-revoked-line>This machine is revoked: its daemon token is refused and it will not connect again until it pairs anew. Credentials stay on the machine.</p>
-                            ) : (
-                                <>
-                                    <p data-card-text>The daemon token stops working at once. Sessions on this machine are marked disconnected, not failed. Credentials stay on the machine.</p>
+                        <Card.Root asChild>
+                            {(card) => (
+                                <section {...card} aria-label="This machine" data-machine-manage>
+                                    <Card.Header>
+                                        <div data-label-row><Card.Title><Label>This machine</Label></Card.Title></div>
+                                    </Card.Header>
+                                    <Card.Body data-card-body="">
+                                        <p data-card-text>Rename it, restart its daemon, or remove it from this workspace. Removing revokes its token first; its environments and logins stay on the machine.</p>
+                                        <div data-card-actions>
+                                            <Button intent="default" onClick={() => { ui.name = m.name; ui.renameAttempted = false; ui.renaming = true; }}>Rename</Button>
+                                            {restartable ? <Button intent="default" disabled={offline || restart?.status === 'pending'} onClick={() => { ui.restartMode = 'drain'; ui.restarting = true; }}>Restart…</Button> : null}
+                                            <Button intent="danger" onClick={() => { ui.removingMachine = true; }}>Remove from workspace</Button>
+                                        </div>
+                                        {restart?.status === 'pending' ? <p data-machine-restart role="status">Restarting {restart.mode === 'now' ? 'now' : 'when idle'} — the daemon comes back on its own; the update card follows it.</p> : null}
+                                        {restart?.status === 'error' ? <ErrorNote data-machine-restart="" data-tone="failed">{restart.message}</ErrorNote> : null}
+                                        {features.includes('log') && !revoked ? (
+                                            // The first open asks the daemon for the tail; Refresh asks again.
+                                            <Collapsible.Root data-daemon-log="" model={() => ui.logOpen} onOpenChange={(open: boolean) => { if (open && !props.log) emit('readLog'); }}>
+                                                <Collapsible.Trigger>Daemon log</Collapsible.Trigger>
+                                                <Collapsible.Panel data-daemon-log-body="">
+                                                    <div data-label-row>
+                                                        <span data-label-aside>{log?.status === 'done' ? `The last ${log.lines?.length ?? 0} lines${log.truncated ? ' — the file holds more' : ''}` : log?.status === 'pending' ? 'Reading…' : 'Token-redacted, read from the machine.'}</span>
+                                                        <Button intent="default" disabled={offline || log?.status === 'pending'} loading={log?.status === 'pending'} onClick={() => emit('readLog')}>Refresh</Button>
+                                                    </div>
+                                                    {log?.status === 'done' ? (log.lines?.length ? <pre data-daemon-log-lines>{log.lines.join('\n')}</pre> : <p data-env-note>The log is empty.</p>) : null}
+                                                    {log?.status === 'error' && log.error ? <ErrorNote data-env-failure="">{logErrorText(log.error)}</ErrorNote> : null}
+                                                    {offline && !log ? <p data-env-note>The machine is offline. The log can be read while its daemon is connected.</p> : null}
+                                                </Collapsible.Panel>
+                                            </Collapsible.Root>
+                                        ) : null}
+                                    </Card.Body>
+                                    {/* Restarting is a consequence confirm (it interrupts running turns), not data entry: it stays the alert dialog. */}
                                     <ConfirmDialog
-                                        model={() => ui.revoking}
-                                        title={`Revoke ${m.name}?`}
-                                        description={`The daemon token stops working at once. ${disconnected} Credentials stay on the machine.`}
+                                        model={() => ui.restarting}
+                                        title={`Restart the daemon on ${m.name}?`}
+                                        description={`${impactText(impact)} Nothing is downloaded: the same build comes back, and idle sessions re-open with their next message.`}
+                                        confirmLabel={ui.restartMode === 'now' && impact.runningTurns.length ? `Interrupt ${impact.runningTurns.length} and restart` : 'Restart'}
+                                        cancelLabel="Not now"
+                                        danger={false}
+                                        onCancel={() => { ui.restarting = false; }}
+                                        onConfirm={() => { ui.restarting = false; emit('restart', ui.restartMode); }}
+                                    >
+                                        <SelectField
+                                            model={() => ui.restartMode}
+                                            name="restart-mode"
+                                            label="When"
+                                            options={[{ value: 'drain', label: 'When idle — after the running turns end' }, { value: 'now', label: impact.runningTurns.length ? `Now — interrupt ${plural(impact.runningTurns.length, 'running turn', 'running turns')}` : 'Now' }]}
+                                        />
+                                        {impact.runningTurns.length ? (
+                                            <div data-update-impact>
+                                                <p data-update-impact-label>Running turns · {impact.runningTurns.length}</p>
+                                                <ul data-update-turns>{impact.runningTurns.map((t) => <li data-update-turn={t.sessionId}>{(props.agents ?? opsAgent)(t.agentId).name} · {t.sessionId}</li>)}</ul>
+                                            </div>
+                                        ) : null}
+                                    </ConfirmDialog>
+                                    <FormDialog
+                                        model={() => ui.renaming}
+                                        title={`Rename ${m.name}`}
+                                        description="How the machine shows on every page. The daemon keeps its token."
+                                        submitLabel="Rename"
+                                        onSubmit={() => {
+                                            ui.renameAttempted = true;
+                                            if (!ui.name.trim()) return;
+                                            ui.renaming = false;
+                                            if (ui.name.trim() !== m.name) emit('rename', ui.name.trim());
+                                        }}
+                                        onCancel={() => { ui.renaming = false; }}
+                                    >
+                                        <TextField model={() => ui.name} name="machine-name" label="Name" required error={ui.renameAttempted && !ui.name.trim() ? 'A name is required.' : undefined} />
+                                    </FormDialog>
+                                    <ConfirmDialog
+                                        model={() => ui.removingMachine}
+                                        title={`Remove ${m.name} from this workspace?`}
+                                        description={`Its daemon token is revoked first, so it cannot connect again. ${revoked ? '' : disconnected} It leaves the Machines page; pairing it again brings it back. Credentials and environments stay on the machine.`}
                                         dependents={props.sessions.map(s => `${s.id} · ${s.task}`)}
                                         dependentsLabel={`Sessions that become disconnected · ${active}`}
-                                        confirmLabel={active ? `Revoke and disconnect ${plural(active, 'session', 'sessions')}` : `Revoke ${m.name}`}
-                                        cancelLabel="Keep paired"
-                                        onCancel={() => { ui.revoking = false; }}
-                                        onConfirm={() => { ui.revoking = false; emit('revoke'); }}
+                                        confirmLabel={`Remove ${m.name}`}
+                                        cancelLabel="Keep it"
+                                        onCancel={() => { ui.removingMachine = false; }}
+                                        onConfirm={() => { ui.removingMachine = false; emit('removeMachine'); }}
                                     />
-                                    <div><Button intent="danger" onClick={() => { ui.revoking = true; }}>Revoke {m.name}</Button></div>
-                                </>
+                                </section>
                             )}
-                        </section>
+                        </Card.Root>
+
+                        <Card.Root asChild>
+                            {(card) => (
+                                <section {...card} data-tone="failed" aria-label="Revoke" data-machine-revoke>
+                                    <Card.Header>
+                                        <div data-label-row><Card.Title><Label>Revoke</Label></Card.Title></div>
+                                    </Card.Header>
+                                    <Card.Body data-card-body="">
+                                        {revoked ? (
+                                            <p data-card-text data-revoked-line>This machine is revoked: its daemon token is refused and it will not connect again until it pairs anew. Credentials stay on the machine.</p>
+                                        ) : (
+                                            <>
+                                                <p data-card-text>The daemon token stops working at once. Sessions on this machine are marked disconnected, not failed. Credentials stay on the machine.</p>
+                                                <ConfirmDialog
+                                                    model={() => ui.revoking}
+                                                    title={`Revoke ${m.name}?`}
+                                                    description={`The daemon token stops working at once. ${disconnected} Credentials stay on the machine.`}
+                                                    dependents={props.sessions.map(s => `${s.id} · ${s.task}`)}
+                                                    dependentsLabel={`Sessions that become disconnected · ${active}`}
+                                                    confirmLabel={active ? `Revoke and disconnect ${plural(active, 'session', 'sessions')}` : `Revoke ${m.name}`}
+                                                    cancelLabel="Keep paired"
+                                                    onCancel={() => { ui.revoking = false; }}
+                                                    onConfirm={() => { ui.revoking = false; emit('revoke'); }}
+                                                />
+                                                <div><Button intent="danger" onClick={() => { ui.revoking = true; }}>Revoke {m.name}</Button></div>
+                                            </>
+                                        )}
+                                    </Card.Body>
+                                </section>
+                            )}
+                        </Card.Root>
                     </aside>
                 </div>
             </OpsPage>

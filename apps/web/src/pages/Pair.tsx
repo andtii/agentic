@@ -1,5 +1,5 @@
 import { component, effect, onMounted, onUnmounted, signal, type Define } from 'sigx';
-import { Countdown } from '@sigx/zero';
+import { Card, Countdown, Timeline } from '@sigx/zero';
 import { Button, Icon, Label } from '@agentic/ui';
 import { pairing } from '../mock/ops';
 import { dataMode } from '../data-mode';
@@ -89,10 +89,11 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
         return (
             <OpsPage page="pair" title="Pair a machine" hero>
                 <div data-pair-grid>
-                    <ol data-pair-steps>
-                        <li data-pair-step data-phase="complete">
-                            <span data-step-marker aria-hidden="true"><Icon name="check" size={14} /></span>
-                            <div data-step-body>
+                    {/* Timeline, not Steps: a step here holds its whole body, and Steps.Item is a wizard rail's button. */}
+                    <Timeline.Root data-pair-steps="" aria-label="Pairing steps">
+                        <Timeline.Item data-pair-step="" data-phase="complete">
+                            <Timeline.Marker color="primary" data-step-marker=""><Icon name="check" size={14} /></Timeline.Marker>
+                            <Timeline.Content data-step-body="">
                                 <h2 data-step-title>Install the daemon on the machine</h2>
                                 <p data-step-note>One line per OS — it downloads the daemon (and Node when the machine has none), pairs with the code below and keeps the daemon running in the background. Re-run it later to upgrade.</p>
                                 {props.install.map((line) => (
@@ -105,11 +106,12 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-                        </li>
-                        <li data-pair-step data-phase="active">
-                            <span data-step-marker aria-hidden="true">2</span>
-                            <div data-step-body>
+                            </Timeline.Content>
+                            <Timeline.Connector />
+                        </Timeline.Item>
+                        <Timeline.Item data-pair-step="" data-phase="active" aria-current="step">
+                            <Timeline.Marker color="primary" data-step-marker="">2</Timeline.Marker>
+                            <Timeline.Content data-step-body="">
                                 <h2 data-step-title>Enter this code there</h2>
                                 {slots.name ? <div data-pair-name>{slots.name()}</div> : null}
                                 <div data-command-well>
@@ -129,7 +131,7 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
                                     <p data-code-status>
                                         <span data-code-dot aria-hidden="true" />
                                         <span>Waiting for the daemon · code expires in </span>
-                                        <Countdown.Root label="Code expires in">
+                                        <Countdown.Root label="Code expires in" mods={{ inline: true }}>
                                             <Countdown.Value value={Math.floor(state.remaining / 60)} digits={2} />
                                             <span aria-hidden="true">:</span>
                                             <Countdown.Value value={state.remaining % 60} digits={2} />
@@ -138,21 +140,30 @@ export const PairView = component<PairViewProps>(({ props, slots }) => {
                                         <span> · single use</span>
                                     </p>
                                 )}
-                            </div>
-                        </li>
-                        <li data-pair-step data-phase="inactive">
-                            <span data-step-marker aria-hidden="true">3</span>
-                            <div data-step-body>
+                            </Timeline.Content>
+                            <Timeline.Connector />
+                        </Timeline.Item>
+                        <Timeline.Item data-pair-step="" data-phase="inactive">
+                            <Timeline.Marker color="neutral" data-step-marker="">3</Timeline.Marker>
+                            <Timeline.Content data-step-body="">
                                 <h2 data-step-title>Name its environments</h2>
                                 <p data-step-hint>The daemon reports the runtimes and accounts it finds. You choose which agents default to them.</p>
-                            </div>
-                        </li>
-                    </ol>
+                            </Timeline.Content>
+                        </Timeline.Item>
+                    </Timeline.Root>
                     <aside data-pair-rail>
-                        <section data-card aria-label="What pairing grants">
-                            <div data-label-row><Label>What pairing grants</Label></div>
-                            {props.grants.map(text => <p data-card-text>{text}</p>)}
-                        </section>
+                        <Card.Root asChild>
+                            {(card) => (
+                                <section {...card} aria-label="What pairing grants" data-pair-grants>
+                                    <Card.Header>
+                                        <div data-label-row><Card.Title><Label>What pairing grants</Label></Card.Title></div>
+                                    </Card.Header>
+                                    <Card.Body data-card-body="">
+                                        {props.grants.map(text => <p data-card-text>{text}</p>)}
+                                    </Card.Body>
+                                </section>
+                            )}
+                        </Card.Root>
                     </aside>
                 </div>
             </OpsPage>

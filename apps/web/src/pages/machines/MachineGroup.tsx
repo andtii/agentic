@@ -1,4 +1,5 @@
 import { component, type Define, type JSXElement } from 'sigx';
+import { Card } from '@sigx/zero';
 import type { EnvironmentDescriptor, EnvironmentTelemetry, QuotaSnapshot } from '@agentic/core';
 import { AgentTile, EnvironmentCard, Icon, StatusPill } from '@agentic/ui';
 import { defaultAgentsFor, opsAgent, type OpsMachine } from '../../mock/ops';
@@ -59,12 +60,15 @@ export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Defin
     /** The machine's own CPU and memory (#400), after the heartbeat in the caption. */
     & Define.Prop<'machineLoad', MachineLoad>;
 
-/** One bordered group per machine on `/machines`: glyph, name, OS and heartbeat, status, Details, then its environments. */
+/** One machine on `/machines`, a zero `Card`: glyph, name, OS and heartbeat, status, Details in the header, then its environments. */
 export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
     const m = props.machine;
     const queued = queuedLine(m, props.environments.reduce((n, e) => n + (props.queued[e.id] ?? 0), 0));
     return (
-        <section data-machine-group data-machine={m.id} data-online={m.online ? '' : undefined} aria-label={m.name}>
+        <Card.Root asChild>
+        {(card) => (
+        <section {...card} data-machine-group data-machine={m.id} data-online={m.online ? '' : undefined} aria-label={m.name}>
+            <Card.Header>
             <header data-machine-head>
                 <span data-machine-glyph aria-hidden="true"><Icon name="machines" size={20} /></span>
                 <div data-machine-title>
@@ -76,6 +80,8 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                 <StatusPill status={m.online ? 'online' : 'offline'} />
                 <LinkButton to={`/machines/${m.id}`}>Details</LinkButton>
             </header>
+            </Card.Header>
+            <Card.Body data-card-body="">
             <EnvironmentGrid environments={props.environments} machine={m} queued={props.queued} defaultFor={props.defaultFor} quota={props.quota} load={props.load} />
             {queued ? (
                 <p data-machine-queued>
@@ -83,13 +89,19 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
                     <span>{queued}</span>
                 </p>
             ) : null}
+            </Card.Body>
         </section>
+        )}
+        </Card.Root>
     );
 });
 
 /** The `platform` row: `anthropic-api` runs without any machine, so both execution types sit in one list. */
 export const PlatformRow = component<Define.Prop<'defaultFor', readonly DefaultForAgent[], true> & Define.Prop<'caption', string, true> & Define.Prop<'keyStatus', string, true> & Define.Prop<'keyLabel', string, true>>(({ props }) => () => (
-    <section data-machine-group data-platform aria-label="platform">
+    <Card.Root asChild>
+    {(card) => (
+    <section {...card} data-machine-group data-platform aria-label="platform">
+        <Card.Body>
         <header data-machine-head>
             <span data-machine-glyph aria-hidden="true"><Icon name="key" size={20} /></span>
             <div data-machine-title>
@@ -102,5 +114,8 @@ export const PlatformRow = component<Define.Prop<'defaultFor', readonly DefaultF
             </span>
             <StatusPill status={props.keyStatus} label={props.keyLabel} />
         </header>
+        </Card.Body>
     </section>
+    )}
+    </Card.Root>
 ));

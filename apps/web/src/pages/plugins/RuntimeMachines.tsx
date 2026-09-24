@@ -10,6 +10,7 @@
  */
 import { component, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
+import { Card } from '@sigx/zero';
 import { useActorState } from '@sigx/actors/app';
 import { Label, StatusPill, type Tone } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -36,15 +37,23 @@ export const RuntimeMachineRow = component<Define.Prop<'machine', RuntimeMachine
 
 /** The section's frame: its heading and the list, or what to do when no machine is paired. */
 export const RuntimeMachines = component<Define.Prop<'name', string, true> & Define.Prop<'empty', boolean> & Define.Slot<'default'>>(({ props, slots }) => () => (
-    <section data-card data-runtime-machines aria-label="Machines">
-        <div data-label-row><Label>Machines</Label><span data-label-aside>where {props.name} is installed</span></div>
-        {props.empty
-            ? <p data-card-text>No machine is paired yet. Pair one from the Machines page; {props.name} is installed on it from its page.</p>
-            : <>
-                <p data-card-text>Install {props.name} on a machine, add an environment that runs on it, then sign that environment in.</p>
-                <ul data-runtime-machine-list>{slots.default?.()}</ul>
-            </>}
-    </section>
+    <Card.Root asChild>
+        {(card) => (
+            <section {...card} data-runtime-machines aria-label="Machines">
+                <Card.Header>
+                    <div data-label-row><Card.Title><Label>Machines</Label></Card.Title><span data-label-aside>where {props.name} is installed</span></div>
+                </Card.Header>
+                <Card.Body data-card-body="">
+                    {props.empty
+                        ? <p data-card-text>No machine is paired yet. Pair one from the Machines page; {props.name} is installed on it from its page.</p>
+                        : <>
+                            <p data-card-text>Install {props.name} on a machine, add an environment that runs on it, then sign that environment in.</p>
+                            <ul data-runtime-machine-list>{slots.default?.()}</ul>
+                        </>}
+                </Card.Body>
+            </section>
+        )}
+    </Card.Root>
 ));
 
 const LiveRuntimeMachine = component<{ runtime: string; id: string; name: string; workspaceId: string }>(({ props }) => {

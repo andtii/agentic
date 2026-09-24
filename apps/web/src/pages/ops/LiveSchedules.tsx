@@ -10,7 +10,7 @@
 import { component, effect, onUnmounted, signal, useHead, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { AgentTile, DataTable, EmptyState, EnvironmentLine, Icon, Switch, Tag } from '@agentic/ui';
+import { AgentTile, DataTable, EmptyState, EnvironmentLine, ErrorNote, Icon, Switch, Tag } from '@agentic/ui';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { scheduleKeyOf, workspaceKeyOf } from '../../actors/keys';
 import type { OpsSchedule } from '../../mock/ops';
@@ -82,7 +82,7 @@ const ScheduleRow = component<{ ws: string; id: string; tz: string; agents: Agen
         const env = s.runsOn.environmentId ? props.environments.lookup(s.runsOn.environmentId) : null;
         const policy = env && !env.online ? `${env.machineName} is offline · policy: ${v.offlinePolicy === 'queue' ? 'queue until it returns' : v.offlinePolicy === 'fail' ? 'fail' : 'fall back to the platform runtime'}` : null;
         return (
-            <tr data-scope="table" data-part="row" data-schedule={s.id} data-enabled={s.enabled ? '' : undefined}>
+            <DataTable.Row data-schedule={s.id} data-enabled={s.enabled ? '' : undefined}>
                 <DataTable.Cell><Tag>{s.kind}</Tag></DataTable.Cell>
                 <DataTable.Cell>
                     <span data-schedule-what>
@@ -96,7 +96,7 @@ const ScheduleRow = component<{ ws: string; id: string; tz: string; agents: Agen
                 <DataTable.Cell>
                     <Switch label={`Enable ${s.what}`} hideLabel model={() => st.on} disabled={st.busy} onCheckedChange={(on: boolean) => { void toggle(on); }} />
                 </DataTable.Cell>
-            </tr>
+            </DataTable.Row>
         );
     };
 });
@@ -148,7 +148,7 @@ export const LiveSchedules = component(() => {
                                 {ws ? ids.map((id) => <ScheduleRow ws={ws} id={id} tz={tz()} agents={agents} environments={environments} onError={fail} />) : null}
                             </DataTable>
                         )}
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                 <p data-foot-note>
                     <Icon name="schedules" size={14} />
                     <span>{dstRuleFor(tz())}</span>

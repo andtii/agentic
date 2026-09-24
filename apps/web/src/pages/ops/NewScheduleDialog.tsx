@@ -1,6 +1,6 @@
 import { component, signal, watch, type Define } from 'sigx';
 import type { EnvironmentId } from '@agentic/core';
-import { ConfirmDialog, SelectField, TextareaField, TextField } from '@agentic/ui';
+import { FormDialog, SelectField, TextareaField, TextField } from '@agentic/ui';
 import type { ScheduleKind } from '../../mock/ops';
 import { validateNewSchedule, type NewScheduleErrors, type NewScheduleInput } from './live';
 import type { WorkdirEnvironments } from '../workdir/environments';
@@ -35,8 +35,8 @@ type PlaceMode = 'environment' | 'project';
  * or a cron recurrence — plain to the inbox, or an agent task with a prompt
  * and an optional environment (AST-05), a folder in it (#193), or a project
  * instead of both (#333: a project says where the work lives, so choosing
- * one clears and disables the environment and the folder). Confirming with
- * a field missing keeps the dialog open with the field marked.
+ * one clears and disables the environment and the folder). A form in a
+ * `FormDialog`: submitting with a field missing keeps it open with the field marked.
  */
 export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emit }) => {
     const st = signal<{ -readonly [K in keyof NewScheduleInput]-?: NonNullable<NewScheduleInput[K]> } & { attempted: boolean; mode: PlaceMode; sync: 'none' | 'folder' }>({ kind: 'reminder', title: '', at: '', cron: '0 9 * * 1-5', agentId: '', environmentId: '', workdir: '', projectId: '', machineId: '', prompt: '', attempted: false, mode: 'environment', sync: 'none' });
@@ -65,14 +65,13 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
         const errors: NewScheduleErrors = st.attempted ? validateNewSchedule(input(), props.timeZone) : {};
         const inProject = st.mode === 'project';
         return (
-            <ConfirmDialog
+            <FormDialog
                 model={props.model}
                 title="New schedule"
                 description={`Times are ${props.timeZone}. Reminders are delivered by the platform, even with every machine offline.`}
-                confirmLabel="Create schedule"
-                danger={false}
+                submitLabel="Create schedule"
                 busy={props.busy}
-                onConfirm={() => {
+                onSubmit={() => {
                     st.attempted = true;
                     if (Object.keys(validateNewSchedule(input(), props.timeZone)).length) return;
                     emit('create', input());
@@ -118,7 +117,7 @@ export const NewScheduleDialog = component<NewScheduleDialogProps>(({ props, emi
                     ) : null}
                     <TextareaField model={() => st.prompt} name="schedule-prompt" label={st.kind === 'agent-task' ? 'Prompt' : 'Note'} rows={3} description={st.kind === 'agent-task' ? 'What the agent is asked to do each time.' : 'Shown in the inbox with the reminder.'} />
                 </div>
-            </ConfirmDialog>
+            </FormDialog>
         );
     };
 });

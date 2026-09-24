@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import type { NotificationKind } from '@agentic/core';
-import { Button, Icon, StatusPill, type Tone } from '@agentic/ui';
+import { Button, ErrorNote, Icon, StatusPill, type Tone } from '@agentic/ui';
 import { LinkButton } from '../ops/LinkButton';
 
 /** The Inbox kinds a machine's daemon raises (#365), with how their pill reads. */
@@ -54,7 +54,7 @@ export const MachineNotice = component<
                         : <LinkButton to={`/machines/${props.machineId}`} label="Open machine">Open machine</LinkButton>}
                     {props.dismiss ? <Button intent="default" loading={st.busy} disabled={st.busy} onClick={dismiss}>Dismiss</Button> : null}
                 </div>
-                {st.error ? <p data-needs-error role="alert">{`Could not dismiss: ${st.error}`}</p> : null}
+                {st.error ? <ErrorNote data-needs-error="">{`Could not dismiss: ${st.error}`}</ErrorNote> : null}
             </article>
         );
     };
