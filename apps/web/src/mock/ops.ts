@@ -531,8 +531,8 @@ export const opsPluginDependents: readonly Dependents[] = [
     { pluginId: 'a2a', agents: [], schedules: [] }
 ];
 
-/** What `pluginReadiness` reads in the mock workspace: the GitHub token is set, the Anthropic key is not yet. */
-export const opsPluginFacts: { readonly secretNames: readonly string[]; readonly hasKek: boolean } = { secretNames: ['github-token', 'gmail-client-id', 'gmail-client-secret', 'connector-engine-secret'], hasKek: true };
+/** What `pluginReadiness` reads in the mock workspace: the GitHub token is set, the Anthropic key is not yet, and Linear's token expired (#635). */
+export const opsPluginFacts: { readonly secretNames: readonly string[]; readonly hasKek: boolean; readonly signedOut: readonly string[] } = { secretNames: ['github-token', 'gmail-client-id', 'gmail-client-secret', 'connector-engine-secret'], hasKek: true, signedOut: ['linear'] };
 
 /** The mock workspace's Gmail account (#533): connected, as a connector page shows it. */
 export const opsGmailAccount = { id: 'acct_gmail', connector: 'gmail', method: 'oauth', status: 'active', displayName: 'you@example.com', createdAt: Date.parse('2026-09-20T09:00:00Z'), updatedAt: Date.parse('2026-09-23T08:00:00Z') } as const;
