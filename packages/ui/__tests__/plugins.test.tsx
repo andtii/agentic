@@ -131,6 +131,7 @@ describe('ReadinessBadge', () => {
         const readiness: PluginReadiness = { status: 'needs-secret', missing: ['anthropic-api-key'] };
         expect(readinessDetail(readiness)).toBe('Not set yet: anthropic-api-key.');
         expect(readinessDetail({ status: 'ready' })).toBeUndefined();
+        expect(readinessDetail({ status: 'needs-sign-in', missing: [] })).toBe('Signed out. Sign in again to reconnect.');
         const quiet = mount(<ReadinessBadge readiness={readiness} />);
         expect(one(quiet, 'ag-plugin-card', 'readiness')!.getAttribute('title')).toBe('Not set yet: anthropic-api-key.');
         expect(one(quiet, 'ag-plugin-card', 'readiness-detail')).toBeNull();

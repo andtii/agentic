@@ -33,6 +33,8 @@ export function readinessDetail(readiness: PluginReadiness): string | undefined 
             return missing ? `Not set yet: ${missing}.` : 'A key it needs is not set.';
         case 'needs-grant':
             return missing ? `Declared but not granted: ${missing}.` : 'A permission it declares is not granted.';
+        case 'needs-sign-in':
+            return 'Signed out. Sign in again to reconnect.';
         case 'needs-machine':
             return 'No paired machine offers an environment for this runtime.';
         case 'no-kek':
