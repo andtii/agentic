@@ -183,6 +183,24 @@ export function machineOfflineText(wait: Extract<WaitReason, { kind: 'machine-of
     return `Waiting for ${name ?? wait.machineId} (offline since ${time(wait.since)}); fails after ${MACHINE_LOST_HOURS} h`;
 }
 
+/**
+ * A chat's message parked on its environment's capacity (#652; EXE-09): "Waiting for a free slot on Work (alien01):
+ * 1 of 1 turns running · 2nd in line". `slots` is the environment's live count, absent while it is not known.
+ */
+export function capacityWaitText(wait: Extract<WaitReason, { kind: 'capacity' }>, where: { readonly environment?: string; readonly machine?: string }, slots?: { readonly active: number; readonly max: number }): string {
+    const env = where.environment ?? wait.environmentId;
+    const parts = [`Waiting for a free slot on ${where.machine ? `${env} (${where.machine})` : env}`];
+    if (slots) parts[0] += `: ${slots.active} of ${slots.max} ${slots.max === 1 ? 'turn' : 'turns'} running`;
+    if (wait.position > 1) parts.push(`${ordinal(wait.position)} in line`);
+    return parts.join(' · ');
+}
+
+const ordinal = (n: number): string => {
+    const tens = n % 100;
+    const suffix = tens >= 11 && tens <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
+    return `${n}${suffix}`;
+};
+
 /** The same wait on a node or a table row, after `wait: machine-offline`: "alien01 offline since 14:02 · fails after 24 h". */
 export function machineOfflineDetail(wait: Extract<WaitReason, { kind: 'machine-offline' }>, name: string | undefined, time: ClockText): string {
     return `${name ?? wait.machineId} offline since ${time(wait.since)} · fails after ${MACHINE_LOST_HOURS} h`;

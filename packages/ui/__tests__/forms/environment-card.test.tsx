@@ -62,7 +62,7 @@ describe('EnvironmentCard', () => {
         expect(text).toContain('1 of 2');
         expect(text).toContain('config-dir');
         expect(text).toContain('C:/Dev');
-        expect(part(root, 'capacity')!.getAttribute('aria-label')).toBe('1 of 2 sessions in use');
+        expect(part(root, 'capacity')!.getAttribute('aria-label')).toBe('1 of 2 turns running');
         const slots = [...root.querySelectorAll('[data-scope="ag-env-card"][data-part="slot"]')];
         expect(slots.map((s) => s.hasAttribute('data-used'))).toEqual([true, false]);
         expect(part(root, 'queued')!.textContent).toBe('1 queued');

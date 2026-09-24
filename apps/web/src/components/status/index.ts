@@ -9,7 +9,7 @@ export { failureOf, taskFailureKind, authUnavailable, isResumeWait, pluginOfFail
 export type { FailureSignals, FailureState, ClientConnection, SessionSignalState } from './failure';
 export { clientConnection, setClientConnection, watchTransport, installClientConnection } from './client';
 export { FailureNotice, failureAction, UNCERTAIN_LINE } from './FailureNotice';
-export { baseTurnId, cutOfEvents, interruptionCause, interruptionLine, interruptionOf, lostMachineOf, machineOfflineDetail, machineOfflineText, routeResume, INTERRUPTION_KINDS, MACHINE_LOST_CODE, MACHINE_LOST_HOURS } from './interruption';
+export { baseTurnId, capacityWaitText, cutOfEvents, interruptionCause, interruptionLine, interruptionOf, lostMachineOf, machineOfflineDetail, machineOfflineText, routeResume, INTERRUPTION_KINDS, MACHINE_LOST_CODE, MACHINE_LOST_HOURS } from './interruption';
 export { useInterruptionReads, useMachineNames, INTERRUPTION_ROWS } from './reads';
 export type { InterruptionReads } from './reads';
 export type { ClockText, InterruptHost, Interruption, InterruptionInput, ResumeState, RouteSignal } from './interruption';

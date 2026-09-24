@@ -148,12 +148,12 @@ export const EnvironmentCard = component<EnvironmentCardProps>(
                             {env.account.identity ? ` (${env.account.identity})` : ''}
                         </span>
                     </p>
-                    <div data-scope={SCOPE} data-part="capacity" role="img" aria-label={`${env.concurrency.active} of ${env.concurrency.max} sessions in use`}>
+                    <div data-scope={SCOPE} data-part="capacity" role="img" aria-label={`${env.concurrency.active} of ${env.concurrency.max} ${env.concurrency.max === 1 ? 'turn' : 'turns'} running`}>
                         <span data-scope={SCOPE} data-part="meter" aria-hidden="true">
                             {slots.map((used) => <span data-scope={SCOPE} data-part="slot" data-used={used ? '' : undefined} />)}
                         </span>
                         <span data-scope={SCOPE} data-part="count">
-                            {env.concurrency.active} of {env.concurrency.max}
+                            {env.concurrency.active} of {env.concurrency.max} running
                         </span>
                         {props.queued ? <span data-scope={SCOPE} data-part="queued">{props.queued} queued</span> : null}
                         {props.load !== undefined ? <span data-scope={SCOPE} data-part="load" title={environmentLoadTitle(props.load, env.runtime)}>{environmentLoadText(props.load)}</span> : null}
