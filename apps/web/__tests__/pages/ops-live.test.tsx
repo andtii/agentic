@@ -74,11 +74,6 @@ const select = (dom: ParentNode, name: string): HTMLSelectElement => dom.querySe
 const input = (dom: ParentNode, name: string): HTMLInputElement => dom.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
 /** The open dialog; the live pages keep their dialogs mounted, so closed is `data-state="closed"`, not gone. */
 const popup = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-scope="dialog"][data-part="popup"][data-state="open"]');
-const setSelect = (el: HTMLSelectElement, value: string): void => {
-    el.value = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-};
 
 /** `ms` of clock later; the host's reminder tick and the live pushes follow on real timers. */
 function advance(ms = TICK): void {
@@ -205,7 +200,9 @@ describe('/settings (live)', () => {
         expect(input(dom, 'retention-logs').value).toBe('90');
         expect(dom.querySelector('[data-notify-row="all"] input[role="switch"]')).not.toBeNull();
 
-        setSelect(select(dom, 'time-zone'), 'Europe/Stockholm');
+        // The time-zone list is windowed (#586): its hidden select carries only the chosen zone, so pick by typeahead as a person would.
+        const zoneTrigger = select(dom, 'time-zone').closest('[data-scope="select"][data-part="root"]')!.querySelector<HTMLElement>('[data-part="trigger"]')!;
+        for (const key of 'Europe/Stockholm') zoneTrigger.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
         setText(input(dom, 'retention-logs'), '14');
         setText(input(dom, 'retention-artifacts'), 'a month');
         await tick();

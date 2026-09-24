@@ -152,7 +152,7 @@ describe('AgentForm', () => {
         const errors = describedByRole(name, 'alert');
         expect(errors).toHaveLength(1);
         expect(errors[0]!.textContent).toMatch(/required/);
-        expect(root.querySelector('[data-part="summary"]')?.textContent).toMatch(/needs attention/);
+        expect(root.querySelector('[data-form-summary]')?.textContent).toMatch(/needs attention/);
 
         // fixing the field clears the error and lets the submit through
         setText(name, 'Fixed');
@@ -220,6 +220,43 @@ describe('AgentForm', () => {
         const root = mount(<AgentForm />);
         expect(root.querySelector<HTMLSelectElement>(`select[name="${F.runtime}"]`)!.value).toBe('anthropic-api');
         expect(root.querySelector<HTMLInputElement>(`input[name="${F.collaborateAll}"]`)!.checked).toBe(true);
+    });
+
+    it('the segmented approvals post one value per category through the group, with no hand-written hidden input', async () => {
+        const state = signal({ config: fullAgentConfig() });
+        const root = mount(<AgentForm model={() => state.config} approvalControl="segmented" environments={[{ value: 'env_1', label: 'Laptop' }]} />);
+        const form = root.querySelector('form')!;
+        await settle();
+        expect([...form.querySelectorAll<HTMLInputElement>('input[type="hidden"]')].filter((i) => i.name.startsWith('approval:'))).toEqual([]);
+        const posted = formDataOf(form);
+        expect(posted.getAll(F.approval('write'))).toEqual(['ask']);
+        expect(posted.getAll(F.approval('destructive'))).toEqual(['deny']);
+        expect(posted.getAll(F.approval('read')).filter(Boolean)).toEqual([]);
+        expect(fromAgentDraft(agentDraftFromFormData(posted)).approvalPolicy).toEqual(fromAgentDraft(toAgentDraft(state.config)).approvalPolicy);
+
+        // A segment pressed moves what the category posts.
+        const readGroup = [...root.querySelectorAll<HTMLElement>('[data-scope="toggle-group"][data-part="root"]')].find((g) => g.getAttribute('aria-label')?.startsWith('Read'))!;
+        [...readGroup.querySelectorAll<HTMLButtonElement>('[data-part="item"]')].find((b) => b.textContent === 'allow')!.click();
+        await settle();
+        expect(formDataOf(form).getAll(F.approval('read'))).toEqual(['allow']);
+    });
+
+    it('the save row is kit Buttons, and in the sections layout the summary heads the sections column', async () => {
+        const blank = { ...fullAgentConfig(), name: '' };
+        const state = signal({ config: blank });
+        const ref = { current: null as AgentFormApi | null };
+        const root = mount(<AgentForm model={() => state.config} ref={ref} environments={[{ value: 'env_1', label: 'Laptop' }]} />);
+        const save = [...root.querySelectorAll<HTMLButtonElement>('button[type="submit"]')].find((b) => b.textContent === 'Save')!;
+        expect(save.getAttribute('data-intent')).toBe('primary');
+        expect([...root.querySelectorAll('button')].find((b) => b.textContent === 'Reset')!.getAttribute('data-intent')).toBe('default');
+
+        const railed = mount(<AgentForm model={() => state.config} layout="sections" environments={[{ value: 'env_1', label: 'Laptop' }]} slots={{ rail: () => <button type="submit">Save</button> }} />);
+        submit(railed.querySelector('form')!);
+        await settle();
+        const summary = railed.querySelector('[data-form-summary]')!;
+        expect(summary.getAttribute('role')).toBe('alert');
+        expect(summary.getAttribute('data-scope')).toBe('alert');
+        expect(summary.parentElement!.getAttribute('data-part')).toBe('sections');
     });
 
     describe('runtimes and models from the workspace (#234)', () => {

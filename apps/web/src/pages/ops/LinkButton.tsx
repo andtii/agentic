@@ -1,7 +1,6 @@
 import { component, type Define } from 'sigx';
 import { useRouter } from '@sigx/router';
-import { variantAttrs } from '@sigx/zero/contract';
-import { buttonAxes, Icon, type ButtonIntent, type IconName } from '@agentic/ui';
+import { Button, type ButtonIntent, type IconName } from '@agentic/ui';
 
 export type LinkButtonProps =
     & Define.Prop<'to', string, true>
@@ -12,34 +11,27 @@ export type LinkButtonProps =
     & Define.Slot<'default'>;
 
 /**
- * A navigation that looks like a kit `Button`: a real `<a href>` (works
- * without JavaScript) stamped with the button anatomy the design system
- * paints, pushed through the router when JavaScript is there.
+ * A navigation that looks like a kit `Button`: the kit Button's `href` mode,
+ * a real `<a href>` (works without JavaScript) carrying zero's button anatomy
+ * from `Button.Root`, pushed through the router when JavaScript is there. A
+ * modified or non-primary click is left to the browser (new tab, window).
  */
 export const LinkButton = component<LinkButtonProps>(({ props, slots }) => {
     const router = useRouter();
-    return () => {
-        const intent = props.intent ?? 'default';
-        const axes = buttonAxes(intent);
-        const attrs = variantAttrs({ color: axes.color as never, variant: axes.variant, mods: axes.mods });
-        return (
-            <a
-                href={props.to}
-                data-scope="button"
-                data-part="root"
-                data-intent={intent}
-                {...attrs}
-                aria-label={props.label}
-                class={props.class}
-                onClick={(e: MouseEvent) => {
-                    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    e.preventDefault();
-                    void router.push(props.to);
-                }}
-            >
-                {props.icon ? <Icon name={props.icon} size={15} /> : null}
-                {intent === 'icon' ? null : <span>{slots.default?.()}</span>}
-            </a>
-        );
-    };
+    return () => (
+        <Button
+            href={props.to}
+            intent={props.intent}
+            icon={props.icon}
+            label={props.label}
+            class={props.class}
+            onClick={(e: MouseEvent) => {
+                if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                void router.push(props.to);
+            }}
+        >
+            {slots.default?.()}
+        </Button>
+    );
 });

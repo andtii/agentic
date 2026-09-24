@@ -8,8 +8,7 @@
  * the consequence ("Disable and stop 2 sessions").
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { watch } from '@sigx/reactivity';
-import { Dialog } from '@sigx/zero';
+import { Dialog, type DialogCloseDetail } from '@sigx/zero';
 import { Button } from './Button.js';
 
 export type ConfirmDialogProps =
@@ -32,23 +31,15 @@ export type ConfirmDialogProps =
     & Define.Slot<'default'>;
 
 export const ConfirmDialog = component<ConfirmDialogProps>(({ props, slots, emit }) => {
-    // A close after `confirm` is the caller finishing, not a cancel: only a
-    // close that no confirm preceded (Cancel, Escape, backdrop) emits `cancel`.
-    let confirmed = false;
-    // Opening resets the flag — through the model (a page reopening it) or zero's own change.
-    watch(() => props.model?.value, (open) => { if (open) confirmed = false; });
-    const onOpenChange = (open: boolean): void => {
-        if (open) confirmed = false;
-        else if (!confirmed) emit('cancel');
-    };
-    const confirm = (): void => {
-        confirmed = true;
-        emit('confirm');
+    // A close the caller makes after `confirm` (writing the model) is zero's
+    // `programmatic` close, not a cancel: Cancel, Escape and the backdrop are.
+    const onClose = (d: DialogCloseDetail): void => {
+        if (d.reason !== 'programmatic') emit('cancel');
     };
     return () => {
         const dependents = props.dependents ?? [];
         return (
-        <Dialog.Root model={props.model} role="alertdialog" modal onOpenChange={onOpenChange}>
+        <Dialog.Root model={props.model} role="alertdialog" modal onClose={onClose}>
             {slots.trigger ? <Dialog.Trigger asChild>{(part) => <span {...part}>{slots.trigger?.()}</span>}</Dialog.Trigger> : null}
             <Dialog.Popup>
                 <Dialog.Title>{props.title}</Dialog.Title>
@@ -66,7 +57,7 @@ export const ConfirmDialog = component<ConfirmDialogProps>(({ props, slots, emit
                 {slots.default?.()}
                 <Dialog.Footer>
                     <Dialog.Cancel>{props.cancelLabel ?? 'Cancel'}</Dialog.Cancel>
-                    <Button intent={props.danger === false ? 'primary' : 'danger'} confirm loading={props.busy} onClick={confirm}>
+                    <Button intent={props.danger === false ? 'primary' : 'danger'} confirm loading={props.busy} onClick={() => emit('confirm')}>
                         {props.confirmLabel}
                     </Button>
                 </Dialog.Footer>

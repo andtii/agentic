@@ -11,6 +11,7 @@ import { dataMode } from '../data-mode';
 import { agentNamed, formatTime, loadTask, sessionsOf } from '../mock/workspace';
 import { opsMachine } from '../mock/ops';
 import { LiveTask, taskHead } from './task/LiveTask';
+import { LinkButton } from './ops/LinkButton';
 
 /** The stop-chain dialog is opened from the topbar, which lives outside the page. */
 const dialogs = signal({ stop: false });
@@ -24,7 +25,7 @@ defineTopbar('task', (route) => {
             crumb: head?.task.objective,
             actions: () => (head ? (
                 <>
-                    {head.task.sessionId ? <Link to={`/sessions/${head.task.sessionId}`} data-scope="button" data-part="root" data-color="neutral" data-variant="solid" data-intent="default"><span>Open session</span></Link> : null}
+                    {head.task.sessionId ? <LinkButton to={`/sessions/${head.task.sessionId}`}>Open session</LinkButton> : null}
                     <Button intent="danger" icon="stop" onClick={() => head.stop()}>Stop chain</Button>
                 </>
             ) : null)
@@ -36,7 +37,7 @@ defineTopbar('task', (route) => {
         crumb: v?.root.objective,
         actions: () => (
             <>
-                {session ? <Link to={`/sessions/${session.id}`} data-scope="button" data-part="root" data-color="neutral" data-variant="solid" data-intent="default"><span>Open session</span></Link> : null}
+                {session ? <LinkButton to={`/sessions/${session.id}`}>Open session</LinkButton> : null}
                 <Button intent="danger" icon="stop" onClick={() => { dialogs.stop = true; }}>Stop chain</Button>
             </>
         )

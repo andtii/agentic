@@ -16,6 +16,7 @@ import { component, type Define } from '@sigx/runtime-core';
 import { batch, computed, signal, watch } from '@sigx/reactivity';
 import type { ConfigNumberProperty, ConfigSchema, ConfigStringArrayProperty, ConfigStringProperty } from '@agentic/core';
 import { Button } from '../kit/Button.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { MapField, MultiSelectField, NumberField, SelectField, SwitchField, TextField } from './fields.js';
 import { fromSchemaDraft, schemaFields, toSchemaDraft, validateSchemaDraft, type SchemaDraft, type SchemaErrors, type SchemaField } from './schema-model.js';
 
@@ -141,12 +142,12 @@ export const SchemaForm = component<SchemaFormProps>(
                         </fieldset>
                     )}
                     {stray.length || props.error ? (
-                        <div data-scope="ai-form" data-part="summary" role="alert">
+                        <ErrorNote data-form-summary="">
                             {props.error ? <p>{props.error}</p> : null}
                             {stray.map(([key, message]) => (
                                 <p key={key}>{key ? `${key}: ${message}` : message}</p>
                             ))}
-                        </div>
+                        </ErrorNote>
                     ) : null}
                     {props.hideActions || fields.length === 0 ? null : (
                         <div data-scope="ai-form" data-part="actions">

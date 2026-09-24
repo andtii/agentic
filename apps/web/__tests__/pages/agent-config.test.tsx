@@ -34,13 +34,13 @@ describe('/agents/:id config tab', () => {
         }
         // the default Save section is not rendered: the rail owns saving
         expect(root.querySelector('[data-section="save"]')).toBeNull();
-        // approval policy as a segmented control per category, posting through a hidden input
+        // approval policy as a segmented control per category, posting through the group's own hidden select
         const rows = [...root.querySelectorAll('[data-part="policy-row"]')];
         expect(rows).toHaveLength(5);
         const read = rows[0]!;
         expect(text(read.querySelector('[data-part="policy-label"] > span'))).toBe('Read');
         expect(read.querySelector('[aria-pressed="true"]')?.textContent).toBe('allow');
-        expect(read.querySelector<HTMLInputElement>(`input[name="${F.approval('read')}"]`)?.value).toBe('allow');
+        expect(read.querySelector<HTMLSelectElement>(`select[name="${F.approval('read')}"]`)?.value).toBe('allow');
         const destructive = rows[4]!;
         expect(destructive.querySelector('[aria-pressed="true"]')?.textContent).toBe('ask');
         expect(destructive.querySelector('[aria-pressed="true"]')?.getAttribute('data-tone')).toBe('needs-you');

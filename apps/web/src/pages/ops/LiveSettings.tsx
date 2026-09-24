@@ -18,6 +18,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
 import type { RegistryOverview } from '@agentic/platform';
+import { virtualListbox } from '@sigx/zero/virtual-listbox';
 import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -167,7 +168,7 @@ export const LiveSettings = component(() => {
                 <form id={SETTINGS_FORM} data-settings-form onSubmit={(e: Event) => { e.preventDefault(); void save(); }}>
                     <Section title="Time" hint="Used by every schedule and reminder.">
                         <div data-settings-pair>
-                            <SelectField name="time-zone" label="Time zone" model={() => draft.timeZone} options={zones().map((z) => ({ value: z, label: z }))} error={errors.timeZone} />
+                            <SelectField name="time-zone" label="Time zone" model={() => draft.timeZone} options={zones().map((z) => ({ value: z, label: z }))} virtual={virtualListbox} error={errors.timeZone} />
                             <SelectField
                                 name="default-environment"
                                 label="Default environment"

@@ -1,7 +1,6 @@
 import { render } from '@sigx/runtime-dom';
 import type { JSXElement } from '@sigx/runtime-core';
 import type { AgentConfig, AgentId, EnvironmentId } from '@agentic/core';
-import type { SettingsFormValue } from '@agentic/ui';
 
 /**
  * The entry list a browser builds for `form` (HTML: constructing the entry list). happy-dom's `new FormData(form)`
@@ -125,13 +124,5 @@ export function fullAgentConfig(): AgentConfig {
             offlinePolicy: 'fail'
         },
         collaborators: ['agent_a' as AgentId, 'agent_b' as AgentId]
-    };
-}
-
-export function fullSettings(): SettingsFormValue {
-    return {
-        timeZone: 'Europe/Stockholm',
-        notifications: { kinds: { reminder: true, 'task-done': false, 'task-failed': true, approval: true, input: false, 'update-available': false, 'update-applied': false, 'update-failed': false, 'daemon-crash-loop': false, 'harness-update-available': false, 'resource-pressure': false, 'machine-security': false }, push: true },
-        defaultEnvironmentId: 'env_1' as EnvironmentId
     };
 }

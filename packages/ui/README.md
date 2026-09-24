@@ -49,17 +49,18 @@ import { Row, Col, Spacer } from '@agentic/ui';
 
 ## Forms
 
-`AgentForm`, `ConfigVersions`, `EnvironmentCard` and `SettingsForm` bind through zero's `model=` contract and also work without JS:
+`AgentForm`, `SchemaForm` and `EnvironmentCard` bind through zero's `model=` contract and also work without JS:
 
 ```tsx
 <AgentForm model={() => state.config} tools={toolOptions} action="/agents/a1/config" onSubmit={({ config, reason }) => save(config, reason)} />
 ```
 
 - The form edits a draft; a valid submit writes the config back through the model and emits `submit`. An invalid submit is blocked, errors render beside their fields (`Field.Error`, `role="alert"`, wired to the control by `aria-describedby`) and `invalid` fires; `reset()` restores the draft.
-- Every control has a real `name` (see `AGENT_FIELDS` / `SETTINGS_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` / `parseSettingsFormData(formData)` return the same config plus the validation errors.
+- Every control has a real `name` (see `AGENT_FIELDS`), so the form posts before hydration. On the server, `parseAgentFormData(formData)` returns the same config plus the validation errors. A form-level error (the count of fields needing attention, a write's refusal) is an `ErrorNote` marked `data-form-summary`.
+- `SelectField virtual={virtualListbox}` (from `@sigx/zero/virtual-listbox`, with an optional `estimateItemSize`) windows a long list — the time-zone field. Its hidden `<select>` then carries only the chosen option, so pick another by the control (typeahead), not by writing the hidden select. Options with a `group` render under group headings.
 - Persistence is the caller's: the forms emit, they never write to an actor.
 - `AgentForm runtimes={…}` takes `RuntimeOption[]`: each runtime may carry a `hint` (drawn under the select, with an `href` to the fix) and the `models` its plugin lists — the model field is then a select (runtime default, each model, "Custom…" → a typed id posted as `AGENT_FIELDS.modelCustom`). Without `runtimes` the form offers the built-in pair and a typed model.
-- `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls, and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
+- `AgentForm layout="sections" approvalControl="segmented" slots={{ rail }}` is the Agent config page's shape (`docs/design/HANDOFF.md` → Agent config): two-column sections with a title-and-hint column, the approval policy as segmented controls (each posts its category through `Segmented name`), and the save card + versions rendered by the page inside the form through the `rail` slot (it receives the form API — `dirty()`, `reset()`, `submit()`, `draft` — and the bound `config`).
 
 ### Working-folder picker (#191)
 
@@ -104,9 +105,14 @@ The dialog never fetches and never assumes that a move happened: it shows what `
 
 ## Component kit (`src/kit`)
 
-The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. The `ag-*` scopes ship in the fragment with recipes (`kitAnatomies` is the list; among them `StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`, `MarkdownViewer` on `ag-markdown`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `MarkdownDialog`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.
+The app components of `docs/design/HANDOFF.md` → "Components", one visual per domain state. The `ag-*` scopes ship in the fragment with recipes (`kitAnatomies` is the list; among them `StatusPill` / `Tag` / `WaitReasonLine` on `ag-pill`, `AgentTile`, `EnvironmentLine`, `NeedsItem`, `TaskNode`, `ConnectionStrip`, `VersionItem`, `EnvironmentCard` on `ag-env-card`, `MarkdownViewer` on `ag-markdown`); the rest compose zero (`Button`, `Segmented`, `Switch`, `ChipInput`, `DataTable`, `TimelineList`, `ConfirmDialog`, `FormDialog`, `MarkdownDialog`, `ErrorNote`, `SectionHeading`, `Label`, `Icon`). Product state never rides `data-state`: a colour is the `tone` axis (`data-tone`), an inbox row's kind the `kind` axis, presence flags are `data-mod-*`.
 
 - `MarkdownViewer value` is a document as prose: the `ag-markdown` recipe styles what `@sigx/richtext/dom` renders inside it (`data-scope="richtext"`; `@sigx/richtext` ships no stylesheet) — headings, lists and task boxes, blockquotes, code blocks with a language / copy header, tables, links (`_blank`, or `onLink`), images. Code highlights through one shared shiki highlighter (`markdownHighlighter()`, loaded on the first block, plain text on any failure); `highlighter={false}` keeps it plain (tests). `compact` is the card-well size.
+- `Button intent` renders zero's `Button.Root` with the intent's axes (`data-intent` for the kit's own rules); `type`, `form`, `name`, `value`, `label` (`aria-label`) and `onClick` pass through. `loading` is zero's: `data-state="loading"`, `aria-busy`, `aria-disabled` and the `spinner` part, activation blocked but NOT the native `disabled`, so the pressed button keeps focus. `href` renders a real `<a>` through `Button.Root asChild` with the same axes — a link button (the web app's `LinkButton` adds the router push).
+- `Segmented name form` posts the chosen value through zero's `ToggleGroup` hidden `<select>`: no hand-written hidden input beside it.
+- `ConfirmDialog` is the destructive confirm (`role="alertdialog"`, initial focus on Cancel). `cancel` fires on every close the caller did not make (zero's close reason is not `programmatic`: Cancel, Escape); the confirm button does not close, the caller closes by writing the model after `busy`.
+- `FormDialog model title description submitLabel cancelLabel busy` is data entry: a plain modal `Dialog` around a `<form>` (default slot = the fields), so Enter submits, `required` validates and focus lands on the first field. `submit` keeps it open until the caller writes the model; `cancel` fires on Cancel, Escape and a backdrop click (a plain modal light-dismisses).
+- `ErrorNote title` is an error line on zero's `Alert` (`role="alert"`, error colour, small); pass the site's `data-*` hook (`<ErrorNote data-save-error="">`) and it lands on the alert root.
 - `MarkdownDialog model title value` reads a document full-size: zero's `Dialog` at 880 px, the viewer scrolling between the title and the footer, the `footer` slot's actions before `Close`; every close (Close, Escape, backdrop, or the model set false after a footer action) emits `close`. The plan card opens its plan in it.
 
 ```tsx
