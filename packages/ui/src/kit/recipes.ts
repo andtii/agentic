@@ -27,103 +27,6 @@ const inks = {
 const toneInk = (part = 'root'): Record<string, Record<string, { base: Record<string, string> }>> =>
     Object.fromEntries(Object.entries(inks).map(([tone, ink]) => [tone, { [part]: { base: { '--ag-ink': ink } } }]));
 
-/** Status pill: 22 px, 6 px dot, mono label; fill 8 % and border 33 % of the ink. */
-const pill: RecipeInput = {
-    component: 'ag-pill',
-    tokens: { '--ag-ink': 'var(--ag-text-muted)' },
-    parts: {
-        root: {
-            base: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-xs)',
-                height: 'var(--ag-pill-h)',
-                padding: '0 var(--space-sm)',
-                border: 'var(--border) solid color-mix(in oklab, var(--ag-ink) 33%, transparent)',
-                borderRadius: 'var(--radius-selector)',
-                background: 'color-mix(in oklab, var(--ag-ink) 8%, transparent)',
-                color: 'var(--ag-ink)',
-                fontFamily: mono,
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-medium)',
-                letterSpacing: 'var(--tracking-wide)',
-                lineHeight: 'var(--leading-none)',
-                whiteSpace: 'nowrap',
-                flexShrink: '0'
-            }
-        },
-        dot: {
-            base: {
-                inlineSize: '6px',
-                blockSize: '6px',
-                borderRadius: '50%',
-                background: 'var(--ag-ink)',
-                boxSizing: 'border-box',
-                flexShrink: '0'
-            }
-        },
-        label: { base: { textTransform: 'uppercase' } }
-    },
-    variants: { tone: toneInk() },
-    modifiers: {
-        // Idle states: nothing is happening, so the dot is a ring.
-        hollow: { dot: { base: { background: 'transparent', border: '1.5px solid var(--ag-ink)' } } },
-        // Tags: outline only, no fill, `line-strong` border, no dot.
-        outline: {
-            root: { base: { background: 'transparent', borderColor: 'var(--ag-line-strong)' } },
-            dot: { base: { display: 'none' } },
-            label: { base: { textTransform: 'none', letterSpacing: 'var(--tracking-normal)' } }
-        }
-    },
-    defaultVariants: { tone: 'muted' }
-};
-
-/** Identity tile: square, radius 6, two-letter mono monogram; fill hue at 12 %, border at 40 %. */
-const agentTile: RecipeInput = {
-    component: 'ag-agent-tile',
-    tokens: { '--ag-hue': 'var(--ag-text-muted)', '--ag-tile': '32px' },
-    parts: {
-        root: {
-            base: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                inlineSize: 'var(--ag-tile)',
-                blockSize: 'var(--ag-tile)',
-                borderRadius: 'var(--radius-field)',
-                background: 'color-mix(in oklab, var(--ag-hue) 12%, transparent)',
-                border: 'var(--border) solid color-mix(in oklab, var(--ag-hue) 40%, transparent)',
-                color: 'var(--ag-hue)',
-                flexShrink: '0',
-                boxSizing: 'border-box'
-            }
-        },
-        monogram: {
-            base: {
-                fontFamily: mono,
-                fontWeight: 'var(--weight-semibold)',
-                fontSize: 'calc(var(--ag-tile) * 0.34375)',
-                lineHeight: 'var(--leading-none)',
-                textTransform: 'uppercase',
-                letterSpacing: 'var(--tracking-normal)'
-            }
-        }
-    },
-    modifiers: {
-        // People are circles on the raised surface: the shape is the only way to tell agent from user at 18 px.
-        circle: {
-            root: {
-                base: {
-                    borderRadius: '50%',
-                    background: 'var(--color-base-300)',
-                    borderColor: 'var(--ag-line-strong)',
-                    color: 'var(--color-base-content)'
-                }
-            }
-        }
-    }
-};
-
 /** Environment line: mono 12, `text-dim` slashes, never wraps. */
 const envLine: RecipeInput = {
     component: 'ag-env-line',
@@ -368,49 +271,6 @@ const envCard: RecipeInput = {
     }
 };
 
-/** Failure card: base-200, border = the state ink at 33 %, radius 8, padding 16, gap 10; icon 16 and name 14 / 600 in the ink, mono signal, 13 px detail, one action (OPS-04). */
-const failure: RecipeInput = {
-    component: 'ag-failure',
-    tokens: { '--ag-ink': 'var(--ag-text-muted)' },
-    parts: {
-        root: {
-            base: {
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                padding: 'var(--space-lg)',
-                border: 'var(--border) solid color-mix(in oklab, var(--ag-ink) 33%, transparent)',
-                borderRadius: 'var(--radius-box)',
-                background: 'var(--color-base-200)',
-                color: 'var(--color-base-content)',
-                minInlineSize: '0'
-            }
-        },
-        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0' } },
-        icon: { base: { display: 'inline-flex', color: 'var(--ag-ink)', flexShrink: '0' } },
-        name: { base: { fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)', color: 'var(--ag-ink)', flex: '1 1 auto', minInlineSize: '0' } },
-        signal: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap', marginInlineStart: 'auto' } },
-        detail: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)', textWrap: 'pretty' } },
-        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' } }
-    },
-    variants: {
-        // Six kinds, three inks: muted for the browser, amber where a person can act on the machine, red where work stopped.
-        kind: {
-            offline: { root: { base: { '--ag-ink': 'var(--ag-text-muted)' } } },
-            machine: { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
-            auth: { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
-            runtime: { root: { base: { '--ag-ink': 'var(--color-error)' } } },
-            task: { root: { base: { '--ag-ink': 'var(--color-error)' } } },
-            interrupted: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
-        },
-        tone: {
-            muted: { root: { base: { '--ag-ink': 'var(--ag-text-muted)' } } },
-            'needs-you': { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
-            failed: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
-        }
-    }
-};
-
 /** Banner over the content: a full-width strip on base-200 with the ink's 33 % border, icon + text + mono state. */
 const banner: RecipeInput = {
     component: 'ag-banner',
@@ -440,34 +300,6 @@ const banner: RecipeInput = {
             'needs-you': { root: { base: { '--ag-ink': 'var(--color-warning)' } } },
             failed: { root: { base: { '--ag-ink': 'var(--color-error)' } } }
         }
-    }
-};
-
-/** Empty state: a centred card on base-200 (dashed with `outline`), or one muted line with `compact`. */
-const empty: RecipeInput = {
-    component: 'ag-empty',
-    parts: {
-        root: {
-            base: {
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 'var(--space-sm)',
-                padding: 'var(--space-xl)',
-                border: 'var(--border) solid var(--ag-line)',
-                borderRadius: 'var(--radius-box)',
-                background: 'var(--color-base-200)',
-                color: 'var(--color-base-content)'
-            }
-        },
-        icon: { base: { display: 'inline-flex', color: 'var(--ag-text-muted)' } },
-        title: { base: { fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-semibold)', lineHeight: 'var(--leading-tight)' } },
-        caption: { base: { margin: '0', fontSize: 'var(--text-md)', color: 'var(--ag-text-muted)', textWrap: 'pretty' } },
-        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginBlockStart: 'var(--space-xs)' } }
-    },
-    modifiers: {
-        compact: { root: { base: { padding: '0', border: 'none', background: 'transparent' } } },
-        outline: { root: { base: { borderStyle: 'dashed', borderColor: 'var(--ag-line-strong)', background: 'transparent' } } }
     }
 };
 
@@ -671,15 +503,17 @@ const mapField: RecipeInput = {
     }
 };
 
-/** A limit window, like Claude Code's `/usage`: label over a full-width 8 px bar with the percent beside it, the reset line under; the bar is the status ink. */
+/** A limit window, like Claude Code's `/usage`: label over a full-width 8 px bar (zero's `Progress`, in the status role) with the percent beside it, the reset line under. */
 const quota: RecipeInput = {
     component: 'ag-quota',
     tokens: { '--ag-ink': 'var(--color-primary)' },
     parts: {
-        root: { base: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 'var(--space-md)', rowGap: 'var(--space-2xs)', transition: `opacity ${motion}` } },
+        root: {
+            base: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: 'var(--space-md)', rowGap: 'var(--space-2xs)', transition: `opacity ${motion}` },
+            // The bar is zero's `Progress`; a window without a number is its indeterminate state, drawn as an empty bar rather than a sweep.
+            selectors: { '& [data-quota-bar] [data-scope="progress"][data-part="range"][data-state="indeterminate"]': { animation: 'none', inlineSize: '0' } }
+        },
         label: { base: { gridColumn: '1 / -1', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-base-content)' } },
-        bar: { base: { display: 'block', blockSize: '8px', borderRadius: 'var(--radius-selector)', background: 'var(--ag-line-strong)', overflow: 'hidden' } },
-        fill: { base: { display: 'block', blockSize: '100%', background: 'var(--ag-ink)', borderRadius: 'inherit', transition: `inline-size ${motion}` } },
         used: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-muted)', whiteSpace: 'nowrap' } },
         resets: { base: { gridColumn: '1 / -1', fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } }
     },
@@ -696,8 +530,7 @@ const quota: RecipeInput = {
         // One line (#315): label, a 56 px bar, the percent; the reset time is the tooltip.
         compact: {
             root: { base: { display: 'inline-grid', gridTemplateColumns: 'minmax(0, auto) 56px auto', columnGap: 'var(--space-sm)', maxInlineSize: '100%' } },
-            label: { base: { gridColumn: 'auto', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            bar: { base: { blockSize: '6px' } }
+            label: { base: { gridColumn: 'auto', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', color: 'var(--ag-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }
         }
     }
 };
@@ -827,4 +660,4 @@ const markdown: RecipeInput = {
     }
 };
 
-export const recipes: RecipeInput[] = [pill, agentTile, envLine, needsItem, taskNode, connection, version, envCard, failure, banner, empty, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel, quotaRings, markdown];
+export const recipes: RecipeInput[] = [envLine, needsItem, taskNode, connection, version, envCard, banner, workdir, workdirPicker, pluginCard, secret, mapField, quota, quotaPanel, quotaRings, markdown];

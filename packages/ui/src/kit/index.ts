@@ -5,13 +5,13 @@
  */
 import './globals.js';
 
-export { kitAnatomies, agPillAnatomy, agAgentTileAnatomy, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agFailureAnatomy, agBannerAnatomy, agEmptyAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy, agQuotaAnatomy, agQuotaPanelAnatomy, agQuotaRingsAnatomy, agMarkdownAnatomy } from './anatomy.js';
+export { kitAnatomies, agEnvLineAnatomy, agNeedsItemAnatomy, agTaskNodeAnatomy, agConnectionAnatomy, agVersionAnatomy, agEnvCardAnatomy, agBannerAnatomy, agPluginCardAnatomy, agSecretAnatomy, agMapFieldAnatomy, agQuotaAnatomy, agQuotaPanelAnatomy, agQuotaRingsAnatomy, agMarkdownAnatomy } from './anatomy.js';
 export { recipes as kitRecipes } from './recipes.js';
 export { kitScopes, TONES, NEEDS_KINDS } from './vocabulary.js';
 export type { Tone, NeedsKind } from './vocabulary.js';
 export { kitCss } from './css.js';
-export { PILLS, pillFor, waitText } from './tone.js';
-export type { PillSpec, PillStatus } from './tone.js';
+export { PILLS, TONE_ROLES, pillFor, roleOf, waitText } from './tone.js';
+export type { PillSpec, PillLook, PillStatus, ToneRole } from './tone.js';
 export { Icon, ICON_NAMES } from './icons.js';
 export type { IconName, IconProps } from './icons.js';
 export { StatusPill, Tag, WaitReasonLine } from './StatusPill.js';
@@ -31,6 +31,8 @@ export type { NeedsItemProps } from './NeedsItem.js';
 export { Button, BUTTON_INTENTS, buttonAxes } from './Button.js';
 export type { ButtonProps, ButtonIntent } from './Button.js';
 export { Segmented, segmentStyle } from './Segmented.js';
+export { FilterChips } from './FilterChips.js';
+export type { FilterChipsProps, FilterChip } from './FilterChips.js';
 export type { SegmentedProps, SegmentedOption } from './Segmented.js';
 export { Switch } from './Switch.js';
 export type { SwitchProps } from './Switch.js';
@@ -65,8 +67,6 @@ export type { SectionHeadingProps, LabelProps } from './text.js';
 export * from './states/index.js';
 
 // `componentExportName(scope)` for every `ag-*` scope — the fragment contract.
-export { StatusPill as AgPill } from './StatusPill.js';
-export { AgentTile as AgAgentTile } from './AgentTile.js';
 export { EnvironmentLine as AgEnvLine } from './EnvironmentLine.js';
 export { NeedsItem as AgNeedsItem } from './NeedsItem.js';
 export { TaskNode as AgTaskNode } from './TaskNode.js';
@@ -74,7 +74,5 @@ export { ConnectionStrip as AgConnection } from './ConnectionStrip.js';
 export { VersionItem as AgVersion } from './VersionItem.js';
 export { EnvironmentCard as AgEnvCard, authPill, authFixLine } from '../forms/environment-card.js';
 export type { DefaultForAgent } from '../forms/environment-card.js';
-export { FailureCard as AgFailure } from './states/FailureCard.js';
 export { OfflineBanner as AgBanner } from './states/OfflineBanner.js';
-export { EmptyState as AgEmpty } from './states/EmptyState.js';
 export { MarkdownViewer as AgMarkdown } from './MarkdownViewer.js';

@@ -1,5 +1,5 @@
 /**
- * What each `ag-*` scope offers of the design system's vocabulary — the
+ * What each `ag-*` scope (and each zero scope the kit narrows) offers of the design system's vocabulary — the
  * per-scope claims `tokens.scopes` carries (`docs/design/HANDOFF.md` →
  * "States and interactions"). A scope names the whole `tone` list when it
  * paints every tone; a subset is a real restriction (a version row is only
@@ -16,18 +16,18 @@ export const NEEDS_KINDS = ['approval', 'input', 'interrupted'] as const;
 export type NeedsKind = (typeof NEEDS_KINDS)[number];
 
 export const kitScopes: Record<string, ScopeVocabulary> = {
-    'ag-pill': { axes: { tone: [...TONES] }, modifiers: ['hollow', 'outline'] },
-    'ag-agent-tile': { modifiers: ['circle'] },
+    // zero parts the kit renders through, narrowed to what the design system's patches draw:
+    // a pill is `soft`, a hollow pill or a tag `outline` (StatusPill / Tag on Badge) …
+    badge: { variants: ['soft', 'outline'] },
+    // … and an empty screen is `compact` or `outline`, a failure card carries the six named states as `kind` (EmptyState / FailureCard).
+    'empty-state': { axes: { kind: ['offline', 'machine', 'auth', 'runtime', 'task', 'interrupted'] }, modifiers: ['compact', 'outline'] },
     'ag-env-line': { axes: { tone: [...TONES] } },
     'ag-needs-item': { axes: { kind: [...NEEDS_KINDS] }, modifiers: ['compact'] },
     'ag-task-node': { modifiers: ['selected'] },
     'ag-connection': { axes: { tone: [...TONES] }, modifiers: ['hollow'] },
     'ag-version': { axes: { tone: ['needs-you'] }, modifiers: ['current'] },
     'ag-env-card': { axes: { tone: [...TONES] }, modifiers: ['selected'] },
-    // The six named failure states — the `kind` values `FAILURES[kind].axis` renders (`client-offline` → `offline`).
-    'ag-failure': { axes: { kind: ['offline', 'machine', 'auth', 'runtime', 'task', 'interrupted'], tone: ['muted', 'needs-you', 'failed'] } },
     'ag-banner': { axes: { tone: ['muted', 'needs-you', 'failed'] } },
-    'ag-empty': { modifiers: ['compact', 'outline'] },
     // The working-folder picker (#191): selection rides ARIA (`aria-pressed`, `aria-selected`, `aria-current`).
     'ag-workdir': { modifiers: ['compact'] },
     'ag-workdir-picker': { modifiers: ['loading'] },

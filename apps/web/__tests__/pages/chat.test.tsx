@@ -17,7 +17,7 @@ describe('/chats/:id (Chat)', () => {
         expect(dom.querySelector('[data-chat-context]')?.getAttribute('aria-label')).toBe('Members and tasks');
         // The current chat is marked in the list; the one with an open approval carries the amber pill.
         expect(dom.querySelector('[data-chat-row][data-current] [data-chat-title]')?.textContent).toBe('Mobile pass #47');
-        expect(dom.querySelector('[data-chat-row][data-waiting] [data-scope="ag-pill"]')).not.toBeNull();
+        expect(dom.querySelector('[data-chat-row][data-waiting] [data-scope="badge"][data-part="root"]')).not.toBeNull();
     });
 
     it('renders the transcript with attribution, tool cards with meta, the approval card with context rows, and the streaming pill', async () => {
@@ -30,7 +30,7 @@ describe('/chats/:id (Chat)', () => {
         expect(approval).not.toBeNull();
         expect(approval!.textContent).toContain('delegated by Atlas · task t_8f2c · depth 1');
         expect(approval!.textContent).toContain('alien01');
-        expect(dom.querySelector('[data-scope="ag-pill"][data-status="streaming"]')).not.toBeNull();
+        expect(dom.querySelector('[data-scope="badge"][data-status="streaming"]')).not.toBeNull();
     });
 
     it('resolves the composer "To" row by the four-case rule', async () => {
@@ -82,7 +82,7 @@ describe('/chats/:id (Chat)', () => {
     it('shows an empty chat as the composer only', async () => {
         const dom = await mountRoute('/chats/c6');
         expect(dom.querySelector('[data-scope="ai-thread"]')).toBeNull();
-        expect(dom.querySelector('[data-chat-empty] [data-scope="ag-empty"]')).not.toBeNull();
+        expect(dom.querySelector('[data-chat-empty] [data-scope="empty-state"][data-part="root"]')).not.toBeNull();
         expect(dom.querySelector('[data-scope="ai-composer"][data-part="root"]')).not.toBeNull();
     });
 

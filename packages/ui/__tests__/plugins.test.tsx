@@ -51,7 +51,7 @@ describe('SecretField', () => {
         expect(field()!.hasAttribute('name')).toBe(false);
         expect(field()!.getAttribute('autocomplete')).toBe('off');
         expect(root.textContent).toContain('NOT SET');
-        expect(one(root, 'ag-pill', 'root')!.getAttribute('data-tone')).toBe('needs-you');
+        expect(one(root, 'badge', 'root')!.getAttribute('data-tone')).toBe('needs-you');
         expect(root.querySelector('form')!.getAttribute('method')).toBe('post');
     });
 
@@ -138,7 +138,7 @@ describe('ReadinessBadge', () => {
         for (const status of STATUSES) {
             expect(TONES).toContain(READINESS[status].tone);
             const root = mount(<ReadinessBadge readiness={{ status }} />);
-            const pill = one(root, 'ag-pill', 'root')!;
+            const pill = one(root, 'badge', 'root')!;
             expect(pill.getAttribute('data-tone')).toBe(READINESS[status].tone);
             expect(pill.hasAttribute('data-state')).toBe(false);
             expect(root.textContent).toBe(READINESS[status].label);

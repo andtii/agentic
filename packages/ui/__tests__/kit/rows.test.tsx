@@ -17,18 +17,18 @@ describe('NeedsItem', () => {
         expect(item.getAttribute('data-kind')).toBe('approval');
         expect(item.getAttribute('aria-label')).toBe('Forge wants to run git push');
         expect(item.hasAttribute('data-mod-compact')).toBe(false);
-        expect(one(root, 'ag-pill', 'label')!.textContent).toBe('APPROVAL');
+        expect(one(root, 'badge', 'root')!.textContent).toBe('APPROVAL');
         expect(one(root, 'ag-needs-item', 'title')!.textContent).toBe('Forge wants to run git push');
         expect(one(root, 'ag-needs-item', 'context')!.textContent).toContain('delegated by Atlas');
         expect(one(root, 'ag-needs-item', 'context')!.textContent).toContain('2 min ago');
-        expect(one(root, 'ag-agent-tile', 'monogram')!.textContent).toBe('FO');
+        expect(one(root, 'avatar', 'fallback')!.textContent).toBe('FO');
         expect(buttonNamed(one(root, 'ag-needs-item', 'actions')!, 'Allow once')).toBeTruthy();
     });
 
     it.each(['approval', 'input', 'interrupted'] as const)('renders the %s kind pill', (kind) => {
         const root = mount(<NeedsItem kind={kind} title="t" compact />);
         expect(one(root, 'ag-needs-item', 'root')!.hasAttribute('data-mod-compact')).toBe(true);
-        expect(one(root, 'ag-pill', 'label')!.textContent).toBe(kind.toUpperCase());
+        expect(one(root, 'badge', 'root')!.textContent).toBe(kind.toUpperCase());
     });
 });
 
@@ -53,7 +53,7 @@ describe('TaskNode', () => {
         expect(one(root, 'ag-task-node', 'meta')!.textContent).toContain('Forge');
         expect(one(root, 'ag-env-line', 'root')!.getAttribute('data-tone')).toBe('dim');
         expect(one(root, 'ag-task-node', 'wait')!.textContent).toBe('wait: approval · git push');
-        expect(one(root, 'ag-pill', 'label')!.textContent).toBe('WAITING');
+        expect(one(root, 'badge', 'root')!.textContent).toBe('WAITING');
         card.click();
         expect(picked).toEqual([id]);
     });
@@ -138,12 +138,12 @@ describe('VersionItem', () => {
         const current = mount(<VersionItem version={version} state="current" when="today" />);
         expect(one(current, 'ag-version', 'root')!.hasAttribute('data-mod-current')).toBe(true);
         expect(current.querySelector('button')).toBeNull();
-        expect(one(current, 'ag-pill', 'label')!.textContent).toBe('CURRENT');
+        expect(one(current, 'badge', 'root')!.textContent).toBe('CURRENT');
         expect(one(current, 'ag-version', 'meta')!.textContent).toBe('today · learning');
 
         const proposed = mount(<VersionItem version={version} state="proposed" onReview={(v) => events.push(`review ${v}`)} onDismiss={(v) => events.push(`dismiss ${v}`)} />);
         expect(one(proposed, 'ag-version', 'root')!.getAttribute('data-tone')).toBe('needs-you');
-        expect(one(proposed, 'ag-pill', 'label')!.textContent).toBe('NEEDS REVIEW');
+        expect(one(proposed, 'badge', 'root')!.textContent).toBe('NEEDS REVIEW');
         buttonNamed(proposed, 'Review').click();
         buttonNamed(proposed, 'Dismiss').click();
 
@@ -165,8 +165,21 @@ describe('TimelineList, SectionHeading, Label', () => {
         expect(root.querySelector('h2')!.textContent).toBe('Needs you3 open');
         expect(root.querySelector('[data-section-aside]')!.textContent).toBe('answer here');
         expect(root.querySelector('[data-label]')!.textContent).toBe('Today');
-        const markers = [...root.querySelectorAll('[data-scope="timeline"][data-part="marker"] [data-tone]')].map((m) => m.getAttribute('data-tone'));
-        expect(markers).toEqual(['working', 'needs-you']);
-        expect([...root.querySelectorAll('time')].map((t) => t.textContent)).toEqual(['14:02', '14:09']);
+        // Each marker is coloured by its tone's role and keeps the tone; the time's mono voice is the recipe's, not inline.
+        const markers = [...root.querySelectorAll('[data-scope="timeline"][data-part="marker"]')];
+        expect(markers.map((m) => m.getAttribute('data-tone'))).toEqual(['working', 'needs-you']);
+        expect(markers.map((m) => m.getAttribute('data-color'))).toEqual(['info', 'warning']);
+        expect(markers.every((m) => m.children.length === 0)).toBe(true);
+        const times = [...root.querySelectorAll('time')];
+        expect(times.map((t) => t.textContent)).toEqual(['14:02', '14:09']);
+        expect(times.every((t) => !t.hasAttribute('style'))).toBe(true);
+    });
+
+    it('names the list by its label, and an entry without a tone is the muted neutral dot', () => {
+        const root = mount(<TimelineList label="Task history" entries={[{ id: '1', text: 'created', time: '14:00' }]} />);
+        expect(root.querySelector('[data-scope="timeline"][data-part="root"]')!.getAttribute('aria-label')).toBe('Task history');
+        const marker = root.querySelector('[data-scope="timeline"][data-part="marker"]')!;
+        expect(marker.getAttribute('data-tone')).toBe('muted');
+        expect(marker.getAttribute('data-color')).toBe('neutral');
     });
 });

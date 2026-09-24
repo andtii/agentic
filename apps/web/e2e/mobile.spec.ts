@@ -179,7 +179,7 @@ test.describe('phone', () => {
         const env = page.locator('[data-scope="ag-env-card"][data-part="root"]').first();
         expect((await env.boundingBox())?.height).toBeGreaterThanOrEqual(52);
         expect(await env.evaluate((el) => getComputedStyle(el).display)).toBe('grid');
-        await expect(env.locator('[data-scope="ag-pill"]').first()).toBeVisible();
+        await expect(env.locator('[data-scope="badge"][data-part="root"]').first()).toBeVisible();
     });
 
     test('touch targets: buttons are 48 px and the memory row actions grow to 44', async ({ page }) => {

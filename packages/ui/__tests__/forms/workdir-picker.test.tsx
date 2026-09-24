@@ -393,10 +393,10 @@ describe('WorkdirDialog', () => {
     it('badges repos and worktrees with their branch, or the short head when detached', async () => {
         const p = picker({ path: repo.path, listing: { ...repo, entries: agentic.entries } });
         await tick();
-        const badges = p.parts('item').map((o) => o.querySelector('[data-scope="ag-pill"]')?.textContent ?? null);
+        const badges = p.parts('item').map((o) => o.querySelector('[data-scope="badge"][data-part="root"]')?.textContent ?? null);
         expect(badges).toEqual(['repo · main', null, 'worktree · detached a1b2c3d']);
         // The folder's own badge sits in the header.
-        expect(p.part('bar')!.querySelector('[data-scope="ag-pill"]')!.textContent).toBe('repo · main');
+        expect(p.part('bar')!.querySelector('[data-scope="badge"][data-part="root"]')!.textContent).toBe('repo · main');
     });
 
     it('offers New worktree… only on a repo or worktree, and emits the request with the suggested path following the branch', async () => {

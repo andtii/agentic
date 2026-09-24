@@ -1,21 +1,24 @@
 /**
- * `StatusPill` and `Tag` on the `ag-pill` scope (`docs/design/HANDOFF.md`
- * → "Task status", "Components"). A pill is 22 px: a 6 px dot plus a mono
- * label; its colour is the `tone` axis, a hollow dot says nothing is
- * happening. A tag is the same box outlined, without a dot — for kinds
- * (memory, schedule, plugin) and wait reasons.
+ * `StatusPill` and `Tag` on zero's `Badge` (`docs/design/HANDOFF.md` →
+ * "Task status", "Components"). A pill is 22 px: a 6 px `Badge.Dot` plus a
+ * mono label; its colour is the tone's role (`pillFor`), a hollow pill is
+ * the `outline` variant with a ring for a dot (nothing is happening), and a
+ * working state puts the dot in zero's governed `running` state. A tag is
+ * the same box outlined, without a dot — for kinds (memory, schedule,
+ * plugin) and wait reasons. The design system's badge patch draws both.
+ *
+ * The root keeps the kit's hooks: `data-status` and `data-tone` on a pill,
+ * `data-tag` and `data-tone` on a tag.
  *
  * `WaitReasonLine` is the amber mono line that follows WAITING; it is the
  * `wait` part of `ag-task-node` (the one place the recipe paints it), so a
  * table row or a node render the same line.
  */
 import { component, type Define } from '@sigx/runtime-core';
+import { Badge } from '@sigx/zero';
 import type { WaitReason } from '@agentic/core';
-import { agPillAnatomy } from './anatomy.js';
-import { pillFor, waitText } from './tone.js';
+import { pillFor, roleOf, waitText } from './tone.js';
 import type { Tone } from './vocabulary.js';
-
-const SCOPE = agPillAnatomy.scope;
 
 export type StatusPillProps =
     /** A `TaskStatus`, `online` / `offline`, a tool phase, or free text (rendered muted). */
@@ -28,12 +31,13 @@ export type StatusPillProps =
 
 export const StatusPill = component<StatusPillProps>(({ props }) => () => {
     const spec = pillFor(props.status);
+    const tone = props.tone ?? spec.tone;
     const hollow = props.hollow ?? spec.hollow;
     return (
-        <span data-scope={SCOPE} data-part="root" data-tone={props.tone ?? spec.tone} data-mod-hollow={hollow ? '' : undefined} data-status={props.status} class={props.class}>
-            <span data-scope={SCOPE} data-part="dot" aria-hidden="true" />
-            <span data-scope={SCOPE} data-part="label">{props.label ?? spec.label}</span>
-        </span>
+        <Badge.Root color={roleOf(tone)} variant={hollow ? 'outline' : 'soft'} data-tone={tone} data-status={props.status} class={props.class}>
+            <Badge.Dot running={tone === 'working' && !hollow} />
+            {props.label ?? spec.label}
+        </Badge.Root>
     );
 }, { name: 'StatusPill' });
 
@@ -43,12 +47,14 @@ export type TagProps =
     & Define.Prop<'class', string>
     & Define.Slot<'default'>;
 
-export const Tag = component<TagProps>(({ props, slots }) => () => (
-    <span data-scope={SCOPE} data-part="root" data-tone={props.tone ?? 'muted'} data-mod-outline="" class={props.class}>
-        <span data-scope={SCOPE} data-part="dot" aria-hidden="true" />
-        <span data-scope={SCOPE} data-part="label">{slots.default?.()}</span>
-    </span>
-), { name: 'Tag' });
+export const Tag = component<TagProps>(({ props, slots }) => () => {
+    const tone = props.tone ?? 'muted';
+    return (
+        <Badge.Root color={roleOf(tone)} variant="outline" data-tone={tone} data-tag="" class={props.class}>
+            {slots.default?.()}
+        </Badge.Root>
+    );
+}, { name: 'Tag' });
 
 export type WaitReasonLineProps =
     & Define.Prop<'wait', WaitReason, true>

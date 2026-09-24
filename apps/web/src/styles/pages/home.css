@@ -8,7 +8,7 @@
     gap: var(--ag-space-8);
     align-items: start;
 }
-[data-page="home"] > [data-scope="ag-empty"] { grid-column: 1 / -1; }
+[data-page="home"] > [data-scope="empty-state"][data-part="root"] { grid-column: 1 / -1; }
 /* the first-run checklist (#234): full width above the inbox while no runtime is ready */
 [data-home-setup] { grid-column: 1 / -1; }
 [data-setup-text] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }

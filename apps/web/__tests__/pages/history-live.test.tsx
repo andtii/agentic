@@ -71,7 +71,7 @@ describe('/history (live)', () => {
         const requested = rows(dom).find((r) => r.getAttribute('data-kind') === 'approval.requested')!;
         expect(text(requested.querySelector('[data-agent-cell] > span:last-child'))).toBe('Forge');
         expect(requested.querySelector('a.ag-ref')!.getAttribute('href')).toBe(`/tasks/${taskId}`);
-        expect(text(requested.querySelector('[data-scope="ag-pill"]'))).toBe('approval requested');
+        expect(text(requested.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('approval requested');
         const resolved = rows(dom).find((r) => r.getAttribute('data-kind') === 'approval.resolved')!;
         expect(text(resolved.querySelector('[data-agent-cell] > span:last-child'))).toBe('You');
         const config = rows(dom).find((r) => r.getAttribute('data-kind') === 'config.versioned')!;

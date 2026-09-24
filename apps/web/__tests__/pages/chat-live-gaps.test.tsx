@@ -107,7 +107,7 @@ describe('/chats/:id tasks, waiting and stop (live)', () => {
         const { task } = await runTask(chatId, forge, 'push it');
         const dom = await mountLive(`/chats/${chatId}`, h);
         await until(() => rowOf(dom, chatId)?.hasAttribute('data-waiting') === true, 'the waiting row');
-        expect(rowOf(dom, chatId)!.querySelector('[data-scope="ag-pill"][data-status="approval"]')).not.toBeNull();
+        expect(rowOf(dom, chatId)!.querySelector('[data-scope="badge"][data-status="approval"]')).not.toBeNull();
         await until(() => [...panel(dom).querySelectorAll('[data-member]')].some((m) => m.querySelector('[data-member-name]')!.textContent === 'Forge' && m.querySelector('[data-status="waiting"]')), 'Forge waiting');
         await until(() => chatHead.value?.members.find((m) => m.agentId === forge)?.status === 'waiting', 'the head');
         // The Task parks through the router's follow of the session (throttled), not the chat's status entry: it lands a beat later.

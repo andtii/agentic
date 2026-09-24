@@ -96,7 +96,7 @@ export const FAILURES: Record<FailureKind, FailureSpec> = {
     }
 };
 
-/** The axis values `ag-failure` claims — what `tokens.scopes` and the recipe wire. */
+/** The `kind` axis values a failure card carries — what the empty-state scope claims and its patch wires. */
 export const FAILURE_AXES: readonly FailureAxis[] = FAILURE_KINDS.map((k) => FAILURES[k].axis);
 
 export function failureSpec(kind: FailureKind): FailureSpec {

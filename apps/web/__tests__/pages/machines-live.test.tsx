@@ -78,7 +78,7 @@ describe('/machines on the live pages', () => {
         expect(groupOf(dom, laptop.machineId)!.querySelector('[data-machine-caption]')!.textContent).toContain('Windows · daemon 0.1.0-test · heartbeat');
         // The platform row stays, with no machine of its own.
         expect(dom.querySelector('[data-machine-group][data-platform] [data-machine-name]')!.textContent).toBe('platform');
-        expect(dom.querySelector('[data-scope="ag-empty"]')).toBeNull();
+        expect(dom.querySelector('[data-scope="empty-state"][data-part="root"]')).toBeNull();
 
         // The laptop's socket drops: offline at once, its cards dimmed; the desktop is untouched.
         await laptop.daemon.socketClosed();
@@ -92,8 +92,8 @@ describe('/machines on the live pages', () => {
     it('with no paired machine shows the platform row and the "Pair a machine" card; a pending registration is not a machine yet', async () => {
         await h.app.as(owner).actor(Workspace, workspaceKey(WS)).registerMachinePending({ name: 'someday' });
         const dom = await mountLive('/machines', h);
-        await until(() => dom.querySelector('[data-scope="ag-empty"][data-part="root"]') !== null, 'the empty card');
-        expect(dom.querySelector('[data-scope="ag-empty"][data-part="root"]')!.getAttribute('data-empty')).toBe('machines');
+        await until(() => dom.querySelector('[data-scope="empty-state"][data-part="root"]') !== null, 'the empty card');
+        expect(dom.querySelector('[data-scope="empty-state"][data-part="root"]')!.getAttribute('data-empty')).toBe('machines');
         expect(groups(dom)).toHaveLength(0);
         expect(dom.querySelector('[data-machine-group][data-platform]')).not.toBeNull();
     });
@@ -114,7 +114,7 @@ describe('/machines/:id on the live pages', () => {
         const dom = await mountLive(`/machines/${m.machineId}`, h);
         await until(() => dom.querySelector('[data-machine-hero]') !== null, 'the machine page');
         expect(dom.querySelector('[data-machine-hero] [data-machine-name]')!.textContent).toBe('alien01');
-        expect(dom.querySelector('[data-machine-hero] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('ONLINE');
+        expect(dom.querySelector('[data-machine-hero] [data-scope="badge"][data-part="root"]')!.textContent).toBe('ONLINE');
         expect([...dom.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]')].map((c) => [c.getAttribute('aria-label'), c.getAttribute('data-env-state')])).toEqual([
             ['work', 'ready'],
             ['client-acme', 'auth-expired']
@@ -133,7 +133,7 @@ describe('/machines/:id on the live pages', () => {
             ['client-acme cannot authenticate', false]
         ]);
         expect(dom.querySelector('[data-doctor-foot]')!.textContent).toContain('agentic-daemon doctor');
-        expect(dom.querySelector('[data-machine-sessions] [data-scope="ag-empty"]')).not.toBeNull();
+        expect(dom.querySelector('[data-machine-sessions] [data-scope="empty-state"][data-part="root"]')).not.toBeNull();
 
         // Revoke: the confirm dialog, then `Machine.revoke` — the record says so, and so does the page.
         button(dom, 'Revoke alien01').click();
@@ -144,7 +144,7 @@ describe('/machines/:id on the live pages', () => {
         await until(async () => (await m.user.get()).revoked, 'the record revoked');
         await until(() => dom.querySelector('[data-revoked-line]') !== null, 'the revoked line');
         expect(dom.querySelector('[data-machine-hero]')!.hasAttribute('data-revoked')).toBe(true);
-        expect(dom.querySelector('[data-machine-hero] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('REVOKED');
+        expect(dom.querySelector('[data-machine-hero] [data-scope="badge"][data-part="root"]')!.textContent).toBe('REVOKED');
         // The revoke card no longer offers it (the page's other danger button removes the machine from the workspace).
         expect([...dom.querySelectorAll('[aria-label="Revoke"] button')].filter((b) => !b.closest('[data-part="popup"]'))).toHaveLength(0);
         // The daemon's next message is refused: revoke stops the token at once.
@@ -154,8 +154,8 @@ describe('/machines/:id on the live pages', () => {
 
     it('an id nobody paired gets the not-paired card', async () => {
         const dom = await mountLive('/machines/nope', h);
-        await until(() => dom.querySelector('[data-scope="ag-empty"]') !== null, 'the card');
-        expect(dom.querySelector('[data-scope="ag-empty"]')!.textContent).toContain('No paired machine with id nope');
+        await until(() => dom.querySelector('[data-scope="empty-state"][data-part="root"]') !== null, 'the card');
+        expect(dom.querySelector('[data-scope="empty-state"][data-part="root"]')!.textContent).toContain('No paired machine with id nope');
     });
 });
 
@@ -200,9 +200,9 @@ describe('/pair on the live pages', () => {
         expect(paired.machineId).toBe(newId);
         await until(() => dom.querySelector('[data-machine-hero]') !== null, 'the machine page');
         expect(dom.querySelector('[data-machine-hero] [data-machine-name]')!.textContent).toBe('laptop');
-        expect(dom.querySelector('[data-machine-hero] [data-scope="ag-pill"] [data-part="label"]')!.textContent).toBe('OFFLINE');
+        expect(dom.querySelector('[data-machine-hero] [data-scope="badge"][data-part="root"]')!.textContent).toBe('OFFLINE');
         // The daemon has not connected yet: the environments section says so.
-        expect(dom.querySelector('[data-machine-envs] [data-scope="ag-empty"]')!.textContent).toContain('has not connected yet');
+        expect(dom.querySelector('[data-machine-envs] [data-scope="empty-state"][data-part="root"]')!.textContent).toContain('has not connected yet');
         // A used code is refused.
         await expect(daemon.pair(code(), { name: 'laptop' })).rejects.toThrow(/already paired/);
     });

@@ -14,20 +14,20 @@ describe('/agents/:id memory tab', () => {
         for (const [i, row] of rows.entries()) {
             const e = p.memories[i]!;
             expect(row.getAttribute('data-kind')).toBe(e.kind);
-            expect(text(row.querySelector('[data-memory-kind] [data-scope="ag-pill"]'))).toBe(e.kind);
+            expect(text(row.querySelector('[data-memory-kind] [data-scope="badge"][data-part="root"]'))).toBe(e.kind);
             expect(text(row.querySelector('[data-memory-text]'))).toBe(e.text);
             const pill = confidencePill(e.confidence);
-            const pillEl = row.querySelector('[data-memory-confidence] [data-scope="ag-pill"][data-part="root"]')!;
+            const pillEl = row.querySelector('[data-memory-confidence] [data-scope="badge"][data-part="root"]')!;
             expect(text(pillEl)).toBe(pill.label);
             expect(pillEl.getAttribute('data-tone')).toBe(pill.tone);
-            expect(pillEl.hasAttribute('data-mod-hollow')).toBe(pill.hollow);
+            expect(pillEl.getAttribute('data-variant') === 'outline').toBe(pill.hollow);
             const labels = [...row.querySelectorAll('[data-memory-actions] button')].map((b) => b.getAttribute('aria-label'));
             expect(labels).toEqual(['Correct this memory', 'Retire this memory', 'Delete this memory']);
         }
         // conditions render as tags after "applies when"
         const lesson = rows[0]!;
         expect(text(lesson.querySelector('[data-memory-conditions] > span'))).toBe('applies when');
-        expect([...lesson.querySelectorAll('[data-memory-conditions] [data-scope="ag-pill"][data-part="label"]')].map(text)).toEqual(['packages/ui', 'layout', 'a11y']);
+        expect([...lesson.querySelectorAll('[data-memory-conditions] [data-scope="badge"][data-part="root"]')].map(text)).toEqual(['packages/ui', 'layout', 'a11y']);
         expect(text(lesson.querySelector('[data-memory-provenance]'))).toMatch(/^your correction · /);
     });
 
@@ -76,7 +76,7 @@ describe('/agents/:id memory tab', () => {
         const root = await memoryPage();
         const scopes = [...root.querySelectorAll('[data-memory-scopes] li')];
         expect(scopes.map((li) => text(li.querySelector('.mono')))).toEqual(['agent:a2', 'shared:agentic-repo']);
-        expect(scopes.map((li) => text(li.querySelector('[data-scope="ag-pill"]')))).toEqual(['private', 'shared']);
+        expect(scopes.map((li) => text(li.querySelector('[data-scope="badge"][data-part="root"]')))).toEqual(['private', 'shared']);
         const sw = root.querySelector<HTMLInputElement>('[data-learning-head] input[role="switch"]')!;
         expect(sw.checked).toBe(true);
         expect(root.querySelector('[data-learning-head] [data-scope="switch"][data-part="root"]')?.getAttribute('data-state')).toBe('checked');
@@ -88,7 +88,7 @@ describe('/agents/:id memory tab', () => {
     it('an agent without memories shows the empty state', async () => {
         const root = await mountAt('/agents/a3?tab=memory', <Agent />);
         expect(root.querySelector('[data-memory-row]')).toBeNull();
-        expect(text(root.querySelector('[data-scope="ag-empty"]'))).toContain('No memories yet');
+        expect(text(root.querySelector('[data-scope="empty-state"][data-part="root"]'))).toContain('No memories yet');
     });
 
     it('provenanceLine and confidencePill follow MEM-06 / MEM-08', () => {

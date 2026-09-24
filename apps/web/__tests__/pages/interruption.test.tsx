@@ -267,7 +267,7 @@ describe('the task page (live): the cause from the Audit, Resume, then "resumed"
         const dom = await mountLive(`/tasks/${taskId}`, h);
         const card = () => dom.querySelector('[data-failure-notice]');
         await until(() => card()?.textContent?.includes('Interrupted: the daemon on m_lab restarted.') === true, 'the cause on the card');
-        expect(dom.querySelector('[data-scope="ag-failure"][data-part="signal"]')?.textContent).toBe('session.closed restart');
+        expect(dom.querySelector('[data-failure-signal]')?.textContent).toBe('session.closed restart');
         card()!.querySelector<HTMLButtonElement>('button')!.click();
         await until(async () => (await task.get()).status === 'completed', 'the resumed turn to finish', 8_000);
         await until(() => dom.querySelector('[data-interruption-note]')?.textContent === 'interrupted: the daemon on m_lab restarted · resumed', 'the resumed note');

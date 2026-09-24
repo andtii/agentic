@@ -11,9 +11,9 @@ describe('/agents/:id config tab', () => {
         const root = await configPage();
         expect(root.querySelector('[data-page="agent"]')?.getAttribute('data-agent')).toBe('a2');
         expect(text(root.querySelector('[data-agent-name]'))).toBe('Builder');
-        expect(root.querySelector('[data-agent-header] [data-scope="ag-agent-tile"]')?.getAttribute('style')).toContain('--ag-tile: 52px');
+        expect(root.querySelector('[data-agent-header] [data-scope="avatar"][data-part="root"]')?.getAttribute('data-tile')).toBe('52');
         expect(root.querySelector('[data-agent-header] [data-scope="ag-env-line"]')?.getAttribute('title')).toBe('andy-desktop / claude-code / work');
-        expect(text(root.querySelector('[data-agent-header] [data-scope="ag-pill"] [data-part="label"]'))).toBe('ACTIVE');
+        expect(text(root.querySelector('[data-agent-header] [data-scope="badge"][data-part="root"]'))).toBe('ACTIVE');
         const tabs = [...root.querySelectorAll('[role="tab"]')].map(text);
         expect(tabs).toEqual(['Overview', 'Config', 'Memory', 'Sessions']);
         const selected = root.querySelector('[role="tab"][aria-selected="true"]');
@@ -93,11 +93,11 @@ describe('/agents/:id config tab', () => {
         const proposed = items[0]!;
         expect(proposed.getAttribute('data-version')).toBe('12');
         expect(proposed.getAttribute('data-tone')).toBe('needs-you');
-        expect(text(proposed.querySelector('[data-scope="ag-pill"] [data-part="label"]'))).toBe('NEEDS REVIEW');
+        expect(text(proposed.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('NEEDS REVIEW');
         expect([...proposed.querySelectorAll('button')].map(text)).toEqual(['Review', 'Dismiss']);
         const current = items[1]!;
         expect(current.hasAttribute('data-mod-current')).toBe(true);
-        expect(text(current.querySelector('[data-scope="ag-pill"] [data-part="label"]'))).toBe('CURRENT');
+        expect(text(current.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('CURRENT');
         expect(current.querySelector('button')).toBeNull();
         const past = items[2]!;
         expect([...past.querySelectorAll('button')].map(text)).toEqual(['Roll back to v10']);

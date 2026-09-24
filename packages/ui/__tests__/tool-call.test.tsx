@@ -21,7 +21,7 @@ import { mount, one, all, buttonNamed, stableHtml, tick } from './helpers';
 const tool = (p: Partial<ToolPartState> = {}): ToolPartState => ({ type: 'tool', callId: 'c1', name: 'ToolSearch', status: 'completed', input: { query: 'select:Read' }, ...p });
 
 /** The pill's label inside the card's status part. */
-const pill = (root: ParentNode): string => one(root, 'ai-tool-call', 'status')!.querySelector('[data-scope="ag-pill"][data-part="label"]')!.textContent!;
+const pill = (root: ParentNode): string => one(root, 'ai-tool-call', 'status')!.querySelector('[data-scope="badge"][data-part="root"]')!.textContent!;
 const meta = (root: ParentNode): string | undefined => one(root, 'ai-tool-call', 'meta')?.textContent ?? undefined;
 /** The zero Collapsible (`<details>`) an io block folds on. */
 const fold = (block: HTMLElement): HTMLDetailsElement => block.querySelector<HTMLDetailsElement>('details[data-scope="collapsible"][data-part="root"]')!;
@@ -84,9 +84,9 @@ describe('the governed data-state and the handoff pill', () => {
         const dom = mount(<ToolCall part={tool({ status, output: undefined })} />);
         expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe(expected);
         expect(pill(dom)).toBe(label);
-        const p = one(dom, 'ag-pill', 'root')!;
+        const p = one(dom, 'badge', 'root')!;
         expect(p.getAttribute('data-tone')).toBe(tone);
-        expect(p.hasAttribute('data-mod-hollow')).toBe(hollow);
+        expect(p.getAttribute('data-variant') === 'outline').toBe(hollow);
         expect(meta(dom)).toBe(refined);
     });
 

@@ -162,7 +162,7 @@ describe('/machines/:id — Sign in… (#484)', () => {
         await say(m.daemon, hello(m.machineId, [env(m.machineId, 'env_work', 'work', 'claude-code', 'missing')]));
         await until(() => dom.querySelector('[data-env-login-relay]') !== null, 'the relay row');
         await m.daemon.socketClosed();
-        await until(() => dom.querySelector('[data-machine-hero] [data-scope="ag-pill"]')?.textContent?.includes('OFFLINE') === true, 'offline');
+        await until(() => dom.querySelector('[data-machine-hero] [data-scope="badge"][data-part="root"]')?.textContent?.includes('OFFLINE') === true, 'offline');
         expect(button(cell(dom, 'env_work'), 'Sign in…').disabled).toBe(true);
     });
 });

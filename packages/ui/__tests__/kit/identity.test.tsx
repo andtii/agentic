@@ -6,27 +6,32 @@ import { AgentTile, EnvironmentLine, hueFor, monogramOf } from '@agentic/ui';
 import { mount, one } from '../helpers';
 
 describe('AgentTile', () => {
-    it('is a square monogram in the agent hue at the requested size', () => {
+    it('is a square Avatar with the monogram as its fallback, in the agent hue at the requested size', () => {
         const root = mount(<AgentTile name="Forge" hue={2} size={44} />);
-        const tile = one(root, 'ag-agent-tile', 'root')!;
+        const tile = one(root, 'avatar', 'root')!;
+        expect(tile.getAttribute('data-shape')).toBe('square');
         expect(tile.getAttribute('data-hue')).toBe('2');
-        expect(tile.hasAttribute('data-mod-circle')).toBe(false);
-        expect(tile.getAttribute('style')).toContain('--ag-tile: 44px');
-        expect(tile.getAttribute('style')).toContain('--ag-hue: var(--ag-agent-2)');
-        expect(one(root, 'ag-agent-tile', 'monogram')!.textContent).toBe('FO');
+        // The design system's avatar patch turns these into --ag-tile / --ag-hue.
+        expect(tile.getAttribute('data-tile')).toBe('44');
+        expect(one(root, 'avatar', 'fallback')!.textContent).toBe('FO');
         // Decorative next to a written name; the name is the tooltip.
         expect(tile.getAttribute('aria-hidden')).toBe('true');
         expect(tile.getAttribute('title')).toBe('Forge');
+        expect(tile.hasAttribute('role')).toBe(false);
+        expect(tile.hasAttribute('aria-label')).toBe(false);
+        expect(one(mount(<AgentTile name="Atlas" />), 'avatar', 'root')!.getAttribute('data-tile')).toBe('32');
     });
 
     it('draws a person as a circle without a hue, labelled when asked', () => {
         const root = mount(<AgentTile name="Andii" person hue={1} labelled />);
-        const tile = one(root, 'ag-agent-tile', 'root')!;
-        expect(tile.hasAttribute('data-mod-circle')).toBe(true);
+        const tile = one(root, 'avatar', 'root')!;
+        expect(tile.getAttribute('data-shape')).toBe('circle');
         expect(tile.hasAttribute('data-hue')).toBe(false);
-        expect(tile.getAttribute('style')).not.toContain('--ag-hue');
+        // Labelled: an image named by the person, with no tooltip and not hidden.
         expect(tile.getAttribute('role')).toBe('img');
         expect(tile.getAttribute('aria-label')).toBe('Andii');
+        expect(tile.hasAttribute('aria-hidden')).toBe(false);
+        expect(tile.hasAttribute('title')).toBe(false);
     });
 
     it('derives two-letter monograms and wraps hues past four', () => {

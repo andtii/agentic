@@ -121,13 +121,13 @@ describe('/settings: API keys are the plugins’ (live)', () => {
         const row = () => dom.querySelector<HTMLElement>('[data-api-key][data-secret="anthropic-api-key"]');
         await until(() => row() !== null, 'the Anthropic key row');
         expect(row()!.hasAttribute('data-set')).toBe(false);
-        expect(text(row()!.querySelector('[data-scope="ag-pill"] [data-part="label"]'))).toBe('NEEDED');
+        expect(text(row()!.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('NEEDED');
         expect(row()!.querySelector('a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
         expect(dom.querySelectorAll('input[type="password"]').length).toBe(0);
 
         await registry().setSecret('anthropic-api-key', 'sk-ant-SETTINGS-NEVER-SHOWN');
         await until(() => row()?.hasAttribute('data-set') === true, 'the row to say it is stored');
-        expect(text(row()!.querySelector('[data-scope="ag-pill"] [data-part="label"]'))).toBe('STORED');
+        expect(text(row()!.querySelector('[data-scope="badge"][data-part="root"]'))).toBe('STORED');
         expect(dom.innerHTML).not.toContain('SETTINGS-NEVER-SHOWN');
     }, 20_000);
 });

@@ -4,26 +4,17 @@
  * → "Components"). Declared with zero's public `defineAnatomy` so the
  * data-only fragment entry can import them without loading a component.
  *
+ * Status pills and tags (`Badge`), identity tiles (`Avatar`), empty and
+ * failure cards (`EmptyState`) and quota bars (`Progress`) are zero parts
+ * the design system's patches draw; they have no anatomy here.
+ *
  * Product state never rides `data-state` (zero governs that vocabulary):
- * a pill's colour is the `tone` axis (`data-tone`), an inbox row's kind the
+ * a row's colour is the `tone` axis (`data-tone`), an inbox row's kind the
  * `kind` axis (`data-kind`), and presence flags are modifiers
  * (`data-mod-hollow`, `data-mod-selected`, …) — all declared in
  * `design-system/tokens.ts`, wired in `./recipes.ts`.
  */
 import { defineAnatomy } from '@sigx/zero/anatomy';
-
-/** A status pill or tag: dot + mono label, tinted by `tone`; `hollow` for idle states, `outline` for tags. */
-export const agPillAnatomy = defineAnatomy('ag-pill', {
-    root: { element: 'span', tokens: ['color', 'radius-selector', 'text'] },
-    dot: { element: 'span', parent: 'root', tokens: ['color'] },
-    label: { element: 'span', parent: 'root', tokens: ['text'] }
-});
-
-/** The identity tile: a square mono monogram in the agent's hue; people are circles (`circle`). */
-export const agAgentTileAnatomy = defineAnatomy('ag-agent-tile', {
-    root: { element: 'span', tokens: ['color', 'radius-field', 'text'] },
-    monogram: { element: 'span', parent: 'root', tokens: ['text'] }
-});
 
 /** `machine / runtime / account` in mono, never one part alone (EXE-06), never wrapping. */
 export const agEnvLineAnatomy = defineAnatomy('ag-env-line', {
@@ -95,17 +86,6 @@ export const agEnvCardAnatomy = defineAnatomy('ag-env-card', {
     actions: { element: 'div', parent: 'root' }
 });
 
-/** One of the six named failure states (OPS-04): icon + name + mono signal caption, a detail, one action; the `kind` axis paints it. */
-export const agFailureAnatomy = defineAnatomy('ag-failure', {
-    root: { element: 'article', tokens: ['color', 'radius-box'] },
-    header: { element: 'div', parent: 'root' },
-    icon: { element: 'span', parent: 'header', tokens: ['color'] },
-    name: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
-    signal: { element: 'span', parent: 'header', tokens: ['text'] },
-    detail: { element: 'p', parent: 'root', tokens: ['text'] },
-    actions: { element: 'div', parent: 'root' }
-});
-
 /** The banner over the content ("This browser is offline · Reconnecting…"): icon, text, mono state, an optional action. */
 export const agBannerAnatomy = defineAnatomy('ag-banner', {
     root: { element: 'div', tokens: ['color', 'radius-box', 'text'] },
@@ -113,15 +93,6 @@ export const agBannerAnatomy = defineAnatomy('ag-banner', {
     text: { element: 'span', parent: 'root', tokens: ['text'] },
     state: { element: 'span', parent: 'root', tokens: ['text'] },
     actions: { element: 'span', parent: 'root' }
-});
-
-/** An empty screen: one card (or one line with `compact`; dashed with `outline`) instead of an empty table. */
-export const agEmptyAnatomy = defineAnatomy('ag-empty', {
-    root: { element: 'div', tokens: ['color', 'radius-box'] },
-    icon: { element: 'span', parent: 'root', tokens: ['color'] },
-    title: { element: 'span', parent: 'root', tokens: ['text'] },
-    caption: { element: 'p', parent: 'root', tokens: ['text'] },
-    actions: { element: 'div', parent: 'root' }
 });
 
 /** A working folder as a field shows it (#191): the chip (`machine / environment · …\last\two`) and its Change / Clear actions. */
@@ -192,8 +163,6 @@ export const agMapFieldAnatomy = defineAnatomy('ag-map-field', {
 export const agQuotaAnatomy = defineAnatomy('ag-quota', {
     root: { element: 'div', tokens: ['color', 'text'] },
     label: { element: 'span', parent: 'root', tokens: ['text'] },
-    bar: { element: 'span', parent: 'root', tokens: ['color', 'radius-selector'] },
-    fill: { element: 'span', parent: 'bar', tokens: ['color'] },
     used: { element: 'span', parent: 'root', tokens: ['text'] },
     resets: { element: 'span', parent: 'root', tokens: ['text'] }
 });
@@ -227,17 +196,13 @@ export const agMarkdownAnatomy = defineAnatomy('ag-markdown', {
 });
 
 export const kitAnatomies = [
-    agPillAnatomy,
-    agAgentTileAnatomy,
     agEnvLineAnatomy,
     agNeedsItemAnatomy,
     agTaskNodeAnatomy,
     agConnectionAnatomy,
     agVersionAnatomy,
     agEnvCardAnatomy,
-    agFailureAnatomy,
     agBannerAnatomy,
-    agEmptyAnatomy,
     agWorkdirAnatomy,
     agWorkdirPickerAnatomy,
     agPluginCardAnatomy,

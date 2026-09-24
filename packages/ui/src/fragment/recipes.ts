@@ -627,7 +627,7 @@ thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${ro
 
 /**
  * Raw CSS the design system appends verbatim: the keyframes the running dot
- * and the STREAMING pill pulse on, the attachment spinner's turn, and the phone regime recipes cannot
+ * pulses on (a STREAMING pill pulses as Badge.Dot `running`), the attachment spinner's turn, and the phone regime recipes cannot
  * express (`docs/design/HANDOFF.md` → "Mobile specifics"): below 768 px the
  * composer docks to the bottom as one 48 px row (attach, single-line input
  * at 15 px, square Send) under the "To" row, the message meta drops the
@@ -636,9 +636,7 @@ thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${ro
  */
 export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
-[data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: ai-pulse 1200ms ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-    [data-scope="ai-message"][data-part="meta"] [data-scope="ag-pill"][data-status="streaming"] [data-part="dot"] { animation: none; }
     [data-scope="ai-composer"][data-part="spinner"] { animation: none; }
 }
 @media (max-width: 767.98px) {

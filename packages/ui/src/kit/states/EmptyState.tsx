@@ -1,5 +1,5 @@
 /**
- * `EmptyState` on the `ag-empty` scope — the handoff's empty screens
+ * `EmptyState` on zero's `EmptyState` — the handoff's empty screens
  * (`docs/design/HANDOFF.md` → "Edge cases"): no empty tables, one card or
  * one line instead. `workspace` is the single "Create your first agent"
  * card with a primary button to `/agents`; `inbox` is "Nothing needs you."
@@ -7,12 +7,15 @@
  * `machines` is the dashed "Pair a machine" card (`outline`); `chat` is the
  * activation hint the composer shows as its placeholder; `generic` is a
  * title and caption a page supplies.
+ *
+ * The root is `role="status"` with the variant as `data-empty`; `compact`
+ * and `outline` are the `data-mod-*` modifiers the design system's
+ * empty-state patch draws. A default action is the kit `Button` as a link.
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { agEmptyAnatomy } from '../anatomy.js';
+import { EmptyState as ZeroEmptyState } from '@sigx/zero';
+import { Button } from '../Button.js';
 import { Icon, type IconName } from '../icons.js';
-
-const SCOPE = agEmptyAnatomy.scope;
 
 export const EMPTY_VARIANTS = ['workspace', 'inbox', 'machines', 'chat', 'generic'] as const;
 export type EmptyVariant = (typeof EMPTY_VARIANTS)[number];
@@ -53,14 +56,14 @@ export const EmptyState = component<EmptyStateProps>(({ props, slots }) => () =>
     const actions = slots.actions
         ? slots.actions()
         : spec.action
-            ? <a href={spec.action.href} data-scope="button" data-part="root" data-color={spec.action.intent === 'primary' ? 'primary' : 'neutral'} data-variant="solid" data-intent={spec.action.intent}><span>{spec.action.label}</span></a>
+            ? <Button href={spec.action.href} intent={spec.action.intent}>{spec.action.label}</Button>
             : null;
     return (
-        <div data-scope={SCOPE} data-part="root" data-empty={variant} data-mod-compact={spec.compact ? '' : undefined} data-mod-outline={spec.outline ? '' : undefined} class={props.class} role="status">
-            {icon ? <span data-scope={SCOPE} data-part="icon"><Icon name={icon} size={20} /></span> : null}
-            {title ? <span data-scope={SCOPE} data-part="title">{title}</span> : null}
-            <p data-scope={SCOPE} data-part="caption">{props.caption ?? spec.caption}</p>
-            {actions ? <div data-scope={SCOPE} data-part="actions">{actions}</div> : null}
-        </div>
+        <ZeroEmptyState.Root role="status" data-empty={variant} mods={{ compact: !!spec.compact, outline: !!spec.outline }} class={props.class}>
+            {icon ? <ZeroEmptyState.Icon><Icon name={icon} size={20} /></ZeroEmptyState.Icon> : null}
+            {title ? <ZeroEmptyState.Title>{title}</ZeroEmptyState.Title> : null}
+            <ZeroEmptyState.Description>{props.caption ?? spec.caption}</ZeroEmptyState.Description>
+            {actions ? <ZeroEmptyState.Actions>{actions}</ZeroEmptyState.Actions> : null}
+        </ZeroEmptyState.Root>
     );
 }, { name: 'EmptyState' });

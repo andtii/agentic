@@ -36,7 +36,7 @@ async function seed(objective: string, agentId?: AgentId) {
 }
 
 const rows = (dom: ParentNode) => [...dom.querySelectorAll<HTMLElement>('[data-page="tasks"] tbody tr, [data-home-tasks] tbody tr')];
-const statusOf = (row: Element) => row.querySelector('[data-cell-status] [data-scope="ag-pill"]')!.getAttribute('data-status');
+const statusOf = (row: Element) => row.querySelector('[data-cell-status] [data-scope="badge"][data-part="root"]')!.getAttribute('data-status');
 const chip = (dom: ParentNode, label: string) => [...dom.querySelectorAll<HTMLButtonElement>('[data-chip]')].find((b) => b.textContent!.trim().startsWith(label))!;
 
 describe('/tasks (live)', () => {
@@ -64,7 +64,7 @@ describe('/tasks (live)', () => {
         await until(() => rows(dom).length === 1 && statusOf(rows(dom)[0]!) === 'completed', 'the completed filter');
         chip(dom, 'Queued').click();
         await until(() => rows(dom).length === 0, 'an empty filter');
-        expect(text(dom.querySelector('[data-scope="ag-empty"]'))).toContain('No queued tasks');
+        expect(text(dom.querySelector('[data-scope="empty-state"][data-part="root"]'))).toContain('No queued tasks');
 
         // The row is what the Task actor wrote: the index and the record agree.
         const index = await h.app.as(owner).actor(TaskIndex, taskIndexKey(WS)).list();
@@ -91,13 +91,13 @@ describe('/ active tasks (live)', () => {
         buttonNamed(dialog, 'Stop 1 chain').click();
         // The index row follows the `cancelled` transition at once; the Task's own turn stays parked on the stop cascade.
         await until(() => rows(dom).length === 0, 'the row to leave Home');
-        expect(text(dom.querySelector('[data-home-tasks] [data-scope="ag-empty"]'))).toContain('No active tasks');
+        expect(text(dom.querySelector('[data-home-tasks] [data-scope="empty-state"][data-part="root"]'))).toContain('No active tasks');
         expect((await task.get()).status).toBe('cancelled');
     });
 
     it('with no agent yet shows the workspace empty state', async () => {
         const dom = await mountLive('/', h);
-        await until(() => dom.querySelector('[data-scope="ag-empty"][data-empty="workspace"]') !== null, 'the workspace empty state');
+        await until(() => dom.querySelector('[data-scope="empty-state"][data-part="root"][data-empty="workspace"]') !== null, 'the workspace empty state');
         expect(dom.querySelector('[data-home-tasks]')).toBeNull();
     });
 });

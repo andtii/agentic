@@ -37,7 +37,7 @@ describe('demo 1 on the live pages', () => {
         const dom = await mountLive('/agents', h);
         await until(() => dom.querySelector('[data-page="agents"]:not([aria-busy])') !== null, 'the roster');
         expect(dom.querySelectorAll('[data-agent-card]')).toHaveLength(0);
-        expect(dom.querySelector('[data-scope="ag-empty"], [data-page="agents"] [data-part="root"]')).not.toBeNull();
+        expect(dom.querySelector('[data-scope="empty-state"][data-part="root"], [data-page="agents"] [data-part="root"]')).not.toBeNull();
 
         // The topbar's "New agent" raises the dialog the live roster answers.
         const actions = await mountLive('/agents', h, <div>{topbarFor({ name: 'agents', path: '/agents', params: {} })!.actions!()}</div>);

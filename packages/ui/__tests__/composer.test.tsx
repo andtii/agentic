@@ -255,7 +255,7 @@ describe('the composer', () => {
             expect(row.textContent!.startsWith('To')).toBe(true);
             const chips = all(dom, 'ai-composer', 'recipient');
             expect(chips.map((c) => c.textContent)).toEqual(['ATAtlascoordinator']);
-            expect(chips[0]!.querySelector('[data-scope="ag-agent-tile"]')!.getAttribute('data-hue')).toBe('1');
+            expect(chips[0]!.querySelector('[data-scope="avatar"][data-part="root"]')!.getAttribute('data-hue')).toBe('1');
             expect(one(dom, 'ai-composer', 'hint')!.textContent).toBe('Atlas answers unless you @ someone');
             expect(one(dom, 'ai-composer', 'hint')!.hasAttribute('data-nobody')).toBe(false);
             expectAnatomy(dom, aiComposerAnatomy);

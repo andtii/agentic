@@ -4,10 +4,11 @@
  * the pill also shows; tags outline; wait lines in the literal core names.
  */
 import type { TaskStatus, WaitReason } from '@agentic/core';
-import { PILLS, StatusPill, Tag, WaitReasonLine, pillFor, waitText } from '@agentic/ui';
+import { PILLS, StatusPill, Tag, WaitReasonLine, pillFor, roleOf, waitText } from '@agentic/ui';
 import { mount, one } from '../helpers';
 
-const SCOPE = 'ag-pill';
+// A pill and a tag are zero's Badge; the kit's hooks ride its root.
+const SCOPE = 'badge';
 
 // The handoff's task-status table, verbatim: pill text, colour (tone), dot.
 const TASK_ROWS: { status: TaskStatus; label: string; tone: string; dot: 'hollow' | 'solid' }[] = [
@@ -23,10 +24,32 @@ describe('StatusPill', () => {
     it.each(TASK_ROWS)('renders $status as $label in $tone with a $dot dot', ({ status, label, tone, dot }) => {
         const root = mount(<StatusPill status={status} />);
         const pill = one(root, SCOPE, 'root')!;
+        expect(pill.getAttribute('data-status')).toBe(status);
         expect(pill.getAttribute('data-tone')).toBe(tone);
-        expect(pill.hasAttribute('data-mod-hollow')).toBe(dot === 'hollow');
-        expect(one(root, SCOPE, 'label')!.textContent).toBe(label);
+        // A hollow pill is the outline variant (its dot a ring); a solid one soft.
+        expect(pill.getAttribute('data-variant')).toBe(dot === 'hollow' ? 'outline' : 'soft');
+        expect(pill.textContent).toBe(label);
         expect(one(root, SCOPE, 'dot')!.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    it.each([
+        ['live', 'primary'],
+        ['working', 'info'],
+        ['needs-you', 'warning'],
+        ['failed', 'error'],
+        ['muted', 'neutral'],
+        ['dim', 'neutral']
+    ] as const)('paints the %s tone in the %s role', (tone, role) => {
+        expect(roleOf(tone)).toBe(role);
+        const pill = one(mount(<StatusPill status="x" tone={tone} />), SCOPE, 'root')!;
+        expect(pill.getAttribute('data-color')).toBe(role);
+        expect(pill.getAttribute('data-tone')).toBe(tone);
+    });
+
+    it('puts the dot of a working state in zero’s running state, and no other', () => {
+        const dotOf = (status: string) => one(mount(<StatusPill status={status} />), SCOPE, 'dot')!;
+        for (const status of ['active', 'running', 'streaming']) expect(dotOf(status).getAttribute('data-state'), status).toBe('running');
+        for (const status of ['waiting', 'failed', 'queued', 'online']) expect(dotOf(status).hasAttribute('data-state'), status).toBe(false);
     });
 
     it.each([
@@ -40,13 +63,16 @@ describe('StatusPill', () => {
         const spec = pillFor(status);
         expect(spec.tone).toBe(tone);
         expect(spec.hollow).toBe(hollow);
+        expect(spec.role).toBe(roleOf(tone));
     });
 
     it('renders free text muted with a solid dot, and takes a label override', () => {
-        expect(pillFor('anything else')).toEqual({ tone: 'muted', hollow: false, label: 'anything else' });
+        expect(pillFor('anything else')).toEqual({ tone: 'muted', hollow: false, label: 'anything else', role: 'neutral' });
         const root = mount(<StatusPill status="current" label="CURRENT" tone="live" />);
         expect(one(root, SCOPE, 'root')!.getAttribute('data-tone')).toBe('live');
-        expect(one(root, SCOPE, 'label')!.textContent).toBe('CURRENT');
+        expect(one(root, SCOPE, 'root')!.getAttribute('data-color')).toBe('primary');
+        expect(one(root, SCOPE, 'root')!.textContent).toBe('CURRENT');
+        expect(one(mount(<StatusPill status="online" hollow />), SCOPE, 'root')!.getAttribute('data-variant')).toBe('outline');
     });
 
     it('has a row for every TaskStatus', () => {
@@ -55,14 +81,19 @@ describe('StatusPill', () => {
 });
 
 describe('Tag', () => {
-    it('is outline only, muted unless toned', () => {
+    it('is outline only with no dot, muted unless toned', () => {
         const root = mount(<Tag>memory</Tag>);
         const tag = one(root, SCOPE, 'root')!;
-        expect(tag.hasAttribute('data-mod-outline')).toBe(true);
+        expect(tag.getAttribute('data-variant')).toBe('outline');
+        expect(tag.hasAttribute('data-tag')).toBe(true);
+        expect(tag.hasAttribute('data-status')).toBe(false);
         expect(tag.getAttribute('data-tone')).toBe('muted');
+        expect(tag.getAttribute('data-color')).toBe('neutral');
+        expect(one(root, SCOPE, 'dot')).toBeNull();
         expect(tag.textContent).toBe('memory');
         const toned = mount(<Tag tone="needs-you">approval</Tag>);
         expect(one(toned, SCOPE, 'root')!.getAttribute('data-tone')).toBe('needs-you');
+        expect(one(toned, SCOPE, 'root')!.getAttribute('data-color')).toBe('warning');
     });
 });
 

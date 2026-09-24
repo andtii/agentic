@@ -38,7 +38,7 @@ const ready = (dom: ParentNode, id: string) => dom.querySelector(`[data-page="ag
 const rows = (dom: ParentNode) => [...dom.querySelectorAll<HTMLElement>('[data-memory-row]')];
 const rowOf = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-memory-row][data-memory-id="${id}"]`);
 const action = (row: Element, label: string) => [...row.querySelectorAll<HTMLButtonElement>('[data-memory-actions] button')].find((b) => b.getAttribute('aria-label') === label);
-const pillOf = (root: ParentNode | null) => root?.querySelector('[data-scope="ag-pill"]')?.getAttribute('data-status') ?? null;
+const pillOf = (root: ParentNode | null) => root?.querySelector('[data-scope="badge"][data-part="root"]')?.getAttribute('data-status') ?? null;
 
 /** A task for `agentId` in a fresh chat, run through the router; `push …` parks it on an approval. */
 async function run(agentId: string, objective: string) {
@@ -153,7 +153,7 @@ describe('/agents/:id presence, sessions and counters (live)', () => {
         const dom = await mountLive(`/agents/${forge}?tab=sessions`, h);
         await until(() => ready(dom, forge), 'the agent page');
         expect(pillOf(dom.querySelector('[data-agent-header]'))).toBe('idle');
-        expect([...dom.querySelectorAll('[data-scope="ag-empty"]')].some((e) => text(e).includes('No sessions yet'))).toBe(true);
+        expect([...dom.querySelectorAll('[data-scope="empty-state"][data-part="root"]')].some((e) => text(e).includes('No sessions yet'))).toBe(true);
 
         const { task } = await run(forge, 'push it');
         await until(() => pillOf(dom.querySelector('[data-agent-header]')) === 'waiting', 'the header pill to say waiting');

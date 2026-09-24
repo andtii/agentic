@@ -53,17 +53,17 @@ describe('/usage (live)', () => {
         expect(cell(byId(atlas), 1)).toBe('2');
         expect(cell(byId(atlas), 2)).toBe('3.0k');
         expect(cell(byId(atlas), 3)).toBe('$2.00');
-        expect(text(byId(atlas).querySelector('[data-scope="ag-pill"]'))).toBe('REPORTED');
+        expect(text(byId(atlas).querySelector('[data-scope="badge"][data-part="root"]'))).toBe('REPORTED');
         // Scout: one reported, one guessed — two figures, the tilde only on the estimate.
         expect(byId(scout).getAttribute('data-quality')).toBe('partly-estimated');
         expect(cell(byId(scout), 3)).toBe('$0.50 + ~$0.30');
-        expect(text(byId(scout).querySelector('[data-scope="ag-pill"]'))).toBe('PARTLY ESTIMATED');
+        expect(text(byId(scout).querySelector('[data-scope="badge"][data-part="root"]'))).toBe('PARTLY ESTIMATED');
         // Forge: tokens known, no cost at all — `n/a` in the dim ink, never 0.
         expect(byId(forge).getAttribute('data-quality')).toBe('not-reported');
         expect(cell(byId(forge), 2)).toBe('3.0k');
         expect(cell(byId(forge), 3)).toBe('n/a');
         expect(byId(forge).querySelector('[data-cost]')!.hasAttribute('data-dim')).toBe(true);
-        expect(text(byId(forge).querySelector('[data-scope="ag-pill"]'))).toBe('NOT REPORTED');
+        expect(text(byId(forge).querySelector('[data-scope="badge"][data-part="root"]'))).toBe('NOT REPORTED');
         expect(text(byId(forge).querySelector('[data-agent-cell] > span:nth-child(2)'))).toBe('Forge');
 
         // The cards: the month's total split into its reported and estimated parts, the guessed and the unpriced turns counted.

@@ -8,39 +8,47 @@ import { all, mount, one } from '../../helpers';
 describe('EmptyState', () => {
     it('workspace is one card with the primary button to /agents', () => {
         const root = mount(<EmptyState variant="workspace" />);
-        const card = one(root, 'ag-empty', 'root')!;
+        const card = one(root, 'empty-state', 'root')!;
         expect(card.getAttribute('role')).toBe('status');
+        expect(card.getAttribute('data-empty')).toBe('workspace');
         expect(card.hasAttribute('data-mod-compact')).toBe(false);
-        expect(one(card, 'ag-empty', 'title')!.textContent).toBe('Create your first agent');
-        const link = one(card, 'ag-empty', 'actions')!.querySelector('a')!;
+        expect(card.hasAttribute('data-mod-outline')).toBe(false);
+        expect(one(card, 'empty-state', 'icon')!.getAttribute('aria-hidden')).toBe('true');
+        expect(one(card, 'empty-state', 'title')!.textContent).toBe('Create your first agent');
+        // The kit Button as a link: a real <a> wearing the button anatomy.
+        const link = one(card, 'empty-state', 'actions')!.querySelector('a')!;
         expect(link.getAttribute('href')).toBe('/agents');
+        expect(link.getAttribute('data-scope')).toBe('button');
         expect(link.getAttribute('data-color')).toBe('primary');
+        expect(link.textContent!.trim()).toBe('New agent');
     });
 
     it('inbox is the muted line only', () => {
         const root = mount(<EmptyState variant="inbox" />);
-        const line = one(root, 'ag-empty', 'root')!;
+        const line = one(root, 'empty-state', 'root')!;
+        expect(line.getAttribute('role')).toBe('status');
+        expect(line.getAttribute('data-empty')).toBe('inbox');
         expect(line.hasAttribute('data-mod-compact')).toBe(true);
-        expect(one(line, 'ag-empty', 'title')).toBeNull();
-        expect(one(line, 'ag-empty', 'caption')!.textContent).toBe('Nothing needs you.');
-        expect(one(line, 'ag-empty', 'actions')).toBeNull();
+        expect(one(line, 'empty-state', 'title')).toBeNull();
+        expect(one(line, 'empty-state', 'description')!.textContent).toBe('Nothing needs you.');
+        expect(one(line, 'empty-state', 'actions')).toBeNull();
     });
 
     it('machines is the dashed "Pair a machine" card', () => {
         const root = mount(<EmptyState variant="machines" />);
-        const card = one(root, 'ag-empty', 'root')!;
+        const card = one(root, 'empty-state', 'root')!;
         expect(card.hasAttribute('data-mod-outline')).toBe(true);
-        expect(one(card, 'ag-empty', 'title')!.textContent).toBe('Pair a machine');
-        expect(one(card, 'ag-empty', 'actions')!.querySelector('a')!.getAttribute('href')).toBe('/pair');
+        expect(one(card, 'empty-state', 'title')!.textContent).toBe('Pair a machine');
+        expect(one(card, 'empty-state', 'actions')!.querySelector('a')!.getAttribute('href')).toBe('/pair');
     });
 
     it('chat is the activation hint, generic takes a title and caption, and actions can be replaced', () => {
-        expect(one(mount(<EmptyState variant="chat" />), 'ag-empty', 'caption')!.textContent).toContain('@ to address an agent');
+        expect(one(mount(<EmptyState variant="chat" />), 'empty-state', 'description')!.textContent).toContain('@ to address an agent');
         const root = mount(<EmptyState title="No schedules yet" caption="Reminders run on the platform." slots={{ actions: () => <button type="button">New schedule</button> }} />);
-        expect(one(root, 'ag-empty', 'root')!.getAttribute('data-empty')).toBe('generic');
-        expect(one(root, 'ag-empty', 'title')!.textContent).toBe('No schedules yet');
-        expect(one(root, 'ag-empty', 'caption')!.textContent).toBe('Reminders run on the platform.');
-        expect(one(root, 'ag-empty', 'actions')!.querySelector('button')!.textContent).toBe('New schedule');
+        expect(one(root, 'empty-state', 'root')!.getAttribute('data-empty')).toBe('generic');
+        expect(one(root, 'empty-state', 'title')!.textContent).toBe('No schedules yet');
+        expect(one(root, 'empty-state', 'description')!.textContent).toBe('Reminders run on the platform.');
+        expect(one(root, 'empty-state', 'actions')!.querySelector('button')!.textContent).toBe('New schedule');
         expect(EMPTY_VARIANTS).toHaveLength(5);
     });
 });

@@ -51,7 +51,7 @@ describe('the Changes list column', () => {
         const commits = all(root, 'ag-changes', 'commit');
         expect(commits[0]!.textContent).toContain('shell: drawer state on data-l-drawer');
         expect(commits[0]!.textContent).toContain('a41c9e2 · 14:06');
-        expect(commits[0]!.querySelector('[data-scope="ag-agent-tile"]')!.getAttribute('aria-label')).toBe('Forge');
+        expect(commits[0]!.querySelector('[data-scope="avatar"][data-part="root"]')!.getAttribute('aria-label')).toBe('Forge');
         expect(all(root, 'ag-changes', 'aside')[0]!.textContent).toBe('vs main');
         expect(one(root, 'ag-changes', 'note')!.textContent).toContain('Files stay on alien01');
     });
