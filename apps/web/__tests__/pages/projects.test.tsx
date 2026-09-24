@@ -210,6 +210,41 @@ describe('the project form (mock)', () => {
         }]);
     });
 
+    it('a feature\u2019s presets fill its fields, the preview follows the draft, and the plugin\u2019s own errors keep the page here (#621)', async () => {
+        const { dom, saved } = await mountForm();
+        setText(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!, 'agentic');
+        await browse(dom, 'env_alien01_work', 'C:\\Dev', 'agentic', 'main');
+        const feature = () => dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
+        const preview = () => Object.fromEntries([...feature().querySelectorAll('[data-project-feature-preview-line]')].map((l) => [text(l.querySelector('dt')), text(l.querySelector('dd'))]));
+        const field = (key: string) => feature().querySelector<HTMLInputElement>(`input[name="feature-agentic.feature.git.${key}"]`)!;
+        expect(preview()).toEqual({ Worktrees: 'off: sessions open in the project folder' });
+        field('worktreePerChat').click();
+        await settle();
+        expect(preview()).toMatchObject({ Branch: 'chat/a1b2c3d4', Folder: 'C:\\Dev\\agentic\\branches\\chat-a1b2c3d4', 'Made by': 'git worktree add' });
+
+        buttonIn(feature(), 'Inside the repo').click();
+        await settle();
+        expect(field('worktreePath').value).toBe('{repo}/.worktrees/{branchSlug}');
+        expect(preview()).toMatchObject({ Folder: 'C:\\Dev\\agentic\\main\\.worktrees\\chat-a1b2c3d4' });
+        // Every field stays editable after a preset; a token the plugin does not know is its error, and the save waits.
+        setText(field('worktreePath'), '{repo}/{nope}');
+        await settle();
+        expect(text(feature().querySelector('[data-project-feature-errors]'))).toContain('{nope}');
+        expect(preview()).toMatchObject({ Problem: expect.stringContaining('{nope}') });
+        buttonIn(dom, 'Create project').click();
+        await settle();
+        expect(saved).toEqual([]);
+        expect(text(dom.querySelector('[data-project-error]'))).toBe('Check the Git settings.');
+
+        buttonIn(feature(), 'Git default').click();
+        await settle();
+        expect(field('worktreePath').value).toBe('');
+        expect(feature().querySelector('[data-project-feature-errors]')).toBeNull();
+        buttonIn(dom, 'Create project').click();
+        await settle();
+        expect(saved[0]?.features).toEqual({ 'agentic.feature.git': { origin: AGENTIC_ORIGIN, worktreePerChat: true } });
+    });
+
     it('the phone regime: the form and the list have no element wider than 400 px worth of columns (one column each)', async () => {
         const { dom } = await mountForm();
         // happy-dom does no layout; the structural rule is what the CSS pins: every grid on the form collapses to one column below 768.

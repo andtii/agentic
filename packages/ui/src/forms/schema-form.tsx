@@ -9,7 +9,9 @@
  * `value` is the stored config; `submit` hands back a sparse config
  * (`schema-model.ts`) and the caller writes it. While the draft is clean a
  * changed `value` (a live read) is taken up; an edited draft is never
- * overwritten. Secrets are not config — `SecretField` takes those.
+ * overwritten. `change` hands back the same sparse config on every edit, and
+ * `load` replaces the draft (a preset, #621) — the caller decides what goes in.
+ * Secrets are not config — `SecretField` takes those.
  */
 
 import { component, type Define } from '@sigx/runtime-core';
@@ -26,6 +28,10 @@ export interface SchemaFormApi {
     errors(): SchemaErrors;
     dirty(): boolean;
     readonly draft: SchemaDraft;
+    /** The draft as a sparse config, as `submit` would hand it back — without validating. */
+    value(): Record<string, unknown>;
+    /** Replace the draft with `config` (a preset laid over `value()`, say); the stored `value` it was opened on is kept. */
+    load(config: Readonly<Record<string, unknown>>): void;
 }
 
 export type SchemaFormProps = Define.Prop<'schema', ConfigSchema, true> &
@@ -45,6 +51,8 @@ export type SchemaFormProps = Define.Prop<'schema', ConfigSchema, true> &
     Define.Prop<'hideActions', boolean> &
     Define.Event<'submit', Record<string, unknown>> &
     Define.Event<'invalid', SchemaErrors> &
+    /** The draft as a sparse config, on every edit (and on `load`). */
+    Define.Event<'change', Record<string, unknown>> &
     Define.Expose<SchemaFormApi>;
 
 const defaultHint = (property: ConfigStringProperty | ConfigNumberProperty): string | undefined => (property.default === undefined ? undefined : `Default: ${property.default}`);
@@ -86,7 +94,14 @@ export const SchemaForm = component<SchemaFormProps>(
             emit('submit', built(draft));
             return true;
         };
-        expose({ reset, submit, errors: () => errors.value, dirty, draft });
+        const load = (config: Readonly<Record<string, unknown>>) => {
+            Object.assign(draft, toSchemaDraft(props.schema, config));
+        };
+        watch(
+            () => JSON.stringify(built(draft)),
+            () => emit('change', built(draft))
+        );
+        expose({ reset, submit, errors: () => errors.value, dirty, draft, value: () => built(draft), load });
 
         const onSubmit = (e: Event) => {
             e.preventDefault();

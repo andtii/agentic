@@ -7,7 +7,7 @@
  * daemon's message; a chosen worktree kept as it is.
  */
 import { describe, expect, it } from 'vitest';
-import { PROJECT_FEATURE_KIND, configDefaults, isProjectFeatureManifest, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
+import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
 
 import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
 
@@ -382,5 +382,35 @@ describe('command strategy and setup (#620)', () => {
             'worktreeSetup.1': expect.stringContaining('{nope}')
         });
         expect(gitSettingsErrors(settingsOf(settings))).toEqual({});
+    });
+});
+
+describe('settings form seam (#621)', () => {
+    it('presets only fill fields, and each clears the templates the others set', () => {
+        expect(gitFeaturePlugin.presets!.map((p) => p.id)).toEqual(['git-default', 'in-repo', 'sibling', 'command']);
+        const sibling = applyProjectFeaturePreset(settingsOf({ worktreePerChat: true, branchTemplate: 'x-{chatId8}' }), gitFeaturePlugin.presets![2]!);
+        expect(sibling).toMatchObject({ worktreePerChat: true, worktreeStrategy: 'builtin', worktreePath: '{repoParent}/{repoName}-{branchSlug}' });
+        expect(sibling).not.toHaveProperty('branchTemplate');
+        const back = applyProjectFeaturePreset(sibling, gitFeaturePlugin.presets![0]!);
+        expect(back).not.toHaveProperty('worktreePath');
+        for (const p of gitFeaturePlugin.presets!) expect(validateConfig(gitFeatureManifest.projectSettings, Object.fromEntries(Object.entries(p.settings).filter(([, v]) => v !== null))).ok, p.id).toBe(true);
+        expect(gitFeaturePlugin.settingsErrors).toBe(gitSettingsErrors);
+    });
+
+    it('previews the branch, folder, maker and setup for a folder of the project, and a problem as a line', () => {
+        const preview = gitFeaturePlugin.previewSettings!;
+        expect(preview({ project, settings: settingsOf() })).toEqual([{ label: 'Worktrees', value: 'off: sessions open in the project folder' }]);
+        expect(preview({ project, settings: settingsOf({ worktreePerChat: true, worktreeSetup: ['npm ci'] }), folder: { path: '/work/app' } })).toEqual([
+            { label: 'Branch', value: 'chat/a1b2c3d4' },
+            { label: 'Folder', value: '/work/app-worktrees/chat-a1b2c3d4' },
+            { label: 'Made by', value: 'git worktree add' },
+            { label: 'Then runs', value: 'npm ci' },
+            { label: 'Chosen worktree', value: 'kept as it is' }
+        ]);
+        const command = preview({ project, settings: settingsOf({ worktreePerChat: true, worktreeStrategy: 'command', worktreeCreate: 'pnpm wt new {branchSlug}', worktreePath: '{repoParent}/branches/{branchSlug}', reuseExisting: false }), folder: { path: 'C:\\Dev\\app\\main' } });
+        expect(command).toContainEqual({ label: 'Folder', value: 'C:\\Dev\\app\\branches\\chat-a1b2c3d4' });
+        expect(command).toContainEqual({ label: 'Made by', value: 'pnpm wt new chat-a1b2c3d4' });
+        expect(command.some((l) => l.label === 'Chosen worktree')).toBe(false);
+        expect(preview({ project, settings: settingsOf({ worktreePerChat: true, worktreePath: '{repo}/{x}' }) })).toEqual([{ label: 'Problem', value: expect.stringContaining('{x}') }]);
     });
 });
