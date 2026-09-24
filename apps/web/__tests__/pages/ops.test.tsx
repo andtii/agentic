@@ -26,6 +26,8 @@ describe('/machines', () => {
         expect(root.querySelector('[data-page="machines"]')).not.toBeNull();
         const groups = [...root.querySelectorAll('[data-machine-group]:not([data-platform])')];
         expect(groups.map(g => g.getAttribute('aria-label'))).toEqual(opsMachines.map(m => m.name));
+        // Each group is zero's Card (#593): the header row, then the body with its environments.
+        expect(groups.every((g) => g.tagName === 'SECTION' && g.getAttribute('data-scope') === 'card' && g.querySelector(':scope > [data-part="header"] [data-machine-head]') !== null)).toBe(true);
         expect(root.querySelector('[data-machine-group][data-platform] [data-machine-name]')!.textContent).toBe('platform');
         // Five environment cards for alien01 — three Claude Code accounts, one Copilot CLI, one Codex.
         expect(groups[0]!.querySelectorAll('[data-scope="ag-env-card"][data-part="root"]').length).toBe(5);
@@ -71,7 +73,7 @@ describe('/machines/:id', () => {
         expect(root.querySelectorAll('[data-doctor-check]').length).toBe(4);
         expect(root.querySelectorAll('[data-doctor-check][data-ok]').length).toBe(3);
         // The revoke card says disconnected, not failed.
-        expect(root.querySelector('[data-card][data-tone="failed"]')!.textContent).toContain('disconnected, not failed');
+        expect(root.querySelector('[data-machine-revoke][data-scope="card"][data-tone="failed"]')!.textContent).toContain('disconnected, not failed');
         buttonNamed(root, 'Revoke alien01').click();
         await tick();
         // The open one: the page's other dialogs (#239) stay in the DOM closed.
@@ -97,6 +99,12 @@ describe('/pair', () => {
         expect(root.querySelector('[data-code-status]')!.textContent).toContain('Waiting for the daemon');
         expect(root.querySelector('[data-code-status]')!.textContent).toContain('08:41');
         expect(root.querySelectorAll('[data-pair-step]').length).toBe(3);
+        // The steps are zero's Timeline (#593): done and current in primary, the next neutral; the countdown sits inline.
+        expect(root.querySelector('[data-pair-steps]')!.getAttribute('data-scope')).toBe('timeline');
+        expect([...root.querySelectorAll('[data-pair-step] > [data-part="marker"]')].map((m) => m.getAttribute('data-color'))).toEqual(['primary', 'primary', 'neutral']);
+        expect(root.querySelector('[data-pair-step][data-phase="active"]')!.getAttribute('aria-current')).toBe('step');
+        expect(root.querySelector('[data-code-status] [data-scope="countdown"][data-part="root"]')!.hasAttribute('data-mod-inline')).toBe(true);
+        expect(root.querySelector('[data-pair-grants]')!.getAttribute('data-scope')).toBe('card');
     });
 
     it('at zero dims the cells and swaps the waiting line for "New code", which restarts at 10:00', async () => {

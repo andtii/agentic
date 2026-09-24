@@ -173,8 +173,11 @@ describe('the update card (#367)', () => {
 
     it('shows a pending update phase by phase: the download’s progress, the turns a drain waits for, Cancel', async () => {
         const downloading = await card(view('downloading'));
-        expect(downloading.section.querySelector('[data-update-phase="downloading"]')!.getAttribute('data-state')).toBe('current');
-        expect(downloading.section.querySelector<HTMLProgressElement>('[data-update-progress]')!.value).toBe(60);
+        expect(downloading.section.querySelector('[data-update-phase="downloading"]')!.getAttribute('data-phase-state')).toBe('current');
+        // The download is zero's Progress: a named progressbar at 60 of 100.
+        const bar = downloading.section.querySelector('[data-update-progress]')!;
+        expect([bar.getAttribute('role'), bar.getAttribute('aria-valuenow'), bar.getAttribute('aria-valuemax')]).toEqual(['progressbar', '60', '100']);
+        expect(text(bar)).toBe('Downloaded 60%');
         buttonNamed(downloading.section, 'Cancel update').click();
         expect(downloading.emitted.cancel).toBe(1);
         // No Update buttons while one is pending.
@@ -182,10 +185,10 @@ describe('the update card (#367)', () => {
 
         const draining = await card(view('draining'));
         const phase = draining.section.querySelector('[data-update-phase="draining"]')!;
-        expect(phase.getAttribute('data-state')).toBe('current');
+        expect(phase.getAttribute('data-phase-state')).toBe('current');
         expect(text(phase.querySelector('[data-update-draining] > span'))).toBe('Waiting for 2 running turns:');
         expect([...phase.querySelectorAll('[data-update-turns] a')].map((a) => a.getAttribute('href'))).toEqual(['/sessions/s_41ab', '/tasks/t1']);
-        expect([...draining.section.querySelectorAll('[data-update-phase]')].filter((p) => p.getAttribute('data-state') === 'done').map((p) => p.getAttribute('data-update-phase'))).toEqual(['downloading', 'verifying', 'staged']);
+        expect([...draining.section.querySelectorAll('[data-update-phase]')].filter((p) => p.getAttribute('data-phase-state') === 'done').map((p) => p.getAttribute('data-update-phase'))).toEqual(['downloading', 'verifying', 'staged']);
     });
 
     it('reports how the last update ended: rolled back (restored), failed with its error, applied with Roll back', async () => {
@@ -258,6 +261,8 @@ describe('/machines and /machines/:id on mock data (#367)', () => {
         buttonNamed(root, 'Update all machines').click();
         await tick();
         const popup = openPopup()!;
+        // A consequence confirm naming every machine it restarts: it stays the alert dialog.
+        expect(popup.getAttribute('role')).toBe('alertdialog');
         expect([...popup.querySelectorAll('[data-confirm-dependents] li')].map((li) => text(li))).toEqual(['alien01 · 0.1.0 → 0.2.0']);
         buttonNamed(popup, 'Update 1 when idle').click();
         await tick();
@@ -274,7 +279,7 @@ describe('/machines and /machines/:id on mock data (#367)', () => {
         expect(options).toEqual(Object.keys(opsUpdateStates));
         change(section, 'select[name="update-preview"]', 'restarting');
         await tick();
-        expect(root.querySelector('[data-update-phase="restarting"]')!.getAttribute('data-state')).toBe('current');
+        expect(root.querySelector('[data-update-phase="restarting"]')!.getAttribute('data-phase-state')).toBe('current');
         // An action moves the mock the way the platform would.
         change(section, 'select[name="update-preview"]', 'available');
         await tick();

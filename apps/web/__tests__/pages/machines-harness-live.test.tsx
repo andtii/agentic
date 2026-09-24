@@ -91,7 +91,7 @@ const popup = (): HTMLElement => document.querySelector<HTMLElement>('[data-scop
 const card = (dom: ParentNode) => dom.querySelector<HTMLElement>('[data-harness-card]');
 const row = (dom: ParentNode, runtime: string) => card(dom)?.querySelector<HTMLElement>(`[data-harness-row="${runtime}"]`) ?? null;
 const textOf = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
-const phaseState = (dom: ParentNode, runtime: string, phase: string) => row(dom, runtime)?.querySelector(`[data-update-phase="${phase}"]`)?.getAttribute('data-state');
+const phaseState = (dom: ParentNode, runtime: string, phase: string) => row(dom, runtime)?.querySelector(`[data-update-phase="${phase}"]`)?.getAttribute('data-phase-state');
 
 describe('/machines/:id — runtimes on this machine (#370, live)', () => {
     it('shows the three runtimes from a live daemon; Update drains claude-code only, follows the phases and lands on the new version', { timeout: 20_000 }, async () => {

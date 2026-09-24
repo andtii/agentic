@@ -1,9 +1,11 @@
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
+import { Alert, Card, Progress } from '@sigx/zero';
 import type { HostOs, UpdateSettings } from '@agentic/core';
 import type { MachineUpdateView } from '@agentic/platform';
-import { Button, ConfirmDialog, Label, StatusPill, ageText } from '@agentic/ui';
+import { Button, ConfirmDialog, ErrorNote, Label, StatusPill, ageText } from '@agentic/ui';
 import { CommandWell } from './CommandWell';
+import { PhaseTimeline } from './PhaseTimeline';
 import { UpdatePolicyForm, type UpdateChoice } from './UpdatePolicyForm';
 import { BADGE_TEXT, canSelfUpdate, drainingText, impactText, lastLine, phaseSteps, policyLabel, progressPercent, reinstallCommand, restartWarning, rollbackTarget, runningLine, updateBadge } from './update';
 
@@ -84,12 +86,21 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
         const percent = progressPercent(pending?.progress);
         const state = !able ? 'no-feature' : pending ? 'pending' : u.available ? 'available' : 'current';
         return (
-            <section data-card data-update-card data-update-state={state} data-tone={u.outdated ? 'failed' : undefined} aria-label="Daemon updates">
-                <div data-label-row>
-                    <Label>Daemon updates</Label>
-                    {badge ? <StatusPill status={badge} label={BADGE_TEXT[badge].label} tone={BADGE_TEXT[badge].tone} /> : null}
-                </div>
-                {u.outdated ? <p data-update-banner role="alert">Update required: the platform no longer serves this daemon's version. It connects, but new work waits until it is updated.</p> : null}
+            <Card.Root asChild>
+            {(card) => (
+            <section {...card} data-update-card data-update-state={state} data-tone={u.outdated ? 'failed' : undefined} aria-label="Daemon updates">
+                <Card.Header>
+                    <div data-label-row>
+                        <Card.Title><Label>Daemon updates</Label></Card.Title>
+                        {badge ? <StatusPill status={badge} label={BADGE_TEXT[badge].label} tone={BADGE_TEXT[badge].tone} /> : null}
+                    </div>
+                </Card.Header>
+                <Card.Body data-card-body="">
+                {u.outdated ? (
+                    <Alert.Root color="warning" size="sm" data-update-banner="">
+                        <Alert.Description>Update required: the platform no longer serves this daemon's version. It connects, but new work waits until it is updated.</Alert.Description>
+                    </Alert.Root>
+                ) : null}
                 <p data-update-running>{runningLine(u, props.daemonVersion)}</p>
                 {restarts ? <p data-update-restarts role="status">{restarts}</p> : null}
 
@@ -98,23 +109,22 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                 {able && pending ? (
                     <div data-update-pending>
                         <p data-card-text>{pending.target === 'restart' ? 'Restarting' : `Updating to ${pending.target === 'previous' ? 'the previous version' : pending.target}`} ({pending.mode === 'now' ? 'now' : 'when idle'}).{pending.phase ? '' : ' Asked — waiting for the daemon to report.'}</p>
-                        <ol data-update-phases>
-                            {phaseSteps(pending).filter((s) => pending.target !== 'restart' || s.phase === 'draining' || s.phase === 'restarting').map((s) => (
-                                <li data-update-phase={s.phase} data-state={s.state} aria-current={s.state === 'current' ? 'step' : undefined}>
-                                    <span data-update-phase-label>{s.label}</span>
-                                    {s.phase === 'downloading' && s.state === 'current' && percent !== null
-                                        ? <progress data-update-progress max={100} value={percent} aria-label={`Downloaded ${percent}%`}>{percent}%</progress>
-                                        : null}
-                                    {s.phase === 'draining' && s.state === 'current' ? (
-                                        <div data-update-draining>
-                                            <span>{drainingText(u.impact)}</span>
-                                            {u.impact.runningTurns.length ? turnLinks() : null}
-                                        </div>
-                                    ) : null}
-                                </li>
-                            ))}
-                        </ol>
-                        {pending.error ? <p data-update-error role="alert">{pending.error.message}</p> : null}
+                        <PhaseTimeline
+                            steps={phaseSteps(pending).filter((s) => pending.target !== 'restart' || s.phase === 'draining' || s.phase === 'restarting')}
+                            label={pending.target === 'restart' ? 'Restart' : 'Update'}
+                            detail={(s) => (s.phase === 'downloading' && s.state === 'current' && percent !== null ? (
+                                <Progress.Root value={percent} max={100} color="primary" size="sm" aria-valuetext={`Downloaded ${percent}%`} data-update-progress="">
+                                    <Progress.Label>Downloaded {percent}%</Progress.Label>
+                                    <Progress.Track><Progress.Range /></Progress.Track>
+                                </Progress.Root>
+                            ) : s.phase === 'draining' && s.state === 'current' ? (
+                                <div data-update-draining>
+                                    <span>{drainingText(u.impact)}</span>
+                                    {u.impact.runningTurns.length ? turnLinks() : null}
+                                </div>
+                            ) : null)}
+                        />
+                        {pending.error ? <ErrorNote data-update-error="">{pending.error.message}</ErrorNote> : null}
                         <div data-card-actions>
                             <Button intent="default" loading={busy} disabled={busy} onClick={() => emit('cancel')}>{pending.target === 'restart' ? 'Cancel restart' : 'Cancel update'}</Button>
                         </div>
@@ -143,7 +153,7 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                     </p>
                 ) : null}
 
-                {last ? <p data-update-last data-tone={lastFailed ? 'failed' : undefined} role={lastFailed ? 'alert' : undefined}>{last}</p> : null}
+                {last ? (lastFailed ? <ErrorNote data-update-last="" data-tone="failed">{last}</ErrorNote> : <p data-update-last>{last}</p>) : null}
                 {able && back ? (
                     <div data-card-actions>
                         <Button intent="default" loading={busy} disabled={busy || offline} onClick={() => emit('rollback')}>Roll back to {back}</Button>
@@ -151,7 +161,7 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                 ) : null}
 
                 {props.reinstall && able ? reinstallBlock('The daemon said it cannot update itself. Reinstall once with the one-line installer:') : null}
-                {props.failure ? <p data-update-error role="alert">{props.failure}</p> : null}
+                {props.failure ? <ErrorNote data-update-error="">{props.failure}</ErrorNote> : null}
 
                 <p data-card-text data-update-follows>
                     {u.inherited.channel && u.inherited.policy
@@ -169,6 +179,7 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                     onSave={(choice: UpdateChoice) => emit('saveUpdates', choice)}
                 />
                 {slots.default?.()}
+                </Card.Body>
 
                 <ConfirmDialog
                     model={() => ui.confirmNow}
@@ -187,6 +198,8 @@ export const UpdateCard = component<UpdateCardProps>(({ props, emit, slots }) =>
                     ) : null}
                 </ConfirmDialog>
             </section>
+            )}
+            </Card.Root>
         );
     };
 });

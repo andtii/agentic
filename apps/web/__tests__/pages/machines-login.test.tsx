@@ -88,7 +88,14 @@ describe('/machines/:id — Sign in… (#484)', () => {
         expect(popup()!.textContent).toContain('paste the code it shows you back here');
         await status(m.daemon, requestId, 'env_work', 'waiting');
         const field = popup()!.querySelector<HTMLInputElement>('input[name="login-code"]')!;
-        // Empty is refused before anything is sent.
+        // Empty is refused before anything is sent: the form's `required` first, then blank space by the dialog itself.
+        expect(popup()!.getAttribute('role')).not.toBe('alertdialog');
+        expect(popup()!.querySelector('form[data-form-dialog]')).not.toBeNull();
+        button(popup()!, 'Send code').click();
+        await tick();
+        expect(field.validity.valueMissing).toBe(true);
+        field.value = '   ';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
         button(popup()!, 'Send code').click();
         await tick();
         expect(frames.filter((f) => f.t === 'login.answer')).toEqual([]);

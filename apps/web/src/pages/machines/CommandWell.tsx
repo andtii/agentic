@@ -1,4 +1,5 @@
 import { component, type Define, type JSXElement } from 'sigx';
+import { Collapsible } from '@sigx/zero';
 import { Button } from '@agentic/ui';
 
 /**
@@ -20,11 +21,13 @@ export const CommandWell = component<Define.Prop<'command', string, true> & Defi
         <>
             {well(props.command)}
             {props.fallback ? (
-                <details data-command-fallback>
-                    <summary>“command not found”?</summary>
-                    <p data-command-fallback-text>That machine was set up before the installer added the command. Run this instead, or re-run the installer from the Pair page to get it:</p>
-                    {well(props.fallback)}
-                </details>
+                <Collapsible.Root data-command-fallback="">
+                    <Collapsible.Trigger>“command not found”?</Collapsible.Trigger>
+                    <Collapsible.Panel>
+                        <p data-command-fallback-text>That machine was set up before the installer added the command. Run this instead, or re-run the installer from the Pair page to get it:</p>
+                        {well(props.fallback)}
+                    </Collapsible.Panel>
+                </Collapsible.Root>
             ) : null}
         </>
     );

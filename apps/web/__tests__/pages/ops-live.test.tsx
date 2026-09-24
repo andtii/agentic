@@ -92,6 +92,14 @@ describe('/schedules (live)', () => {
         buttonNamed(actions, 'New schedule').click();
         await until(() => popup(dom) !== null, 'the dialog');
         expect(newScheduleRequest.open).toBe(true);
+        // A FormDialog: an empty required title blocks the submit, and blank space is the dialog's own refusal.
+        expect(popup(dom)!.getAttribute('role')).not.toBe('alertdialog');
+        expect(popup(dom)!.querySelector('form[data-form-dialog]')).not.toBeNull();
+        buttonNamed(popup(dom)!, 'Create schedule').click();
+        await tick();
+        expect(input(popup(dom)!, 'schedule-title').validity.valueMissing).toBe(true);
+        setText(input(popup(dom)!, 'schedule-title'), '  ');
+        setText(input(popup(dom)!, 'schedule-at'), '2026-09-18 12:00');
         buttonNamed(popup(dom)!, 'Create schedule').click();
         await tick();
         expect(popup(dom)!.textContent).toContain('A title is required.');

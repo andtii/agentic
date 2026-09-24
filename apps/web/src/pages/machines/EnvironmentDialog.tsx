@@ -9,7 +9,7 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import type { EnvironmentDescriptor, EnvironmentInput, HostOs, MachinePolicy } from '@agentic/core';
-import { Button, ConfirmDialog, NumberField, SelectField, SwitchField, TextField, TextareaField } from '@agentic/ui';
+import { Button, ErrorNote, FormDialog, NumberField, SelectField, SwitchField, TextField, TextareaField } from '@agentic/ui';
 import { draftOf, emptyDraft, failureField, failureText, inputOf, validateDraft, withRoot, type DraftErrors, type EnvFailure, type EnvironmentDraft } from './manage';
 
 export type EnvironmentDialogProps =
@@ -49,16 +49,15 @@ export const EnvironmentDialog = component<EnvironmentDialogProps>(({ props, emi
         const allowed = props.policy?.allowedRoots ?? [];
         const runtimeOptions = [...new Set([...props.runtimes, ...(d.runtime ? [d.runtime] : [])])].map((r) => ({ value: r, label: r }));
         return (
-            <ConfirmDialog
+            <FormDialog
                 model={props.model}
                 title={editing ? `Edit ${props.environment!.name}` : 'Add environment'}
                 description={editing
                     ? 'The daemon changes it in place; its profile directory and sign-in stay as they are.'
                     : 'The daemon writes it on the machine and gives it its own profile directory. Sign its account in on the machine afterwards.'}
-                confirmLabel={editing ? 'Save environment' : 'Add environment'}
-                danger={false}
+                submitLabel={editing ? 'Save environment' : 'Add environment'}
                 busy={props.busy}
-                onConfirm={() => {
+                onSubmit={() => {
                     st.attempted = true;
                     if (Object.keys(errors()).length) return;
                     emit('save', inputOf(st.draft));
@@ -89,9 +88,9 @@ export const EnvironmentDialog = component<EnvironmentDialogProps>(({ props, emi
                     <NumberField model={() => d.concurrency} name="env-concurrency" label="Turns at once" description="How many agents may work in this environment at the same time; a message beyond it waits for a free slot. Open chats cost nothing until they work." min={1} step={1} placeholder="1" error={errorOf('concurrency')} disabled={props.busy} />
                     <TextField model={() => d.accountLabel} name="env-account" label="Account label" description="How the account shows in pickers; the environment's name when empty." disabled={props.busy} />
                     <SwitchField model={() => d.allowBypass} name="env-bypass" label="Allow bypassPermissions" description="Claude Code may run every tool unasked in this environment. Turning it on asks you to confirm with GitHub once." disabled={props.busy} />
-                    {failure && !field ? <p data-env-failure role="alert">{failureText(failure)}</p> : null}
+                    {failure && !field ? <ErrorNote data-env-failure="">{failureText(failure)}</ErrorNote> : null}
                 </div>
-            </ConfirmDialog>
+            </FormDialog>
         );
     };
 });

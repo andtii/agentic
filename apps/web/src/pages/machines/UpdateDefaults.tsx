@@ -1,5 +1,6 @@
 import { component, type Define } from 'sigx';
 import type { UpdateSettings } from '@agentic/core';
+import { ErrorNote } from '@agentic/ui';
 import { UpdatePolicyForm, type UpdateChoice } from './UpdatePolicyForm';
 
 /**
@@ -26,6 +27,6 @@ export const UpdateDefaults = component<
             busy={props.busy}
             onSave={(choice: UpdateChoice) => emit('save', { defaultChannel: choice.channel ?? props.value.defaultChannel, defaultPolicy: choice.policy ?? props.value.defaultPolicy })}
         />
-        {props.status ? <p data-update-defaults-status role={props.failed ? 'alert' : 'status'}>{props.status}</p> : null}
+        {props.status ? (props.failed ? <ErrorNote data-update-defaults-status="">{props.status}</ErrorNote> : <p data-update-defaults-status role="status">{props.status}</p>) : null}
     </div>
 ));

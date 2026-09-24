@@ -42,7 +42,7 @@ import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { EnvironmentId, EnvironmentInput, MachineId } from '@agentic/core';
-import { EmptyState } from '@agentic/ui';
+import { EmptyState, ErrorNote } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, routingKeyOf, taskKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { useAgentDirectory } from '../chat/directory';
@@ -411,7 +411,7 @@ export const LiveMachine = component<{ id: string; focusEnv?: string }>(({ props
                         ))
                     }}
                 />
-                {st.error ? <p data-machine-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-machine-error="">{st.error}</ErrorNote> : null}
                 {elevate.pending ? (
                     <ElevateDialog
                         model={() => elevate.open}

@@ -19,7 +19,7 @@ import { useActorState } from '@sigx/actors/app';
 import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from '@agentic/core';
 import type { RegistryOverview } from '@agentic/platform';
 import { virtualListbox } from '@sigx/zero/virtual-listbox';
-import { Button, ConfirmDialog, EmptyState, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
+import { Button, ConfirmDialog, EmptyState, ErrorNote, Icon, Label, SelectField, StatusPill, Switch, TextField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { registryKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { formatAge } from '../../mock/workspace';
@@ -227,7 +227,7 @@ export const LiveSettings = component(() => {
                         {deleteOp.text ? <p data-op-status="delete" data-state={deleteOp.state} role="status">{deleteOp.text}</p> : null}
                     </Section>
                 </form>
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
 
                 <ConfirmDialog
                     model={() => st.deleting}

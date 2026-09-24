@@ -15,6 +15,7 @@
  * from the same `get`.
  */
 import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
+import { Card } from '@sigx/zero';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { MachineUpdateView } from '@agentic/platform';
@@ -39,7 +40,7 @@ const LiveMachineGroup = component<{ id: string; name: string; workspaceId: stri
     onUnmounted(() => { stopReport(); props.report(props.id, null); });
     return (): JSXElement => {
         const v = view.value;
-        if (!v) return <section data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />;
+        if (!v) return <Card.Root asChild>{(card) => <section {...card} data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />}</Card.Root>;
         // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
         return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={liveCapacity(v)} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, Date.now()) } : {})} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} />;
     };

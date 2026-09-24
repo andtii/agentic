@@ -103,6 +103,8 @@ describe('/machines/:id on mock data (#239)', () => {
         button(root, 'Restart…').click();
         await tick();
         expect(text(open())).toContain('Restart the daemon on alien01?');
+        // A consequence confirm (it interrupts running turns): the alert dialog, not a form.
+        expect(open().getAttribute('role')).toBe('alertdialog');
         expect(text(open())).toContain('1 running turn will be interrupted and offered Resume.');
         expect(text(open().querySelector('[data-update-turns]'))).toContain('Lint · s_41ab');
         button(open(), 'Restart').click();
@@ -111,8 +113,7 @@ describe('/machines/:id on mock data (#239)', () => {
         expect(button(root, 'Restart…').disabled).toBe(true);
 
         const details = root.querySelector<HTMLDetailsElement>('[data-daemon-log]')!;
-        details.open = true;
-        details.dispatchEvent(new Event('toggle'));
+        details.querySelector<HTMLElement>('summary')!.click();
         await tick();
         expect(text(details)).toContain('Reading…');
         await new Promise((r) => setTimeout(r, 350));
@@ -145,6 +146,9 @@ describe('/machines/:id on mock data (#239)', () => {
 
         button(root, 'Rename').click();
         await tick();
+        // Rename is data entry: a FormDialog (a plain dialog around a form).
+        expect(open().getAttribute('role')).not.toBe('alertdialog');
+        expect(open().querySelector('form[data-form-dialog] input[name="machine-name"]')).not.toBeNull();
         setText(open().querySelector<HTMLInputElement>('input[name="machine-name"]')!, 'workstation');
         button(open(), 'Rename').click();
         await tick();

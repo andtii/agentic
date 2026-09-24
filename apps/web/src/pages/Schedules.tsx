@@ -53,7 +53,7 @@ export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
                     const policy = offlinePolicyLine(s);
                     const on = enabled[s.id] ?? s.enabled;
                     return (
-                        <tr data-scope="table" data-part="row" data-schedule={s.id}>
+                        <DataTable.Row data-schedule={s.id}>
                             <DataTable.Cell><Tag>{s.kind}</Tag></DataTable.Cell>
                             <DataTable.Cell>
                                 <span data-schedule-what>
@@ -67,7 +67,7 @@ export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
                             <DataTable.Cell>
                                 <Switch label={`Enable ${s.what}`} hideLabel model={() => enabled[s.id]} onCheckedChange={(v: boolean) => { enabled[s.id] = v; }} />
                             </DataTable.Cell>
-                        </tr>
+                        </DataTable.Row>
                     );
                 })}
             </DataTable>

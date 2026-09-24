@@ -15,7 +15,7 @@ import { component, effect, onMounted, onUnmounted, signal, type JSXElement } fr
 import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { Button, EmptyState, TextField, TextareaField } from '@agentic/ui';
+import { Button, EmptyState, ErrorNote, TextField, TextareaField } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { machineKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { pairing } from '../../mock/ops';
@@ -108,7 +108,7 @@ export const LivePair = component(() => {
                     <div data-pair-pending aria-busy={st.error ? undefined : 'true'}>
                         {st.error ? (
                             <>
-                                <p data-pair-error role="alert">{st.error}</p>
+                                <ErrorNote data-pair-error="">{st.error}</ErrorNote>
                                 <Button intent="primary" disabled={st.busy} onClick={() => { if (ws) void mint(ws); }}>Try again</Button>
                             </>
                         ) : null}
@@ -146,7 +146,7 @@ export const LivePair = component(() => {
                         )
                     }}
                 />
-                {st.error ? <p data-pair-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-pair-error="">{st.error}</ErrorNote> : null}
             </>
         );
     };
