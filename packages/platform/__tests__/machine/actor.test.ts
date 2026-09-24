@@ -659,6 +659,38 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect(await worktrees()).toHaveLength(1);
     });
 
+    it('audits a re-created worktree, not a reused one, and every project command with how it ended (#618)', async () => {
+        const { respond } = await rawDaemon(['run']);
+        const reused = await machine(K1).fsRequest(E1, worktree);
+        await respond(reused.requestId, { result: { kind: 'worktree', path: worktree.path, branch: 'feat/x', reused: true } });
+        expect(await machine(K1).fsResult(reused.requestId)).toMatchObject({ status: 'done', result: { reused: true } });
+        const recreated = await machine(K1).fsRequest(E1, worktree);
+        await respond(recreated.requestId, { result: { kind: 'worktree', path: worktree.path, branch: 'feat/x', recreated: true } });
+        await until(async () => (await worktrees()).length === 1, 'the re-created worktree');
+        expect((await worktrees())[0]).toMatchObject({ key: `${K1}:worktree:${recreated.requestId}`, summary: expect.stringContaining('re-created'), data: { recreated: true } });
+
+        const commands = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['workdir.command-run'] })).events;
+        const run = { kind: 'run', cwd: '/work/app', argv: ['npm', 'ci'] } as const;
+        const ok = await machine(K1).fsRequest(E1, run);
+        await respond(ok.requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } });
+        const failed = await machine(K1).fsRequest(E1, run);
+        await respond(failed.requestId, { error: { code: 'timeout', message: 'too slow' } });
+        await until(async () => (await commands()).length === 2, 'both commands');
+        const byKey = new Map((await commands()).map((e) => [e.key, e]));
+        expect(byKey.get(`${K1}:run:${ok.requestId}`)).toMatchObject({ by: 'user:u1', data: { machineId: M1, environmentId: E1, cwd: '/work/app', argv: ['npm', 'ci'], exitCode: 0 } });
+        expect(byKey.get(`${K1}:run:${failed.requestId}`)).toMatchObject({ data: { argv: ['npm', 'ci'], error: 'timeout' } });
+        expect(await worktrees()).toHaveLength(1);
+
+        // A long command line is cut in the summary and kept whole in the data.
+        const long = { ...run, argv: ['echo', 'x'.repeat(500)] };
+        const big = await machine(K1).fsRequest(E1, long);
+        await respond(big.requestId, { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } });
+        await until(async () => (await commands()).length === 3, 'the long command');
+        const entry = (await commands()).find((e) => e.key === `${K1}:run:${big.requestId}`)!;
+        expect(entry.summary.length).toBeLessThan(200);
+        expect(entry.data).toMatchObject({ argv: long.argv });
+    });
+
     it('times out an unanswered request through the liveness reminder; a late answer still lands', async () => {
         connect(K1, daemon(M1));
         await until(async () => (await machine(K1).get()).online, 'online');

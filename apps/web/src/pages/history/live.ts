@@ -18,7 +18,7 @@ export const HISTORY_KIND_FILTERS = [
     { id: 'all', label: 'All', kinds: undefined },
     { id: 'approvals', label: 'Approvals', kinds: ['approval.requested', 'approval.resolved'] },
     { id: 'delegations', label: 'Delegations', kinds: ['delegation.created'] },
-    { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created'] },
+    { id: 'environments', label: 'Environments and folders', kinds: ['environment.chosen', 'workdir.worktree-created', 'workdir.command-run'] },
     { id: 'transitions', label: 'Transitions', kinds: ['task.transition'] },
     { id: 'config', label: 'Config changes', kinds: ['config.versioned', 'proposal.reviewed'] },
     // `auth.elevated` (#355) carries no machine id, but it is only ever written as the gate on a machine security change and its summary names the machine, so it belongs beside the change it let through.
@@ -80,6 +80,7 @@ export const KIND_TONE: Partial<Record<AuditKind, Tone>> = {
     'machine.restarted': 'live',
     'auth.elevated': 'live',
     'workdir.worktree-created': 'live',
+    'workdir.command-run': 'live',
     'secret.opened': 'needs-you',
     'connector.connected': 'live',
     'connector.needs-reauth': 'failed'
@@ -94,7 +95,8 @@ export function kindLabel(e: AuditEvent): string {
         if (isResumeWait(e.data.wait)) return 'interrupted';
         return e.data.to === 'failed' ? 'failed' : e.data.to === 'cancelled' ? 'cancelled' : 'transition';
     }
-    if (e.kind === 'workdir.worktree-created') return 'worktree created';
+    if (e.kind === 'workdir.worktree-created') return e.data.recreated ? 'worktree re-created' : 'worktree created';
+    if (e.kind === 'workdir.command-run') return e.data.error !== undefined || e.data.exitCode !== 0 ? 'command failed' : 'command ran';
     // A connected account (#532, #533): `connected`, `reconnected`, `needs reconnecting`, `disconnected`.
     if (e.kind === 'connector.connected') return e.data.reconnected ? 'reconnected' : 'connected';
     if (e.kind === 'connector.needs-reauth') return 'needs reconnecting';
@@ -174,6 +176,7 @@ export function refOf(e: AuditEvent): HistoryRef | null {
     if (e.kind === 'environment.put') return { label: e.data.name, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'environment.removed') return { label: e.data.environmentId, href: `/machines/${e.data.machineId}` };
     if (e.kind === 'workdir.worktree-created') return { label: e.data.branch, href: `/machines/${e.data.machineId}` };
+    if (e.kind === 'workdir.command-run') return { label: e.data.argv[0] ?? 'command', href: `/machines/${e.data.machineId}` };
     if (e.kind === 'harness.changed') return { label: e.data.runtime, href: `/machines/${e.data.machineId}#runtimes` };
     if (e.kind === 'machine.renamed') return { label: e.data.to, href: `/machines/${e.data.machineId}` };
     // The folder policy has its own card on the machine page (#480); a relayed sign-in names the environment it signed in.

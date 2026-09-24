@@ -50,7 +50,8 @@ export const AUDIT_KINDS = [
     'session.interrupted',
     'session.resumed',
     'task.machine-lost',
-    'workdir.worktree-created'
+    'workdir.worktree-created',
+    'workdir.command-run'
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -318,6 +319,20 @@ export interface WorktreeCreatedData {
     /** Where the worktree was added: absolute, machine-native. */
     readonly path: string;
     readonly base?: string;
+    /** The branch existed with no worktree and was checked out again (#618). */
+    readonly recreated?: true;
+}
+
+/** A project command a machine ran on the owner's behalf (#618): what, where, and how it ended. */
+export interface CommandRunData {
+    readonly machineId: MachineId;
+    readonly environmentId: EnvironmentId;
+    readonly cwd: string;
+    readonly argv: readonly string[];
+    /** The exit code, when the command ran to its end. */
+    readonly exitCode?: number;
+    /** The refusal or failure (`not-found`, `timeout`, `outside-roots`, …) when it did not. */
+    readonly error?: string;
 }
 
 /**
@@ -435,6 +450,7 @@ export interface AuditDataByKind {
     readonly 'session.resumed': SessionResumedData;
     readonly 'task.machine-lost': TaskMachineLostData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
+    readonly 'workdir.command-run': CommandRunData;
 }
 
 /** What an emitter hands `record` / `recordAudit`: one kind, its data, the common fields. */
