@@ -61,9 +61,10 @@ All work is tracked as sub-issues of the tracking issue
    `docs/promotion.md`. Need another package changed? Stop and file a follow-up
    issue instead of editing it.
 6. **Zero feedback.** When `@sigx/zero` blocks you (missing part, state, binding),
-   file an issue on `andtii/zero-wip` labelled `from:agentic`, link it from your
-   issue, and use the smallest local workaround under
-   `packages/ui/src/_zero-gaps/`. Never patch `node_modules` or vendor zero.
+   file an issue on `signalxjs/zero` labelled `from:agentic`, link it from your
+   issue, and use the smallest local workaround in the package that owns the
+   code, with a `docs/promotion.md` line naming the zero issue. Never patch
+   `node_modules` or vendor zero.
 7. **Promotion.** Anything generic you write stays in the package the issue names
    and gets one line in `docs/promotion.md`.
 8. **Definition of done:** `pnpm typecheck && pnpm lint && pnpm test && pnpm size`
