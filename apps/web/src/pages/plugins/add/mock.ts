@@ -7,13 +7,16 @@
 import { signal } from 'sigx';
 import type { AgentHue } from '@agentic/ui';
 import { AGENTS } from '../../../mock/workspace';
-import { listingPluginId } from '../../../plugins/listings';
+import { CONNECTOR_LISTINGS, listingPluginId } from '../../../plugins/listings';
 import { connectorIdOf } from '../connector';
 import type { AddConnectorPort } from './AddConnectorView';
 import { addedReason } from './model';
 
 /** What the mock board shows connected. */
 export const MOCK_CONNECTED: readonly string[] = ['github'];
+
+/** Every plugin the mock workspace has, connected or not: the conduit connectors ship in the catalogue, as live. */
+const MOCK_INSTALLED: readonly string[] = CONNECTOR_LISTINGS.filter((l) => l.transport === 'conduit').map(listingPluginId);
 
 export interface MockAddedVersion {
     readonly agentId: string;
@@ -25,7 +28,7 @@ export function mockAddConnectorPort(log: MockAddedVersion[] = []): AddConnector
     const st = signal<{ connected: string[] }>({ connected: [...MOCK_CONNECTED] });
     return {
         connected: () => new Set(st.connected),
-        taken: () => new Set(st.connected),
+        taken: () => new Set([...MOCK_INSTALLED, ...st.connected]),
         agents: () => AGENTS.map((a) => ({ id: a.id, name: a.name, role: a.role, hue: a.hue as AgentHue })),
         async connectConduit(listing) {
             st.connected = [...st.connected, listingPluginId(listing)];

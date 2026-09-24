@@ -148,6 +148,7 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
 
     const tile = (listing: ConnectorListing, selected: string | undefined, connected: ReadonlySet<string>) => (
         <ConnectorTile
+            key={listing.id}
             id={listing.id}
             name={listing.name}
             transport={transportLabel(listing.transport)}
@@ -180,7 +181,7 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
                         label="Show"
                         model={() => st.show}
                         options={[{ value: 'not-connected', label: 'Not connected' }, { value: 'everything', label: 'Everything' }]}
-                        onValueChange={(v: string) => { const { show: _show, ...rest } = query(); go({ ...rest, ...(v === 'not-connected' ? { show: 'not-connected' as const } : {}) }); }}
+                        onValueChange={(v: string) => { st.show = v === 'not-connected' ? 'not-connected' : 'everything'; const { show: _show, ...rest } = query(); go({ ...rest, ...(v === 'not-connected' ? { show: 'not-connected' as const } : {}) }); }}
                     />
                 </div>
                 <div data-add-unlisted>

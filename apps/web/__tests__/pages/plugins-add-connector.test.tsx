@@ -16,6 +16,7 @@ import { plainCodeRenderer, useCodeRenderer } from '@agentic/ui';
 import { afterConnect, startReturnTo } from '../../src/connectors/routes';
 import { createServerRouter } from '../../src/router';
 import { LiveAddConnector } from '../../src/pages/plugins/add/live';
+import { mockAddConnectorPort } from '../../src/pages/plugins/add/mock';
 import { addHref, addedReason, configWithConnector, parseAddQuery, withConnector } from '../../src/pages/plugins/add/model';
 import { buttonNamed, setText, text, tick } from './helpers';
 import { WS, mountLive, owner, tick as sleep, startLive, until, type LiveHarness } from './live-harness';
@@ -120,6 +121,15 @@ describe('/plugins/connectors/add (mock)', () => {
         await wait(() => !tiles(dom).includes('github'), 'GitHub hidden');
         expect(urlOf(router)).toBe('/plugins/connectors/add?category=dev-tools&show=not-connected');
         expect(dom.querySelector('[data-category="dev-tools"] [data-count]')!.textContent).toBe('2');
+        buttonNamed(dom, 'Everything').click();
+        await wait(() => tiles(dom).includes('github'), 'GitHub back');
+        expect(urlOf(router)).toBe('/plugins/connectors/add?category=dev-tools');
+    });
+
+    it('the mock port counts every installed plugin as taken, connected or not', () => {
+        const taken = mockAddConnectorPort().taken();
+        expect(taken.has('gmail')).toBe(true);
+        expect(taken.has('github')).toBe(true);
     });
 
     it('selecting a tile shows its preview, and the URL restores it on reload', async () => {
