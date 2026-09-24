@@ -285,9 +285,12 @@ const lineComposer: RecipeInput = {
         head: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0' } },
         title: { base: { ...ellipsis, flex: '1', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' } },
         ref: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)', whiteSpace: 'nowrap' } },
+        // zero's Textarea wears the design system's field chrome; here it fills the row (autosizing from two rows).
         input: {
-            base: { inlineSize: '100%', boxSizing: 'border-box', padding: '10px', resize: 'vertical', minBlockSize: '60px', background: 'var(--color-base-100)', border: 'var(--border) solid var(--ag-line-strong)', borderRadius: 'var(--radius-field)', color: 'var(--color-base-content)', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' },
-            selectors: { '&:focus-visible': { outline: 'none', borderColor: 'var(--ag-text-dim)' } }
+            base: { display: 'block' },
+            selectors: {
+                '& [data-scope="textarea"][data-part="textarea"]': { inlineSize: '100%', boxSizing: 'border-box', padding: '10px', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-md)' }
+            }
         },
         foot: {
             base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' },

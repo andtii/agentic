@@ -1,8 +1,10 @@
 /**
  * A tool part's lifecycle, in the two vocabularies a card needs: the product
  * PHASE (`pending | running | done | error | denied`, what the status text
- * says) and the governed zero STATE the anatomy declares for `data-state`
- * (`loading | active | complete | error | closed`) — see `./anatomy`.
+ * says) and the governed zero lifecycle STATE the anatomy declares for
+ * `data-state` (`loading | running | paused | complete | error | denied |
+ * cancelled`) — see `./anatomy`. A cancelled call keeps the ERROR pill (the
+ * handoff's five words) but its own governed state.
  */
 import type { AgentStatus } from '@sigx/ai-agent';
 import type { ToolPartState } from '@sigx/ai-agent/app';
@@ -20,10 +22,10 @@ export interface ToolCallView {
 
 const STATE_OF: Record<ToolCallPhase, LifecycleState> = {
     pending: 'loading',
-    running: 'active',
+    running: 'running',
     done: 'complete',
     error: 'error',
-    denied: 'closed'
+    denied: 'denied'
 };
 
 function phaseOf(p: ToolPartState): ToolCallPhase {
@@ -50,21 +52,21 @@ export function toolCallState(p: ToolPartState, opts: { readonly awaiting?: bool
     else if (phase === 'pending' && opts.awaiting) label = 'awaiting approval';
     else if (p.status === 'cancelled') label = 'cancelled';
     else if (phase === 'done' && opts.emptyOutput) label = 'done, no output';
-    return { phase, state: STATE_OF[phase], label };
+    return { phase, state: p.status === 'cancelled' ? 'cancelled' : STATE_OF[phase], label };
 }
 
-/** A sub-agent's status on the same governed set: paused is a wait, cancelled a dismissal. */
+/** A sub-agent's status on the same governed set. */
 export function agentState(status: AgentStatus): LifecycleState {
     switch (status) {
         case 'running':
-            return 'active';
+            return 'running';
         case 'paused':
-            return 'loading';
+            return 'paused';
         case 'completed':
             return 'complete';
         case 'failed':
             return 'error';
         default:
-            return 'closed';
+            return 'cancelled';
     }
 }

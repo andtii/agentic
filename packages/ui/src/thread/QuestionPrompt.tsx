@@ -21,6 +21,7 @@
 import { component, type Define } from '@sigx/runtime-core';
 import type { OpenRequest } from '@sigx/ai-agent/app';
 import { Button } from '../kit/Button.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { Icon } from '../kit/icons.js';
 import type { ApprovalRequester, RespondFn } from './ApprovalPrompt.js';
 import { aiQuestionAnatomy } from './anatomy.js';
@@ -216,7 +217,7 @@ export const QuestionPrompt = component<QuestionPromptProps>(({ props, signal })
                                 />
                             </fieldset>
                         ))}
-                        {st.error ? <p data-scope={SCOPE} data-part="error" role="alert">{`Could not answer: ${st.error}`}</p> : null}
+                        {st.error ? <ErrorNote data-question-error="">{`Could not answer: ${st.error}`}</ErrorNote> : null}
                         <div data-scope={SCOPE} data-part="actions">
                             <Button intent="wait" icon="check" loading={st.pending} disabled={st.pending || !ready} onClick={submit}>
                                 Answer

@@ -3,25 +3,28 @@
  * `docs/design/HANDOFF.md` → "Tool call `data-state`"): the header carries
  * an icon in the state colour, the tool name, the signature truncated, an
  * optional meta (duration, diff stat, task id) and the status pill; the
- * input folds in a `<details>`, the output is a well that folds past six
- * lines behind "Show N more lines" and links to the session log past two
- * hundred; an error line; the approval card in place while the call waits
- * on the operator; the sub-agent card when the call spawned one.
+ * input folds in a zero `Collapsible`, the output is a well (a Collapsible
+ * too) that folds past six lines behind "Show N more lines" and links to the
+ * session log past two hundred; an error line; the approval card in place
+ * while the call waits on the operator; the sub-agent card when the call
+ * spawned one.
  *
- * `data-state` is the governed lifecycle (`./tool-state`): `loading` while
- * pending — arguments still streaming, or awaiting approval — `active` while
- * running, `complete`, `error`, and `closed` for a denied call. The pill
- * says the phase in the handoff's words (PENDING, RUNNING, DONE, ERROR,
- * DENIED); a refined phase (`awaiting approval`, `cancelled`, `no output`)
- * is the meta text when the caller gave none.
+ * `data-state` is zero's governed lifecycle (`./tool-state`): `loading`
+ * while pending — arguments still streaming, or awaiting approval —
+ * `running`, `complete`, `error`, `denied` and `cancelled`. The pill says
+ * the phase in the handoff's words (PENDING, RUNNING, DONE, ERROR, DENIED);
+ * a refined phase (`awaiting approval`, `cancelled`, `no output`) is the
+ * meta text when the caller gave none.
  */
 import { component, type Define } from '@sigx/runtime-core';
 import { agentMessages } from '@sigx/ai-agent';
+import { Collapsible } from '@sigx/zero';
 import type { AgentState, AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import { Button } from '../kit/Button.js';
 import { Icon, type IconName } from '../kit/icons.js';
 import { StatusPill } from '../kit/StatusPill.js';
 import { aiToolCallAnatomy } from './anatomy.js';
+import { followDisclosure } from './disclosure.js';
 import { ApprovalPrompt, type ApprovalPromptProps, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message } from './Message.js';
@@ -96,36 +99,32 @@ export function toolIcon(name: string): IconName {
 /** The pill status per phase — the handoff's five words. */
 const PILL: Record<ToolCallPhase, string> = { pending: 'pending', running: 'running', done: 'done', error: 'error', denied: 'denied' };
 
-/** The input block on a native `<details>`; the reader's toggle wins over the default. */
-const InputBlock = component<Define.Prop<'text', string, true>>(({ props, signal }) => {
-    const st = signal({ open: undefined as boolean | undefined });
-    return () => {
-        const open = st.open ?? false;
-        return (
-            <details
-                data-scope={SCOPE}
-                data-part="input"
-                data-state={open ? 'open' : 'closed'}
-                open={open}
-                onToggle={(e: Event) => {
-                    st.open = (e.currentTarget as HTMLDetailsElement).open;
-                }}
-            >
-                <summary>input</summary>
-                <pre>{props.text}</pre>
-            </details>
-        );
-    };
-}, { name: 'ToolCall.Input' });
+/** A block's fold: a zero Collapsible whose trigger is the chevron and a mono label. */
+const Fold = component<Define.Prop<'label', string, true> & Define.Prop<'defaultOpen', boolean, false> & Define.Slot<'default'>>(({ props, slots }) => () => (
+    <Collapsible.Root defaultOpen={props.defaultOpen}>
+        <Collapsible.Trigger>
+            {props.label}
+        </Collapsible.Trigger>
+        <Collapsible.Panel>{slots.default?.()}</Collapsible.Panel>
+    </Collapsible.Root>
+), { name: 'ToolCall.Fold' });
+
+/** The input block: folded by default; the Collapsible keeps the reader's toggle across re-renders. */
+const InputBlock = component<Define.Prop<'text', string, true>>(({ props }) => () => (
+    <div data-scope={SCOPE} data-part="input">
+        <Fold label="input">
+            <pre>{props.text}</pre>
+        </Fold>
+    </div>
+), { name: 'ToolCall.Input' });
 
 /**
  * The output well: open by default, the first six lines, then "Show N more
  * lines"; past two hundred lines the rest lives in the session log.
  */
 const OutputBlock = component<Define.Prop<'text', string, true> & Define.Prop<'logHref', string, false>>(({ props, signal }) => {
-    const st = signal({ open: undefined as boolean | undefined, expanded: false });
+    const st = signal({ expanded: false });
     return () => {
-        const open = st.open ?? true;
         const lines = props.text.split('\n');
         const total = lines.length;
         const capped = Math.min(total, OUTPUT_LOG);
@@ -133,35 +132,28 @@ const OutputBlock = component<Define.Prop<'text', string, true> & Define.Prop<'l
         const folded = capped - shown.length;
         const beyond = total - capped;
         return (
-            <details
-                data-scope={SCOPE}
-                data-part="output"
-                data-state={open ? 'open' : 'closed'}
-                open={open}
-                onToggle={(e: Event) => {
-                    st.open = (e.currentTarget as HTMLDetailsElement).open;
-                }}
-            >
-                <summary>output</summary>
-                <pre>{shown.join('\n')}</pre>
-                {folded > 0 && (
-                    <button
-                        type="button"
-                        data-scope={SCOPE}
-                        data-part="more"
-                        onClick={() => {
-                            st.expanded = true;
-                        }}
-                    >
-                        {`Show ${folded} more line${folded === 1 ? '' : 's'}`}
-                    </button>
-                )}
-                {st.expanded && beyond > 0 && props.logHref && (
-                    <a data-scope={SCOPE} data-part="log" href={props.logHref}>
-                        {`${beyond} more line${beyond === 1 ? '' : 's'} in the session log`}
-                    </a>
-                )}
-            </details>
+            <div data-scope={SCOPE} data-part="output">
+                <Fold label="output" defaultOpen>
+                    <pre>{shown.join('\n')}</pre>
+                    {folded > 0 && (
+                        <button
+                            type="button"
+                            data-scope={SCOPE}
+                            data-part="more"
+                            onClick={() => {
+                                st.expanded = true;
+                            }}
+                        >
+                            {`Show ${folded} more line${folded === 1 ? '' : 's'}`}
+                        </button>
+                    )}
+                    {st.expanded && beyond > 0 && props.logHref && (
+                        <a data-scope={SCOPE} data-part="log" href={props.logHref}>
+                            {`${beyond} more line${beyond === 1 ? '' : 's'} in the session log`}
+                        </a>
+                    )}
+                </Fold>
+            </div>
         );
     };
 }, { name: 'ToolCall.Output' });
@@ -173,9 +165,12 @@ const OutputBlock = component<Define.Prop<'text', string, true> & Define.Prop<'l
  * recursion: a sub-agent's own spawning call carries its own card.
  */
 const AgentCard = component<Define.Prop<'agent', AgentState, true> & ThreadContextProps>(({ props }) => {
+    const isRunning = (): boolean => props.agent.status === 'running' || props.agent.status === 'paused';
+    // Its work is open while it runs and folds once it is done — unless the reader toggled it.
+    const work = followDisclosure(isRunning);
     return () => {
         const { agent, transcript } = props;
-        const running = agent.status === 'running' || agent.status === 'paused';
+        const running = isRunning();
         const summary = nonBlank(agent.summary === undefined ? undefined : oneLine(agent.summary));
         const error = nonBlank(agent.error?.message);
         const messages = transcript ? agentMessages(transcript, agent.agentId) : [];
@@ -193,12 +188,21 @@ const AgentCard = component<Define.Prop<'agent', AgentState, true> & ThreadConte
                 {summary && <p>{summary}</p>}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
                 {messages.length > 0 && (
-                    <details open={running}>
-                        <summary>{running ? 'Working…' : `Its work (${messages.length} message${messages.length === 1 ? '' : 's'})`}</summary>
-                        {messages.map((m) => (
-                            <Message key={m.id} message={m} transcript={transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={cancel} />
-                        ))}
-                    </details>
+                    <Collapsible.Root
+                        model={() => work.open}
+                        onOpenChange={() => {
+                            work.touched = true;
+                        }}
+                    >
+                        <Collapsible.Trigger>
+                            {running ? 'Working…' : `Its work (${messages.length} message${messages.length === 1 ? '' : 's'})`}
+                        </Collapsible.Trigger>
+                        <Collapsible.Panel>
+                            {messages.map((m) => (
+                                <Message key={m.id} message={m} transcript={transcript} onRespond={props.onRespond} describeRequest={props.describeRequest} onCancelAgent={cancel} />
+                            ))}
+                        </Collapsible.Panel>
+                    </Collapsible.Root>
                 )}
             </div>
         );

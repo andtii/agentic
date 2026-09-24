@@ -5,13 +5,11 @@
  *
  * Every `data-state` value is a member of zero's governed vocabulary: the
  * kit's `mergeManifests` rejects any other spelling at adoption time. A tool
- * call's lifecycle therefore reads as `loading` (pending, awaiting approval,
- * arguments still streaming) · `active` (running) · `complete` (done) ·
- * `error` (failed, cancelled) · `closed` (denied — the request was
- * dismissed); the human phase is the pill in the `status` part. Zero's
- * synonym table itself prescribes the first three (`pending → loading`,
- * `done → complete`, `failed → error`); a lifecycle family of its own is
- * filed upstream as andtii/zero-wip#483.
+ * call's lifecycle reads on zero's governed lifecycle family: `loading`
+ * (pending, awaiting approval, arguments still streaming) · `running` ·
+ * `paused` (a sub-agent held) · `complete` (done) · `error` (failed) ·
+ * `denied` (the request was refused) · `cancelled` (stopped before it
+ * finished); the human phase is the pill in the `status` part.
  *
  * The parts follow `docs/design/HANDOFF.md` → "`ai-*` fragment": the
  * message meta carries the environment line and the time, the tool card an
@@ -22,7 +20,7 @@
 import { defineAnatomy } from '@sigx/zero/anatomy';
 
 /** The lifecycle states a tool call — and a sub-agent it spawned — can render. */
-export const LIFECYCLE_STATES = ['loading', 'active', 'complete', 'error', 'closed'] as const;
+export const LIFECYCLE_STATES = ['loading', 'running', 'paused', 'complete', 'error', 'denied', 'cancelled'] as const;
 
 /**
  * The transcript container: a `role="log"` root that windows its rows and
@@ -68,9 +66,11 @@ export const aiMessageAnatomy = defineAnatomy('ai-message', {
 
 /**
  * A tool call card: header (icon in the state colour, tool name, the
- * signature truncated, an optional meta, the status pill), collapsible io,
- * the error line, the sub-agent it spawned. The output well folds past six
- * lines behind `more`, and `log` links out past two hundred.
+ * signature truncated, an optional meta, the status pill), the `input` and
+ * `output` blocks — each holds a zero `Collapsible` (the `<details>`), which
+ * the recipe styles in context through `composes` — the error line, the
+ * sub-agent it spawned. The output well folds past six lines behind `more`,
+ * and `log` links out past two hundred.
  */
 export const aiToolCallAnatomy = defineAnatomy('ai-tool-call', {
     root: { element: 'div', states: LIFECYCLE_STATES, tokens: ['color', 'radius-box', 'text'] },
@@ -83,8 +83,8 @@ export const aiToolCallAnatomy = defineAnatomy('ai-tool-call', {
     /** A page's link about the call ("View diff") — `links`, before the meta. */
     link: { element: 'a', parent: 'header', tokens: ['color', 'text'] },
     status: { element: 'span', parent: 'header', tokens: ['color', 'text'] },
-    input: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },
-    output: { element: 'details', parent: 'root', states: ['open', 'closed'], tokens: ['text'] },
+    input: { element: 'div', parent: 'root', tokens: ['text'] },
+    output: { element: 'div', parent: 'root', tokens: ['text'] },
     /** "Show N more lines" — the output well past six lines. */
     more: { element: 'button', parent: 'output', tokens: ['color', 'text'] },
     /** The session log link — an output past two hundred lines. */
@@ -93,10 +93,14 @@ export const aiToolCallAnatomy = defineAnatomy('ai-tool-call', {
     agent: { element: 'div', parent: 'root', states: LIFECYCLE_STATES, tokens: ['color', 'radius-box'] }
 });
 
-/** A reasoning block on a native `<details>`: open while it streams, folded once done. */
+/**
+ * A reasoning block: the `root` holds a zero `Collapsible` (the `<details>`,
+ * open while it streams, folded once done); the `summary` text sits in its
+ * trigger and the `body` in its panel.
+ */
 export const aiReasoningAnatomy = defineAnatomy('ai-reasoning', {
-    root: { element: 'details', states: ['open', 'closed'], tokens: ['color', 'radius-box', 'text'] },
-    summary: { element: 'summary', parent: 'root', tokens: ['text'] },
+    root: { element: 'div', tokens: ['color', 'text'] },
+    summary: { element: 'span', parent: 'root', tokens: ['text'] },
     body: { element: 'div', parent: 'root', tokens: ['text'] }
 });
 
@@ -130,7 +134,7 @@ export const aiApprovalAnatomy = defineAnatomy('ai-approval', {
  * then one `question` per form property — its `label` (the short header),
  * its `prompt` (the question itself), the `options` as toggles (`on` when
  * chosen, with a `hint` line each) and a free-text `other` — the `actions`
- * with the answer button, an `error` line when the answer did not get
+ * with the answer button, the kit's `ErrorNote` when the answer did not get
  * through, and the one-line `record` an answered question collapses to. A
  * question whose asker stopped waiting (#285) carries a `note` saying what
  * answering does.
@@ -148,6 +152,5 @@ export const aiQuestionAnatomy = defineAnatomy('ai-question', {
     hint: { element: 'span', parent: 'option', tokens: ['text'] },
     other: { element: 'textarea', parent: 'question', tokens: ['color', 'radius-field', 'text'] },
     actions: { element: 'div', parent: 'root' },
-    error: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
     record: { element: 'p', parent: 'root', tokens: ['text'] }
 });
