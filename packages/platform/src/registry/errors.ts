@@ -16,6 +16,7 @@ export type RegistryErrorCode =
     | 'secret-denied'
     | 'bad-name'
     | 'connector-missing'
+    | 'unknown-tool'
     | 'no-migration'
     | 'migration-failed';
 

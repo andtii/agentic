@@ -45,7 +45,9 @@ describe('gate({ connectors })', () => {
                 url: 'https://mcp.acme.test/mcp',
                 auth: { bearer: 'acme.token', headers: { 'X-Team': 'acme.team' } },
                 tools: [],
-                status: { state: 'unknown' }
+                status: { state: 'unknown' },
+                toolPolicy: {},
+                toolsGranted: true
             },
             { id: 'other', state: 'disabled', pluginId: 'other' },
             { id: 'ghost', state: 'missing' }
@@ -85,7 +87,7 @@ describe('a conduit connector (#530)', () => {
         // A plugin config url is an MCP setting; it never reaches a conduit connector.
         await reg().configure('gmail', { url: 'https://elsewhere.test/mcp' });
         expect((await reg().gate({ connectors: ['gmail'] })).connectors).toEqual([
-            { id: 'gmail', state: 'ready', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' } }
+            { id: 'gmail', state: 'ready', pluginId: 'gmail', transport: 'conduit', connector: 'gmail', account: 'acct_1', tools: [], status: { state: 'unknown' }, toolPolicy: {}, toolsGranted: true }
         ]);
     });
 

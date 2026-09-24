@@ -10,7 +10,7 @@
  * contract the history page and other emitters (delegation, #39) build on.
  */
 
-import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, UpdatePolicy, WaitReason } from '@agentic/core';
+import type { AccountKey, AgentId, ChatId, EnvErrorCode, EnvironmentId, Limits, MachineId, OfflinePolicy, PermissionScope, ProjectFeatureReleaseReason, ProjectId, ReleaseChannel, RuntimeId, SessionClosedCode, SessionId, TaskId, TaskStatus, ToolMode, UpdatePolicy, WaitReason } from '@agentic/core';
 
 export const AUDIT_KINDS = [
     'approval.requested',
@@ -44,6 +44,8 @@ export const AUDIT_KINDS = [
     'plugin.enabled',
     'plugin.disabled',
     'plugin.granted',
+    'plugin.revoked',
+    'plugin.tool-policy',
     'plugin.activated',
     'project.changed',
     'project.chat-released',
@@ -285,6 +287,16 @@ export interface PluginGrantedData {
     readonly scopes: readonly PermissionScope[];
 }
 
+/** `Registry.revoke` narrowed a plugin's permissions; `scopes` are the ones it HELD and no longer does. */
+export type PluginRevokedData = PluginGrantedData;
+
+/** `Registry.setToolPolicy` changed the workspace-default mode of one of a plugin's tools (PLG-03). */
+export interface PluginToolPolicyData {
+    readonly pluginId: string;
+    readonly tool: string;
+    readonly mode: ToolMode;
+}
+
 /** `Registry.activate` changed which plugin a single-slot kind (memory, learning) runs on; `previous` is the one it replaced. */
 export interface PluginActivatedData {
     readonly pluginId: string;
@@ -460,6 +472,8 @@ export interface AuditDataByKind {
     readonly 'plugin.enabled': PluginToggledData;
     readonly 'plugin.disabled': PluginToggledData;
     readonly 'plugin.granted': PluginGrantedData;
+    readonly 'plugin.revoked': PluginRevokedData;
+    readonly 'plugin.tool-policy': PluginToolPolicyData;
     readonly 'plugin.activated': PluginActivatedData;
     readonly 'project.changed': ProjectChangedData;
     readonly 'project.chat-released': ProjectChatReleasedData;
