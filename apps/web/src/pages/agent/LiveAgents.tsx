@@ -10,11 +10,11 @@
  * `defaults.runtime` (#234).
  */
 import { component, signal, useHead, type Define } from 'sigx';
-import { Link, useRouter } from '@sigx/router';
+import { useRouter } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId } from '@agentic/core';
-import { AgentTile, EmptyState, EnvironmentLine, Icon, Label, StatusPill } from '@agentic/ui';
+import { AgentTile, EmptyState, EnvironmentLine, ErrorNote, Icon, Label, StatusPill } from '@agentic/ui';
 import { Col, Row, Stack } from '@sigx/zero';
 import { useActorDefs, useViewer, type ActorDefs } from '../../actors/defs';
 import { agentKeyOf, workspaceKeyOf } from '../../actors/keys';
@@ -24,6 +24,7 @@ import { useAgentCorrections, useMemoryCount, useWorkspaceTasks } from './activi
 import { closeNewAgent, newAgentRequest } from './head';
 import { CREATED_REASON, newAgentPatch, presenceOf, tasksByAssignee, type NewAgentInput } from './live';
 import { NewAgentDialog } from './NewAgentDialog';
+import { AgentCardLink } from './AgentCardLink';
 import { useWorkspaceReadiness } from '../plugins/readiness';
 import { runtimeOptions } from './runtimes';
 
@@ -94,7 +95,7 @@ export const LiveAgents = component(() => {
                                     const pill = presencePill(presenceOf(byAgent[a.id] ?? []));
                                     return (
                                     <li data-agent-card={a.id}>
-                                        <Link to={`/agents/${a.id}`} class="agent-card">
+                                        <AgentCardLink to={`/agents/${a.id}`}>
                                             <Row gap="md" align="center">
                                                 <AgentTile name={a.name} hue={a.hue} size={44} />
                                                 <Stack.Item grow>
@@ -111,13 +112,13 @@ export const LiveAgents = component(() => {
                                                 <EnvironmentLine machine={a.environment.machine} runtime={a.environment.runtime} account={a.environment.account} tone="live" />
                                             </Col>
                                             <CardStats agentId={a.id} configVersion={a.configVersion} />
-                                        </Link>
+                                        </AgentCardLink>
                                     </li>
                                     );
                                 })}
                             </ul>
                         )}
-                {st.error ? <p data-agent-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-agent-error="">{st.error}</ErrorNote> : null}
                 <p data-agent-grid-footer="">
                     <Icon name="delegate" size={14} />
                     <span>Agents may delegate to every agent in this workspace. Depth 3, concurrency 3, budgets split from the parent.</span>

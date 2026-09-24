@@ -39,7 +39,7 @@ import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import { activeIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
-import { Composer, EmptyState, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
+import { Composer, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -520,7 +520,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             {slotAt ? <> <Link to={`/machines/${slotAt.machineId}?env=${encodeURIComponent(slotAt.environmentId)}`}>Change limit</Link></> : null}
                         </p>
                     ) : null}
-                    {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                    {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                     <div data-chat-composer onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>
                         <Composer
                             recipients={addressing.recipients}

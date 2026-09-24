@@ -96,6 +96,33 @@ describe('/chats/:id (Chat)', () => {
         expect(dom.querySelector('[data-chat-list][data-wide]')).not.toBeNull();
         expect(dom.querySelectorAll('[data-chat-row]')).toHaveLength(CHATS.length);
     });
+
+    it('the list is on zero parts (#592): a labelled search Input, a project Select that goes back to all, the unread count a warning Badge', async () => {
+        const dom = await mountRoute('/chats');
+        const list = dom.querySelector('[data-chat-list]')!;
+        const search = list.querySelector<HTMLInputElement>('[data-chat-search] [data-scope="input"][data-part="input"]')!;
+        expect(search.type).toBe('search');
+        expect(list.querySelector(`label[for="${search.id}"]`)?.textContent).toBe('Search chats');
+        // The unread count: zero's Badge, the warning colour, small.
+        const unread = list.querySelector('[data-chat-row] [data-chat-unread]')!;
+        expect(unread.getAttribute('data-scope')).toBe('badge');
+        expect(unread.getAttribute('data-color')).toBe('warning');
+        expect(unread.getAttribute('data-size')).toBe('sm');
+        // The project filter narrows the rows and "All projects" brings them back.
+        const filter = list.querySelector<HTMLElement>('[data-chat-project-filter] [data-scope="select"][data-part="root"]')!;
+        const choose = async (label: string) => {
+            filter.querySelector<HTMLElement>('[data-scope="select"][data-part="trigger"]')!.click();
+            await new Promise((r) => setTimeout(r, 0));
+            [...filter.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent?.replace('✓', '').trim() === label)!.click();
+            await new Promise((r) => setTimeout(r, 0));
+        };
+        const inAgentic = CHATS.filter((c) => c.projectId === 'p_agentic').map((c) => c.title);
+        expect(inAgentic.length).toBeGreaterThan(0);
+        await choose('agentic');
+        expect(texts([...list.querySelectorAll('[data-chat-title]')])).toEqual(inAgentic);
+        await choose('All projects');
+        expect(list.querySelectorAll('[data-chat-row]')).toHaveLength(CHATS.length);
+    });
 });
 
 describe('/chats/:id — working folders (#193)', () => {

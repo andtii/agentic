@@ -87,9 +87,10 @@ describe('projects on the live pages (#333)', () => {
         const subtitle = topbarFor({ name: 'chat', path: `/chats/${chatId}`, params: { id: chatId } })?.subtitle;
         expect(subtitle).toBeDefined();
         // The list column filters by project.
-        const filter = dom.querySelector<HTMLSelectElement>('select#chat-project-filter');
+        const filter = dom.querySelector<HTMLElement>('[data-chat-project-filter] [data-scope="select"][data-part="root"]');
         expect(filter).not.toBeNull();
-        expect([...filter!.options].map((o) => o.textContent)).toEqual(['All projects', 'agentic']);
+        expect(texts(filter!.querySelectorAll('[role="option"]')).map((t) => t.replace('✓', '').trim())).toEqual(['All projects', 'agentic']);
+        expect(texts(filter!.querySelectorAll('[data-scope="select"][data-part="value"]'))).toEqual(['All projects']);
         expect(dom.querySelector('[data-chat-row][data-current]')).not.toBeNull();
 
         // An override for one member wins over the project and can be cleared back to it.

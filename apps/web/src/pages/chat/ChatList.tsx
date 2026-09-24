@@ -1,5 +1,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
+import { Select } from '@sigx/zero';
+import { Badge, Field, Input } from '@sigx/zero-daisyui/components';
 import { AgentTile, Button, StatusPill } from '@agentic/ui';
 import { agentNamed, type MockChatSummary } from '../../mock/workspace';
 import type { AgentLookup } from './live';
@@ -32,6 +34,9 @@ export const MemberTiles = component<{ agentIds: readonly string[]; size?: 18 | 
     );
 });
 
+/** The project filter's "All projects" item: never a project id (those are minted by `createId`), and not zero's empty "nothing chosen". */
+export const ALL_PROJECTS = '*';
+
 /** The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search keeps all. */
 export function matchingChats(chats: readonly MockChatSummary[], q: string, projectId: string = ''): readonly MockChatSummary[] {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -50,30 +55,41 @@ export function matchingChats(chats: readonly MockChatSummary[], q: string, proj
  * and last line as you type.
  */
 export const ChatList = component<ChatListProps>(({ props, emit }) => {
-    const st = signal({ q: '', project: '' });
+    // The project filter's model: a project id, or `ALL_PROJECTS` (zero's Select keeps `null` / `''` for "nothing chosen").
+    const st = signal({ q: '', project: ALL_PROJECTS as string | null });
+    const projectFilter = (): string => (st.project && st.project !== ALL_PROJECTS ? st.project : '');
     return () => (
     <nav data-chat-list data-wide={props.wide ? '' : undefined} aria-label="Chats">
         <div data-chat-search>
-            <label data-visually-hidden for="chat-search">Search chats</label>
-            <input id="chat-search" type="search" placeholder="Search chats" data-scope="input" data-part="input" value={st.q} onInput={(e: Event) => { st.q = (e.target as HTMLInputElement).value; }} />
+            <Input.Root model={() => st.q} type="search" autocomplete="off">
+                <Input.Label visuallyHidden>Search chats</Input.Label>
+                <Input.Control>
+                    <Input.Input placeholder="Search chats" />
+                </Input.Control>
+            </Input.Root>
             <Button intent="icon" icon="plus" label="New chat" onClick={() => emit('newChat')} />
         </div>
         {props.projects?.length ? (
             <div data-chat-project-filter>
-                <label data-visually-hidden for="chat-project-filter">Project</label>
-                <select id="chat-project-filter" data-scope="select" data-part="select" value={st.project} onChange={(e: Event) => { st.project = (e.target as HTMLSelectElement).value; }}>
-                    <option value="">All projects</option>
-                    {props.projects.map((p) => <option value={p.id}>{p.name}</option>)}
-                </select>
+                <Field.Root>
+                    <Field.Label visuallyHidden>Project</Field.Label>
+                    <Select.Root
+                        model={() => st.project}
+                        items={[{ id: ALL_PROJECTS, name: 'All projects' }, ...props.projects]}
+                        itemValue={(p) => p.id}
+                        itemLabel={(p) => p.name}
+                        name="chat-project-filter"
+                    />
+                </Field.Root>
             </div>
         ) : null}
         <ul data-chat-rows>
-            {matchingChats(props.chats, st.q, st.project).map((chat) => (
+            {matchingChats(props.chats, st.q, projectFilter()).map((chat) => (
                 <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined}>
                     <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined}>
                         <span data-chat-row-head>
                             <span data-chat-title>{chat.title}</span>
-                            {chat.waiting ? <StatusPill status="approval" label={String(chat.unread || 1)} /> : chat.unread ? <span data-chat-unread>{chat.unread}</span> : null}
+                            {chat.waiting ? <StatusPill status="approval" label={String(chat.unread || 1)} /> : chat.unread ? <Badge.Root color="warning" size="sm" data-chat-unread="">{chat.unread}</Badge.Root> : null}
                         </span>
                         <span data-chat-row-line>
                             <MemberTiles agentIds={chat.members.map((m) => m.agentId)} lookup={props.lookup} />

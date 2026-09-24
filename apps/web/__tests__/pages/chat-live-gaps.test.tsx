@@ -11,7 +11,7 @@ import { chatKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { chatHead, chatSearchRequest, chatSettingsRequest, openChatSettings, toggleChatSearch } from '../../src/pages/chat/head';
 import { readMarks, resetReadMarks } from '../../src/pages/chat/read-marks';
-import { buttonNamed, setText } from './helpers';
+import { buttonNamed, setText, tick } from './helpers';
 import { USER, WS, mountLive, owner, startLive, texts, until, type LiveHarness } from './live-harness';
 
 let h: LiveHarness;
@@ -195,7 +195,7 @@ describe('search and settings (live)', () => {
         expect(dom.querySelector('[data-chat-find]')).toBeNull();
         toggleChatSearch();
         await until(() => dom.querySelector('[data-chat-find]') !== null, 'the search panel');
-        setText(dom.querySelector<HTMLInputElement>('#chat-find')!, 'DRAWER');
+        setText(dom.querySelector<HTMLInputElement>('[data-chat-find] input[type="search"]')!, 'DRAWER');
         dom.querySelector('[data-chat-find] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         await until(() => dom.querySelectorAll('[data-chat-hit]').length === 1, 'the hit');
         expect(dom.querySelector('[data-chat-hit] [data-chat-last]')!.textContent).toBe('You: deploy the drawer fix');
@@ -204,7 +204,7 @@ describe('search and settings (live)', () => {
         // The thread prints the same clock face.
         expect(texts(dom.querySelectorAll('[data-scope="ai-message"][data-part="time"]'))[0]).toBe(dom.querySelector('[data-chat-hit] time')!.textContent);
 
-        setText(dom.querySelector<HTMLInputElement>('#chat-find')!, 'nothing like it');
+        setText(dom.querySelector<HTMLInputElement>('[data-chat-find] input[type="search"]')!, 'nothing like it');
         dom.querySelector('[data-chat-find] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         await until(() => dom.querySelector('[data-chat-find] [data-panel-note]') !== null, 'the empty answer');
         dom.querySelector<HTMLButtonElement>('[data-chat-find] button[aria-label="Close search"]')!.click();
@@ -218,16 +218,27 @@ describe('search and settings (live)', () => {
         openChatSettings();
         await until(() => document.querySelector('[data-chat-settings-title] input') !== null, 'the dialog');
         const title = document.querySelector<HTMLInputElement>('[data-chat-settings-title] input')!;
-        const coordinator = document.querySelector<HTMLSelectElement>('[data-chat-settings-coordinator] select')!;
+        const coordinator = document.querySelector<HTMLElement>('[data-chat-settings-coordinator] [data-scope="select"][data-part="root"]')!;
+        const shown = (): string => texts(coordinator.querySelectorAll('[data-scope="select"][data-part="value"]')).join();
+        // A form dialog (#592): zero's plain Dialog around a <form>, not the alert-dialog preset.
+        const form = title.closest<HTMLFormElement>('form[data-form-dialog]')!;
+        const popup = form.closest('[data-scope="dialog"][data-part="popup"]');
+        expect(popup).not.toBeNull();
+        expect(popup!.getAttribute('role')).not.toBe('alertdialog');
         expect(title.value).toBe('');
-        expect(coordinator.value).toBe(atlas);
+        expect(shown()).toBe('Atlas');
+        expect(texts(coordinator.querySelectorAll('[role="option"]')).map((t) => t.replace('✓', ''))).toEqual(['None', 'Atlas', 'Forge']);
 
         setText(title, '  Release   plan ');
-        coordinator.value = forge;
-        coordinator.dispatchEvent(new Event('change', { bubbles: true }));
-        const remove = document.querySelector<HTMLInputElement>(`[data-chat-settings-remove] input[value="${atlas}"]`)!;
-        remove.checked = true;
-        remove.dispatchEvent(new Event('change', { bubbles: true }));
+        coordinator.querySelector<HTMLElement>('[data-scope="select"][data-part="trigger"]')!.click();
+        await tick();
+        [...coordinator.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent?.replace('✓', '').trim() === 'Forge')!.click();
+        await until(() => shown() === 'Forge', 'the coordinator pick');
+        const remove = document.querySelector<HTMLInputElement>(`[data-chat-settings-remove] input[type="checkbox"][value="${atlas}"]`)!;
+        remove.click();
+        await tick();
+        // The form posts what the dialog posted before it moved onto zero: the title and each member to remove; the Selects post nothing.
+        expect([...new FormData(form).entries()]).toEqual([['title', '  Release   plan '], ['remove', atlas]]);
         buttonNamed(document, 'Save settings').click();
 
         await until(() => chatHead.value?.title === 'Release plan', 'the renamed head');
@@ -284,12 +295,12 @@ describe('the chat list search box', () => {
         await asOwner().actor(Chat, chatKeyOf(USER, second.chatId)).addAgent(atlas, 'all');
         const dom = await mountLive('/chats', h);
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'two rows');
-        setText(dom.querySelector<HTMLInputElement>('#chat-search')!, 'lunch');
+        setText(dom.querySelector<HTMLInputElement>('[data-chat-list] [data-chat-search] input[type="search"]')!, 'lunch');
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 1, 'one row');
         expect(texts(dom.querySelectorAll('[data-chat-title]'))).toEqual(['Lunch']);
-        setText(dom.querySelector<HTMLInputElement>('#chat-search')!, 'DRAWERS');
+        setText(dom.querySelector<HTMLInputElement>('[data-chat-list] [data-chat-search] input[type="search"]')!, 'DRAWERS');
         await until(() => texts(dom.querySelectorAll('[data-chat-title]')).join() === 'about drawers', 'the match on the title and the last line');
-        setText(dom.querySelector<HTMLInputElement>('#chat-search')!, '');
+        setText(dom.querySelector<HTMLInputElement>('[data-chat-list] [data-chat-search] input[type="search"]')!, '');
         await until(() => dom.querySelectorAll('[data-chat-row]').length === 2, 'both rows back');
     });
 });

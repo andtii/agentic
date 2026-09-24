@@ -59,7 +59,7 @@ describe('/chats/new (mock)', () => {
         expect(select()!.value).toBe('');
         const block = prefillBlock()!;
         expect(block.hasAttribute('data-prefill-project')).toBe(false);
-        expect(text(block.querySelector('legend'))).toBe('This folder is not in a project yet');
+        expect(text(block.querySelector('[data-new-chat-prefill-choice] [data-scope="field"][data-part="label"]'))).toBe('This folder is not in a project yet');
         expect(text(block.querySelector('[data-new-chat-prefill-line]'))).toBe(`${path} on ${labelOf('env_alien01_work')}`);
         const radios = [...block.querySelectorAll<HTMLInputElement>('input[name="chat-prefill-mode"]')];
         expect(radios.map((r) => [r.value, r.checked])).toEqual([['chat', true], ['project', false]]);

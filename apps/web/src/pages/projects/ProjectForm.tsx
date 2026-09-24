@@ -10,7 +10,10 @@
  */
 import { component, signal, watch, type Define } from 'sigx';
 import { applyProjectFeaturePreset, configDefaults, type EnvironmentId, type FsGitInfo, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeaturePreset, type ProjectPatch, type ProjectRecord } from '@agentic/core';
-import { Button, ChipInput, ConfirmDialog, Label, SchemaForm, Switch, Tag, TextField, TextareaField, gitBadgeText, type SchemaFormApi, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
+import { derivedModel } from '@sigx/zero/behaviors';
+import { RadioGroup } from '@sigx/zero';
+import { Field } from '@sigx/zero-daisyui/components';
+import { Button, ChipInput, ConfirmDialog, ErrorNote, FormDialog, Label, SchemaForm, Switch, Tag, TextField, TextareaField, gitBadgeText, type SchemaFormApi, type WorkdirEnvironment, type WorkdirSelection } from '@agentic/ui';
 import { projectFeatureCatalogue } from '../../plugins/features';
 import { MemberPicker } from '../chat/MemberPicker';
 import type { AgentIdentity } from '../chat/live';
@@ -134,6 +137,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
     };
     /** The match in effect: the picked one, else the first (the radios show it checked). */
     const matchInEffect = (): string => st.match || (props.locate.state.matches[0]?.path ?? '');
+    const matchModel = derivedModel<string>(matchInEffect, (path) => { st.match = path; });
     /** Confirm: fill the row with the match — while there is none (still searching, an error, nothing found) the dialog stays, its results in view. */
     const useMatch = (): void => {
         const env = st.finding;
@@ -263,7 +267,7 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                                         />
                                     ) : null}
                                     {enabled(m.id) && pluginErrors(m).length ? (
-                                        <ul data-project-feature-errors role="alert">{pluginErrors(m).map((e) => <li key={e}>{e}</li>)}</ul>
+                                        <ErrorNote data-project-feature-errors=""><ul>{pluginErrors(m).map((e) => <li key={e}>{e}</li>)}</ul></ErrorNote>
                                     ) : null}
                                     {enabled(m.id) && catalogue()[m.id]?.previewSettings ? (
                                         <dl data-project-feature-preview aria-label={`What the ${m.name} settings do`}>
@@ -278,41 +282,40 @@ export const ProjectForm = component<ProjectFormProps>(({ props, emit }) => {
                     ) : <p data-panel-note>No project feature plugins are enabled.</p>}
                 </section>
 
-                {props.error || st.featureError ? <p data-project-error role="alert">{props.error || st.featureError}</p> : null}
+                {props.error || st.featureError ? <ErrorNote data-project-error="">{props.error || st.featureError}</ErrorNote> : null}
                 <div data-project-actions>
                     <Button intent="primary" loading={props.busy} onClick={save}>{props.project ? 'Save project' : 'Create project'}</Button>
                     <Button intent="default" disabled={!!props.busy} onClick={() => emit('cancel')}>Cancel</Button>
                     {props.project ? <Button intent="danger" icon="trash" disabled={!!props.busy} onClick={() => { st.removing = true; }}>Delete project</Button> : null}
                 </div>
 
-                <ConfirmDialog
+                <FormDialog
                     model={() => st.finding !== null}
                     title={finding ? `Find the repo on ${finding.label}` : 'Find the repo'}
                     description={`Every checkout of ${o ?? 'the project'} under the environment's working roots.`}
-                    confirmLabel="Use this folder"
-                    danger={false}
+                    submitLabel="Use this folder"
                     busy={found.status === 'loading'}
-                    onConfirm={useMatch}
+                    onSubmit={useMatch}
                     onCancel={closeFind}
                 >
                     {found.status === 'loading' ? <p data-panel-note data-project-locate="loading">Searching…</p> : null}
-                    {found.status === 'error' ? <p data-project-locate="error" role="alert">{found.error?.message ?? 'The machine could not search.'}</p> : null}
+                    {found.status === 'error' ? <ErrorNote data-project-locate="error">{found.error?.message ?? 'The machine could not search.'}</ErrorNote> : null}
                     {found.status === 'done' && !found.matches.length ? <p data-panel-note data-project-locate="empty">No checkout of that repo under the roots. Browse to one, or clone it there first.</p> : null}
                     {found.status === 'done' && found.matches.length ? (
-                        <ul data-project-locate="matches">
-                            {found.matches.map((m) => (
-                                <li>
-                                    <label data-project-match>
-                                        <input type="radio" name="project-locate-match" value={m.path} checked={matchInEffect() === m.path} onChange={() => { st.match = m.path; }} />
+                        <Field.Root>
+                            <Field.Label visuallyHidden>Checkouts found</Field.Label>
+                            <RadioGroup.Root model={matchModel} name="project-locate-match" data-project-locate="matches">
+                                {found.matches.map((m) => (
+                                    <RadioGroup.Item value={m.path} data-project-match="">
                                         <span data-project-match-path>{m.path}</span>
                                         <Tag>{gitBadgeText(m.git)}</Tag>
-                                    </label>
-                                </li>
-                            ))}
-                        </ul>
+                                    </RadioGroup.Item>
+                                ))}
+                            </RadioGroup.Root>
+                        </Field.Root>
                     ) : null}
                     {found.status === 'done' && found.truncated ? <p data-panel-note data-project-locate="truncated">Only the first matches are listed; browse for one deeper down.</p> : null}
-                </ConfirmDialog>
+                </FormDialog>
                 {props.project ? (
                     <ConfirmDialog
                         model={() => st.removing}

@@ -151,7 +151,9 @@ describe('the project form (mock)', () => {
         // No match to use (here: the mock has no tree for the codex environment, an error): confirming keeps the dialog and its answer in view; Cancel closes it.
         buttonIn(row(dom, 'env_alien01_codex'), 'Find').click();
         await settle();
-        expect(openPopup().querySelector('[data-project-locate="error"]')).not.toBeNull();
+        // The error line is the kit ErrorNote (#592): zero's Alert, announced, keeping its hook.
+        const locateError = openPopup().querySelector('[data-project-locate="error"]')!;
+        expect([locateError.getAttribute('data-scope'), locateError.getAttribute('role')]).toEqual(['alert', 'alert']);
         buttonIn(openPopup(), 'Use this folder').click();
         await settle();
         expect(openPopup()).not.toBeNull();
@@ -235,6 +237,10 @@ describe('the project form (mock)', () => {
         await settle();
         expect(saved).toEqual([]);
         expect(text(dom.querySelector('[data-project-error]'))).toBe('Check the Git settings.');
+        expect(dom.querySelector('[data-project-error]')!.getAttribute('role')).toBe('alert');
+        expect(feature().querySelector('[data-project-feature-errors]')!.getAttribute('role')).toBe('alert');
+        // Nothing in the form is a hand-stamped <p role="alert"> any more.
+        expect(dom.querySelector('p[role="alert"], ul[role="alert"]')).toBeNull();
 
         buttonIn(feature(), 'Git default').click();
         await settle();

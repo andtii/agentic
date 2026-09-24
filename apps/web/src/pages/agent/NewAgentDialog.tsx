@@ -1,5 +1,5 @@
 import { component, signal, watch, type Define } from 'sigx';
-import { ConfirmDialog, SelectField, TextField, type RuntimeOption } from '@agentic/ui';
+import { FormDialog, SelectField, TextField, type RuntimeOption } from '@agentic/ui';
 import type { NewAgentInput } from './live';
 import { initialRuntime } from './runtimes';
 
@@ -56,14 +56,13 @@ export const NewAgentDialog = component<NewAgentDialogProps>(({ props, emit }) =
     const runtime = (): string => st.runtime || fallback();
     const chosen = (): RuntimeOption | undefined => props.runtimes?.find((r) => r.value === runtime());
     return () => (
-        <ConfirmDialog
+        <FormDialog
             model={props.model}
             title="New agent"
             description={`Give it a name and what it is for. It runs on ${nameOf(props.runtimes, runtime())}; change that, the model and everything else in its config.`}
-            confirmLabel="Create agent"
-            danger={false}
+            submitLabel="Create agent"
             busy={props.busy}
-            onConfirm={() => {
+            onSubmit={() => {
                 if (!st.name.trim()) {
                     st.attempted = true;
                     return;
@@ -85,6 +84,6 @@ export const NewAgentDialog = component<NewAgentDialogProps>(({ props, emit }) =
                     />
                 ) : null}
             </div>
-        </ConfirmDialog>
+        </FormDialog>
     );
 });

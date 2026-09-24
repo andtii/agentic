@@ -35,15 +35,21 @@ describe('/agents/:id memory tab', () => {
         const root = await memoryPage();
         const p = agentProfile('a2')!;
         const counts = memoryCounts(p.memories);
-        const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-filter-chip]')];
-        expect(chips[0]!.getAttribute('data-kind')).toBe('all');
+        // The kit FilterChips (#592): zero's ToggleGroup, labelled, one chip per kind with its count.
+        const group = root.querySelector('[data-memory-filters] [data-filter-chips]')!;
+        expect(group.getAttribute('role')).toBe('group');
+        expect(group.getAttribute('aria-label')).toBe('Filter by kind');
+        const chips = [...group.querySelectorAll<HTMLButtonElement>('[data-scope="toggle-group"][data-part="item"]')];
+        const label = (chip: Element) => (chip.firstChild?.textContent ?? '').trim();
+        const byLabel: Record<string, keyof typeof counts> = { All: 'all', Lessons: 'lesson', Preferences: 'preference', Facts: 'fact', Records: 'record', Assumptions: 'assumption', Working: 'working' };
+        expect(label(chips[0]!)).toBe('All');
         expect(chips[0]!.getAttribute('aria-pressed')).toBe('true');
-        expect(text(chips[0]!.querySelector('[data-filter-count]'))).toBe(String(counts.all));
+        expect(text(chips[0]!.querySelector('[data-chip-count]'))).toBe(String(counts.all));
         // only kinds with entries get a chip
-        for (const chip of chips.slice(1)) expect(counts[chip.getAttribute('data-kind') as keyof typeof counts]).toBeGreaterThan(0);
+        for (const chip of chips.slice(1)) expect(counts[byLabel[label(chip)]!]).toBeGreaterThan(0);
 
-        const lessons = chips.find((c) => c.getAttribute('data-kind') === 'lesson')!;
-        expect(text(lessons.querySelector('[data-filter-count]'))).toBe(String(counts.lesson));
+        const lessons = chips.find((c) => label(c) === 'Lessons')!;
+        expect(text(lessons.querySelector('[data-chip-count]'))).toBe(String(counts.lesson));
         lessons.click();
         await tick();
         expect(lessons.getAttribute('aria-pressed')).toBe('true');

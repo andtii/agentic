@@ -1,6 +1,8 @@
 import { component, signal, watch, type Define } from 'sigx';
 import { accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
-import { ConfirmDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
+import { RadioGroup } from '@sigx/zero';
+import { Checkbox, Field } from '@sigx/zero-daisyui/components';
+import { ErrorNote, FormDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { MemberPicker } from './MemberPicker';
 import { projectForOrigin, type NewChatPrefill } from './new-chat-prefill';
@@ -57,6 +59,12 @@ export function openingMachine(machines: readonly MachineEntry[], lastMachineId:
     if (lastMachineId && machines.some((m) => m.id === lastMachineId)) return lastMachineId;
     return machineChoices(machines)[0]?.id ?? '';
 }
+
+/** "This folder is not in a project yet" (#336): the chat alone, or a project made from the folder. */
+const PREFILL_MODES = [
+    { value: 'chat', label: 'Just this chat' },
+    { value: 'project', label: 'Create project from this folder' }
+];
 
 export type NewChatDialogProps =
     & Define.Model<boolean>
@@ -119,7 +127,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     const machinesOf = (): readonly MachineEntry[] => props.machines ?? [];
     // Mounted open (the tests): already on the opening project and its roster.
     const first = props.model?.value === true ? openingProject() : '';
-    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project', machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
+    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as string, machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';
@@ -193,14 +201,13 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         const creatingProject = !!prefill && !project && st.mode === 'project';
         const projectFolder = prefill && project ? project.folders[prefill.environmentId as keyof typeof project.folders] : undefined;
         return (
-            <ConfirmDialog
+            <FormDialog
                 model={props.model}
                 title="New chat"
                 description="Who is in it? Pick one agent for a direct chat, or several for a group. Each card shows where the agent runs and how much of that account’s plan is left."
-                confirmLabel={creatingProject ? 'Create project' : st.picked.length > 1 ? `Create chat with ${st.picked.length}` : 'Create chat'}
-                danger={false}
+                submitLabel={creatingProject ? 'Create project' : st.picked.length > 1 ? `Create chat with ${st.picked.length}` : 'Create chat'}
                 busy={props.busy}
-                onConfirm={() => {
+                onSubmit={() => {
                     if (creatingProject) {
                         emit('createProject', prefill);
                         return;
@@ -243,37 +250,32 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                                         : `Runs in ${prefill.path} on ${envLabel(prefill.environmentId)} (the project's folder there is ${projectFolder}).`}
                                 </p>
                             ) : (
-                                <label data-new-chat-save-folder>
-                                    <input type="checkbox" name="chat-save-folder" checked={st.saveFolder} onChange={(e: Event) => { st.saveFolder = (e.target as HTMLInputElement).checked; }} />
-                                    <span>Save {prefill.path} as this project's folder on {envLabel(prefill.environmentId)}</span>
-                                </label>
+                                <Checkbox.Root model={() => st.saveFolder} name="chat-save-folder" data-new-chat-save-folder="">
+                                    Save {prefill.path} as this project's folder on {envLabel(prefill.environmentId)}
+                                </Checkbox.Root>
                             )
                         ) : (
-                            <fieldset data-new-chat-prefill-choice>
-                                <legend>This folder is not in a project yet</legend>
-                                <p data-new-chat-prefill-line>{prefill.path} on {envLabel(prefill.environmentId)}</p>
-                                <label>
-                                    <input type="radio" name="chat-prefill-mode" value="chat" checked={st.mode === 'chat'} onChange={() => { st.mode = 'chat'; }} />
-                                    <span>Just this chat</span>
-                                </label>
-                                <label>
-                                    <input type="radio" name="chat-prefill-mode" value="project" checked={st.mode === 'project'} onChange={() => { st.mode = 'project'; }} />
-                                    <span>Create project from this folder</span>
-                                </label>
-                            </fieldset>
+                            <div data-new-chat-prefill-choice>
+                                <Field.Root>
+                                    <Field.Label>This folder is not in a project yet</Field.Label>
+                                    <p data-new-chat-prefill-line>{prefill.path} on {envLabel(prefill.environmentId)}</p>
+                                    <RadioGroup.Root model={() => st.mode} name="chat-prefill-mode" items={PREFILL_MODES} />
+                                </Field.Root>
+                            </div>
                         )}
                     </div>
                 ) : null}
                 {machines.length ? (
-                    <fieldset data-new-chat-machine>
-                        <legend>Machine</legend>
-                        <p data-new-chat-machine-note>Where the chat's members run: each one under its account on that machine. Change it later from the chat's settings.</p>
+                    <div data-new-chat-machine>
+                        <Field.Root>
+                        <Field.Label>Machine</Field.Label>
+                        <Field.Description data-new-chat-machine-note="">Where the chat's members run: each one under its account on that machine. Change it later from the chat's settings.</Field.Description>
+                        <RadioGroup.Root model={() => st.machine} name="chat-machine">
                         {machines.map((m) => {
                             const flags = st.picked.length ? signedIn(m) : [];
                             const missing = flags.filter((f) => f.environmentId === undefined);
                             return (
-                                <label key={m.id} data-new-chat-machine-choice={m.id} data-online={m.online ? '' : undefined} data-selected={st.machine === m.id ? '' : undefined}>
-                                    <input type="radio" name="chat-machine" value={m.id} checked={st.machine === m.id} onChange={() => { st.machine = m.id; }} />
+                                <RadioGroup.Item key={m.id} value={m.id} data-new-chat-machine-choice={m.id} data-online={m.online ? '' : undefined}>
                                     <span data-new-chat-machine-name>{m.name}{m.os ? ` · ${m.os}` : ''}{m.online ? '' : ' · offline'}</span>
                                     {flags.length ? (
                                         <span data-new-chat-machine-accounts>
@@ -285,22 +287,24 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                                         </span>
                                     ) : null}
                                     {missing.length && st.machine === m.id ? <span data-new-chat-machine-warning role="status">{missing.length === 1 ? `${missing[0]!.agent.name} has no login on ${m.name} — its messages will fail until it signs in there.` : `${missing.length} members have no login on ${m.name}.`}</span> : null}
-                                </label>
+                                </RadioGroup.Item>
                             );
                         })}
-                    </fieldset>
+                        </RadioGroup.Root>
+                        </Field.Root>
+                    </div>
                 ) : null}
                 <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} quotaEnvironmentOf={machine ? quotaEnvironmentOf : undefined} {...(quotaMachine ? { quotaMachine } : {})} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
-                <p data-new-chat-summary aria-live="polite">
+                <div data-new-chat-summary aria-live="polite">
                     {!st.picked.length
-                        ? (st.attempted ? <span data-new-chat-required role="alert">Pick at least one agent.</span> : 'Nobody picked yet.')
+                        ? (st.attempted ? <ErrorNote data-new-chat-required="">Pick at least one agent.</ErrorNote> : 'Nobody picked yet.')
                         : !group
                             ? `A direct chat with ${nameOf(st.picked[0]!)}.`
                             : st.coordinator
                                 ? <>A group of {st.picked.length}. {nameOf(st.coordinator)} answers unless you mention someone. <button type="button" data-link-button onClick={() => { st.coordinator = ''; }}>No coordinator</button></>
                                 : `A group of ${st.picked.length}, no coordinator: mention an agent to address it.`}
-                </p>
-            </ConfirmDialog>
+                </div>
+            </FormDialog>
         );
     };
 });
