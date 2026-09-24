@@ -109,15 +109,20 @@ export function rollbackTarget(view: Pick<MachineUpdateView, 'last' | 'build'>):
     return last.from;
 }
 
-/** A restart count that means trouble (#367): three or more, the last one inside the hour. */
+/**
+ * A restart count that means trouble (#367): three or more, the last one inside the hour and not planned. The
+ * supervisor's count is cumulative and includes applied updates and web restarts (exit 75), so a last exit of
+ * `update` or `stop` is a healthy machine, not a crash loop (#695).
+ */
 export const RESTART_WARNING_COUNT = 3;
 export const RESTART_WARNING_WINDOW_MS = 60 * 60_000;
+const PLANNED_EXITS = new Set(['update', 'stop']);
 
 /** The warning line under the card, or `null`: "Restarted 4 times — last exit: crashed (code 1) at 21 Sep 11:58". */
 export function restartWarning(view: Pick<MachineUpdateView, 'restarts' | 'lastExit'>, now: number, zone?: string): string | null {
     const n = view.restarts ?? 0;
     const exit = view.lastExit;
-    if (n < RESTART_WARNING_COUNT || !exit || now - exit.at > RESTART_WARNING_WINDOW_MS) return null;
+    if (n < RESTART_WARNING_COUNT || !exit || PLANNED_EXITS.has(exit.reason) || now - exit.at > RESTART_WARNING_WINDOW_MS) return null;
     return `The daemon restarted ${n} times — last exit: ${exit.reason}${exit.code !== undefined ? ` (code ${exit.code})` : ''} at ${dateTime(exit.at, zone)}.`;
 }
 
