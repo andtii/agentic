@@ -96,7 +96,24 @@ The dialog never fetches and never assumes that a move happened: it shows what `
 - `submit` emits a SPARSE config: a property left at its manifest default is not written, so the stored config keeps following the manifest. Write it as it comes.
 - `value` follows a live read while the draft is clean; an edited draft is never overwritten. `ref` gives `dirty()`, `reset()`, `submit()`, `errors()`, `draft`; `hideActions` leaves the buttons to a save rail.
 - `SecretField` never shows a value and never posts one: the input has no `name`, is disabled until mounted, and the typed value is dropped when `save` fires. Put it BESIDE `SchemaForm`, never inside another `<form>`. After a failed write the user pastes again.
-- `ReadinessBadge readiness={…} detail` adds the sentence (`readinessDetail`) after the pill; `READINESS` is the label / tone table.
+- `ReadinessBadge readiness={…} detail` adds the sentence (`readinessDetail`) after the pill; `READINESS` is the label / tone table, in the handoff's vocabulary: READY (`live`), OFF (hollow, `dim`), and NEEDS KEY / NEEDS MACHINE / NEEDS SETUP / NEEDS GRANT / NEEDS SIGN-IN / NO KEY STORE, all `needs-you`.
+
+### Plugins redesign parts (#634)
+
+The parts the four plugins boards compose (`docs/design/plugins/HANDOFF-plugins.md`). Like the rest, data in and slots or events out.
+
+```tsx
+<PluginRow id={m.id} name={m.name} version={m.version} features={['usage limits']} description={m.description} kind="harness" readiness={readiness} href={`/plugins/${m.id}`} slots={{ dependents, toggle: () => <Switch label={`Enable ${m.name}`} hideLabel model={…} />, fix: () => <Button intent="wait">Add key</Button> }} />
+<PluginRow variant="connector" name="Linear" description="mcp.linear.app · token expired" kind="mcp" readiness={{ status: 'needs-sign-in' }} href="/plugins/linear" slots={{ fix, dependents, toggle }} />
+<PluginRow variant="radio" name="Flat memory" active={false} consequence="switching into it drops conditions" href="/plugins/flat-memory" slots={{ action: () => <Button>Make active</Button> }} />
+<ConnectorTile id="gmail" name="Gmail" transport="conduit" description="Send, draft, search and label email." selected={sel === 'gmail'} connected={has('gmail')} onSelect={() => pick('gmail')} />
+<ToolPolicyRow name="gmail__send-email" description="Send a message" model={() => modes['gmail__send-email']} pending={saving} onValueChange={(mode) => save('gmail__send-email', mode)} />
+```
+
+- `PluginRow` is the 60 px grid `36px 1fr 150px 150px 120px 44px 20px`: tile (a 32 px monogram, or the `tile` slot), name + version + feature tags over a one-line description, the `kind` tag, the readiness pill plus the `fix` slot, the `dependents` slot, the `toggle` slot, the chevron. `href` renders the whole row as an `<a>`; the `toggle`, `fix` and `action` slots stop click and keydown propagation so a router above never navigates on them. Put buttons there, not links. `variant="connector"` switches to `36px 1fr 90px 230px 100px 44px 20px` (56 px), draws the description as the mono account line and takes the transport as `kind`. `variant="radio"` is a single-slot kind: a radio dot, the ACTIVE pill when `active`, else the `action` slot, and the mono `consequence` line.
+- `ConnectorTile` is a `<button aria-pressed>`: monogram, name, transport in mono caps, a one-line description. `selected` fills it `base-300` with the `live` border at 53 %; `connected` dims it and adds a `Connected` check. `select` fires on click in every state.
+- `ToolPolicyRow` is the mono tool name over its description and the kit `Segmented` allow / ask / deny (live / needs-you / failed at 15 %), bound to a `ToolMode` model. `disabled` and `pending` lock the control; `pending` also sets `aria-busy`.
+- These parts carry their look as inline styles, not `ag-*` recipes, so they need no fragment change; the rows draw their own bottom rule and the page supplies the bordered list around them.
 
 ## Component kit (`src/kit`)
 

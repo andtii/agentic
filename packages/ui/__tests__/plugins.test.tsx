@@ -2,7 +2,8 @@ import { component } from '@sigx/runtime-core';
 import { signal } from '@sigx/reactivity';
 import { renderToString } from '@sigx/server-renderer';
 import type { PluginReadiness, PluginReadinessStatus } from '@agentic/core';
-import { PluginCard, READINESS, ReadinessBadge, SecretField, TONES, readinessDetail } from '@agentic/ui';
+import type { ToolMode } from '@agentic/core';
+import { ConnectorTile, PluginCard, PluginRow, READINESS, ReadinessBadge, SecretField, Switch, TONES, ToolPolicyRow, readinessDetail } from '@agentic/ui';
 import { buttonNamed, mount, one, tick } from './helpers';
 
 const SECRET = 'sk-ant-test-0123456789';
@@ -115,6 +116,23 @@ describe('SecretField', () => {
 });
 
 describe('ReadinessBadge', () => {
+    it.each([
+        ['ready', 'READY', 'live', false],
+        ['disabled', 'OFF', 'dim', true],
+        ['needs-secret', 'NEEDS KEY', 'needs-you', false],
+        ['needs-machine', 'NEEDS MACHINE', 'needs-you', false],
+        ['needs-config', 'NEEDS SETUP', 'needs-you', false],
+        ['needs-grant', 'NEEDS GRANT', 'needs-you', false],
+        ['needs-sign-in', 'NEEDS SIGN-IN', 'needs-you', false],
+        ['no-kek', 'NO KEY STORE', 'needs-you', false]
+    ] as const)('%s is the handoff pill %s (%s)', (status, label, tone, hollow) => {
+        expect(READINESS[status]).toEqual({ label, tone, hollow });
+        const pill = one(mount(<ReadinessBadge readiness={{ status }} />), 'ag-pill', 'root')!;
+        expect(pill.textContent).toBe(label);
+        expect(pill.getAttribute('data-tone')).toBe(tone);
+        expect(pill.hasAttribute('data-mod-hollow')).toBe(hollow);
+    });
+
     it('has a label and a product tone for every status core can report', () => {
         expect(Object.keys(READINESS).sort()).toEqual([...STATUSES].sort());
         for (const status of STATUSES) {
@@ -167,5 +185,181 @@ describe('PluginCard', () => {
         const active = mount(<PluginCard name="Default memory" kind="memory" readiness={{ status: 'ready' }} active />);
         expect(one(active, 'ag-plugin-card', 'root')!.hasAttribute('data-mod-selected')).toBe(true);
         expect(one(active, 'ag-plugin-card', 'tags')!.textContent).toBe('memoryactiveREADY');
+    });
+});
+
+const rowPart = (root: ParentNode, part: string): HTMLElement | null => root.querySelector<HTMLElement>(`[data-plugin-row-part="${part}"]`);
+
+describe('PluginRow', () => {
+    it('lays out tile, title, kind, readiness, dependents, toggle and chevron on the 60 px grid', () => {
+        const root = mount(
+            <PluginRow id="claude-code" name="Claude Code" version="0.1.0" features={['usage limits']} description="Drives Claude Code through its SDK." kind="harness" readiness={{ status: 'ready' }} href="/plugins/claude-code" slots={{ dependents: () => 'No dependents', toggle: () => <button type="button">toggle</button> }} />
+        );
+        const row = root.querySelector<HTMLAnchorElement>('a[data-plugin-row]')!;
+        expect(row.getAttribute('href')).toBe('/plugins/claude-code');
+        expect(row.getAttribute('data-plugin')).toBe('claude-code');
+        expect(row.getAttribute('data-plugin-row')).toBe('default');
+        expect(row.style.gridTemplateColumns).toBe('36px minmax(0, 1fr) 150px 150px 120px 44px 20px');
+        expect(row.getAttribute('style')).toContain('min-block-size: 60px');
+        expect([...row.children].map((c) => c.getAttribute('data-plugin-row-part'))).toEqual(['tile', 'title', 'kind', 'readiness', 'dependents', 'toggle', 'chevron']);
+        expect(rowPart(root, 'tile')!.textContent).toBe('CC');
+        expect(rowPart(root, 'name')!.textContent).toBe('Claude Code');
+        expect(rowPart(root, 'version')!.textContent).toBe('0.1.0');
+        expect(rowPart(root, 'title')!.textContent).toContain('usage limits');
+        expect(rowPart(root, 'description')!.textContent).toBe('Drives Claude Code through its SDK.');
+        expect(rowPart(root, 'kind')!.textContent).toBe('harness');
+        expect(rowPart(root, 'readiness')!.textContent).toBe('READY');
+        expect(rowPart(root, 'dependents')!.textContent).toBe('No dependents');
+        expect(rowPart(root, 'chevron')!.querySelector('[data-icon="chevron-right"]')).not.toBeNull();
+    });
+
+    it('without href it is not a link', () => {
+        const root = mount(<PluginRow name="Git" readiness={{ status: 'ready' }} />);
+        expect(root.querySelector('a')).toBeNull();
+        expect(root.querySelector('div[data-plugin-row]')).not.toBeNull();
+        expect(rowPart(root, 'chevron')!.childElementCount).toBe(0);
+    });
+
+    it('a click or keydown in the toggle or fix slot never reaches the row link; the switch still toggles', async () => {
+        const st = signal({ on: true });
+        let signIns = 0;
+        const root = mount(
+            <PluginRow name="Linear" variant="connector" readiness={{ status: 'needs-sign-in' }} href="/plugins/linear" slots={{ toggle: () => <Switch label="Enable Linear" hideLabel model={() => st.on} />, fix: () => <button type="button" onClick={() => signIns++}>Sign in</button> }} />
+        );
+        const row = root.querySelector('a')!;
+        const seen: string[] = [];
+        row.addEventListener('click', () => seen.push('click'));
+        row.addEventListener('keydown', () => seen.push('keydown'));
+        root.querySelector<HTMLInputElement>('input[role="switch"]')!.click();
+        await tick();
+        expect(st.on).toBe(false);
+        buttonNamed(root, 'Sign in').click();
+        expect(signIns).toBe(1);
+        rowPart(root, 'toggle')!.firstElementChild!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        buttonNamed(root, 'Sign in').dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+        expect(seen).toEqual([]);
+        // the rest of the row is the link
+        rowPart(root, 'name')!.click();
+        rowPart(root, 'readiness')!.querySelector<HTMLElement>('[data-scope="ag-pill"]')!.click();
+        expect(seen).toEqual(['click', 'click']);
+    });
+
+    it('the connector variant: its own grid, the mono account line, the transport and an inline fix', () => {
+        const root = mount(<PluginRow name="Linear" variant="connector" description="mcp.linear.app · token expired" kind="mcp" readiness={{ status: 'needs-sign-in' }} slots={{ fix: () => <button type="button">Sign in</button> }} />);
+        const row = root.querySelector<HTMLElement>('[data-plugin-row]')!;
+        expect(row.getAttribute('data-plugin-row')).toBe('connector');
+        expect(row.style.gridTemplateColumns).toBe('36px minmax(0, 1fr) 90px 230px 100px 44px 20px');
+        expect(row.getAttribute('data-readiness')).toBe('needs-sign-in');
+        expect(rowPart(root, 'description')!.getAttribute('style')).toContain('font-family: var(--font-mono)');
+        expect(rowPart(root, 'kind')!.textContent).toBe('mcp');
+        expect(rowPart(root, 'readiness')!.textContent).toBe('NEEDS SIGN-IN' + 'Sign in');
+    });
+
+    it('the radio variant: the active one has a filled dot and ACTIVE, the others the action and the consequence', () => {
+        const active = mount(<PluginRow name="Memory" variant="radio" active href="/plugins/memory" slots={{ action: () => <button type="button">Make active</button> }} />);
+        const row = active.querySelector<HTMLElement>('[data-plugin-row="radio"]')!;
+        expect(row.hasAttribute('data-active')).toBe(true);
+        expect(rowPart(active, 'radio')!.childElementCount).toBe(1);
+        expect(one(active, 'ag-pill', 'root')!.textContent).toBe('ACTIVE');
+        expect(one(active, 'ag-pill', 'root')!.getAttribute('data-tone')).toBe('live');
+        expect(active.textContent).not.toContain('Make active');
+
+        let made = 0;
+        const other = mount(<PluginRow name="Flat memory" variant="radio" consequence="switching into it drops conditions" href="/plugins/flat-memory" slots={{ action: () => <button type="button" onClick={() => made++}>Make active</button> }} />);
+        const link = other.querySelector('a')!;
+        let clicks = 0;
+        link.addEventListener('click', () => clicks++);
+        expect(rowPart(other, 'radio')!.childElementCount).toBe(0);
+        expect(one(other, 'ag-pill', 'root')).toBeNull();
+        expect(rowPart(other, 'consequence')!.textContent).toBe('switching into it drops conditions');
+        buttonNamed(other, 'Make active').click();
+        expect(made).toBe(1);
+        expect(clicks).toBe(0);
+    });
+});
+
+describe('ConnectorTile', () => {
+    it('is a button with the monogram, name, transport and description', () => {
+        let selects = 0;
+        const root = mount(<ConnectorTile id="google-calendar" name="Google Calendar" transport="conduit" description="Read and create events." onSelect={() => selects++} />);
+        const tile = root.querySelector('button')!;
+        expect(tile.getAttribute('type')).toBe('button');
+        expect(tile.getAttribute('aria-pressed')).toBe('false');
+        expect(tile.getAttribute('data-connector')).toBe('google-calendar');
+        expect(one(root, 'ag-agent-tile', 'monogram')!.textContent).toBe('GC');
+        expect(root.querySelector('[data-connector-part="transport"]')!.getAttribute('style')).toContain('text-transform: uppercase');
+        expect(root.querySelector('[data-connector-part="description"]')!.textContent).toBe('Read and create events.');
+        expect(root.querySelector('[data-connector-part="connected"]')).toBeNull();
+        tile.click();
+        expect(selects).toBe(1);
+    });
+
+    it('selected: pressed, base-300 fill and the live border at 53 %', () => {
+        const tile = mount(<ConnectorTile name="Google Calendar" transport="conduit" selected />).querySelector('button')!;
+        expect(tile.getAttribute('aria-pressed')).toBe('true');
+        expect(tile.hasAttribute('data-selected')).toBe(true);
+        const style = tile.getAttribute('style')!;
+        expect(style).toContain('background: var(--color-base-300)');
+        expect(style).toContain('color-mix(in oklab, var(--color-primary) 53%, transparent)');
+    });
+
+    it('connected: dimmed with a Connected check, still selectable', () => {
+        let selects = 0;
+        const root = mount(<ConnectorTile name="Gmail" transport="conduit" connected onSelect={() => selects++} />);
+        const tile = root.querySelector('button')!;
+        expect(tile.hasAttribute('data-connected')).toBe(true);
+        expect(tile.getAttribute('style')).toContain('color: var(--ag-text-muted)');
+        const check = root.querySelector('[data-connector-part="connected"]')!;
+        expect(check.textContent).toBe('Connected');
+        expect(check.querySelector('[data-icon="check"]')).not.toBeNull();
+        tile.click();
+        expect(selects).toBe(1);
+    });
+});
+
+describe('ToolPolicyRow', () => {
+    const items = (root: ParentNode) => [...root.querySelectorAll<HTMLButtonElement>('[data-scope="toggle-group"][data-part="item"]')];
+
+    it('shows the tool over its description and binds allow / ask / deny in their tones', async () => {
+        const st = signal({ mode: 'ask' as ToolMode });
+        const changes: ToolMode[] = [];
+        const root = mount(<ToolPolicyRow name="gmail__send-email" description="Send a message" model={() => st.mode} onValueChange={(v) => changes.push(v)} />);
+        expect(root.querySelector('[data-tool-policy-part="name"]')!.textContent).toBe('gmail__send-email');
+        expect(root.querySelector('[data-tool-policy-part="name"]')!.getAttribute('style')).toContain('font-family: var(--font-mono)');
+        expect(root.querySelector('[data-tool-policy-part="description"]')!.textContent).toBe('Send a message');
+        expect(root.querySelector('[role="group"]')!.getAttribute('aria-label')).toBe('Approval for gmail__send-email');
+        expect(items(root).map((i) => i.textContent)).toEqual(['allow', 'ask', 'deny']);
+        expect(items(root).map((i) => i.getAttribute('data-tone'))).toEqual(['live', 'needs-you', 'failed']);
+        expect(items(root).map((i) => i.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+        expect(items(root)[2]!.getAttribute('style')).toContain('color-mix(in oklab, var(--color-error) 15%, transparent)');
+        items(root)[2]!.click();
+        await tick();
+        expect(st.mode).toBe('deny');
+        expect(changes).toEqual(['deny']);
+        st.mode = 'allow';
+        await tick();
+        expect(items(root).map((i) => i.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    });
+
+    it('disabled and pending leave the mode alone; pending says busy', async () => {
+        const st = signal({ mode: 'allow' as ToolMode, pending: true, disabled: false });
+        const Host = component(() => () => <ToolPolicyRow name="gmail__search" model={() => st.mode} pending={st.pending} disabled={st.disabled} />);
+        const root = mount(<Host />);
+        expect(root.querySelector('[data-tool-policy]')!.getAttribute('aria-busy')).toBe('true');
+        items(root)[1]!.click();
+        await tick();
+        expect(st.mode).toBe('allow');
+        st.pending = false;
+        st.disabled = true;
+        await tick();
+        expect(root.querySelector('[data-tool-policy]')!.hasAttribute('aria-busy')).toBe(false);
+        items(root)[1]!.click();
+        await tick();
+        expect(st.mode).toBe('allow');
+        st.disabled = false;
+        await tick();
+        items(root)[1]!.click();
+        await tick();
+        expect(st.mode).toBe('ask');
     });
 });
