@@ -48,7 +48,7 @@ afterEach(async () => {
 
 const registry = () => h.app.as(owner).actor(Registry, registryKey(WS));
 const row = (dom: ParentNode, id: string) => dom.querySelector<HTMLElement>(`[data-plugin-rows] [data-plugin-row][data-plugin="${id}"]`);
-const readinessOf = (el: ParentNode | null) => el?.querySelector('[data-part="readiness"]')?.getAttribute('data-readiness') ?? null;
+const readinessOf = (el: ParentNode | null) => el?.querySelector('[data-scope="ag-readiness"][data-part="root"]')?.getAttribute('data-readiness') ?? null;
 
 describe('/plugins (live, with the catalogue)', () => {
     it('a fresh workspace lists every built-in by kind; a key set elsewhere turns anthropic-api from Needs key to Ready without a reload', async () => {

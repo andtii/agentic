@@ -3,7 +3,7 @@ import { signal } from '@sigx/reactivity';
 import { renderToString } from '@sigx/server-renderer';
 import type { PluginReadiness, PluginReadinessStatus } from '@agentic/core';
 import type { ToolMode } from '@agentic/core';
-import { ConnectorTile, PluginCard, PluginRow, READINESS, ReadinessBadge, SecretField, Switch, TONES, ToolPolicyRow, readinessDetail } from '@agentic/ui';
+import { ConnectorTile, PluginRow, READINESS, ReadinessBadge, SecretField, Switch, TONES, ToolPolicyRow, readinessDetail } from '@agentic/ui';
 import { buttonNamed, mount, one, tick } from './helpers';
 
 const SECRET = 'sk-ant-test-0123456789';
@@ -151,40 +151,10 @@ describe('ReadinessBadge', () => {
         expect(readinessDetail({ status: 'ready' })).toBeUndefined();
         expect(readinessDetail({ status: 'needs-sign-in', missing: [] })).toBe('Signed out. Sign in again to reconnect.');
         const quiet = mount(<ReadinessBadge readiness={readiness} />);
-        expect(one(quiet, 'ag-plugin-card', 'readiness')!.getAttribute('title')).toBe('Not set yet: anthropic-api-key.');
-        expect(one(quiet, 'ag-plugin-card', 'readiness-detail')).toBeNull();
+        expect(one(quiet, 'ag-readiness', 'root')!.getAttribute('title')).toBe('Not set yet: anthropic-api-key.');
+        expect(one(quiet, 'ag-readiness', 'detail')).toBeNull();
         const loud = mount(<ReadinessBadge readiness={readiness} detail />);
-        expect(one(loud, 'ag-plugin-card', 'readiness-detail')!.textContent).toBe('Not set yet: anthropic-api-key.');
-    });
-});
-
-describe('PluginCard', () => {
-    it('shows name, version, kind, description and readiness, with the page’s slots', () => {
-        const root = mount(
-            <PluginCard id="anthropic-api" name="Anthropic API" kind="runtime" version="1.0.0" description="Runs agents on the Anthropic API." readiness={{ status: 'needs-secret', missing: ['anthropic-api-key'] }} slots={{ toggle: () => <button type="button">toggle</button>, meta: () => 'No dependents', configure: () => <a href="/plugins/anthropic-api">Configure</a>, default: () => <p data-body>body</p> }} />
-        );
-        const card = one(root, 'ag-plugin-card', 'root')!;
-        expect(card.getAttribute('aria-label')).toBe('Anthropic API');
-        expect(card.getAttribute('data-plugin')).toBe('anthropic-api');
-        expect(card.getAttribute('data-tone')).toBe('needs-you');
-        expect(one(root, 'ag-plugin-card', 'name')!.textContent).toBe('Anthropic API1.0.0');
-        expect(one(root, 'ag-plugin-card', 'tags')!.textContent).toBe('runtimeNEEDS KEY');
-        expect(one(root, 'ag-plugin-card', 'description')!.textContent).toBe('Runs agents on the Anthropic API.');
-        expect(one(root, 'ag-plugin-card', 'header')!.querySelector('button')!.textContent).toBe('toggle');
-        expect(root.querySelector('[data-body]')).not.toBeNull();
-        expect(one(root, 'ag-plugin-card', 'meta')!.textContent).toBe('No dependents');
-        expect(one(root, 'ag-plugin-card', 'footer')!.querySelector('a')!.getAttribute('href')).toBe('/plugins/anthropic-api');
-    });
-
-    it('a ready plugin is quiet, a disabled one dims, the active one of its kind is marked', () => {
-        const ready = one(mount(<PluginCard name="Claude Code" kind="runtime" readiness={{ status: 'ready' }} />), 'ag-plugin-card', 'root')!;
-        expect(ready.hasAttribute('data-tone')).toBe(false);
-        expect(ready.querySelector('footer')).toBeNull();
-        const off = one(mount(<PluginCard name="Flat memory" kind="memory" readiness={{ status: 'disabled' }} />), 'ag-plugin-card', 'root')!;
-        expect(off.getAttribute('data-tone')).toBe('dim');
-        const active = mount(<PluginCard name="Default memory" kind="memory" readiness={{ status: 'ready' }} active />);
-        expect(one(active, 'ag-plugin-card', 'root')!.hasAttribute('data-mod-selected')).toBe(true);
-        expect(one(active, 'ag-plugin-card', 'tags')!.textContent).toBe('memoryactiveREADY');
+        expect(one(loud, 'ag-readiness', 'detail')!.textContent).toBe('Not set yet: anthropic-api-key.');
     });
 });
 

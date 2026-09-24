@@ -89,7 +89,7 @@ The dialog never fetches and never assumes that a move happened: it shows what `
 
 ### Plugin setup (#232)
 
-`SchemaForm` draws a plugin's config form from its core `ConfigSchema`; `SecretField` takes its secrets; `PluginCard` and `ReadinessBadge` show it in a list. All four are data in and events out — the page owns the Registry calls.
+`SchemaForm` draws a plugin's config form from its core `ConfigSchema`; `SecretField` takes its secrets; `ReadinessBadge` shows its readiness (`PluginRow` below shows it in a list). All three are data in and events out — the page owns the Registry calls.
 
 ```tsx
 <SchemaForm schema={plugin.manifest.config} value={plugin.config} saving={st.saving} error={st.error} onSubmit={(config) => configure(plugin.manifest.id, config)} />
@@ -97,7 +97,7 @@ The dialog never fetches and never assumes that a move happened: it shows what `
     <SecretField name={s.name} label={s.title} description={s.description} required={s.required} isSet={secretNames.includes(s.name)} onSave={(value) => setSecret(s.name, value)} onRemove={() => deleteSecret(s.name)} />
 ))}
 
-<PluginCard id={m.id} name={m.name} kind={m.kind} version={m.version} description={m.description} readiness={pluginReadiness(plugin, facts)} active={active.memory === m.id} slots={{ toggle, meta, configure }} />
+<ReadinessBadge readiness={pluginReadiness(plugin, facts)} detail />
 ```
 
 - One field per property: string → text (`format: 'uri'` → URL), `enum` → select, number / integer → number (`minimum` / `maximum`), boolean → switch, string list → chips, string map → `MapField` rows. A property kind the form does not know is not drawn and is kept in the config. Validation is core's `validateConfig`, read over `configDefaults`.

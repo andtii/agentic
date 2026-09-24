@@ -1,7 +1,7 @@
 /**
  * `/plugins?kind=connector` over the real wire (#628): on the platform the
- * Connectors view draws the workspace's MCP servers (`LiveConnectors`) inside
- * the plugins layout, not the catalogue the mock branch falls back to.
+ * Connectors view draws the workspace's MCP servers (`LiveConnectorsView`) inside
+ * the plugins layout.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defineRegistry, generateWorkspaceKek, importWorkspaceKek } from '@agentic/platform';
@@ -21,11 +21,10 @@ afterEach(async () => {
 });
 
 describe('plugins routes (#628, live)', () => {
-    it('?kind=connector renders LiveConnectors inside the plugins layout', async () => {
+    it('?kind=connector renders LiveConnectorsView inside the plugins layout', async () => {
         const dom = await mountLive('/plugins?kind=connector', h);
         const connectors = () => dom.querySelector('[data-plugins-layout][data-kind="connector"] [data-plugins-content] [data-plugin-connectors]');
         await until(() => connectors() !== null, 'the connector list');
         expect(buttonNamed(connectors()!, 'Add MCP server')).not.toBeNull();
-        expect(dom.querySelector('[data-plugins-content] [data-plugin-catalogue]')).toBeNull();
     });
 });

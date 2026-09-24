@@ -1,5 +1,5 @@
 /**
- * `ReadinessBadge` — a plugin's readiness as the kit's status pill: the
+ * `ReadinessBadge` — a plugin's readiness (`ag-readiness`) as the kit's status pill: the
  * `tone` axis paints it (never `data-state`), a hollow dot says it is off.
  * What is missing rides the `title`, and `detail` renders it as text for a
  * page that has the room.
@@ -19,9 +19,9 @@ export const ReadinessBadge = component<ReadinessBadgeProps>(({ props }) => () =
     const spec = READINESS[props.readiness.status];
     const detail = readinessDetail(props.readiness);
     return (
-        <span data-scope="ag-plugin-card" data-part="readiness" data-readiness={props.readiness.status} title={detail} class={props.class}>
+        <span data-scope="ag-readiness" data-part="root" data-readiness={props.readiness.status} title={detail} class={props.class}>
             <StatusPill status={props.readiness.status} label={spec.label} tone={spec.tone} hollow={spec.hollow} />
-            {props.detail && detail ? <span data-scope="ag-plugin-card" data-part="readiness-detail">{detail}</span> : null}
+            {props.detail && detail ? <span data-scope="ag-readiness" data-part="detail">{detail}</span> : null}
         </span>
     );
 }, { name: 'ReadinessBadge' });

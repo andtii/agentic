@@ -130,18 +130,10 @@ export const agWorkdirPickerAnatomy = defineAnatomy('ag-workdir-picker', {
     actions: { element: 'div', parent: 'worktree' }
 });
 
-/** One plugin of the build (PLG-02, PLG-03): name + version, kind and readiness tags, description, the page's sections, dependents + configure; tone `dim` disabled, `needs-you` / `failed` when it needs the user, `selected` = the active plugin of its kind. */
-export const agPluginCardAnatomy = defineAnatomy('ag-plugin-card', {
-    root: { element: 'article', tokens: ['color', 'radius-box'] },
-    header: { element: 'header', parent: 'root' },
-    name: { element: 'h3', parent: 'header', tokens: ['text'] },
-    version: { element: 'span', parent: 'name', tokens: ['color', 'text'] },
-    tags: { element: 'div', parent: 'root' },
-    readiness: { element: 'span', parent: 'tags', tokens: ['text'] },
-    'readiness-detail': { element: 'span', parent: 'readiness', tokens: ['color', 'text'] },
-    description: { element: 'p', parent: 'root', tokens: ['color', 'text'] },
-    footer: { element: 'footer', parent: 'root', tokens: ['color', 'text'] },
-    meta: { element: 'span', parent: 'footer' }
+/** A plugin's readiness (PLG-02): the status pill, then — when the page has room — the sentence saying what is missing. */
+export const agReadinessAnatomy = defineAnatomy('ag-readiness', {
+    root: { element: 'span', tokens: ['text'] },
+    detail: { element: 'span', parent: 'root', tokens: ['color', 'text'] }
 });
 
 /** A write-only secret: SET / NOT SET with Replace and Remove, and the one-line editor that takes a new value. */
@@ -205,7 +197,7 @@ export const kitAnatomies = [
     agBannerAnatomy,
     agWorkdirAnatomy,
     agWorkdirPickerAnatomy,
-    agPluginCardAnatomy,
+    agReadinessAnatomy,
     agSecretAnatomy,
     agMapFieldAnatomy,
     agQuotaAnatomy,

@@ -8,7 +8,7 @@
  * the MCP sign-in form, which seals the new credential, checks the server
  * with it and records the answer. The switch is `usePluginSwitches`.
  *
- * Remove is ported from `LiveConnectors` (#241): `Registry.remove` refuses
+ * Remove is ported from the old connector list (#241): `Registry.remove` refuses
  * with `plugin-in-use` while agents or schedules pick the connector; the page
  * then names them and removes only when the person confirms (`force`). Its
  * credential goes with it unless another connector still reads it.
