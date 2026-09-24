@@ -128,6 +128,23 @@ describe('the transcript', () => {
         expect(target.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
         expect(target.state).toBe('idle');
     });
+
+    it('a running turn with nothing of its own to show marks no row as streaming — never the reply before it (#606)', () => {
+        // A turn the runtime opened on its own after the member's last reply: input-less, no rows yet, maybe never.
+        const session = createTranscript('s9');
+        session.state = 'running';
+        session.turn = { turnId: 'ghost' };
+        const target = chatTranscript('chat');
+        composeTranscript(target, entryTranscript(entries, lookup), [{ sessionId: 's9', agentId: 'a1', transcript: session }], lookup);
+        // The last assistant row is the entry `m2`, a finished reply: the chat is not mid-turn on its account.
+        expect(target.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
+        expect(target.state).toBe('idle');
+        // Once the turn shows something, that row is the one streaming.
+        session.messages.push({ id: 'y', role: 'assistant', turnId: 'ghost', parts: [{ type: 'text', id: 'p1', text: 'a background task finished' }] });
+        composeTranscript(target, entryTranscript(entries, lookup), [{ sessionId: 's9', agentId: 'a1', transcript: session }], lookup);
+        expect(target.messages.at(-1)?.id).toBe('y');
+        expect(target.state).toBe('running');
+    });
 });
 
 describe('addressing and activation', () => {
