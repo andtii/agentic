@@ -41,7 +41,9 @@ export function conduitOpener(options: ConduitOpenerOptions = {}): (input: Extra
             secret: (name) => context.secret(name, input.pluginId),
             engineSecret,
             redirectUri: connectorRedirectUri(options.origin?.() ?? PLACEHOLDER_ORIGIN),
-            ...(options.http ? { http: options.http } : {})
+            ...(options.http ? { http: options.http } : {}),
+            // The plugin's granted `network:` hosts (#642): a host it was not granted fails the call, naming the scope.
+            ...(input.allowedHosts ? { allowedHosts: input.allowedHosts } : {})
         });
         const opened = await conduitTools(engine, { id: input.id, connector: input.connector, account: input.account, owner: context.workspaceId });
         // Structurally: TypeScript checks conduit's tools against what a session takes.

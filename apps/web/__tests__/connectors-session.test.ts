@@ -180,6 +180,25 @@ describe('Gmail on a local anthropic-api session (#533)', () => {
         });
     });
 
+    describe('with network:gmail.googleapis.com revoked (#642)', () => {
+        beforeEach(() => start('gmail__search-messages', { query: 'is:unread' }));
+
+        it('a Gmail tool call fails with a clear permission error, and Google never sees it', async () => {
+            await connectGmail();
+            await registry().revoke('gmail', ['network:gmail.googleapis.com']);
+            const before = google.seen.length;
+            await run('t1', await agent(RULES));
+            await until(async () => (await task('t1').get()).status === 'completed', 'the task to complete');
+
+            // The tool is still offered — the grant fences the host, not the tool list.
+            expect(hasTool(model.requests[0]!, 'gmail__search-messages')).toBe(true);
+            const result = JSON.stringify(toolResults(model.requests[1]!));
+            expect(result).toContain('Permission denied: network:gmail.googleapis.com is not granted to this connector');
+            expect(result).not.toContain('is:unread');
+            expect(google.seen.slice(before).some((s) => s.includes('/gmail/'))).toBe(false);
+        });
+    });
+
     it('an agent whose workspace has not connected Gmail runs without it and is told where to connect it', async () => {
         await start('gmail__search-messages', {});
         await registry().setSecret(ANTHROPIC_API_KEY_SECRET, 'sk-ant-test');

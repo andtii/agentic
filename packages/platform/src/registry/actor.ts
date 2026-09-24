@@ -53,7 +53,7 @@ import { Workspace } from '../workspace/index.js';
 import { computeDependents, type AgentRef, type ScheduleRef } from './dependents.js';
 import { BadConfigError, PluginDisabledError, RegistryError } from './errors.js';
 import { parseRegistryKey } from './key.js';
-import { assertName, assertPluginManifest, declaredScopes, isPermissionScope, isToolMode, scopeCovered } from './manifest.js';
+import { assertName, assertPluginManifest, declaredScopes, isPermissionScope, isToolMode, scopeCovered, grantedNetworkHosts } from './manifest.js';
 import {
     REGISTRY_STATE_VERSION,
     type CatalogueEntry,
@@ -193,7 +193,29 @@ export function defineRegistry(options: RegistryOptions = {}) {
         const own = Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined));
         const checked = validateConfig(manifest.config, { ...configDefaults(manifest.config), ...own });
         if (!checked.ok) throw new BadConfigError(manifest.id, checked.errors);
+        const hostError = connectorUrlHostError(manifest, checked.value);
+        if (hostError) throw new BadConfigError(manifest.id, [hostError]);
         return own;
+    };
+
+    /**
+     * A connector's `url` must stay on a host its manifest declares a `network:` scope for (#642; PLG-04): the host is
+     * fenced by that grant, and a scope the manifest does not declare can never be granted — so a URL moved to a new
+     * host would leave the connector unreachable with no way to fix it on its page. Refused here instead, saying to add
+     * the connector again. A connector that declares no `network:` scope is not fenced and not checked.
+     */
+    const connectorUrlHostError = (manifest: PluginManifest, config: Record<string, unknown>): { path: string; message: string } | undefined => {
+        if (manifest.kind !== 'connector' || typeof config.url !== 'string') return undefined;
+        const declared = declaredScopes(manifest);
+        if (!declared.some((s) => s.startsWith('network:'))) return undefined;
+        let url: URL;
+        try {
+            url = new URL(config.url);
+        } catch {
+            return undefined;
+        }
+        if (scopeCovered(declared, `network:${url.host}`) || scopeCovered(declared, `network:${url.hostname}`)) return undefined;
+        return { path: 'url', message: `${url.host} is not a host this connector was added with (it declares no network:${url.host} permission); to use another server, add the connector again` };
     };
 
     /** The plugin a single-slot kind runs on: the owner's choice while it exists, else the catalogue's first, else the first installed. */
@@ -252,6 +274,12 @@ export function defineRegistry(options: RegistryOptions = {}) {
         return wanted.every((scope) => scopeCovered(p.grantedPermissions, scope));
     };
 
+    /** The hosts of the plugin's granted `network:<host>` scopes (PLG-04): what its connector may reach (#642). Absent under `network:*`. */
+    const networkHosts = (p: PluginRecord): { networkHosts?: string[] } => {
+        const hosts = grantedNetworkHosts(p.grantedPermissions);
+        return hosts === undefined ? {} : { networkHosts: hosts };
+    };
+
     /**
      * A connector an agent names, as a session would open it (#240): its record and its plugin, looked up by the
      * connector id — or, for a ref naming the plugin, the first connector registered under it.
@@ -273,7 +301,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 tools: record.tools,
                 status: record.status,
                 toolPolicy: restrictedTools(ctx, p),
-                toolsGranted: toolsGranted(p)
+                toolsGranted: toolsGranted(p),
+                ...networkHosts(p)
             };
         }
         const config = mergedConfig(p);
@@ -297,7 +326,8 @@ export function defineRegistry(options: RegistryOptions = {}) {
             tools: record.tools,
             status: record.status,
             toolPolicy: restrictedTools(ctx, p),
-            toolsGranted: toolsGranted(p)
+            toolsGranted: toolsGranted(p),
+            ...networkHosts(p)
         };
     };
 

@@ -4,7 +4,7 @@ export { REGISTRY_TYPE, registryKey, parseRegistryKey } from './key.js';
 export { Registry, defineRegistry, initialRegistryState, type KekSource, type RegistryActor, type RegistryOptions } from './actor.js';
 export { requireEnabled, pluginEnabled, type HopContext } from './require-enabled.js';
 export { FALLBACK_RUNTIME, computeDependents, dependencyOf, toolInNamespace, toolNamespaces, type AgentRef, type ScheduleRef } from './dependents.js';
-export { PLUGIN_KINDS, NAME_RE, TOOL_MODES, assertPluginManifest, assertName, declaredScopes, isPermissionScope, isToolMode, scopeCovered } from './manifest.js';
+export { PLUGIN_KINDS, NAME_RE, TOOL_MODES, assertPluginManifest, assertName, declaredScopes, isPermissionScope, isToolMode, scopeCovered, grantedNetworkHosts } from './manifest.js';
 export { RegistryError, PluginDisabledError, BadConfigError, isRegistryError, isPluginDisabledError, type RegistryErrorCode } from './errors.js';
 export type {
     AgentDependent,

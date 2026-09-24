@@ -11,6 +11,7 @@
  * bearer token the host already holds.
  */
 
+import { McpNetworkError, guardFetch } from './network.js';
 import { JSON_RPC, McpTransportError, errorFrom, isJsonRpcId, isPlainObject, type JsonRpcId, type JsonRpcResponse } from './protocol.js';
 import { readSse } from './sse.js';
 import { CONSUMED_NOTIFICATIONS, type McpRequestOptions, type McpServerMessage, type McpTransport } from './transport.js';
@@ -29,6 +30,11 @@ export interface StreamableHttpTransportOptions {
     readonly fetch?: FetchLike;
     /** Per-request timeout; default 60 000 ms. */
     readonly timeoutMs?: number;
+    /**
+     * The hosts of the connector plugin's granted `network:` scopes (#642). Set: a request to any other host fails
+     * with `McpNetworkError` before it is sent. Absent: no allowlist.
+     */
+    readonly allowedHosts?: readonly string[];
 }
 
 export interface StreamableHttpTransport extends McpTransport {
@@ -67,7 +73,8 @@ const anySignal = (signals: readonly AbortSignal[]): { readonly signal: AbortSig
 
 export function createStreamableHttpTransport(options: StreamableHttpTransportOptions): StreamableHttpTransport {
     const url = String(options.url);
-    const fetchImpl: FetchLike = options.fetch ?? ((input, init) => fetch(input, init));
+    const baseFetch: FetchLike = options.fetch ?? ((input, init) => fetch(input, init));
+    const fetchImpl: FetchLike = options.allowedHosts ? guardFetch(baseFetch, options.allowedHosts) : baseFetch;
     const timeoutMs = options.timeoutMs ?? 60_000;
     const listeners = new Set<(m: McpServerMessage) => void>();
     let sessionId: string | undefined;
@@ -91,7 +98,7 @@ export function createStreamableHttpTransport(options: StreamableHttpTransportOp
         try {
             response = await fetchImpl(url, { method: 'POST', headers: await headersFor('application/json, text/event-stream'), body: JSON.stringify(body), signal });
         } catch (e) {
-            if (signal?.aborted) throw e;
+            if (signal?.aborted || e instanceof McpNetworkError) throw e;
             throw new McpTransportError(`MCP request to ${url} failed: ${e instanceof Error ? e.message : String(e)}`, undefined, e);
         }
         const sid = response.headers.get('mcp-session-id');

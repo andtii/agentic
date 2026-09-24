@@ -5,6 +5,7 @@
  */
 
 export { createConnectorEngine, type ConnectorEngine, type ConnectorEngineOptions } from './engine.js';
+export { ConnectorNetworkError, connectorHostAllowed, guardHttp } from './network.js';
 export { clientFromSecrets, connectorClientSecretNames, CONNECTOR_ENGINE_SECRET, type OpenConnectorSecret } from './clients.js';
 export {
     conduitTools,

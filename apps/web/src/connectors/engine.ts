@@ -20,7 +20,7 @@
  *   built for a session never begins a sign-in, so its redirect URI is never
  *   sent anywhere; conduit only needs it to be a valid URL.
  */
-import type { Principal, WorkspaceId } from '@agentic/core';
+import type { PermissionScope, Principal, WorkspaceId } from '@agentic/core';
 import { clientFromSecrets, createConnectorEngine, CONNECTOR_ENGINE_SECRET, type ConnectorEngine } from '@agentic/connectors';
 import { ConnectorAccounts, asPrincipal, connectorAccountStores, connectorAccountsKey, type ConnectorAccountsClient } from '@agentic/platform';
 import { actor } from '@sigx/actors';
@@ -40,6 +40,8 @@ export interface WorkspaceEngineInput {
     readonly engineSecret: string;
     readonly redirectUri: string;
     readonly http?: ConnectorHttp;
+    /** The hosts of the connector plugin's granted `network:` scopes (#642): a session's engine reaches these only. Absent: no allowlist. */
+    readonly allowedHosts?: readonly string[];
 }
 
 /** The workspace's conduit engine, as `principal`. Cheap: nothing is read until a call needs it. */
@@ -50,7 +52,8 @@ export function workspaceConnectorEngine(input: WorkspaceEngineInput): Connector
         ...connectorAccountStores(client),
         clients: clientFromSecrets((name) => input.secret(name), input.pluginId),
         redirectUri: input.redirectUri,
-        ...(input.http ? { http: input.http } : {})
+        ...(input.http ? { http: input.http } : {}),
+        ...(input.allowedHosts ? { allowedHosts: input.allowedHosts } : {})
     });
 }
 
@@ -72,7 +75,7 @@ export function isSecretMissing(error: unknown): boolean {
 
 /** The slice of a Registry client (as the owner) the connector routes call. */
 export interface ConnectorRegistry {
-    get(id: string): Promise<{ readonly enabled: boolean } | null>;
+    get(id: string): Promise<{ readonly enabled: boolean; readonly grantedPermissions?: readonly PermissionScope[] } | null>;
     getConnector(id: string): Promise<{ readonly id: string; readonly pluginId: string; readonly transport: string; readonly connector?: string; readonly account?: string } | null>;
     putConnector(input: { readonly id: string; readonly pluginId: string; readonly transport: 'conduit'; readonly connector: string; readonly account?: string }): Promise<unknown>;
     openSecret(name: string, pluginId: string): Promise<string>;

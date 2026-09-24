@@ -26,6 +26,11 @@ export interface OpenMcpConnectorOptions {
     /** Credential headers by name, values already opened. */
     readonly headers?: Readonly<Record<string, string>>;
     readonly fetch?: FetchLike;
+    /**
+     * The hosts of the connector plugin's granted `network:` scopes (#642; PLG-04). Set: the server is reached only
+     * on one of them, anything else fails with `McpNetworkError` naming the scope. Absent: no allowlist.
+     */
+    readonly allowedHosts?: readonly string[];
     /** The deadline for connect + `tools/list`, ms. Default 10 000. */
     readonly timeoutMs?: number;
 }
@@ -46,7 +51,8 @@ export async function openMcpConnector(options: OpenMcpConnectorOptions): Promis
         timeoutMs: options.timeoutMs ?? MCP_CONNECTOR_OPEN_TIMEOUT_MS,
         ...(options.bearer !== undefined ? { auth: options.bearer } : {}),
         ...(options.headers ? { headers: options.headers } : {}),
-        ...(options.fetch ? { fetch: options.fetch } : {})
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {})
     });
     const deadline = options.timeoutMs ?? MCP_CONNECTOR_OPEN_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;

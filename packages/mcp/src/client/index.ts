@@ -32,3 +32,4 @@ export type { McpConnectorOptions, McpConnectorBase, McpHttpConnector, McpStdioC
 export { mcpConnector, mcpConnectorSetup, connectorNamespace, connectorToolPrefix, MCP_CONNECTOR_CAPABILITIES } from './connector.js';
 export type { OpenMcpConnectorOptions, OpenedMcpConnector } from './open.js';
 export { openMcpConnector, MCP_CONNECTOR_OPEN_TIMEOUT_MS } from './open.js';
+export { McpNetworkError, guardFetch, mcpHostAllowed } from './network.js';

@@ -187,6 +187,11 @@ export interface GateConnector {
     readonly toolPolicy?: Readonly<Record<string, Exclude<ToolMode, 'allow'>>>;
     /** Ready only: whether the plugin's `tools:<ns>` scope is covered by its `grantedPermissions` (PLG-04); #636 enforces it. */
     readonly toolsGranted?: boolean;
+    /**
+     * Ready only: the hosts of the plugin's granted `network:<host>` scopes (PLG-04) — the allowlist its fetch runs
+     * behind (#642). Absent (a gate answer recorded before #642): no allowlist.
+     */
+    readonly networkHosts?: readonly string[];
 }
 
 /** One read for a page: every plugin, the active slots, which secrets are set (names only). */
