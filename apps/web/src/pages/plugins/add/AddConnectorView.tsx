@@ -6,7 +6,8 @@
  *   "Not listed?" with `Add MCP server`.
  * - Middle: the title and `Done`, the search (`?q=`, `matchListing`), then one section per category with three tiles
  *   and "See all N" — or, with a query or a category, a flat grid. A connected tile is dimmed and opens its plugin.
- * - Right, 380 px: the `?selected=` listing's preview and `Connect <name>`.
+ * - Right, 380 px: the `?selected=` listing's preview and `Connect <name>`. Below 1280 px it drops under the tiles;
+ *   below 768 px the page is one column and the preview is a full-screen sheet with Connect docked at its foot (#641).
  *
  * Connecting runs the existing flows through the page's `AddConnectorPort` (mock or live): a conduit connector's
  * sign-in, or the MCP form prefilled from the listing. Then `?next=agents` swaps the middle column for the step that
@@ -236,7 +237,7 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
         const isConnected = connected.has(listingPluginId(listing));
         const asks = [...(listing.asks.signIn ? [listing.asks.signIn] : []), ...listing.asks.scopes];
         return (
-            <aside data-add-preview data-connector={listing.id} aria-label={`${listing.name} preview`}>
+            <aside data-add-preview data-connector={listing.id} data-sheet={step ? undefined : ''} aria-label={`${listing.name} preview`}>
                 <div data-preview-head>
                     <AgentTile name={listing.name} size={44} />
                     <div>
@@ -246,6 +247,8 @@ export const AddConnectorView = component<AddConnectorViewProps>(({ props }) => 
                             <code data-mono>{listing.publisher.toLowerCase()} · {listing.version}</code>
                         </div>
                     </div>
+                    {/* The phone's full-screen sheet (#641) closes back to the list; hidden wider, where the preview is a column. */}
+                    {step ? null : <span data-preview-close><Button intent="icon" icon="close" label="Close preview" onClick={() => { const { selected: _selected, ...rest } = query(); go(rest); }} /></span>}
                 </div>
                 <p data-preview-description>{listing.description}</p>
                 <div data-preview-group="tools">

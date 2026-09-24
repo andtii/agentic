@@ -11,7 +11,7 @@ const shell = (part: string) => `[data-scope="ai-shell"][data-part="${part}"]`;
 /** The shell's navigation drawer — the responsive one; the chat's context panel is a plain modal drawer. */
 const drawerPanel = '[data-scope="drawer"][data-part="panel"][data-l-dock-above="md"]';
 
-const ROUTES = ['/', '/chats/c1', '/projects', '/projects/new', '/projects/p_agentic', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage'];
+const ROUTES = ['/', '/chats/c1', '/projects', '/projects/new', '/projects/p_agentic', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/plugins?kind=connector', '/plugins/connectors/add', '/plugins/connectors/add?selected=gmail', '/plugins/gmail', '/settings', '/history', '/usage'];
 
 async function noHorizontalScroll(page: Page, path: string) {
     const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
@@ -180,6 +180,88 @@ test.describe('phone', () => {
         expect((await env.boundingBox())?.height).toBeGreaterThanOrEqual(52);
         expect(await env.evaluate((el) => getComputedStyle(el).display)).toBe('grid');
         await expect(env.locator('[data-scope="badge"][data-part="root"]').first()).toBeVisible();
+    });
+
+    test('plugins (#641): the category Select above the list, stacked rows, 44 px targets', async ({ page }) => {
+        await page.goto('/plugins?kind=harness');
+        // The menu column is gone; its items are one Select above the content, on the current category.
+        await expect(page.getByRole('navigation', { name: 'Plugin categories' })).toBeHidden();
+        const trigger = page.locator('[data-plugins-select] [data-scope="select"][data-part="trigger"]');
+        await expect(trigger).toBeVisible();
+        await expect(trigger).toContainText('Harness');
+        const [t, search] = await Promise.all([trigger.boundingBox(), page.getByRole('searchbox', { name: 'Search plugins' }).boundingBox()]);
+        expect(t!.height).toBeGreaterThanOrEqual(44);
+        expect(t!.y + t!.height).toBeLessThanOrEqual(search!.y);
+        await trigger.click();
+        await page.getByRole('option', { name: /^Memory/ }).click();
+        await expect(page).toHaveURL(/\/plugins\?kind=memory$/);
+
+        // A row stacks: the tile, the name over the readiness pill, then the switch; the chevron is hidden.
+        await page.goto('/plugins');
+        const row = page.locator('[data-plugin-rows] [data-plugin-row="default"][data-plugin="claude-code"]');
+        const part = (name: string) => row.locator(`[data-plugin-row-part="${name}"]`);
+        await expect(part('chevron')).toBeHidden();
+        await expect(part('kind')).toBeHidden();
+        await expect(part('readiness')).toBeVisible();
+        const [tile, name, pill, toggle] = await Promise.all([part('tile').boundingBox(), part('name').boundingBox(), part('readiness').boundingBox(), part('toggle').boundingBox()]);
+        expect(name!.x).toBeGreaterThan(tile!.x + tile!.width - 1);
+        expect(pill!.y).toBeGreaterThanOrEqual(name!.y + name!.height - 1);
+        expect(Math.round(pill!.x)).toBe(Math.round(name!.x));
+        expect(toggle!.x).toBeGreaterThan(name!.x + name!.width - 1);
+        // Touch targets: the switch, the status chips and the Select are 44 px.
+        const sw = await row.locator('[data-scope="switch"][data-part="root"]').boundingBox();
+        expect(sw!.height).toBeGreaterThanOrEqual(44);
+        expect(sw!.width).toBeGreaterThanOrEqual(44);
+        for (const chip of await page.locator('[data-status-chip]').all()) expect((await chip.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+        // The Connectors view stacks the same way, with no sideways scroll.
+        await page.goto('/plugins?kind=connector');
+        const connector = page.locator('[data-connector-rows] [data-plugin-row="connector"]').first();
+        await expect(connector.locator('[data-plugin-row-part="chevron"]')).toBeHidden();
+        await expect(connector.locator('[data-plugin-row-part="readiness"]')).toBeVisible();
+        await noHorizontalScroll(page, '/plugins?kind=connector');
+    });
+
+    test('add a connector (#641): one column, the preview a full-screen sheet with Connect docked at the foot', async ({ page }) => {
+        await page.goto('/plugins/connectors/add');
+        // One column: the browse column first, the filters under it; no preview until one is picked.
+        const [main, side] = await Promise.all([page.locator('[data-add-main]').boundingBox(), page.locator('[data-add-side]').boundingBox()]);
+        expect(side!.y).toBeGreaterThanOrEqual(main!.y + main!.height - 1);
+        expect(Math.round(side!.x)).toBe(Math.round(main!.x));
+        await expect(page.locator('[data-add-preview]')).toBeHidden();
+
+        await page.locator('[data-add-main] button[data-connector="gmail"]').click();
+        const sheet = page.locator('[data-add-preview][data-sheet]');
+        await expect(sheet).toBeVisible();
+        const viewport = page.viewportSize()!;
+        const box = (await sheet.boundingBox())!;
+        expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, viewport.width, viewport.height]);
+        const connect = sheet.getByRole('button', { name: 'Connect Gmail' });
+        const foot = (await sheet.locator('[data-preview-foot]').boundingBox())!;
+        expect(Math.round(foot.y + foot.height)).toBe(viewport.height);
+        expect((await connect.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        const close = sheet.getByRole('button', { name: 'Close preview' });
+        expect((await close.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+        await close.click();
+        await expect(sheet).toBeHidden();
+        await expect(page).not.toHaveURL(/selected=/);
+
+        // Connect from the sheet runs the flow to the agent step, which the sheet no longer covers.
+        await page.locator('[data-add-main] button[data-connector="gmail"]').click();
+        await page.locator('[data-add-preview][data-sheet]').getByRole('button', { name: 'Connect Gmail' }).click();
+        await expect(page.getByRole('heading', { name: 'Choose agents for Gmail' })).toBeVisible();
+        await expect(page.locator('[data-add-preview]')).toBeHidden();
+        await noHorizontalScroll(page, '/plugins/connectors/add?next=agents');
+    });
+
+    test('the plugin page (#641): the header wraps, the rail drops under the main column', async ({ page }) => {
+        await page.goto('/plugins/gmail');
+        const [main, rail] = await Promise.all([page.locator('[data-plugin-detail-main]').boundingBox(), page.locator('[data-plugin-detail-rail]').boundingBox()]);
+        expect(rail!.y).toBeGreaterThanOrEqual(main!.y + main!.height - 1);
+        expect(Math.round(rail!.x)).toBe(Math.round(main!.x));
+        const deny = page.locator('[data-tool-policy="gmail__send-email"]').getByRole('button', { name: 'deny' });
+        expect((await deny.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await noHorizontalScroll(page, '/plugins/gmail');
     });
 
     test('touch targets: buttons are 48 px and the memory row actions grow to 44', async ({ page }) => {

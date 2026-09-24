@@ -31,9 +31,7 @@ export const kitScopes: Record<string, ScopeVocabulary> = {
     // The working-folder picker (#191): selection rides ARIA (`aria-pressed`, `aria-selected`, `aria-current`).
     'ag-workdir': { modifiers: ['compact'] },
     'ag-workdir-picker': { modifiers: ['loading'] },
-    // Plugins (#232): a ready plugin carries no tone; `selected` is the active plugin of a single-slot kind.
-    // `ag-secret` and `ag-map-field` paint no tone and no modifier, so they make no claim (an empty one is refused).
-    'ag-plugin-card': { axes: { tone: ['dim', 'needs-you', 'failed'] }, modifiers: ['selected'] },
+    // Plugins (#232): `ag-readiness`, `ag-secret` and `ag-map-field` paint no tone and no modifier, so they make no claim (an empty one is refused).
     // Provider limits (#270): ok is `live`, warning `needs-you`, exhausted `failed`, unknown `muted`; `stale` dims an old snapshot.
     'ag-quota': { axes: { tone: ['muted', 'live', 'needs-you', 'failed'] }, modifiers: ['stale', 'compact'] },
     'ag-quota-panel': { modifiers: ['stale', 'compact'] },

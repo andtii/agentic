@@ -1,18 +1,24 @@
-/* /plugins redesign (#625): list — owned by its page issue (#637, board `Plugins`). */
+/* /plugins redesign (#625): list — owned by its page issue (#637, board `Plugins`); the phone and tablet pass is #641. */
+@import '@agentic/ui/css/breakpoints';
 
 /* The layout (`PluginsLayout`): the 232 px category menu, full height beside the view. */
 [data-plugins-layout] { display: grid; grid-template-columns: auto minmax(0, 1fr); }
-[data-plugins-menu], [data-plugins-menu] > div { display: flex; }
+[data-plugins-menu], [data-plugins-menu-column] { display: flex; }
+/* The phone's category `Select` (#641): hidden beside the menu column. */
+[data-plugins-select] { display: none; }
 [data-plugins-content] { min-inline-size: 0; container: plugins / inline-size; }
 @media (min-width: 768px) {
     /* Flush with the shell's sidebar and topbar, as on the board: the menu's rule runs the page's height. */
     [data-plugins-layout] { margin: calc(-1 * var(--ag-space-8)); min-block-size: calc(100% + 2 * var(--ag-space-8)); }
     [data-plugins-content] { padding: var(--space-xl) var(--ag-space-8) var(--ag-space-8); }
 }
-/* Below the sidebar regime the menu steps aside until the phone layout (#641) places it. */
-@media (max-width: 767px) {
+/* Below 768 px (#641): the menu column steps aside and its items are one `Select` above the content. */
+@media (--below-md) {
     [data-plugins-layout] { grid-template-columns: minmax(0, 1fr); }
-    [data-plugins-menu] { display: none; }
+    [data-plugins-menu-column] { display: none; }
+    [data-plugins-select] { display: block; flex: 1 1 auto; min-inline-size: 0; margin-block-end: var(--space-lg); }
+    [data-plugins-select] [data-scope="select"][data-part="root"], [data-plugins-select] [data-scope="select"][data-part="trigger"] { inline-size: 100%; max-inline-size: none; }
+    [data-plugins-select] [data-scope="select"][data-part="trigger"] { min-block-size: 44px; }
 }
 
 /* The head row: search, status chips, then the page actions. */
@@ -89,4 +95,46 @@
     [data-plugin-row="radio"] { grid-template-columns: 16px 36px minmax(0, 1fr) auto !important; }
     [data-plugin-row="radio"] > [data-plugin-row-part="chevron"] { display: none !important; }
     [data-plugins-filters] [data-search-field] { flex-basis: 100%; }
+}
+
+/* The Connectors view's rows (#638) beside the menu (a tablet, #641): a connector row sheds its transport, then its dependents. */
+@container plugins (max-width: 880px) {
+    [data-plugin-row="connector"] { grid-template-columns: 36px minmax(0, 1fr) 230px 100px 44px 20px !important; }
+    [data-plugin-row="connector"] > [data-plugin-row-part="kind"] { display: none !important; }
+}
+@container plugins (max-width: 720px) {
+    [data-plugin-row="connector"] { grid-template-columns: 36px minmax(0, 1fr) auto 44px 20px !important; }
+    [data-plugin-row="connector"] > [data-plugin-row-part="kind"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="dependents"] { display: none !important; }
+}
+
+/*
+ * The phone (#641, below 768 px): a row stacks — the tile, the name over the readiness pill, then the switch — and
+ * the kind, dependents and chevron drop (the whole row still links). Every control is a 44 px touch target.
+ */
+@media (--below-md) {
+    [data-plugin-row="default"], [data-plugin-row="connector"] {
+        grid-template-columns: 36px minmax(0, 1fr) 44px !important;
+        grid-template-areas: "tile title toggle" "tile readiness toggle";
+        row-gap: var(--space-xs);
+        min-block-size: 68px !important;
+    }
+    [data-plugin-row="default"] > [data-plugin-row-part="tile"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="tile"] { grid-area: tile; }
+    [data-plugin-row="default"] > [data-plugin-row-part="title"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="title"] { grid-area: title; }
+    [data-plugin-row="default"] > [data-plugin-row-part="readiness"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="readiness"] { grid-area: readiness; display: flex !important; flex-wrap: wrap; }
+    [data-plugin-row="default"] > [data-plugin-row-part="toggle"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="toggle"] { grid-area: toggle; justify-content: center; }
+    [data-plugin-row="default"] > [data-plugin-row-part="kind"],
+    [data-plugin-row="default"] > [data-plugin-row-part="dependents"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="kind"],
+    [data-plugin-row="connector"] > [data-plugin-row-part="dependents"],
+    [data-plugin-row] > [data-plugin-row-part="chevron"] { display: none !important; }
+    [data-plugin-row="radio"] { grid-template-columns: 16px 36px minmax(0, 1fr) auto !important; }
+    [data-plugin-row-part="toggle"] [data-scope="switch"][data-part="root"] { min-block-size: 44px; min-inline-size: 44px; justify-content: center; }
+    [data-plugin-row] [data-scope="button"], [data-plugin-attention] [data-scope="button"], [data-plugin-more] a { min-block-size: 44px; }
+    [data-status-chip] { block-size: 44px; }
+    [data-page="plugins"] [data-page-actions] [data-scope="button"] { min-block-size: 44px; }
 }

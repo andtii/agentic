@@ -1,4 +1,5 @@
-/* /plugins redesign (#625): connectors — owned by its page issue. */
+/* /plugins redesign (#625): connectors — owned by its page issue; the phone pass is #641. */
+@import '@agentic/ui/css/breakpoints';
 /* The Connectors view (#638), board `PluginsConnectors`: filter box and chips, then the bordered list. */
 [data-page-lead]:has(> [data-connectors-controls]) { flex: 1 1 auto; }
 [data-connectors-controls] { flex: 1 1 auto; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-md); min-inline-size: 0; }
@@ -26,3 +27,10 @@
 [data-connector-deps="none"], [data-connector-deps="loading"] { font-size: var(--text-xs); color: var(--ag-text-dim); white-space: nowrap; }
 [data-connector-schedules] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
 [data-mcp-sign-in] { display: flex; flex-direction: column; gap: var(--space-md); margin-block-end: var(--space-lg); }
+
+/* The phone (#641): 44 px chips and Remove; the group label keeps one line. */
+@media (--below-md) {
+    [data-connector-chips] [data-filter-chip] { block-size: 44px; }
+    [data-connectors-label] > :first-child { white-space: nowrap; }
+    [data-connector-remove] [data-scope="button"] { min-block-size: 44px; min-inline-size: 44px; }
+}

@@ -66,13 +66,32 @@ test.describe('tablet', () => {
         await expect(drawer).toBeHidden();
     });
 
+    test('plugins (#641): the add page\'s preview drops under the tile grid, the plugin page\'s rail under its main column', async ({ page }) => {
+        await page.goto('/plugins/connectors/add?selected=gmail');
+        const preview = page.locator('[data-add-preview][data-connector="gmail"]');
+        await expect(preview).toBeVisible();
+        // In flow, not a sheet: the side column stays, the preview sits in the browse column under the tiles.
+        await expect(page.locator('[data-add-side]')).toBeVisible();
+        await expectRailBelow(page, '[data-add-main]', '[data-add-preview]');
+        expect(await preview.evaluate((el) => getComputedStyle(el).position)).not.toBe('fixed');
+        await expect(preview.getByRole('button', { name: 'Connect Gmail' })).toBeVisible();
+
+        await page.goto('/plugins/gmail');
+        await expectRailBelow(page, '[data-plugin-detail-main]', '[data-plugin-detail-rail]');
+
+        // The menu column stays beside the list; the phone's Select is not shown.
+        await page.goto('/plugins?kind=connector');
+        await expect(page.getByRole('navigation', { name: 'Plugin categories' })).toBeVisible();
+        await expect(page.locator('[data-plugins-select]')).toBeHidden();
+    });
+
     test('three-column card grids become two, and nothing scrolls horizontally', async ({ page }) => {
         await page.goto('/machines');
         expect(await page.locator('[data-env-grid]').first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2);
         // The plugins list (#637) beside its menu: a row drops its kind and dependents columns, keeping name, readiness and switch.
         await page.goto('/plugins');
         expect(await page.locator('[data-plugin-rows] [data-plugin-row="default"]').first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(5);
-        for (const path of ['/', '/chats/c1', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/settings', '/history', '/usage']) {
+        for (const path of ['/', '/chats/c1', '/tasks/t1-1', '/sessions/s1', '/agents', '/agents/a1', '/machines', '/machines/alien01', '/pair', '/schedules', '/plugins', '/plugins?kind=connector', '/plugins/connectors/add', '/plugins/connectors/add?selected=gmail', '/plugins/gmail', '/settings', '/history', '/usage']) {
             await page.goto(path);
             const [scrollWidth, innerWidth] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
             expect(scrollWidth, path).toBeLessThanOrEqual(innerWidth);

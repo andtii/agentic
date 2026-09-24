@@ -1,4 +1,4 @@
-/* /plugins redesign (#625): detail — owned by its page issue (#640), board `PluginDetail`. */
+/* /plugins redesign (#625): detail — owned by its page issue (#640), board `PluginDetail`; the phone pass is #641. */
 @import '@agentic/ui/css/breakpoints';
 
 /* The page: the header, then the panels beside a 360 px rail. */
@@ -55,6 +55,28 @@
 [data-plugin-panel="remove"][data-plugin-action] [data-label] { color: var(--color-error) !important; }
 [data-remove-dependents] { margin: 0; padding-inline-start: var(--space-lg); font-size: var(--text-sm); color: var(--ag-text-muted); }
 
+/* Below 1280 the rail drops under the main column (it stays there on a phone). */
 @media (--below-xl) {
     [data-plugin-detail-grid] { grid-template-columns: minmax(0, 1fr); }
+}
+
+/*
+ * The phone (#641): the header wraps — the tile beside the name and tags, readiness and the switch on their own line —
+ * the account facts and granted scopes stack, and every control is a 44 px touch target.
+ */
+@media (--below-md) {
+    [data-plugin-detail] [data-plugin-detail-head] { flex-wrap: wrap; align-items: flex-start; gap: var(--space-md); }
+    [data-plugin-detail] [data-plugin-detail-title] { flex: 1 1 0; }
+    [data-plugin-detail] [data-plugin-detail-name] { font-size: 20px; }
+    [data-plugin-detail-status] { flex-basis: 100%; justify-content: space-between; }
+    [data-plugin-detail] [data-plugin-panel] { padding: 16px; }
+    [data-plugin-panel-head] { flex-wrap: wrap; }
+    [data-plugin-panel-caption] { margin-inline-start: 0; text-align: start; }
+    [data-account-rows] > div { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-xs); }
+    [data-plugin-detail] [data-permission-list] li { flex-wrap: wrap; row-gap: var(--space-2xs); }
+    [data-plugin-detail] [data-permission-scope] { inline-size: auto; flex: 1 1 100%; }
+    [data-plugin-detail] [data-permission-reason] { flex-basis: 0; }
+    [data-permission-action] { min-block-size: 44px; min-inline-size: 44px; }
+    [data-plugin-detail] [data-scope="button"], [data-plugin-detail] [data-segmented] button { min-block-size: 44px; }
+    [data-plugin-detail-status] [data-scope="switch"][data-part="root"] { min-block-size: 44px; min-inline-size: 44px; justify-content: center; }
 }

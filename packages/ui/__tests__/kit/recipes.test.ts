@@ -17,12 +17,12 @@ const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('
 describe('the ag-* kit', () => {
     it('declares sixteen scopes (pills, tiles, empty and failure cards are zero parts), every one in the fragment with a recipe, and a vocabulary claim where it paints one', () => {
         const scopes = kitAnatomies.map((a) => a.scope);
-        expect(scopes).toEqual(['ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-banner', 'ag-workdir', 'ag-workdir-picker', 'ag-plugin-card', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel', 'ag-quota-rings', 'ag-markdown']);
+        expect(scopes).toEqual(['ag-env-line', 'ag-needs-item', 'ag-task-node', 'ag-connection', 'ag-version', 'ag-env-card', 'ag-banner', 'ag-workdir', 'ag-workdir-picker', 'ag-readiness', 'ag-secret', 'ag-map-field', 'ag-quota', 'ag-quota-panel', 'ag-quota-rings', 'ag-markdown']);
         for (const scope of scopes) {
             expect(fragment.components.some((c) => c.scope === scope), scope).toBe(true);
             expect(kitRecipes.some((r) => r.component === scope), scope).toBe(true);
             // Layout-only scopes paint no tone and no modifier: they make no vocabulary claim (the validator refuses an empty one).
-            if (!['ag-secret', 'ag-map-field'].includes(scope)) expect(kitScopes[scope], scope).toBeDefined();
+            if (!['ag-readiness', 'ag-secret', 'ag-map-field'].includes(scope)) expect(kitScopes[scope], scope).toBeDefined();
             expect(tokens.scopes?.[scope], scope).toEqual(kitScopes[scope]);
         }
     });
