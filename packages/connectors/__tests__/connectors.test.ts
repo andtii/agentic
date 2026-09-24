@@ -297,6 +297,7 @@ describe('network: grants on the conduit fetch (#642)', () => {
             (e: unknown) => e
         );
         expect(failure).toBeInstanceOf(ConnectorToolError);
+        (globalThis as any).process?.stderr?.write?.('DBG ' + (failure as Error).message + '\n');
         expect((failure as ConnectorToolError).code).toBe('network_not_granted');
         expect((failure as ConnectorToolError).tool).toBe('gmail__search-messages');
         expect((failure as Error).message).toBe("Permission denied: network:gmail.googleapis.com is not granted to this connector: the workspace owner can grant it on the connector's plugin page.");
@@ -313,6 +314,36 @@ describe('network: grants on the conduit fetch (#642)', () => {
         const out = await byName(connector.tools, 'gmail__search-messages').run({ query: 'is:unread' }, ctx());
         expect(out).toBeDefined();
         expect(h.google.seen.some((r) => r.url.startsWith(GMAIL))).toBe(true);
+    });
+
+    it('a granted host that redirects elsewhere reaches nothing there: conduit follows redirects itself, every hop checked and sent through the guarded http', async () => {
+        const h = harness();
+        const account = await h.connect();
+        const hops: string[] = [];
+        const redirecting = async (request: Request): Promise<Response> => {
+            hops.push(`${new URL(request.url).host} ${request.redirect}`);
+            if (request.url.startsWith(GMAIL)) return new Response(null, { status: 307, headers: { location: 'https://evil.example/collect' } });
+            return h.google.http(request);
+        };
+        const engine = createConnectorEngine({
+            secret: 'a-workspace-secret-that-is-long-enough-0123456789',
+            accounts: h.accounts,
+            transient: memoryTransient(),
+            locks: inProcessLocks(),
+            clients: clientFromSecrets(async (name) => ({ 'gmail-client-id': 'cid.apps.googleusercontent.com', 'gmail-client-secret': 'client-shh' })[name], 'gmail'),
+            redirectUri: REDIRECT,
+            http: redirecting,
+            allowedHosts: ['gmail.googleapis.com', 'oauth2.googleapis.com']
+        });
+        const connector = await conduitTools(engine, { id: 'gmail', connector: 'gmail', account, owner: OWNER });
+        const failure = await byName(connector.tools, 'gmail__search-messages').run({ query: 'is:unread' }, ctx()).then(
+            () => undefined,
+            (e: unknown) => e
+        );
+        expect(failure).toBeInstanceOf(ConnectorToolError);
+        expect((failure as Error).message).toContain('evil.example is not allowed');
+        // `redirect: 'manual'`: the engine's http sees each hop, and the second one never left.
+        expect(hops).toEqual(['gmail.googleapis.com manual']);
     });
 
     it('guardHttp matches a grant by host or hostname and names only the scope', async () => {

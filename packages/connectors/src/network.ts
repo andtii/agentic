@@ -8,6 +8,10 @@
  *
  * It is a `ConduitError`, so conduit passes it through as it is: no retry, no
  * `request failed:` wrapping.
+ *
+ * Redirects need nothing extra here: conduit builds every request with
+ * `redirect: 'manual'` and follows a 3xx itself, checking each hop against
+ * the spec's hosts and sending it through this same `http`.
  */
 
 import { ConduitError, type HttpClient } from '@aigntiq/conduit';
