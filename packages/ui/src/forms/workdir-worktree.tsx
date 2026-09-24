@@ -16,6 +16,7 @@ import { Field, Input } from '@sigx/zero';
 import { normalizePath, pathWithin, suggestWorktreePath, type FsError, type FsListResult } from '@agentic/core';
 import { agWorkdirPickerAnatomy } from '../kit/anatomy.js';
 import { Button } from '../kit/Button.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { fsErrorText, type WorkdirEnvironment, type WorkdirWorktreeRequest } from './workdir-model.js';
 
 const SCOPE = agWorkdirPickerAnatomy.scope;
@@ -97,7 +98,7 @@ export const WorkdirWorktreeForm = component<WorkdirWorktreeFormProps>(({ props,
                     </Input.Root>
                     {st.targetError ? <Field.Error>{st.targetError}</Field.Error> : null}
                 </Field.Root>
-                {error ? <p data-scope={SCOPE} data-part="notice" data-notice="error" role="alert">{error}</p> : null}
+                {error ? <ErrorNote data-worktree-error="">{error}</ErrorNote> : null}
                 <div data-scope={SCOPE} data-part="actions">
                     <Button intent="default" disabled={props.creating} onClick={() => emit('close')}>Discard</Button>
                     <Button intent="primary" icon="branch" loading={props.creating} onClick={submit}>Create worktree</Button>

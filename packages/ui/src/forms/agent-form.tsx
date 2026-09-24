@@ -20,7 +20,7 @@
 
 import { component, type Define, type JSXElement } from '@sigx/runtime-core';
 import { batch, computed, signal, watch } from '@sigx/reactivity';
-import { Button, Field, Select } from '@sigx/zero';
+import { Field, Select } from '@sigx/zero';
 import type { AgentConfig } from '@agentic/core';
 import {
     AGENT_FIELDS as F,
@@ -40,6 +40,8 @@ import {
     type RuntimeOption
 } from './agent-model.js';
 import { MultiSelectField, NumberField, SelectField, SwitchField, TextField, TextareaField, type FieldOption } from './fields.js';
+import { Button } from '../kit/Button.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { Segmented } from '../kit/Segmented.js';
 import { modelDisplayName } from '../kit/model-name.js';
 
@@ -343,8 +345,7 @@ export const AgentForm = component<AgentFormProps>(
                             <span>{CATEGORY_LABELS[c]}</span>
                             <small>{CATEGORY_HINTS[c]}</small>
                         </div>
-                        <Segmented model={() => draft.approvals[c]} label={`${CATEGORY_LABELS[c]} policy`} options={SEGMENTS} disabled={props.disabled} />
-                        {draft.approvals[c] ? <input type="hidden" name={F.approval(c)} value={draft.approvals[c]} /> : null}
+                        <Segmented model={() => draft.approvals[c]} name={F.approval(c)} label={`${CATEGORY_LABELS[c]} policy`} options={SEGMENTS} disabled={props.disabled} />
                     </div>
                 ) : (
                     <SelectField key={c} model={() => draft.approvals[c]} name={F.approval(c)} label={CATEGORY_LABELS[c]} options={APPROVAL_OPTIONS} placeholder="No rule" />
@@ -447,28 +448,27 @@ export const AgentForm = component<AgentFormProps>(
                         <>
                             <TextField model={() => draft.reason} name={F.reason} label="Reason for this change" description="Recorded with the new configuration version." />
                             <div data-scope="ai-form" data-part="actions">
-                                <Button.Root type="submit" color="primary" disabled={props.disabled}>
+                                <Button type="submit" intent="primary" disabled={props.disabled}>
                                     {props.submitLabel ?? 'Save'}
-                                </Button.Root>
-                                <Button.Root type="button" variant="ghost" disabled={props.disabled} onClick={reset}>
+                                </Button>
+                                <Button intent="default" disabled={props.disabled} onClick={reset}>
                                     Reset
-                                </Button.Root>
+                                </Button>
                             </div>
                         </>
                     ))}
                 </>
             );
 
+            // In the two-column layout the summary heads the sections column, so it never takes a grid cell of its own.
+            const summary = count ? <ErrorNote data-form-summary="">{count === 1 ? 'One field needs attention.' : `${count} fields need attention.`}</ErrorNote> : null;
+
             return (
                 <form data-scope="ai-form" data-part="root" data-form="agent" data-layout={props.layout ?? 'stack'} action={props.action} method={props.method ?? 'post'} onSubmit={onSubmit}>
-                    {count ? (
-                        <div data-scope="ai-form" data-part="summary" role="alert">
-                            {count === 1 ? 'One field needs attention.' : `${count} fields need attention.`}
-                        </div>
-                    ) : null}
+                    {rail ? null : summary}
                     {rail ? (
                         <>
-                            <div data-scope="ai-form" data-part="sections">{body}</div>
+                            <div data-scope="ai-form" data-part="sections">{summary}{body}</div>
                             <aside data-scope="ai-form" data-part="rail">{rail({ ...api, config: source() })}</aside>
                         </>
                     ) : body}
