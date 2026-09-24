@@ -91,7 +91,13 @@ export function connectorOptions(draft: ConnectorDraft): McpHttpConnector {
     };
 }
 
-/** One tool the probe found, as the manifest declares it (`mcpConnector`'s `tools`): its server name, unprefixed. */
+/**
+ * One tool the probe found, as the manifest declares it (`mcpConnector`'s `tools`).
+ * Built from the opened session's tools, so `name` is the sanitized, unprefixed
+ * name (a server's `delete.repo` arrives as `delete_repo`), not the raw
+ * `tools/list` name; it maps back to the same session name. A server `title` is
+ * not carried through, and a title-only tool shows its title as the description.
+ */
 export type ProbedTool = NonNullable<McpHttpConnector['tools']>[number];
 
 export type ConnectorProbe =
