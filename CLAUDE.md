@@ -8,9 +8,11 @@ Below are only the Claude-Code-specific bits.
 
 ## Claude Code specifics
 
-- **Branch first — never work on `main`.** Before touching any file:
-  `pnpm wt new <N-short-slug>`, then continue from
-  `<repo>/branches/<N-short-slug>`. Verify with `git branch --show-current`
+- **Branch first — never work on `main`.** Before touching any file, run
+  `git branch --show-current`: a non-`main` branch under `<repo>/branches/`
+  (a `pnpm wt` or agentic chat worktree) means you are already isolated — stay.
+  Otherwise `pnpm wt new <N-short-slug>`, then continue from
+  `<repo>/branches/<N-short-slug>` (`pnpm install` if `node_modules` is missing). Verify with `git branch --show-current`
   before every commit; if it prints `main` or nothing (detached HEAD), stop —
   move the changes
   (`git stash -u` → `pnpm wt new <N-short-slug>` →
