@@ -7,15 +7,16 @@
  * `actions`; those keep their own scopes and take the adopting design
  * system's own recipes. The `addressing` row says who a message goes to:
  * "To" plus one `recipient` chip per resolved agent and a right-aligned
- * `hint` (`docs/design/HANDOFF.md` → `ai-composer`). The `mentions` listbox
- * carries `open | closed` and is hidden by the runtime while closed.
+ * `hint` (`docs/design/HANDOFF.md` → `ai-composer`). The `@mention` popup
+ * is zero's `Combobox` in trigger mode around the textarea — its own scope,
+ * styled by the design system's `combobox` recipe.
  *
  * The root takes the governed `highlighted` flag while a drag carrying files
  * hovers it (zero's `FileUpload` spells drag-over the same way). Each
  * `attachment` chip carries its upload as a governed lifecycle state —
  * `loading` (uploading) · `complete` (ready) · `error` — with a
  * `thumbnail` for images, its `attachment-name` / `attachment-size`, a
- * `spinner` while loading and the `attachment-error` line.
+ * `spinner` while loading, and the kit's `ErrorNote` on an error.
  */
 import { defineAnatomy } from '@sigx/zero/anatomy';
 
@@ -31,11 +32,8 @@ export const aiComposerAnatomy = defineAnatomy('ai-composer', {
     'attachment-size': { element: 'span', parent: 'attachment', tokens: ['color', 'text'] },
     /** The upload's spinner — rendered only while the chip is `loading`. */
     spinner: { element: 'span', parent: 'attachment', tokens: ['color'] },
-    'attachment-error': { element: 'span', parent: 'attachment', tokens: ['color', 'text'] },
     input: { element: 'div', parent: 'root' },
-    mentions: { element: 'ul', parent: 'input', states: ['open', 'closed'], hiddenIn: ['closed'], tokens: ['color', 'radius-box'] },
-    mention: { element: 'li', parent: 'mentions', flags: ['highlighted'], tokens: ['color', 'text'] },
     actions: { element: 'div', parent: 'root' },
-    /** The key hint: `Enter to send · Shift+Enter newline`, mono 11. */
+    /** The key hint: `Enter to send · Shift+Enter newline` with the keys as zero `Kbd`s, mono 11. */
     keys: { element: 'span', parent: 'actions', tokens: ['color', 'text'] }
 });

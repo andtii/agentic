@@ -130,7 +130,10 @@ describe('asking about a line', () => {
         expect(one(root, 'ag-line-composer', 'ref')!.textContent).toBe('shell.css:61');
         const send = buttonNamed(root, 'Send to chat');
         expect(send.disabled).toBe(true);
-        const input = one(root, 'ag-line-composer', 'input') as HTMLTextAreaElement;
+        // zero's Textarea, autosizing from two rows, inside the `input` part.
+        const input = one(root, 'ag-line-composer', 'input')!.querySelector<HTMLTextAreaElement>('[data-scope="textarea"][data-part="textarea"]')!;
+        expect(input.getAttribute('rows')).toBe('2');
+        expect(input.hasAttribute('data-autosize')).toBe(true);
         expect(document.activeElement).toBe(input);
         input.value = '  Does the drawer keep its focus trap?  ';
         input.dispatchEvent(new Event('input', { bubbles: true }));

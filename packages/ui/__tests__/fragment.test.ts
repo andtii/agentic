@@ -40,7 +40,7 @@ describe('the ai-* fragment', () => {
         for (const c of merged.components.slice(zeroManifest.components.length)) expect(c.package).toBe('@agentic/ui');
         // The tool card's lifecycle, spelled in the governed vocabulary.
         const toolCall = merged.components.find((c) => c.scope === 'ai-tool-call')!;
-        expect(toolCall.parts.find((p) => p.name === 'root')!.states).toEqual(['loading', 'active', 'complete', 'error', 'closed']);
+        expect(toolCall.parts.find((p) => p.name === 'root')!.states).toEqual(['loading', 'running', 'paused', 'complete', 'error', 'denied', 'cancelled']);
     });
 
     it('styles only the scopes and parts it declares, and validates under the recommended vocabulary', () => {

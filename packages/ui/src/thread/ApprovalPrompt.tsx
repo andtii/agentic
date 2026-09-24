@@ -27,6 +27,7 @@ import type { Decision, OpenRequest } from '@sigx/ai-agent/app';
 import { AgentTile, type AgentHue } from '../kit/AgentTile.js';
 import { Button } from '../kit/Button.js';
 import { EnvironmentLine, type EnvironmentParts } from '../kit/EnvironmentLine.js';
+import { ErrorNote } from '../kit/ErrorNote.js';
 import { Icon } from '../kit/icons.js';
 import { MarkdownDialog } from '../kit/MarkdownDialog.js';
 import { MarkdownViewer, type MarkdownViewerProps } from '../kit/MarkdownViewer.js';
@@ -237,7 +238,7 @@ export const ApprovalPrompt = component<ApprovalPromptProps>(({ props, signal })
                         )}
                     </dl>
                 )}
-                {st.error && !decision ? <p data-scope={SCOPE} data-part="description" role="alert">{`Could not answer: ${st.error}`}</p> : null}
+                {st.error && !decision ? <ErrorNote data-approval-error="">{`Could not answer: ${st.error}`}</ErrorNote> : null}
                 {decision ? (
                     <p data-scope={SCOPE} data-part="record">{decisionText(decision)}</p>
                 ) : plan !== undefined ? (

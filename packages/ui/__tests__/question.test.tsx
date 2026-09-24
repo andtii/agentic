@@ -157,7 +157,11 @@ describe('the question card', () => {
         reject(new Error('session is closed'));
         await tick();
         await tick();
-        expect(one(dom, 'ai-question', 'error')!.textContent).toBe('Could not answer: session is closed');
+        // The kit's ErrorNote: zero's Alert, `role="alert"`, with the site's hook.
+        const note = dom.querySelector('[data-scope="ai-question"] [data-question-error]')!;
+        expect(note.getAttribute('role')).toBe('alert');
+        expect(note.getAttribute('data-scope')).toBe('alert');
+        expect(note.textContent).toBe('Could not answer: session is closed');
         expect(buttonNamed(dom, 'Answer').disabled).toBe(false);
     });
 

@@ -12,6 +12,8 @@ import type { UIToolState } from '@sigx/ai';
 import { createTranscript, toolState } from '@sigx/ai-agent';
 import type { AgentState, AgentTranscript, Decision, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import { expectAnatomy } from '@sigx/zero/testing';
+import { signal } from '@sigx/reactivity';
+import { component } from '@sigx/runtime-core';
 import { ToolCall, aiToolCallAnatomy, aiApprovalAnatomy, toolCallState, toolIcon, OUTPUT_FOLD, OUTPUT_LOG } from '../src/thread';
 import { recipes } from '../src/fragment/recipes';
 import { mount, one, all, buttonNamed, stableHtml, tick } from './helpers';
@@ -21,6 +23,8 @@ const tool = (p: Partial<ToolPartState> = {}): ToolPartState => ({ type: 'tool',
 /** The pill's label inside the card's status part. */
 const pill = (root: ParentNode): string => one(root, 'ai-tool-call', 'status')!.querySelector('[data-scope="ag-pill"][data-part="label"]')!.textContent!;
 const meta = (root: ParentNode): string | undefined => one(root, 'ai-tool-call', 'meta')?.textContent ?? undefined;
+/** The zero Collapsible (`<details>`) an io block folds on. */
+const fold = (block: HTMLElement): HTMLDetailsElement => block.querySelector<HTMLDetailsElement>('details[data-scope="collapsible"][data-part="root"]')!;
 
 /** A transcript with one open permission request bound to call `c1`. */
 function awaiting(): { transcript: AgentTranscript; request: OpenRequest } {
@@ -71,11 +75,11 @@ describe('the governed data-state and the handoff pill', () => {
     it.each([
         ['streaming', 'loading', 'PENDING', 'muted', true, 'writing arguments'],
         ['pending', 'loading', 'PENDING', 'muted', true, undefined],
-        ['in_progress', 'active', 'RUNNING', 'working', false, undefined],
+        ['in_progress', 'running', 'RUNNING', 'working', false, undefined],
         ['completed', 'complete', 'DONE', 'muted', false, undefined],
         ['failed', 'error', 'ERROR', 'failed', false, undefined],
-        ['cancelled', 'error', 'ERROR', 'failed', false, 'cancelled'],
-        ['denied', 'closed', 'DENIED', 'failed', true, undefined]
+        ['cancelled', 'cancelled', 'ERROR', 'failed', false, 'cancelled'],
+        ['denied', 'denied', 'DENIED', 'failed', true, undefined]
     ] as const)('%s → data-state=%s, pill %s', (status, expected, label, tone, hollow, refined) => {
         const dom = mount(<ToolCall part={tool({ status, output: undefined })} />);
         expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe(expected);
@@ -87,11 +91,15 @@ describe('the governed data-state and the handoff pill', () => {
     });
 
     it('takes a state border only while running and on error — the rest keep the quiet line', () => {
-        // The recipe is the contract: `active` and `error` paint a role colour, the other three the line.
-        const root = recipes.find((r) => r.component === 'ai-tool-call')!.parts.root!.states!;
-        expect(root.active!.borderColor).toBe('var(--color-info)');
+        // The recipe is the contract: `running` and `error` paint a role colour, the rest the line.
+        const recipe = recipes.find((r) => r.component === 'ai-tool-call')!;
+        const root = recipe.parts.root!.states!;
+        expect(Object.keys(root).sort()).toEqual(['cancelled', 'complete', 'denied', 'error', 'loading', 'paused', 'running']);
+        expect(root.running!.borderColor).toBe('var(--color-info)');
         expect(root.error!.borderColor).toBe('var(--color-error)');
-        for (const quiet of ['loading', 'complete', 'closed']) expect(root[quiet]!.borderColor, quiet).toContain('--ag-line');
+        for (const quiet of ['loading', 'paused', 'complete', 'denied', 'cancelled']) expect(root[quiet]!.borderColor, quiet).toContain('--ag-line');
+        // The look-alikes are declared, not disguised.
+        expect(recipe.sameAs!.root).toEqual({ complete: 'loading', cancelled: 'denied' });
     });
 
     it('an open request on a pending call reads as awaiting approval', () => {
@@ -133,7 +141,7 @@ describe('tool output', () => {
     it('renders a string output as is and a non-string as JSON, open by default', () => {
         const text = mount(<ToolCall part={tool({ output: 'a\nb' })} />);
         expect(one(text, 'ai-tool-call', 'output')!.querySelector('pre')!.textContent).toBe('a\nb');
-        expect(one(text, 'ai-tool-call', 'output')!.getAttribute('data-state')).toBe('open');
+        expect(fold(one(text, 'ai-tool-call', 'output')!).open).toBe(true);
         const json = mount(<ToolCall part={tool({ output: [{ id: 'INC-41' }] })} />);
         expect(one(json, 'ai-tool-call', 'output')!.querySelector('pre')!.textContent).toContain('"INC-41"');
     });
@@ -166,10 +174,59 @@ describe('tool output', () => {
 
     it('folds the input away by default, and opens no input block for a call with no arguments', () => {
         const dom = mount(<ToolCall part={tool()} />);
-        expect(one(dom, 'ai-tool-call', 'input')!.getAttribute('data-state')).toBe('closed');
+        expect(fold(one(dom, 'ai-tool-call', 'input')!).open).toBe(false);
+        expect(fold(one(dom, 'ai-tool-call', 'input')!).getAttribute('data-state')).toBe('closed');
         const bare = mount(<ToolCall part={tool({ input: undefined })} />);
         expect(one(bare, 'ai-tool-call', 'input')).toBeNull();
         expect(one(bare, 'ai-tool-call', 'signature')).toBeNull();
+    });
+});
+
+describe('the folds are zero Collapsibles', () => {
+    it('a reader\'s toggle persists across streaming updates of the call', async () => {
+        const st = signal<{ part: ToolPartState }>({ part: tool({ status: 'in_progress', output: 'one' }) });
+        const Host = component(() => () => <ToolCall part={st.part} />);
+        const dom = mount(<Host />);
+        const input = (): HTMLDetailsElement => fold(one(dom, 'ai-tool-call', 'input')!);
+        const output = (): HTMLDetailsElement => fold(one(dom, 'ai-tool-call', 'output')!);
+        expect(input().open).toBe(false);
+        expect(output().open).toBe(true);
+        input().querySelector<HTMLElement>('summary')!.click();
+        output().querySelector<HTMLElement>('summary')!.click();
+        await tick();
+        expect(input().open).toBe(true);
+        expect(output().open).toBe(false);
+        st.part = tool({ status: 'completed', output: 'one\ntwo' });
+        await tick();
+        expect(one(dom, 'ai-tool-call', 'root')!.getAttribute('data-state')).toBe('complete');
+        expect(input().open).toBe(true);
+        expect(output().open).toBe(false);
+    });
+
+    it('a sub-agent\'s work follows its run until the reader toggles it', async () => {
+        const transcript = createTranscript('s1');
+        const agent: AgentState = { agentId: 'a1', callId: 'c1', depth: 1, seq: 1, status: 'running', title: 'Triage' };
+        transcript.agents[agent.agentId] = agent;
+        transcript.messages.push({ id: 'm-sub', role: 'assistant', parentCallId: 'c1', parts: [{ type: 'text', id: 'p1', text: 'looking' }] });
+        const st = signal<{ transcript: AgentTranscript }>({ transcript });
+        const Host = component(() => () => <ToolCall part={tool({ agentId: 'a1' })} transcript={st.transcript} />);
+        const dom = mount(<Host />);
+        const work = (): HTMLDetailsElement => fold(one(dom, 'ai-tool-call', 'agent')!);
+        expect(work().open).toBe(true);
+        st.transcript = { ...transcript, agents: { a1: { ...agent, status: 'paused' } } };
+        await tick();
+        expect(one(dom, 'ai-tool-call', 'agent')!.getAttribute('data-state')).toBe('paused');
+        expect(work().open).toBe(true);
+        work().querySelector<HTMLElement>('summary')!.click();
+        await tick();
+        expect(work().open).toBe(false);
+        st.transcript = { ...transcript, agents: { a1: { ...agent, status: 'running' } } };
+        await tick();
+        expect(work().open).toBe(false);
+        st.transcript = { ...transcript, agents: { a1: { ...agent, status: 'cancelled' } } };
+        await tick();
+        expect(one(dom, 'ai-tool-call', 'agent')!.getAttribute('data-state')).toBe('cancelled');
+        expectAnatomy(dom, aiToolCallAnatomy);
     });
 });
 
@@ -215,7 +272,8 @@ describe('the sub-agent card', () => {
         const card = one(dom, 'ai-tool-call', 'agent')!;
         expect(card.getAttribute('data-state')).toBe('complete');
         expect(card.textContent).toContain('INC-41 first then INC-42');
-        expect(card.querySelector('details')!.open).toBe(false);
+        expect(fold(card).open).toBe(false);
+        expect(card.querySelector('[data-scope="collapsible"][data-part="trigger"]')!.textContent).toBe('Its work (1 message)');
         expect(all(dom, 'ai-message', 'root')).toHaveLength(1);
         expectAnatomy(dom, aiToolCallAnatomy);
     });
@@ -224,7 +282,8 @@ describe('the sub-agent card', () => {
         const { part, transcript } = withAgent({ status: 'running' });
         const cancelled: string[] = [];
         const dom = mount(<ToolCall part={part} transcript={transcript} onCancelAgent={(id) => cancelled.push(id)} />);
-        expect(one(dom, 'ai-tool-call', 'agent')!.getAttribute('data-state')).toBe('active');
+        expect(one(dom, 'ai-tool-call', 'agent')!.getAttribute('data-state')).toBe('running');
+        expect(fold(one(dom, 'ai-tool-call', 'agent')!).open).toBe(true);
         buttonNamed(dom, 'Cancel').click();
         expect(cancelled).toEqual(['a1']);
         const passive = mount(<ToolCall part={part} transcript={transcript} />);
