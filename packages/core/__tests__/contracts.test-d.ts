@@ -1,5 +1,6 @@
 import { expectTypeOf } from 'vitest';
 import type { ConnectorToolDeclaration, PlatformConnectorCall, PlatformConnectorTools, AccountKey, AccountRef, AgentId, ChatEntry, ChatFile, ChatFileBody, ChatFilePart, ChatFileRead, ChatFileStore, ChatId, ChatRoster, DaemonBuild, DaemonFeature, DaemonFrame, ChangeSet, EnvErrorCode, EnvironmentInput, EnvOp, ExecutionDefaults, FileChangeStatus, FsErrorCode, FsOp, FsReadResult, FsResult, FsTreeResult, PromptPart, WorkspaceAnswer, WorkspaceSource, LoginPhase, MachineId, MachinePolicy, MachinePolicyErrorCode, MachinePolicyOp, OpenSpec, PlatformFrame, PluginKind, Principal, ProjectId, Proposal, QuotaAccount, ReleaseAsset, RuntimeDriver, RuntimeOpenContext, SessionClosedCode, TaskContract, TaskOrigin, TaskStatus, WaitReason } from '../src/index';
+import type { PluginManifest, PluginReadinessStatus, PluginToolDeclaration, ToolGrant, ToolMode } from '../src/index';
 import type { CONNECTOR_CALL_TOOL, CONNECTOR_TOOLS_TOOL, DAEMON_FRAME_TYPES, PLATFORM_FRAME_TYPES } from '../src/index';
 
 // Every union is closed: exhaustiveness holds and the discriminants are literal.
@@ -103,6 +104,13 @@ describe('contract type tests', () => {
         expectTypeOf<Extract<ChatEntry, { t: 'msg' }>['machine']>().toEqualTypeOf<{ readonly id: MachineId | null } | undefined>();
         expectTypeOf<ChatRoster['machine']>().toEqualTypeOf<{ readonly id: MachineId; readonly name: string } | undefined>();
         expectTypeOf<QuotaAccount['key']>().toEqualTypeOf<AccountKey | undefined>();
+    });
+    it('plugins declare their tools with a default mode, and readiness knows a signed-out connection (#627)', () => {
+        expectTypeOf<ToolMode>().toEqualTypeOf<'allow' | 'ask' | 'deny'>();
+        expectTypeOf<ToolGrant['mode']>().toEqualTypeOf<ToolMode | undefined>();
+        expectTypeOf<PluginManifest['tools']>().toEqualTypeOf<readonly PluginToolDeclaration[] | undefined>();
+        expectTypeOf<PluginToolDeclaration['defaultMode']>().toEqualTypeOf<ToolMode | undefined>();
+        expectTypeOf<'needs-sign-in'>().toMatchTypeOf<PluginReadinessStatus>();
     });
     it('instruction proposals always require review', () => {
         expectTypeOf<Extract<Proposal, { kind: 'instruction' }>['requiresReview']>().toEqualTypeOf<true>();

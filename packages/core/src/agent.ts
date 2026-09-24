@@ -12,11 +12,23 @@ export interface SkillRef {
     readonly version?: string;
 }
 
+/** How a tool call is let through: at once, after an approval, or never. */
+export type ToolMode = 'allow' | 'ask' | 'deny';
+
 /** A tool the agent may call; the only thing a policy is compiled from. */
 export interface ToolGrant {
     readonly name: string;
     /** `'ask'` routes every call through the approval flow. Default `'allow'`. */
-    readonly mode?: 'allow' | 'ask' | 'deny';
+    readonly mode?: ToolMode;
+}
+
+/**
+ * The mode a tool starts in when nothing chose one, from its MCP-style hints:
+ * read-only is allowed, destructive asks, anything else is allowed (PLG-09).
+ */
+export function defaultToolMode(annotations?: { readonly readOnlyHint?: boolean; readonly destructiveHint?: boolean }): ToolMode {
+    if (annotations?.readOnlyHint) return 'allow';
+    return annotations?.destructiveHint ? 'ask' : 'allow';
 }
 
 export interface ConnectorRef {
