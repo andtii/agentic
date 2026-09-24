@@ -52,15 +52,15 @@
 }
 [data-files-empty] { padding: var(--ag-space-8); }
 [data-files-loading] { margin: 0; padding: var(--ag-space-8); }
+/* a failed banner is an ErrorNote (the alert's own error colour, #594); the status banner is amber */
 [data-files-banner] {
     display: flex; align-items: center; gap: var(--space-sm);
     margin: 0; padding: var(--space-sm) var(--space-xl);
     border-block-end: var(--border) solid var(--ag-line);
-    background: color-mix(in oklab, var(--color-warning) 8%, transparent);
-    color: var(--color-warning);
+    border-radius: 0;
     font-size: var(--text-sm);
 }
-[data-files-banner][data-tone="failed"] { background: color-mix(in oklab, var(--color-error) 8%, transparent); color: var(--color-error); }
+[data-files-banner][role="status"] { background: color-mix(in oklab, var(--color-warning) 8%, transparent); color: var(--color-warning); }
 /* "Edited by <tile> Edit at 14:09" in a file's header (#565): dim label, the agent's tile, the call as a link. */
 [data-file-edited] { display: inline-flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; white-space: nowrap; }
 [data-file-edited-label] { font-size: var(--text-xs); color: var(--ag-text-dim); }
@@ -86,7 +86,8 @@
 }
 [data-files-main] { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; }
 [data-files-surface] { flex: 1 1 auto; min-block-size: 0; display: flex; flex-direction: column; }
-[data-files-note] { margin: 0; padding: var(--space-lg) var(--space-xl); color: var(--ag-text-muted); font-size: var(--text-sm); }
+[data-files-note] { margin: 0; padding: var(--space-lg) var(--space-xl); font-size: var(--text-sm); }
+p[data-files-note] { color: var(--ag-text-muted); }
 [data-scope="ag-changes"] [data-files-note] { padding: 0; }
 [data-files-state] { padding: var(--ag-space-8); }
 [data-files-back] { display: none; }

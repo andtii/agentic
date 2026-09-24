@@ -15,13 +15,15 @@
  */
 import { component, onMounted, signal, useData, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
+import { Card } from '@sigx/zero';
 import { useActorState } from '@sigx/actors/app';
 import type { LedgerSummary } from '@agentic/platform';
-import { AgentTile, Button, DataTable, Label, Segmented, StatusPill } from '@agentic/ui';
+import { AgentTile, Button, DataTable, ErrorNote, Label, Segmented, StatusPill } from '@agentic/ui';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { ledgerKeyOf, ledgerMonthOf, workspaceKeyOf } from '../../actors/keys';
 import { OpsPage } from '../ops/OpsPage';
 import { LiveLimits } from './Limits';
+import { UsageStats } from './UsageStats';
 import { useAgentDirectory } from '../chat/directory';
 import { costText, dayOf, daysOf, statsOf, tokensText, USAGE_BY, USAGE_COLS, usageRowsOf, type LiveUsageBy } from './live';
 
@@ -108,29 +110,27 @@ export const LiveUsage = component(() => {
             >
                 <LiveLimits />
 
-                <div data-usage-stats aria-busy={grouped.loading ? 'true' : undefined}>
-                    {stats.map((stat) => (
-                        <section data-card data-stat data-tone={stat.tone} aria-label={stat.label}>
-                            <Label>{stat.label}</Label>
-                            <span data-stat-value>{stat.value}</span>
-                            <span data-stat-caption>{stat.caption}</span>
-                        </section>
-                    ))}
-                </div>
+                <UsageStats stats={stats} busy={grouped.loading} />
 
-                <section data-card data-usage-days aria-label="Cost per day">
-                    <div data-label-row>
-                        <Label>Cost per day · USD · reported + estimated</Label>
-                        <span data-label-aside>{days.from} to {days.to}</span>
-                    </div>
-                    <div data-bars role="img" aria-label={`Cost per day from ${days.from} to ${days.to}; today ${days.today}`}>
-                        {days.values.map((v, i) => <span data-bar data-today={i === days.values.length - 1 ? '' : undefined} style={`--h: ${max > 0 ? Math.round((v / max) * 100) : 0}%`} />)}
-                    </div>
-                    <div data-bars-foot>
-                        <span>1</span>
-                        <span data-bars-today>today <strong>{days.today}</strong></span>
-                    </div>
-                </section>
+                <Card.Root asChild data-usage-days="" aria-label="Cost per day">
+                    {(part: Record<string, unknown>) => (
+                        <section {...part}>
+                            <Card.Body data-card-body="">
+                                <div data-label-row>
+                                    <Label>Cost per day · USD · reported + estimated</Label>
+                                    <span data-label-aside>{days.from} to {days.to}</span>
+                                </div>
+                                <div data-bars role="img" aria-label={`Cost per day from ${days.from} to ${days.to}; today ${days.today}`}>
+                                    {days.values.map((v, i) => <span data-bar data-today={i === days.values.length - 1 ? '' : undefined} style={`--h: ${max > 0 ? Math.round((v / max) * 100) : 0}%`} />)}
+                                </div>
+                                <div data-bars-foot>
+                                    <span>1</span>
+                                    <span data-bars-today>today <strong>{days.today}</strong></span>
+                                </div>
+                            </Card.Body>
+                        </section>
+                    )}
+                </Card.Root>
 
                 <DataTable
                     cols={USAGE_COLS}
@@ -139,7 +139,7 @@ export const LiveUsage = component(() => {
                     class="ag-usage"
                 >
                     {rows.map((row) => (
-                        <tr data-scope="table" data-part="row" data-usage-row={row.id} data-quality={row.quality}>
+                        <DataTable.Row data-usage-row={row.id} data-quality={row.quality}>
                             <DataTable.Cell>
                                 <span data-agent-cell>
                                     {row.agent ? <AgentTile name={row.agent.name} hue={row.agent.hue} size={22} /> : null}
@@ -151,11 +151,11 @@ export const LiveUsage = component(() => {
                             <DataTable.Cell><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
                             <DataTable.Cell><code data-mono data-cost={row.quality} data-dim={row.cost === null ? '' : undefined}>{costText(row.cost)}</code></DataTable.Cell>
                             <DataTable.Cell><StatusPill status={row.quality} hollow {...(row.quality === 'estimated' ? { tone: 'needs-you' as const, label: 'ESTIMATED' } : {})} /></DataTable.Cell>
-                        </tr>
+                        </DataTable.Row>
                     ))}
                 </DataTable>
                 {!rows.length && !grouped.loading ? <p data-panel-note data-usage-empty>No usage recorded in {ui.month}. Each turn a session runs adds a row.</p> : null}
-                {grouped.error ? <p data-chat-error role="alert">{grouped.error.message}</p> : null}
+                {grouped.error ? <ErrorNote data-chat-error="">{grouped.error.message}</ErrorNote> : null}
             </OpsPage>
         );
     };

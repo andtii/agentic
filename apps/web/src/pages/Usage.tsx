@@ -1,4 +1,5 @@
 import { component, signal, type Define } from 'sigx';
+import { Card } from '@sigx/zero';
 import { AgentTile, DataTable, Label, Segmented, StatusPill } from '@agentic/ui';
 import { dataMode } from '../data-mode';
 import { money, opsAgent, opsLimitAccounts, tokensText, usageDays, usageRows, usageStats, type UsageBy, type UsageRow } from '../mock/ops';
@@ -6,6 +7,7 @@ import { OpsPage } from './ops/OpsPage';
 import { USAGE_COLS } from './usage/live';
 import { LiveUsage } from './usage/LiveUsage';
 import { LimitsSection } from './usage/Limits';
+import { UsageStats } from './usage/UsageStats';
 
 /** The artboard's column template (`docs/design/HANDOFF.md` → tables). */
 export { USAGE_COLS };
@@ -43,29 +45,27 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
         >
             <LimitsSection accounts={opsLimitAccounts()} />
 
-            <div data-usage-stats>
-                {usageStats.map(stat => (
-                    <section data-card data-stat data-tone={stat.tone} aria-label={stat.label}>
-                        <Label>{stat.label}</Label>
-                        <span data-stat-value>{stat.value}</span>
-                        <span data-stat-caption>{stat.caption}</span>
-                    </section>
-                ))}
-            </div>
+            <UsageStats stats={usageStats} />
 
-            <section data-card data-usage-days aria-label="Cost per day">
-                <div data-label-row>
-                    <Label>Cost per day · USD · anthropic-api</Label>
-                    <span data-label-aside>{usageDays.from} to {usageDays.to}</span>
-                </div>
-                <div data-bars role="img" aria-label={`Cost per day from ${usageDays.from} to ${usageDays.to}; today ${usageDays.today}`}>
-                    {usageDays.values.map((v, i) => <span data-bar data-today={i === usageDays.values.length - 1 ? '' : undefined} style={`--h: ${Math.round((v / max) * 100)}%`} />)}
-                </div>
-                <div data-bars-foot>
-                    <span>1</span>
-                    <span data-bars-today>today <strong>{usageDays.today}</strong></span>
-                </div>
-            </section>
+            <Card.Root asChild data-usage-days="" aria-label="Cost per day">
+                {(part: Record<string, unknown>) => (
+                    <section {...part}>
+                        <Card.Body data-card-body="">
+                            <div data-label-row>
+                                <Label>Cost per day · USD · anthropic-api</Label>
+                                <span data-label-aside>{usageDays.from} to {usageDays.to}</span>
+                            </div>
+                            <div data-bars role="img" aria-label={`Cost per day from ${usageDays.from} to ${usageDays.to}; today ${usageDays.today}`}>
+                                {usageDays.values.map((v, i) => <span data-bar data-today={i === usageDays.values.length - 1 ? '' : undefined} style={`--h: ${Math.round((v / max) * 100)}%`} />)}
+                            </div>
+                            <div data-bars-foot>
+                                <span>1</span>
+                                <span data-bars-today>today <strong>{usageDays.today}</strong></span>
+                            </div>
+                        </Card.Body>
+                    </section>
+                )}
+            </Card.Root>
 
             <DataTable
                 cols={USAGE_COLS}
@@ -76,7 +76,7 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
                 {props.rows[ui.by].map(row => {
                     const agent = row.agentId ? opsAgent(row.agentId) : undefined;
                     return (
-                        <tr data-scope="table" data-part="row" data-usage-row={row.id} data-quality={row.quality}>
+                        <DataTable.Row data-usage-row={row.id} data-quality={row.quality}>
                             <DataTable.Cell>
                                 <span data-agent-cell>
                                     {agent ? <AgentTile name={agent.name} hue={agent.hue} size={22} /> : null}
@@ -88,7 +88,7 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
                             <DataTable.Cell><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
                             <DataTable.Cell><code data-mono data-cost={row.quality}>{money(row.costUsd, row.quality)}</code></DataTable.Cell>
                             <DataTable.Cell><StatusPill status={row.quality} hollow /></DataTable.Cell>
-                        </tr>
+                        </DataTable.Row>
                     );
                 })}
             </DataTable>

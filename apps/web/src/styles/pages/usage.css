@@ -8,10 +8,11 @@
 [data-usage-limits][data-compact] [data-limits-grid] { grid-template-columns: minmax(0, 1fr); gap: var(--space-md); }
 [data-limit-account] { display: flex; flex-direction: column; gap: var(--space-2xs); min-inline-size: 0; }
 [data-limit-caption] { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ag-text-dim); }
-[data-stat] { gap: var(--space-sm); }
+/* a stat card is zero's Stats (#594), drawn as the rail card: base-200, the line border, the card padding; its tone is the Stats colour, muted the muted ink */
+[data-stat] { background: var(--color-base-200); border-color: var(--ag-line); }
+[data-stat][data-tone="muted"] { --stats-accent: var(--ag-text-muted); }
+[data-stat] > [data-scope="stats"][data-part="item"] { row-gap: var(--space-sm); padding: var(--space-xl); }
 [data-stat-value] { font-family: var(--font-mono); font-size: var(--text-3xl); font-weight: var(--weight-semibold); line-height: 1.1; }
-[data-stat][data-tone="needs-you"] [data-stat-value] { color: var(--color-warning); }
-[data-stat][data-tone="muted"] [data-stat-value] { color: var(--ag-text-muted); }
 [data-stat-caption] { font-size: var(--text-sm); color: var(--ag-text-muted); }
 [data-bars] { display: flex; align-items: flex-end; gap: var(--space-sm); block-size: 120px; }
 [data-bar] { flex: 1 1 0; block-size: max(3px, var(--h)); background: var(--color-base-300); border-radius: 2px 2px 0 0; }

@@ -64,7 +64,7 @@ test.describe('core flow', () => {
         // The tasks list is the breadcrumb's parent.
         await page.goto('/tasks');
         await expect(page.locator('[data-page="tasks"]')).toBeVisible();
-        await expect(page.locator('[data-chip][aria-pressed="true"]')).toContainText('All');
+        await expect(page.locator('[data-filter-chips] [aria-pressed="true"]')).toContainText('All');
 
         expect(errors, errors.join('\n')).toEqual([]);
     });

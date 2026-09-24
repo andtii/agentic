@@ -3,19 +3,12 @@
 
 /* ---- shared page furniture (#88): panels, key-value rows, ages, chips ---- */
 [data-page] > [data-page-heading][data-visually-hidden] { position: absolute; }
-[data-panel] {
-    background: var(--color-base-200);
-    border: var(--border) solid var(--ag-line);
-    border-radius: var(--radius-box);
-    padding: var(--space-xl);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    min-inline-size: 0;
-}
-[data-panel][data-tone="failed"] { border-color: var(--color-error); }
-[data-panel][data-tone="needs-you"] { border-color: var(--color-warning); }
-[data-panel-head] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+/* a Panel is zero's Card (#594): its head is one row — the label as the title, the aside at the end — and its body a column at the rail's rhythm */
+[data-panel] { min-inline-size: 0; }
+[data-panel-head] { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-md); }
+[data-panel-head] > [data-scope="card"][data-part="title"] { font-size: var(--text-xs); }
+[data-panel-head] + [data-panel-body] { padding-block-start: var(--space-md); }
+[data-panel-body], [data-card-body] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
 [data-panel-aside] { font-size: var(--text-sm); }
 [data-panel-note] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-dim); }
 [data-kv] { margin: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
@@ -24,7 +17,6 @@
 [data-kv-row] > dd > code { font-size: var(--text-sm); }
 [data-inline-tile] { display: inline-flex; align-items: center; gap: var(--space-xs); }
 [data-age] { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ag-text-dim); }
-[data-filter-chips] { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
 [data-link-button] { appearance: none; border: 0; background: none; padding: 0; color: var(--color-primary); font: inherit; font-size: var(--text-sm); cursor: pointer; text-decoration: underline; }
 [data-link-button]:hover { color: var(--ag-link-hover); }
 /* table cells (#88): status + wait reason stacked, tile + name inline */
@@ -37,7 +29,7 @@
 [data-setup-steps] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 [data-setup-steps] > li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--space-md); align-items: center; padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); }
 [data-setup-steps] > li:last-child { border-block-end: 0; }
-[data-needs-error] { margin: 0; color: var(--color-error); font-size: 13px; }
+
 [data-home-tasks] { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-lg); min-inline-size: 0; }
 [data-today] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 [data-today] > li { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: var(--space-md); align-items: center; padding-block: var(--space-sm); border-block-end: var(--border) solid var(--ag-line); }
@@ -90,7 +82,6 @@ a[data-scope="button"][data-part="root"] { color: revert-layer; text-decoration:
 [data-push-list] > li svg { color: var(--ag-text-dim); }
 [data-push-label] { flex: 1; min-width: 0; }
 [data-push-added] { color: var(--ag-text-dim); font-size: var(--text-sm); }
-[data-filter-chips] { display: flex; gap: var(--space-sm); flex-wrap: wrap; }
 
 @media (--below-md) {
     [data-settings-pair] { grid-template-columns: minmax(0, 1fr); }

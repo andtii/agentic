@@ -14,7 +14,7 @@ import { component, onMounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { Button, Icon } from '@agentic/ui';
+import { Button, ErrorNote, Icon } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../actors/defs';
 import { inboxKeyOf, registryKeyOf } from '../actors/keys';
 import { formatAge } from '../mock/workspace';
@@ -127,7 +127,7 @@ export const PushDevices = component(() => {
                         ))}
                     </ul>
                 ) : null}
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             </div>
         );
     };

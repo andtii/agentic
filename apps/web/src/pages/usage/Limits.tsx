@@ -7,6 +7,7 @@
  */
 import { component, effect, onUnmounted, signal, type Define, type JSXElement } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
+import { Card } from '@sigx/zero';
 import type { MachineView } from '@agentic/platform';
 import { Label, QuotaPanel } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -19,14 +20,11 @@ export type LimitsSectionProps =
     & Define.Prop<'compact', boolean>
     & Define.Prop<'loading', boolean>;
 
-export const LimitsSection = component<LimitsSectionProps>(({ props }) => () => (
-    <section data-card={props.compact ? undefined : ''} data-usage-limits data-compact={props.compact ? '' : undefined} aria-label="Usage limits" aria-busy={props.loading ? 'true' : undefined}>
-        {props.compact ? null : (
-            <div data-label-row>
-                <Label>Limits · per account, as the provider reports them</Label>
-            </div>
-        )}
-        {props.accounts.length === 0 && !props.loading ? <p data-panel-note>No accounts yet. Pair a machine and add an environment to see its limits.</p> : null}
+/** On `/usage` a card of its own (zero's `Card`); compact, inside Home's "Usage limits" panel, just the rows. */
+export const LimitsSection = component<LimitsSectionProps>(({ props }) => () => {
+    const busy = props.loading ? 'true' : undefined;
+    const rows = [
+        props.accounts.length === 0 && !props.loading ? <p data-panel-note>No accounts yet. Pair a machine and add an environment to see its limits.</p> : null,
         <div data-limits-grid>
             {props.accounts.map((a) => (
                 <div data-limit-account={a.key}>
@@ -35,8 +33,25 @@ export const LimitsSection = component<LimitsSectionProps>(({ props }) => () => 
                 </div>
             ))}
         </div>
-    </section>
-));
+    ];
+    if (props.compact) {
+        return <section data-usage-limits data-compact="" aria-label="Usage limits" aria-busy={busy}>{rows}</section>;
+    }
+    return (
+        <Card.Root asChild data-usage-limits="" aria-label="Usage limits" aria-busy={busy}>
+            {(part: Record<string, unknown>) => (
+                <section {...part}>
+                    <Card.Body data-card-body="">
+                        <div data-label-row>
+                            <Label>Limits · per account, as the provider reports them</Label>
+                        </div>
+                        {rows}
+                    </Card.Body>
+                </section>
+            )}
+        </Card.Root>
+    );
+});
 
 /** Renderless: keeps one machine's record current (the `ChatWatch` pattern). */
 const MachineQuotaWatch = component<{ id: string; workspaceId: string; onRead: (view: MachineView) => void }>(({ props }) => {

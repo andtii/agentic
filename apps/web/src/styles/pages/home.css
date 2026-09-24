@@ -20,8 +20,6 @@
 [data-spend] { display: flex; align-items: baseline; gap: var(--space-sm); margin: 0; }
 [data-spend-value] { font-family: var(--font-mono); font-size: var(--text-3xl); font-weight: var(--weight-semibold); }
 [data-spend-limit] { font-size: var(--text-sm); color: var(--ag-text-muted); }
-[data-spend-bar] { block-size: 6px; border-radius: 9999px; background: var(--ag-line); overflow: hidden; }
-[data-spend-bar] > span { display: block; block-size: 100%; background: var(--color-primary); }
 
 @media (--below-xl) {
     /* fixed right rails drop under the main column: Home, Task, Session, Machine, Memory */

@@ -9,7 +9,7 @@
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { actor } from '@sigx/actors';
 import type { PluginView } from '@agentic/platform';
-import { Button, Label } from '@agentic/ui';
+import { Button, ErrorNote, Label } from '@agentic/ui';
 import type { ActorDefs } from '../actors/defs';
 import { inboxKeyOf, registryKeyOf } from '../actors/keys';
 import { VAPID_SECRET, canGenerateKeys } from './model';
@@ -72,7 +72,7 @@ export const GenerateKeys = component<GenerateKeysProps>(({ props }) => {
                 </Button>
                 {!can.ok ? <p data-plugin-hint>{can.why}</p> : null}
                 {st.done ? <p data-plugin-saved role="status">{st.dropped ? `New keys saved. ${st.dropped} subscribed browser${st.dropped === 1 ? '' : 's'} removed — subscribe again in Settings.` : 'Keys saved. Turn push on for each browser in Settings → Notifications.'}</p> : null}
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             </section>
         );
     };

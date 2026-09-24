@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { MachineId, MessageId, TaskId } from '@agentic/core';
 import { AgentActor, AuditActor, TaskActor, Workspace, agentKey, auditKey, taskKey, workspaceKey, type AuditEventInput } from '@agentic/platform';
-import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
+import { USER, WS, mountLive, owner, startLive, tick, until, type LiveHarness } from './live-harness';
 import { buttonNamed, text } from './helpers';
 import { HISTORY_PAGE } from '../../src/pages/history/live';
 
@@ -30,7 +30,7 @@ afterEach(async () => {
 const audit = () => h.app.as(owner).actor(AuditActor, auditKey(WS));
 const rows = (dom: ParentNode) => [...dom.querySelectorAll<HTMLElement>('[data-history-row]')];
 const kinds = (dom: ParentNode) => rows(dom).map((r) => r.getAttribute('data-kind'));
-const chip = (dom: ParentNode, label: string) => [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chip]')].find((b) => b.textContent!.trim() === label)!;
+const chip = (dom: ParentNode, label: string) => [...dom.querySelectorAll<HTMLButtonElement>('[data-filter-chips] [data-part="item"]')].find((b) => b.textContent!.trim() === label)!;
 
 /** Forge asking on destructive calls, a task through the router, the approval answered: the scripted scenario. */
 async function scenario() {
@@ -67,6 +67,10 @@ describe('/history (live)', () => {
         expect(counts.get('approval.resolved')).toBe(1);
         expect(counts.get('task.transition')).toBe(4);
         expect(dom.querySelectorAll('[data-day-row]').length).toBe(1);
+        // The day heading is a zero Table.Row whose one cell spans the five columns (#594).
+        const day = dom.querySelector('[data-day-row]')!;
+        expect([day.getAttribute('data-scope'), day.getAttribute('data-part')]).toEqual(['table', 'row']);
+        expect(day.querySelector('[data-scope="table"][data-part="cell"]')!.getAttribute('colspan')).toBe('5');
 
         const requested = rows(dom).find((r) => r.getAttribute('data-kind') === 'approval.requested')!;
         expect(text(requested.querySelector('[data-agent-cell] > span:last-child'))).toBe('Forge');
@@ -89,13 +93,20 @@ describe('/history (live)', () => {
         await until(() => rows(dom).length >= 7, 'everything again');
 
         // The agent select is `agentId`: the approval and the transitions concern Forge; the config versions do too.
-        const select = dom.querySelector<HTMLSelectElement>('[data-history-agent] select')!;
-        expect([...select.options].map((o) => o.textContent)).toEqual(['Every actor', 'Forge']);
-        select.value = forge;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        // A zero Select (#594): open it by its trigger, choose by the option.
+        const field = dom.querySelector<HTMLElement>('[data-history-agent]')!;
+        const pickAgent = async (label: string): Promise<void> => {
+            field.querySelector<HTMLElement>('[data-scope="select"][data-part="trigger"]')!.click();
+            await tick();
+            [...field.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent!.replace('✓', '').trim() === label)!.click();
+        };
+        expect(text(field.querySelector('[data-scope="field"][data-part="label"]'))).toBe('Agent');
+        expect([...field.querySelectorAll('[role="option"]')].map((o) => o.textContent!.replace('✓', '').trim())).toEqual(['Every actor', 'Forge']);
+        await pickAgent('Forge');
         await until(() => rows(dom).every((r) => r.getAttribute('data-kind') !== 'machine.paired') && rows(dom).length >= 7, 'the agent filter');
-        select.value = '';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        // The hidden <select> posts the chosen agent's id.
+        expect(field.querySelector<HTMLSelectElement>('select[name="history-agent"]')!.value).toBe(forge);
+        await pickAgent('Every actor');
 
         // The time window is `since`: an event recorded a month ago falls out of "Last 24 h".
         const old: AuditEventInput = { key: 'old-1', kind: 'machine.paired', at: Date.now() - 30 * 24 * 60 * 60_000, by: `user:${USER}`, summary: 'paired an old machine', data: { machineId: 'm_old' as MachineId, name: 'old-box' } };

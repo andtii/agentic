@@ -14,13 +14,16 @@ import { Link } from '@sigx/router';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { AuditEvent, AuditPage } from '@agentic/platform';
-import { AgentTile, Button, DataTable, EmptyState, Tag } from '@agentic/ui';
+import { AgentTile, Button, DataTable, EmptyState, ErrorNote, FilterChips, SelectField, Tag } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../actors/defs';
 import { auditKeyOf, workspaceKeyOf } from '../../actors/keys';
 import { clock, groupByDay } from '../ops/format';
 import { OpsPage } from '../ops/OpsPage';
 import { useAgentDirectory } from '../chat/directory';
 import { auditQueryOf, DEFAULT_FILTERS, HISTORY_COLS, HISTORY_KIND_FILTERS, HISTORY_WINDOWS, mergePages, rowOf, type HistoryFilters, type HistoryKindFilter, type HistoryWindow } from './live';
+
+/** The agent filter's "no agent" item. */
+const EVERY_ACTOR = '*';
 
 export const LiveHistory = component(() => {
     const defs = useActorDefs();
@@ -53,6 +56,9 @@ export const LiveHistory = component(() => {
     const set = (patch: Partial<HistoryFilters>): void => {
         ui.filters = { ...ui.filters, ...patch };
     };
+    // The agent Select binds a string; "Every actor" is an item of its own (a `''` option would be the placeholder, never chosen again).
+    const pick = signal({ agent: ui.filters.agentId ?? EVERY_ACTOR });
+    watch(() => pick.agent, (id) => set({ agentId: id && id !== EVERY_ACTOR ? id : null }));
     const nextCursor = (): number | null => (older.pages.length ? older.next : (first.value?.next ?? null));
     const loadOlder = async (): Promise<void> => {
         const w = viewer.workspaceId;
@@ -85,23 +91,28 @@ export const LiveHistory = component(() => {
                 slots={{
                     lead: () => (
                         <div data-history-filters>
-                            <div role="group" aria-label="Filter by kind" data-filter-chips>
-                                {HISTORY_KIND_FILTERS.map((f) => (
-                                    <button type="button" data-filter-chip aria-pressed={ui.filters.kind === f.id ? 'true' : 'false'} onClick={() => set({ kind: f.id as HistoryKindFilter })}>{f.label}</button>
-                                ))}
+                            <FilterChips
+                                label="Filter by kind"
+                                model={() => ui.filters.kind}
+                                options={HISTORY_KIND_FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+                                onValueChange={(v: string) => set({ kind: v as HistoryKindFilter })}
+                            />
+                            <div data-history-window>
+                                <FilterChips
+                                    label="Filter by time"
+                                    model={() => ui.filters.window}
+                                    options={HISTORY_WINDOWS.map((w) => ({ value: w.id, label: w.label }))}
+                                    onValueChange={(v: string) => set({ window: v as HistoryWindow })}
+                                />
                             </div>
-                            <div role="group" aria-label="Filter by time" data-filter-chips data-history-window>
-                                {HISTORY_WINDOWS.map((w) => (
-                                    <button type="button" data-filter-chip aria-pressed={ui.filters.window === w.id ? 'true' : 'false'} onClick={() => set({ window: w.id as HistoryWindow })}>{w.label}</button>
-                                ))}
+                            <div data-history-agent>
+                                <SelectField
+                                    name="history-agent"
+                                    label="Agent"
+                                    model={() => pick.agent}
+                                    options={[{ value: EVERY_ACTOR, label: 'Every actor' }, ...directory.all().map((a) => ({ value: a.id, label: a.name }))]}
+                                />
                             </div>
-                            <label data-history-agent>
-                                <span>Agent</span>
-                                <select aria-label="Filter by agent" value={ui.filters.agentId ?? ''} onChange={(ev: Event) => set({ agentId: (ev.target as HTMLSelectElement).value || null })}>
-                                    <option value="">Every actor</option>
-                                    {directory.all().map((a) => <option value={a.id}>{a.name}</option>)}
-                                </select>
-                            </label>
                         </div>
                     )
                 }}
@@ -116,12 +127,12 @@ export const LiveHistory = component(() => {
                             class="ag-history"
                         >
                             {groups.map((group) => [
-                                // A day heading spans the row: zero's `Table.Cell` takes no colspan, so the row stamps the anatomy itself.
-                                <tr data-scope="table" data-part="row" data-day-row={group.day}>
-                                    <td data-scope="table" data-part="cell" colSpan={5}><span data-day-label>{group.label}</span></td>
-                                </tr>,
+                                // A day heading spans the row.
+                                <DataTable.Row data-day-row={group.day}>
+                                    <DataTable.Cell colSpan={5}><span data-day-label>{group.label}</span></DataTable.Cell>
+                                </DataTable.Row>,
                                 ...group.items.map((e) => (
-                                    <tr data-scope="table" data-part="row" data-history-row={e.id} data-kind={e.kind} data-seq={e.seq}>
+                                    <DataTable.Row data-history-row={e.id} data-kind={e.kind} data-seq={String(e.seq)}>
                                         <DataTable.Cell><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
                                         <DataTable.Cell><Tag tone={e.tone}>{e.label}</Tag></DataTable.Cell>
                                         <DataTable.Cell>
@@ -132,7 +143,7 @@ export const LiveHistory = component(() => {
                                         </DataTable.Cell>
                                         <DataTable.Cell><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
                                         <DataTable.Cell>{e.ref ? <Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link> : <span data-dim>—</span>}</DataTable.Cell>
-                                    </tr>
+                                    </DataTable.Row>
                                 ))
                             ])}
                         </DataTable>
@@ -146,7 +157,7 @@ export const LiveHistory = component(() => {
                         </p>
                     )
                     : null}
-                {older.error || first.error ? <p data-chat-error role="alert">{older.error || first.error?.message}</p> : null}
+                {older.error || first.error ? <ErrorNote data-chat-error="">{older.error || first.error?.message}</ErrorNote> : null}
             </OpsPage>
         );
     };

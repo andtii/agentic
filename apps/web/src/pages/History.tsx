@@ -1,6 +1,6 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
-import { AgentTile, Button, DataTable, Tag, type Tone } from '@agentic/ui';
+import { AgentTile, Button, DataTable, FilterChips, Tag, type Tone } from '@agentic/ui';
 import { dataMode } from '../data-mode';
 import { historyFilters, opsAgent, opsHistory, type HistoryEntry, type HistoryFilter, type HistoryKind } from '../mock/ops';
 import { clock, groupByDay } from './ops/format';
@@ -46,11 +46,12 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
                 title="History"
                 slots={{
                     lead: () => (
-                        <div role="group" aria-label="Filter by kind" data-filter-chips>
-                            {historyFilters.map(f => (
-                                <button type="button" data-filter-chip aria-pressed={ui.filter === f.id ? 'true' : 'false'} onClick={() => { ui.filter = f.id; }}>{f.label}</button>
-                            ))}
-                        </div>
+                        <FilterChips
+                            label="Filter by kind"
+                            model={() => ui.filter}
+                            options={historyFilters.map(f => ({ value: f.id, label: f.label }))}
+                            onValueChange={(v: string) => { ui.filter = v as HistoryFilter; }}
+                        />
                     )
                 }}
             >
@@ -61,14 +62,14 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
                     class="ag-history"
                 >
                     {groups.map(group => [
-                        // A day heading spans the row: zero's `Table.Cell` takes no colspan, so the row stamps the anatomy itself.
-                        <tr data-scope="table" data-part="row" data-day-row={group.day}>
-                            <td data-scope="table" data-part="cell" colSpan={5}><span data-day-label>{group.label}</span></td>
-                        </tr>,
+                        // A day heading spans the row.
+                        <DataTable.Row data-day-row={group.day}>
+                            <DataTable.Cell colSpan={5}><span data-day-label>{group.label}</span></DataTable.Cell>
+                        </DataTable.Row>,
                         ...group.items.map(e => {
                             const agent = e.actor === 'you' ? undefined : opsAgent(e.actor);
                             return (
-                                <tr data-scope="table" data-part="row" data-history-row={e.id} data-kind={e.kind}>
+                                <DataTable.Row data-history-row={e.id} data-kind={e.kind}>
                                     <DataTable.Cell><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
                                     <DataTable.Cell><Tag tone={KIND_TONE[e.kind]}>{kindLabel(e.kind)}</Tag></DataTable.Cell>
                                     <DataTable.Cell>
@@ -79,7 +80,7 @@ export const HistoryView = component<HistoryViewProps>(({ props }) => {
                                     </DataTable.Cell>
                                     <DataTable.Cell><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
                                     <DataTable.Cell><Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link></DataTable.Cell>
-                                </tr>
+                                </DataTable.Row>
                             );
                         })
                     ])}

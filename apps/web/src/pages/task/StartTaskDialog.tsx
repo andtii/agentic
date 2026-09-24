@@ -1,6 +1,6 @@
 import { component, signal, watch, type Define } from 'sigx';
 import type { EnvironmentId, WorkdirRef } from '@agentic/core';
-import { ConfirmDialog, SelectField, TextareaField } from '@agentic/ui';
+import { ErrorNote, FormDialog, SelectField, TextareaField } from '@agentic/ui';
 import type { AgentIdentity } from '../chat/live';
 import type { WorkdirEnvironments } from '../workdir/environments';
 import { WorkdirInput } from '../workdir/WorkdirInput';
@@ -40,14 +40,13 @@ export const StartTaskDialog = component<StartTaskDialogProps>(({ props, emit })
         const agent = props.agents.find((a) => a.id === st.agentId);
         const onMachine = !!agent && agent.environment.runtime !== 'anthropic-api';
         return (
-            <ConfirmDialog
+            <FormDialog
                 model={props.model}
                 title="Start task"
                 description="Opens a chat with the agent and posts the objective, so you can follow up there."
-                confirmLabel="Start task"
-                danger={false}
+                submitLabel="Start task"
                 busy={props.busy}
-                onConfirm={() => {
+                onSubmit={() => {
                     st.attempted = true;
                     if (Object.keys(validateStartTask(input())).length) return;
                     emit('start', input());
@@ -70,9 +69,9 @@ export const StartTaskDialog = component<StartTaskDialogProps>(({ props, emit })
                             onChange={(ref) => { st.workdir = ref; }}
                         />
                     ) : agent ? <p data-start-task-note>{agent.name} runs on the platform: no machine, no folder.</p> : null}
-                    {props.error ? <p data-start-task-error role="alert">{props.error}</p> : null}
+                    {props.error ? <ErrorNote data-start-task-error="">{props.error}</ErrorNote> : null}
                 </div>
-            </ConfirmDialog>
+            </FormDialog>
         );
     };
 });

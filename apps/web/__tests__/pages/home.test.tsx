@@ -3,6 +3,8 @@ import { HOME_TASK_COLS } from '../../src/pages/Home';
 import { NEEDS, sortNeeds, loadHome } from '../../src/mock/workspace';
 import { needsYouCount } from '../../src/nav';
 import { mountRoute, page, all, texts } from './mount';
+import { Panel } from '../../src/components/Panel';
+import { mountAt, text } from './helpers';
 
 describe('/ (Home)', () => {
     it('renders the home page with its three regions and the tasks table template', async () => {
@@ -63,6 +65,39 @@ describe('/ (Home)', () => {
         expect(dom.querySelector('[data-spend-bar]')?.getAttribute('aria-valuenow')).toBe('37');
         expect(dom.querySelector('[data-home-rail]')!.textContent).toContain('Today · Europe/Stockholm');
         expect(texts([...dom.querySelectorAll('[data-today-time]')])).toEqual(['15:00', '17:30', '02:00']);
+    });
+
+    it('the rail panels are zero Cards named by their label, and the spend bar is a Progress (#594)', async () => {
+        const dom = await mountRoute('/');
+        const panels = [...dom.querySelectorAll<HTMLElement>('[data-home-rail] [data-panel]')];
+        expect(panels.map((p) => p.getAttribute('aria-label'))).toEqual(['Today · Europe/Stockholm', 'This month', 'Usage limits']);
+        for (const p of panels) {
+            expect(p.tagName).toBe('SECTION');
+            expect([p.getAttribute('data-scope'), p.getAttribute('data-part')]).toEqual(['card', 'root']);
+        }
+        const month = panels[1]!;
+        expect(text(month.querySelector('[data-panel-head] [data-scope="card"][data-part="title"]'))).toBe('This month');
+        expect(text(month.querySelector('[data-panel-head] [data-panel-aside]'))).toBe('Usage');
+        const bar = month.querySelector('[data-panel-body] [data-spend-bar]')!;
+        expect([bar.getAttribute('data-scope'), bar.getAttribute('role'), bar.getAttribute('aria-label')]).toEqual(['progress', 'progressbar', 'Month spend against the limit']);
+        expect(bar.querySelector('[data-scope="progress"][data-part="range"]')!.getAttribute('style')).toContain('width: 37%');
+    });
+
+    it('a Panel tone is the card colour, the tone kept on the root (#594)', async () => {
+        const dom = await mountAt('/', (
+            <div>
+                <Panel label="Set up a runtime" tone="needs-you"><p>steps</p></Panel>
+                <Panel label="Result" tone="failed" />
+                <Panel aria-label="Plain"><p>body only</p></Panel>
+            </div>
+        ));
+        const [setup, result, plain] = [...dom.querySelectorAll<HTMLElement>('[data-panel]')];
+        expect([setup!.getAttribute('data-color'), setup!.getAttribute('data-tone')]).toEqual(['warning', 'needs-you']);
+        expect([result!.getAttribute('data-color'), result!.getAttribute('data-tone')]).toEqual(['error', 'failed']);
+        expect(plain!.hasAttribute('data-color')).toBe(false);
+        expect(plain!.getAttribute('aria-label')).toBe('Plain');
+        expect(plain!.querySelector('[data-panel-head]')).toBeNull();
+        expect(text(plain!.querySelector('[data-panel-body]'))).toBe('body only');
     });
 
     it('the rail shows each account\'s tightest limit (#270)', async () => {

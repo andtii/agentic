@@ -9,7 +9,7 @@
 import { component, signal, watch, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import type { FileChangeStatus, FsError, FsTreeEntry } from '@agentic/core';
-import { Button, CodeViewer, EmptyState, FileHeader, FileTree, FileTreeLegend, GoToFile, Icon, changedLines, fileSizeText, splitPath, type LineMark } from '@agentic/ui';
+import { Button, CodeViewer, EmptyState, ErrorNote, FileHeader, FileTree, FileTreeLegend, GoToFile, Icon, changedLines, fileSizeText, splitPath, type LineMark } from '@agentic/ui';
 import { Page } from '../components/Page';
 import { defineTopbar, routeId } from '../components/topbar';
 import { dataMode } from '../data-mode';
@@ -133,7 +133,7 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
         if (!p) return <p data-files-note>Choose a file to read it.</p>;
         if (!f.online) return <p data-files-note>Files come from {f.machineName}; this one shows again when the machine reconnects.</p>;
         if (text.error?.code === 'too-large') return <p data-files-note>This file is too large to show here ({text.error.message}).</p>;
-        if (text.error) return <p data-files-note role="alert">{text.error.message}</p>;
+        if (text.error) return <ErrorNote data-files-note="">{text.error.message}</ErrorNote>;
         if (text.binary) return <p data-files-note>Binary file · {fileSizeText(text.size ?? 0)} — not shown.</p>;
         if (text.text === undefined) return <p data-files-note aria-busy="true">Loading {splitPath(p).name}…</p>;
         return (
@@ -168,7 +168,7 @@ export const FilesView = component<{ ctx: SessionFrameContext }>(({ props }) => 
                     <Button intent="icon" icon="history" label={offline ? 'Refresh (the machine is offline)' : 'Refresh from the machine'} disabled={offline} onClick={() => { st.version++; }} />
                 </SessionFilesBar>
                 {offline ? <p data-files-banner role="status"><Icon name="wifi" size={14} /> Machine disconnected · files show again when {f.machineName} reconnects</p> : null}
-                {st.rootError?.code === 'not-found' ? <p data-files-banner data-tone="failed" role="alert">Folder no longer on {f.machineName}</p> : null}
+                {st.rootError?.code === 'not-found' ? <ErrorNote data-files-banner="" data-tone="failed">Folder no longer on {f.machineName}</ErrorNote> : null}
                 <div data-files-body data-has-file={p ? '' : undefined}>
                     <aside data-files-tree aria-label="Folder">
                         <GoToFile paths={paths} onPick={(x) => open(x)} hotkey id="session-files-find" />

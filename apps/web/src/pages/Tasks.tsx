@@ -1,6 +1,6 @@
 import { component, signal } from 'sigx';
 import type { TaskStatus } from '@agentic/core';
-import { Button, DataTable, EmptyState, SectionHeading } from '@agentic/ui';
+import { Button, DataTable, EmptyState, FilterChips, SectionHeading } from '@agentic/ui';
 import { defineTopbar } from '../components/topbar';
 import { openStartTask } from './task/start';
 import { Page } from '../components/Page';
@@ -33,13 +33,12 @@ export const Tasks = component(() => {
         return (
             <Page title="Tasks" page="tasks" hideTitle>
                 <SectionHeading count={`${all.length} total`}>Tasks</SectionHeading>
-                <div data-filter-chips role="group" aria-label="Filter by status">
-                    {FILTERS.map((f) => (
-                        <button type="button" data-chip aria-pressed={st.filter === f.value ? 'true' : 'false'} onClick={() => { st.filter = f.value; }}>
-                            {f.label} <span data-chip-count>{count(f.value)}</span>
-                        </button>
-                    ))}
-                </div>
+                <FilterChips
+                    label="Filter by status"
+                    model={() => st.filter}
+                    options={FILTERS.map((f) => ({ value: f.value, label: f.label, count: count(f.value) }))}
+                    onValueChange={(v: string) => { st.filter = v as TaskStatus | 'all'; }}
+                />
                 {rows.length
                     ? (
                         <DataTable cols={HOME_TASK_COLS} columns={TASK_COLUMNS} label="Tasks">

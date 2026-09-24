@@ -10,7 +10,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import type { Decision } from '@sigx/ai-agent';
 import type { TaskId } from '@agentic/core';
-import { EmptyState } from '@agentic/ui';
+import { EmptyState, ErrorNote } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -90,7 +90,7 @@ export const LiveSession = component<{ id: string }>(({ props }) => {
         return (
             <>
                 <SessionView v={v} agent={directory.lookup(v.agentId)} onRespond={(requestId: string, decision: Decision) => void client().respond(requestId, decision).catch(fail)} onResume={() => { void resume(); }} recovering={st.recovering} time={zoneFormat(zone()).time} files={files()} />
-                {st.error ? <p data-chat-error role="alert">{st.error}</p> : null}
+                {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
             </>
         );
     };

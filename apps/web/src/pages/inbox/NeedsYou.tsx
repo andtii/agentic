@@ -13,7 +13,7 @@
 import { component } from 'sigx';
 import type { Decision } from '@sigx/ai-agent';
 import type { OpenRequest } from '@sigx/ai-agent/app';
-import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, NeedsItem, QuestionPrompt, SectionHeading, type ApprovalDecision } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, ErrorNote, NeedsItem, QuestionPrompt, SectionHeading, type ApprovalDecision } from '@agentic/ui';
 import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
 import { MachineNotice } from '../machines/MachineNotice';
@@ -130,8 +130,8 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
                 ) : null}
                 {row.kind === 'interrupted' && row.primary && source.resume ? <Button intent="wait" icon="play" loading={st.busy} disabled={st.busy || !!row.primary.disabled} onClick={resume}>{row.primary.label}</Button> : null}
                 {r?.loading && !view ? <p data-panel-note>Loading the request…</p> : null}
-                {r?.error ? <p data-needs-error role="alert">{`Could not load the request: ${r.error.message}`}</p> : null}
-                {st.error && row.kind === 'interrupted' ? <p data-needs-error role="alert">{`Could not resume: ${st.error}`}</p> : null}
+                {r?.error ? <ErrorNote data-needs-error="">{`Could not load the request: ${r.error.message}`}</ErrorNote> : null}
+                {st.error && row.kind === 'interrupted' ? <ErrorNote data-needs-error="">{`Could not resume: ${st.error}`}</ErrorNote> : null}
                 <LinkButton to={link.to} label={link.label}>{link.label}</LinkButton>
             </NeedsItem>
         );
