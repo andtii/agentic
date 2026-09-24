@@ -45,7 +45,7 @@ export function parseEnvironments(value: unknown): EnvironmentsResult {
         if (row.profileDir !== undefined && !isText(row.profileDir)) errors.push(`${at}.profileDir must be a path`);
         if (!Array.isArray(row.cwdRoots) || row.cwdRoots.length === 0 || !row.cwdRoots.every((r) => isText(r))) errors.push(`${at}.cwdRoots must be a non-empty list of paths`);
         // No limit unless the row sets one (#694); with one, a prompt beyond it waits, a second session does not (#394).
-        const concurrency = row.concurrency ?? undefined;
+        const concurrency = row.concurrency;
         if (concurrency !== undefined && (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1)) errors.push(`${at}.concurrency must be a whole number ≥ 1`);
         if (row.accountLabel !== undefined && !isText(row.accountLabel, 256)) errors.push(`${at}.accountLabel must be text`);
         if (row.allowBypassPermissions !== undefined && typeof row.allowBypassPermissions !== 'boolean') errors.push(`${at}.allowBypassPermissions must be true or false`);

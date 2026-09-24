@@ -31,6 +31,7 @@ describe('environments.json', () => {
         const { concurrency: _omit, ...noConcurrency } = row;
         expect(parseEnvironments([row])).toEqual({ ok: true, environments: [row] });
         expect(parseEnvironments({ environments: [noConcurrency] })).toEqual({ ok: true, environments: [noConcurrency] });
+        expect(parseEnvironments([{ ...row, concurrency: null }])).toMatchObject({ ok: false, errors: [expect.stringMatching(/concurrency must be a whole number/)] });
     });
     it('reads allowBypassPermissions (#453): only true is kept, anything but a boolean is an error', () => {
         expect(parseEnvironments([{ ...row, allowBypassPermissions: true }])).toEqual({ ok: true, environments: [{ ...row, allowBypassPermissions: true }] });
