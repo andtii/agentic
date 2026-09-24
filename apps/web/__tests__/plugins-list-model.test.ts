@@ -88,7 +88,7 @@ describe('needsAttention', () => {
         const p = plugin('gmail');
         const fixOf = (r: PluginReadiness) => needsAttention([p], { gmail: r })[0]?.fix;
         expect(fixOf({ status: 'needs-machine', missing: ['claude-code'] })).toEqual({ label: 'Pair a machine', href: '/pair' });
-        expect(fixOf({ status: 'needs-config', missing: ['url'] })).toEqual({ label: 'Configure', href: '/plugins/gmail#settings' });
+        expect(fixOf({ status: 'needs-config', missing: ['url'] })).toEqual({ label: 'Configure', href: '/plugins/gmail#config' });
         expect(fixOf({ status: 'needs-grant', missing: ['network:x'] })).toEqual({ label: 'Grant', href: '/plugins/gmail#granted' });
         expect(fixOf({ status: 'no-kek' })).toEqual({ label: 'Deployment docs', href: KEK_DOCS_HREF, external: true });
         expect(fixOf({ status: 'ready' })).toBeUndefined();

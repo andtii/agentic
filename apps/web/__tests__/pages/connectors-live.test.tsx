@@ -64,7 +64,7 @@ describe('/plugins: MCP servers (live)', () => {
         const ada = await h.agent('Ada');
         // MCP servers are managed in the Connectors view (#637 took them off the list).
         const dom = await mountLive('/plugins?kind=connector', h);
-        await until(() => dom.querySelector('[data-plugin-connectors] [data-plugin-none]')?.textContent?.includes('No connectors') === true, 'the empty connector list');
+        await until(() => dom.querySelector('[data-plugin-connectors]')?.textContent?.includes('No connectors') === true, 'the empty connector list');
 
         buttonNamed(dom, 'Add MCP server').click();
         await until(() => popup(dom) !== null, 'the dialog');

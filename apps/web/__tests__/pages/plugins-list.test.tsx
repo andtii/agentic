@@ -74,7 +74,7 @@ describe('/plugins (#637)', () => {
         expect(claude.getAttribute('data-readiness')).toBe('ready');
         expect(text(claude.querySelector('[data-plugin-row-part="kind"]'))).toBe('harness');
         expect(text(claude.querySelector('[data-plugin-row-part="title"]'))).toContain('usage limits');
-        expect(claude.querySelectorAll('[data-plugin-used] [data-scope="ag-agent-tile"][data-part="root"]').length).toBe(2);
+        expect(claude.querySelectorAll('[data-plugin-used] [data-plugin-dependent]').length).toBe(2);
         expect(text(claude.querySelector('[data-plugin-schedules]'))).toBe('1 schedule');
         expect(row(root, 'anthropic-api').getAttribute('data-readiness')).toBe('needs-secret');
         expect(text(row(root, 'anthropic-api').querySelector('[data-plugin-row-part="readiness"]'))).toContain('NEEDS KEY');
@@ -123,6 +123,38 @@ describe('/plugins (#637)', () => {
         expect(query(router)).toMatchObject({ kind: 'memory', status: 'off' });
         expect(root.querySelector('[data-status-chip="off"]')!.getAttribute('aria-pressed')).toBe('true');
         expect(text(root.querySelector('[data-plugin-empty]'))).toBe('No plugins match.');
+    });
+
+    it('the search follows the URL when history moves across `?kind=` (the view stays mounted)', async () => {
+        const { root, router } = await mountPlugins('/plugins?kind=memory');
+        const input = () => root.querySelector<HTMLInputElement>('[data-search-field] input')!;
+        setText(input(), 'flat');
+        await tick();
+        await tick();
+        expect(query(router)).toMatchObject({ kind: 'memory', q: 'flat' });
+        await router.push('/plugins?kind=harness&q=flat');
+        await tick();
+        setText(input(), '');
+        await tick();
+        await tick();
+        expect(query(router).q).toBeUndefined();
+
+        // Back: the memory entry, whose search the input had replaced into it.
+        router.back();
+        for (let i = 0; i < 20 && query(router).kind !== 'memory'; i++) await tick();
+        await tick();
+        expect(query(router).q).toBe('flat');
+        expect(input().value).toBe('flat');
+        expect(rowIds(root)).toEqual(['agentic.memory.flat']);
+    });
+
+    it('a filter lists every matching connector; only the unfiltered All view truncates them', async () => {
+        const connectors = listPlugins.filter((p) => p.manifest.kind === 'connector');
+        const { root } = await mountPlugins('/plugins?status=on');
+        const group = root.querySelector('[data-plugin-group="connector"]')!;
+        expect(group.querySelectorAll('[data-plugin-row]').length).toBe(connectors.filter((p) => p.enabled).length);
+        expect(group.querySelectorAll('[data-plugin-row]').length).toBeGreaterThan(2);
+        expect(group.querySelector('[data-plugin-more]')).toBeNull();
     });
 
     it('"googleapis" finds Gmail by its permission scope; the menu goes through the router', async () => {

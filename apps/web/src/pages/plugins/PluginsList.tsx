@@ -1,4 +1,4 @@
-import { component, signal, type Define, type JSXElement } from 'sigx';
+import { component, signal, untrack, watch, type Define, type JSXElement } from 'sigx';
 import { useRoute, useRouter } from '@sigx/router';
 import { isSingleSlot, type PluginReadiness, type PluginReadinessFacts } from '@agentic/core';
 import type { Dependents, PluginView } from '@agentic/platform';
@@ -12,7 +12,7 @@ import { dataMode } from '../../data-mode';
 import { LivePlugins } from '../ops/LivePlugins';
 import { queryOf } from '../session/files';
 import { canActivate, dependentsById, disableDescription, featuresOf, groupByKind, isLastReadyRuntime, needsConfirm, pluginHref, workspaceWideConsequence, type PluginGroup } from './model';
-import { MEMORY_GROUP_NOTE, STATUS_FILTERS, filterPlugins, inCategory, matchPlugin, memoryConsequence, needsAttention, pluginsHref, previewConnectors, rowKind, statusCounts, statusFilterOf, type StatusFilter } from './list-model';
+import { ALL_ID, MEMORY_GROUP_NOTE, STATUS_FILTERS, filterPlugins, inCategory, matchPlugin, memoryConsequence, needsAttention, pluginsHref, previewConnectors, rowKind, statusCounts, statusFilterOf, type StatusFilter } from './list-model';
 import { readinessById, readinessFacts } from './readiness';
 
 /** The mock workspace's readiness facts: its secrets, and the environments its machines report. */
@@ -70,7 +70,16 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
 export const PluginListView = component<PluginListViewProps>(({ props, slots }) => {
     const route = useRoute();
     const router = useRouter();
-    const st = signal({ q: queryOf(route.query.q) ?? '' });
+    // The URL owns the search; `st.q` is the input's draft, and follows the URL
+    // when it changes under the view (back/forward across `?kind=`, which keeps it mounted).
+    const urlQ = (): string => queryOf(route.query.q) ?? '';
+    const st = signal({ q: urlQ() });
+    let seen = st.q;
+    watch(urlQ, (q) => {
+        if (q === seen) return;
+        seen = q;
+        untrack(() => { if (st.q !== q) st.q = q; });
+    });
     const status = (): StatusFilter => statusFilterOf(queryOf(route.query.status));
     const go = (next: { q?: string; status?: StatusFilter }): void => {
         void router.replace(pluginsHref({ kind: props.kind, q: next.q ?? st.q, status: next.status ?? status() }));
@@ -83,7 +92,7 @@ export const PluginListView = component<PluginListViewProps>(({ props, slots }) 
         if (!deps || !dependentCount(deps)) return <span data-plugin-none>No dependents</span>;
         return (
             <span data-plugin-used>
-                {deps.agents.map((a) => { const who = props.agentOf(a.id); return <AgentTile name={a.name || who.name} hue={who.hue} size={20} labelled />; })}
+                {deps.agents.map((a) => { const who = props.agentOf(a.id); return <span data-plugin-dependent={a.id} data-name={a.name || who.name}><AgentTile name={a.name || who.name} hue={who.hue} size={20} labelled /></span>; })}
                 {deps.schedules.length ? <span data-plugin-schedules>{plural(deps.schedules.length, 'schedule')}</span> : null}
             </span>
         );
@@ -127,8 +136,10 @@ export const PluginListView = component<PluginListViewProps>(({ props, slots }) 
 
     const group = (g: PluginGroup): JSXElement => {
         const connectors = g.kind === 'connector';
-        // The All view never lists every connector: two, then the count and the way to the Connectors view.
-        const { shown, more } = connectors && props.kind !== 'connector' ? previewConnectors(g.plugins) : { shown: g.plugins, more: 0 };
+        // The unfiltered All view never lists every connector: two, then the count and the way to the
+        // Connectors view. A category, search or status filter lists every connector that matches.
+        const preview = connectors && (!props.kind || props.kind === ALL_ID) && !st.q && status() === 'all';
+        const { shown, more } = preview ? previewConnectors(g.plugins) : { shown: g.plugins, more: 0 };
         const note = g.note ?? (g.kind === 'memory' ? MEMORY_GROUP_NOTE : undefined);
         return (
             <section key={g.key} data-plugin-group={g.key} aria-label={g.title}>

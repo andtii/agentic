@@ -142,7 +142,7 @@ describe('/plugins (live)', () => {
         await h.app.as(owner).actor(Schedule, `${WS}:schedule:${scheduleId}`).create({ kind: 'agent-task', title: 'nightly triage', prompt: 'Triage', recurrence: { kind: 'at', at: NOW + 86_400_000 }, agentId: bob });
 
         const dom = await mountLive('/plugins', h);
-        await until(() => row(dom, 'github')?.querySelector('[data-plugin-used] [data-scope="ag-agent-tile"]') != null, 'the dependents on the row');
+        await until(() => row(dom, 'github')?.querySelector('[data-plugin-used] [data-plugin-dependent]') != null, 'the dependents on the row');
         const control = () => row(dom, 'github')!.querySelector<HTMLInputElement>('input[role="switch"]')!;
         expect(row(dom, 'github')!.querySelector('[data-plugin-row-part="name"]')!.textContent).toBe('GitHub MCP');
         expect(control().checked).toBe(true);
@@ -150,7 +150,7 @@ describe('/plugins (live)', () => {
         expect(row(dom, 'github')!.getAttribute('data-readiness')).toBe('needs-grant');
         expect(row(dom, 'github')!.getAttribute('href')).toBe('/plugins/github');
         expect(dom.querySelector('[data-plugin-attention] li[data-plugin="github"] a[href="/plugins/github#granted"]')).not.toBeNull();
-        expect([...row(dom, 'github')!.querySelectorAll('[data-plugin-used] [data-scope="ag-agent-tile"][data-part="root"]')].map((t) => t.getAttribute('aria-label') ?? t.getAttribute('title'))).toEqual(['Ada', 'Bob']);
+        expect([...row(dom, 'github')!.querySelectorAll('[data-plugin-used] [data-plugin-dependent]')].map((t) => t.getAttribute('data-name'))).toEqual(['Ada', 'Bob']);
         expect(row(dom, 'github')!.querySelector('[data-plugin-schedules]')!.textContent).toBe('1 schedule');
         // Secret names, never values; connectors live in the Connectors view now.
         expect(dom.querySelector('[data-plugin-secrets]')!.textContent).toContain('No secrets stored');

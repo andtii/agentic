@@ -184,7 +184,7 @@ function attentionOf(p: PluginView, r: PluginReadiness): Omit<AttentionItem, 'pl
         case 'needs-machine':
             return { text: 'no paired machine reports this runtime', fix: { label: 'Pair a machine', href: '/pair' } };
         case 'needs-config':
-            return { text: missing ? `needs its settings: ${missing}` : 'needs its settings', fix: { label: 'Configure', href: `${page}#settings` } };
+            return { text: missing ? `needs its settings: ${missing}` : 'needs its settings', fix: { label: 'Configure', href: `${page}#config` } };
         case 'needs-grant':
             return { text: missing ? `needs ${missing} granted` : 'needs a permission granted', fix: { label: 'Grant', href: `${page}#granted` } };
         case 'needs-sign-in':
