@@ -73,14 +73,14 @@ catalogs:
       specifier: ^1.0.1
       version: 1.0.1
     '@sigx/zero':
-      specifier: ^0.4.0
-      version: 0.4.0
+      specifier: ^0.5.0
+      version: 0.5.0
     '@sigx/zero-daisyui':
-      specifier: ^0.4.0
-      version: 0.4.0
+      specifier: ^0.5.0
+      version: 0.5.0
     '@sigx/zero-kit':
-      specifier: ^0.4.0
-      version: 0.4.0
+      specifier: ^0.5.0
+      version: 0.5.0
     sigx:
       specifier: ^1.0.1
       version: 1.0.1
@@ -227,10 +227,10 @@ importers:
         version: 1.0.1(sigx@1.0.1)
       '@sigx/zero':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
+        version: 0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
       '@sigx/zero-daisyui':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/zero@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))
+        version: 0.5.0(@sigx/zero@0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))
       sigx:
         specifier: 'catalog:'
         version: 1.0.1
@@ -261,7 +261,7 @@ importers:
         version: 1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
       '@sigx/zero-kit':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
+        version: 0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -600,10 +600,10 @@ importers:
         version: 0.4.0(@sigx/reactivity@1.0.1)(@sigx/richtext@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))))(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(shiki@4.4.3)
       '@sigx/zero':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
+        version: 0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
       '@sigx/zero-daisyui':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/zero@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))
+        version: 0.5.0(@sigx/zero@0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))
       shiki:
         specifier: ^4.4.3
         version: 4.4.3
@@ -625,7 +625,7 @@ importers:
         version: 1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
       '@sigx/zero-kit':
         specifier: 'catalog:'
-        version: 0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
+        version: 0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       sigx:
         specifier: 'catalog:'
         version: 1.0.1
@@ -2173,16 +2173,16 @@ packages:
       '@sigx/ssr-islands':
         optional: true
 
-  '@sigx/zero-daisyui@0.4.0':
-    resolution: {integrity: sha512-nL6uSQoDzI3R0AjeAeObWltHB4wU1F00JJBKADxgSXkBUCyOkP7sdd1ulSRrA0ZnyO9bwWcYaZ6S6VdXpCX6RQ==}
+  '@sigx/zero-daisyui@0.5.0':
+    resolution: {integrity: sha512-7JKJ8JzSKvJ5miMxQ/5tmnvE0NXUTjaz9rdbyDBS3vDVSbESZCBKCy/gVxB7J+cuqR886O5s80r1HH8cyVb3bA==}
     peerDependencies:
-      '@sigx/zero': ^0.4.0
+      '@sigx/zero': ^0.5.0
 
-  '@sigx/zero-kit@0.4.0':
-    resolution: {integrity: sha512-3kPV/JiClADePdKzf/4cleYbRkuGGLD+MGGT54vo9OvVi5F0Uepp5Lb5xSSwaqSyrxGGpzhlCd5NpZhFqEL1SA==}
+  '@sigx/zero-kit@0.5.0':
+    resolution: {integrity: sha512-H6zbUsz9Mc3xyY+UQx1VRkOQyL2DqyiiZDPXZ5+QdghPRwYzXp4pW+Twh8P6Ips2apR0SZJIoiye1ENeuKoGZQ==}
 
-  '@sigx/zero@0.4.0':
-    resolution: {integrity: sha512-HiVg7tbNL0SpGIw2ZbgDTbU0nR/VPpLWwBNolPtFICyDa/XP9vtAS2aFUH2fRgkwzJLQT3mKdTuY852bvEWYNg==}
+  '@sigx/zero@0.5.0':
+    resolution: {integrity: sha512-0G2iJEEtklRCUbMeGpH6YAREwWs1gsdtt2CAQfYPXCGeeOBCBSJ6qfSZACmNeXFiEz3Cw2uLqLb4eWZ8ugpCDg==}
     peerDependencies:
       '@sigx/reactivity': ^1.0.0
       '@sigx/runtime-core': ^1.0.0
@@ -4462,11 +4462,11 @@ snapshots:
       '@sigx/server': 1.0.1(sigx@1.0.1)
       '@sigx/server-renderer': 1.0.1(sigx@1.0.1)
 
-  '@sigx/zero-daisyui@0.4.0(@sigx/zero@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))':
+  '@sigx/zero-daisyui@0.5.0(@sigx/zero@0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1))':
     dependencies:
-      '@sigx/zero': 0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
+      '@sigx/zero': 0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)
 
-  '@sigx/zero-kit@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))':
+  '@sigx/zero-kit@0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))':
     dependencies:
       '@sigx/cli': 0.12.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))
       ajv: 8.20.0
@@ -4475,7 +4475,7 @@ snapshots:
       - '@sigx/reactivity'
       - '@sigx/runtime-core'
 
-  '@sigx/zero@0.4.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)':
+  '@sigx/zero@0.5.0(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1))(@sigx/runtime-dom@1.0.1(@sigx/reactivity@1.0.1)(@sigx/runtime-core@1.0.1(@sigx/reactivity@1.0.1)))(sigx@1.0.1)':
     dependencies:
       '@sigx/reactivity': 1.0.1
       '@sigx/runtime-core': 1.0.1(@sigx/reactivity@1.0.1)

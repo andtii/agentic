@@ -342,23 +342,24 @@ The approval card is one component everywhere: in the chat under the message tha
 
 ### App components
 
-| Component | Built from (zero) | Variants | Notes |
-| --- | --- | --- | --- |
-| `AgentTile` | `Avatar` | 18, 20, 22, 28, 32, 44, 52 px | Square, radius 6, two-letter mono monogram in the agent hue. People use a circle. This shape difference is the only way to tell agent from user at 18 px, so keep it |
-| `StatusPill` | `Badge` + `Status` | queued, active, waiting, completed, failed, cancelled, online, offline, plus free text | 22 px, 6 px dot + mono label. Hollow dot for states where nothing is happening: queued, cancelled, offline, unknown, denied |
-| `Tag` | `Badge` | neutral, coloured text | Outline only. Used for kinds (memory kind, schedule kind, plugin kind) and wait reasons |
-| `EnvironmentLine` | text | default, dim, strong | `machine / runtime / account` in mono 12 with `text-dim` slashes. Never render one part alone where work is attributed (EXE-06). Never wraps |
-| `EnvironmentCard` | `Card` | ok, expired, unknown, offline | Name, runtime + account, capacity meter (one 18 × 6 segment per slot, `working` when used), queued count, "Default for" tiles, isolation mechanism. Expired auth turns the border `failed` and adds a fix line with `Re-check` |
-| `NeedsItem` | `Card` | approval, input, interrupted | Home inbox row: tile 32, kind pill + title 14 / 600, context line, action row |
-| `Button` | `Button` | primary, default, wait, danger, icon | 36 px, radius 6, 13 / 600, icon 15 with gap 8. Danger is outline only until the confirm step |
-| `Segmented` | `ToggleGroup` | allow / ask / deny, by agent / task / turn | 2 px inset track, 30 px segments, `aria-pressed`. The selected policy segment takes its meaning colour at 15% |
-| `Switch` | `Switch` | on, off | 40 × 24, knob 20. On = `live` track with `live-ink` knob |
-| `Field`, `Select`, `ChipInput` | `Field`, `Input`, `Select`, `Combobox` | default, error, disabled | Label 12 / 600 `text-muted` above, 38 px control, `base-100` fill, `line-strong` border, hint 12 `text-dim` below. `ChipInput` is a multi-select `Combobox` whose chips are mono with a remove button |
-| `DataTable` | `Table` |  | See column templates above. Whole row is not clickable; the ref or name cell is the link |
-| `TaskNode` | `TreeView` item | selected, default | Depth rail: one 28 px column per level with a `line-strong` left border. Node card: tile 28, title, agent + environment, wait reason in amber mono, status pill. Selected = `base-300` fill + `live` border at 53% |
-| `Timeline` | `Timeline` |  | 8 px dot in the state colour, 1 px `line-strong` connector, text 13 + mono time 11 |
-| `VersionItem` | list | current, proposed, past | Proposed (from learning) carries a `NEEDS REVIEW` pill and `Review` / `Dismiss`. Past versions show "Roll back to vN" |
-| `ConfirmDialog` | `Dialog` | destructive | 520 px, `base-300`, radius 10, padding 24. Must list every dependent by name before the destructive button, and the button states the consequence ("Disable and stop 2 sessions") |
+| Component | Built from (zero) | Today | Variants | Notes |
+| --- | --- | --- | --- | --- |
+| `AgentTile` | `Avatar` | kit; `Avatar shape` in #591 | 18, 20, 22, 28, 32, 44, 52 px | Square, radius 6, two-letter mono monogram in the agent hue. People use a circle. This shape difference is the only way to tell agent from user at 18 px, so keep it |
+| `StatusPill` | `Badge` + `Status` | kit; `Badge` + `Badge.Dot` in #591 | queued, active, waiting, completed, failed, cancelled, online, offline, plus free text | 22 px, 6 px dot + mono label. Hollow dot for states where nothing is happening: queued, cancelled, offline, unknown, denied |
+| `Tag` | `Badge` | kit; `Badge` in #591 | neutral, coloured text | Outline only. Used for kinds (memory kind, schedule kind, plugin kind) and wait reasons |
+| `EnvironmentLine` | text | kit (text); stays | default, dim, strong | `machine / runtime / account` in mono 12 with `text-dim` slashes. Never render one part alone where work is attributed (EXE-06). Never wraps |
+| `EnvironmentCard` | `Card` | `forms/environment-card.tsx`; `Card` in #593 | ok, expired, unknown, offline | Name, runtime + account, capacity meter (one 18 × 6 segment per slot, `working` when used), queued count, "Default for" tiles, isolation mechanism. Expired auth turns the border `failed` and adds a fix line with `Re-check` |
+| `NeedsItem` | `Card` | hand-built; `Card` in #594 | approval, input, interrupted | Home inbox row: tile 32, kind pill + title 14 / 600, context line, action row |
+| `Button` | `Button` | kit `Button` re-stamping the anatomy; `Button.Root` in #586 | primary, default, wait, danger, icon | 36 px, radius 6, 13 / 600, icon 15 with gap 8. Danger is outline only until the confirm step |
+| `Segmented` | `ToggleGroup` | kit on `ToggleGroup` (done, #519) | allow / ask / deny, by agent / task / turn | 2 px inset track, 30 px segments, `aria-pressed`. The selected policy segment takes its meaning colour at 15% |
+| `Switch` | `Switch` | zero `Switch` (done) | on, off | 40 × 24, knob 20. On = `live` track with `live-ink` knob |
+| `Field`, `Select`, `ChipInput` | `Field`, `Input`, `Select`, `Combobox` | zero `Field`/`Select`/`Combobox` (done, #519/#521) | default, error, disabled | Label 12 / 600 `text-muted` above, 38 px control, `base-100` fill, `line-strong` border, hint 12 `text-dim` below. `ChipInput` is a multi-select `Combobox` whose chips are mono with a remove button |
+| `DataTable` | `Table` | kit `DataTable` with `--ag-col-N`; `Table.Root columns` + `stack` in #595 |  | See column templates above. Whole row is not clickable; the ref or name cell is the link |
+| `TaskNode` | `TreeView` item | hand-built; stays (won't: ToggleGroup) | selected, default | Depth rail: one 28 px column per level with a `line-strong` left border. Node card: tile 28, title, agent + environment, wait reason in amber mono, status pill. Selected = `base-300` fill + `live` border at 53% |
+| `Timeline` | `Timeline` | kit `TimelineList`; `Timeline.Marker color` in #591 |  | 8 px dot in the state colour, 1 px `line-strong` connector, text 13 + mono time 11 |
+| `VersionItem` | list | hand-built list; stays | current, proposed, past | Proposed (from learning) carries a `NEEDS REVIEW` pill and `Review` / `Dismiss`. Past versions show "Roll back to vN" |
+| `ConfirmDialog` | `Dialog` | kit on `Dialog`, misused for data entry; split in #586 | destructive | 520 px, `base-300`, radius 10, padding 24. Must list every dependent by name before the destructive button, and the button states the consequence ("Disable and stop 2 sessions") |
+| `FormDialog` | `Dialog` | new in #586 | data entry | A plain dialog for forms. `ConfirmDialog` stays for confirming a consequence (an `alertdialog`) |
 
 ## States and interactions
 
@@ -456,7 +457,7 @@ One row per route: what it reads, and the behaviour the artboard cannot show. Ev
 
 ## Responsive behaviour
 
-There is one breakpoint in v1, 768 px, because zero has no layout tier yet (andtii/zero-wip#473). Below it everything is a single column. The acceptance bar is no horizontal scroll on any route at 400 px ([#47](https://github.com/andtii/agentic/issues/47)).
+There is one breakpoint in v1, 768 px. zero 0.4 ships a layout tier with breakpoint tokens, and moving to it is tracked in #184 (#584). Below it everything is a single column. The acceptance bar is no horizontal scroll on any route at 400 px ([#47](https://github.com/andtii/agentic/issues/47)).
 
 | Width | Changes |
 | --- | --- |
@@ -534,7 +535,7 @@ These are the places where the design guessed or stopped. Each one blocks or ben
 - [ ] **History and Usage routes.** Both are in the sidebar but architecture §10 lists no route for them. Proposed: `/history` and `/usage`; §10 needs the same PR.
 - [ ] **A tasks list route.** §10 has `/tasks/:id` but no `/tasks`. The design reaches tasks from Home and from a chat. The Task breadcrumb shows a "Tasks" parent that currently has nowhere to go.
 - [ ] **Agent overview and sessions tabs.** The tab bar shows Overview, Config, Memory, Sessions; only Config and Memory are drawn. Sessions can reuse the Machine page's sessions table. Overview has no design.
-- [ ] **Zero coverage.** The spec assumes zero has `Card`, `Collapsible` and a toggle-group. §10 does not list them. Missing ones go to andtii/zero-wip as `from:agentic` with a workaround under `packages/ui/src/_zero-gaps/`.
+- [ ] **Zero coverage.** The spec assumes zero has `Card`, `Collapsible` and a toggle-group. §10 does not list them. zero 0.4 ships all three, plus avatar, badge, status, tree-view, kbd, alert, stats, steps and progress. Adoption is tracked in #184. New gaps go to signalxjs/zero as `from:agentic`.
 - [ ] **More than four agents.** The identity palette has four hues. It needs eight to twelve that stay distinct from the four state colours.
 - [ ] **Render coverage.** Rendered outside the canvas runtime, with the type's script removed. Layout and fonts match; anything the canvas editor adds is not covered. Known leftover: long select values sit tight against the chevron in Settings and Agent config.
 - [ ] **States not drawn.** Hover, focus, disabled, loading, empty and error-field states are specified in this doc only. The add-agent dialog, new-chat dialog, memory correct/edit form, new-schedule form and the client-offline banner are also not drawn.
