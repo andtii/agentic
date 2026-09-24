@@ -52,8 +52,8 @@ All work is tracked as sub-issues of the tracking issue
    are merged. Comment "taking this" so no other agent starts it.
 2. Already in a worktree under `<repo>/branches/` (not on `main`)? Stay there.
    Otherwise `pnpm wt new <N-short-slug>` from `<repo>/main`; work only inside
-   `<repo>/branches/<N-short-slug>`. `git branch --show-current` must never print
-   `main`.
+   `<repo>/branches/<N-short-slug>`. No `node_modules`? `pnpm install`.
+   `git branch --show-current` must never print `main`.
 3. Read, in this order: the issue body, the `docs/architecture.md` section it
    names, the requirement IDs it lists in `docs/requirements.md`. Do not read the
    tracking thread — the issue body is complete by design.
