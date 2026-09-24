@@ -26,18 +26,23 @@
  *       review threads must resolve.
  *     - No force-push and no deletion of `main`.
  *     - (Optional) required status checks green before merge — pass --checks.
+ *       By default the branch must also be up to date with `main`; pass
+ *       --no-strict to drop that (for repos where parallel sessions merge
+ *       faster than CI runs and merge queue is unavailable — user-owned repos).
  *
  * Required status checks are OPT-IN via --checks because a wrong context name
  * would block ALL merges. Discover your real check names on any open PR with
  * `gh pr checks <pr>` (or the PR "Checks" tab), then re-run with them.
  *
  * Usage:
- *   node scripts/apply-branch-protection.mjs <owner/repo> [--checks "a; b; c"] [--approvals N] [--dry-run]
+ *   node scripts/apply-branch-protection.mjs <owner/repo> [--checks "a; b; c"] [--approvals N] [--no-strict] [--dry-run]
  *   (--checks is semicolon-separated — matrix check names contain commas.)
  *
  * Examples:
  *   node scripts/apply-branch-protection.mjs signalxjs/core
  *   node scripts/apply-branch-protection.mjs signalxjs/core --checks "test (ubuntu-latest, 22); verify-pack"
+ *   node scripts/apply-branch-protection.mjs andtii/agentic --approvals 0 --no-strict \
+ *     --checks "test (ubuntu-latest, 20); test (ubuntu-latest, 22); test (windows-latest, 22); e2e; size"
  *
  * Requirements: `gh` CLI authenticated (`gh auth login`) with admin on the repo.
  */
@@ -51,10 +56,12 @@ const argv = process.argv.slice(2);
 let repo;
 let checks = [];
 let dryRun = false;
+let strict = true; // branch must be up to date with main before merge
 let approvals = 1; // required approving reviews; 0 = PR required but owner may self-merge
 for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') dryRun = true;
+    else if (a === '--no-strict') strict = false;
     else if (a === '--checks') {
         const v = argv[++i];
         // Reject a missing value or a following flag (e.g. `--checks --dry-run`)
@@ -72,12 +79,13 @@ for (let i = 0; i < argv.length; i++) {
     else die(`Unexpected argument: ${a}`);
 }
 if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
-    die('Usage: node scripts/apply-branch-protection.mjs <owner/repo> [--checks "a; b"] [--approvals N] [--dry-run]\n' +
+    die('Usage: node scripts/apply-branch-protection.mjs <owner/repo> [--checks "a; b"] [--approvals N] [--no-strict] [--dry-run]\n' +
         '  --checks  semicolon-separated check-run names (repeatable). Use ";" not "," —\n' +
         '            matrix names contain commas, e.g. "test (ubuntu-latest, 22); verify-pack".\n' +
         '  --approvals 0  → PR required (plus any --checks), but the author/owner may merge\n' +
         '                   without a separate approval (for solo/small repos where Copilot\n' +
-        '                   reviews but can\'t formally approve)');
+        '                   reviews but can\'t formally approve)\n' +
+        '  --no-strict    → checks must pass, but the branch need not be up to date with main');
 }
 
 // ── gh helpers ───────────────────────────────────────────────────────────────
@@ -142,7 +150,7 @@ if (checks.length) {
     rules.push({
         type: 'required_status_checks',
         parameters: {
-            strict_required_status_checks_policy: true, // branch must be up to date
+            strict_required_status_checks_policy: strict, // true: branch must be up to date
             required_status_checks: checks.map((context) => ({ context })),
         },
     });
