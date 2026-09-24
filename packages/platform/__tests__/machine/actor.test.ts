@@ -705,6 +705,15 @@ describe('Machine folder browsing (#189, EXE-06/08, OPS-03/04)', () => {
         expect((await machine(K1).fsResult(requestId)).error).toBeUndefined();
     });
 
+    it('gives a project command its own time on top of the answer deadline (#620)', async () => {
+        await rawDaemon(['run']);
+        const { requestId } = await machine(K1).fsRequest(E1, { kind: 'run', cwd: '/work/app', argv: ['npm', 'ci'], timeoutMs: 60_000 });
+        await advance(TICK);
+        expect((await machine(K1).fsResult(requestId)).status).toBe('pending');
+        await advance(60_000);
+        expect(await machine(K1).fsResult(requestId)).toMatchObject({ status: 'error', error: { code: 'timeout', message: `no answer from machine ${M1} within 90000 ms` } });
+    });
+
     it('fails pending requests when the daemon disconnects', async () => {
         connect(K1, daemon(M1));
         await until(async () => (await machine(K1).get()).online, 'online');

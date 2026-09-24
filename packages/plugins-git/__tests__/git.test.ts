@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FEATURE_KIND, configDefaults, isProjectFeatureManifest, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
 
-import { chatWorktreeFor, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
+import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
 
 const CHAT = 'chat_AbCdEfGhIjKlMnOpQrStUv' as ChatId;
 const SHORT = 'opqrstuv';
@@ -69,8 +69,8 @@ describe('manifest', () => {
         expect(Array.isArray(gitFeatureManifest.capabilities)).toBe(true);
         expect(gitFeatureManifest.permissions).toEqual([]);
         expect(gitFeatureManifest.compat).toEqual({ platform: '*', core: '*' });
-        expect(Object.keys(gitFeatureManifest.projectSettings.properties!)).toEqual(['origin', 'worktreePerChat', 'branchPrefix', 'branchTemplate', 'worktreePath', 'reuseExisting', 'worktreeNotice', 'base', 'instructions']);
-        expect(configDefaults(gitFeatureManifest.projectSettings)).toEqual({ worktreePerChat: false, branchPrefix: DEFAULT_BRANCH_PREFIX, reuseExisting: true, instructions: '' });
+        expect(Object.keys(gitFeatureManifest.projectSettings.properties!)).toEqual(['origin', 'worktreePerChat', 'branchPrefix', 'branchTemplate', 'worktreePath', 'worktreeStrategy', 'worktreeCreate', 'worktreeSetup', 'reuseExisting', 'worktreeNotice', 'base', 'instructions']);
+        expect(configDefaults(gitFeatureManifest.projectSettings)).toEqual({ worktreePerChat: false, branchPrefix: DEFAULT_BRANCH_PREFIX, worktreeStrategy: 'builtin', reuseExisting: true, instructions: '' });
         // Nothing workspace-wide to set.
         expect(validateConfig(gitFeatureManifest.config, {})).toEqual({ ok: true, value: {} });
     });
@@ -282,9 +282,9 @@ describe('beforeSession', () => {
 describe('templates (#619)', () => {
     it('chatWorktreeFor is deterministic and defaults to today\u2019s names', () => {
         const at = { chatId: CHAT, cwd: '/work/agentic', projectName: 'My App' };
-        expect(chatWorktreeFor(settingsOf(), at)).toEqual({ branch: `chat/${SHORT}`, path: `/work/agentic-worktrees/chat-${SHORT}` });
+        expect(chatWorktreeFor(settingsOf(), at)).toMatchObject({ branch: `chat/${SHORT}`, path: `/work/agentic-worktrees/chat-${SHORT}`, values: { repoName: 'agentic', branchSlug: `chat-${SHORT}` } });
         expect(chatWorktreeFor(settingsOf({ branchTemplate: '{project}/{chatId}' }), at).branch).toBe('my-app/abcdefghijklmnopqrstuv');
-        expect(chatWorktreeFor(settingsOf({ branchPrefix: 'wip-', branchTemplate: '{branchPrefix}{chatId8}', worktreePath: '{repoParent}/wt/{branch}' }), at)).toEqual({ branch: `wip-${SHORT}`, path: `/work/wt/wip-${SHORT}` });
+        expect(chatWorktreeFor(settingsOf({ branchPrefix: 'wip-', branchTemplate: '{branchPrefix}{chatId8}', worktreePath: '{repoParent}/wt/{branch}' }), at)).toMatchObject({ branch: `wip-${SHORT}`, path: `/work/wt/wip-${SHORT}` });
     });
 
     it('gitSettingsErrors names each template that cannot expand, for the settings form', () => {
@@ -294,5 +294,93 @@ describe('templates (#619)', () => {
             worktreePath: expect.stringContaining('{x}'),
             worktreeNotice: expect.stringContaining('{chatId}')
         });
+    });
+});
+
+/**
+ * A fake daemon for the command strategy (#620): a folder map of badges `list` reads, and a `run` that answers from
+ * `onRun` (which may add the worktree the command made). Every op recorded.
+ */
+function commandFs(badges: Map<string, FsGitInfo>, onRun: (op: Extract<FsOp, { kind: 'run' }>) => { result: FsResult } | { error: FsError } = () => ({ result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } })) {
+    const ops: FsOp[] = [];
+    const fs: ProjectFeatureFs = async (op) => {
+        ops.push(op);
+        if (op.kind === 'list') {
+            const git = badges.get(op.path);
+            return git ? { result: { kind: 'list', path: op.path, git, entries: [], truncated: false } } : { error: { code: 'not-found', message: `${op.path} does not exist` } };
+        }
+        if (op.kind === 'run') return onRun(op);
+        if (op.kind === 'worktree') return { result: { kind: 'worktree', path: op.path, branch: op.branch, ...(badges.has(op.path) ? { reused: true as const } : {}) } };
+        return { error: { code: 'unsupported', message: op.kind } };
+    };
+    return { fs, ops };
+}
+
+describe('command strategy and setup (#620)', () => {
+    const wt = `/work/branches/chat-${SHORT}`;
+    const settings = { worktreePerChat: true, worktreeStrategy: 'command', worktreeCreate: 'pnpm wt new {branchSlug}', branchTemplate: 'chat-{chatId8}', worktreePath: '{repoParent}/branches/{branchSlug}' };
+
+    it("runs the project's create command in the project folder, checks what it made, then the setup commands in the worktree", async () => {
+        const badges = new Map<string, FsGitInfo>();
+        const { fs, ops } = commandFs(badges, (op) => {
+            if (op.argv[0] === 'pnpm' && op.argv[1] === 'wt') badges.set(wt, { kind: 'worktree', branch: `chat-${SHORT}` });
+            return { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } };
+        });
+        const effect = await gitFeaturePlugin.beforeSession!(input(fs, '/work/main', { settings: { ...settings, worktreeSetup: ['pnpm install --frozen-lockfile', '  ', 'echo "{path} ready"'] } }));
+        expect(ops).toEqual([
+            { kind: 'list', path: wt },
+            { kind: 'run', cwd: '/work/main', argv: ['pnpm', 'wt', 'new', `chat-${SHORT}`] },
+            { kind: 'list', path: wt },
+            { kind: 'run', cwd: wt, argv: ['pnpm', 'install', '--frozen-lockfile'] },
+            { kind: 'run', cwd: wt, argv: ['echo', `${wt} ready`] }
+        ]);
+        expect(effect).toEqual({ cwd: wt, instructions: notice(wt, `chat-${SHORT}`) });
+
+        // The next task: the worktree is there, so neither the create command nor setup runs again.
+        ops.length = 0;
+        expect((await gitFeaturePlugin.beforeSession!(input(fs, '/work/main', { settings: { ...settings, worktreeSetup: ['pnpm install'] } })))?.cwd).toBe(wt);
+        expect(ops).toEqual([{ kind: 'list', path: wt }]);
+    });
+
+    it('parks the task when the command fails, makes nothing, or makes the wrong branch; or something else is at the folder', async () => {
+        const run = (fs: ProjectFeatureFs, extra: Record<string, unknown> = {}) => gitFeaturePlugin.beforeSession!(input(fs, '/work/main', { settings: { ...settings, ...extra } }));
+        const failing = commandFs(new Map(), () => ({ result: { kind: 'run', exitCode: 2, stdoutTail: 'ok so far', stderrTail: 'line 1\nfatal: no space' } }));
+        await expect(run(failing.fs)).rejects.toThrow(/create failed: `pnpm wt new chat-opqrstuv` exited 2: line 1\nfatal: no space/);
+        await expect(run(commandFs(new Map()).fs)).rejects.toThrow(/finished but .* is not a worktree/);
+        const wrong = new Map<string, FsGitInfo>();
+        await expect(run(commandFs(wrong, () => (wrong.set(wt, { kind: 'worktree', branch: 'other' }), { result: { kind: 'run', exitCode: 0, stdoutTail: '', stderrTail: '' } })).fs)).rejects.toThrow(/worktree-mismatch: the create command made .* on other/);
+        await expect(run(commandFs(new Map([[wt, { kind: 'worktree', branch: 'other' }]])).fs)).rejects.toThrow(/worktree-mismatch: .* holds the worktree of other/);
+        const old = commandFs(new Map(), () => ({ error: { code: 'unsupported', message: 'the daemon does not run project commands (no run feature); update it' } }));
+        await expect(run(old.fs)).rejects.toThrow('git worktree create unsupported: `pnpm wt new chat-opqrstuv`: the daemon does not run project commands (no run feature); update it');
+        await expect(run(commandFs(new Map()).fs, { worktreeCreate: '' })).rejects.toThrow(/has no create command/);
+    });
+
+    it('with the builtin strategy, setup runs after the daemon adds or re-creates the worktree, not when it reuses one', async () => {
+        const badges = new Map<string, FsGitInfo>();
+        const { fs, ops } = commandFs(badges);
+        const own = { worktreePerChat: true, worktreeSetup: ['npm ci'] };
+        await gitFeaturePlugin.beforeSession!(input(fs, '/work/agentic', { settings: own }));
+        expect(ops.map((o) => o.kind)).toEqual(['worktree', 'run']);
+        expect(ops[1]).toEqual({ kind: 'run', cwd: `/work/agentic-worktrees/chat-${SHORT}`, argv: ['npm', 'ci'] });
+        badges.set(`/work/agentic-worktrees/chat-${SHORT}`, { kind: 'worktree', branch: `chat/${SHORT}` });
+        ops.length = 0;
+        await gitFeaturePlugin.beforeSession!(input(fs, '/work/agentic', { settings: own }));
+        expect(ops.map((o) => o.kind)).toEqual(['worktree']);
+        // A failing setup parks the task with its output.
+        const failing = commandFs(new Map(), () => ({ result: { kind: 'run', exitCode: 1, stdoutTail: 'npm ERR! missing lockfile', stderrTail: '' } }));
+        await expect(gitFeaturePlugin.beforeSession!(input(failing.fs, '/work/agentic', { settings: own }))).rejects.toThrow('git worktree setup failed: `npm ci` exited 1: npm ERR! missing lockfile');
+    });
+
+    it('splitCommand reads quotes and nothing else of shell syntax; gitSettingsErrors names bad commands', () => {
+        expect(splitCommand(`make  worktree NAME="a b" 'c d'e`)).toEqual(['make', 'worktree', 'NAME=a b', 'c de']);
+        expect(splitCommand('echo $HOME; rm -rf / | x && y')).toEqual(['echo', '$HOME;', 'rm', '-rf', '/', '|', 'x', '&&', 'y']);
+        expect(splitCommand('say ""')).toEqual(['say', '']);
+        expect(() => splitCommand('say "hi')).toThrow(/unclosed "/);
+        expect(gitSettingsErrors(settingsOf({ worktreeStrategy: 'command' }))).toEqual({ worktreeCreate: expect.stringContaining('needs a create command') });
+        expect(gitSettingsErrors(settingsOf({ worktreeStrategy: 'command', worktreeCreate: 'wt "{branch}', worktreeSetup: ['ok', 'x {nope}'] }))).toEqual({
+            worktreeCreate: expect.stringContaining('unclosed'),
+            'worktreeSetup.1': expect.stringContaining('{nope}')
+        });
+        expect(gitSettingsErrors(settingsOf(settings))).toEqual({});
     });
 });

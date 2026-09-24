@@ -10,7 +10,7 @@
  * never a silent fallback.
  */
 
-import { configDefaults, enabledProjectFeatures, type ChatId, type EnvironmentId, type FsOp, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId } from '@agentic/core';
+import { configDefaults, enabledProjectFeatures, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, type ChatId, type EnvironmentId, type FsOp, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId } from '@agentic/core';
 import { isServerFnError } from '@sigx/server';
 import type { FsResultView } from '../machine/index.js';
 
@@ -39,8 +39,14 @@ export const noDaemonFs: ProjectFeatureFs = async () => ({ error: { code: 'unsup
 /**
  * A `ProjectFeatureFs` over one machine's daemon: `fsRequest`, then `fsResult` polled until the daemon answered
  * (or the deadline passed). A refusal of the request itself (offline, unknown environment, not the owner) is the
- * daemon-shaped error the plugin would get from the wire.
+ * daemon-shaped error the plugin would get from the wire. A `run` (#620) waits its own time on top — a setup command
+ * may install for minutes — and is polled at most every `RUN_POLL_MS` once it has run a few seconds.
  */
+/** A `run` still going after this long is polled less often… */
+const RUN_SLOW_AFTER_MS = 5_000;
+/** …at most every this long. */
+const RUN_POLL_MS = 2_000;
+
 export function machineFs(machine: FsMachineClient, environmentId: EnvironmentId, options: MachineFsOptions = {}): ProjectFeatureFs {
     const pollMs = options.pollMs ?? 250;
     const timeoutMs = options.timeoutMs ?? 35_000;
@@ -54,7 +60,8 @@ export function machineFs(machine: FsMachineClient, environmentId: EnvironmentId
             const status = isServerFnError(e) ? e.status : undefined;
             return { error: { code: status === 404 ? 'unknown-environment' : status === 400 ? 'internal' : 'unsupported', message } };
         }
-        const deadline = now() + timeoutMs;
+        const started = now();
+        const deadline = started + timeoutMs + (op.kind === 'run' ? Math.min(op.timeoutMs ?? FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS) : 0);
         for (;;) {
             let view: FsResultView;
             try {
@@ -64,8 +71,8 @@ export function machineFs(machine: FsMachineClient, environmentId: EnvironmentId
             }
             if (view.status === 'done' && view.result) return { result: view.result };
             if (view.status === 'error' || view.status === 'done') return { error: view.error ?? { code: 'internal', message: `the daemon answered ${op.kind} without a result` } };
-            if (now() >= deadline) return { error: { code: 'timeout', message: `the daemon did not answer ${op.kind} within ${timeoutMs} ms` } };
-            await new Promise((r) => setTimeout(r, pollMs));
+            if (now() >= deadline) return { error: { code: 'timeout', message: `the daemon did not answer ${op.kind} within ${deadline - started} ms` } };
+            await new Promise((r) => setTimeout(r, op.kind === 'run' && now() - started > RUN_SLOW_AFTER_MS ? Math.max(pollMs, RUN_POLL_MS) : pollMs));
         }
     };
 }

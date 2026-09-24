@@ -10,10 +10,10 @@
  * Edge-safe: `@agentic/core` only, no `node:` imports; it runs on the router.
  */
 
-import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
-import { BRANCH_TOKENS, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError } from './templates.js';
+import { normalizePath, PROJECT_FEATURE_KIND, projectFolderFor, suggestWorktreePath, type ConfigSchema, type FsGitInfo, type HostOs, type ProjectFeatureContext, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionEffect, type ProjectFeatureSessionInput, type ProjectFolderInfo } from '@agentic/core';
+import { BRANCH_TOKENS, commandError, expandCommand, expandPath, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, repoValues, slugOf, templateError, type TemplateValues } from './templates.js';
 
-export { BRANCH_TOKENS, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, templateError, templateTokens } from './templates.js';
+export { BRANCH_TOKENS, COMMAND_TOKENS, commandError, expandCommand, expandTemplate, NOTICE_TOKENS, PATH_TOKENS, slugOf, splitCommand, templateError, templateTokens } from './templates.js';
 
 /** The plugin's id: what a project stores its settings under (`features['agentic.feature.git']`). */
 export const GIT_FEATURE_ID = 'agentic.feature.git';
@@ -59,6 +59,25 @@ export const gitProjectSettings: ConfigSchema = {
             title: 'Worktree folder',
             description:
                 "Where a chat's worktree goes, as a template: {repo} (the project folder), {repoName}, {repoParent}, {branch}, {branchSlug}, {chatId8}, {project} — e.g. {repo}/.worktrees/{branchSlug} or {repoParent}/{repoName}-{branchSlug}. `auto` (or empty): beside a checkout named main under branches/, else <repo>-worktrees/<branch>, the branch's / written as - (chat/x → chat-x)."
+        },
+        worktreeStrategy: {
+            type: 'string',
+            title: 'How worktrees are made',
+            description: "`builtin`: agentic runs git worktree add. `command`: the project's own command (worktreeCreate) makes it — a repo script, a make target, a task runner.",
+            enum: ['builtin', 'command'],
+            default: 'builtin'
+        },
+        worktreeCreate: {
+            type: 'string',
+            title: 'Create command',
+            description:
+                'With the command strategy: run in the project folder to make the worktree, as a template with every folder token plus {path} — e.g. `pnpm wt new {branchSlug}` or `make worktree NAME={branchSlug}`. Quotes group an argument; nothing else is shell syntax.'
+        },
+        worktreeSetup: {
+            type: 'array',
+            title: 'Setup commands',
+            description: 'Run in order in a worktree agentic just made (never in one it reused), e.g. `npm ci` or `uv sync`; the first failure parks the task.',
+            items: { type: 'string' }
         },
         reuseExisting: {
             type: 'boolean',
@@ -165,7 +184,7 @@ function shortChatId(chatId: string): string {
  * `{branchPrefix}{chatId8}`, i.e. `gitBranchFor`) and `worktreePath` (default `auto`: `suggestWorktreePath`).
  * Deterministic for a chat. Throws on an unknown token, an invalid branch name or a folder that is not absolute.
  */
-export function chatWorktreeFor(settings: Readonly<Record<string, unknown>>, input: { readonly chatId: string; readonly cwd: string; readonly projectName: string }): { readonly branch: string; readonly path: string } {
+export function chatWorktreeFor(settings: Readonly<Record<string, unknown>>, input: { readonly chatId: string; readonly cwd: string; readonly projectName: string }): { readonly branch: string; readonly path: string; readonly values: TemplateValues } {
     const prefix = stringSetting(settings, 'branchPrefix') ?? DEFAULT_BRANCH_PREFIX;
     const os = hostOsOfPath(input.cwd);
     const chatId8 = shortChatId(input.chatId);
@@ -176,13 +195,14 @@ export function chatWorktreeFor(settings: Readonly<Record<string, unknown>>, inp
         branch = expandTemplate(branchTemplate, common, BRANCH_TOKENS);
         if (!isValidBranchName(branch)) throw new Error(`git worktree: "${branch}" (from the branch template "${branchTemplate}") is not a valid branch name`);
     } else branch = gitBranchFor(input.chatId, prefix);
+    const values = { ...common, ...repoValues(input.cwd, os), branch, branchSlug: branch.replace(/\//g, '-') };
     const pathTemplate = templateSetting(settings, 'worktreePath');
+    let path: string | null;
     if (!pathTemplate || pathTemplate === AUTO_WORKTREE_PATH) {
-        const path = suggestWorktreePath(input.cwd, branch, os);
+        path = suggestWorktreePath(input.cwd, branch, os);
         if (path === null) throw new Error(`git worktree: the project's folder "${input.cwd}" is not an absolute path`);
-        return { branch, path };
-    }
-    return { branch, path: expandPath(pathTemplate, { ...common, ...repoValues(input.cwd, os), branch, branchSlug: branch.replace(/\//g, '-') }, os) };
+    } else path = expandPath(pathTemplate, values, os);
+    return { branch, path, values: { ...values, path } };
 }
 
 /** Every template setting the project has that cannot expand, by key (#619): what the settings form shows. */
@@ -197,6 +217,14 @@ export function gitSettingsErrors(settings: Readonly<Record<string, unknown>>): 
     check('branchTemplate', BRANCH_TOKENS);
     check('worktreePath', PATH_TOKENS);
     check('worktreeNotice', NOTICE_TOKENS);
+    const create = templateSetting(settings, 'worktreeCreate');
+    if (settings['worktreeStrategy'] === 'command' && !create) errors['worktreeCreate'] = 'the command strategy needs a create command';
+    const createError = create ? commandError(create) : undefined;
+    if (createError) errors['worktreeCreate'] = createError;
+    setupOf(settings).forEach((line, i) => {
+        const error = commandError(line);
+        if (error) errors[`worktreeSetup.${i}`] = error;
+    });
     return errors;
 }
 
@@ -211,9 +239,11 @@ function noticeFor(settings: Readonly<Record<string, unknown>>, path: string, br
  * When the project has `worktreePerChat` on and the task came from a chat, the session opens in the chat's worktree:
  * - With `reuseExisting` (the default), a folder other than the project's own that is already a linked worktree —
  *   one the user chose for the chat or task, made in a terminal or anywhere else — is used as it is (#619).
- * - Otherwise one `worktree` op for the branch and folder `chatWorktreeFor` names, from `base` when set. The daemon
- *   makes it idempotent (#618): a worktree already there is `reused`, one removed by hand `recreated`. So nothing is
- *   remembered: every task of the chat asks again and lands in the same folder.
+ * - Otherwise the branch and folder `chatWorktreeFor` names, made the project's way (#620): by default one `worktree`
+ *   op, from `base` when set, which the daemon makes idempotent (#618: `reused`, `recreated`); with
+ *   `worktreeStrategy: 'command'` the project's `worktreeCreate` command, unless that worktree is already there.
+ *   So nothing is remembered: every task of the chat asks again and lands in the same folder.
+ * - In a worktree just made (not reused), the `worktreeSetup` commands run in order.
  * Any daemon error — `worktree-mismatch` (something else at the folder), `branch-exists` (the branch checked out in
  * another folder), `not-a-repo`, … — throws, so the router parks the task `waiting { project-feature }` with the
  * daemon's message (EXE-12). The agent is told it is already isolated (`worktreeNotice`), so a repo guide that says
@@ -234,13 +264,79 @@ async function beforeSession({ settings, project, chatId, environmentId, cwd, fs
             }
         }
     }
-    const { branch, path } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
+    const { branch, path, values } = chatWorktreeFor(settings, { chatId, cwd, projectName: project.name });
+    const made = settings['worktreeStrategy'] === 'command' ? await byCommand(settings, fs, cwd, branch, path, values) : await builtin(settings, fs, cwd, branch, path);
+    if (made.fresh) for (const line of setupOf(settings)) await run(fs, made.path, line, { ...values, path: made.path }, 'setup');
+    const instructions = noticeFor(settings, made.path, made.branch);
+    return { cwd: made.path, ...(instructions ? { instructions } : {}) };
+}
+
+/** Where the chat's worktree ended up, and whether it was just made (so setup runs) or was already there. */
+interface MadeWorktree {
+    readonly path: string;
+    readonly branch: string;
+    readonly fresh: boolean;
+}
+
+/** The project's setup commands, in order, blank lines left out. */
+function setupOf(settings: Readonly<Record<string, unknown>>): string[] {
+    const list = settings['worktreeSetup'];
+    return Array.isArray(list) ? list.filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((l) => l.trim()) : [];
+}
+
+/** The `worktree` op (#618): the daemon reuses, re-creates or adds the worktree; any error parks the task. */
+async function builtin(settings: Readonly<Record<string, unknown>>, fs: ProjectFeatureSessionInput['fs'], cwd: string, branch: string, path: string): Promise<MadeWorktree> {
     const base = stringSetting(settings, 'base')?.trim();
     const answer = await fs({ kind: 'worktree', repo: cwd, branch, path, ...(base ? { base } : {}) });
     if (answer.error) throw new Error(`git worktree ${answer.error.code}: ${answer.error.message}`);
     if (answer.result.kind !== 'worktree') throw new Error(`git worktree: the daemon answered with a ${answer.result.kind} result`);
-    const instructions = noticeFor(settings, answer.result.path, answer.result.branch);
-    return { cwd: answer.result.path, ...(instructions ? { instructions } : {}) };
+    return { path: answer.result.path, branch: answer.result.branch, fresh: answer.result.reused !== true };
+}
+
+/** The git badge of `path`, or `undefined` when there is nothing there (or nothing git). */
+async function badgeOf(fs: ProjectFeatureSessionInput['fs'], path: string): Promise<FsGitInfo | undefined> {
+    const listed = await fs({ kind: 'list', path });
+    if (listed.error) {
+        if (listed.error.code === 'not-found') return undefined;
+        throw new Error(`git worktree ${listed.error.code}: ${listed.error.message}`);
+    }
+    return listed.result.kind === 'list' ? listed.result.git : undefined;
+}
+
+/**
+ * The project's own create command (#620): a worktree of `branch` already at `path` is kept; otherwise the command
+ * runs in the project folder, and afterwards `path` must be a worktree of `branch` — a command that made something
+ * else, or nothing, parks the task like a daemon error would.
+ */
+async function byCommand(settings: Readonly<Record<string, unknown>>, fs: ProjectFeatureSessionInput['fs'], cwd: string, branch: string, path: string, values: TemplateValues): Promise<MadeWorktree> {
+    const create = templateSetting(settings, 'worktreeCreate');
+    if (!create) throw new Error('git worktree: the project makes worktrees with a command but has no create command');
+    const argv = expandCommand(create, values);
+    const before = await badgeOf(fs, path);
+    if (before?.kind === 'worktree' && before.branch === branch) return { path, branch, fresh: false };
+    if (before) throw new Error(`git worktree worktree-mismatch: ${path} already holds ${before.kind === 'worktree' ? `the worktree of ${before.branch ?? 'a detached HEAD'}` : 'a repository'}, not ${branch}`);
+    await runArgv(fs, cwd, argv, 'create');
+    const after = await badgeOf(fs, path);
+    if (after?.kind !== 'worktree') throw new Error(`git worktree: the create command \`${argv.join(' ')}\` finished but ${path} is not a worktree`);
+    if (after.branch !== branch) throw new Error(`git worktree worktree-mismatch: the create command made ${path} on ${after.branch ?? 'a detached HEAD'}, not ${branch}`);
+    return { path, branch, fresh: true };
+}
+
+/** A command template run in `cwd`: expanded, split, then `runArgv`. */
+function run(fs: ProjectFeatureSessionInput['fs'], cwd: string, line: string, values: TemplateValues, what: 'create' | 'setup'): Promise<void> {
+    return runArgv(fs, cwd, expandCommand(line, values), what);
+}
+
+/** One `run` op; a daemon error or a non-zero exit throws with the tail of its output, so the task parks. */
+async function runArgv(fs: ProjectFeatureSessionInput['fs'], cwd: string, argv: readonly string[], what: 'create' | 'setup'): Promise<void> {
+    const answer = await fs({ kind: 'run', cwd, argv });
+    const command = argv.join(' ');
+    if (answer.error) throw new Error(`git worktree ${what} ${answer.error.code}: \`${command}\`: ${answer.error.message}`);
+    if (answer.result.kind !== 'run') throw new Error(`git worktree: the daemon answered with a ${answer.result.kind} result`);
+    if (answer.result.exitCode !== 0) {
+        const output = (answer.result.stderrTail.trim() || answer.result.stdoutTail.trim()).split(/\r?\n/).slice(-5).join('\n');
+        throw new Error(`git worktree ${what} failed: \`${command}\` exited ${answer.result.exitCode}${output ? `: ${output}` : ''}`);
+    }
 }
 
 /** The git feature: `detect` on the git badge, `instructions` from the settings, `beforeSession` the worktree per chat. */
