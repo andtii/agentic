@@ -356,6 +356,21 @@ async function worktree(op: Extract<FsOp, { kind: 'worktree' }>, roots: readonly
  * The worktrees of the repository `root` is in (#622), as `git worktree list` has them: the one `root` is in marked
  * `current`, and one outside the roots marked `outside` (listed, but a session's Files cannot open it).
  */
+/**
+ * `path` as the roots are written (#622): git names folders resolved through links (`/private/var/…` for a root under
+ * `/var` on macOS), but the platform checks a later request's `root` lexically against the roots as written — so a
+ * folder under a root's resolved form is answered under the root itself. Anything else is returned unchanged.
+ */
+async function asWritten(path: string, roots: readonly string[], platform: NodeJS.Platform): Promise<string> {
+    if (withinRoots(path, roots, platform)) return path;
+    for (const root of roots) {
+        const real = await realpath(resolve(root)).catch(() => undefined);
+        if (!real || real === resolve(root) || !withinRoots(path, [real], platform)) continue;
+        return join(resolve(root), path.slice(real.length));
+    }
+    return path;
+}
+
 async function worktrees(op: Extract<FsOp, { kind: 'worktrees' }>, roots: readonly string[], options: { readonly platform: NodeJS.Platform; readonly git: string }): Promise<FsOutcome> {
     const { platform, git } = options;
     const root = await checkWithinRoots(op.root, roots, platform);
@@ -371,8 +386,8 @@ async function worktrees(op: Extract<FsOp, { kind: 'worktrees' }>, roots: readon
     const listed = parseWorktreeList(list.stdout.toString('utf8'));
     const entries = [];
     for (const w of listed.slice(0, FS_WORKTREES_MAX)) {
-        // git writes `/` on Windows too: answer in the machine's own syntax, like every other path.
-        const path = resolve(w.path);
+        // git writes `/` on Windows too: answer in the machine's own syntax, like every other path, under the roots as written.
+        const path = await asWritten(resolve(w.path), roots, platform);
         entries.push({
             path,
             ...(w.branch !== undefined && fitsId(w.branch) ? { branch: w.branch } : {}),

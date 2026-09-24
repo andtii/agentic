@@ -382,6 +382,9 @@ describe.skipIf(!hasGit)('fs worktrees (real git, #622)', () => {
         expect(byPath.get(await realpath(wt))).toMatchObject({ branch: 'feat', locked: true, current: true });
         expect(byPath.get(await realpath(away))).toMatchObject({ detached: true, outside: true });
         expect(byPath.get(await realpath(away))).not.toHaveProperty('branch');
+        // Inside the roots, each is named under the root as written — not git's resolved form (`/private/var` on macOS) —
+        // so the platform's lexical check admits it when it is opened as a `root`.
+        expect(outcome.result.entries.map((e) => e.path)).toEqual(expect.arrayContaining([repo, wt]));
 
         expect(errorOf(await ask({ kind: 'worktrees', root: outside }))).toBe('outside-roots');
         await mkdir(join(root, 'plain'));
