@@ -23,6 +23,9 @@ Design: `docs/architecture.md` §9 (project feature plugins) and §7 (feature ho
 | `branchPrefix` | string | `chat/` | what a chat's branch name starts with |
 | `branchTemplate` | string | — | a chat's branch as a template: `{branchPrefix}`, `{chatId8}`, `{chatId}`, `{project}`; unset = `{branchPrefix}{chatId8}` |
 | `worktreePath` | string | `auto` | where a chat's worktree goes, as a template: the branch tokens plus `{repo}`, `{repoName}`, `{repoParent}`, `{branch}`, `{branchSlug}`; `auto` = `suggestWorktreePath` |
+| `worktreeStrategy` | `builtin` \| `command` | `builtin` | `builtin`: the daemon's `worktree` op (`git worktree add`); `command`: the project's own `worktreeCreate` makes it |
+| `worktreeCreate` | string | — | the create command, run in the project folder, as a template: every folder token plus `{path}`; quotes group an argument, nothing else is shell syntax |
+| `worktreeSetup` | string[] | — | commands run in order in a worktree just made (never in a reused one), same tokens |
 | `reuseExisting` | boolean | `true` | a session folder other than the project's own that is already a linked worktree is used as it is |
 | `worktreeNotice` | string | the default notice | what the agent is told about its worktree: `{path}`, `{branch}`; blank = nothing |
 | `base` | string | — | the start point of a new chat branch; the checkout's HEAD when empty |
@@ -44,6 +47,14 @@ Either way the agent gets the notice (`worktreeNotice`, default `DEFAULT_WORKTRE
 
 Every daemon error throws `git worktree <code>: <message>`, and the router parks the task `waiting { kind: 'project-feature' }` with that message (EXE-12). The errors include `worktree-mismatch` (something else at the folder), `branch-exists` (the branch is checked out in another folder), `not-a-repo`, `outside-roots`, `timeout` and `unsupported`.
 
+### The project's own tooling (#620)
+
+With `worktreeStrategy: 'command'` the plugin does not run `git worktree add`. It checks the folder first: a worktree of the branch already there is kept, and anything else there parks the task. Otherwise it runs `worktreeCreate` in the project folder through the daemon's `run` op. Afterwards the folder must be a worktree of the expected branch; a command that fails, makes nothing, or makes another branch parks the task with the tail of its output.
+
+`worktreeSetup` then runs in the new worktree, one command at a time. It runs after either strategy, but only when the worktree was just made or re-created, never when it was reused. The first failing command parks the task.
+
+Commands are split into argv (`splitCommand`) and expanded one argument at a time, so a path with spaces stays one argument. The daemon never runs them through a shell (#618). They run as the owner, only on a daemon with the `run` feature, with a working directory inside the environment's roots, and every run is audited (`workdir.command-run`).
+
 ### Examples
 
 | Convention | Settings |
@@ -52,15 +63,17 @@ Every daemon error throws `git worktree <code>: <message>`, and the router parks
 | in-repo `.worktrees/` | `worktreePath: "{repo}/.worktrees/{branchSlug}"` |
 | sibling folders | `worktreePath: "{repoParent}/{repoName}-{branchSlug}"` |
 | `main/` + `branches/`, branch = folder | `branchTemplate: "chat-{chatId8}"`, `worktreePath: "{repoParent}/branches/{branchSlug}"` |
+| a repo script that makes and installs worktrees (this repo's `pnpm wt`) | the row above, plus `worktreeStrategy: "command"`, `worktreeCreate: "pnpm wt new {branchSlug}"` |
+| install dependencies in a new worktree | `worktreeSetup: ["npm ci"]` (or `["uv sync"]`, `["bundle install"]`, …) |
 
-Out of scope here: push/pull, PR creation, clone. Creating worktrees with the project's own command and setup commands (#620) and cleanup (#623) are follow-ups.
+Out of scope here: push/pull, PR creation, clone. Cleanup (#623) is a follow-up.
 
 ## Layout
 
 | File | What |
 |---|---|
 | `src/index.ts` | `gitFeaturePlugin`, `gitFeatureManifest`, `gitProjectSettings`, `GIT_FEATURE_ID`, `gitBranchFor`, `chatWorktreeFor`, `gitSettingsErrors`, `DEFAULT_WORKTREE_NOTICE`, `isValidBranchName`, `hostOsOfPath`, `identityOf` |
-| `src/templates.ts` | the `{token}` templates: `expandTemplate`, `templateError`, `templateTokens`, `slugOf`, the token lists |
+| `src/templates.ts` | the `{token}` templates: `expandTemplate`, `templateError`, `templateTokens`, `slugOf`, the token lists; command lines: `splitCommand`, `expandCommand`, `commandError` |
 | `__tests__/git.test.ts` | the manifest, detect / identity / instructions, and `beforeSession` against a recording fake daemon |
 
 The router end to end (two machines, reuse, parking) is covered in `packages/platform/__tests__/routing/projects.test.ts`.

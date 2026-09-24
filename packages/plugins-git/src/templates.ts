@@ -64,3 +64,50 @@ export function expandPath(template: string, values: TemplateValues, os: HostOs)
     if (path === null) throw new Error(`worktree path "${raw}" (from "${template}") is not an absolute path`);
     return path;
 }
+
+/** What a create or setup command may name: everything a path may, and the worktree's folder itself (#620). */
+export const COMMAND_TOKENS = [...PATH_TOKENS, 'path'] as const;
+
+/**
+ * A command line split into argv (#620): whitespace separates arguments, `"…"` and `'…'` keep one together (the
+ * quotes dropped). No other shell syntax is read — `$`, `;`, `|`, `&`, `>` are plain characters — because the daemon
+ * never runs it through a shell. Throws on an unclosed quote.
+ */
+export function splitCommand(line: string): string[] {
+    const argv: string[] = [];
+    let current: string | null = null;
+    let quote: '"' | "'" | null = null;
+    for (const c of line) {
+        if (quote) {
+            if (c === quote) quote = null;
+            else current += c;
+        } else if (c === '"' || c === "'") {
+            quote = c;
+            current ??= '';
+        } else if (/\s/.test(c)) {
+            if (current !== null) argv.push(current);
+            current = null;
+        } else current = (current ?? '') + c;
+    }
+    if (quote) throw new Error(`command "${line}": an unclosed ${quote}`);
+    if (current !== null) argv.push(current);
+    return argv;
+}
+
+/** A command template split, then each argument expanded — so a value with spaces stays one argument. */
+export function expandCommand(line: string, values: TemplateValues): string[] {
+    const error = templateError(line, COMMAND_TOKENS);
+    if (error) throw new Error(`command "${line}": ${error}`);
+    return splitCommand(line).map((a) => expandTemplate(a, values, COMMAND_TOKENS));
+}
+
+/** Why a command template cannot run: a template error or an unclosed quote. `undefined` when it can. */
+export function commandError(line: string): string | undefined {
+    const error = templateError(line, COMMAND_TOKENS);
+    if (error) return error;
+    try {
+        return splitCommand(line).length === 0 ? 'no command' : undefined;
+    } catch (e) {
+        return (e as Error).message.replace(/^command ".*": /, '');
+    }
+}

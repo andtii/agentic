@@ -14,7 +14,7 @@
  * agent principal. Every mutation ends in `ctx.save()` inside the turn.
  */
 
-import { actorKey, DAEMON_LOG_MAX_LINES, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, pathWithin, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceAnswer, type WorkspaceId, type ChangeScope, type ChangeSet } from '@agentic/core';
+import { actorKey, DAEMON_LOG_MAX_LINES, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, DEFAULT_UPDATE_SETTINGS, LOGIN_ANSWER_MAX_CHARS, hasScope, mergeQuota, pathWithin, policyConverged, telemetryWarningCleared, telemetryWarningKey, telemetryWarnings, type AgentId, type CapabilityReport, type DaemonBuild, type DaemonExit, type DaemonFeature, type HarnessPhase, type HarnessReport, type LifecycleError, type LoginAction, type LoginError, type LoginPhase, type PlatformInfo, type ReleaseAsset, type ReleaseChannel, type ReleaseManifest, type UpdatePolicy, type EnvError, type EnvOp, type EnvResult, type EnvironmentDescriptor, type EnvironmentId, type EnvironmentInput, type EnvironmentVerdict, type FsError, type FsOp, type FsResult, type HistoryError, type HistoryRange, type IsolationMechanism, type DaemonLogError, type DaemonLogResult, type MachineId, type MachinePolicy, type MachinePolicyError, type MachinePolicyInput, type MachinePolicyOp, type MachinePolicyResult, type MachineTelemetry, type OpenSpec, type Principal, type QuotaSnapshot, type RuntimeId, type SessionClosedCode, type SessionId, type TaskId, type WorkspaceAnswer, type WorkspaceId, type ChangeScope, type ChangeSet } from '@agentic/core';
 import { compareVersions, DAEMON_PROTOCOL_VERSION, decodeDaemonFrame, encodeFrame, environmentInput as environmentInputSchema, fsOp as fsOpSchema, type DaemonFrame, type DaemonFrameOf, type PlatformFrame } from '@agentic/daemon-protocol';
 import { actor, defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
 import { capabilities as agentCapabilities, type AgentCapabilities, type AgentEvent, type SessionRef } from '@sigx/ai-agent';
@@ -74,6 +74,11 @@ function filesRefusal(s: MachineState, environment: EnvironmentDescriptor, root:
 
 /** How much of a command line a `workdir.command-run` summary shows (#618). */
 const RUN_SUMMARY_CHARS = 120;
+
+/** How long a `run` (#617) may take on the daemon, on top of the usual answer time: what its deadline allows (#620). */
+function runTimeOf(op: FsOp): number {
+    return op.kind === 'run' ? Math.min(op.timeoutMs ?? FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS) : 0;
+}
 
 /** A `run` (#617) is refused here, like a files op: a daemon without the `run` feature, a `cwd` outside the roots. */
 function runRefusal(s: MachineState, environment: EnvironmentDescriptor, cwd: string): FsError | undefined {
@@ -2005,7 +2010,7 @@ export function defineMachineActor(ports: MachinePorts) {
                     const by = principalLabel(ctx.principal);
                     const record: FsRequestRecord = refusal
                         ? { requestId, environmentId, op: structuredClone(checked), status: 'error', error: refusal, requestedAt: at, finishedAt: at, deadline: at, by }
-                        : { requestId, environmentId, op: structuredClone(checked), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs, by };
+                        : { requestId, environmentId, op: structuredClone(checked), status: 'pending', requestedAt: at, deadline: at + fsTimeoutMs + runTimeOf(checked), by };
                     fs[requestId] = record;
                     await armLiveness();
                     await ctx.save();
@@ -2608,7 +2613,7 @@ export function defineMachineActor(ports: MachinePorts) {
                 for (const r of Object.values(s.fs)) {
                     if (r.status !== 'pending' || r.deadline > at) continue;
                     r.status = 'error';
-                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${fsTimeoutMs} ms` };
+                    r.error = { code: 'timeout', message: `no answer from machine ${ids?.machineId ?? ctx.key} within ${r.deadline - r.requestedAt} ms` };
                     r.finishedAt = at;
                 }
                 pruneFs(s.fs, at, false);
