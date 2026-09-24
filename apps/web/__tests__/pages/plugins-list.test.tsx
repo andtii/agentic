@@ -47,6 +47,9 @@ describe('/plugins (#637)', () => {
     it('draws the menu, chips, needs attention and compact rows by group', async () => {
         const { root } = await mountPlugins('/plugins');
         const menu = root.querySelector('[data-plugins-menu] [data-category-menu]')!;
+        // The menu is the page's navigation landmark (CategoryMenu's NavList renders it).
+        expect(root.querySelectorAll('[data-plugins-menu] nav').length).toBe(1);
+        expect(root.querySelector('[data-plugins-menu] nav')!.getAttribute('aria-label')).toBe('Plugin categories');
         expect(menu.querySelector('a[aria-current="page"]')!.getAttribute('data-category')).toBe('all');
         expect(text(menu.querySelector('[data-category="attention"] [data-count]'))).toBe('2');
         expect(menu.querySelector('[data-category="attention"] [data-count]')!.getAttribute('data-tone')).toBe('needs-you');
@@ -210,10 +213,14 @@ describe('/plugins (#637)', () => {
         expect(switchOf(row(root, 'a2a')).checked).toBe(true);
     });
 
-    it('Make active moves the memory slot on mock data', async () => {
-        const root = await mountAt('/plugins', <PluginsView plugins={listPlugins} />);
-        buttonNamed(row(root, 'agentic.memory.flat'), 'Make active').click();
+    it('Make active moves the memory slot on mock data, and stays on the list', async () => {
+        const { root, router } = await mountPlugins('/plugins');
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+        buttonNamed(row(root, 'agentic.memory.flat'), 'Make active').dispatchEvent(click);
         await tick();
+        await tick();
+        expect(click.defaultPrevented).toBe(true);
+        expect(router.currentRoute.path).toBe('/plugins');
         expect(row(root, 'agentic.memory.flat').hasAttribute('data-active')).toBe(true);
         expect(row(root, 'agentic.memory.default').hasAttribute('data-active')).toBe(false);
     });

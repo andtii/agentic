@@ -114,7 +114,7 @@ export const PluginListView = component<PluginListViewProps>(({ props, slots }) 
                     active={p.active === true}
                     consequence={memoryConsequence(p)}
                     href={pluginHref(id)}
-                    slots={{ action: () => (canActivate(p) ? <Button intent="default" onClick={() => props.activate(p)}>Make active</Button> : readiness ? <ReadinessBadge readiness={readiness} /> : null) }}
+                    slots={{ action: () => (canActivate(p) ? <Button intent="default" onClick={(e: MouseEvent) => { e.preventDefault(); props.activate(p); }}>Make active</Button> : readiness ? <ReadinessBadge readiness={readiness} /> : null) }}
                 />
             );
         }
