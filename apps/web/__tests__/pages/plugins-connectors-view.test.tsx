@@ -37,7 +37,7 @@ describe('connectors model (#638)', () => {
         const gmail = rec({ id: 'gmail', transport: 'conduit', connector: 'gmail', account: 'a1' });
         expect(connectorLine(gmail, [account])).toBe('Google account · connected 12 Sep');
         expect(connectorLine(gmail, [{ ...account, status: 'needsReauth' }])).toBe('Google account · sign-in expired');
-        expect(connectorLine(gmail, [])).toBe('account gone · sign in again');
+        expect(connectorLine(gmail, [])).toBe('account gone');
         expect(connectorLine(rec({ id: 'linear', transport: 'streamable-http', url: 'https://mcp.linear.app/', status: { state: 'error', error: 'initialize failed with HTTP 401' } }), [])).toBe('mcp.linear.app · token expired');
         expect(connectorLine(rec({ id: 'x', transport: 'streamable-http', url: 'https://x.test/mcp', status: { state: 'error', error: 'HTTP 500' } }), [])).toBe('x.test/mcp · check failed');
         expect(connectorLine(rec({ id: 'gh', transport: 'streamable-http', url: 'https://api.githubcopilot.com/mcp', tools: Array.from({ length: 38 }, (_, i) => `gh__t${i}`) }), [])).toBe('api.githubcopilot.com/mcp · 38 tools');
@@ -187,6 +187,12 @@ describe('/plugins?kind=connector (#638, mock)', () => {
         expect(ids(root)).toEqual(['gmail', 'filesystem']);
     });
 
+    it('offers no Remove on a connector that ships with the build (Gmail): the Registry would refuse it', async () => {
+        const root = await mountRoute('/plugins?kind=connector');
+        expect(rowOf(root, 'gmail').querySelector('[data-connector-remove]')).toBeNull();
+        expect(rowOf(root, 'github').querySelector('[data-connector-remove]')).not.toBeNull();
+    });
+
     it('with no connectors, the empty state points at Add connector', async () => {
         const root = await mountAt('/plugins?kind=connector', <ConnectorsList rows={[]} dependents={{}} agentOf={(id: string) => ({ name: id })} toggle={() => <span />} />);
         const empty = root.querySelector('[data-plugin-connectors] [data-empty]')!;
@@ -252,6 +258,8 @@ describe('/plugins?kind=connector (#638, live)', () => {
         expect(text(rowOf(dom, 'gmail').querySelector('[data-plugin-row-part="description"]'))).toBe('owner@example.com · sign-in expired');
         buttonNamed(rowOf(dom, 'gmail'), 'Sign in').click();
         expect(went).toEqual(['/_agentic/connectors/gmail/start']);
+        // Gmail ships with the build: Registry.remove refuses it (`builtin`), so the row offers no Remove.
+        expect(rowOf(dom, 'gmail').querySelector('[data-connector-remove]')).toBeNull();
     }, 20_000);
 
     it('Remove refuses while an agent picks it, names the agent, and removes on confirm — credential included', async () => {

@@ -80,7 +80,7 @@ export function connectorLine(
             case 'needs-reauth':
                 return `${c.account.displayName ?? `${record.connector ?? record.id} account`} · sign-in expired`;
             case 'missing':
-                return 'account gone · sign in again';
+                return 'account gone';
             default:
                 return 'not connected';
         }

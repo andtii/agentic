@@ -38,6 +38,8 @@ export type ConnectorsListProps =
     & Define.Prop<'toggle', (plugin: PluginView) => JSXElement, true>
     /** A write is in flight: Remove waits. */
     & Define.Prop<'busy', boolean>
+    /** Why the last Remove or switch failed, shown above the list. */
+    & Define.Prop<'error', string>
     /** The rows are still loading: no empty state yet. */
     & Define.Prop<'loading', boolean>
     /** Offer `Add MCP server` (the MCP form) beside the empty state's pointer at Add connector. */
@@ -88,6 +90,7 @@ export const ConnectorsList = component<ConnectorsListProps>(({ props, emit }) =
                         <Label>Connected · {all.length}</Label>
                         <span data-connectors-note>{CONNECTED_NOTE}</span>
                     </div>
+                    {props.error ? <p data-chat-error role="alert">{props.error}</p> : null}
                     {all.length
                         ? rows.length
                             ? (
@@ -109,9 +112,12 @@ export const ConnectorsList = component<ConnectorsListProps>(({ props, emit }) =
                                                     toggle: () => props.toggle(row.plugin)
                                                 }}
                                             />
-                                            <span data-connector-remove>
-                                                <Button intent="icon" icon="trash" label={`Remove ${row.name}`} disabled={props.busy} onClick={() => emit('remove', row)} />
-                                            </span>
+                                            {/* A connector that ships with the build cannot be removed (the Registry says `builtin`): disable it, or disconnect its account on its page. */}
+                                            {row.plugin.builtin ? null : (
+                                                <span data-connector-remove>
+                                                    <Button intent="icon" icon="trash" label={`Remove ${row.name}`} disabled={props.busy} onClick={() => emit('remove', row)} />
+                                                </span>
+                                            )}
                                         </li>
                                     ))}
                                 </ul>
@@ -236,6 +242,7 @@ export const MockConnectorsView = component(() => {
         return connectorRows(plugins, st.records, connectorAccounts, readinessById(plugins, connectorFacts(st.records)));
     };
     const remove = (row: ConnectorRow, force = false): void => {
+        if (row.plugin.builtin) return;
         const d = deps[row.id];
         if (!force && d && dependentCount(d)) {
             st.removing = row;

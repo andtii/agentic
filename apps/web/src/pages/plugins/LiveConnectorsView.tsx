@@ -168,9 +168,9 @@ export const LiveConnectorsView = component<LiveConnectorsViewProps>(({ props })
                     loading={!ready.overview() || !records.value}
                     onAddMcp={() => { st.addError = ''; st.adding = true; }}
                     onSignIn={signIn}
+                    error={st.error || switches.error() || undefined}
                     onRemove={(row: ConnectorRow) => { void remove(row); }}
                 />
-                {st.error || switches.error() ? <p data-chat-error role="alert">{st.error || switches.error()}</p> : null}
                 <McpSignInDialog
                     model={() => st.signingIn !== null}
                     row={st.signingIn}
