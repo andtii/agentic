@@ -296,6 +296,16 @@ describe('the worktree picker (#622)', () => {
         expect(rootQuery(own)).toBeUndefined();
         expect(changesHref('s1', { root: 'C:\\x', file: 'a.ts' })).toBe('/sessions/s1/changes?root=C%3A%5Cx&file=a.ts');
     });
+
+    it('reads another folder only when the repository lists it as a worktree: a crafted ?root= opens nothing', async () => {
+        const own = mockSessionFiles(loadSession('s1')!);
+        const listed = filesAtRoot(own, 'C:\\Dev\\agentic\\main');
+        expect((await listed.source!.tree('')).result).toBeDefined();
+        const crafted = filesAtRoot(own, 'C:\\Dev\\secrets');
+        expect(await crafted.source!.tree('')).toEqual({ error: { code: 'outside-roots', message: expect.stringContaining('is not a worktree') } });
+        expect((await crafted.source!.changes('uncommitted')).error?.code).toBe('outside-roots');
+        expect((await crafted.source!.read('README.md')).error?.code).toBe('outside-roots');
+    });
 });
 
 describe('where the files come from', () => {

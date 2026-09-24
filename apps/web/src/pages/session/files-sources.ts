@@ -8,7 +8,7 @@
  */
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
-import { workspaceCapabilities, type ChangeScope, type EnvironmentId, type ProjectRecord } from '@agentic/core';
+import { workspaceCapabilities, type ChangeScope, type EnvironmentId, type ProjectRecord, type WorkspaceSource } from '@agentic/core';
 import { machineWorkspaceSource, machineWorktrees, type MachineFilesClient, type MachineView, type SessionInfo } from '@agentic/platform';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { chatKeyOf, machineKeyOf } from '../../actors/keys';
@@ -20,11 +20,28 @@ import type { ChangesSnapshot, LineQuestion, SessionFiles } from './files';
 /**
  * `files` over another worktree's folder (#622): the same machine and chat, `source` / `snapshot` rebuilt by `rooted`
  * for `root`, the worktree list still the session's own. The chat hooks are left out — a question, a mention and
- * "Edited by" are about the session's own files.
+ * "Edited by" are about the session's own files. Only a folder the repository lists as one of its worktrees — inside
+ * the roots, its folder there — is read: any other `?root=` is refused, so a crafted link opens nothing but a worktree.
  */
 function atWorktree(files: SessionFiles, root: string, rooted: (root: string) => Pick<SessionFiles, 'files' | 'vcs' | 'source' | 'snapshot'>): SessionFiles {
     const { ask: _ask, mention: _mention, fileActions: _fileActions, at: _at, source: _source, snapshot: _snapshot, vcs: _vcs, ...rest } = files;
-    return { ...rest, ...rooted(root), root, sessionRoot: files.root };
+    const moved = rooted(root);
+    let listed: Promise<boolean> | undefined;
+    const allowed = async (): Promise<boolean> => {
+        listed ??= (async () => {
+            const answer = files.worktrees ? await files.worktrees() : undefined;
+            return !!answer?.result?.entries.some((e) => e.path === root && !e.outside && !e.prunable);
+        })();
+        return listed;
+    };
+    const refused = { error: { code: 'outside-roots' as const, message: `${root} is not a worktree of this session's repository` } };
+    const source: WorkspaceSource | null = moved.source && {
+        tree: async (path) => ((await allowed()) ? moved.source!.tree(path) : refused),
+        read: async (path, rev) => ((await allowed()) ? moved.source!.read(path, rev) : refused),
+        changes: async (scope) => ((await allowed()) ? moved.source!.changes(scope) : refused)
+    };
+    const snapshot = moved.snapshot && (async (scope: ChangeScope) => ((await allowed()) ? moved.snapshot!(scope) : null));
+    return { ...rest, ...moved, source, ...(snapshot ? { snapshot } : {}), root, sessionRoot: files.root };
 }
 
 /** What the pages ask a machine: the files requests and, for the offline view, its last `changes` snapshot. */
