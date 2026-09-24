@@ -184,7 +184,7 @@ function networkHostAllowed(hosts: readonly string[], url: URL): boolean {
 
 /**
  * Why a Streamable HTTP connector may not reach its own server (#642; PLG-04): its plugin's `network:<host>` scope is
- * not granted. Names the scope only — never the URL's path or query. `undefined` when it may, when it is not an HTTP
+ * not granted. Names the scope and the plugin page — never the URL's path or query. `undefined` when it may, when it is not an HTTP
  * one, or when the gate answer predates the allowlist.
  */
 function networkRevoked(c: GateConnector): string | undefined {
