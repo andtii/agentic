@@ -524,7 +524,11 @@ export interface SessionFeed {
  * transcript for the Thread — in place, so the Thread's window patches
  * rather than remounts. Requests come from the sessions (an approval the
  * user must answer, CHT-09); the state is `running` while any session is
- * mid-turn, `awaiting` while one waits on an answer.
+ * mid-turn with a row of that turn to show, `awaiting` while one waits on an
+ * answer. A turn with nothing of its own yet (#606: one a runtime opened by
+ * itself, input-less, perhaps never ending) leaves the state alone — the
+ * Thread would put its streaming mark on the last assistant row, a reply
+ * that finished long ago.
  */
 export function composeTranscript(target: AgentTranscript, entries: EntryTranscript, feeds: readonly SessionFeed[], lookup: AgentLookup): Record<string, MessageAuthor> {
     const authors: Record<string, MessageAuthor> = { ...entries.authors };
@@ -533,13 +537,14 @@ export function composeTranscript(target: AgentTranscript, entries: EntryTranscr
     let state: AgentTranscript['state'] = 'idle';
     for (const feed of feeds) {
         const a = lookup(feed.agentId);
-        for (const m of inFlightMessages(feed.transcript)) {
+        const rows = inFlightMessages(feed.transcript);
+        for (const m of rows) {
             messages.push(m);
             authors[m.id] = { name: a.name, hue: a.hue, environment: a.environment };
         }
         Object.assign(requests, feed.transcript.requests);
         if (feed.transcript.state === 'awaiting') state = 'awaiting';
-        else if (feed.transcript.state === 'running' && state !== 'awaiting') state = 'running';
+        else if (feed.transcript.state === 'running' && rows.length && state !== 'awaiting') state = 'running';
     }
     target.messages = messages;
     target.requests = requests;
