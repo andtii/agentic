@@ -1,20 +1,24 @@
 /**
  * One visual per `PluginReadiness` status (core's `pluginReadiness`, PLG-03):
  * the pill's label, tone and dot, and the sentence that says what to do next.
- * A status core gains gets its row here before it reaches a screen.
+ * The labels are the handoff's pill vocabulary
+ * (`docs/design/plugins/HANDOFF-plugins.md` → "Readiness pill mapping"):
+ * everything that waits on the user is `needs-you`, a plugin that is off is a
+ * hollow dim OFF. A status core gains gets its row here before it reaches a
+ * screen.
  */
 import type { PluginReadiness, PluginReadinessStatus } from '@agentic/core';
 import type { PillSpec } from '../kit/tone.js';
 
 export const READINESS: Record<PluginReadinessStatus, PillSpec> = {
     ready: { tone: 'live', hollow: false, label: 'READY' },
-    disabled: { tone: 'dim', hollow: true, label: 'DISABLED' },
+    disabled: { tone: 'dim', hollow: true, label: 'OFF' },
     'needs-config': { tone: 'needs-you', hollow: false, label: 'NEEDS SETUP' },
     'needs-secret': { tone: 'needs-you', hollow: false, label: 'NEEDS KEY' },
-    'needs-grant': { tone: 'needs-you', hollow: false, label: 'NEEDS PERMISSION' },
+    'needs-grant': { tone: 'needs-you', hollow: false, label: 'NEEDS GRANT' },
     'needs-sign-in': { tone: 'needs-you', hollow: false, label: 'NEEDS SIGN-IN' },
-    'needs-machine': { tone: 'needs-you', hollow: false, label: 'NEEDS A MACHINE' },
-    'no-kek': { tone: 'failed', hollow: false, label: 'CANNOT STORE KEYS' }
+    'needs-machine': { tone: 'needs-you', hollow: false, label: 'NEEDS MACHINE' },
+    'no-kek': { tone: 'needs-you', hollow: false, label: 'NO KEY STORE' }
 };
 
 const list = (items: readonly string[] | undefined): string => (items?.length ? items.join(', ') : '');
