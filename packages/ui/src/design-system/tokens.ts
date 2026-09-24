@@ -18,10 +18,11 @@
  * Pure data: the kit import is type-only, so `dist/design-system.js` loads
  * in a Node build script without the kit's Node-only barrel.
  */
-import type { ContrastPairDecl, CustomTokenDecl, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
+import type { ContrastPairDecl, CustomTokenDecl, ScopeVocabulary, SystemTokens, ThemeInput, TokensInput } from '@sigx/zero-kit';
 import { tokens as daisy } from '@sigx/zero-daisyui';
 import { kitScopes } from '../kit/vocabulary.js';
 import { codeScopes } from '../code/vocabulary.js';
+import { scopes as packScopes } from '../fragment/scopes.js';
 
 type Daisy = typeof daisy;
 /** daisyUI's eight roles — the vocabulary every daisy recipe keys `color` on. */
@@ -197,6 +198,14 @@ export const contrast: ContrastPairDecl[] = [
     }))
 ];
 
+/** Per scope: the fragment pack's declines, then what the kit and the code surfaces claim (a claim wins per key). */
+function ownScopes(): Record<string, ScopeVocabulary> {
+    const claims: Record<string, ScopeVocabulary> = { ...kitScopes, ...codeScopes };
+    const out: Record<string, ScopeVocabulary> = { ...claims };
+    for (const [scope, declines] of Object.entries(packScopes)) out[scope] = { ...declines, ...claims[scope] };
+    return out;
+}
+
 export const tokens: TokensInput<Roles, typeof system> = {
     roles: daisy.roles,
     custom,
@@ -205,7 +214,8 @@ export const tokens: TokensInput<Roles, typeof system> = {
     axes: { ...daisy.axes, tone: [...TONES], kind: [...KINDS] },
     // daisy's sm / md / lg, plus the handoff's 1280 regime.
     breakpoints: { ...daisy.breakpoints, xl: '80rem' },
-    scopes: { ...daisy.scopes, ...kitScopes, ...codeScopes },
+    // The pack's declines (every ai-* / ag-* scope has no colour or size axis) under the kit's own claims.
+    scopes: { ...daisy.scopes, ...ownScopes() },
     system,
     contrast,
     // A single-scheme design system names its one theme as `defaultLight` (the

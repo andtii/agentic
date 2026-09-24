@@ -133,16 +133,16 @@ export const LiveHistory = component(() => {
                                 </DataTable.Row>,
                                 ...group.items.map((e) => (
                                     <DataTable.Row data-history-row={e.id} data-kind={e.kind} data-seq={String(e.seq)}>
-                                        <DataTable.Cell><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
-                                        <DataTable.Cell><Tag tone={e.tone}>{e.label}</Tag></DataTable.Cell>
-                                        <DataTable.Cell>
+                                        <DataTable.Cell column={0}><code data-mono data-dim>{clock(e.at)}</code></DataTable.Cell>
+                                        <DataTable.Cell column={1}><Tag tone={e.tone}>{e.label}</Tag></DataTable.Cell>
+                                        <DataTable.Cell column={2}>
                                             <span data-agent-cell>
                                                 <AgentTile name={e.actor.name} hue={e.actor.hue} person={e.actor.person} size={22} />
                                                 <span>{e.actor.name}</span>
                                             </span>
                                         </DataTable.Cell>
-                                        <DataTable.Cell><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
-                                        <DataTable.Cell>{e.ref ? <Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link> : <span data-dim>—</span>}</DataTable.Cell>
+                                        <DataTable.Cell column={3}><span data-ellipsis title={e.what}>{e.what}</span></DataTable.Cell>
+                                        <DataTable.Cell column={4}>{e.ref ? <Link to={e.ref.href} class="ag-ref">{e.ref.label}</Link> : <span data-dim>—</span>}</DataTable.Cell>
                                     </DataTable.Row>
                                 ))
                             ])}

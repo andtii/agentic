@@ -49,25 +49,25 @@ export const LiveTaskRowCells = component<{ task: TaskListRow; now: number }>(({
     const t = props.task;
     return (
         <>
-            <DataTable.Cell>
+            <DataTable.Cell column={0}>
                 <span data-cell-status>
                     <StatusPill status={t.status} />
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell>
+            <DataTable.Cell column={1}>
                 <span data-cell-objective>
                     <span data-cell-title title={t.objective}><Link to={`/tasks/${t.id}`}>{t.objective}</Link></span>
                     {t.wait ? <WaitReasonLine wait={t.wait} detail={t.waitDetail} /> : null}
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell>
+            <DataTable.Cell column={2}>
                 <span data-cell-agent>
                     <AgentTile name={t.agent.name} hue={t.agent.hue} size={22} />
                     <span>{t.agent.name}</span>
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell><EnvironmentLine tone={t.status === 'queued' ? 'dim' : 'muted'} {...t.environment} /></DataTable.Cell>
-            <DataTable.Cell><span data-align="end"><Age at={t.createdAt} now={props.now} /></span></DataTable.Cell>
+            <DataTable.Cell column={3}><EnvironmentLine tone={t.status === 'queued' ? 'dim' : 'muted'} {...t.environment} /></DataTable.Cell>
+            <DataTable.Cell column={4}><Age at={t.createdAt} now={props.now} /></DataTable.Cell>
         </>
     );
 });

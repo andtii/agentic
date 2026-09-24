@@ -54,17 +54,17 @@ export const SchedulesView = component<SchedulesViewProps>(({ props }) => {
                     const on = enabled[s.id] ?? s.enabled;
                     return (
                         <DataTable.Row data-schedule={s.id}>
-                            <DataTable.Cell><Tag>{s.kind}</Tag></DataTable.Cell>
-                            <DataTable.Cell>
+                            <DataTable.Cell column={0}><Tag>{s.kind}</Tag></DataTable.Cell>
+                            <DataTable.Cell column={1}>
                                 <span data-schedule-what>
                                     <span data-schedule-title>{s.what}</span>
                                     {policy ? <span data-policy-line>{policy}</span> : null}
                                 </span>
                             </DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-dim>{s.when}</code></DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-strong={on ? '' : undefined}>{on ? s.nextRun : 'paused'}</code></DataTable.Cell>
-                            <DataTable.Cell><RunsOn schedule={s} /></DataTable.Cell>
-                            <DataTable.Cell>
+                            <DataTable.Cell column={2}><code data-mono data-dim>{s.when}</code></DataTable.Cell>
+                            <DataTable.Cell column={3}><code data-mono data-strong={on ? '' : undefined}>{on ? s.nextRun : 'paused'}</code></DataTable.Cell>
+                            <DataTable.Cell column={4}><RunsOn schedule={s} /></DataTable.Cell>
+                            <DataTable.Cell column={5}>
                                 <Switch label={`Enable ${s.what}`} hideLabel model={() => enabled[s.id]} onCheckedChange={(v: boolean) => { enabled[s.id] = v; }} />
                             </DataTable.Cell>
                         </DataTable.Row>

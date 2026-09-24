@@ -3,7 +3,7 @@
  * table, the connection strip, the version item, the section heading.
  */
 import type { AgentConfigVersion, TaskId } from '@agentic/core';
-import { AgentTile, ConnectionStrip, DataTable, Label, NeedsItem, SectionHeading, TaskNode, TimelineList, VersionItem, parseCols } from '@agentic/ui';
+import { AgentTile, ConnectionStrip, DataTable, Label, NeedsItem, SectionHeading, TaskNode, TimelineList, VersionItem, parseCols, tableColumns } from '@agentic/ui';
 import { buttonNamed, mount, one } from '../helpers';
 
 describe('NeedsItem', () => {
@@ -70,41 +70,49 @@ describe('TaskNode', () => {
 describe('DataTable', () => {
     const columns = [{ label: 'Status' }, { label: 'Objective' }, { label: 'Age', align: 'end' as const }];
 
-    it('turns the column template into col widths and labelled heads', () => {
+    it('turns the column template into zero\'s column spec: widths, alignment and labelled heads', () => {
         expect(parseCols('100px 1fr 60px')).toEqual(['100px', undefined, '60px']);
+        expect(tableColumns('100px 1fr 60px', columns)).toEqual([{ label: 'Status', width: '100px' }, { label: 'Objective' }, { label: 'Age', width: '60px', align: 'end' }]);
         const root = mount(
             <DataTable cols="100px 1fr 60px" columns={columns} label="Active tasks">
-                <DataTable.Row><DataTable.Cell>a</DataTable.Cell><DataTable.Cell>b</DataTable.Cell><DataTable.Cell>c</DataTable.Cell></DataTable.Row>
+                <DataTable.Row><DataTable.Cell column={0}>a</DataTable.Cell><DataTable.Cell column={1}>b</DataTable.Cell><DataTable.Cell column={2}>c</DataTable.Cell></DataTable.Row>
             </DataTable>
         );
-        const cols = [...root.querySelectorAll<HTMLElement>('col')].map((c) => c.style.width || null);
+        // Widths ride `--table-column-width` on each <col>, never a width literal (a responsive rule takes them back below xl).
+        const cols = [...root.querySelectorAll<HTMLElement>('col')].map((c) => c.style.getPropertyValue('--table-column-width') || null);
         expect(cols).toEqual(['100px', null, '60px']);
         expect([...root.querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Status', 'Objective', 'Age']);
-        expect(root.querySelector('th [data-align="end"]')!.textContent).toBe('Age');
-        expect(root.querySelector('caption')!.textContent).toBe('Active tasks');
+        // Alignment rides `--table-cell-align` on the head and on every cell that names its column.
+        expect(root.querySelectorAll<HTMLElement>('th')[2]!.style.getPropertyValue('--table-cell-align')).toBe('end');
+        expect(root.querySelectorAll<HTMLElement>('tbody td')[2]!.style.getPropertyValue('--table-cell-align')).toBe('end');
+        expect(root.querySelector('caption [data-visually-hidden]')!.textContent).toBe('Active tasks');
         expect(root.querySelectorAll('tbody td').length).toBe(3);
-        expect(root.querySelector('[data-scope="table"][data-part="root"]')!.hasAttribute('data-mod-hover')).toBe(true);
+        const table = root.querySelector('[data-scope="table"][data-part="root"]')!;
+        expect(table.hasAttribute('data-mod-hover')).toBe(true);
+        expect(root.querySelector('[data-ag-table], [style*="--ag-col-"]')).toBeNull();
     });
 
-    it('captions every cell with its column head for the stacked layout below 768', () => {
+    it('stacks below md, each cell captioned by its column (a hidden column is named for assistive tech only)', () => {
         const root = mount(
             <DataTable cols="100px 1fr 60px" columns={[{ label: 'Status' }, { label: 'Objective' }, { label: 'Toggle', hidden: true }]} label="t">
-                <DataTable.Row><DataTable.Cell>a</DataTable.Cell><DataTable.Cell>b</DataTable.Cell><DataTable.Cell>c</DataTable.Cell></DataTable.Row>
+                <DataTable.Row><DataTable.Cell column={0}>a</DataTable.Cell><DataTable.Cell column={1}>b</DataTable.Cell><DataTable.Cell column={2}>c</DataTable.Cell></DataTable.Row>
             </DataTable>
         );
-        const wrapper = root.querySelector<HTMLElement>('[data-ag-table]')!;
-        expect(wrapper).not.toBeNull();
-        // Custom properties carry the captions; the kit CSS reads them into `td::before` per column. A hidden head captions nothing.
-        expect(wrapper.style.getPropertyValue('--ag-col-1').trim()).toBe('"Status"');
-        expect(wrapper.style.getPropertyValue('--ag-col-2').trim()).toBe('"Objective"');
-        expect(wrapper.style.getPropertyValue('--ag-col-3').trim()).toBe('""');
-        expect(wrapper.querySelector('[data-scope="table"][data-part="root"]')).not.toBeNull();
+        expect(root.querySelector('[data-scope="table"][data-part="root"]')!.getAttribute('data-l-stack')).toBe('md');
+        // zero's `cell-label`: the column's label inside each cell, aria-hidden (the header association names the value).
+        const labels = [...root.querySelectorAll('tbody td')].map((td) => td.querySelector('[data-part="cell-label"]')?.textContent ?? null);
+        expect(labels).toEqual(['Status', 'Objective', null]);
+        expect(root.querySelector('[data-part="cell-label"]')!.getAttribute('aria-hidden')).toBe('true');
+        const hidden = root.querySelectorAll('th')[2]!;
+        expect(hidden.querySelector('[data-visually-hidden]')!.textContent).toBe('Toggle');
     });
 
     it('stands in three skeleton rows while loading', () => {
         const root = mount(<DataTable cols="1fr 1fr 1fr" columns={columns} label="t" loading />);
         expect(root.querySelectorAll('tbody tr').length).toBe(3);
         expect(root.querySelectorAll('tbody [data-scope="skeleton"]').length).toBe(9);
+        // Stacked, a loading row is captioned like a real one.
+        expect([...root.querySelectorAll('tbody tr')[0]!.querySelectorAll('[data-part="cell-label"]')].map((l) => l.textContent)).toEqual(['Status', 'Objective', 'Age']);
     });
 
     it('refuses a template that does not match the columns in development', () => {

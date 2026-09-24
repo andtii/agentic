@@ -44,10 +44,19 @@ const envLine: RecipeInput = {
                 minInlineSize: '0',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis'
-            }
+            },
+            // In a stacked table card the line has the card's width to wrap in.
+            at: { 'below-md': { selectors: { '[data-scope="table"][data-part="cell"] &': { whiteSpace: 'normal' } } } }
         },
-        machine: { base: { whiteSpace: 'nowrap' } },
-        sep: { base: { color: 'var(--ag-text-dim)' } },
+        machine: {
+            base: { whiteSpace: 'nowrap' },
+            // Phones: the line never wraps; where it cannot fit, the machine segment (and its separator) goes.
+            at: { 'below-md': { selectors: { '[data-fit="drop-machine"] > &': { display: 'none' } } } }
+        },
+        sep: {
+            base: { color: 'var(--ag-text-dim)' },
+            at: { 'below-md': { selectors: { '[data-fit="drop-machine"] > [data-part="machine"] + &': { display: 'none' } } } }
+        },
         runtime: { base: { whiteSpace: 'nowrap' } },
         account: { base: { whiteSpace: 'nowrap' } }
     },
@@ -87,7 +96,11 @@ const needsItem: RecipeInput = {
         head: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', minInlineSize: '0', flexWrap: 'wrap' } },
         title: { base: { fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minInlineSize: '0' } },
         context: { base: { margin: '0', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)', alignItems: 'baseline' } },
-        actions: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginBlockStart: 'var(--space-xs)' } }
+        actions: {
+            base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)', marginBlockStart: 'var(--space-xs)' },
+            // Phones: the row takes the card's width, its buttons split it evenly and an approval card inside takes a row of its own.
+            at: { 'below-md': { base: { gridColumn: '1 / -1' }, selectors: { '& > *': { flex: '1 1 0' }, '& > [data-scope="ai-approval"]': { flex: '1 1 100%' } } } }
+        }
     },
     variants: {
         // The kind pill takes its meaning colour; the card stays neutral (colour only ever means state).
@@ -106,12 +119,14 @@ const needsItem: RecipeInput = {
 /** Task node: one 28 px rail column per depth with a `line-strong` left border; selected = base-300 + live border at 53 %. */
 const taskNode: RecipeInput = {
     component: 'ag-task-node',
-    tokens: { '--ag-depth': '0' },
+    tokens: { '--ag-depth': '0', '--ag-rail': '28px' },
     parts: {
-        root: { base: { display: 'flex', alignItems: 'stretch', paddingInlineStart: 'calc(var(--ag-depth) * 28px)', minInlineSize: '0' } },
-        rail: { base: { inlineSize: '28px', flexShrink: '0', borderInlineStart: 'var(--border) solid var(--ag-line-strong)', marginInlineStart: '-28px', marginInlineEnd: '0' } },
+        root: { base: { display: 'flex', alignItems: 'stretch', paddingInlineStart: 'calc(var(--ag-depth) * var(--ag-rail))', minInlineSize: '0' } },
+        rail: { base: { inlineSize: 'var(--ag-rail)', flexShrink: '0', borderInlineStart: 'var(--border) solid var(--ag-line-strong)', marginInlineStart: 'calc(-1 * var(--ag-rail))', marginInlineEnd: '0' } },
         card: {
             base: {
+                // A real <button>: no user-agent chip under the card.
+                appearance: 'none',
                 flex: '1 1 auto',
                 minInlineSize: '0',
                 display: 'grid',
@@ -225,14 +240,32 @@ const envCard: RecipeInput = {
                 background: 'var(--color-base-200)',
                 color: 'var(--color-base-content)',
                 transition: `border-color ${motion}, opacity ${motion}`
+            },
+            // Phones: a 52 px row — name + auth pill, runtime and capacity, default-agent tiles.
+            at: {
+                'below-md': {
+                    base: {
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(0, 1fr) auto',
+                        gridTemplateAreas: '"header header" "line default" "capacity default" "fix fix" "actions actions"',
+                        alignItems: 'center',
+                        columnGap: 'var(--space-md)',
+                        rowGap: 'var(--space-2xs)',
+                        minBlockSize: '52px',
+                        padding: 'var(--space-md) var(--space-lg)'
+                    }
+                }
             }
         },
-        header: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' } },
+        header: {
+            base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' },
+            at: { 'below-md': { base: { gridArea: 'header', flexWrap: 'nowrap' }, selectors: { '& > [data-scope="ag-env-card"][data-part="status"]': { display: 'none' } } } }
+        },
         name: { base: { margin: '0', fontFamily: mono, fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)', flex: '1 1 auto', minInlineSize: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         status: { base: { display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
-        line: { base: { margin: '0', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' } },
-        capacity: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' } },
-        meter: { base: { display: 'inline-flex', gap: '3px' } },
+        line: { base: { margin: '0', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' }, at: { 'below-md': { base: { gridArea: 'line' } } } },
+        capacity: { base: { display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', fontFamily: mono, fontSize: 'var(--text-xs)', color: 'var(--ag-text-dim)' }, at: { 'below-md': { base: { gridArea: 'capacity' } } } },
+        meter: { base: { display: 'inline-flex', gap: 'calc(var(--space-2xs) + var(--border))' } },
         slot: {
             base: { display: 'inline-block', inlineSize: '18px', blockSize: '6px', borderRadius: '2px', background: 'var(--ag-line-strong)' },
             selectors: { '&[data-used]': { background: 'var(--color-info)' } }
@@ -242,6 +275,7 @@ const envCard: RecipeInput = {
         load: { base: { whiteSpace: 'nowrap', marginInlineStart: 'auto' }, selectors: { '&[data-tone="warning"]': { color: 'var(--color-warning)' } } },
         facts: {
             base: { margin: '0', display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: 'var(--space-md)', rowGap: 'var(--space-2xs)', fontSize: 'var(--text-sm)' },
+            at: { 'below-md': { base: { gridArea: 'default', display: 'block' }, selectors: { '& > *:not([data-scope="ag-env-card"][data-part="default-for"])': { display: 'none' } } } },
             selectors: {
                 '& > dt': { fontFamily: mono, fontSize: 'var(--text-xs)', letterSpacing: 'var(--tracking-wider)', textTransform: 'uppercase', color: 'var(--ag-text-dim)', alignSelf: 'baseline' },
                 '& > dd': { margin: '0', color: 'var(--ag-text-muted)', overflowWrap: 'anywhere' }
@@ -252,9 +286,10 @@ const envCard: RecipeInput = {
         fix: {
             base: { margin: '0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)', fontSize: 'var(--text-sm)', color: 'var(--color-base-content)', paddingBlockStart: 'var(--space-sm)', borderBlockStart: 'var(--border) solid var(--ag-line)' },
             // The line wraps; the button keeps its intrinsic width ("Re-check" never breaks).
-            selectors: { '& > [data-scope="button"]': { flex: 'none' } }
+            selectors: { '& > [data-scope="button"]': { flex: 'none' } },
+            at: { 'below-md': { base: { gridArea: 'fix' } } }
         },
-        actions: { base: { display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' } }
+        actions: { base: { display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }, at: { 'below-md': { base: { gridArea: 'actions' } } } }
     },
     variants: {
         tone: {
@@ -356,7 +391,11 @@ const workdir: RecipeInput = {
 const workdirPicker: RecipeInput = {
     component: 'ag-workdir-picker',
     parts: {
-        root: { base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minInlineSize: '0', color: 'var(--color-base-content)', fontSize: 'var(--text-md)' } },
+        root: {
+            base: { display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minInlineSize: '0', color: 'var(--color-base-content)', fontSize: 'var(--text-md)' },
+            // Phones: the dialog around the picker pads less (its popup keeps the 16 px gutter).
+            at: { 'below-md': { selectors: { '[data-scope="dialog"][data-part="popup"]:has(&)': { padding: 'var(--space-lg)' } } } }
+        },
         envs: { base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' } },
         env: {
             base: {
@@ -402,7 +441,7 @@ const workdirPicker: RecipeInput = {
             }
         },
         crumb: {
-            base: { ...bare, padding: '2px var(--space-2xs)', borderRadius: 'var(--radius-selector)', maxInlineSize: '100%', overflowWrap: 'anywhere', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' },
+            base: { ...bare, padding: 'var(--space-2xs)', borderRadius: 'var(--radius-selector)', maxInlineSize: '100%', overflowWrap: 'anywhere', fontFamily: mono, fontSize: 'var(--text-sm)', color: 'var(--ag-text-muted)' },
             selectors: { '&:hover': { color: 'var(--color-base-content)' }, '&[aria-current]': { color: 'var(--color-base-content)', fontWeight: 'var(--weight-semibold)' }, '&:focus-visible': ring }
         },
         editor: {
@@ -601,7 +640,7 @@ const markdown: RecipeInput = {
                 [`${md('copy')}:focus-visible`]: ring,
                 [md('pre')]: { margin: '0', padding: 'var(--space-sm) var(--space-md)', border: 'none', borderRadius: '0', background: 'transparent', overflow: 'auto', fontFamily: mono, fontSize: 'var(--text-sm)', lineHeight: '1.5' },
                 [md('code-body')]: { padding: '0', background: 'none', fontSize: 'inherit' },
-                [md('inline-code')]: { fontFamily: mono, fontSize: '0.92em', padding: '0.1rem 0.35rem', borderRadius: 'var(--radius-selector)', background: 'var(--color-base-300)' },
+                [md('inline-code')]: { fontFamily: mono, fontSize: '0.92em', padding: 'var(--space-2xs) var(--space-xs)', borderRadius: 'var(--radius-selector)', background: 'var(--color-base-300)' },
                 [md('table')]: { display: 'block', inlineSize: 'max-content', maxInlineSize: '100%', overflowX: 'auto', borderCollapse: 'collapse', border: 'var(--border) solid var(--ag-line)', borderRadius: 'var(--radius-field)', fontSize: 'var(--text-sm)' },
                 [md('table-head')]: { background: 'var(--color-base-200)' },
                 [md('table-cell')]: { padding: 'var(--space-xs) var(--space-sm)', borderBlockEnd: 'var(--border) solid var(--ag-line)', textAlign: 'start', verticalAlign: 'top' },

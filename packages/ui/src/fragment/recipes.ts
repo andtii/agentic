@@ -19,7 +19,6 @@
  * without loading the sigx runtime.
  */
 import type { RecipeInput } from '@sigx/zero-kit';
-import { RECOMMENDED_ROLE_LIST } from '@sigx/zero/contract';
 
 const motion = 'var(--duration-fast) var(--ease-standard)';
 const mono = 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)';
@@ -54,13 +53,10 @@ const lifecycle = {
 };
 const lifecycleSameAs = { complete: 'loading', cancelled: 'denied' };
 
-/** The 1200 ms opacity pulse a running or streaming dot carries, off under reduced motion. */
-const pulse = {
-    animation: 'ai-pulse 1200ms ease-in-out infinite'
-};
-
 const thread: RecipeInput = {
     component: 'ai-thread',
+    // The anchor's `on` is hidden by the runtime (`hiddenIn`), so the two states look alike on purpose.
+    sameAs: { anchor: { on: 'off', off: 'on' } },
     parts: {
         root: {
             base: {
@@ -128,9 +124,6 @@ const thread: RecipeInput = {
                 cursor: 'pointer',
                 transition: `opacity ${motion}`
             },
-            // `on` is hidden by the runtime (`hiddenIn`), so the two states are
-            // legitimately CSS-identical; `off` is the one that paints.
-            states: { on: {}, off: { opacity: '1' } },
             selectors: { '&:hover': { background: linkHover } }
         }
     }
@@ -169,7 +162,8 @@ const message: RecipeInput = {
             }
         },
         name: { base: { fontWeight: 'var(--weight-semibold, 600)' } },
-        environment: { base: { display: 'inline-flex', minInlineSize: '0', color: textDim } },
+        // Phones: the meta line drops the environment.
+        environment: { base: { display: 'inline-flex', minInlineSize: '0', color: textDim }, at: { 'below-md': { base: { display: 'none' } } } },
         time: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } },
         body: {
             base: {
@@ -265,10 +259,8 @@ const toolCall: RecipeInput = {
                 minInlineSize: '0',
                 transition: `border-color ${motion}`
             },
-            states: lifecycle,
-            // The running pill's dot pulses; still under reduced motion.
-            selectors: { '&[data-state="running"] [data-scope="ag-pill"][data-part="dot"]': pulse },
-            at: { 'reduced-motion': { selectors: { '&[data-state="running"] [data-scope="ag-pill"][data-part="dot"]': { animation: 'none' } } } }
+            // The running pill's dot pulses on its own: a `working` StatusPill is Badge.Dot in zero's `running` state.
+            states: lifecycle
         },
         header: {
             base: {
@@ -417,12 +409,23 @@ const approval: RecipeInput = {
         },
         actions: {
             base: { display: 'flex', flexWrap: 'wrap', gap: 'var(--space-sm)' },
-            selectors: { '& > [data-scope="button"]': { blockSize: '2.5rem' } }
+            selectors: { '& > [data-scope="button"]': { blockSize: '2.5rem' } },
+            // Phones: `Allow once` takes a full row, the other two answers share the next.
+            at: {
+                'below-md': {
+                    base: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))' },
+                    selectors: { '& > :first-child': { gridColumn: '1 / -1' } }
+                }
+            }
         },
-        'label-full': { base: { display: 'inline' } },
-        'label-short': { base: { display: 'none' } },
+        'label-full': { base: { display: 'inline' }, at: { 'below-md': { base: { display: 'none' } } } },
+        'label-short': { base: { display: 'none' }, at: { 'below-md': { base: { display: 'inline' } } } },
         // The one-line record a decision collapses to.
         record: { base: { margin: '0', fontSize: 'var(--text-sm)', color: textMuted } }
+    },
+    // Phones: the answers are touch-height.
+    composes: {
+        button: { within: 'actions', parts: { root: { at: { 'below-md': { base: { blockSize: controlTouch } } } } } }
     },
     modifiers: {
         // Session page and mobile: no context rows.
@@ -460,7 +463,8 @@ const question: RecipeInput = {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'flex-start',
-                gap: '2px',
+                gap: 'var(--space-2xs)',
+                appearance: 'none',
                 padding: 'var(--space-sm) var(--space-md)',
                 border: `var(--border) solid ${line}`,
                 borderRadius: 'var(--radius-field)',
@@ -506,6 +510,7 @@ const question: RecipeInput = {
 /** Card base-200, `line-strong` border, radius 10; "To" row; borderless textarea 14; attach · key hint · Send 44. */
 const composer: RecipeInput = {
     component: 'ai-composer',
+    keyframes: { 'ai-spin': 'to { transform: rotate(360deg); }' },
     parts: {
         root: {
             base: {
@@ -522,11 +527,30 @@ const composer: RecipeInput = {
             selectors: {
                 '&:focus-within': { borderColor: textDim }
             },
+            // Phones (docs/design/HANDOFF.md, "Mobile specifics"): docked to the bottom as one 48 px row — attach,
+            // the input, a square Send — under the "To" row and the attachments.
+            at: {
+                'below-md': {
+                    base: {
+                        display: 'grid',
+                        gridTemplateColumns: `${controlTouch} minmax(0, 1fr) ${controlTouch}`,
+                        gridTemplateAreas: '"to to to" "attachments attachments attachments" "attach input send" "cancel cancel cancel"',
+                        alignItems: 'end',
+                        gap: 'var(--space-sm)',
+                        borderRadius: '0',
+                        borderInline: '0',
+                        borderBlockEnd: '0',
+                        borderBlockStart: `var(--border) solid ${line}`,
+                        padding: 'var(--space-sm) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px))'
+                    }
+                }
+            },
             // A drag carrying files hovers the card: the drop zone lights up.
             states: { highlighted: { borderColor: 'var(--color-primary)', borderStyle: 'dashed', background: 'var(--color-base-300)' } }
         },
         addressing: {
-            base: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: textMuted }
+            base: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: textMuted },
+            at: { 'below-md': { base: { gridArea: 'to' } } }
         },
         recipient: {
             base: {
@@ -548,7 +572,7 @@ const composer: RecipeInput = {
             base: { marginInlineStart: 'auto', fontSize: 'var(--text-sm)', color: textMuted },
             selectors: { '&[data-nobody]': { color: textDim } }
         },
-        attachments: { base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' } },
+        attachments: { base: { listStyle: 'none', margin: '0', padding: '0', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }, at: { 'below-md': { base: { gridArea: 'attachments' } } } },
         attachment: {
             base: {
                 display: 'inline-flex',
@@ -586,16 +610,18 @@ const composer: RecipeInput = {
                 borderInlineEndColor: 'transparent',
                 borderRadius: '50%',
                 animation: 'ai-spin 800ms linear infinite'
-            }
+            },
+            // Still under reduced motion: the ring stays, it does not turn.
+            at: { 'reduced-motion': { base: { animation: 'none' } } }
         },
         input: {
             base: { position: 'relative' },
+            at: { 'below-md': { base: { gridArea: 'input' } } },
             selectors: {
-                // The field fills the card; its label is for assistive tech only (the card is the frame).
+                // The field fills the card; its label is for assistive tech only (`Textarea.Label visuallyHidden` — the card is the frame).
                 // The mention Combobox wraps the field: both fill the card, never wider than it.
                 '& [data-scope="combobox"][data-part="root"]': { display: 'flex', inlineSize: '100%', minInlineSize: '0' },
                 '& [data-scope="textarea"][data-part="root"]': { display: 'flex', inlineSize: '100%', minInlineSize: '0' },
-                '& [data-scope="textarea"][data-part="label"]': { position: 'absolute', inlineSize: '1px', blockSize: '1px', margin: '-1px', padding: '0', border: '0', overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' },
                 // Borderless, 14 px — the card is the frame; the height is zero's autosize (`minRows` / `maxRows`).
                 '& textarea': { display: 'block', inlineSize: '100%', minInlineSize: '0', boxSizing: 'border-box', border: 'none', background: 'transparent', boxShadow: 'none', padding: '0', fontSize: 'var(--text-lg)', lineHeight: '1.5', resize: 'none', outline: 'none' },
                 // One line: an autosizing box measures its placeholder too, and a wrapped hint would grow an empty box.
@@ -607,96 +633,116 @@ const composer: RecipeInput = {
             selectors: {
                 '& > [data-scope="button"][data-intent="primary"]': { blockSize: controlTouch, paddingInline: 'var(--space-lg)' },
                 '& > [data-scope="button"][data-intent="icon"]': { blockSize: controlTouch, inlineSize: controlTouch }
-            }
+            },
+            // Phones: the buttons join the card's grid.
+            at: { 'below-md': { base: { display: 'contents' } } }
         },
         // `Enter to send · Shift+Enter newline`, the keys as zero Kbd caps.
-        keys: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' } }
+        keys: { base: { marginInlineStart: 'auto', fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim, whiteSpace: 'nowrap' }, at: { 'below-md': { base: { display: 'none' } } } }
+    },
+    composes: {
+        // Phones: the input wears field chrome of its own — one 22 px row, which with the padding and border is the 48 px touch row.
+        textarea: {
+            within: 'input',
+            parts: {
+                textarea: {
+                    at: {
+                        'below-md': {
+                            base: {
+                                boxSizing: 'border-box',
+                                minBlockSize: controlTouch,
+                                padding: 'var(--space-md)',
+                                border: `var(--border) solid ${lineStrong}`,
+                                borderRadius: 'var(--radius-field)',
+                                background: 'var(--color-base-100)',
+                                fontSize: '15px',
+                                lineHeight: '22px'
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        // Phones: attach on the start, a square Send on the end with its label read, not seen; Cancel takes its own row.
+        button: {
+            within: 'actions',
+            parts: {
+                root: {
+                    at: {
+                        'below-md': {
+                            selectors: {
+                                '&[data-intent="icon"]': { gridArea: 'attach', inlineSize: controlTouch, blockSize: controlTouch },
+                                '&[data-intent="default"]': { gridArea: 'cancel' },
+                                '&[data-intent="primary"]': { gridArea: 'send', inlineSize: controlTouch, blockSize: controlTouch, padding: '0', justifyContent: 'center' },
+                                '&[data-intent="primary"] > span': { position: 'absolute', inlineSize: '1px', blockSize: '1px', overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 };
 
 /**
- * A `color` axis over the WHOLE recommended role list on the scopes whose
- * root paints a tint — a subset would diverge from every sibling component
- * in the adopting design system, and the kit's validator says so.
+ * Raw CSS the design system appends verbatim. Nothing is left: the running
+ * dot is Badge.Dot's own `running` pulse, the attachment spinner's turn is
+ * the composer recipe's `keyframes`, and the phone regime (the docked
+ * composer, the approval's action grid, the message meta without its
+ * environment line) is the recipes' `below-md` keys and `composes`. Kept as
+ * an export so an adopting design system's `css` list does not change.
  */
-function colorAxis(part: string, paint: (role: string) => Record<string, string>): NonNullable<RecipeInput['variants']> {
-    return { color: Object.fromEntries(RECOMMENDED_ROLE_LIST.map((role) => [role, { [part]: { base: paint(role) } }])) };
-}
-
-thread.variants = colorAxis('anchor', (role) => ({ background: `var(--color-${role})`, color: `var(--color-${role}-content)` }));
+export const fragmentCss = '';
 
 /**
- * Raw CSS the design system appends verbatim: the keyframes the running dot
- * pulses on (a STREAMING pill pulses as Badge.Dot `running`), the attachment spinner's turn, and the phone regime recipes cannot
- * express (`docs/design/HANDOFF.md` → "Mobile specifics"): below 768 px the
- * composer docks to the bottom as one 48 px row (attach, single-line input
- * at 15 px, square Send) under the "To" row, the message meta drops the
- * environment line, and the approval card's `Allow once` takes a full row
- * with the other two answers sharing the next.
+ * The forms' layout scope (`AgentForm`, `SchemaForm`): the pages lay the
+ * sections out; the pack only spaces the button row, which otherwise sits
+ * flush.
  */
-export const fragmentCss = `@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-@keyframes ai-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-    [data-scope="ai-composer"][data-part="spinner"] { animation: none; }
-}
-@media (max-width: 767.98px) {
-    [data-scope="ai-message"][data-part="environment"] { display: none; }
+const form: RecipeInput = {
+    component: 'ai-form',
+    parts: {
+        root: { base: { minInlineSize: '0' } },
+        actions: { base: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-sm)' } }
+    }
+};
 
-    [data-scope="ai-approval"][data-part="actions"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
-    [data-scope="ai-approval"][data-part="label-full"] { display: none; }
-    [data-scope="ai-approval"][data-part="label-short"] { display: inline; }
-    [data-scope="ai-approval"][data-part="actions"] > [data-scope="button"] { block-size: var(--ag-control-h-touch); }
-    [data-scope="ai-approval"][data-part="actions"] > :first-child { grid-column: 1 / -1; }
+/**
+ * The app shell's own marks (`AppShell`): the mono wordmark beside its 28 px
+ * `a/` tile, and the spacer that pushes the sidebar's foot down. The layout
+ * regimes (docked sidebar, phone app bar) are `shell.css`, over zero's
+ * Drawer, Navbar and NavList.
+ */
+const shell: RecipeInput = {
+    component: 'ai-shell',
+    parts: {
+        brand: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-sm)',
+                fontFamily: mono,
+                fontSize: '15px',
+                fontWeight: 'var(--weight-semibold, 600)',
+                letterSpacing: 'var(--tracking-tight, -0.01em)',
+                color: 'var(--color-base-content)'
+            }
+        },
+        'brand-mark': {
+            base: {
+                display: 'inline-grid',
+                placeItems: 'center',
+                inlineSize: '28px',
+                blockSize: '28px',
+                borderRadius: 'var(--radius-field)',
+                background: 'var(--color-primary)',
+                color: 'var(--color-primary-content)',
+                fontWeight: 'var(--weight-bold, 700)',
+                fontSize: 'var(--text-lg)'
+            }
+        },
+        'sidebar-spacer': { base: { flex: '1 1 auto' } }
+    }
+};
 
-    [data-scope="ai-composer"][data-part="root"] {
-        display: grid;
-        grid-template-columns: var(--ag-control-h-touch) minmax(0, 1fr) var(--ag-control-h-touch);
-        grid-template-areas: "to to to" "attachments attachments attachments" "attach input send" "cancel cancel cancel";
-        align-items: end;
-        gap: var(--space-sm);
-        border-radius: 0;
-        border-inline: 0;
-        border-block-end: 0;
-        border-block-start: var(--border) solid var(--ag-line);
-        padding: var(--space-sm) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
-    }
-    [data-scope="ai-composer"][data-part="addressing"] { grid-area: to; }
-    [data-scope="ai-composer"][data-part="attachments"] { grid-area: attachments; }
-    [data-scope="ai-composer"][data-part="input"] { grid-area: input; }
-    [data-scope="ai-composer"][data-part="input"] textarea {
-        box-sizing: border-box;
-        min-block-size: var(--ag-control-h-touch);
-        padding: 12px var(--space-md);
-        border: var(--border) solid var(--ag-line-strong);
-        border-radius: var(--radius-field);
-        background: var(--color-base-100);
-        font-size: 15px;
-        /* zero autosizes from one 22 px row: with the padding and border that is the 48 px touch row. */
-        line-height: 22px;
-    }
-    [data-scope="ai-composer"][data-part="actions"] { display: contents; }
-    [data-scope="ai-composer"][data-part="keys"] { display: none; }
-    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="icon"] { grid-area: attach; inline-size: var(--ag-control-h-touch); block-size: var(--ag-control-h-touch); }
-    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="default"] { grid-area: cancel; }
-    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="primary"] {
-        grid-area: send;
-        inline-size: var(--ag-control-h-touch);
-        block-size: var(--ag-control-h-touch);
-        padding: 0;
-        justify-content: center;
-    }
-    [data-scope="ai-composer"][data-part="actions"] > [data-scope="button"][data-intent="primary"] > span {
-        position: absolute;
-        inline-size: 1px;
-        block-size: 1px;
-        margin: -1px;
-        padding: 0;
-        border: 0;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-    }
-}
-`;
-
-export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer];
+export const recipes: readonly RecipeInput[] = [thread, message, toolCall, reasoning, approval, question, composer, form, shell];

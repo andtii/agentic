@@ -38,7 +38,7 @@ export { Switch } from './Switch.js';
 export type { SwitchProps } from './Switch.js';
 export { MultiSelect as ChipInput } from '../forms/fields.js';
 export type { MultiSelectProps as ChipInputProps, FieldOption as ChipInputOption } from '../forms/fields.js';
-export { DataTable, parseCols } from './DataTable.js';
+export { DataTable, parseCols, tableColumns } from './DataTable.js';
 export type { DataTableProps, DataColumn } from './DataTable.js';
 export { TaskNode } from './TaskNode.js';
 export type { TaskNodeProps } from './TaskNode.js';

@@ -147,17 +147,17 @@ import { AgentTile, Button, DataTable, EnvironmentLine, StatusPill, WaitReasonLi
 
 <DataTable cols="100px 1fr 140px 270px 60px" columns={[{ label: 'Status' }, { label: 'Objective' }, { label: 'Assignee' }, { label: 'Environment' }, { label: 'Age', align: 'end' }]} label="Active tasks">
     <DataTable.Row>
-        <DataTable.Cell><StatusPill status={task.status} />{task.wait && <WaitReasonLine wait={task.wait} detail="git push" />}</DataTable.Cell>
-        <DataTable.Cell><a href={`/tasks/${task.id}`}>{task.objective}</a></DataTable.Cell>
-        <DataTable.Cell><AgentTile name="Forge" hue={2} size={22} /> Forge</DataTable.Cell>
-        <DataTable.Cell><EnvironmentLine machine="alien01" runtime="claude-code" account="work" /></DataTable.Cell>
-        <DataTable.Cell>14m</DataTable.Cell>
+        <DataTable.Cell column={0}><StatusPill status={task.status} />{task.wait && <WaitReasonLine wait={task.wait} detail="git push" />}</DataTable.Cell>
+        <DataTable.Cell column={1}><a href={`/tasks/${task.id}`}>{task.objective}</a></DataTable.Cell>
+        <DataTable.Cell column={2}><AgentTile name="Forge" hue={2} size={22} /> Forge</DataTable.Cell>
+        <DataTable.Cell column={3}><EnvironmentLine machine="alien01" runtime="claude-code" account="work" /></DataTable.Cell>
+        <DataTable.Cell column={4}>14m</DataTable.Cell>
     </DataTable.Row>
 </DataTable>
 <Button intent="wait" icon="check">Allow once</Button>
 ```
 
-`PILLS` is the table: if core gains a state, add its row there before it reaches a screen. `Button intent="icon"` needs a `label`; `EnvironmentLine` refuses a lone part in development (EXE-06); `DataTable` refuses a template that does not match its columns.
+`PILLS` is the table: if core gains a state, add its row there before it reaches a screen. `Button intent="icon"` needs a `label`; `EnvironmentLine` refuses a lone part in development (EXE-06); `DataTable` refuses a template that does not match its columns. It is zero's `Table.Root columns` + `stack="md"`: pass `column={i}` on each `DataTable.Cell`, so below `md` every row stacks into a card and each value is captioned by its column's label (a `hidden` column is named for assistive tech only). The column widths yield below `xl`.
 
 ### Provider limits (#270)
 
@@ -237,4 +237,15 @@ const view = useAgentSession(session);
 
 ## Fragment (`@agentic/ui/fragment`)
 
-The six `ai-*` anatomies (and the kit's `ag-*`) as a zero manifest fragment plus a recipe pack on the recommended token grammar — the handoff's inks (`--ag-line`, `--ag-text-dim`, …) are read with a recommended fallback, so a generic skin still renders it — pure data (no sigx runtime). `fragmentCss` carries the one `@keyframes` (the streaming pulse) for the design system's raw-CSS slot. Declared through `"sigx-zero": { "fragment": "./dist/fragment.js", "requires": ">=0.5.0" }`, `version` is `FRAGMENT_VERSION` from `@sigx/zero/contract`. `build` runs `sigx zero:fragment --strict`, which checks the fragment (schema, merge into zero's manifest, recipes on declared parts only, the lynx probe, `componentExportName(scope)` on the root) and writes `dist/fragment.json` for `--extra-manifest`. A design system adopts it with `--extra-manifest @agentic/ui`, or `mergeManifests(zeroManifest, fragment)` + `recipes` in a build script. The exported `recipes` / `fragmentCss` pass through `withFallbacks` (`src/fragment/fallbacks.ts`): every bare `var()` of the kit vocabulary or an `--ag-*` token carries its value as a fallback, so the pack paints on a target (lynx) that defines none of them. agentic's own design system compiles the recipe files without it. There is no `sigx zero:extend` path: agentic owns its design system (#184).
+The fragment is pure data (no sigx runtime). It holds a zero manifest fragment and a recipe pack on the recommended token grammar:
+- the transcript's `ai-*` anatomies (thread, message, tool call, reasoning, approval, question, composer);
+- `ai-form` (the `AgentForm` / `SchemaForm` layout parts) and `ai-shell` (the `AppShell` regions), whose components stamp `FORM_SCOPE` / `SHELL_SCOPE`;
+- the kit's and the code surfaces' `ag-*` anatomies.
+
+The handoff's inks (`--ag-line`, `--ag-text-dim`, …) are read with a recommended fallback, so a generic skin still renders the pack.
+
+The `scopes` export declines the axes the pack never wires, in `tokens.scopes` shape with every list empty:
+- colour and size on every scope;
+- `tone` / `kind` where they are part-level attributes (`fragment/scopes.ts`).
+
+`fragmentCss` is empty. The spinner's keyframes, the reduced-motion stops and the phone regime are all recipe keys (`below-md`, `composes`). The published `recipes` drop their breakpoint keys until signalxjs/zero#225 lets the fragment probe accept them. Declared through `"sigx-zero": { "fragment": "./dist/fragment.js", "requires": ">=0.5.0" }`, `version` is `FRAGMENT_VERSION` from `@sigx/zero/contract`. `build` runs `sigx zero:fragment --strict`, which checks the fragment (schema, merge into zero's manifest, recipes on declared parts only, the lynx probe, `componentExportName(scope)` on the root) and writes `dist/fragment.json` for `--extra-manifest`. A design system adopts it with `--extra-manifest @agentic/ui`, or `mergeManifests(zeroManifest, fragment)` + `recipes` in a build script. The exported `recipes` / `fragmentCss` pass through `withFallbacks` (`src/fragment/fallbacks.ts`): every bare `var()` of the kit vocabulary or an `--ag-*` token carries its value as a fallback, so the pack paints on a target (lynx) that defines none of them. agentic's own design system compiles the recipe files without it. There is no `sigx zero:extend` path: agentic owns its design system (#184).

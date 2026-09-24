@@ -2,7 +2,8 @@
  * Raw rules for the code surface that recipes cannot express (#563): the
  * class names the Monaco renderer hands Monaco for its decorations (Monaco
  * owns that DOM, so the design system cannot stamp scopes on it), and the
- * box the editor fills. Colours still come only from tokens.
+ * box the editor fills. Colours still come only from tokens; the phone
+ * layout is the recipes' `below-md` keys.
  */
 export const codeCss = `/* the Monaco renderer: the editor fills the surface; the plain grid stays underneath until Monaco is ready */
 [data-scope="ag-code"][data-engine="monaco"] { position: relative; padding: 0; overflow: hidden; min-block-size: 240px; }
@@ -20,14 +21,4 @@ export const codeCss = `/* the Monaco renderer: the editor fills the surface; th
 .ag-code-selected { box-shadow: inset 2px 0 0 var(--color-warning); }
 [data-scope="ag-code"][data-engine="monaco"][data-clickable] .monaco-editor .line-numbers { cursor: pointer; }
 
-/* below 768 px (docs/design/HANDOFF.md → "Responsive behaviour"): the session bar wraps — tabs, then who and
-   where, then the view's controls — and the widget under a line takes the width */
-@media (max-width: 767px) {
-    [data-scope="ag-session-bar"][data-part="root"] { flex-wrap: wrap; gap: 0 16px; padding: 0 16px; }
-    [data-scope="ag-session-bar"][data-part="tabs"] { gap: 16px; }
-    [data-scope="ag-session-bar"][data-part="divider"] { display: none; }
-    [data-scope="ag-session-bar"][data-part="context"] { flex-basis: 100%; padding-block-end: 8px; }
-    [data-scope="ag-session-bar"][data-part="controls"] { flex-basis: 100%; flex-wrap: wrap; margin-inline-start: 0; padding-block-end: 8px; }
-    [data-scope="ag-code"][data-part="widget"] { margin-inline: 8px; }
-}
 `;

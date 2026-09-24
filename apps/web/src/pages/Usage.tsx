@@ -77,17 +77,17 @@ export const UsageView = component<UsageViewProps>(({ props }) => {
                     const agent = row.agentId ? opsAgent(row.agentId) : undefined;
                     return (
                         <DataTable.Row data-usage-row={row.id} data-quality={row.quality}>
-                            <DataTable.Cell>
+                            <DataTable.Cell column={0}>
                                 <span data-agent-cell>
                                     {agent ? <AgentTile name={agent.name} hue={agent.hue} size={22} /> : null}
                                     <span data-ellipsis title={row.label}>{row.label}</span>
                                     <span data-usage-sub>{agent ? agent.runtime : row.sub}</span>
                                 </span>
                             </DataTable.Cell>
-                            <DataTable.Cell><code data-mono>{row.tasks}</code></DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
-                            <DataTable.Cell><code data-mono data-cost={row.quality}>{money(row.costUsd, row.quality)}</code></DataTable.Cell>
-                            <DataTable.Cell><StatusPill status={row.quality} hollow /></DataTable.Cell>
+                            <DataTable.Cell column={1}><code data-mono>{row.tasks}</code></DataTable.Cell>
+                            <DataTable.Cell column={2}><code data-mono data-dim={row.tokens === null ? '' : undefined}>{tokensText(row.tokens)}</code></DataTable.Cell>
+                            <DataTable.Cell column={3}><code data-mono data-cost={row.quality}>{money(row.costUsd, row.quality)}</code></DataTable.Cell>
+                            <DataTable.Cell column={4}><StatusPill status={row.quality} hollow /></DataTable.Cell>
                         </DataTable.Row>
                     );
                 })}

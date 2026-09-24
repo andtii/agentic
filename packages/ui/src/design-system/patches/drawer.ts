@@ -43,7 +43,7 @@ const patch: RecipePatch = {
                 },
                 [`${sidebar}[data-l-dock="inline"]`]: {
                     maxInlineSize: 'var(--ag-sidebar-w)',
-                    padding: 'var(--space-xl) 14px',
+                    padding: 'var(--space-xl) calc(var(--space-md) + var(--space-2xs))',
                     borderInlineEnd: 'var(--border) solid var(--ag-line)'
                 },
                 [`${sidebar}[data-l-dock="sheet"]`]: {

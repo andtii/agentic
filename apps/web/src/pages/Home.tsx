@@ -30,25 +30,25 @@ export const TaskRowCells = component<{ task: MockTaskRow }>(({ props }) => () =
     const agent = agentNamed(t.agentId);
     return (
         <>
-            <DataTable.Cell>
+            <DataTable.Cell column={0}>
                 <span data-cell-status>
                     <StatusPill status={t.status} />
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell>
+            <DataTable.Cell column={1}>
                 <span data-cell-objective>
                     <span data-cell-title title={t.objective}><Link to={`/tasks/${t.id}`}>{t.objective}</Link></span>
                     {t.wait ? <WaitReasonLine wait={t.wait} detail={t.waitDetail} /> : null}
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell>
+            <DataTable.Cell column={2}>
                 <span data-cell-agent>
                     <AgentTile name={agent.name} hue={agent.hue} size={22} />
                     <span>{agent.name}</span>
                 </span>
             </DataTable.Cell>
-            <DataTable.Cell><EnvironmentLine tone={t.status === 'queued' ? 'dim' : 'muted'} {...t.environment} /></DataTable.Cell>
-            <DataTable.Cell><span data-align="end"><Age at={t.createdAt} /></span></DataTable.Cell>
+            <DataTable.Cell column={3}><EnvironmentLine tone={t.status === 'queued' ? 'dim' : 'muted'} {...t.environment} /></DataTable.Cell>
+            <DataTable.Cell column={4}><Age at={t.createdAt} /></DataTable.Cell>
         </>
     );
 });

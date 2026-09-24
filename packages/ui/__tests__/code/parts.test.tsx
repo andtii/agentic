@@ -352,7 +352,7 @@ describe('the session files scopes in the design system', () => {
             const parts = new Set<string>(anatomy.partNames());
             for (const part of Object.keys(recipe!.parts)) expect(parts.has(part), `${anatomy.scope}.${part}`).toBe(true);
         }
-        expect(tokens.scopes?.['ag-status-tile']).toEqual(codeScopes['ag-status-tile']);
+        expect(tokens.scopes?.['ag-status-tile']).toEqual({ colors: [], sizes: [], ...codeScopes['ag-status-tile'] });
         const result = validateDesignSystem(designSystem, mergeManifests(zeroManifest, fragment));
         expect(result.errors).toEqual([]);
         expect(result.warnings).toEqual([]);

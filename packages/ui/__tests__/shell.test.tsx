@@ -2,6 +2,7 @@ import { render } from '@sigx/runtime-dom';
 import { renderToString } from '@sigx/server-renderer';
 import { AppShell, type NavGroup, type NavItem } from '../src/index';
 import { installThemes } from '../src/design-system';
+import { aiShellAnatomy } from '../src/shell/anatomy';
 
 // The shell asks the registered design system's `md` breakpoint, as the app does after `installThemes()`.
 beforeAll(() => installThemes());
@@ -25,7 +26,7 @@ function mount(el: Parameters<typeof render>[0]): HTMLElement {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const part = (name: string) => `[data-scope="ai-shell"][data-part="${name}"]`;
+const part = (name: string) => `[data-scope="${aiShellAnatomy.scope}"][data-part="${name}"]`;
 const panelSel = '[data-scope="drawer"][data-part="panel"]';
 const triggerSel = `${part('bar')} [data-scope="drawer"][data-part="trigger"]`;
 const linkSel = '[data-scope="nav-list"][data-part="link"]';

@@ -45,7 +45,15 @@ export function buttonNamed(root: ParentNode, label: string): HTMLButtonElement 
     return button;
 }
 
-/** The `<col>` widths a `DataTable` renders from its `cols` template. */
-export function colWidths(table: Element): string[] {
-    return [...table.querySelectorAll<HTMLElement>('colgroup > col')].map((c) => c.style.width || 'auto');
+/** The `<col>` widths a `DataTable` renders from its `cols` template (zero's `--table-column-width`; `auto` for an `fr` track). */
+export function colWidths(table: ParentNode): string[] {
+    return [...table.querySelectorAll<HTMLElement>('colgroup > col')].map((c) => c.style.getPropertyValue('--table-column-width') || 'auto');
+}
+
+/** A `DataTable` cell's value: its text without the column label zero prints inside it for the stacked layout. */
+export function cellText(cell: Element | null | undefined): string {
+    if (!cell) return '';
+    const copy = cell.cloneNode(true) as Element;
+    copy.querySelectorAll('[data-scope="table"][data-part="cell-label"]').forEach((label) => label.remove());
+    return text(copy);
 }

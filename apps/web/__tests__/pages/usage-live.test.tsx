@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { LedgerActor, ledgerKey, ledgerMonth, type LedgerRow } from '@agentic/platform';
 import { WS, mountLive, owner, startLive, until, type LiveHarness } from './live-harness';
-import { buttonNamed, text } from './helpers';
+import { buttonNamed, cellText, text } from './helpers';
 
 let h: LiveHarness;
 beforeEach(async () => {
@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 const rows = (dom: ParentNode) => [...dom.querySelectorAll<HTMLElement>('[data-usage-row]')];
-const cell = (row: Element, n: number) => text(row.querySelectorAll('td')[n]);
+const cell = (row: Element, n: number) => cellText(row.querySelectorAll('td')[n]);
 const stat = (dom: ParentNode, label: string) => dom.querySelector(`[data-stat][aria-label="${label}"]`)!;
 
 /** Three agents in one month: Atlas fully reported, Scout partly estimated, Forge never priced (a daemon runtime). */

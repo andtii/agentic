@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { mergeManifests, validateDesignSystem, type ZeroManifest } from '@sigx/zero-kit';
 import { AG_MODIFIERS, KINDS, TONES, designSystem, patches, tokens } from '../../src/design-system';
-import { fragment } from '../../src/fragment';
+import { fragment, scopes as packScopes } from '../../src/fragment';
 import { kitAnatomies, kitRecipes, kitScopes, NEEDS_KINDS } from '../../src/kit';
 
 const zeroManifest = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve('@sigx/zero/manifest.json')), 'utf8')) as ZeroManifest;
@@ -23,7 +23,9 @@ describe('the ag-* kit', () => {
             expect(kitRecipes.some((r) => r.component === scope), scope).toBe(true);
             // Layout-only scopes paint no tone and no modifier: they make no vocabulary claim (the validator refuses an empty one).
             if (!['ag-readiness', 'ag-secret', 'ag-map-field'].includes(scope)) expect(kitScopes[scope], scope).toBeDefined();
-            expect(tokens.scopes?.[scope], scope).toEqual(kitScopes[scope]);
+            // The design system claims the kit's vocabulary over the pack's declines (no colour, no size axis).
+            expect(tokens.scopes?.[scope], scope).toEqual({ ...packScopes[scope], ...kitScopes[scope] });
+            expect(tokens.scopes?.[scope], scope).toMatchObject({ colors: [], sizes: [] });
         }
     });
 
