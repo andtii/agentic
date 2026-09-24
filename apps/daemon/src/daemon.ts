@@ -1192,14 +1192,16 @@ export function createDaemon(options: DaemonOptions): Daemon {
     function heal(manifestUrl: string): Promise<void> {
         const harness = options.harnesses!;
         const run = harnessWork.then(async () => {
-            const stale = (runtime: string): boolean => {
+            // Not ready, or a store harness that is not the version this build pins.
+            const wanted = harness.store.selected().filter((runtime) => {
+                if (!drivers.has(runtime)) return false;
                 const s = harness.store.state(runtime);
+                if (s.status !== 'ready') return true;
                 const pin = harness.store.pinned(runtime);
-                return s.status === 'ready' && s.location.source === 'store' && pin !== undefined && s.location.version !== pin;
-            };
-            const wanted = harness.store.selected().filter((runtime) => drivers.has(runtime) && (harness.store.state(runtime).status !== 'ready' || stale(runtime)));
+                return s.location.source === 'store' && pin !== undefined && s.location.version !== pin;
+            });
             if (wanted.length === 0 || stopped) return;
-            logger.info('harness: installing the selected harnesses this machine lacks or runs an older version of', { runtimes: wanted, manifest: manifestUrl });
+            logger.info('harness: installing missing or outdated selected harnesses', { runtimes: wanted, manifest: manifestUrl });
             const fail = async (runtime: string, message: string) => {
                 logger.warn('harness: install failed; retried on the next start', { runtime, error: message });
                 await harness.store.setFailure(runtime, message).catch(() => undefined);
