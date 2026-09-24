@@ -75,6 +75,9 @@ describe('connectors model (#638)', () => {
         expect(mcpCredentialOf({ auth: { headers: { 'X-Api-Key': 'k.token' } } })).toEqual({ auth: 'header', header: 'X-Api-Key', secret: 'k.token' });
         expect(mcpCredentialOf({ secrets: ['old.token'] })).toEqual({ auth: 'bearer', secret: 'old.token' });
         expect(mcpCredentialOf({})).toEqual({ auth: 'none' });
+        // A stdio server binding a host and a token: sign in replaces the token, not the host.
+        expect(mcpCredentialOf({ auth: { env: { GH_HOST: 'gh.host', GH_TOKEN: 'gh.token' } } })).toEqual({ auth: 'bearer', secret: 'gh.token' });
+        expect(mcpCredentialOf({ auth: { env: { ONLY: 'only.value' } } })).toEqual({ auth: 'bearer', secret: 'only.value' });
         expect(mcpSignInDraft({ id: 'linear', url: 'https://mcp.linear.app', auth: { bearer: 'linear.token' } }, 'tok')).toEqual({ name: 'linear', url: 'https://mcp.linear.app', auth: 'bearer', header: '', secret: 'tok' });
     });
 });

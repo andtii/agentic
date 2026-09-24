@@ -158,13 +158,18 @@ export interface McpCredential {
     readonly header?: string;
 }
 
+const CREDENTIAL_NAME = /token|key|secret|password|pat\b/i;
+
 export function mcpCredentialOf(record: Pick<ConnectorRecord, 'auth' | 'secrets'>): McpCredential {
     if (record.auth?.bearer) return { auth: 'bearer', secret: record.auth.bearer };
     const [header, secret] = Object.entries(record.auth?.headers ?? {})[0] ?? [];
     if (header && secret) return { auth: 'header', header, secret };
-    // A stdio server reads it from its environment: one value, like a token.
-    const env = Object.values(record.auth?.env ?? {})[0];
-    if (env) return { auth: 'bearer', secret: env };
+    // A stdio server reads it from its environment, which may bind several
+    // secrets (a host and a token): sign in replaces the credential-looking
+    // one (TOKEN, KEY, SECRET, PASSWORD in its variable or secret name), else the first.
+    const envs = Object.entries(record.auth?.env ?? {});
+    const env = envs.find(([name, secret]) => CREDENTIAL_NAME.test(name) || CREDENTIAL_NAME.test(secret)) ?? envs[0];
+    if (env) return { auth: 'bearer', secret: env[1] };
     // A record from before #240: its first secret is the bearer token.
     const first = record.secrets?.[0];
     return first ? { auth: 'bearer', secret: first } : { auth: 'none' };

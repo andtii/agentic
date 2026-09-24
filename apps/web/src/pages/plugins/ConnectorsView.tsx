@@ -211,7 +211,7 @@ export const RemoveConnectorDialog = component<RemoveConnectorDialogProps>(({ pr
         <ConfirmDialog
             model={props.model}
             title={`Remove ${props.name}?`}
-            description="These still pick it. Removed, their new sessions go without its tools and say so. Its credential is deleted with it."
+            description="These still pick it. Removed, their new sessions go without its tools and say so. Any credential only it uses is deleted with it."
             {...(names.length ? { dependents: names, dependentsLabel: `Depends on it · ${dependentCount(props.dependents)}` } : {})}
             confirmLabel={`Remove ${props.name} anyway`}
             cancelLabel="Keep it"
