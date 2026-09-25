@@ -887,3 +887,24 @@ This app is the dogfood consumer for `@sigx/zero`. Friction (a missing part, a s
 | Search (CHT-10) | substring per chat; full-text later |
 | `@sigx/actors` pre-1.0 churn | pin `^0.9.2`, accept minor churn |
 | `@sigx/cli` `actors` scaffold layer throws | scaffold `--target cloudflare`, add the DO class by hand |
+
+## 13. Target — desktop shell (#850)
+
+Target: this section is the contract for #844–#849, and lands with them; `apps/desktop`, the bridge and the release workflow named below do not exist until those issues merge. `apps/desktop` (`@agentic/desktop`) is a Tauri 2 app for Windows, macOS and Linux. It is a **thin shell around the deployed web app**, not a second client. Decision: `docs/decisions.md`, 2026-09-25 "desktop app on Tauri 2".
+
+- **The remote origin is loaded directly.** The main window navigates to the configured server URL (`APP_ORIGIN` of a deployment). The UI is never bundled or served from `tauri://localhost`. Everything is then same-origin as in a browser: the `__Host-session` cookie (`SameSite=Lax`), GitHub OAuth and its `/auth/callback`, the `Origin` checks on the file and connector routes, relative `/_sigx/actor` calls and the live sockets. The web app needs no change to run inside the shell, and the session persists in the app's webview profile.
+- **The server URL is configuration.** A first-run page asks for it, with a default from a build-time `AGENTIC_SERVER_URL`. It is stored in the app config and changed from the tray. No deployment is hard-coded.
+- **The shell's own page.** `apps/desktop/ui/` (`index.html`, `connect.js`) is a local page with no framework, for the first run and when the server can't be reached. It keeps "server unreachable" apart from "signed out" (OPS-04) and retries.
+- **The capability is scoped to one origin.** A Tauri capability grants IPC to the configured origin only (`remote.urls`), and exposes only these commands:
+  - `notify({title, body, url})`: a native notification. Clicking it focuses the window and navigates to `url`.
+  - `set_badge(count)`: the unread badge on the tray icon and the dock.
+  - `local_machine()`: `{workspaceId, machineId}` of a daemon paired on this computer, or `null`. It resolves the daemon config dir as `apps/daemon/src/paths.ts` does (`AGENTIC_DAEMON_HOME`, `%APPDATA%\agentic`, `~/Library/Application Support/agentic`, `$XDG_CONFIG_HOME/agentic`) and reads `credentials.json`. **The machine token never leaves Rust.**
+  - `get_server` / `set_server`.
+  - `open_external(url)`: opens the system browser. Links to other origins always go there.
+- **Plugins:** tray (show/hide, quit, autostart toggle), `single-instance` (a second launch or a deep link focuses the running window), `window-state`, `deep-link` (`agentic://<path>` maps to that relative path on the server, and anything else is rejected), `notification`, `updater` (a signed manifest on GitHub Releases under `desktop-latest` / `desktop-stable`, like the daemon channels), `autostart` (off by default), `global-shortcut` (the quick-ask window at `/quick`, off by default).
+- **Closing is hiding.** Closing the window hides it to the tray, so the page's live Inbox subscription keeps running. Only tray → Quit exits.
+- **Web side: the `DesktopHost` bridge** (`apps/web/src/desktop/bridge.ts`). It is an interface with `notify`, `setBadge`, `localMachine` and `openExternal`. The Tauri implementation calls through `window.__TAURI_INTERNALS__` and ships no `@tauri-apps/api` in the web bundle. Outside the app the host is `null`, and every caller treats that as "not desktop". The interface is the seam: a different host can replace Tauri later without touching the pages.
+- **Notifications in the app.** System webviews do not reliably support Web Push. So inside the app, new Inbox entries from the page's live subscription go to `notify` and the unread count goes to `setBadge`, instead of Web Push. The switches in §9 "Notification prefs" apply unchanged: `push: false` means no OS notification. There is no server-side change: the Inbox stays the one durable record.
+- **Machines stay per account.** Machines paired from the web or from the app are the same `Machine` actors and appear in the same list. The app adds only "This computer" (from `local_machine()`), plus a "Pair this computer" link to `/pair` and the one-line installer when there is none.
+- **The UI/compute split.** The shell is the UI. Local compute stays the Node daemon (§5b), installed, paired and supervised as today. A later option can launch and supervise the daemon as a Tauri sidecar; it is not part of v1.
+- **Releases.** `desktop-release.yml` runs on the daemon's OS matrix and produces MSI/NSIS, a universal DMG, AppImage and .deb. Each installer must stay under 15 MB, and each OS gets a smoke run (dev-login against the preview Worker, a chat streams, Monaco renders). A `tauri-driver` pass covers WebKitGTK on Linux.

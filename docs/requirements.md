@@ -66,7 +66,7 @@ A role does not determine an execution type. A developer can run through an API-
 
 - **USR-01 — Private workspaces:** The platform MUST isolate each user's agents, memories, credentials, chats, machines, and tasks from other users.
 - **USR-02 — Multiple devices:** Users MUST be able to access the same workspace from multiple devices.
-- **USR-03 — Web and mobile:** The product MUST support desktop and mobile use. Responsive web versus native mobile applications remains an open delivery decision.
+- **USR-03 — Web and mobile:** The product MUST support desktop and mobile use. Responsive web versus native mobile applications remains an open delivery decision. *(Desktop delivery decided 2026-09-25, #850: a Tauri 2 desktop app for Windows, macOS and Linux. The mobile choice stays as `decisions.md` open decision 8 has it: responsive web in v1, a native shell later.)*
 - **USR-04 — Machine pairing:** Machines MUST register securely to the appropriate workspace and be revocable.
 - **USR-05 — Initial audience:** Shared team workspaces and collaboration between different users are outside the proposed initial scope.
 
