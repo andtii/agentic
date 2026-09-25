@@ -3,7 +3,7 @@
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -36,6 +36,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     launcher.enable()
                 };
             }
+            crate::updater::MENU_ID => crate::updater::install(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -53,5 +54,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    app.manage(crate::updater::TrayMenu(menu));
     Ok(())
 }

@@ -1,8 +1,9 @@
 name: Desktop
 
 # The Tauri shell (apps/desktop, #844): format, lint and unit tests of the
-# Rust side. Only runs when the shell changes, so the rest of the repo never
-# needs a Rust toolchain. Installers and signing are desktop-release.yml (#848).
+# Rust side and the release scripts, then a WebDriver smoke run of the built
+# app in WebKitGTK (#848). Only runs when the shell changes, so the rest of
+# the repo never needs a Rust toolchain. Installers: desktop-release.yml.
 
 on:
   pull_request:
@@ -46,3 +47,49 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: node --test apps/desktop/scripts/*.test.mjs
+
+  # The app on a fresh profile in WebKitGTK, driven over WebDriver (tauri-driver has no macOS support;
+  # WebView2 on Windows is covered by the release smoke checklist in docs/runbook.md).
+  smoke:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux webview, tray and WebDriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev webkit2gtk-driver xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build the app
+        run: cargo build
+        working-directory: apps/desktop/src-tauri
+
+      # Pinned so a new tauri-driver never breaks the smoke on its own; bump on purpose.
+      - name: tauri-driver
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      - name: Smoke
+        run: |
+          xvfb-run -a bash -c '
+            tauri-driver --port 4444 &
+            node apps/desktop/scripts/smoke.mjs "$PWD/apps/desktop/src-tauri/target/debug/agentic-desktop"
+          '

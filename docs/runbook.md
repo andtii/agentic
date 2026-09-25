@@ -425,6 +425,60 @@ The default release is the daemon's own (`daemon-v<version>` for a stable build,
 
 `powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\agentic\daemon\uninstall.ps1"` / `sh ~/.agentic/daemon/uninstall.sh` removes the service, the supervisor and the `agentic-daemon` command, and keeps the data folders above (and `harnesses/`); delete them by hand. Revoke the machine on the platform (its page's **Revoke** card, or `Machine.revoke()`) so the token stops working — the next connect is refused and a revoked daemon redials forever at the backoff ceiling until re-paired.
 
+## 5a. Desktop app (Windows, macOS, Linux)
+
+The desktop app (`apps/desktop`, architecture §13) is a Tauri shell around a deployed server. It has no data of its own, so a new release changes only the shell.
+
+### 5a.1 Run it locally
+
+Install a Rust toolchain (`rustup`, stable). On Linux you also need `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`. Then run `pnpm --filter @agentic/desktop dev`. The first run asks for the server; `http://localhost:8787` reaches a local `pnpm dev`. Set `AGENTIC_SERVER_URL` to prefill it.
+
+### 5a.2 Cut a release
+
+1. Bump nothing: the version comes from the tag.
+2. Run `git tag desktop-v0.2.0 && git push origin desktop-v0.2.0`. You can also run the "Desktop release" workflow by hand with the `tag` input.
+3. `desktop-release.yml` builds these installers into the release `desktop-v0.2.0`:
+   - Windows x64: NSIS `.exe` and `.msi`
+   - macOS: a universal `.dmg`
+   - Linux x64 and arm64: `.AppImage`, `.deb` and `.rpm`
+4. Any installer over 15 MB fails the build.
+5. A semver with `-` (`desktop-v0.2.0-rc.1`) is a pre-release and never reaches the update channel.
+
+### 5a.3 Auto-update (one-time setup)
+
+Installed apps check `desktop-stable/latest.json` every 6 hours. When there is a new version, a tray item "Install update <version>…" appears; clicking it downloads, verifies, installs and restarts. This only works once the repo has an updater key. Builds without one have no updater at all.
+
+```sh
+pnpm --filter @agentic/desktop tauri signer generate -w ~/.tauri/agentic-desktop.key   # keep the private key safe; losing it strands installed apps
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/agentic-desktop.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD                                       # the password you chose (empty is allowed)
+gh variable set AGENTIC_UPDATER_PUBKEY < ~/.tauri/agentic-desktop.key.pub
+gh variable set AGENTIC_SERVER_URL --body https://<your origin>                         # optional: what a fresh install suggests
+```
+
+After that, every stable tag's `latest.json` is copied to the `desktop-stable` pre-release. To roll back, publish a new higher version; the updater never downgrades. If a release is bad, re-point the channel at the previous release's manifest: `gh release download desktop-v<good> --pattern latest.json` and `gh release upload desktop-stable latest.json --clobber`. Only apps not yet updated pick it up.
+
+### 5a.4 Code signing (not wired yet)
+
+The installers are unsigned. On first launch, macOS Gatekeeper asks you to confirm (right-click → Open), and Windows SmartScreen shows "More info → Run anyway". Signing needs:
+- **macOS:** an Apple Developer ID Application certificate, plus notarization. Secrets: `APPLE_CERTIFICATE` (base64 .p12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`, passed to the tauri-action step.
+- **Windows:** a code-signing certificate, through `bundle.windows.certificateThumbprint` or a `signCommand` (for example Azure Trusted Signing).
+
+Wire them in a follow-up once the certificates exist. Don't pass empty values: an empty `APPLE_CERTIFICATE` makes the bundler try to import it.
+
+### 5a.5 Release smoke
+
+- **CI:** `desktop.yml` drives the app in WebKitGTK over WebDriver (`scripts/smoke.mjs`). It checks the connect page shows, and that a plain-http remote server is refused.
+- **Manual, on each OS, before announcing a release:**
+  1. Install and launch.
+  2. Connect to the preview server (or production) and sign in with GitHub inside the window.
+  3. Open a chat and watch a reply stream.
+  4. Open a session's Changes tab and check Monaco renders.
+  5. Close the window and confirm it stays in the tray.
+  6. Relaunch and confirm it focuses the existing window.
+  7. Open an `agentic://machines` link.
+  8. Quit from the tray.
+
 ## 6. Demo 1 smoke (`smoke:demo1`, #35)
 
 Sign in, create an agent on the `anthropic-api` runtime, open a direct chat, post, watch the answer stream — as a Playwright spec (`apps/web/e2e/demo1.spec.ts`, config `playwright.demo1.config.ts`) against a deployed Worker. It signs in through the preview-only dev login, so the Worker needs `AGENTIC_DEV_LOGIN` set (§3); the Anthropic key comes from `ANTHROPIC_API_KEY` in the shell running the smoke, which stores it as the fresh workspace's `anthropic-api-key` (the Worker holds none, #231).
