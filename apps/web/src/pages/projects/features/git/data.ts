@@ -7,8 +7,16 @@ import { dataMode } from '../../../../data-mode';
 import { mockWorkTasks, usePulls } from '../../work/live';
 import { gitSummaryOf, type GitSummary } from './model';
 
-/** A getter for the project's git summary, recomputed on each read. */
-export function useGitSummary(projectId: string): () => GitSummary {
-    const pulls = usePulls(projectId);
-    return () => gitSummaryOf(pulls(), dataMode() === 'live' ? [] : mockWorkTasks(projectId));
+/**
+ * A getter for the project's git summary, recomputed on each read. Call it once in setup: `projectId` is read on
+ * each read, and the pulls reader is made again only when it changes — a component reused for another project
+ * follows it, and a render never makes a reader (it subscribes once pulls are live).
+ */
+export function useGitSummary(projectId: () => string): () => GitSummary {
+    let current: { readonly id: string; readonly pulls: ReturnType<typeof usePulls> } | undefined;
+    return () => {
+        const id = projectId();
+        if (current?.id !== id) current = { id, pulls: usePulls(id) };
+        return gitSummaryOf(current.pulls(), dataMode() === 'live' ? [] : mockWorkTasks(id));
+    };
 }
