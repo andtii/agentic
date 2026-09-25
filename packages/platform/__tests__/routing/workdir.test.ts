@@ -16,10 +16,11 @@ import { mockAgent } from '@sigx/ai-agent/testing';
 
 import { AgentActor, agentKey } from '../../src/agent/index';
 import { capturingAuditPort } from '../../src/audit/index';
-import { workspaceKey } from '../../src/auth/index';
+import { mintAgentPrincipal, workspaceKey } from '../../src/auth/index';
 import { defineMachineActor, machineKey, parseMachineKey, type MachineSocketPort } from '../../src/machine/index';
 import { PairingDirectory } from '../../src/pairing/index';
-import { createToolCallPort, defineRoutingActor, routingKey } from '../../src/routing/index';
+import { createActorToolPorts, createToolCallPort, defineRoutingActor, routingKey, type AgentPrincipal } from '../../src/routing/index';
+import { platformTools } from '@agentic/runtimes';
 import { defineSessionActor, type CommandSink, type SessionFactory } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { Workspace } from '../../src/workspace/index';
@@ -321,5 +322,38 @@ describe('working folder resolution (#190)', () => {
         expect(await statusOf(createTask('t1', a, { workdir: '/work/app' }))).toBe(400);
         expect(await statusOf(createTask('t2', a, { environmentId: E1, workdir: '  ' }))).toBe(400);
         expect((await createTask('t3', a, { environmentId: E1, workdir: ' /work/app ' })).workdir).toBe('/work/app');
+    });
+});
+
+describe('delegate names where the assignee can run (#599)', () => {
+    it('an unknown environmentId, and a workdir without one, are refused naming the environments (id, machine, roots) — before any child exists', async () => {
+        const m1 = await onlineMachine();
+        const lead = await agent('agent_lead', { runtime: 'anthropic-api' });
+        const member = await agent('agent_member', { runtime: 'in-memory' });
+        await createTask('p1', lead);
+        await task('p1').start('user:u1', 'session_p1' as SessionId);
+        const principal = mintAgentPrincipal({ workspaceId: WS, agentId: lead, sessionId: 'session_p1' as SessionId, taskId: 'p1' as TaskId }) as AgentPrincipal;
+        const ports = createActorToolPorts({ principal, routing: () => Routing, machines: () => Machine });
+        const call = { callId: 'c1', signal: new AbortController().signal };
+
+        const refused = await ports.task.delegate({ assignee: member, objective: 'go', context: [], constraints: {}, environmentId: 'env_guess' as EnvironmentId, workdir: '/work/app' }, call).catch((e: unknown) => e);
+        expect(refused).toMatchObject({ name: 'ToolCallError', code: 'invalid' });
+        const message = (refused as Error).message;
+        expect(message).toContain('no machine of this workspace reports environment env_guess');
+        expect(message).toContain(`env_1 on machine ${m1} (laptop) — roots /work, /scratch`);
+        expect(message).toContain(`env_2 on machine ${m1} (laptop) — roots /other`);
+        expect((await task('p1').get()).children).toEqual([]);
+
+        // The tool's own refusal of a folder without its environment names them too — the ids the retry needs.
+        const tool = platformTools(ports).find((t) => t.name === 'delegate')!;
+        const bare = await tool.run({ assignee: member, objective: 'go', workdir: '/work/app' }, { toolCallId: 'c2', signal: new AbortController().signal }).catch((e: unknown) => e);
+        expect((bare as Error).message).toContain('workdir needs environmentId');
+        expect((bare as Error).message).toContain(`env_1 on machine ${m1} (laptop) — roots /work, /scratch`);
+
+        // With the environment the refusal named, the child is created.
+        const pending = ports.task.delegate({ assignee: member, objective: 'go', context: [], constraints: {}, environmentId: E1, workdir: '/scratch/app' }, { callId: 'c3', signal: new AbortController().signal });
+        const outcome = await pending;
+        expect(outcome).toMatchObject({ status: 'completed' });
+        expect(await cwdOf(m1, outcome.taskId)).toEqual({ sent: '/scratch/app', record: '/scratch/app' });
     });
 });

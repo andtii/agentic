@@ -1,7 +1,7 @@
 /** The platform tools over fake ports: validation, what reaches the port, what the model gets back. */
 import { SchemaValidationError, type ToolContext } from '@sigx/ai';
-import type { NewMemoryEntry } from '@agentic/core';
-import { grantedPlatformTools, platformTools, PLATFORM_TOOL_NAMES, isPlatformToolName } from '../../src/index';
+import type { EnvironmentId, MachineId, NewMemoryEntry, TaskId } from '@agentic/core';
+import { type DelegateCall, type DelegateOutcome, type DelegateSpec, describeEnvironments, grantedPlatformTools, platformTools, PLATFORM_TOOL_NAMES, isPlatformToolName } from '../../src/index';
 import { fakePorts, memoryEntry } from '../anthropic/helpers';
 
 const ctx = (id = 'call_1', signal = new AbortController().signal): ToolContext => ({ toolCallId: id, signal });
@@ -90,6 +90,69 @@ describe('delegate', () => {
         expect(ports.calls[0]!.args).toEqual({ assignee: 'agent_bob', objective: 'Go.', context: [], constraints: {}, environmentId: 'env_1', workdir: 'C:/src/app' });
         await expect(tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.', workdir: 'C:/src/app' }, ctx())).rejects.toBeInstanceOf(SchemaValidationError);
         expect(ports.calls).toHaveLength(1);
+    });
+    it('a refused folder names the environments the assignee can run in, when the port knows them (#599)', async () => {
+        const base = fakePorts();
+        const ports = {
+            ...base,
+            task: {
+                ...base.task,
+                environments: async () => [
+                    { id: 'env_claude' as EnvironmentId, machineId: 'machine_mac' as MachineId, machineName: 'mac', cwdRoots: ['/Users/andii/dev'], online: true },
+                    { id: 'env_win' as EnvironmentId, machineId: 'machine_pc' as MachineId, cwdRoots: ['C:/Dev', 'D:/src'], online: false }
+                ]
+            }
+        };
+        const { tool } = byName(ports);
+        const refused = await tool('delegate')
+            .run({ assignee: 'agent_bob', objective: 'Go.', workdir: '/Users/andii/dev/app' }, ctx())
+            .catch((e: unknown) => e);
+        expect(refused).toBeInstanceOf(SchemaValidationError);
+        expect((refused as Error).message).toContain('workdir needs environmentId');
+        expect((refused as Error).message).toContain('env_claude on machine machine_mac (mac) — roots /Users/andii/dev');
+        expect((refused as Error).message).toContain('env_win on machine machine_pc, offline — roots C:/Dev, D:/src');
+        expect(base.calls).toEqual([]);
+    });
+    it('a child still running when the wait ends comes back `running` with its taskId and how to follow it; `follow` reaches the port (#599)', async () => {
+        const base = fakePorts();
+        const emitted: unknown[] = [];
+        const ports = {
+            ...base,
+            task: {
+                ...base.task,
+                delegate: async (spec: DelegateSpec, call: DelegateCall): Promise<DelegateOutcome> => {
+                    base.calls.push({ port: 'task', op: 'delegate', args: spec, call });
+                    call.onDelegated?.('task_p.call_1' as TaskId);
+                    return { taskId: 'task_p.call_1' as TaskId, status: 'running' };
+                }
+            }
+        };
+        const { tool } = byName(ports);
+        const withEmit = { ...ctx(), emit: (e: unknown) => emitted.push(e) } as ToolContext;
+        const out = (await tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.' }, withEmit)) as { taskId: string; status: string; note: string };
+        expect(out).toMatchObject({ taskId: 'task_p.call_1', status: 'running', artifacts: [], verified: false });
+        expect(out.note).toMatch(/SECOND child/);
+        expect(out.note).toMatch(/`follow`/);
+        // The card opens and stays open: no terminal update for a child still running.
+        expect(emitted).toEqual([expect.objectContaining({ type: 'agent-start', agentId: 'task_p.call_1' })]);
+        await tool('delegate').run({ assignee: 'agent_bob', objective: 'Go.', follow: 'task_p.call_1' }, ctx('call_2'));
+        expect(base.calls[1]!.args).toMatchObject({ assignee: 'agent_bob', follow: 'task_p.call_1' });
+    });
+    it('the environments a refusal names are bounded, under a daemon tool.result message (#599)', () => {
+        const many = Array.from({ length: 40 }, (_, i) => ({ id: `env_${i}` as EnvironmentId, machineId: `machine_${i}` as MachineId, cwdRoots: Array.from({ length: 30 }, (_, j) => `/very/long/root/path/number/${j}`), online: true }));
+        const text = describeEnvironments('agent_bob', many);
+        expect(text.length).toBeLessThan(2_500);
+        expect(text).toContain('env_0 on machine machine_0');
+        expect(text).toContain('and 26 more');
+        // Twelve of forty, four roots each, and the whole cut to its character budget.
+        expect(text).toContain('…');
+        expect(text).not.toContain('env_12 ');
+        expect(describeEnvironments('agent_bob', [])).toBe('No paired machine reports an environment agent agent_bob can run in.');
+    });
+    it('the description says a verbatim retry starts a second child and how to follow instead (#599)', () => {
+        const d = byName().tool('delegate').description;
+        expect(d).toMatch(/second child/);
+        expect(d).toMatch(/`follow`/);
     });
 });
 

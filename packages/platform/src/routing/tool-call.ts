@@ -31,7 +31,7 @@ import type { ConnectorStatus, RegistryGate } from '../registry/types.js';
 import type { SessionMemory } from '../task/driver.js';
 import { callPlatformConnector, connectorCredentials, ConnectorCredentialsError, platformConnectorTools, PlatformConnectorError, type ConnectorOpenContext, type ConnectorOpener } from './connectors.js';
 import { registryCode } from './factory.js';
-import { createActorToolPorts, type AgentPrincipal } from './tools.js';
+import { createActorToolPorts, DELEGATE_WAIT_MS, type AgentPrincipal } from './tools.js';
 
 /** The slice of the Session actor the port reads (`defineSessionActor`): the spec, and the running turn for its task (#390). */
 interface SessionSpecClient {
@@ -45,6 +45,8 @@ export interface ToolCallPortOptions {
     readonly routing: () => AnyActorDefinition;
     /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
     readonly askQuickWaitMs?: number;
+    /** How long a `delegate` waits for its child before it answers `running` with the child's id (#599); default `DELEGATE_WAIT_MS`. */
+    readonly delegateWaitMs?: number;
     /** The Session actor definition — where a session's chat is looked up for `chat_post` and `ask_user` (#285), and where `ask_user` raises its request (#122). */
     readonly sessions: () => AnyActorDefinition;
     /** Where chat attachment bytes live (#203) — the `files` port (`chat_file_read`); absent, the tool reports it unavailable. */
@@ -192,7 +194,9 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 ...(options.files ? { files: options.files } : {}),
                 ...(memory ? { memory } : {}),
                 ...(options.machines ? { machines: options.machines } : {}),
-                ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {})
+                ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {}),
+                // A daemon's engine gives up on a tool call after its own timeout, and the child's id with it (#599).
+                delegateWaitMs: options.delegateWaitMs ?? DELEGATE_WAIT_MS
             });
             const tool = platformTools(ports).find((t) => t.name === input.tool);
             if (!tool) throw new ToolCallError('unsupported', `no platform tool named "${input.tool}"`);

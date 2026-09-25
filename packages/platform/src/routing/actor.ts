@@ -2226,6 +2226,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     return;
                 }
                 const wait = t.status === 'waiting' ? t.wait : undefined;
+                // The turn ended with a child still running (#599: `delegate` answered `running`): the child goes on, on its
+                // own record, and nothing waits on it in this task any more — the task leaves `waiting` and completes.
+                if (wait?.kind === 'child') await tryTask(() => taskClient.resolveWaiting(ROUTER, `turn ${turnId} ended; ${wait.childTaskIds.join(', ')} run on`, sessionId));
                 if (wait && (wait.kind === 'input' || wait.kind === 'approval') && wait.sessionId === sessionId) {
                     // The turn ended with its question still open (#285: `ask_user` answered `pending`). In a chat the task keeps
                     // waiting for it (#396): the route parks `waiting-answer` — followed by nobody — and `deliverAnswer` prompts this
