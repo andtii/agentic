@@ -49,13 +49,17 @@ export const MOCK_WORK_ITEMS: Readonly<Record<string, readonly WorkItemDetail[]>
                     id: 12, title: 'Make the drawer collapse below 768 px', state: 'claimed',
                     assignee: { kind: 'agent', agentId: forge }, queueIndex: 0, assignedBy: { kind: 'agent', agentId: 'atlas' as AgentId },
                     claim: { agentId: forge, leaseUntil: minutesAgo(-16), taskId: 't1-1' as TaskId },
-                    after: [11], touches: ['packages/ui/src/shell/shell.css'], refs: [],
+                    after: [11], touches: ['packages/ui/src/shell/shell.css'],
+                    refs: [{ kind: 'item', n: 11 }, { kind: 'file', path: 'packages/ui/src/shell/shell.css', from: 38, to: 41 }, { kind: 'pr', n: 603 }],
                     doneWhen: [
                         { text: 'The drawer collapses under 768 px', checked: true },
                         { text: 'Focus stays trapped in the open drawer', checked: false },
                         { text: 'Lint approves the change', checked: false }
                     ],
-                    activity: [{ at: minutesAgo(14), actor: { kind: 'agent', agentId: forge }, text: 'claimed #12' }]
+                    activity: [
+                        { at: minutesAgo(40), actor: { kind: 'agent', agentId: 'atlas' as AgentId }, text: 'assigned #12 to Forge' },
+                        { at: minutesAgo(14), actor: { kind: 'agent', agentId: forge }, text: 'claimed #12' }
+                    ]
                 }
             }
         }

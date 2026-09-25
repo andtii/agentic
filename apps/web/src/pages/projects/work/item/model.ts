@@ -1,9 +1,9 @@
 /**
  * The work item page's view model (#739, PRJ-05): a work item without a pull request, with what it links to — the
  * task carrying it out, that task's chat and session, and, when the item comes from Plan, the plan item with its
- * done-when checklist. Pure: the mock fixtures and (later) live data render through the same helpers.
+ * done-when checklist, refs and activity (#890). Pure: the mock fixtures and (later) live data render through the same helpers.
  */
-import { WORK_STAGES_FALLBACK, type PlanDoneWhen, type PlanItem, type WorkItem, type WorkOwner, type WorkStageState } from '@agentic/core';
+import { WORK_STAGES_FALLBACK, type PlanActivity, type PlanActor, type PlanDoneWhen, type PlanItem, type Ref, type WorkItem, type WorkOwner, type WorkStageState } from '@agentic/core';
 
 /** The task a work item is carried out by, as the page links it. */
 export interface WorkItemTask {
@@ -82,4 +82,29 @@ export function ownerLabel(owner: WorkOwner, agentName: (id: string) => string):
 /** The checklist's progress, `2 of 3 done`, or `''` for an empty list. */
 export function doneWhenProgress(list: readonly PlanDoneWhen[]): string {
     return list.length ? `${list.filter((d) => d.checked).length} of ${list.length} done` : '';
+}
+
+/** Who wrote a History line: an agent by its name, a person as `You` (the workspace's one user), the platform itself as `Platform`. */
+export function actorLabel(actor: PlanActor, agentName: (id: string) => string): string {
+    if (actor.kind === 'agent') return agentName(actor.agentId);
+    return actor.userId === 'system' ? 'Platform' : 'You';
+}
+
+/** A plan item's History, newest first (the store keeps it oldest first; lines in the same ms keep that order, reversed). */
+export function activityOf(item: Pick<PlanItem, 'activity'>): PlanActivity[] {
+    return [...item.activity].reverse().sort((a, b) => b.at - a.at);
+}
+
+/**
+ * Where a ref chip on the page goes, if anywhere in the app: a plan item (`#9`) to its work item page, a pull request to
+ * the project's pull request page, a URL out. Other refs (files, commits, docs, members, chat messages, other projects'
+ * items) print only.
+ */
+export function refHref(ref: Ref, projectId: string): { readonly to: string; readonly external: boolean } | undefined {
+    switch (ref.kind) {
+        case 'item': return { to: `/projects/${projectId}/work/item:${ref.n}`, external: false };
+        case 'pr': return { to: `/projects/${projectId}/work/pr:${ref.n}`, external: false };
+        case 'url': return { to: ref.url, external: true };
+        default: return undefined;
+    }
 }
