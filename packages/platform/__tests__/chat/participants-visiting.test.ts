@@ -70,6 +70,7 @@ describe('who visits', () => {
         ]);
         expect(visitingManagers(projects, SX).map((v) => v.agentId)).toEqual([KEEL, QUILL]);
         expect(visitingManagers(projects, null)).toEqual([]);
+        expect(visitingManagers(projects, 'prj_removed' as ProjectId)).toEqual([]);
     });
 
     it('a manager that is also a member of the chat’s project is at home, not visiting', () => {

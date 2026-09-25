@@ -34,12 +34,14 @@ export function projectManagerOf(project: Pick<ProjectRecord, 'members' | 'pm'>)
 /**
  * Every manager that would visit a chat in `chatProjectId`: the managers of the other projects, minus the agents that
  * belong to the chat's project (a member there is at home, not visiting). A chat outside any project has no home to
- * visit, so no one visits it.
+ * visit, so no one visits it — nor one whose project was removed.
  */
 export function visitingManagers(projects: readonly VisitingProject[], chatProjectId: ProjectId | null | undefined): Visitor[] {
     if (!chatProjectId) return [];
     const home = projects.find((p) => p.id === chatProjectId);
-    const locals = new Set<string>(home ? [...home.members.agentIds, ...(home.members.coordinator ? [home.members.coordinator] : []), ...(home.pm?.agentId ? [home.pm.agentId] : [])] : []);
+    // A chat can keep the id of a project since removed: with no home, no one visits.
+    if (!home) return [];
+    const locals = new Set<string>([...home.members.agentIds, ...(home.members.coordinator ? [home.members.coordinator] : []), ...(home.pm?.agentId ? [home.pm.agentId] : [])]);
     const out: Visitor[] = [];
     for (const p of projects) {
         if (p.id === chatProjectId) continue;
