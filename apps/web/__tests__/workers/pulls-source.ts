@@ -1,10 +1,13 @@
 /**
  * The workers pool's pull request source (#742): scripted by the repo's name, so the test drives it without
  * reaching into the worker's module. `fake/merge-after-N`: PR #1 on head `chat/one` is open for the first N
- * reads of the repo's open list, merged after.
+ * reads of the repo's open list, merged after. Any other repo (`workerPullSources`) is read through the app's own
+ * credential lookup (#840, `projectPullToken` over the worker's Registry and Workspace) with an empty fake adapter.
  */
 import type { PullRequest } from '@agentic/core';
-import type { PullSourcePort } from '@agentic/platform';
+import { projectPullToken, tokenPullSources, type PullSourcePort } from '@agentic/platform';
+import { GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
+import type { AnyActorDefinition } from '@sigx/actors';
 
 const reads = new Map<string, number>();
 
@@ -42,3 +45,14 @@ export const fakePullSources: PullSourcePort = {
         }
     })
 };
+
+/** `fake/*` from the script above; any other repo needs the project's credential, then reads as an empty repo. */
+export function workerPullSources(actors: () => readonly AnyActorDefinition[]): PullSourcePort {
+    const byType = (type: string) => (): AnyActorDefinition => actors().find((d) => (d as { type?: string }).type === type)!;
+    const credentialed = tokenPullSources({
+        adapters: { github: () => ({ listOpen: async () => [], get: async () => undefined }) },
+        token: projectPullToken({ registry: byType('Registry'), workspace: byType('Workspace'), pluginId: GIT_FEATURE_ID, secret: GITHUB_TOKEN_SECRET }),
+        ttlMs: 0
+    });
+    return { open: (ref) => (ref.repo.startsWith('fake/') ? fakePullSources.open(ref) : credentialed.open(ref)) };
+}
