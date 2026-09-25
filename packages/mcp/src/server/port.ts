@@ -248,7 +248,8 @@ export interface PlatformPort {
     /** A project's plans (#751, the Plan actor under this client). Absent: this host has no Plan, and the surface declares no `plan_*` tool. */
     readonly plan?: import('./plan.js').PlanMcpPort;
 
-    // slot #759 requests port — replace this line
+    /** Requests between projects (#759, the Requests actor under this client). Absent: this host has no Requests actor, and the surface declares no request tool. */
+    readonly requests?: import('./requests.js').RequestsMcpPort;
 }
 
 /** The port for one authenticated client — the app binds it to the actors under this principal. */

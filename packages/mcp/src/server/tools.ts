@@ -47,7 +47,7 @@ import type { ExternalPrincipal, PlatformPort } from './port.js';
 
 import { PLAN_SCOPE, planMcpTools } from './plan.js';
 
-// slot #759 requests mcp tools import — replace this line
+import { REQUESTS_SCOPE, requestsMcpTools } from './requests.js';
 
 /** What the tool set needs besides the port. */
 export interface PlatformToolsOptions {
@@ -568,7 +568,8 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
         // ---- plan (#751) ----------------------------------------------------------------
         ...planMcpTools(port.plan, tool),
 
-        // slot #759 requests tool family — replace this line
+        // ---- requests (#759) ------------------------------------------------------------
+        ...requestsMcpTools(port.requests, tool),
     ];
 }
 
@@ -578,7 +579,7 @@ export function scopeOfTool(name: string): Scope | null {
 
     if (family === 'plan') return PLAN_SCOPE;
 
-    // slot #759 requests tool family scope — replace this line
+    if (family === 'requests') return REQUESTS_SCOPE;
 
     return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' || family === 'usage' || family === 'projects' ? family : null;
 }

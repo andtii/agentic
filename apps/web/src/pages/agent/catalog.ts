@@ -33,7 +33,7 @@ export interface AgentCatalog {
  * `PLATFORM_TOOL_NAMES` of `@agentic/runtimes` — the browser bundle does not
  * import the runtimes for six strings; `agent-live-model.test.ts` pins the two.
  */
-export const PLATFORM_TOOLS = ['memory_search', 'memory_remember', 'delegate', 'chat_post', 'chat_file_read', 'task_report', 'ask_user', 'usage_limits', 'projects', 'plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff'] as const;
+export const PLATFORM_TOOLS = ['memory_search', 'memory_remember', 'delegate', 'chat_post', 'chat_file_read', 'task_report', 'ask_user', 'usage_limits', 'projects', 'plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff', 'requests_list', 'requests_triage', 'requests_resolve', 'projects_request'] as const;
 
 const unique = (values: readonly string[]): FieldOption[] => [...new Set(values.filter(Boolean))].map((value) => ({ value }));
 
