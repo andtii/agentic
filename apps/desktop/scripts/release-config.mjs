@@ -20,7 +20,7 @@ export function releaseConfig(tag, env = {}) {
     const pubkey = (env.AGENTIC_UPDATER_PUBKEY ?? '').trim();
     const url = (env.AGENTIC_UPDATER_URL ?? '').trim();
     if (pubkey) {
-        if (!/^https:\/\//.test(url)) throw new Error('AGENTIC_UPDATER_URL must be an https URL when AGENTIC_UPDATER_PUBKEY is set');
+        if (!url.startsWith('https://')) throw new Error('AGENTIC_UPDATER_URL must be an https URL when AGENTIC_UPDATER_PUBKEY is set');
         config.bundle = { createUpdaterArtifacts: true };
         config.plugins = { updater: { pubkey, endpoints: [url] } };
     }
