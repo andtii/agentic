@@ -646,7 +646,7 @@ _not yet_
 
 #### #736 web: Settings › Features — slot marks, add-a-feature catalogue, detail panel
 
-_not yet_
+`pages/projects/settings/features/`: live, the catalogue is `Registry.projectFeatures()` joined with each manifest's `projectSettings` from `Registry.overview()` and the build's `projectFeatureCatalogue` (its presets while the Registry has none, #773, and whether it writes `instructions`, which fills the fifth slot mark); on mock data it is `mock/projects/features.ts`. `model.ts` is pure: the on-list in the project's order, the tiles (not on, search, category), `unmetNeeds` (a `folder` or `machine` need is unmet when the project has no folder: the tile shows `NEEDS A FOLDER` in place of `Add`), the slot lines of the detail panel, and the patches. Every change is one `ProjectPatch` with one feature key through `Workspace.upsertProject`: `{ [id]: {} }` to add, `{ [id]: settings }` to save the panel's `SchemaForm` (a `Start from` preset is laid over the draft with `applyProjectFeaturePreset`), `{ [id]: null }` for a switch off or `Remove from project`. A refusal is shown above the page and the switches go back to the record.
 
 #### #737 platform/runtimes: feature tools join sessions (ui.tools)
 

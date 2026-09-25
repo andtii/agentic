@@ -105,7 +105,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #735: —
 
-- #736: —
+- #736: `unmetNeeds` / `catalogueTiles` in `apps/web/src/pages/projects/settings/features/model.ts` are generic over `ProjectFeatureView` and could move to `@agentic/core` beside `ProjectFeatureUi` once a second surface (the New project dialog) needs them.
 
 - #737: `featureTools` / `withFeatureTools` (`packages/platform/src/routing/features.ts`) — a named tool-family registry joined to an agent's grants under its policy; generic enough for `@sigx/ai-agent` tool sets.
 
