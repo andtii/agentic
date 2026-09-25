@@ -68,6 +68,8 @@ export const NEW_AUTOPILOT_RUN: AutopilotRun = { attempts: 0, answered: [] };
 
 /** The approval rule every autopilot merge goes through: the merge tool always asks. */
 export const ASK_ON_MERGE: ApprovalRule = { id: 'ask-on-merge', match: { tools: ['pull_merge'] }, outcome: 'ask', scope: 'once' };
+/** The rule a person's own Squash and merge goes through (#892, `Pulls.merge`): their click is the approval. */
+export const PERSON_MERGE: ApprovalRule = { id: 'person-merge', match: { tools: ['pull_merge'] }, outcome: 'allow', scope: 'once' };
 /** After a turn ended, how long the PR has to show its effect (a push starts checks) before the autopilot moves on. */
 export const AUTOPILOT_SETTLE_MS = 5 * 60_000;
 /** A turn the chat never reported ended is given up on after this long. */
@@ -294,8 +296,12 @@ export interface AutopilotPort {
      * turn runs as, kept on the run's turn so its end ends the turn (#858).
      */
     startTurn(turn: { readonly agentId: AgentId; readonly chatId: ChatId; readonly taskId?: TaskId; readonly text: string; readonly pr: PullRequest }): Promise<void | { readonly taskId?: TaskId }>;
-    /** Merge through `rule` (the approval rule `ask on merge`): `merged`, or not with why. */
-    merge(request: { readonly agentId: AgentId; readonly rule: ApprovalRule; readonly pr: PullRequest }): Promise<{ readonly merged: boolean; readonly reason?: string }>;
+    /**
+     * Merge through `rule` (the approval rule `ask on merge`, or `PERSON_MERGE` for a person's own Squash and merge):
+     * `merged`, or not with why. `agentId` is the autopilot's agent; a person's merge (#892) has none and names them in
+     * `by` (`user:<id>`) instead.
+     */
+    merge(request: { readonly agentId?: AgentId; readonly by?: string; readonly rule: ApprovalRule; readonly pr: PullRequest }): Promise<{ readonly merged: boolean; readonly reason?: string }>;
     /** It stopped: the next move is yours (#747 notifies). */
     yourMove?(event: { readonly pr: PullRequest; readonly stop: AutopilotStop }): Promise<void>;
 }

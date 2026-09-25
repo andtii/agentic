@@ -14,7 +14,8 @@
  *
  * Autopilot (#820, PRJ-09): an open PR with switches keeps one `AutopilotRun`, driven after every good poll through
  * the app's `PullsAutopilotPort`; `setAutopilot`, `takeOver`, `stopAutopilot`, `resumeAutopilot`,
- * `autopilotTurnEnded` and `answerMerge` are the page's and the chat's hooks. The view carries each PR through
+ * `autopilotTurnEnded` and `answerMerge` are the page's and the chat's hooks; `merge` is a person's own Squash and merge
+ * (#892) through the same port, with or without an autopilot ask. The view carries each PR through
  * `withAutopilotRun`, so its `autopilot.attempt` and `activity` are the run's, and `runs` says where each run stands
  * (paused, asking to merge) for the page's Resume and Approve / Decline. A turn whose task the port named ends when
  * that task ends (#858): each poll reads the task — polling at the floor while such a turn runs — and ends the turn
@@ -30,6 +31,7 @@
 import { isTerminal, type AgentId, type ApprovalRule, type Autopilot, type ChatId, type PluginReadinessStatus, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
+import { principalLabel } from '../agent/index.js';
 import { auditPort, type AuditPort } from '../audit/port.js';
 import { sameWorkspace } from '../auth/index.js';
 import { TaskActor } from '../task/actor.js';
@@ -38,6 +40,7 @@ import { parsePullsKey, PULLS_TYPE } from './key.js';
 import type { PullSource, PullSourcePort } from './ports.js';
 import {
     ASK_ON_MERGE,
+    PERSON_MERGE,
     autopilotMergeAnswered,
     autopilotTurnEnded,
     driveAutopilot,
@@ -82,6 +85,8 @@ interface TrackedPull {
     autopilot?: AutopilotRun;
     /** A merge the autopilot asked you for, until `answerMerge` (or the PR stops being green). */
     mergeAsk?: { readonly agentId: AgentId; readonly at: number };
+    /** Who merged it through `merge` (#892, `user:<id>`): the `by` of its `pull.merged` record. */
+    mergedBy?: string;
 }
 
 export interface PullsState {
@@ -331,7 +336,7 @@ export function definePullsActor(options: PullsActorOptions) {
             key: `${ctx.key}:${pr.number}:${pr.state}`,
             kind,
             at,
-            by: PULLS_BY,
+            by: (pr.state === 'merged' && t.mergedBy) || PULLS_BY,
             summary: `pull request #${pr.number} ${pr.state === 'merged' ? 'merged' : 'closed without merging'}: ${pr.title}`,
             ...(pr.taskId !== undefined ? { taskId: pr.taskId } : {}),
             ...(pr.sessionId !== undefined ? { sessionId: pr.sessionId } : {}),
@@ -401,6 +406,8 @@ export function definePullsActor(options: PullsActorOptions) {
             startTurn: (turn) => port.startTurn(turn),
             merge: async (request) => {
                 if (request.rule.outcome === 'ask') {
+                    // The autopilot's merge always names its agent; an ask without one has no one to wait for.
+                    if (request.agentId === undefined) return { merged: false, reason: 'no agent asks for this merge' };
                     asked = { agentId: request.agentId, rule: request.rule };
                     return { merged: false };
                 }
@@ -702,6 +709,36 @@ export function definePullsActor(options: PullsActorOptions) {
                     }
                     t.autopilot = autopilotMergeAnswered(run, t.pr, answer.merged, now(), answer.reason).run;
                     return settle(answer.merged);
+                },
+
+                /**
+                 * A person's own Squash and merge (#892): the open PR merges through the app's port as the caller
+                 * (`PERSON_MERGE`, their click the approval) — with or without an autopilot ask, which it answers — and
+                 * is read at once so the view shows it merged; `pull.merged` records them as its `by`. Only a user
+                 * principal (403 otherwise); the port's refusal (or its absence) is a 409 and changes nothing.
+                 */
+                async merge(number: number): Promise<PullsView> {
+                    // A person's: an agent merges only through the autopilot's approval rule (`answerMerge`). Checked first,
+                    // so a refused caller learns nothing about which PRs are tracked.
+                    if ((ctx.principal as { kind?: string } | null | undefined)?.kind !== 'user') throw new ServerFnError(403, '[pulls] only a person merges a pull request here');
+                    const t = trackedOf(number);
+                    // No repo watched → nothing would read the merge back (no poll, no `pull.merged`).
+                    if (!ctx.state.repo) throw new ServerFnError(409, '[pulls] no repo is watched');
+                    if (t.pr.state !== 'open') throw new ServerFnError(409, `[pulls] #${number} is ${t.pr.state}, not open`);
+                    const port = portFor(ctx.state);
+                    if (!port) throw new ServerFnError(409, '[pulls] no merge is wired on this deployment');
+                    const by = principalLabel(ctx.principal);
+                    let answer: { merged: boolean; reason?: string };
+                    try {
+                        answer = await port.merge({ by, rule: PERSON_MERGE, pr: t.pr });
+                    } catch (error) {
+                        answer = { merged: false, reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) };
+                    }
+                    if (!answer.merged) throw new ServerFnError(409, `[pulls] #${number} was not merged${answer.reason ? `: ${answer.reason}` : ''}`);
+                    delete t.mergeAsk;
+                    t.mergedBy = by;
+                    ctx.state.intervalMs = POLL_FLOOR_MS;
+                    return settle();
                 },
 
                 /** Poll now. */

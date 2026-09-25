@@ -66,8 +66,8 @@ export const PullsFeed = component<{ feed: WorkspacePulls }>(({ props }) => {
 }, { name: 'PullsFeed' });
 
 /**
- * Home's pull requests live: the feed's PRs, each opening its PR page; "Squash and merge" answers the project's
- * Pulls actor (`answerMerge`) and rejects when the actor refuses; the PR leaves the list once its poll reads it merged.
+ * Home's pull requests live: the feed's PRs, each opening its PR page; "Squash and merge" merges through the
+ * project's Pulls actor (`merge`, the viewer's own merge — no autopilot ask needed, #892) and rejects when it refuses; the PR leaves the list once its poll reads it merged.
  */
 export function livePullNeeds(feed: WorkspacePulls, defs: Pick<ActorDefs, 'Pulls'>, workspaceId: () => string | null, me: () => string | null | undefined = () => undefined): PullNeeds {
     // Keyed by repo and number, not by object: the list hands the card a reactive view of the record.
@@ -88,7 +88,7 @@ export function livePullNeeds(feed: WorkspacePulls, defs: Pick<ActorDefs, 'Pulls
             const projectId = projectOf(pr);
             if (!ws || !projectId) throw new Error('the pull request is no longer in a project');
             // The actor polls after the merge; the card leaves once the live read shows it merged.
-            await actor(defs.Pulls, pullsKeyOf(ws, projectId)).answerMerge(pr.number, true);
+            await actor(defs.Pulls, pullsKeyOf(ws, projectId)).merge(pr.number);
         }
     };
 }
