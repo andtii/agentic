@@ -17,7 +17,11 @@ const patch: RecipePatch = {
             },
             states: { active: { background: 'transparent', boxShadow: 'none', color: 'var(--color-base-content)', borderBlockEndColor: 'var(--color-primary)' }, 'focus-visible': ring }
         }
-    }
+    },
+    // daisy's default `border` flavor draws its own active mark — a rounded
+    // ::before bar in currentColor — and rounds the tab. Dropped, or the active
+    // tab carries two underlines and ours curls at the ends (#700).
+    variants: { variant: { border: { tab: null } } }
 };
 
 export default patch;

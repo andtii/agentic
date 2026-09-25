@@ -150,4 +150,12 @@ describe('the agentic design system', () => {
         expect(badge.parts['root']!.base!['height']).toBe('var(--ag-pill-h)');
         expect(badge.parts['root']!.base!['fontFamily']).toBe('var(--font-mono)');
     });
+
+    it('marks the active tab once: our square underline, daisy\'s border-flavor bar and rounding dropped (#700)', () => {
+        const tabs = designSystem.recipes.find((r) => r.component === 'tabs')!;
+        expect(tabs.defaultVariants?.['variant']).toBe('border');
+        expect(tabs.parts['tab']!.base!['borderRadius']).toBe('0');
+        expect(tabs.parts['tab']!.states!['active']!['borderBlockEndColor']).toBe('var(--color-primary)');
+        expect(tabs.variants!['variant']!['border']).toEqual({});
+    });
 });
