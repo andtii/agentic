@@ -164,7 +164,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #762: —
 
-- #763: —
+- #763: `pmSummaryTrigger` (a `TriggerPort` that handles its own marked entries and hands the rest to `next`) in `packages/platform/src/requests/summary.ts` is a generic trigger-chaining pattern — candidate for `schedule/` next to `scheduleTrigger`.
 
 - #764: `projectHandle` / `resolveProject` (project name → handle for `project#n`) and the upstream-first `order` in `packages/platform/src/plan/links.ts` are generic — candidates for core next to `refs.ts`.
 
