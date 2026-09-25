@@ -89,7 +89,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #727: the nested nav look (indented sub-menu behind a rule, compact 32 px sub-items, a plain count beside the badge, a labelled or divided block, a switcher button heading the sub-menu) in `@agentic/ui`'s `shell.css` / `AppShell` — a zero `NavList` candidate with #725's `NavItem.children`.
 
-- #728: —
+- #728: `pickerMove` (`apps/web/src/pages/projects/layout/ProjectPicker.tsx`) — wrapping ArrowUp/Down/Home/End over a combobox's options; a candidate for a zero `Combobox`/listbox keyboard helper.
 
 - #729: `pages/projects/index/model.ts` pill / strip wording (`cardPills`, `unassignedText`) could move to `@agentic/ui` once Home or project Overview needs the same `N YOUR MOVE` / `N AGENTS ON IT` pills.
 

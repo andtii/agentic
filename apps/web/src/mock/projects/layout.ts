@@ -1,5 +1,10 @@
 /**
- * Mock data for the project layout: the picker's recent projects and the sub-menu counts (#722) — owned by #728, imported only by its own page; nothing shared re-exports it.
- * Empty until then (#725).
+ * Mock data for the project layout (#728): the sub-menu counts as the ProjectHome board draws them — Chats 5, Work
+ * with 3 that need you. Imported only by the layout's own files; nothing shared re-exports it. A project not listed
+ * here gets counts derived from the sample chats (`countsFromChats`).
  */
-export const MOCK_PROJECT_MENU_COUNTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {};
+import type { ProjectMenuCounts } from '../../pages/projects/layout/counts';
+
+export const MOCK_PROJECT_MENU_COUNTS: Readonly<Record<string, ProjectMenuCounts>> = {
+    p_agentic: { chats: 5, work: 7, needsYou: 3 }
+};
