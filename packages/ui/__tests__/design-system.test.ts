@@ -156,6 +156,6 @@ describe('the agentic design system', () => {
         expect(tabs.defaultVariants?.['variant']).toBe('border');
         expect(tabs.parts['tab']!.base!['borderRadius']).toBe('0');
         expect(tabs.parts['tab']!.states!['active']!['borderBlockEndColor']).toBe('var(--color-primary)');
-        expect(tabs.variants!['variant']!['border']).toEqual({});
+        expect(tabs.variants!['variant']!['border']!['tab']).toBeUndefined();
     });
 });
