@@ -7,9 +7,12 @@
  * - `pullsPlacement`: the router's `placed` hook — a task placed in a project with Git on watches the repo its
  *   `origin` names (`Pulls.watch`, once per repo), and a chat with a worktree of its own links its branch to the task
  *   (`Pulls.linkBranch`), so the PR the agent opens from it waits the task and completes it on merge.
+ * - `pullsAutopilot`: the actor's autopilot port (#820) — turns in the PR's chat and Inbox rows from the platform's
+ *   `chatAutopilotPort`, the merge from `githubPullMerger`: a squash through the git feature's `PullProvider.merge`
+ *   with the same token, only ever after the approval rule `ask on merge` was answered yes (`Pulls.answerMerge`).
  */
-import { asPrincipal, pullsKey, registryPullToken, tokenPullSources, userPrincipal, type PullLink, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
-import { configDefaults, enabledProjectFeatures } from '@agentic/core';
+import { asPrincipal, chatAutopilotPort, pullsKey, registryPullToken, tokenPullSources, userPrincipal, type AutopilotPort, type PullLink, type PullsAutopilotPort, type PullsRepo, type PullSourcePort, type PullsView, type ProjectPlacement } from '@agentic/platform';
+import { configDefaults, enabledProjectFeatures, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { chatWorktreeFor, gitProjectSettings, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET } from '@agentic/plugins-git';
 import { createGitHubPullProvider, pullRepoOfOrigin } from '@agentic/plugins-git/provider';
 import { actor, type AnyActorDefinition } from '@sigx/actors';
@@ -19,6 +22,44 @@ export function githubPullSources(registry: () => AnyActorDefinition, fetchImpl?
     return tokenPullSources({
         adapters: { github: (token) => createGitHubPullProvider({ token, ...(fetchImpl ? { fetch: fetchImpl } : {}) }) },
         token: registryPullToken({ registry, pluginId: GIT_FEATURE_ID, secret: GITHUB_TOKEN_SECRET })
+    });
+}
+
+/** Whose autopilot: the Pulls actor's workspace and project. */
+export interface AutopilotRef {
+    readonly workspaceId: WorkspaceId;
+    readonly projectId: ProjectId;
+}
+
+/**
+ * The autopilot's merge (#820): a squash of the PR through the GitHub adapter with the workspace's `github-token`.
+ * No adapter for the PR's provider, or no token → not merged, with why; the provider's own refusal (not mergeable,
+ * the head moved) comes back as its reason.
+ */
+export function githubPullMerger(registry: () => AnyActorDefinition, ref: AutopilotRef, fetchImpl?: typeof fetch): AutopilotPort['merge'] {
+    const token = registryPullToken({ registry, pluginId: GIT_FEATURE_ID, secret: GITHUB_TOKEN_SECRET });
+    return async ({ pr }) => {
+        if (pr.provider !== 'github') return { merged: false, reason: `no ${pr.provider} adapter merges pull requests` };
+        const secret = await token({ ...ref, provider: pr.provider, repo: pr.repo });
+        if (!secret) return { merged: false, reason: 'no GitHub token for the git feature' };
+        const provider = createGitHubPullProvider({ token: secret, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
+        const out = await provider.merge(pr.repo, pr.number, 'squash', { subject: `${pr.title} (#${pr.number})` });
+        return { merged: out.merged, ...(out.message ? { reason: out.message } : {}) };
+    };
+}
+
+export interface PullsAutopilotOptions {
+    readonly routing: () => AnyActorDefinition;
+    readonly inbox: () => AnyActorDefinition;
+    readonly registry: () => AnyActorDefinition;
+    readonly fetch?: typeof fetch;
+}
+
+/** The Pulls actor's `autopilot` option: the platform's chat-and-inbox port with the GitHub merge. */
+export function pullsAutopilot(options: PullsAutopilotOptions): (ref: AutopilotRef) => PullsAutopilotPort {
+    return (ref) => ({
+        ...chatAutopilotPort({ workspaceId: ref.workspaceId, routing: options.routing, inbox: options.inbox }),
+        merge: githubPullMerger(options.registry, ref, options.fetch)
     });
 }
 
