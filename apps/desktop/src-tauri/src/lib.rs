@@ -5,6 +5,7 @@
 mod deeplink;
 mod machine;
 mod notify;
+mod quick;
 mod server;
 mod tray;
 mod updater;
@@ -62,13 +63,9 @@ fn get_server(state: State<'_, Server>) -> ServerInfo {
 fn set_server(app: AppHandle, state: State<'_, Server>, url: String) -> Result<String, String> {
     let origin = server::normalize_server(&url)?;
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    server::save(
-        &dir,
-        &server::Settings {
-            server: Some(origin.clone()),
-        },
-    )
-    .map_err(|e| e.to_string())?;
+    let mut settings = server::load(&dir);
+    settings.server = Some(origin.clone());
+    server::save(&dir, &settings).map_err(|e| e.to_string())?;
     *state.origin.lock().unwrap() = Some(origin.clone());
     let granted = state.granted.lock().unwrap().clone();
     match granted {
@@ -80,13 +77,19 @@ fn set_server(app: AppHandle, state: State<'_, Server>, url: String) -> Result<S
 }
 
 /// The commands the server's pages may call (architecture §13).
-const REMOTE_PERMISSIONS: &[&str] = &["allow-notify", "allow-set-badge", "allow-local-machine"];
+const REMOTE_PERMISSIONS: &[&str] = &[
+    "allow-notify",
+    "allow-set-badge",
+    "allow-local-machine",
+    "allow-open-main",
+    "allow-hide-quick",
+];
 
 fn grant(app: &AppHandle, state: &Server, origin: &str) -> Result<(), String> {
     let mut capability = tauri::ipc::CapabilityBuilder::new("server")
         .remote(server::remote_pattern(origin))
         .local(false)
-        .window(MAIN);
+        .windows([MAIN, quick::QUICK]);
     for permission in REMOTE_PERMISSIONS {
         capability = capability.permission(*permission);
     }
@@ -133,11 +136,18 @@ fn open_external(app: &AppHandle, url: &Url) {
 
 static WINDOWS: AtomicUsize = AtomicUsize::new(0);
 
-fn build_window(
+/// What a window is: the main one, a page the server opened with `window.open`, or the quick-ask window (#849).
+pub enum WindowKind {
+    Main,
+    Popup(NewWindowFeatures),
+    Quick,
+}
+
+pub fn build_window(
     app: &AppHandle,
     label: &str,
     url: WebviewUrl,
-    features: Option<NewWindowFeatures>,
+    kind: WindowKind,
 ) -> tauri::Result<tauri::WebviewWindow> {
     let state = app.state::<Server>().inner().clone();
     let nav_app = app.clone();
@@ -163,7 +173,7 @@ fn build_window(
                 Navigation::Stay => {
                     let label = format!("page-{}", WINDOWS.fetch_add(1, Ordering::Relaxed));
                     let target = WebviewUrl::External("about:blank".parse().unwrap());
-                    match build_window(&new_app, &label, target, Some(features)) {
+                    match build_window(&new_app, &label, target, WindowKind::Popup(features)) {
                         Ok(window) => NewWindowResponse::Create { window },
                         Err(_) => NewWindowResponse::Deny,
                     }
@@ -175,9 +185,16 @@ fn build_window(
                 Navigation::Block => NewWindowResponse::Deny,
             },
         );
-    match features {
-        Some(features) => builder.window_features(features),
-        None => builder.inner_size(1280.0, 820.0).min_inner_size(400.0, 560.0),
+    match kind {
+        WindowKind::Popup(features) => builder.window_features(features),
+        WindowKind::Main => builder.inner_size(1280.0, 820.0).min_inner_size(400.0, 560.0),
+        WindowKind::Quick => builder
+            .inner_size(640.0, 300.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .center(),
     }
     .build()
 }
@@ -189,6 +206,15 @@ pub fn run() {
     if updates {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
+    builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    quick::toggle(app);
+                }
+            })
+            .build(),
+    );
     builder
         // First, so a second launch exits before it builds anything.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
@@ -205,18 +231,23 @@ pub fn run() {
             set_server,
             notify::notify,
             notify::set_badge,
-            machine::local_machine
+            machine::local_machine,
+            quick::open_main,
+            quick::hide_quick
         ])
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<Server>().inner().clone();
             let settings = server::load(&app.path().app_config_dir()?);
+            let quick_ask = settings.quick_ask.clone();
             if let Some(origin) = settings.server {
                 *state.origin.lock().unwrap() = Some(origin.clone());
                 grant(&handle, &state, &origin)?;
             }
-            build_window(&handle, MAIN, WebviewUrl::App("index.html".into()), None)?;
-            tray::build(&handle)?;
+            build_window(&handle, MAIN, WebviewUrl::App("index.html".into()), WindowKind::Main)?;
+            // The tray shows the hotkey as on only when it actually registered (another app may hold it).
+            let active = quick_ask.filter(|shortcut| quick::apply(&handle, Some(shortcut)));
+            tray::build(&handle, active.as_deref())?;
             updater::start(&handle);
             // `agentic://` links (#847): the one that started the app, then each one while it runs
             // (a second launch hands its link over through single-instance).
@@ -239,15 +270,18 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Closing the main window hides it: the page's live connection
-            // keeps running in the tray. Quit is in the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == MAIN {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            // keeps running in the tray. Quit is in the tray menu. The
+            // quick-ask window hides too, and whenever it loses the focus.
+            WindowEvent::CloseRequested { api, .. } if window.label() == MAIN || window.label() == quick::QUICK => {
+                api.prevent_close();
+                let _ = window.hide();
             }
+            WindowEvent::Focused(false) if window.label() == quick::QUICK => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .build(context)
         .expect("error while building the Agentic desktop app")

@@ -98,6 +98,9 @@ pub fn remote_pattern(origin: &str) -> String {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
     pub server: Option<String>,
+    /// The quick-ask hotkey (#849) as an accelerator (`CommandOrControl+Shift+Space`); `None` is off.
+    #[serde(default, rename = "quickAsk", skip_serializing_if = "Option::is_none")]
+    pub quick_ask: Option<String>,
 }
 
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -111,6 +114,7 @@ pub fn load(dir: &Path) -> Settings {
         .unwrap_or_default();
     Settings {
         server: settings.server.and_then(|s| normalize_server(&s).ok()),
+        quick_ask: settings.quick_ask.filter(|a| !a.trim().is_empty()),
     }
 }
 
@@ -242,10 +246,12 @@ mod tests {
             &dir,
             &Settings {
                 server: Some("https://a.example".into()),
+                quick_ask: Some("Alt+Space".into()),
             },
         )
         .unwrap();
         assert_eq!(load(&dir).server.as_deref(), Some("https://a.example"));
+        assert_eq!(load(&dir).quick_ask.as_deref(), Some("Alt+Space"));
         std::fs::write(dir.join(SETTINGS_FILE), r#"{"server":"http://evil.example"}"#).unwrap();
         assert!(load(&dir).server.is_none());
         std::fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();

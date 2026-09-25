@@ -6,7 +6,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
-pub fn build(app: &AppHandle) -> tauri::Result<()> {
+pub fn build(app: &AppHandle, quick_ask: Option<&str>) -> tauri::Result<()> {
     let autostart = app.autolaunch().is_enabled().unwrap_or(false);
     let menu = Menu::with_items(
         app,
@@ -16,6 +16,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &MenuItem::with_id(app, "server", "Change server…", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &CheckMenuItem::with_id(app, "autostart", "Launch at login", true, autostart, None::<&str>)?,
+            &CheckMenuItem::with_id(
+                app,
+                "quick",
+                quick_label(quick_ask),
+                true,
+                quick_ask.is_some(),
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "Quit Agentic", true, None::<&str>)?,
         ],
@@ -37,6 +45,17 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 };
             }
             crate::updater::MENU_ID => crate::updater::install(app),
+            "quick" => {
+                let menu = app.state::<crate::updater::TrayMenu>();
+                let item = menu.0.get("quick").and_then(|i| i.as_check_menuitem().cloned());
+                // The click already flipped the check; what it shows now is what was asked for.
+                let on = item.as_ref().and_then(|i| i.is_checked().ok()).unwrap_or(false);
+                let shortcut = crate::quick::set_enabled(app, on);
+                if let Some(item) = item {
+                    let _ = item.set_checked(shortcut.is_some());
+                    let _ = item.set_text(quick_label(shortcut.as_deref()));
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -56,4 +75,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     tray.build(app)?;
     app.manage(crate::updater::TrayMenu(menu));
     Ok(())
+}
+
+/// "Quick ask ⌘⇧Space" when the hotkey is on; its default when off, so the switch says what it would turn on.
+fn quick_label(shortcut: Option<&str>) -> String {
+    let key = crate::quick::label(
+        shortcut.unwrap_or(crate::quick::DEFAULT_SHORTCUT),
+        cfg!(target_os = "macos"),
+    );
+    format!("Quick ask ({key})")
 }
