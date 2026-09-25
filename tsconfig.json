@@ -40,6 +40,9 @@
       "@agentic/plugins-git": [
         "./packages/plugins-git/src/index.ts"
       ],
+      "@agentic/plugins-plan": [
+        "./packages/plugins-plan/src/index.ts"
+      ],
       "@agentic/runtimes/claude-code": [
         "./packages/runtimes/src/claude-code/index.ts"
       ],

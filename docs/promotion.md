@@ -131,7 +131,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #748: —
 
-- #749: —
+- #749: — (scaffold only; nothing generic)
 
 - #750: —
 

@@ -24,6 +24,11 @@
     "limit": "5.5 KB"
   },
   {
+    "name": "@agentic/plugins-plan",
+    "path": "packages/plugins-plan/dist/index.js",
+    "limit": "1 KB"
+  },
+  {
     "name": "@agentic/connectors",
     "path": "packages/connectors/dist/index.prod.js",
     "limit": "3.75 KB",
