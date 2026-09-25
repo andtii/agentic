@@ -263,7 +263,7 @@ async function syncPmSummary(ctx: ActorContext<WorkspaceState>, project: Project
         }
         const spec = pmSummarySchedule(project, ctx.state.settings.timeZone, summary);
         if (!existing) await schedule.create(spec);
-        else if (!existing.enabled || existing.title !== spec.title || JSON.stringify(existing.recurrence) !== JSON.stringify(spec.recurrence)) {
+        else if (!existing.enabled || existing.title !== spec.title || existing.prompt !== spec.prompt || existing.projectId !== project.id || JSON.stringify(existing.recurrence) !== JSON.stringify(spec.recurrence)) {
             await schedule.update({ title: spec.title, recurrence: spec.recurrence, prompt: spec.prompt, projectId: project.id, enabled: true });
         }
         // Indexed once it exists, so the Schedules list and the workspace export and delete reach it.
