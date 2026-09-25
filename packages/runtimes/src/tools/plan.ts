@@ -46,7 +46,8 @@ export interface PlanUpdateInput {
 
 export interface NewPlanItem {
     readonly title: string;
-    readonly after?: readonly number[];
+    /** Item numbers of this project, or `project#n` for an item in another project (#822). */
+    readonly after?: readonly (number | string)[];
     readonly touches?: readonly string[];
     readonly doneWhen?: readonly string[];
 }
@@ -270,7 +271,10 @@ export const planAddInput = z.object({
         .array(
             z.object({
                 title: z.string().min(1),
-                after: z.array(z.number().int().min(1)).optional(),
+                after: z
+                    .array(z.union([z.number().int().min(1), z.string().min(1).max(300)]))
+                    .optional()
+                    .describe('What must be done first: item numbers of this project (`9` or `#9`), or `project#n` for an item in another project — it stays blocked until that item is done.'),
                 touches: z.array(z.string().min(1)).optional(),
                 doneWhen: z.array(z.string().min(1)).optional()
             })

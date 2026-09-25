@@ -16,13 +16,31 @@
  * Every change is a line in the item's activity and a `plan.changed` / `plan.lease-expired` audit record with
  * its actor. Workers eviction rule: every mutation ends in `ctx.save()` inside the turn.
  */
-import { memberLimit, type AgentId, type Plan, type PlanActor, type PlanItem, type Principal, type ProjectId, type ProjectRecord, type Ref, type WorkspaceId } from '@agentic/core';
-import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { memberLimit, type AgentId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type Principal, type ProjectId, type ProjectRecord, type Ref, type WorkspaceId } from '@agentic/core';
+import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
 import { sameWorkspace, workspaceKey } from '../auth/index.js';
 import { Workspace } from '../workspace/index.js';
-import { parsePlanKey, PLAN_TYPE } from './key.js';
+import { parsePlanKey, planKey, PLAN_TYPE } from './key.js';
+import {
+    crossAfterOf,
+    crossRefsByProject,
+    linkedClaimRefusal,
+    linkedItemView,
+    linkedPlanView,
+    linkProjectInfo,
+    linkSource,
+    lookupOf,
+    parseAfter,
+    setAfter,
+    setCrossAfter,
+    type CrossAfter,
+    type ItemLookup,
+    type LinkedItemInput,
+    type LinkItemInput,
+    type LinkProjectInfo
+} from './links.js';
 import {
     addItems,
     addPhase,
@@ -34,7 +52,6 @@ import {
     emptyBook,
     expireLeases,
     handoff,
-    itemView,
     nextFor,
     nextLeaseEnd,
     openItems,
@@ -45,6 +62,8 @@ import {
     splitItem,
     takeNotices,
     update,
+    viewState,
+    AFTER_MAX,
     type ClaimOptions,
     type OpenPlanItem,
     type Outcome,
@@ -55,6 +74,7 @@ import {
     type PlanItemInput,
     type PlanItemPatch,
     type PlanNotice,
+    type StoredItem,
     type TouchesWarning
 } from './rules.js';
 
@@ -81,9 +101,22 @@ export const workspacePlanProjects: PlanProjectPort = {
     }
 };
 
+/**
+ * Where the actor reads what cross-project `after` needs (#822): the workspace's projects (to resolve `project#n`)
+ * and the states of other projects' items (to block on them). Both default to the real thing — the Workspace record
+ * and a hop to the other project's Plan actor.
+ */
+export interface PlanLinksPort {
+    projects?(ctx: ActorContext<PlanState>, workspaceId: WorkspaceId): Promise<readonly LinkProjectInfo[]>;
+    /** The view states of items `ns` of project `projectId`, by number; a missing number is unknown. */
+    states?(ctx: ActorContext<PlanState>, workspaceId: WorkspaceId, projectId: ProjectId, ns: readonly number[]): Promise<Readonly<Record<string, PlanItemState>>>;
+}
+
 export interface PlanActorOptions {
     /** Default: the Workspace record (`workspacePlanProjects`). */
     readonly projects?: PlanProjectPort;
+    /** Cross-project `after` (#822). Default: the Workspace's projects and the other projects' Plan actors. */
+    readonly links?: PlanLinksPort;
     /** Clock; default `Date.now`. */
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
@@ -93,6 +126,9 @@ export interface PlanActorOptions {
     /** Where `plan.*` records go. Default: the workspace's Audit log. */
     readonly audit?: AuditPort;
 }
+
+/** The most item numbers one `itemStates` call reads. */
+export const ITEM_STATES_MAX = 2000;
 
 /** The reminder the lease expiry runs under. */
 export const PLAN_LEASE_REMINDER = 'lease';
@@ -104,6 +140,9 @@ export interface PlanClaimResult {
     readonly item: PlanItem;
     readonly warnings: readonly TouchesWarning[];
 }
+
+/** Every item as the link graph reads it (`workspaceLinks`), from `linkItems`. */
+export type PlanLinkItems = LinkItemInput[];
 
 export interface PlanListView {
     readonly projectId: ProjectId;
@@ -128,6 +167,14 @@ export function definePlanActor(options: PlanActorOptions = {}) {
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? sameWorkspace;
 
     type Ctx = ActorContext<PlanState>;
+
+    /** This definition, for the hop to another project's Plan actor; set once `defineActor` returns. */
+    let self: AnyActorDefinition | undefined;
+    type StatesClient = { itemStates(ns: readonly number[]): Promise<Record<string, PlanItemState>> };
+    const linkProjects = async (ctx: Ctx, workspaceId: WorkspaceId): Promise<readonly LinkProjectInfo[]> =>
+        options.links?.projects ? options.links.projects(ctx, workspaceId) : (await ctx.actor(Workspace, workspaceKey(workspaceId)).projects()).map(linkProjectInfo);
+    const linkStates = async (ctx: Ctx, workspaceId: WorkspaceId, projectId: ProjectId, ns: readonly number[]): Promise<Readonly<Record<string, PlanItemState>>> =>
+        options.links?.states ? options.links.states(ctx, workspaceId, projectId, ns) : (ctx.actor(self!, planKey(workspaceId, projectId)) as unknown as StatesClient).itemStates(ns);
 
     const record = async (ctx: Ctx, changes: readonly PlanChange[], at: number): Promise<void> => {
         const s = ctx.state;
@@ -175,9 +222,11 @@ export function definePlanActor(options: PlanActorOptions = {}) {
         throw error;
     };
 
-    return defineActor({
+    const definition = defineActor({
         type: PLAN_TYPE,
         authorize,
+        // The cross-project reads never wait behind a turn: a Plan actor mid-claim reads another that may be reading it.
+        methodReentrancy: { itemStates: 'always', linkItems: 'always' },
         ...(options.allowAnonymous ? { allowAnonymous: true as const } : {}),
         state: (key): PlanState => {
             // A malformed key is refused by the methods, not here: a throwing factory is an opaque activation failure.
@@ -242,6 +291,38 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 }
             };
 
+            /**
+             * What the items wait on in other projects, read from those projects' Plan actors — before the rule runs, as
+             * the rules are pure. A project that cannot be read leaves its items unknown (not done).
+             */
+            const lookupFor = async (items: Iterable<StoredItem | undefined>): Promise<ItemLookup> => {
+                const byProject = crossRefsByProject([...items].filter((i): i is StoredItem => !!i));
+                if (!byProject.size) return () => undefined;
+                const ws = ctx.state.workspaceId;
+                const states = new Map<ProjectId, Readonly<Record<string, PlanItemState>>>();
+                await Promise.all(
+                    [...byProject].map(async ([projectId, ns]) => {
+                        // In batches `itemStates` takes; a batch that cannot be read leaves its items unknown.
+                        const batches: number[][] = [];
+                        for (let i = 0; i < ns.length; i += ITEM_STATES_MAX) batches.push(ns.slice(i, i + ITEM_STATES_MAX));
+                        const read = await Promise.all(batches.map((batch) => linkStates(ctx, ws, projectId, batch).catch(() => ({}))));
+                        states.set(projectId, Object.assign({}, ...read));
+                    })
+                );
+                return lookupOf(states);
+            };
+            const allItems = () => Object.values(ctx.state.items);
+            /** The workspace's projects, when the call names another project's item (else none are read). */
+            const projectsFor = async (needed: boolean): Promise<readonly LinkProjectInfo[]> => (needed ? linkProjects(ctx, ctx.state.workspaceId).catch(() => []) : []);
+            const mentionsProject = (values: unknown): boolean => Array.isArray(values) && values.some((v) => typeof v !== 'number');
+            /** Stored items as views, their cross-project waits applied. */
+            const viewsOf = async (items: readonly StoredItem[]): Promise<PlanItem[]> => {
+                const lookup = await lookupFor(items);
+                const at = now();
+                return items.map((i) => linkedItemView(ctx.state, i, at, lookup));
+            };
+            const viewOf = async (item: StoredItem): Promise<PlanItem> => (await viewsOf([item]))[0]!;
+
             return {
                 /** A new plan, optionally with its phases and items. Project manager and people. */
                 async create(input: PlanCreateInput): Promise<Plan> {
@@ -252,66 +333,101 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 },
 
                 async addPhase(planId: string, title: string): Promise<Plan> {
+                    const lookup = await lookupFor(allItems());
                     return write((b, c) => {
                         const out = addPhase(b, c, planId, title);
-                        return { value: planView(b, planOf(b, planId), c.now), changes: out.changes };
+                        return { value: linkedPlanView(b, planOf(b, planId), c.now, lookup), changes: out.changes };
                     });
                 },
 
-                /** Add items to a plan's phase. Project manager and people. */
-                async add(planId: string, phase: number, items: readonly PlanItemInput[]): Promise<PlanItem[]> {
-                    return write((b, c) => {
-                        const out = addItems(b, c, planId, phase, items);
-                        return { value: out.value.map((i) => itemView(b, i, c.now)), changes: out.changes };
+                /** Add items to a plan's phase; `after` may name other projects' items (`project#n`). Project manager and people. */
+                async add(planId: string, phase: number, items: readonly LinkedItemInput[]): Promise<PlanItem[]> {
+                    const projectList = await projectsFor(Array.isArray(items) && items.some((i) => mentionsProject(i?.after)));
+                    const stored = await write((b, c) => {
+                        const { inputs, cross } = splitAfter(b, items, projectList);
+                        const out = addItems(b, c, planId, phase, inputs);
+                        const changes = [...out.changes];
+                        out.value.forEach((item, k) => {
+                            if (cross[k]!.length) changes.push(...setCrossAfter(b, c, item.id, cross[k]!, projectList).changes);
+                        });
+                        return { value: out.value, changes };
                     });
+                    return viewsOf(stored);
                 },
 
-                /** Split an item into parts in its place. Project manager and people. */
-                async split(itemId: number, parts: readonly PlanItemInput[]): Promise<PlanItem[]> {
-                    return write((b, c) => {
-                        const out = splitItem(b, c, itemId, parts);
-                        return { value: out.value.map((i) => itemView(b, i, c.now)), changes: out.changes };
+                /**
+                 * Split an item into parts in its place; `after` may name other projects' items. Each part also waits on
+                 * what the original waited on in other projects. Project manager and people.
+                 */
+                async split(itemId: number, parts: readonly LinkedItemInput[]): Promise<PlanItem[]> {
+                    const projectList = await projectsFor(Array.isArray(parts) && parts.some((i) => mentionsProject(i?.after)));
+                    const stored = await write((b, c) => {
+                        const original = b.items[String(itemId)];
+                        const inherited = original ? crossAfterOf(original) : [];
+                        const { inputs, cross } = splitAfter(b, parts, projectList);
+                        const joined = cross.map((own) => dedupe([...inherited, ...own]));
+                        // Checked before anything changes: a refusal after the split would leave half of it saved.
+                        inputs.forEach((input, k) => {
+                            if (new Set([...(original?.after ?? []), ...(input.after ?? [])]).size + joined[k]!.length > AFTER_MAX) throw new PlanRuleError('invalid', `after holds at most ${AFTER_MAX}`);
+                        });
+                        const out = splitItem(b, c, itemId, inputs);
+                        const changes = [...out.changes];
+                        // An inherited wait names a project `parseAfter` did not resolve this call: known by its id.
+                        const known = [...projectList, ...inherited.filter((a) => !projectList.some((p) => p.id === a.projectId)).map((a): LinkProjectInfo => ({ id: a.projectId, name: a.projectId }))];
+                        out.value.forEach((item, k) => {
+                            if (joined[k]!.length) changes.push(...setCrossAfter(b, c, item.id, joined[k]!, known).changes);
+                        });
+                        return { value: out.value, changes };
                     });
+                    return viewsOf(stored);
+                },
+
+                /**
+                 * Replace everything an item waits on: numbers or `#n` for this project's items, `project#n` for another
+                 * project's (#822; PRJ-17). Project manager and people.
+                 */
+                async after(itemId: number, values: readonly (number | string | Ref)[]): Promise<PlanItem> {
+                    const projectList = await projectsFor(mentionsProject(values));
+                    const item = await write((b, c) => setAfter(b, c, itemId, parseAfter(values, b.projectId, projectList), projectList));
+                    return viewOf(item);
                 },
 
                 /** Put an item in a queue at `index` (or move it within one), or `null` back to the open pool. Project manager and people. */
                 async assign(itemId: number, to: PlanActor | null, index?: number): Promise<PlanItem> {
-                    return write((b, c) => {
-                        const out = assign(b, c, itemId, to, index);
-                        return { value: itemView(b, out.value, c.now), changes: out.changes };
-                    });
+                    return viewOf(await write((b, c) => assign(b, c, itemId, to, index)));
                 },
 
                 /** The calling agent starts an item under a lease. Refused if blocked, taken, someone else's, or over its limit. */
                 async claim(itemId: number, claimOptions?: ClaimOptions): Promise<PlanClaimResult> {
-                    return write((b, c) => {
-                        const out = claim(b, c, itemId, claimOptions ?? {});
-                        return { value: { item: itemView(b, out.value.item, c.now), warnings: out.value.warnings }, changes: out.changes };
+                    // Refused too while an item in another project it waits on is unfinished (#822).
+                    const target = Number.isSafeInteger(itemId) ? ctx.state.items[String(itemId)] : undefined;
+                    const lookup = await lookupFor([target]);
+                    const projectList = await projectsFor(!!target && crossAfterOf(target).length > 0);
+                    const out = await write((b, c) => {
+                        const item = b.items[String(itemId)];
+                        if (item && c.actor?.kind === 'agent') {
+                            const refusal = linkedClaimRefusal(b, c, c.actor.agentId, item, lookup, projectList);
+                            // Only the cross-project wait is refused here; every other refusal is `claim`'s own.
+                            if (refusal?.code === 'blocked') throw refusal;
+                        }
+                        return claim(b, c, itemId, claimOptions ?? {});
                     });
+                    return { item: await viewOf(out.item), warnings: out.warnings };
                 },
 
                 /** Tick done-when lines, add a note, change the state; `done` is a person's. */
                 async update(itemId: number, patch: PlanItemPatch): Promise<PlanItem> {
-                    return write((b, c) => {
-                        const out = update(b, c, itemId, patch);
-                        return { value: itemView(b, out.value, c.now), changes: out.changes };
-                    });
+                    return viewOf(await write((b, c) => update(b, c, itemId, patch)));
                 },
 
                 /** Attach a ref (object or its text form). */
                 async ref(itemId: number, ref: Ref | string): Promise<PlanItem> {
-                    return write((b, c) => {
-                        const out = addRef(b, c, itemId, ref);
-                        return { value: itemView(b, out.value, c.now), changes: out.changes };
-                    });
+                    return viewOf(await write((b, c) => addRef(b, c, itemId, ref)));
                 },
 
                 /** Release an item with a note: to the top of `to`'s queue, or `null` to the open pool. */
                 async handoff(itemId: number, to: PlanActor | null, note: string): Promise<PlanItem> {
-                    return write((b, c) => {
-                        const out = handoff(b, c, itemId, to === null ? null : checkActor(to), note);
-                        return { value: itemView(b, out.value, c.now), changes: out.changes };
-                    });
+                    return viewOf(await write((b, c) => handoff(b, c, itemId, to === null ? null : checkActor(to), note)));
                 },
 
                 /** Renew the calling agent's leases (any plan call does too). Returns how many it holds. */
@@ -321,11 +437,13 @@ export function definePlanActor(options: PlanActorOptions = {}) {
 
                 /** Every plan of the project, phases and items in order. */
                 async list(): Promise<PlanListView> {
-                    return read((b, c) => ({ projectId: b.projectId, plans: Object.values(b.plans).map((p) => planView(b, p, c.now)) }));
+                    const lookup = await lookupFor(allItems());
+                    return read((b, c) => ({ projectId: b.projectId, plans: Object.values(b.plans).map((p) => linkedPlanView(b, p, c.now, lookup)) }));
                 },
 
                 async get(planId: string): Promise<Plan> {
-                    return read((b, c) => planView(b, planOf(b, planId), c.now));
+                    const lookup = await lookupFor(allItems());
+                    return read((b, c) => linkedPlanView(b, planOf(b, planId), c.now, lookup));
                 },
 
                 /**
@@ -333,17 +451,41 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                  * claimable and clear of other agents' touches — or `null`.
                  */
                 async next(agentId?: AgentId): Promise<PlanItem | null> {
+                    const lookup = await lookupFor(allItems());
                     return read((b, c) => {
                         const id = agentId ?? (c.actor?.kind === 'agent' ? c.actor.agentId : undefined);
                         if (id === undefined || typeof id !== 'string') throw new PlanRuleError('invalid', 'name the agent to find the next item for');
-                        const item = nextFor(b, c, id);
-                        return item ? itemView(b, item, c.now) : null;
+                        const item = nextFor(b, c, id, (i) => linkedClaimRefusal(b, c, id, i, lookup));
+                        return item ? linkedItemView(b, item, c.now, lookup) : null;
                     });
                 },
 
                 /** Every item not done, with its plan and phase — the Work view's plan rows (K1). */
                 async openItems(): Promise<OpenPlanItem[]> {
-                    return read((b, c) => openItems(b, c.now));
+                    const lookup = await lookupFor(allItems());
+                    return read((b, c) => openItems(b, c.now).map((o) => ({ ...o, item: linkedItemView(b, b.items[String(o.item.id)]!, c.now, lookup) })));
+                },
+
+                /**
+                 * The view states of items `ns` (their own `after` applied, not their cross-project waits) — how another
+                 * project's Plan actor reads whether what it waits on is done (#822). Pure read: no lease is touched.
+                 */
+                async itemStates(ns: readonly number[]): Promise<Record<string, PlanItemState>> {
+                    requireKey();
+                    if (!Array.isArray(ns) || ns.length > ITEM_STATES_MAX) throw new ServerFnError(400, '[plan] itemStates takes a list of item numbers');
+                    const at = now();
+                    const out: Record<string, PlanItemState> = {};
+                    for (const n of ns) {
+                        const item = Number.isSafeInteger(n) ? ctx.state.items[String(n)] : undefined;
+                        if (item) out[String(n)] = viewState(ctx.state, item, at);
+                    }
+                    return out;
+                },
+
+                /** Every item as the workspace's link graph reads it (`workspaceLinks`). Pure read: no lease is touched. */
+                async linkItems(): Promise<PlanLinkItems> {
+                    requireKey();
+                    return [...linkSource(ctx.state, { id: ctx.state.projectId, name: ctx.state.projectId }, now()).items];
                 },
 
                 /** Take the caller's notices (lease ran out, touches overlap, handoffs), oldest first. */
@@ -364,7 +506,29 @@ export function definePlanActor(options: PlanActorOptions = {}) {
             await commit(ctx, changes, call.now);
         }
     });
+    self = definition as unknown as AnyActorDefinition;
+    return definition;
 }
+
+/** Split each item's `after` into this project's numbers (for the rules) and other projects' items. */
+function splitAfter(book: PlanBook, items: readonly LinkedItemInput[], projects: readonly LinkProjectInfo[]): { inputs: PlanItemInput[]; cross: CrossAfter[][] } {
+    if (!Array.isArray(items)) throw new PlanRuleError('invalid', 'items must be a list');
+    const inputs: PlanItemInput[] = [];
+    const cross: CrossAfter[][] = [];
+    for (const item of items) {
+        if (!item || typeof item !== 'object' || item.after === undefined) {
+            inputs.push(item as PlanItemInput);
+            cross.push([]);
+            continue;
+        }
+        const parsed = parseAfter(item.after, book.projectId, projects);
+        inputs.push({ ...item, after: parsed.local });
+        cross.push(parsed.cross);
+    }
+    return { inputs, cross };
+}
+
+const dedupe = (refs: readonly CrossAfter[]): CrossAfter[] => [...new Map(refs.map((a) => [`${a.projectId}#${a.n}`, a])).values()];
 
 /** The Plan actor's definition type (core's `PlanActor` is who acts on a plan). */
 export type PlanStoreActor = ReturnType<typeof definePlanActor>;

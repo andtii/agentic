@@ -4,6 +4,8 @@
  * - `key.ts`: `planKey(ws, projectId)` → `{ws}:plan:{projectId}`.
  * - `rules.ts`: the pure rules every method runs through (table-tested).
  * - `actor.ts`: `definePlanActor()` — the store, the lease alarm, notices and History.
+ * - `links.ts`: cross-project `after` (`project#n`), blocked following the other project's item, and the workspace's
+ *   link graph (`workspaceLinks` over each project's `linkItems`) (#764, #822).
  * - `port.ts`: the actor as the `plan_*` tools' `PlanPort` (#816), and the pieces the MCP surface shares.
  */
 export * from './key.js';
@@ -11,6 +13,7 @@ export * from './key.js';
 export * as planRules from './rules.js';
 export { PlanRuleError, LEASE_MAX_MS as PLAN_LEASE_MAX_MS, LEASE_MIN_MS as PLAN_LEASE_MIN_MS } from './rules.js';
 export type { ClaimOptions as PlanClaimOptions, OpenPlanItem, PlanCreateInput, PlanErrorCode, PlanItemInput, PlanItemPatch, PlanNotice, PlanOp, TouchesWarning as PlanTouchesWarning } from './rules.js';
+export * from './links.js';
 export * from './actor.js';
 export type { PlanChangedData } from '../audit/events.js';
 export * from './port.js';

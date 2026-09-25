@@ -11,7 +11,8 @@
  */
 import { formatRef, memberLimit, type AgentId, type FileRef, type Plan, type PlanActor, type PlanItem, type ProjectRecord, type Ref, type TaskId } from '@agentic/core';
 import { PlanRefusal, type NewPlanItem, type PlanAddInput, type PlanBoard, type PlanMember, type PlanPort, type PlanUpdateInput, type ToolCall } from '@agentic/runtimes';
-import type { ClaimOptions, PlanItemInput, PlanItemPatch, PlanNotice } from './rules.js';
+import type { LinkedItemInput } from './links.js';
+import type { ClaimOptions, PlanItemPatch, PlanNotice } from './rules.js';
 
 /** The Plan actor methods the port calls; a client of `definePlanActor()` satisfies it. */
 export interface PlanActorClient {
@@ -21,8 +22,8 @@ export interface PlanActorClient {
     assign(itemId: number, to: PlanActor | null, index?: number): Promise<PlanItem>;
     update(itemId: number, patch: PlanItemPatch): Promise<PlanItem>;
     ref(itemId: number, ref: Ref | string): Promise<PlanItem>;
-    add(planId: string, phase: number, items: readonly PlanItemInput[]): Promise<readonly PlanItem[]>;
-    split(itemId: number, parts: readonly PlanItemInput[]): Promise<readonly PlanItem[]>;
+    add(planId: string, phase: number, items: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
+    split(itemId: number, parts: readonly LinkedItemInput[]): Promise<readonly PlanItem[]>;
     handoff(itemId: number, to: PlanActor | null, note: string): Promise<PlanItem>;
     takeNotices(): Promise<readonly PlanNotice[]>;
 }
@@ -94,7 +95,8 @@ export function planPatch(input: Omit<PlanUpdateInput, 'item'>): PlanItemPatch {
     };
 }
 
-const itemInput = (i: NewPlanItem): PlanItemInput => ({
+/** `after` may hold `project#n` (#822): the actor resolves it. */
+const itemInput = (i: NewPlanItem): LinkedItemInput => ({
     title: i.title,
     ...(i.after ? { after: i.after } : {}),
     ...(i.touches ? { touches: i.touches } : {}),
