@@ -92,9 +92,10 @@ const actorOf = (column: BoardColumnKey, you: PlanActor): PlanActor | undefined 
 
 /**
  * The plan after dropping item `id` at `slot`: it joins that column's queue at the slot's position (the slot counts
- * the queue as it is shown, the dragged card included), and both queues are renumbered from 0. Taken off the agent
- * working it, it loses its claim and a claimed or stuck item is ready again (one that needs a person still does);
- * a `note` goes into its history as the handoff. Whether it is worked is judged at `by.at`.
+ * the queue as it is shown, the dragged card included), and both queues are renumbered from 0. Moved to another
+ * column, it loses any claim on it — live, or a lease that ran out — and a claimed or stuck item is ready again (one
+ * that needs a person still does); a `note` goes into its history as the handoff. Whether an item is worked, for the
+ * queues, is judged at `by.at`.
  */
 export function moveItem(items: readonly PlanItem[], id: number, slot: BoardSlot, by: { readonly you: PlanActor; readonly at: number; readonly note?: string }): PlanItem[] {
     const item = items.find((i) => i.id === id);
@@ -104,14 +105,14 @@ export function moveItem(items: readonly PlanItem[], id: number, slot: BoardSlot
     const target = queueOf(slot.column);
     const before = target.slice(0, Math.max(0, Math.min(slot.index, target.length))).filter((i) => i.id !== id);
     const after = target.slice(Math.max(0, Math.min(slot.index, target.length))).filter((i) => i.id !== id);
-    const handoff = needsHandoff(item, slot, by.at);
+    const leaves = from !== slot.column && item.claim !== undefined;
     const assignee = actorOf(slot.column, by.you);
     const { assignee: _a, assignedBy: _b, queueIndex: _q, claim: _c, ...rest } = item;
     const moved: PlanItem = {
         ...rest,
         ...(assignee ? { assignee, assignedBy: by.you } : {}),
-        ...(handoff ? {} : item.claim ? { claim: item.claim } : {}),
-        state: handoff && (item.state === 'claimed' || item.state === 'stuck') ? 'ready' : item.state,
+        ...(!leaves && item.claim ? { claim: item.claim } : {}),
+        state: leaves && (item.state === 'claimed' || item.state === 'stuck') ? 'ready' : item.state,
         activity: by.note?.trim() ? [...item.activity, { at: by.at, actor: by.you, text: `Handoff: ${by.note.trim()}` }] : item.activity
     };
     const order = new Map<number, number>();

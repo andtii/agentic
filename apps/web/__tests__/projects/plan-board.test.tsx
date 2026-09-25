@@ -99,8 +99,15 @@ describe('the Plan board rules (#755)', () => {
         const next = moveItem(items, 4, { column: 'agent:scout', index: 0 }, { you: YOU, at: expired });
         const moved = next.find((i) => i.id === 4)!;
         expect(columnOf(moved)).toBe('agent:scout');
+        expect(moved.claim).toBeUndefined();
+        expect(moved.state).toBe('ready');
         expect(moved.activity).toEqual([]);
         expect(ids(boardColumns(next, members, expired)[3]!.queue)).toEqual([4, 7]);
+        // A note written while the lease was live and sent after it ran out still hands off consistently.
+        const late = moveItem(items, 4, { column: 'agent:scout', index: 0 }, { you: YOU, at: expired, note: 'see branch' }).find((i) => i.id === 4)!;
+        expect(late.claim).toBeUndefined();
+        expect(late.state).toBe('ready');
+        expect(late.activity).toEqual([{ at: expired, actor: YOU, text: 'Handoff: see branch' }]);
         expect(cardMeta(four, items, expired, () => '')).toEqual([]);
     });
 
