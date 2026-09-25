@@ -25,8 +25,19 @@ export function installers(dir) {
     return out;
 }
 
+/**
+ * Formats that cannot meet the shell's budget by design, with their own ceiling. An AppImage carries
+ * WebKitGTK and its libraries itself (~80 MB); the .deb and .rpm use the system's and stay small.
+ */
+export const FORMAT_BUDGET_MB = { AppImage: 100 };
+
+export function budgetOf(path, maxMb) {
+    const ext = /\.([^.]+)$/.exec(path)?.[1] ?? '';
+    return FORMAT_BUDGET_MB[ext] ?? maxMb;
+}
+
 export function overBudget(files, maxMb) {
-    return files.filter((f) => f.bytes > maxMb * 1024 * 1024);
+    return files.filter((f) => f.bytes > budgetOf(f.path, maxMb) * 1024 * 1024);
 }
 
 if (process.argv[1]?.endsWith('check-size.mjs')) {
@@ -39,7 +50,7 @@ if (process.argv[1]?.endsWith('check-size.mjs')) {
     for (const f of files) console.log(`${(f.bytes / 1024 / 1024).toFixed(1).padStart(6)} MB  ${f.path}`);
     const over = overBudget(files, Number(max));
     if (over.length) {
-        console.error(`over the ${max} MB budget: ${over.map((f) => f.path).join(', ')}`);
+        console.error(`over budget (${max} MB; AppImage ${FORMAT_BUDGET_MB.AppImage} MB): ${over.map((f) => f.path).join(', ')}`);
         process.exit(1);
     }
 }

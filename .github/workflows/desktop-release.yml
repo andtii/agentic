@@ -7,7 +7,8 @@ name: Desktop release
 #   builds every target with tauri-action and creates the release
 #   `desktop-v<semver>`: NSIS + MSI (Windows x64), a universal DMG (macOS arm64
 #   + x64), AppImage + .deb (Linux x64 and arm64). Every installer must stay
-#   under 15 MB (scripts/check-size.mjs);
+#   under 15 MB, except an AppImage (100 MB: it carries WebKitGTK itself;
+#   scripts/check-size.mjs);
 # - with the repo variable AGENTIC_UPDATER_PUBKEY and the secret
 #   TAURI_SIGNING_PRIVATE_KEY set, the build carries the updater
 #   (scripts/release-config.mjs) and the release a signed `latest.json`; unless
@@ -64,7 +65,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev xdg-utils
 
       - uses: dtolnay/rust-toolchain@stable
         with:
