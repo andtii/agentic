@@ -204,6 +204,9 @@ importers:
       '@agentic/plugins-git':
         specifier: workspace:*
         version: link:../../packages/plugins-git
+      '@agentic/plugins-plan':
+        specifier: workspace:*
+        version: link:../../packages/plugins-plan
       '@agentic/runtimes':
         specifier: workspace:*
         version: link:../../packages/runtimes

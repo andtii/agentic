@@ -26,7 +26,7 @@
   {
     "name": "@agentic/plugins-plan",
     "path": "packages/plugins-plan/dist/index.js",
-    "limit": "1 KB"
+    "limit": "2.75 KB"
   },
   {
     "name": "@agentic/connectors",

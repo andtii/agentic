@@ -8,9 +8,9 @@
  */
 import type { ProjectFeaturePlugin } from '@agentic/core';
 import { GIT_FEATURE_ID, gitFeaturePlugin } from '@agentic/plugins-git';
+import { PLAN_FEATURE_ID, planFeaturePlugin } from '@agentic/plugins-plan';
 
 export const projectFeatureCatalogue: Readonly<Record<string, ProjectFeaturePlugin>> = {
     [GIT_FEATURE_ID]: gitFeaturePlugin,
-
-    // slot #753 plan project feature — replace this line
+    [PLAN_FEATURE_ID]: planFeaturePlugin
 };
