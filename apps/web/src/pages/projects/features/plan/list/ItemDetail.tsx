@@ -20,7 +20,11 @@ export type ItemDetailProps =
     & Define.Prop<'now', number, true>
     /** Open another item (a `#n` chip). */
     & Define.Prop<'onPick', (n: number) => void, true>
-    & Define.Prop<'onClose', () => void, true>;
+    & Define.Prop<'onClose', () => void, true>
+    /** Tick a done-when line (live, #926). Absent, the checklist is read-only. */
+    & Define.Prop<'onTick', (index: number, checked: boolean) => void>
+    /** Send a comment (live, #926); resolves whether it went. Absent, Send is disabled. */
+    & Define.Prop<'onComment', (text: string) => Promise<boolean>>;
 
 export const STATE_TAGS: Readonly<Record<PlanItem['state'], { readonly label: string; readonly tone: Tone }>> = {
     ready: { label: 'READY', tone: 'muted' },
@@ -42,7 +46,16 @@ const ItemChip = (n: number, items: readonly PlanItem[], onPick: (n: number) => 
 };
 
 export const ItemDetail = component<ItemDetailProps>(({ props }) => {
-    const st = signal({ pin: '' as string, draft: '' });
+    const st = signal({ pin: '' as string, draft: '', sending: false });
+    const send = async (e: Event): Promise<void> => {
+        e.preventDefault();
+        const text = st.draft.trim();
+        if (!text || st.sending || !props.onComment) return;
+        st.sending = true;
+        const sent = await props.onComment(text);
+        st.sending = false;
+        if (sent) st.draft = '';
+    };
     const follow = useFollow();
     const NavChip = (href: string, kind: string, body: JSXElement) => <a href={href} onClick={follow(href)} data-plan-chip={kind}>{body}</a>;
     const togglePin = (key: string): void => { st.pin = st.pin === key ? '' : key; };
@@ -185,9 +198,15 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         <section data-plan-detail-section="done-when" aria-label="Done when">
                             <h4>Done when</h4>
                             <ul data-plan-done-when="">
-                                {item.doneWhen.map((d) => (
+                                {item.doneWhen.map((d, index) => (
                                     <li data-checked={d.checked ? 'true' : 'false'}>
-                                        <input type="checkbox" checked={d.checked} disabled aria-label={d.text} />
+                                        <input
+                                            type="checkbox"
+                                            checked={d.checked}
+                                            disabled={!props.onTick}
+                                            aria-label={d.text}
+                                            onChange={(e: Event) => props.onTick?.(index, (e.target as HTMLInputElement).checked)}
+                                        />
                                         <span>{d.text}</span>
                                     </li>
                                 ))}
@@ -213,7 +232,7 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         : <p data-dim="">Nothing yet.</p>}
                 </section>
 
-                <form data-plan-comment="" onSubmit={(e: Event) => e.preventDefault()}>
+                <form data-plan-comment="" onSubmit={(e: Event) => void send(e)}>
                     <input
                         type="text"
                         aria-label={`Comment on #${item.id}`}
@@ -221,7 +240,9 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                         value={st.draft}
                         onInput={(e: Event) => { st.draft = (e.target as HTMLInputElement).value; }}
                     />
-                    <button type="submit" aria-label="Send comment" disabled title="Comments arrive with the Plan store"><Icon name="send" size={14} /></button>
+                    {props.onComment
+                        ? <button type="submit" aria-label="Send comment" disabled={st.sending || !st.draft.trim()}><Icon name="send" size={14} /></button>
+                        : <button type="submit" aria-label="Send comment" disabled title="Comments need the Plan store"><Icon name="send" size={14} /></button>}
                     {hints.length
                         ? (
                             <ul data-plan-comment-refs="" aria-label="Refs in your comment">

@@ -3,7 +3,8 @@
  * lanes, `after` as arrows, each node its state glyph — and the plan switcher by the title (the project's plans, then
  * New plan). The layout is `planGraphLayout` (./layout.ts). Undrawn in the boards: HANDOFF.md "Plan" gives the glyphs.
  *
- * Mock data draws `MOCK_GRAPH_PLANS`; live, the project has no plan store yet, so the view says so.
+ * Mock data draws `MOCK_GRAPH_PLANS`; live (#926), the project's Plan actor — New plan is its `create`, and a refusal
+ * shows as the note under the switcher.
  */
 import { component, signal, type Define, type JSXElement } from 'sigx';
 import { Popover } from '@sigx/zero';
@@ -11,6 +12,7 @@ import type { Plan } from '@agentic/core';
 import { Icon, ItemGlyph } from '@agentic/ui';
 import { dataMode } from '../../../../../data-mode';
 import type { ProjectPageProps } from '../../../layout/types';
+import { usePlanStore } from '../shared/data';
 import { GRAPH_NODE_H, GRAPH_NODE_W, planGraphLayout } from './layout';
 import { MOCK_GRAPH_PLANS } from './mock';
 
@@ -117,8 +119,15 @@ export const PlanSwitcher = component<PlanSwitcherProps>(({ props, emit }) => {
 /** The Plan graph view and its plan switcher (#756). */
 export const PlanGraph = component<ProjectPageProps>(({ props }) => {
     const st = signal<{ planId: string | null; created: Plan[] }>({ planId: null, created: [] });
-    const plans = (): readonly Plan[] => (dataMode() === 'live' ? [] : [...(MOCK_GRAPH_PLANS[props.project.id] ?? []), ...st.created.filter((p) => p.projectId === props.project.id)]);
-    const newPlan = (): void => {
+    const live = dataMode() === 'live';
+    const store = live ? usePlanStore(() => props.project.id) : undefined;
+    const plans = (): readonly Plan[] => (store ? store.docs().map((d) => d.plan) : [...(MOCK_GRAPH_PLANS[props.project.id] ?? []), ...st.created.filter((p) => p.projectId === props.project.id)]);
+    const newPlan = async (): Promise<void> => {
+        if (store?.writes) {
+            const plan = await store.writes.newPlan(`Untitled plan ${plans().length + 1}`);
+            if (plan) st.planId = plan.id;
+            return;
+        }
         const plan: Plan = { id: `plan_new_${st.created.length + 1}`, projectId: props.project.id, title: `Untitled plan ${st.created.length + 1}`, phases: [] };
         st.created = [...st.created, plan];
         st.planId = plan.id;
@@ -129,8 +138,9 @@ export const PlanGraph = component<ProjectPageProps>(({ props }) => {
         return (
             <section aria-label="Plan graph" data-plan-graph="">
                 <header data-plan-graph-head="">
-                    <PlanSwitcher plans={list} current={current} onSelect={(id: string) => { st.planId = id; }} onNew={dataMode() === 'live' ? undefined : newPlan} />
+                    <PlanSwitcher plans={list} current={current} onSelect={(id: string) => { st.planId = id; }} onNew={() => void newPlan()} />
                 </header>
+                {store?.note() ? <p data-plan-note="" role="alert">{store.note()}</p> : null}
                 {current ? <PlanGraphCanvas plan={current} /> : <p data-plan-graph-empty="" role="status">No plans yet.</p>}
             </section>
         );

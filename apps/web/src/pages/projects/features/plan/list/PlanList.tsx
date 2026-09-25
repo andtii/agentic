@@ -2,15 +2,16 @@
  * The Plan list (#754, PRJ-13; board `Plan`, docs/design/projects/HANDOFF.md → "Plan"): the header, the crew strip,
  * search with All / Mine / Open, the phases (collapsible, a mini progress each; a finished phase starts closed) with
  * their item rows, and the item detail panel. `?plan=` picks the plan, `?item=` the item the panel opens on.
- * Mock data only until the Plan store exists (#750).
+ * Live (#926) it reads the project's Plan actor and writes to it: Add item, New plan, done-when ticks and comments;
+ * a refusal shows as the note above the list.
  */
 import { component, signal } from 'sigx';
 import { useRoute } from '@sigx/router';
 import { planItems, type PlanItem, type PlanPhase } from '@agentic/core';
-import { EmptyState, Icon, ItemGlyph, SearchField, Segmented } from '@agentic/ui';
+import { Button, EmptyState, Icon, ItemGlyph, SearchField, Segmented } from '@agentic/ui';
 import { formatAge } from '../../../../../mock/workspace';
 import type { ProjectPageProps } from '../../../layout/types';
-import { actorLook, actorName, planNow, plansOf, planViewer } from '../shared/data';
+import { actorLook, actorName, planNow, planViewer, usePlanStore } from '../shared/data';
 import { ActorTile, Bar, PlanHeader } from '../shared/parts';
 import {
     PLAN_FILTERS, crewCounts, crewOf, defaultItem, filterPhases, itemMeta, lastActivityAt, ownerStatus, phaseProgress, planOf,
@@ -42,6 +43,8 @@ const CrewStrip = (doc: PlanDoc, members: ProjectPageProps['project']['members']
 
 export const PlanList = component<ProjectPageProps>(({ props }) => {
     const route = useRoute();
+    const store = usePlanStore(() => props.project.id);
+    const writes = store.writes;
     // `picked`: undefined → `?item=` or the default item; null → the panel is closed.
     const st = signal({ q: '', filter: 'all' as string, open: {} as Record<number, boolean>, picked: undefined as number | null | undefined });
 
@@ -77,13 +80,23 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
         );
     };
 
+    const Note = () => (store.note() ? <p data-plan-note="" role="alert">{store.note()}</p> : null);
+    const newPlan = (): void => { if (writes) void writes.newPlan('Untitled plan 1'); };
+
     return () => {
-        const docs = plansOf(props.project.id);
+        const docs = store.docs();
         const doc = planOf(docs, route.query.plan);
         if (!doc) {
+            if (store.loading) return <section aria-label="Plan" data-plan-list="" data-loading=""><p data-plan-none="" role="status">Loading the plan…</p></section>;
             return (
                 <section aria-label="Plan" data-plan-list="">
-                    <EmptyState variant="generic" title="No plan yet" caption="Plans arrive with the Plan store: the project manager drafts one from a chat, or you add items here." />
+                    {Note()}
+                    <EmptyState
+                        variant="generic"
+                        title="No plan yet"
+                        caption="The project manager drafts one from a chat, or you start one here."
+                        {...(writes ? { slots: { actions: () => <Button intent="primary" icon="plus" onClick={newPlan}>New plan</Button> } } : {})}
+                    />
                 </section>
             );
         }
@@ -97,7 +110,14 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
         const picked = pickedId === null || pickedId === undefined ? undefined : all.find((i) => i.id === pickedId);
         return (
             <section aria-label="Plan" data-plan-list="" data-detail={picked ? 'open' : 'closed'}>
-                <PlanHeader projectId={props.project.id} doc={doc} view="list" several={docs.length > 1} />
+                <PlanHeader
+                    projectId={props.project.id}
+                    doc={doc}
+                    view="list"
+                    several={docs.length > 1}
+                    {...(writes ? { onAdd: async (title: string) => (await writes.addItem(doc.plan, title)) !== undefined } : {})}
+                />
+                {Note()}
                 {CrewStrip(doc, props.project.members)}
                 <div data-plan-body="">
                     <div data-plan-items="">
@@ -131,7 +151,14 @@ export const PlanList = component<ProjectPageProps>(({ props }) => {
                             : <p data-plan-none="">No items match.</p>}
                     </div>
                     {picked
-                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }} />
+                        ? <ItemDetail key={picked.id} projectId={props.project.id} doc={doc} item={picked} items={all} now={now} onPick={(n) => { st.picked = n; }} onClose={() => { st.picked = null; }}
+                            {...(writes
+                                ? {
+                                    onTick: (index: number, checked: boolean) => void writes.tick(picked.id, index, checked),
+                                    onComment: async (text: string) => (await writes.comment(picked.id, text)) !== undefined
+                                }
+                                : {})}
+                        />
                         : null}
                 </div>
             </section>
