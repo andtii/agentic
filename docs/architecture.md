@@ -744,7 +744,7 @@ _not yet_
 
 #### #757 core: Request, Triage and project-manager policy (contract)
 
-_not yet_
+`packages/core/src/requests.ts`. A `ProjectRequest` (not `Request`, which would shadow the fetch global) goes from `fromProject` (optional `fromChat`, a `PlanActor` sender) to `toProject`, with refs and a state `needs-you | triaging | asked-for-more | accepted | declined`, the manager's `Triage` (kind, priority, reproduced, similar refs, proposed item, open-issue flag, reply, why) and, once accepted, `resultItem` (`#n` in `toProject`). `PmPolicy` holds sender rules (per project or `'*'`, `any-member` or listed actors, `allowed | ask`), `autonomy` (`priorityUpTo` is capped at `normal`), an optional weekly summary and `notifyOnMerge`; `PM_POLICY_DEFAULT` is what a new manager starts with. Pure `needsPersonReasons` / `needsPerson(triage, policy)` decide whether a triage must go to a person (high and urgent always do), and `pmSenderMode` applies the sender rules. Each project gets its own manager agent (#784): `ProjectPatch.pm` takes a `ProjectManagerSpec` (`name?`, a preset or custom personality, skills) or `null`, and `ProjectRecord.pm` stores `{ agentId?, policy }` — both added by module augmentation from `requests.ts`. `PM_PERSONALITIES` ships four presets and `pmPersonalityText(spec)` returns the persona paragraph for the playbook (unknown preset or empty custom → `undefined`, capped at 2000 characters). Tool names: `REQUEST_TOOLS`.
 
 #### #758 platform: Requests actor, PM policy and autonomy rules
 

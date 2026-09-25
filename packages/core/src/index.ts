@@ -33,7 +33,7 @@ export * from './pull.js';
 export * from './plan.js';
 export * from './refs.js';
 
-// slot #757 requests exports — replace this line
+export * from './requests.js';
 
 export * from './account.js';
 export * from './files.js';
