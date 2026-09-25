@@ -6,6 +6,8 @@
  * One line per feature issue: each replaces its own slot line with its entry and touches nothing else here.
  */
 import type { ProjectPage } from '../layout/types';
+import { PlanList } from './plan/list/PlanList';
+import { PlanOverviewCard } from './plan/shared/parts';
 
 export interface ProjectFeatureViews {
     /** The sub-menu label; the manifest's `ui.section.label` when it has one, else the feature id. */
@@ -21,7 +23,7 @@ export interface ProjectFeatureViews {
 export const PROJECT_FEATURE_VIEWS: Readonly<Record<string, ProjectFeatureViews>> = {
     // slot #746 git feature views — replace this line
 
-    // slot #754 plan feature views — replace this line
+    'agentic.feature.plan': { label: 'Plan', path: 'plan', Section: PlanList, OverviewCard: PlanOverviewCard },
 };
 
 /** The views of an enabled feature, or `undefined` when it draws nothing of its own. */
