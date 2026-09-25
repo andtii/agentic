@@ -18,12 +18,14 @@
  *       step (AGENTS.md step 6) must pass --subject/--body explicitly — an
  *       explicit message is used verbatim, with nothing appended.
  *     - Auto-delete head branches after merge.
+ *     - (Optional) auto-merge allowed — pass --auto-merge.
  *   Ruleset "sigx-standard: protect main" on `main`:
  *     - No direct pushes — changes land via PR only.
  *     - PR required: `--approvals N` approving reviews (default 1; pass 0 for a
  *       solo repo where the owner merges without a separate approval), stale
  *       approvals dismissed on new commits, CODEOWNERS review when approvals >= 1,
  *       review threads must resolve.
+ *       Pass --no-thread-resolution to make review comments advisory.
  *     - No force-push and no deletion of `main`.
  *     - (Optional) required status checks green before merge — pass --checks.
  *       With --checks, the branch must by default also be up to date with `main`; pass
@@ -42,7 +44,7 @@
  *   node scripts/apply-branch-protection.mjs signalxjs/core
  *   node scripts/apply-branch-protection.mjs signalxjs/core --checks "test (ubuntu-latest, 22); verify-pack"
  *   node scripts/apply-branch-protection.mjs andtii/agentic --approvals 0 --no-strict \
- *     --checks "test (ubuntu-latest, 20); test (ubuntu-latest, 22); test (windows-latest, 22); e2e; size"
+ *     --no-thread-resolution --auto-merge --checks gate
  *
  * Requirements: `gh` CLI authenticated (`gh auth login`) with admin on the repo.
  */
@@ -58,10 +60,14 @@ let checks = [];
 let dryRun = false;
 let strict = true; // branch must be up to date with main before merge
 let approvals = 1; // required approving reviews; 0 = PR required but owner may self-merge
+let threads = true; // every review thread must be resolved before merge
+let autoMerge = false; // allow `gh pr merge --auto`
 for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') dryRun = true;
     else if (a === '--no-strict') strict = false;
+    else if (a === '--no-thread-resolution') threads = false;
+    else if (a === '--auto-merge') autoMerge = true;
     else if (a === '--checks') {
         const v = argv[++i];
         // Reject a missing value or a following flag (e.g. `--checks --dry-run`)
@@ -85,7 +91,9 @@ if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
         '  --approvals 0  → PR required (plus any --checks), but the author/owner may merge\n' +
         '                   without a separate approval (for solo/small repos where Copilot\n' +
         '                   reviews but can\'t formally approve)\n' +
-        '  --no-strict    → with --checks: they must pass, but the branch need not be up to date with main');
+        '  --no-strict    → with --checks: they must pass, but the branch need not be up to date with main\n' +
+        '  --no-thread-resolution → review comments are advisory: open threads do not block merge\n' +
+        '  --auto-merge   → allow `gh pr merge --auto` (merges itself once the required checks pass)');
 }
 
 // ── gh helpers ───────────────────────────────────────────────────────────────
@@ -120,6 +128,7 @@ const repoSettings = {
     allow_merge_commit: false,
     allow_rebase_merge: false,
     delete_branch_on_merge: true,
+    allow_auto_merge: autoMerge,
     // PR title + body instead of the COMMIT_MESSAGES concatenation. Trailers are
     // NOT fully prevented here — GitHub appends Co-authored-by to any generated
     // message — so the merge step also passes --subject/--body (AGENTS.md step 6).
@@ -136,7 +145,7 @@ const pullRequestRule = {
         // Code-owner review implies an approval — only enforce it when approvals are required.
         require_code_owner_review: approvals > 0,
         require_last_push_approval: false,
-        required_review_thread_resolution: true,
+        required_review_thread_resolution: threads,
     },
 };
 
@@ -171,7 +180,8 @@ const ruleset = {
 console.log(`Repo:   ${repo}`);
 console.log(`Branch: ${DEFAULT_BRANCH}`);
 console.log(`Checks: ${checks.length ? checks.join(', ') : '(none — pass --checks to require CI green)'}`);
-console.log(`Reviews: ${approvals} approving review(s)${approvals === 0 ? ' — PR required, owner may self-merge' : ', CODEOWNERS enforced'}`);
+console.log(`Reviews: ${approvals} approving review(s)${approvals === 0 ? ' — PR required, owner may self-merge' : ', CODEOWNERS enforced'}; threads ${threads ? 'must resolve' : 'advisory'}`);
+console.log(`Auto-merge: ${autoMerge ? 'allowed' : 'off'}; up to date with main: ${checks.length && strict ? 'required' : 'not required'}`);
 console.log(`Merges: squash-only, message = PR title + body, auto-delete branch on merge`);
 
 if (dryRun) {

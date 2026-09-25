@@ -16,6 +16,7 @@ docs/dist/
 
 # Keep specific JS files
 !vite.config.js
+!.claude/workflows/*.js
 !*.config.js
 !examples/*.js
 !scripts/*.js

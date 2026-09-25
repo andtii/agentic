@@ -20,11 +20,11 @@ Copilot CLI, work agents, …). Tool-specific notes live in `CLAUDE.md`; it defe
 here for everything shared.
 
 This repo follows the sigx standard agent setup
-([`signalxjs/repo-template`](https://github.com/signalxjs/repo-template)): issue →
-worktree → PR with Copilot as reviewer → threads resolved → green CI →
-squash-merge. Nobody approves by hand (`--approvals 0`), but the ruleset requires
-every review thread to be resolved, so a PR that skips the Copilot step stalls at
-merge however green it is.
+([`signalxjs/repo-template`](https://github.com/signalxjs/repo-template)), tuned
+for many agents at once: issue → worktree → `pnpm check` + local review → **one**
+push → PR with Copilot as an advisory reviewer → auto-merge on the `gate` check.
+Nobody approves by hand (`--approvals 0`) and review threads do not block merge;
+the one required check is CI's `gate`.
 
 ## What this repo is
 
@@ -72,108 +72,94 @@ All work is tracked as sub-issues of the tracking issue
    `node_modules` or vendor zero.
 7. **Promotion.** Anything generic you write stays in the package the issue names
    and gets one line in `docs/promotion.md`.
-8. **Definition of done:** `pnpm typecheck && pnpm lint && pnpm test && pnpm size`
-   green; new tests for new behaviour; the issue's acceptance checklist ticked in
-   the PR body; `docs/architecture.md` updated if a seam changed. No
-   `CHANGELOG.md` entries: the PR title and body are the record, and release
-   notes are drafted from PR titles (the files are frozen history).
+8. **Definition of done:** `pnpm check` green (typecheck, lint, the unit tests
+   your diff reaches, size and scripts when touched); new tests for new
+   behaviour; the issue's acceptance checklist ticked in the PR body;
+   `docs/architecture.md` updated if a seam changed. No `CHANGELOG.md` entries:
+   the PR title and body are the record, and release notes are drafted from PR
+   titles (the files are frozen history).
 9. **PR, Copilot review, merge** — the full loop is under "Development
-   workflow" below. In short:
+   workflow" below (Claude Code: the `take-issue` skill runs it). In short:
    ```sh
+   pnpm check                                   # then the local review, then ONE push
    gh pr create --base main --title "<area>: <what>" --body "Closes #N. <summary>" --reviewer @copilot
-   gh pr checks <pr> --watch
-   # wait for copilot-pull-request-reviewer, fix what it raises, resolve every thread
-   gh pr merge <pr> --squash --delete-branch \
+   # Copilot (≤5 min): fix only real bugs, in ONE commit
+   gh pr merge <pr> --auto --squash --delete-branch \
      --subject "$(gh pr view <pr> --json title -q .title) (#<pr>)" \
      --body "$(gh pr view <pr> --json body -q .body)"
-   pnpm wt rm <N-short-slug>
    ```
    Pass `--subject`/`--body` explicitly so GitHub adds no generated trailers.
 
-## Development workflow (issue → worktree → PR → Copilot review → merge)
+## Development workflow (issue → worktree → check → one push → auto-merge)
 
 Mandatory for every agent-driven change, including one-line fixes. Never commit
-straight to `main` — it is protected (PR, resolved review threads, green CI,
-squash only; `scripts/apply-branch-protection.mjs` is the ruleset as code).
-A branch need **not** be up to date with `main` to merge (`--no-strict`, #685):
-parallel sessions merge faster than CI runs, and merge queue is unavailable on a
-user-owned repo. Rebase only on a real conflict. CI still runs on every push to
-`main`; if a merge turns it red, fixing `main` comes before anything else.
+straight to `main` — it is protected (PR, the `gate` check green, squash only;
+`scripts/apply-branch-protection.mjs` is the ruleset as code, `pnpm
+branch-protection` re-applies it). A branch need **not** be up to date with
+`main` to merge (`--no-strict`, #685); rebase only on a real conflict.
 
+**Every push costs a CI run, so push once.** The loop is built so review
+happens *before* the push, not after it:
+
+0. **`main` red?** `gh issue list --label main-red --state open`. An open one
+   means `main` is broken: fix it (or wait for whoever took it) before starting
+   anything else. The main-branch CI opens it automatically.
 1. **Issue first.** If no issue tracks the work, create one before writing code
    with the plan in its body (`.github/ISSUE_TEMPLATE/task.md` is the shape).
+   Claim an existing one: comment "taking this" and add the `in-progress` label.
 2. **Worktree, always** — the one you are in if it is under `<repo>/branches/`
    and not on `main`, else `pnpm wt new <N-short-slug>`. Never `git switch -c`
    in `<repo>/main` — parallel sessions share it.
-3. **Implement and verify.** Bug fix → write the failing test first (red), then
-   fix (green). `pnpm typecheck` for any `.ts`; relevant `pnpm test` / `pnpm build`.
-   Stage specific files (`git add <path>`), never `git add -A`. No co-author
-   trailers.
-4. **Open the PR with Copilot as the reviewer.** `Closes #N` in the body; the
-   body becomes the squash commit body verbatim, the title (with ` (#<pr>)`
+3. **Implement.** Bug fix → write the failing test first (red), then fix
+   (green). Stage specific files (`git add <path>`), never `git add -A`. No
+   co-author trailers.
+4. **`pnpm check`** — the local gate (`scripts/check.mjs`): typecheck, lint,
+   `vitest --changed origin/main`, plus build + size when a size-limited
+   package changed and the scripts tests when `scripts/` changed. `--workers`
+   adds workerd, `--all` the whole unit suite. `git fetch` first.
+5. **Review locally, before pushing.** Claude Code: the `code-review` skill on
+   the diff (low effort); other agents: an equivalent self-review of the diff
+   for correctness bugs, missing tests and layering breaks. Fix what it finds,
+   re-run `pnpm check`.
+6. **Push once and open the PR, Copilot as reviewer.** `Closes #N` in the body;
+   the body becomes the squash commit body verbatim, the title (with ` (#<pr>)`
    appended) its subject — write them as the commit you want on `main`.
    ```sh
    gh pr create --base main --title "<area>: <what>" \
      --body "Closes #N. <summary>" --reviewer @copilot
    ```
-   On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`.
+   If `gh` cannot resolve `@copilot` (`'@copilot' not found`), request it via
+   the API: `gh api --method POST repos/andtii/agentic/pulls/<pr>/requested_reviewers
+   -f 'reviewers[]=copilot-pull-request-reviewer[bot]'`.
    **Rebase early on a conflict.** GitHub runs no `pull_request` CI on a PR it
-   cannot compute a merge ref for (`mergeable_state: dirty`) — only
-   `pull_request_target` workflows run, and close/reopen does not help. When
-   `gh pr view <pr> --json mergeStateStatus` says `DIRTY`, `git fetch && git
-   rebase origin/main` right away (then `git push --force-with-lease`), not at
-   merge time. If `gh`
-   cannot resolve `@copilot` (`'@copilot' not found`), request it via the API —
-   don't skip it:
-   ```sh
-   gh api --method POST repos/andtii/agentic/pulls/<pr>/requested_reviewers \
-     -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-   ```
-5. **Wait for Copilot's review, then fix.** The bot
-   `copilot-pull-request-reviewer` reviews within a minute or two; do not merge
-   before it has.
-   ```sh
-   gh pr view <pr> --json reviews -q '.reviews[].author.login'   # wait for "copilot-pull-request-reviewer"
-   gh pr view <pr> --json reviews,comments
-   ```
-   Address every actionable comment with follow-up commits and push. If the
-   review doesn't re-trigger, re-request it: `gh pr edit <pr> --add-reviewer @copilot`.
+   cannot compute a merge ref for (`mergeable_state: dirty`). When `gh pr view
+   <pr> --json mergeStateStatus` says `DIRTY`, `git fetch && git rebase
+   origin/main` right away (then `git push --force-with-lease`).
+7. **Copilot is advisory — one pass.** It reviews in a minute or two, while CI
+   runs (`gh pr view <pr> --json reviews -q '.reviews[].author.login'`; give it
+   up to ~5 minutes, then move on). Fix **only** correctness bugs, security
+   issues, contract/layering breaks and missing tests — all of them in **one**
+   commit, one push. Style, naming and wording nits: leave them. Threads need
+   no resolving; a one-line reply ("fixed in <sha>" / "won't fix: nit") is
+   courtesy, not a gate. Do not re-request a review after the fix.
+8. **Auto-merge.** `gh pr merge <pr> --auto --squash --delete-branch --subject
+   "<title> (#<pr>)" --body "<body>"` — it merges itself the moment `gate` is
+   green. Pass `--subject`/`--body` explicitly: GitHub appends
+   `Co-authored-by:` trailers to any message it generates itself. Once merged:
+   `pnpm wt rm <N-short-slug>`. `gate` red? Read the failing lane
+   (`gh pr checks <pr>`), fix, push once more.
 
-   **Then resolve the threads.** The ruleset sets
-   `required_review_thread_resolution`, so a PR carrying an unresolved inline
-   comment cannot merge however green it is — `gh pr merge` just says BLOCKED and
-   `gh pr checks` shows nothing wrong. Pushing a fix does not resolve a thread,
-   nor does replying at PR level. There is no `gh pr` porcelain — reply on each
-   thread and resolve it over GraphQL:
-   ```sh
-   # list the open threads
-   gh api graphql -f query='query { repository(owner:"andtii", name:"agentic") {
-     pullRequest(number:<pr>) { reviewThreads(first:100) { nodes {
-       id isResolved comments(first:1){nodes{body}} } } } } }' \
-     -q '.data.repository.pullRequest.reviewThreads.nodes[]
-         | select(.isResolved==false) | "\(.id) \(.comments.nodes[0].body[0:60])"'
+### What CI runs (`.github/workflows/ci.yml`)
 
-   # reply (say which commit fixed it, or why it stays), then resolve — pass the
-   # body as a GraphQL variable, not string-interpolated
-   gh api graphql -f query='mutation($t:ID!,$b:String!){
-     addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t, body:$b}){ comment { id } } }' \
-     -f t="<thread-id>" -f b="Fixed in <sha>. <what changed>"
-   gh api graphql -f query='mutation($t:ID!){
-     resolveReviewThread(input:{threadId:$t}){ thread { isResolved } } }' -f t="<thread-id>"
-   ```
-6. **Merge it yourself** once the threads are resolved and CI is green — squash
-   (repo rules block merge commits), delete the branch, remove the worktree:
-   ```sh
-   pr=123
-   gh pr checks "$pr"                         # all green, including e2e and size
-   gh pr merge "$pr" --squash --delete-branch \
-     --subject "$(gh pr view "$pr" --json title -q .title) (#$pr)" \
-     --body "$(gh pr view "$pr" --json body -q .body)"
-   pnpm wt rm <N-short-slug>
-   ```
-   Pass `--subject`/`--body` explicitly: GitHub appends `Co-authored-by:`
-   trailers to every message it generates itself whenever a branch-commit author
-   differs from the merging account; an explicit message is used verbatim.
+- **On a PR**, only the lanes the diff can break (`scripts/ci-changes.mjs`
+  decides; docs-only PRs run nothing): `static` (lint, catalog, typecheck,
+  scripts tests), `unit` (the vitest suite in 4 shards), `workers` (workerd +
+  acceptance, when web/platform-side code changed), `e2e` (phone + desktop in 2
+  shards, when web/ui/platform/core changed), `size` (when core/ui/connectors/
+  plugins-git changed). `gate` aggregates them — the only required check.
+- **On `main` and nightly**, everything: plus Windows and Node 20 (`compat`),
+  e2e at all three widths and coverage. A red run opens or comments on a
+  `main-red` issue — see step 0.
 
 ## Build, Test, Lint
 
@@ -187,6 +173,7 @@ pnpm test:coverage
 pnpm typecheck        # tsc --noEmit over packages/*/src, __tests__, apps/*/src
 pnpm lint             # oxlint packages apps
 pnpm size             # size-limit (.size-limit.json)
+pnpm check            # the pre-push gate for this diff (scripts/check.mjs; --all, --workers)
 pnpm verify:catalog   # single-minor core catalog guard (CI runs it too)
 pnpm test:scripts     # node --test for scripts/
 pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd (Node >= 22)
