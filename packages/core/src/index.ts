@@ -26,5 +26,13 @@ export * from './workspace.js';
 export * from './workdir.js';
 export * from './workspace-source.js';
 export * from './project.js';
+export * from './project-ui.js';
+export * from './work.js';
+export * from './pull.js';
+
+// slot #748 plan + refs exports — replace this line
+
+// slot #757 requests exports — replace this line
+
 export * from './account.js';
 export * from './files.js';

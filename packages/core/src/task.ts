@@ -24,7 +24,9 @@ export type WaitReason =
      */
     | { readonly kind: 'turn'; readonly sessionId: SessionId; readonly turnId: string }
     /** The machine running the task's session went away mid-turn (#359; EXE-08), `since` epoch ms; the agent's `onInterrupt` decides what follows. */
-    | { readonly kind: 'machine-offline'; readonly machineId: MachineId; readonly since: number };
+    | { readonly kind: 'machine-offline'; readonly machineId: MachineId; readonly since: number }
+    /** The task opened a pull request (#722): it waits on it and completes when it merges, not when the agent says done. */
+    | { readonly kind: 'pull-request'; readonly number: number; readonly state: 'open' | 'merged' | 'closed' };
 
 /** Where a task came from (COL-04 "originating agent or task"). */
 export type TaskOrigin =

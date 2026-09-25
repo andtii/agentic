@@ -13,6 +13,7 @@ import type { ConnectorRef } from './agent.js';
 import type { AgentId, ChatId, EnvironmentId, MachineId, ProjectId, TaskId } from './ids.js';
 import type { ConfigSchema } from './plugin-config.js';
 import type { PluginManifest } from './plugin.js';
+import { PROJECT_FEATURE_CATEGORIES, projectFeatureUiError, type ProjectFeatureCategory, type ProjectFeatureUi } from './project-ui.js';
 import type { FsError, FsGitInfo, FsOp, FsResult } from './workdir.js';
 
 /** A workspace holds at most this many projects. */
@@ -24,9 +25,28 @@ export const PROJECT_FEATURE_KIND = 'project-feature';
 /** Who a chat in the project starts with: the New chat picker preselects them; it is a default, not a fence. */
 export interface ProjectMembers {
     readonly agentIds: readonly AgentId[];
-    /** One of `agentIds`, or none. */
+    /** One of `agentIds`, or none. The coordinator is the project's manager (#722): it owns the Plan and takes requests. */
     readonly coordinator: AgentId | null;
+    /** What each member does here, free text shown on the Plan board ("Developer", "Reviewer"). */
+    readonly roles?: Readonly<Partial<Record<AgentId, string>>>;
+    /** How many plan items each member may work on at once in this project; `memberLimit` defaults it. */
+    readonly limits?: Readonly<Partial<Record<AgentId, number>>>;
 }
+
+/** A member's working limit when the project sets none (#722: per agent per project). */
+export const MEMBER_LIMIT_DEFAULT = 1;
+/** The largest working limit a project may set. */
+export const MEMBER_LIMIT_MAX = 10;
+
+/** How many items `agentId` may work on at once in the project. */
+export function memberLimit(project: { readonly members: ProjectMembers }, agentId: AgentId): number {
+    const limit = project.members.limits?.[agentId];
+    return typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 ? Math.min(limit, MEMBER_LIMIT_MAX) : MEMBER_LIMIT_DEFAULT;
+}
+
+/** The project square's colours: the four agent hues of the design tokens. */
+export const PROJECT_COLORS = ['violet', 'orange', 'pink', 'blue'] as const;
+export type ProjectColor = (typeof PROJECT_COLORS)[number];
 
 /** Settings of the enabled project feature plugins, by plugin id; an entry's presence is what enables the plugin. */
 export type ProjectFeatures = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
@@ -46,6 +66,8 @@ export interface ProjectRecord {
     /** Connectors every session in the project gets, on top of the agent's own. */
     readonly connectors: readonly ConnectorRef[];
     readonly features: ProjectFeatures;
+    /** The project square's colour; the UI picks one from the id when unset. */
+    readonly color?: ProjectColor;
     readonly createdAt: number;
     readonly updatedAt: number;
 }
@@ -63,6 +85,8 @@ export interface ProjectPatch {
     readonly folders?: Readonly<Partial<Record<string, string | null>>>;
     readonly connectors?: readonly ConnectorRef[];
     readonly features?: Readonly<Record<string, Readonly<Record<string, unknown>> | null>>;
+    /** `null` clears it. */
+    readonly color?: ProjectColor | null;
 }
 
 /**
@@ -74,12 +98,19 @@ export interface ProjectPatch {
 export interface ProjectFeatureManifest extends PluginManifest {
     readonly kind: typeof PROJECT_FEATURE_KIND;
     readonly projectSettings: ConfigSchema;
+    /** What it adds to the UI and to sessions (#722); see `ProjectFeatureUi`. */
+    readonly ui?: ProjectFeatureUi;
+    /** Its group in the Add a feature browser. */
+    readonly category?: ProjectFeatureCategory;
 }
 
 export function isProjectFeatureManifest(manifest: PluginManifest): manifest is ProjectFeatureManifest {
     if (manifest.kind !== PROJECT_FEATURE_KIND || !Object.hasOwn(manifest, 'projectSettings')) return false;
-    const schema = (manifest as { projectSettings?: unknown }).projectSettings;
-    return typeof schema === 'object' && schema !== null && !Array.isArray(schema);
+    const m = manifest as { projectSettings?: unknown; ui?: unknown; category?: unknown };
+    const schema = m.projectSettings;
+    if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return false;
+    if (m.category !== undefined && !(PROJECT_FEATURE_CATEGORIES as readonly unknown[]).includes(m.category)) return false;
+    return m.ui === undefined || projectFeatureUiError(m.ui) === undefined;
 }
 
 /** A folder as the daemon lists it: the path and, for a repo or worktree, its git badge. */
