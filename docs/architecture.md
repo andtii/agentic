@@ -569,6 +569,190 @@ Routes (`@sigx/router`): `/` (inbox + active tasks), `/chats`, `/chats/new` (#33
   - **History and Inbox:** `harness.changed` files under "Machines" as `harness installed` / `updated` / `removed` / `failed`, linked to the runtimes card; the `harness-update-available` notice reads RUNTIME UPDATE and opens the runtimes card.
   - **Mock:** `opsHarnessStates` (update available, requested, downloading, draining, installing, updated, failed, broken, no feature) with a "Preview" picker; the mock Plugin page lists the sample machines.
 
+### Projects (redesign)
+
+The target for the projects redesign ([#722](https://github.com/andtii/agentic/issues/722); boards in `docs/design/projects/`, requirements PRJ-01 … PRJ-19, decisions 2026-09-25). One placeholder per sub-issue, in issue order: each issue replaces its own placeholder's body in place and never appends, so parallel PRs merge cleanly.
+
+#### #723 docs: projects redesign — decisions, PRJ requirements, design reference, doc slots
+
+Docs only: the handoff, boards and screenshots in `docs/design/projects/`, requirements §20 (PRJ-01 … PRJ-19), the 2026-09-25 decisions, and these placeholders plus the promotion slots. No seam changes.
+
+#### #724 core: project feature ui slots, work items, pull requests, member roles and limits (contract)
+
+_not yet_
+
+#### #725 web: projects scaffold — routes, sub-menu seam, stubs and slots so page issues never collide
+
+_not yet_
+
+#### #726 ui: ProjectSquare, StageTrack, ItemGlyph, SlotMarks, ChecksBar
+
+_not yet_
+
+#### #727 ui: AppShell project sub-menu — switcher, counts, needs-you badge, FEATURES block
+
+_not yet_
+
+#### #728 web: project sub-menu data, project picker, crumbs
+
+_not yet_
+
+#### #729 web: /projects index — cards, move/agent pills, open-links strip, unassigned strip
+
+_not yet_
+
+#### #730 web: project Overview — Your move, recent chats, Schedules and People cards, feature card slot
+
+_not yet_
+
+#### #731 web: project Chats — state groups, defaults strip, Review-and-move
+
+_not yet_
+
+#### #732 web: global /chats grouped by project
+
+_not yet_
+
+#### #733 web: Settings General / Members / Folders / Connectors tabs + New project dialog
+
+_not yet_
+
+#### #734 platform: member roles/limits, project colour, project summaries
+
+_not yet_
+
+#### #735 platform: Registry exposes project-feature ui slots, categories and needs
+
+_not yet_
+
+#### #736 web: Settings › Features — slot marks, add-a-feature catalogue, detail panel
+
+_not yet_
+
+#### #737 platform/runtimes: feature tools join sessions (ui.tools)
+
+_not yet_
+
+#### #738 web: Work view — derived work items, groups, stage tracks, filters
+
+_not yet_
+
+#### #739 web: work item page for non-Git work
+
+_not yet_
+
+#### #740 plugins-git: ui block — Code section, overview card, Git stages, pr: refs, needs a folder
+
+_not yet_
+
+#### #741 plugins-git: provider-neutral pull request adapter + GitHub adapter
+
+_not yet_
+
+#### #742 platform: Pulls actor — polled PR state, pull-request wait reason, task completes on merge
+
+_not yet_
+
+#### #743 platform: autopilot — fix checks, answer threads, rebase, merge when green
+
+_not yet_
+
+#### #744 web: pull request page
+
+_not yet_
+
+#### #745 ui+web: one PR card on chat, Home needs-you and task node
+
+_not yet_
+
+#### #746 web: Git Code section and Code overview card
+
+_not yet_
+
+#### #747 platform: push only when the next move becomes yours or autopilot gives up
+
+_not yet_
+
+#### #748 core: Plan, Phase, Item, Ref and the ref parser (contract)
+
+_not yet_
+
+#### #749 repo: packages/plugins-plan scaffold
+
+_not yet_
+
+#### #750 platform: Plan actor — items, queues, claims and leases, limits, after, touches, audit
+
+_not yet_
+
+#### #751 runtimes+mcp: plan_list/next/claim/assign/update/ref/add/handoff tools
+
+_not yet_
+
+#### #752 daemon: pin file refs to a commit (resolve sha, read range)
+
+_not yet_
+
+#### #753 plugins-plan: plan feature manifest, presets, instructions
+
+_not yet_
+
+#### #754 web: Plan list — phases, crew strip, item detail panel, ref hover card, overview card
+
+_not yet_
+
+#### #755 web: Plan board — columns by agent, limits, drag to assign and reorder
+
+_not yet_
+
+#### #756 web: Plan graph view (minimal) and plan switcher
+
+_not yet_
+
+#### #757 core: Request, Triage and project-manager policy (contract)
+
+_not yet_
+
+#### #758 platform: Requests actor, PM policy and autonomy rules
+
+_not yet_
+
+#### #759 runtimes+mcp: requests_list/triage/resolve and projects_request tools
+
+_not yet_
+
+#### #760 web: Settings › Project manager
+
+_not yet_
+
+#### #761 web: Requests inbox — incoming, sent, linked, triage card, actions
+
+_not yet_
+
+#### #762 platform+web: visiting project manager in chat — @ another PM, request card, across-projects panel
+
+_not yet_
+
+#### #763 platform: PM weekly summary on Home and tell requesters on merge
+
+_not yet_
+
+#### #764 platform: cross-project after refs and the link graph
+
+_not yet_
+
+#### #765 web: /projects/links — lanes, arrows, chain highlight, chain panel
+
+_not yet_
+
+#### #766 web: responsive pass and e2e for every project page
+
+_not yet_
+
+#### #767 web: remove the old projects page code and dead mocks
+
+_not yet_
+
 ## 11. Zero feedback loop
 
 This app is the dogfood consumer for `@sigx/zero`. Friction (a missing part, a state the anatomy cannot express, a control that fights the model binding, a recipe the validator rejects) is filed on signalxjs/zero labelled `from:agentic` as it is found, linked from the sub-issue here, with the smallest workaround in the package that owns the code and a `docs/promotion.md` line naming the zero issue. Zero is never patched or vendored in this repo.

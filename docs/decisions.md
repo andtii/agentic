@@ -312,3 +312,16 @@ An open tab kept about 10 Durable Objects awake, because every `live: true` read
 2. **The routing is written locally, not taken from upstream.** `socketTransport()` is one multiplexed link, and its `connect` seam is not told which actor it serves, so it cannot dial the per-actor path by itself. The router is filed upstream as signalxjs/actors#490, with a line in `docs/promotion.md`.
 3. **Terminating the socket in the Worker was ruled out.** One multiplexed socket would mean fewer sockets, but a Worker-held socket cannot hibernate and forwards every frame to the objects. That costs the same as holding them awake, which is the thing hibernation exists to remove.
 4. **Authorization is per call, not per upgrade.** Like the HTTP mount, the upgrade is accepted without a session, and every read on it is authorized through the principal the upgrade's cookies resolve to. A read without a session is refused (`__tests__/workers/live-socket.test.ts`).
+
+## 2026-09-25 — projects redesign: project managers, working limits, requests, git adapter, new actors (#722, #723)
+
+The projects handoff ([`docs/design/projects/`](design/projects/HANDOFF.md), requirements §20 `PRJ-*`) redesigns a project around what needs you, who is on it and how work moves. It left four questions open (HANDOFF.md "Projects" → "Open questions") and a few seams unnamed. These are the answers.
+
+1. **One agent can manage several projects.** The project manager is `ProjectMembers.coordinator`, so nothing stops the same agent being the coordinator of more than one project.
+2. **The working limit is per agent per project**, default 1. An agent busy on one project does not use up its slot on another.
+3. **Requests between two projects of the same owner skip approval**, unless the target's project-manager policy says "Ask me first". High or urgent priority still always comes to a person (PRJ-14).
+4. **Global `/chats` groups by project** and keeps the filter chip.
+5. **Plan views are `?view=list|board|graph`.** The graph is not drawn on the boards, so its first cut is minimal.
+6. **Git is behind a provider-neutral adapter in `plugins-git`, GitHub first.** It runs at the edge with the project's GitHub connector credential. Pull request state is polled from a `Pulls` actor alarm; webhooks are a follow-up.
+7. **New actors `Plan`, `Pulls` and `Requests`, keyed per project.** `ProjectRecord` stays in Workspace, extended. **Work items are derived** (tasks + pulls + plan items), not stored.
+8. **`text-mute` in the handoff means `text-muted`**, the existing token.
