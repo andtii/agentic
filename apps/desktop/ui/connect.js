@@ -33,13 +33,16 @@ async function reachable(origin) {
     }
 }
 
+/** A deep link's in-app path to open once connected (#847), taken from `get_server` once. */
+let landing = '/';
+
 async function connect(origin, attempt = 0) {
     clearTimeout(retryTimer);
     clearInterval(countdown);
     setServer(origin);
     show('connecting');
     if (await reachable(origin)) {
-        location.replace(`${origin}/`);
+        location.replace(`${origin}${landing}`);
         return;
     }
     show('offline');
@@ -77,7 +80,8 @@ function setup(current, canCancel) {
 }
 
 async function start() {
-    const { server, suggested } = await invoke('get_server');
+    const { server, suggested, path } = await invoke('get_server');
+    if (typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')) landing = path;
     const change = new URLSearchParams(location.search).has('change');
     $('change').onclick = () => setup(server, Boolean(server));
     if (!server || change) setup(server ?? suggested, Boolean(server));
