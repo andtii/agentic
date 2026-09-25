@@ -712,7 +712,7 @@ _not yet_
 
 #### #746 web: Git Code section and Code overview card
 
-_not yet_
+`pages/projects/features/git/`: the registry entry `agentic.feature.git` gives the section (label `Code`, at the default `f/agentic.feature.git`) and the Overview card. `model.ts` is pure: `gitSummaryOf(pulls, tasks)` — the base branch (`main` without PRs), a checks pill read off the last merged PR's checks, the open PRs with the Work view's next step (`workItemsOf`), *your move* = open PRs in the Work view's Your move group, *failing* = open PRs with a failed check, the task branches no open or merged PR heads, and the last merge. `data.ts` reads the pulls through `work/live.ts`'s `usePulls` (mock Pulls state; `[]` live until the pull request store feeds it) and the mock tasks' branches (none live). The card draws branch + checks, the three stats, branches without a PR, last merge and `Open →`; the section the same stats, the open PRs (linking to `/projects/:id/work/pr:<n>` and to the session's Changes view when the PR carries a `sessionId`) and the branches without a PR.
 
 #### #747 platform: push only when the next move becomes yours or autopilot gives up
 

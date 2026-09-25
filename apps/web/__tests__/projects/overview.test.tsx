@@ -65,10 +65,10 @@ describe('the Overview page (#730)', () => {
         expect(text(chats.querySelector('[data-overview-card-aside] a'))).toBe('All 6 chats →');
         expect(chats.querySelector('[data-overview-card-aside] a')!.getAttribute('href')).toBe('/projects/p_agentic/chats');
         expect(text(chats.querySelector('[data-overview-chat="c_rel04"] [data-overview-chat-state]'))).toBe('NEEDS YOU');
-        // The rail: no feature registers an OverviewCard yet, so the fixed cards and Add a feature.
+        // The rail: git's Code card (#746), then the fixed cards and Add a feature.
         const rail = el.querySelector('[data-overview-rail]')!;
-        expect(rail.querySelectorAll('[data-overview-feature]')).toHaveLength(0);
-        expect([...rail.children].map((c) => c.getAttribute('data-overview-card') ?? (c.hasAttribute('data-overview-add-feature') ? 'add' : '?'))).toEqual(['schedules', 'people', 'add']);
+        expect([...rail.querySelectorAll('[data-overview-feature]')].map((f) => f.getAttribute('data-overview-feature'))).toEqual(['agentic.feature.git']);
+        expect([...rail.children].map((c) => c.getAttribute('data-overview-card') ?? (c.hasAttribute('data-overview-feature') ? 'feature' : c.hasAttribute('data-overview-add-feature') ? 'add' : '?'))).toEqual(['feature', 'schedules', 'people', 'add']);
         expect(text(rail.querySelector('[data-overview-schedule]'))).toContain('Nightly dependency check');
         expect(rail.querySelector('[data-overview-add-feature] a')!.getAttribute('href')).toBe('/projects/p_agentic/settings/features');
     });
