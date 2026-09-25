@@ -126,7 +126,8 @@ async function fetchManifest(doFetch: typeof fetch, url: string, timeoutMs: numb
                 if (done) break;
                 total += value.byteLength;
                 if (total > RELEASE_MANIFEST_MAX_BYTES) {
-                    await reader.cancel().catch(() => undefined);
+                    // Not awaited: a tee'd body (a cloned Response) only settles its cancel once every branch is cancelled.
+                    void reader.cancel().catch(() => undefined);
                     throw new Error(`the manifest is more than ${RELEASE_MANIFEST_MAX_BYTES} bytes`);
                 }
                 chunks.push(value);

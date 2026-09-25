@@ -8,12 +8,30 @@ export default defineConfig({
     define: { __DEV__: 'true' },
     oxc: { jsx: { runtime: 'automatic', importSource: '@sigx/runtime-core' } },
     test: {
-        environment: 'happy-dom',
-        include: ['packages/**/__tests__/**/*.test.{ts,tsx}', 'apps/**/__tests__/**/*.test.{ts,tsx}'],
         // workerd-only: `pnpm --filter @agentic/web test:workers`, and the `*.workers.test.ts` half of `test:acceptance`
         exclude: ['**/node_modules/**', '**/dist/**', 'apps/web/__tests__/workers/**', '**/*.workers.test.ts'],
         globals: true,
-        typecheck: { enabled: true, include: ['packages/**/__tests__/**/*.test-d.ts'] }
+        // Only the UI needs a DOM: happy-dom set-up per file was over half the suite's time.
+        projects: [
+            {
+                extends: true,
+                test: {
+                    name: 'dom',
+                    environment: 'happy-dom',
+                    include: ['packages/ui/__tests__/**/*.test.{ts,tsx}', 'apps/web/__tests__/**/*.test.{ts,tsx}']
+                }
+            },
+            {
+                extends: true,
+                test: {
+                    name: 'node',
+                    environment: 'node',
+                    include: ['packages/**/__tests__/**/*.test.{ts,tsx}', 'apps/**/__tests__/**/*.test.{ts,tsx}'],
+                    exclude: ['packages/ui/**', 'apps/web/**'],
+                    typecheck: { enabled: true, include: ['packages/**/__tests__/**/*.test-d.ts'] }
+                }
+            }
+        ]
     },
     resolve: {
         // longest names first: a string find is a prefix match

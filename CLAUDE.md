@@ -21,3 +21,8 @@ Below are only the Claude-Code-specific bits.
 - **Worktrees**: Claude Code sessions are per-directory, so `pnpm wt new <name>`
   plus launching Claude Code from `<repo>/branches/<name>` gives a fully
   independent parallel session — no extra wiring needed.
+- **The loop**: the `take-issue` skill (`.claude/skills/take-issue/`) runs
+  AGENTS.md's development workflow for one issue — claim, worktree,
+  `pnpm check`, `code-review`, one push, advisory Copilot, auto-merge. The
+  `issue-wave` workflow (`.claude/workflows/issue-wave.js`) runs it for a list
+  of issues in parallel.
