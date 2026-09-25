@@ -45,7 +45,17 @@ const id = session.sessionId;
 const s = (path) => `/session/${id}${path}`;
 try {
     const form = await waitFor(() => wd('POST', s('/element'), { using: 'css selector', value: '#setup' }), 'the connect page');
-    await waitFor(() => wd('GET', s(`/element/${idOf(form)}/displayed`)), 'the server form to show');
+    try {
+        await waitFor(() => wd('GET', s(`/element/${idOf(form)}/displayed`)), 'the server form to show');
+    } catch (e) {
+        // What the page looks like when it did not get there: which section shows, and whether the IPC bridge exists.
+        const state = await wd('POST', s('/execute/sync'), {
+            script: "return { ready: document.readyState, ipc: !!window.__TAURI_INTERNALS__, sections: ['connecting', 'offline', 'setup'].map((id) => id + ':' + (document.getElementById(id)?.hidden ? 'hidden' : 'shown')), error: document.getElementById('error')?.textContent, notice: document.body.dataset.error ?? null };",
+            args: []
+        }).catch((err) => String(err));
+        console.error('page state:', JSON.stringify(state));
+        throw e;
+    }
     console.log('connect page: server form shown');
 
     const input = await wd('POST', s('/element'), { using: 'css selector', value: '#url' });
