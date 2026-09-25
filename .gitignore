@@ -22,6 +22,8 @@ docs/dist/
 !scripts/*.js
 # The web app's service worker (#244), served as-is from the assets root
 !apps/web/public/sw.js
+# The desktop shell's connect page (#844), served as-is by Tauri
+!apps/desktop/ui/*.js
 
 # TypeScript cache
 *.tsbuildinfo

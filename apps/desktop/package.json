@@ -1,0 +1,16 @@
+{
+  "name": "@agentic/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agentic desktop app: a thin Tauri 2 shell around a deployed Agentic server (Windows, macOS, Linux).",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "bundle": "tauri build",
+    "icons": "tauri icon app-icon.svg",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic</title>
+  <link rel="stylesheet" href="connect.css">
+  <script type="module" src="connect.js"></script>
+</head>
+<body>
+  <main>
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#1e1b4b"/><path d="M38 10 20 36h12l-6 18 18-26H32z" fill="#a5b4fc"/></svg>
+
+    <section id="connecting" hidden>
+      <h1>Connecting…</h1>
+      <p class="muted" data-server></p>
+    </section>
+
+    <section id="offline" hidden>
+      <h1>Can't reach your Agentic server</h1>
+      <p class="muted"><span data-server></span> isn't answering. This computer may be offline, or the server may be down. Your work is safe on the server.</p>
+      <p class="muted" id="retry-in"></p>
+      <div class="row">
+        <button id="retry" type="button">Try again</button>
+        <button id="change" type="button" class="quiet">Change server</button>
+      </div>
+    </section>
+
+    <form id="setup" hidden>
+      <h1>Connect to Agentic</h1>
+      <p class="muted">Enter the address of your Agentic server. You sign in on the next screen.</p>
+      <label for="url">Server address</label>
+      <input id="url" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="agentic.example.com" required>
+      <p id="error" class="error" role="alert"></p>
+      <div class="row">
+        <button type="submit">Connect</button>
+        <button id="cancel" type="button" class="quiet" hidden>Cancel</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>

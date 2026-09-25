@@ -183,6 +183,9 @@ pnpm --filter @agentic/web test:workers  # Worker + ActorHost DO inside workerd 
 Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost:8787,
 `.dev.vars` generated, dev-login link printed — `docs/runbook.md` §4) or
 `pnpm dev:mock` (Vite on mock data). Run the daemon: `pnpm --filter @agentic/daemon start`.
+Run the desktop app: `pnpm --filter @agentic/desktop dev` (`tauri dev`; needs a Rust toolchain — only for
+`apps/desktop`, nothing else in the repo does). Its Rust checks: `cargo fmt --check && cargo clippy
+--all-targets -- -D warnings && cargo test` in `apps/desktop/src-tauri` (CI: `desktop.yml`, on changes there).
 
 ## Packages
 
@@ -202,6 +205,7 @@ Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost
 | `packages/a2a` | `@agentic/a2a` | A2A 1.0 server + client adapter |
 | `apps/web` | `@agentic/web` | sigx SSR app + actors host on Cloudflare Workers |
 | `apps/daemon` | `@agentic/daemon` | `agentic-daemon` machine daemon (Windows first) |
+| `apps/desktop` | `@agentic/desktop` | Tauri 2 desktop shell (Windows, macOS, Linux) around a deployed server; Rust in `src-tauri/` |
 
 Path aliases: `tsconfig.json` and `vitest.config.ts` map `@agentic/*` to
 `packages/*/src`, so tests and typecheck run against source, not dist.
