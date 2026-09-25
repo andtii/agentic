@@ -4,10 +4,10 @@
  * The Worker forwards `/_sigx/socket/{type}/{key}` to that actor's Durable
  * Object, which accepts it with the hibernation API (`actors.app.ts`,
  * `createHostDurableObject({ socket })`). An idle socket costs nothing; the
- * NDJSON `$live` stream `fetchTransport` holds keeps its object awake for as
- * long as the tab is open (#351).
+ * NDJSON `$live` stream that `fetchTransport` holds open keeps its object
+ * awake for as long as the tab is open (#351).
  *
- * `@sigx/actors-ws`' `socketTransport()` is ONE multiplexed link and its
+ * The `socketTransport()` from `@sigx/actors-ws` is ONE multiplexed link and its
  * `connect` seam is not told which actor it is for, so this router keeps one
  * `socketTransport` per actor, keyed by the subscription's `type`/`key`,
  * opened on the first subscription and closed with the last. Calls stay on
