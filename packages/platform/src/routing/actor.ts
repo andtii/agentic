@@ -1485,7 +1485,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment on this machine, a
                     // delegating parent's in the same environment (on the same machine), the agent's default in its default environment,
                     // else the environment's first root — which needs the machine's report, so the machine is located first (#702).
-                    // Only the task's own folder is taken as asked (and fails outside the roots): a DERIVED one — the parent's, the
+                    // Only the task's own folder (which fails outside the roots) and the project's (already checked by `projectFolderOn`)
+                    // are taken as asked: a DERIVED one — the parent's, the
                     // agent's default, picked perhaps on another host — that the environment's roots do not hold is passed over for
                     // the next candidate, and the record says why (#599).
                     if (located === undefined) located = await locate(environmentId, requestedMachineId);
