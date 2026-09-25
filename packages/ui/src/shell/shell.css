@@ -255,3 +255,22 @@
 
     [data-scope="ai-shell"][data-part="main"][data-flush] { padding: 0; }
 }
+
+/*
+ * A nav entry's sub-menu (#725, `NavItem.children`): its blocks indented under the entry behind a 1 px rule, each
+ * after the first under a small heading. Minimal — the project sub-menu's real look (switcher, counts, 32 px items)
+ * is #727's.
+ */
+[data-nav-children] {
+    margin-inline-start: var(--space-md);
+    padding-inline-start: var(--space-sm);
+    border-inline-start: var(--border) solid var(--ag-line-strong);
+}
+[data-nav-block-heading] {
+    display: block;
+    padding: var(--space-xs) var(--space-sm) 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    color: var(--ag-text-dim);
+}

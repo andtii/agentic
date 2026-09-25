@@ -102,7 +102,13 @@ import {
     type TriggerPort,
     type WorkspaceStore,
     type ArtifactSink,
-    type KekSource
+    type KekSource,
+
+    // slot #742 Pulls actor import — replace this line
+
+    // slot #750 Plan actor import — replace this line
+
+    // slot #758 Requests actor import — replace this line
 } from '@agentic/platform';
 import { learningDefaultPlugin } from '@agentic/learning';
 import { actor, type AnyActorDefinition, type Host } from '@sigx/actors';
@@ -284,7 +290,15 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const Chat = defineChatActor({ ...withFiles, routing: () => Routing, titles: createChatTitler({ registry }) });
     // `OAuthClients` / `OAuthGrants`: the OAuth 2.1 server's store for external MCP clients (#50, `src/auth/oauth-server`).
     // `ConnectorAccounts`: conduit's accounts, handshakes and refresh locks per workspace (#532, #533) — the one `ActorHost` DO serves it.
-    return [Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, ConnectorAccounts, OAuthClients, OAuthGrants];
+    return [
+        Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, ConnectorAccounts, OAuthClients, OAuthGrants,
+
+        // slot #742 Pulls actor registration — replace this line
+
+        // slot #750 Plan actor registration — replace this line
+
+        // slot #758 Requests actor registration — replace this line
+    ];
 }
 
 /** The registry this isolate serves — what the OAuth/MCP mount binds its `PlatformPort` to (#50). */
@@ -341,7 +355,13 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         Ledger: byType('ledger') as ActorDefs['Ledger'],
         Memory: byType('Memory') as ActorDefs['Memory'],
         FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory'],
-        ConnectorAccounts: byType('ConnectorAccounts') as ActorDefs['ConnectorAccounts']
+        ConnectorAccounts: byType('ConnectorAccounts') as ActorDefs['ConnectorAccounts'],
+
+        // slot #742 Pulls actor SSR def — replace this line
+
+        // slot #750 Plan actor SSR def — replace this line
+
+        // slot #758 Requests actor SSR def — replace this line
     };
 }
 

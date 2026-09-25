@@ -34,6 +34,12 @@ export function clientDefs(): ActorDefs {
         Ledger: ref('ledger'),
         Memory: ref('Memory'),
         FlatMemory: ref('FlatMemory'),
-        ConnectorAccounts: ref('ConnectorAccounts')
+        ConnectorAccounts: ref('ConnectorAccounts'),
+
+        // slot #742 Pulls actor stub — replace this line
+
+        // slot #750 Plan actor stub — replace this line
+
+        // slot #758 Requests actor stub — replace this line
     };
 }

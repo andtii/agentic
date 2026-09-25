@@ -16,6 +16,12 @@
 import { defineInjectable } from 'sigx';
 import type { AgentActor, AuditActor, Chat, ConnectorAccounts, FlatMemory, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
 
+// slot #742 Pulls actor type import — replace this line
+
+// slot #750 Plan actor type import — replace this line
+
+// slot #758 Requests actor type import — replace this line
+
 export interface ActorDefs {
     readonly Workspace: typeof Workspace;
     readonly Chat: typeof Chat;
@@ -43,6 +49,12 @@ export interface ActorDefs {
     readonly FlatMemory: typeof FlatMemory;
     /** The workspace's connected conduit accounts (#532) — a connector page's status (#533). Summaries only, never credentials. */
     readonly ConnectorAccounts: typeof ConnectorAccounts;
+
+    // slot #742 Pulls actor def — replace this line
+
+    // slot #750 Plan actor def — replace this line
+
+    // slot #758 Requests actor def — replace this line
 }
 
 export const useActorDefs = defineInjectable<ActorDefs>('ActorDefs', { hint: 'app.defineProvide(useActorDefs, () => clientDefs()) in the entry (see src/actors/defs.ts).' });

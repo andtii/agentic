@@ -45,6 +45,10 @@ import { z } from 'zod';
 import { McpScopeError } from './errors.js';
 import type { ExternalPrincipal, PlatformPort } from './port.js';
 
+// slot #751 plan mcp tools import — replace this line
+
+// slot #759 requests mcp tools import — replace this line
+
 /** What the tool set needs besides the port. */
 export interface PlatformToolsOptions {
     /** Where chat attachment bytes live (R2 in the web app). Absent: `chats_file_get` returns metadata only. */
@@ -559,12 +563,21 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             input: z.object({}),
             annotations: READ,
             run: () => port.projects.list()
-        })
+        }),
+
+        // slot #751 plan tool family — replace this line
+
+        // slot #759 requests tool family — replace this line
     ];
 }
 
 /** The scope a tool name belongs to — `<family>_<op>`. */
 export function scopeOfTool(name: string): Scope | null {
     const family = name.split('_')[0];
+
+    // slot #751 plan tool family scope — replace this line
+
+    // slot #759 requests tool family scope — replace this line
+
     return family === 'machines' || family === 'environments' || family === 'agents' || family === 'sessions' || family === 'tasks' || family === 'chats' || family === 'memory' || family === 'schedules' || family === 'usage' || family === 'projects' ? family : null;
 }

@@ -13,6 +13,7 @@ import { useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { useNeedsSource } from './pages/inbox';
+import { projectMenuFor } from './pages/projects/layout/menu';
 
 /**
  * The signed-in person's mark in the sidebar foot: zero's `Avatar` as a
@@ -128,7 +129,7 @@ export const App = component(() => {
             <ThemeProvider>
                 <AppShell
                     brand="agentic"
-                    groups={NAV_GROUPS(needs().length)}
+                    groups={NAV_GROUPS(needs().length, projectMenuFor(route))}
                     currentPath={route.path}
                     flush={FLUSH_ROUTES.has(String(route.name ?? ''))}
                     title={titleOf(crumbs)}

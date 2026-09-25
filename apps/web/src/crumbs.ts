@@ -21,8 +21,17 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     'chat-new': { label: 'Chats', href: '/chats' },
     chat: { label: 'Chats', href: '/chats' },
     projects: { label: 'Projects', href: '/projects' },
+    'projects-links': { label: 'Projects', href: '/projects' },
     'project-new': { label: 'Projects', href: '/projects' },
     project: { label: 'Projects', href: '/projects' },
+    // Inside a project (#725) each page's topbar gives the whole trail, `Projects › <project> › …` (`projects/layout/trail.ts`).
+    'project-chats': { label: 'Projects', href: '/projects' },
+    'project-work': { label: 'Projects', href: '/projects' },
+    'project-work-item': { label: 'Projects', href: '/projects' },
+    'project-requests': { label: 'Projects', href: '/projects' },
+    'project-plan': { label: 'Projects', href: '/projects' },
+    'project-settings': { label: 'Projects', href: '/projects' },
+    'project-feature': { label: 'Projects', href: '/projects' },
     agents: { label: 'Agents', href: '/agents' },
     agent: { label: 'Agents', href: '/agents' },
     tasks: { label: 'Tasks', href: '/tasks' },
@@ -48,6 +57,10 @@ export const TRAILS: Record<string, readonly { label: string; href: string }[]> 
         { label: 'Plugins', href: '/plugins' },
         { label: 'Connectors', href: '/plugins?kind=connector' },
         { label: 'Add connector', href: '/plugins/connectors/add' }
+    ],
+    'projects-links': [
+        { label: 'Projects', href: '/projects' },
+        { label: 'Links', href: '/projects/links' }
     ]
 };
 

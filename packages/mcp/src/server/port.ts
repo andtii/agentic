@@ -244,6 +244,10 @@ export interface PlatformPort {
         /** Every account's provider limits as its machine last reported them (#272, OPS-07): machines → environments → `Machine.quota`. */
         limits(query: UsageLimitsQuery): Promise<UsageLimits>;
     };
+
+    // slot #751 plan port — replace this line
+
+    // slot #759 requests port — replace this line
 }
 
 /** The port for one authenticated client — the app binds it to the actors under this principal. */

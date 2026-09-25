@@ -1,0 +1,20 @@
+/*
+ * The projects redesign (#722, scaffold #725): one stylesheet per page so each page issue owns its own file, imported
+ * once from `pages.css`. The order below is the cascade order; this file holds only the `@import`s.
+ */
+@import './layout.css';
+@import './index-page.css';
+@import './links.css';
+@import './overview.css';
+@import './chats.css';
+@import './work.css';
+@import './work-item.css';
+@import './pull.css';
+@import './requests.css';
+@import './settings.css';
+@import './features.css';
+@import './manager.css';
+@import './plan.css';
+@import './plan-board.css';
+@import './plan-graph.css';
+@import './git.css';

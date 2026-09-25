@@ -83,7 +83,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #724: —
 
-- #725: —
+- #725: `NavItem.children` (a nav entry's sub-menu in blocks, the page on the longest matching sub-item) in `@agentic/ui`'s `AppShell` — a zero `NavList` candidate for nested items once #727 settles the visuals.
 
 - #726: —
 

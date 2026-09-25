@@ -583,7 +583,17 @@ _not yet_
 
 #### #725 web: projects scaffold — routes, sub-menu seam, stubs and slots so page issues never collide
 
-_not yet_
+Every shared file the redesign needs, edited once, so a page issue only adds files in its own folder or replaces its own slot line (the #649 precedent).
+
+- **Routes** (`router.ts`, literals before `:id`): `/projects` (`projects`, `index/ProjectsIndex` — today's list until #729), `/projects/links` (`projects-links`), `/projects/new` (`project-new`, today's form), and inside a project `/projects/:id` (`project`, Overview), `…/chats`, `…/work`, `…/work/:item` (`pr:<n>` is the pull request page, anything else the item page — `work/WorkItemRoute`), `…/requests`, `…/plan` (`?view=list|board|graph`, `features/plan/Plan`), `…/settings/:tab` (general, members, folders, connectors, features, manager — `settings/SettingsLayout` and `settings/tabs.ts`) and `…/f/:feature` (a feature's `Section` from `features/registry.ts`). Route names `project-*`; `CRUMBS` roots them all at Projects.
+- **Layout seam** (`pages/projects/layout/`): the route table registers `inProject(Page)`, so every page under `/projects/:id` gets `{ project: ProjectRecord }` from `ProjectLayout` (the sample workspace on mock data, `Workspace.projects()` live; not found / signed out otherwise) and never loads it. Live, the layout publishes `projectHead` (`{ id, name, features, manager }`).
+- **Sub-menu seam**: `NavItem.children?: readonly NavGroup[]` in `@agentic/ui`'s shell, drawn minimally (indented blocks, headed after the first; the page is the longest matching sub-item). `App.tsx` passes `projectMenuFor(route)` (`layout/menu.ts`) as `NAV_GROUPS(badge, project)`: Core (Overview, Chats, Work, Requests when the project has a coordinator), Features (enabled features whose registry entry has a `Section`), Settings (the six tabs).
+- **Crumbs**: each page's topbar returns `trail: projectTrail(route, …)` — always `Projects › <project> › …`; Overview keeps route `project`'s crumb. `TRAILS['projects-links']` is Projects › Links.
+- **Feature registry** (`pages/projects/features/registry.ts`): feature id → `{ label?, path?, Section?, OverviewCard? }`, one slot line each for git (#746) and plan (#754).
+- **Stubs**: one component per page folder (`index/`, `links/`, `overview/`, `chats/`, `work/`, `work/item/`, `work/pull/`, `requests/`, `settings/{general,members,folders,connectors,features,manager}/`, `features/plan/{list,board,graph}/`, `features/git/`), each rendering its title and "Coming in #N". Settings › General is today's project form until #733.
+- **CSS / mocks / tests**: `styles/projects/index.css` (one `@import` from `pages.css`) over one file per page; `mock/projects/<area>.ts` per page, imported by nothing shared; `pages/projects*.test.tsx` split into `__tests__/projects/{index,settings,live,model}.test.ts(x)`, with the scaffold's own `routes.test.tsx` / `routes-live.test.tsx`.
+- **`@agentic/ui` projects barrel** (`packages/ui/src/projects/`): `ProjectSquare`, `StageTrack`, `ItemGlyph`, `SlotMarks` (+ `usedSlots`), `ChecksBar`, `PullCard` with their final props and placeholder renders.
+- **Slot lines** (`// slot #N <what> — replace this line`) for the Pulls (#742), Plan (#750) and Requests (#758) actors (platform index; web `actors/{defs,client,keys}.ts`, `actors.app.ts`; audit kinds, data shapes and by-kind map), the `plan` (#751) and `requests` (#759) tool families (runtimes `tools/index.ts` and `tools/ports.ts`; mcp `server/tools.ts` and `server/port.ts`), and the plan project feature (#753) in `plugins/features.ts`.
 
 #### #726 ui: ProjectSquare, StageTrack, ItemGlyph, SlotMarks, ChecksBar
 

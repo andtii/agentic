@@ -1,24 +1,21 @@
 /**
- * `/projects` and the project form on mock data (#333): the list with its
- * place badges, one folder row per machine with an override per environment
- * on it (#702), Browse keeping
- * the folder's git badge on the row, Find through the mock `locate`, the
- * different-origin warning, a feature's settings from its manifest schema
- * with the origin prefilled, `detect` suggesting a feature, and the patch a
- * save produces.
+ * The project form on mock data (#333; split out of `pages/projects.test.tsx` by the scaffold #725, the edit page now
+ * at Settings › General): one folder row per machine with an override per environment on it (#702), Browse keeping
+ * the folder's git badge on the row, Find through the mock `locate`, the different-origin warning, a feature's
+ * settings from its manifest schema with the origin prefilled, `detect` suggesting a feature, and the patch a save
+ * produces; `/projects/new` prefilled from a folder (#336). #733 owns this file.
  */
 import { describe, it, expect } from 'vitest';
 import type { ProjectFeaturePlugin, ProjectPatch } from '@agentic/core';
 import { AGENTS, PROJECTS } from '../../src/mock/workspace';
 import { AGENTIC_ORIGIN, mockFsLocate } from '../../src/mock/fs';
 import { opsPlugins } from '../../src/mock/ops';
-import { topbarFor } from '../../src/components/topbar';
 import { mockLocate } from '../../src/pages/projects/locate';
 import { connectorOptionsOf, featureManifestsOf } from '../../src/pages/projects/model';
 import { ProjectForm } from '../../src/pages/projects/ProjectForm';
 import { mockWorkdirEnvironments } from '../../src/pages/workdir/environments';
-import { mountAt, setText, text } from './helpers';
-import { mountRoute, page, texts } from './mount';
+import { mountAt, setText, text } from '../pages/helpers';
+import { mountRoute, page, texts } from '../pages/mount';
 
 const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
 /** A machine's folder row (#702); `override` is one environment's row inside it. */
@@ -56,25 +53,9 @@ async function browse(at: HTMLElement, root: string, ...names: string[]): Promis
     await settle();
 }
 
-describe('/projects (mock)', () => {
-    it('lists both projects with a badge per environment that has a folder, the members and the enabled features; the topbar offers New project', async () => {
-        const dom = await mountRoute('/projects');
-        expect(page(dom, 'projects')).not.toBeNull();
-        const rows = [...dom.querySelectorAll<HTMLElement>('[data-project-row]')];
-        expect(rows.map((r) => r.getAttribute('data-project-row'))).toEqual(['p_agentic', 'p_docs']);
-        // The machine's folder by the machine's name, an override by its environment (#702).
-        expect(texts([...rows[0]!.querySelectorAll('.project-env')])).toEqual(['alien01', 'alien01 / personal']);
-        expect(texts([...rows[0]!.querySelectorAll('.project-feature')])).toEqual(['Git']);
-        expect(rows[0]!.querySelectorAll('[data-member-tiles] [data-scope="avatar"][data-part="root"]').length).toBe(3);
-        expect(texts([...rows[1]!.querySelectorAll('.project-env')])).toEqual(['alien01 / personal']);
-        expect(rows[0]!.querySelector('a')!.getAttribute('href')).toBe('/projects/p_agentic');
-        expect(text(topbarFor({ name: 'projects', path: '/projects', params: {} })?.actions?.() as never)).toBe('');
-        expect(topbarFor({ name: 'project', path: '/projects/p_agentic', params: { id: 'p_agentic' } })?.crumb).toBe('agentic');
-        expect(topbarFor({ name: 'project-new', path: '/projects/new', params: {} })?.crumb).toBe('New project');
-    });
-
+describe('/projects/:id/settings/general (mock)', () => {
     it('the edit page renders the enabled feature\u2019s settings from the manifest schema, filled from the record', async () => {
-        const dom = await mountRoute('/projects/p_agentic');
+        const dom = await mountRoute('/projects/p_agentic/settings/general');
         expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('agentic');
         const feature = dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
         expect(feature.hasAttribute('data-on')).toBe(true);
