@@ -24,7 +24,14 @@ const LiveQuickAsk = component(() => {
     const agents = useAgentDirectory(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const st = signal({ agentId: '', text: '', busy: false, error: '' });
-    const storage = (): Storage | undefined => (typeof localStorage === 'undefined' ? undefined : localStorage);
+    // Reading `localStorage` itself can throw (blocked site data), not only its methods.
+    const storage = (): Storage | undefined => {
+        try {
+            return globalThis.localStorage ?? undefined;
+        } catch {
+            return undefined;
+        }
+    };
     const hide = (): void => { void desktopHost()?.hideQuick().catch(() => {}); };
 
     // Esc anywhere hides the window; every time it comes back, the text box has the focus.

@@ -67,19 +67,28 @@ pub fn hide_quick(app: AppHandle) {
     }
 }
 
-/// The tray's "Quick ask" switch: keep the stored shortcut (else the default) when on, clear it when off.
-/// Answers the shortcut now in effect, or `None` when off or when it could not be registered.
+/// The tray's "Quick ask" switch. On: the stored shortcut (else the default), saved only once it is
+/// registered. Off: unregistered, and cleared from the settings. Answers the shortcut now in effect.
 pub fn set_enabled(app: &AppHandle, on: bool) -> Option<String> {
     let dir = app.path().app_config_dir().ok()?;
     let mut settings = crate::server::load(&dir);
-    settings.quick_ask = if on {
-        Some(settings.quick_ask.unwrap_or_else(|| DEFAULT_SHORTCUT.to_string()))
-    } else {
-        None
-    };
+    if !on {
+        apply(app, None);
+        settings.quick_ask = None;
+        let _ = crate::server::save(&dir, &settings);
+        return None;
+    }
+    let shortcut = settings
+        .quick_ask
+        .clone()
+        .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string());
+    if !apply(app, Some(&shortcut)) {
+        // Held by another app, or not an accelerator: stays off, and the settings keep what they had.
+        return None;
+    }
+    settings.quick_ask = Some(shortcut.clone());
     let _ = crate::server::save(&dir, &settings);
-    let shortcut = settings.quick_ask?;
-    apply(app, Some(&shortcut)).then_some(shortcut)
+    Some(shortcut)
 }
 
 /// How the tray names a shortcut: `⌘⇧Space` on macOS, `Ctrl+Shift+Space` elsewhere.

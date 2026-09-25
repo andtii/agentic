@@ -245,8 +245,9 @@ pub fn run() {
                 grant(&handle, &state, &origin)?;
             }
             build_window(&handle, MAIN, WebviewUrl::App("index.html".into()), WindowKind::Main)?;
-            tray::build(&handle, quick_ask.as_deref())?;
-            quick::apply(&handle, quick_ask.as_deref());
+            // The tray shows the hotkey as on only when it actually registered (another app may hold it).
+            let active = quick_ask.filter(|shortcut| quick::apply(&handle, Some(shortcut)));
+            tray::build(&handle, active.as_deref())?;
             updater::start(&handle);
             // `agentic://` links (#847): the one that started the app, then each one while it runs
             // (a second launch hands its link over through single-instance).
