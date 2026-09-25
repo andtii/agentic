@@ -14,7 +14,7 @@
  * A second pill counts the runtimes with a newer harness waiting (#370),
  * from the same `get`.
  */
-import { component, effect, onUnmounted, signal, type JSXElement } from 'sigx';
+import { component, effect, onMounted, onUnmounted, signal, type JSXElement } from 'sigx';
 import { Card } from '@sigx/zero';
 import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
@@ -30,9 +30,11 @@ import { MachineGroup, PlatformRow } from './MachineGroup';
 import { UpdateAll, type UpdateAllEntry, type UpdateAllResult } from './UpdateAll';
 import { harnessUpdates } from './harness';
 import { needsReinstall, updateBadge } from './update';
+import { LinkButton } from '../ops/LinkButton';
+import { desktopHost, isThisComputer, offerPairing, type ThisComputer } from '../../desktop';
 
 /** One machine's group over a live read of its record; busy (and empty) until the first value. */
-const LiveMachineGroup = component<{ id: string; name: string; workspaceId: string; queued: Readonly<Record<string, number>>; agents: readonly AgentIdentity[]; report: (id: string, update: MachineUpdateView | null) => void }>(({ props }) => {
+const LiveMachineGroup = component<{ id: string; name: string; workspaceId: string; here: boolean; queued: Readonly<Record<string, number>>; agents: readonly AgentIdentity[]; report: (id: string, update: MachineUpdateView | null) => void }>(({ props }) => {
     const defs = useActorDefs();
     const view = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'get'] as const, { live: true });
     const update = useActorState(defs.Machine, () => [machineKeyOf(props.workspaceId, props.id), 'updateState'] as const, { live: true });
@@ -42,7 +44,7 @@ const LiveMachineGroup = component<{ id: string; name: string; workspaceId: stri
         const v = view.value;
         if (!v) return <Card.Root asChild>{(card) => <section {...card} data-machine-group data-machine={props.id} aria-label={props.name} aria-busy="true" />}</Card.Root>;
         // "Default for" per environment (#414): pinned agents by id, account-bound ones by the login this machine reports.
-        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={liveCapacity(v)} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, Date.now()) } : {})} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} />;
+        return <MachineGroup machine={machineOf(v, props.name, Date.now())} environments={liveCapacity(v)} queued={props.queued} defaultFor={defaultForByEnvironment(props.agents, v.environments)} quota={v.quota ?? {}} {...(v.telemetry ? { load: v.telemetry.environments, machineLoad: machineLoadOf(v.telemetry, Date.now()) } : {})} update={v.revoked ? null : updateBadge(update.value)} harnessUpdates={v.revoked ? 0 : harnessUpdates(v)} here={props.here} />;
     };
 });
 
@@ -53,6 +55,12 @@ export const LiveMachines = component(() => {
     const index = useActorState(defs.Workspace, () => { const ws = viewer.workspaceId; return ws && ([workspaceKeyOf(ws), 'listMachines'] as const); }, { live: true });
     const routing = useActorState(defs.Routing, () => { const ws = viewer.workspaceId; return ws && ([routingKeyOf(ws), 'get'] as const); }, { live: true });
     const st = signal({ updates: {} as Record<string, MachineUpdateView>, results: null as UpdateAllResult[] | null, busy: false });
+    // Inside the desktop app (#846): which machine, if any, is this computer. Client only; `null` in a browser.
+    const here = signal<{ value: ThisComputer }>({ value: null });
+    onMounted(() => {
+        const host = desktopHost();
+        if (host) void host.localMachine().then((local) => { here.value = { local }; }, () => { here.value = { local: null }; });
+    });
     const report = (id: string, update: MachineUpdateView | null): void => {
         if ((st.updates[id] ?? null) === update) return;
         const next = { ...st.updates };
@@ -81,8 +89,16 @@ export const LiveMachines = component(() => {
         const agents = directory.all();
         return (
             <OpsPage page="machines" title="Machines">
+                {!index.loading && offerPairing(here.value, ws ?? undefined, paired.map((m) => m.id))
+                    ? (
+                        <section data-pair-this-computer aria-label="Pair this computer">
+                            <p data-panel-note>This computer is not paired with this workspace yet. Pair it to run agents here.</p>
+                            <LinkButton to="/pair" intent="primary" icon="plus">Pair this computer</LinkButton>
+                        </section>
+                    )
+                    : null}
                 {ws ? <UpdateAll machines={paired.map((m) => ({ id: m.id, name: m.name, update: st.updates[m.id] ?? null }))} results={st.results} busy={st.busy} onRun={(targets: readonly UpdateAllEntry[]) => { void updateAll(targets); }} /> : null}
-                {ws ? paired.map((m) => <LiveMachineGroup id={m.id} name={m.name} workspaceId={ws} queued={queuedByEnvironment(routing.value ?? undefined, m.id)} agents={agents} report={report} />) : null}
+                {ws ? paired.map((m) => <LiveMachineGroup id={m.id} name={m.name} workspaceId={ws} here={isThisComputer(here.value, ws, m.id)} queued={queuedByEnvironment(routing.value ?? undefined, m.id)} agents={agents} report={report} />) : null}
                 <PlatformRow defaultFor={platformAgents(agents)} caption={LIVE_PLATFORM_ROW.caption} keyStatus={LIVE_PLATFORM_ROW.key} keyLabel={LIVE_PLATFORM_ROW.keyLabel} />
                 {signedOut
                     ? <EmptyState variant="generic" title="Sign in to see your machines" caption="Machines belong to your workspace." />

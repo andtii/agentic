@@ -171,3 +171,7 @@
     /* long mono strings wrap inside the cards */
     [data-card-body] code { overflow-wrap: anywhere; }
 }
+/* the desktop app (#846): the machine it runs on carries a tag after its name; an unpaired computer is offered pairing above the list */
+[data-this-computer] { margin-inline-start: var(--space-sm); font-family: var(--font-sans); font-size: var(--text-sm); font-weight: var(--weight-normal); vertical-align: middle; }
+[data-pair-this-computer] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); flex-wrap: wrap; }
+[data-pair-this-computer] [data-panel-note] { margin: 0; }

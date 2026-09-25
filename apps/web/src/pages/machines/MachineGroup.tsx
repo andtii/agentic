@@ -1,7 +1,7 @@
 import { component, type Define, type JSXElement } from 'sigx';
 import { Card } from '@sigx/zero';
 import type { EnvironmentDescriptor, EnvironmentTelemetry, QuotaSnapshot } from '@agentic/core';
-import { AgentTile, EnvironmentCard, Icon, StatusPill } from '@agentic/ui';
+import { AgentTile, EnvironmentCard, Icon, StatusPill, Tag } from '@agentic/ui';
 import { defaultAgentsFor, opsAgent, type OpsMachine } from '../../mock/ops';
 import { LinkButton } from '../ops/LinkButton';
 import { loadText, loadTone, type DefaultForAgent, type MachineLoad } from './live';
@@ -58,7 +58,9 @@ export type MachineGroupProps = Define.Prop<'machine', OpsMachine, true> & Defin
     /** How many of its runtimes have a newer harness waiting (#370): a second pill beside the daemon's. */
     & Define.Prop<'harnessUpdates', number>
     /** The machine's own CPU and memory (#400), after the heartbeat in the caption. */
-    & Define.Prop<'machineLoad', MachineLoad>;
+    & Define.Prop<'machineLoad', MachineLoad>
+    /** The computer the desktop app runs on (#846): a "This computer" tag after the name. */
+    & Define.Prop<'here', boolean>;
 
 /** One machine on `/machines`, a zero `Card`: glyph, name, OS and heartbeat, status, Details in the header, then its environments. */
 export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
@@ -72,7 +74,7 @@ export const MachineGroup = component<MachineGroupProps>(({ props }) => () => {
             <header data-machine-head>
                 <span data-machine-glyph aria-hidden="true"><Icon name="machines" size={20} /></span>
                 <div data-machine-title>
-                    <span data-machine-name>{m.name}</span>
+                    <span data-machine-name>{m.name}{props.here ? <span data-this-computer><Tag tone="live">This computer</Tag></span> : null}</span>
                     <span data-machine-caption>{m.osLabel} · {buildLabel(m.build, m.daemonVersion)} · {m.online ? `heartbeat ${m.seen}` : `last seen ${m.seen}`}{props.machineLoad ? <> · <span data-machine-load data-tone={loadTone(props.machineLoad)}>{loadText(props.machineLoad)}</span></> : null}</span>
                 </div>
                 {props.update ? <StatusPill status={props.update} label={BADGE_TEXT[props.update].label} tone={BADGE_TEXT[props.update].tone} class="ag-update-badge" /> : null}

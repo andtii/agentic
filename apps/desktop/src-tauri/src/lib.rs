@@ -2,6 +2,7 @@
 //! configured Agentic server, a tray, and nothing else: the web app runs
 //! unchanged on its own origin.
 
+mod machine;
 mod notify;
 mod server;
 mod tray;
@@ -72,7 +73,7 @@ fn set_server(app: AppHandle, state: State<'_, Server>, url: String) -> Result<S
 }
 
 /// The commands the server's pages may call (architecture §13).
-const REMOTE_PERMISSIONS: &[&str] = &["allow-notify", "allow-set-badge"];
+const REMOTE_PERMISSIONS: &[&str] = &["allow-notify", "allow-set-badge", "allow-local-machine"];
 
 fn grant(app: &AppHandle, state: &Server, origin: &str) -> Result<(), String> {
     let mut capability = tauri::ipc::CapabilityBuilder::new("server")
@@ -189,7 +190,8 @@ pub fn run() {
             get_server,
             set_server,
             notify::notify,
-            notify::set_badge
+            notify::set_badge,
+            machine::local_machine
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -10,6 +10,7 @@ fn main() {
             "set_server",
             "notify",
             "set_badge",
+            "local_machine",
         ])),
     )
     .expect("failed to run tauri-build");

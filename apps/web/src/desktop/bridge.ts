@@ -16,10 +16,19 @@ export interface DesktopNotice {
     readonly url?: string;
 }
 
+/** The daemon paired on this computer against this server (#846): ids only, never its token. */
+export interface LocalMachine {
+    readonly workspaceId: string;
+    readonly machineId: string;
+    readonly name: string;
+}
+
 export interface DesktopHost {
     notify(notice: DesktopNotice): Promise<void>;
     /** The tray / dock / taskbar badge; 0 clears it. */
     setBadge(count: number): Promise<void>;
+    /** This computer's paired machine, or `null` when no daemon here is paired to this server. */
+    localMachine(): Promise<LocalMachine | null>;
 }
 
 interface TauriInternals {
@@ -37,6 +46,7 @@ export function desktopHost(g: typeof globalThis = globalThis): DesktopHost | nu
         },
         setBadge: async (count) => {
             await invoke('set_badge', { count: Math.max(0, Math.floor(count)) });
-        }
+        },
+        localMachine: async () => ((await invoke('local_machine')) as LocalMachine | null) ?? null
     };
 }
