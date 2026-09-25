@@ -35,6 +35,8 @@ import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
 import { checkedPmSpec, DEFAULT_PM_SPEC, pmCoordinatorError, PmSpecError, projectManagerConfig, projectManagerConfigPatch, withProjectManager, type ProjectManagerPatch } from './project-manager.js';
 import { checkedPmPolicy } from './pm-policy.js';
+import { pmSummarySchedule, pmSummaryScheduleId, pmSummaryScheduleKey } from '../requests/summary-schedule.js';
+import { defineScheduleActor } from '../schedule/actor.js';
 
 export const WORKSPACE_STATE_VERSION = 1;
 
@@ -225,6 +227,54 @@ interface MachineGetClient {
 
 interface MachineRevokeClient {
     revoke(): Promise<MachineView>;
+}
+
+/** A Schedule definition to hop with for a project's weekly summary (#868): resolved by `type`, its trigger never runs. */
+let scheduleRef: ReturnType<typeof defineScheduleActor> | undefined;
+const scheduleRefDef = (): ReturnType<typeof defineScheduleActor> =>
+    (scheduleRef ??= defineScheduleActor({
+        trigger: {
+            fired: () => {
+                throw new Error('[workspace] the Schedule ref is a hop target, never a host');
+            }
+        }
+    }));
+
+/**
+ * Keep project `project`'s weekly-summary Schedule entry (`pmSummaryScheduleKey`) in step with its manager policy
+ * (#868): created (and indexed with the workspace's schedules) when `weeklySummary` is first set, patched and switched
+ * back on when its day or time — or the project's name or the workspace's time zone — changed, switched off when it is
+ * cleared. Best effort: the policy is already saved, so a failing Schedule hop is logged, and the next policy save
+ * catches the entry up.
+ */
+async function syncPmSummary(ctx: ActorContext<WorkspaceState>, project: ProjectRecord): Promise<void> {
+    const workspaceId = ownerOfWorkspaceKey(ctx.key) as WorkspaceId;
+    try {
+        const schedule = ctx.actor(scheduleRefDef(), pmSummaryScheduleKey(workspaceId, project.id));
+        // Never created → `get` refuses with "does not exist": nothing to switch off, one to create. Any other failure is real.
+        const existing = await schedule.get().catch((error: unknown) => {
+            if (error instanceof Error && /does not exist/.test(error.message)) return undefined;
+            throw error;
+        });
+        const summary = project.pm?.policy.weeklySummary;
+        if (!summary) {
+            if (existing?.enabled) await schedule.disable();
+            return;
+        }
+        const spec = pmSummarySchedule(project, ctx.state.settings.timeZone, summary);
+        if (!existing) await schedule.create(spec);
+        else if (!existing.enabled || existing.title !== spec.title || existing.prompt !== spec.prompt || existing.projectId !== project.id || JSON.stringify(existing.recurrence) !== JSON.stringify(spec.recurrence)) {
+            await schedule.update({ title: spec.title, recurrence: spec.recurrence, prompt: spec.prompt, projectId: project.id, enabled: true });
+        }
+        // Indexed once it exists, so the Schedules list and the workspace export and delete reach it.
+        const id = pmSummaryScheduleId(project.id);
+        if (!ctx.state.schedules.includes(id)) {
+            ctx.state.schedules.push(id);
+            await ctx.save();
+        }
+    } catch (error) {
+        console.warn(`[workspace] the weekly summary schedule of project ${project.id} did not follow its policy:`, error);
+    }
 }
 
 /** The daemon's path rules; one that never said is taken for Windows, the first platform (decision 2). */
@@ -601,6 +651,8 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     summary: `project ${record.name} (${record.id}) ${base ? 'updated' : 'created'}`,
                     data
                 });
+                // The weekly summary follows a policy set here (#819) or a rename of a project that has one (#868).
+                if (pmPolicy || (base && base.name !== record.name && record.pm?.policy.weeklySummary)) await syncPmSummary(ctx, record);
                 return ctx.snapshot(record);
             },
 
@@ -672,6 +724,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                     summary: `project ${record.name} (${projectId}) manager policy set`,
                     data
                 });
+                await syncPmSummary(ctx, record);
                 return ctx.snapshot(record);
             },
 

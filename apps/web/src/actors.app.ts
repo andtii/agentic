@@ -106,6 +106,8 @@ import {
 
     definePullsActor,
     type PullSourcePort,
+    pmSummaryTrigger,
+    pullMergeNotices,
 
     definePlanActor,
 
@@ -162,8 +164,9 @@ export interface PlatformPorts {
     /** The plugins every workspace's Registry lists (#231). Default: `pluginCatalogue` (`src/plugins/catalogue.ts`). */
     readonly catalogue?: readonly CatalogueEntry[];
     /**
-     * Where a schedule firing goes. Default: `connectorTrigger` (an entry watching a connector polls it, #535) over
-     * `scheduleTrigger` (the Machines as the environment probe), both starting their tasks through `Routing.run`.
+     * Where a schedule firing goes. Default: `pmSummaryTrigger` (a project's weekly summary posts to Home, #868) over
+     * `connectorTrigger` (an entry watching a connector polls it, #535) over `scheduleTrigger` (the Machines as the
+     * environment probe), both starting their tasks through `Routing.run`.
      */
     readonly trigger?: TriggerPort;
     /** `fetch` replacement for a connector trigger's provider calls (tests). Default: the global `fetch`. */
@@ -277,24 +280,28 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
             .run(taskId)
             .catch((e: unknown) => console.warn(`[actors.app] routing ${taskId} from ${from} failed:`, e));
     };
-    // An entry that watches a connector (#535) polls it and starts a task per new item; every other firing is `scheduleTrigger`'s.
+    // A project's weekly summary (#868) posts the week to Home; an entry that watches a connector (#535) polls it and
+    // starts a task per new item; every other firing is `scheduleTrigger`'s.
     const trigger =
         ports.trigger ??
-        connectorTrigger({
-            fallback: scheduleTrigger({
-                environments: createEnvironmentProbe({ machines: () => Machine }),
-                onOutcome: (event, outcome) => {
-                    if (outcome.kind !== 'task' || (outcome.status !== 'queued' && outcome.wait?.kind !== 'environment-offline')) return;
-                    route(event.workspaceId, outcome.taskId, `schedule ${event.scheduleId}`);
-                }
-            }),
-            route: (ws, taskId) => route(ws, taskId, 'a connector trigger'),
-            origin: () => secrets.appOrigin,
-            ...(ports.connectorHttp ? { http: ports.connectorHttp } : {})
+        pmSummaryTrigger({
+            next: connectorTrigger({
+                fallback: scheduleTrigger({
+                    environments: createEnvironmentProbe({ machines: () => Machine }),
+                    onOutcome: (event, outcome) => {
+                        if (outcome.kind !== 'task' || (outcome.status !== 'queued' && outcome.wait?.kind !== 'environment-offline')) return;
+                        route(event.workspaceId, outcome.taskId, `schedule ${event.scheduleId}`);
+                    }
+                }),
+                route: (ws, taskId) => route(ws, taskId, 'a connector trigger'),
+                origin: () => secrets.appOrigin,
+                ...(ports.connectorHttp ? { http: ports.connectorHttp } : {})
+            })
         });
     // A project's pull requests (#742): read through the git feature's GitHub adapter with the workspace's token (#793).
     // Autopilot (#820): turns in the PR's chat through the router, rows to the Inbox, the merge through the same adapter.
-    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources(registry), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry }) });
+    // A merge tells the requesters whose request became the plan item it finishes, in their chat, as the manager (#868).
+    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources(registry), autopilot: pullsAutopilot({ routing: () => Routing, inbox: () => Inbox, registry }), merged: pullMergeNotices() });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the
     // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.

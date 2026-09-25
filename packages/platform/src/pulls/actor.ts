@@ -42,6 +42,7 @@ import {
     type AutopilotRun
 } from './autopilot.js';
 import type { PullsAutopilotPort } from './autopilot-port.js';
+import type { TriggerHop } from '../schedule/ports.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -106,6 +107,11 @@ export interface PullsView {
 // ---------------------------------------------------------------------------
 // Options
 
+/** What happens when a PR is first seen merged (#868; production: the merge notices to requesters, `pullMergeNotices`). */
+export interface PullMergedPort {
+    merged(hop: TriggerHop, event: { readonly workspaceId: WorkspaceId; readonly projectId: ProjectId; readonly pr: PullRequest }): Promise<void>;
+}
+
 export interface PullsActorOptions {
     /** Where the PRs are read. */
     readonly sources: PullSourcePort;
@@ -122,6 +128,8 @@ export interface PullsActorOptions {
      * → the switches are kept and shown, but nothing is driven.
      */
     readonly autopilot?: (ref: { readonly workspaceId: WorkspaceId; readonly projectId: ProjectId }) => PullsAutopilotPort;
+    /** Told once per PR, when its merge is recorded and before its task completes. Never a gate: a throw is logged. */
+    readonly merged?: PullMergedPort;
 }
 
 /** The switches `setAutopilot` takes: core's `Autopilot` without what the run fills. */
@@ -295,7 +303,17 @@ export function definePullsActor(options: PullsActorOptions) {
         t.audited = true;
     };
 
-    const portFor = (s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
+    /** The merge hook, once per PR (it rides on the audit's once): a failure is logged, never retried. */
+    const noticeMerge = async (ctx: Ctx, pr: PullRequest): Promise<void> => {
+        if (!options.merged) return;
+        try {
+            await options.merged.merged({ actor: (def, key) => ctx.actor(def, key) }, { workspaceId: ctx.state.workspaceId, projectId: ctx.state.projectId, pr });
+        } catch (error) {
+            console.warn(`[pulls] merge notices for #${pr.number} failed:`, error);
+        }
+    };
+
+    const portFor =(s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
 
     /**
      * Step the PR's autopilot and take its actions (#820). A merge whose rule says `ask` is not taken: it is recorded
@@ -383,7 +401,9 @@ export function definePullsActor(options: PullsActorOptions) {
             delay = retryAt !== undefined ? Math.max(POLL_FLOOR_MS, retryAt - at) : s.intervalMs;
         }
         for (const t of Object.values(s.pulls)) {
+            const merging = t.pr.state === 'merged' && !t.audited;
             await record(ctx, t);
+            if (merging) await noticeMerge(ctx, t.pr);
             await followTask(ctx, t);
         }
         // Only on a good read: the autopilot acts on what the PR shows now, never on a stale view.
