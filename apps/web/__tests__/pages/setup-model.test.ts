@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { PluginReadiness } from '@agentic/core';
 import type { PluginView } from '@agentic/platform';
 import { opsPlugins } from '../../src/mock/ops';
-import { initialRuntime, modelsOf, runtimeOptions } from '../../src/pages/agent/runtimes';
+import { fixFor, initialRuntime, modelsOf, runtimeOptions } from '../../src/pages/agent/runtimes';
 import { setupSteps } from '../../src/pages/home/setup';
 
 const plugin = (id: string): PluginView => opsPlugins.find((p) => p.manifest.id === id)!;
@@ -16,6 +16,7 @@ const off = (p: PluginView): PluginView => ({ ...p, enabled: false });
 const NEEDS_KEY: PluginReadiness = { status: 'needs-secret', missing: ['anthropic-api-key'] };
 const NEEDS_MACHINE: PluginReadiness = { status: 'needs-machine' };
 const READY: PluginReadiness = { status: 'ready' };
+const SIGNED_OUT: PluginReadiness = { status: 'needs-sign-in' };
 
 describe('runtimeOptions', () => {
     it('offers each enabled runtime plugin by name, with its models and default, and a hint only when it is not ready', () => {
@@ -35,6 +36,17 @@ describe('runtimeOptions', () => {
     it('a runtime that needs a machine links to pairing', () => {
         const cc = runtimeOptions(opsPlugins, { 'claude-code': NEEDS_MACHINE })!.find((o) => o.value === 'claude-code')!;
         expect(cc).toMatchObject({ label: 'Claude Code — needs a machine', href: '/pair', hrefLabel: 'Pair a machine' });
+    });
+
+    it('a runtime whose sign-in lapsed reads needs sign-in, with Sign in to its page account panel (#684)', () => {
+        const cc = runtimeOptions(opsPlugins, { 'claude-code': SIGNED_OUT })!.find((o) => o.value === 'claude-code')!;
+        expect(cc).toMatchObject({ label: 'Claude Code — needs sign-in', href: '/plugins/claude-code#account', hrefLabel: 'Sign in' });
+        expect(cc.hint).toMatch(/Sign in/);
+    });
+
+    it('fixFor: a signed-out conduit connector goes to its sign-in route, any other plugin to its account panel (#684)', () => {
+        expect(fixFor(plugin('gmail'), SIGNED_OUT)).toEqual({ href: '/_agentic/connectors/gmail/start', hrefLabel: 'Sign in' });
+        expect(fixFor(plugin('github-mcp'), SIGNED_OUT)).toEqual({ href: '/plugins/github-mcp#account', hrefLabel: 'Sign in' });
     });
 
     it('a disabled runtime is not offered — unless the agent is on it, then it stays, marked turned off', () => {
@@ -90,6 +102,11 @@ describe('setupSteps', () => {
     it('every runtime turned off: turn one on', () => {
         const steps = setupSteps({ plugins: runtimes.map(off), readiness: { 'anthropic-api': { status: 'disabled' }, 'claude-code': { status: 'disabled' } }, machines: [] })!;
         expect(steps).toEqual([expect.objectContaining({ title: 'Turn a runtime on', href: '/plugins' })]);
+    });
+
+    it('a runtime whose sign-in lapsed: needs sign-in, with Sign in (#684)', () => {
+        const steps = setupSteps({ plugins: [plugin('claude-code')], readiness: { 'claude-code': SIGNED_OUT }, machines: [] })!;
+        expect(steps).toEqual([expect.objectContaining({ id: 'claude-code', title: 'Claude Code needs sign-in', href: '/plugins/claude-code#account', action: 'Sign in' })]);
     });
 
     it('a deployment that cannot seal keys says so, with nothing to click', () => {

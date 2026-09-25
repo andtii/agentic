@@ -8,6 +8,8 @@
 import type { PluginReadiness } from '@agentic/core';
 import type { PluginView } from '@agentic/platform';
 import { readinessDetail, type RuntimeOption } from '@agentic/ui';
+import { connectorStartPath } from '../../connectors/paths';
+import { isConduitConnector } from '../plugins/conduit';
 import { pluginHref } from '../plugins/model';
 
 /** The plugin's model list: a `defaultModel` string property with an `enum` in its config schema. */
@@ -16,10 +18,20 @@ export function modelsOf(plugin: PluginView): readonly string[] {
     return prop && prop.type === 'string' && prop.enum ? prop.enum : [];
 }
 
+/**
+ * Where a signed-out plugin signs in again (#684): a conduit connector's
+ * sign-in route, else the Account panel of its page — the targets the plugins
+ * pages' Sign in fixes use.
+ */
+export function signInHref(plugin: PluginView): string {
+    return isConduitConnector(plugin.manifest) ? connectorStartPath(plugin.manifest.id) : `${pluginHref(plugin.manifest.id)}#account`;
+}
+
 /** Where a person fixes what `readiness` says is in the way. */
 export function fixFor(plugin: PluginView, readiness: PluginReadiness | undefined): { readonly href: string; readonly hrefLabel: string } {
     if (readiness?.status === 'needs-machine') return { href: '/pair', hrefLabel: 'Pair a machine' };
     if (readiness?.status === 'needs-secret') return { href: pluginHref(plugin.manifest.id), hrefLabel: 'Add the key' };
+    if (readiness?.status === 'needs-sign-in') return { href: signInHref(plugin), hrefLabel: 'Sign in' };
     if (readiness?.status === 'disabled') return { href: pluginHref(plugin.manifest.id), hrefLabel: 'Turn it on' };
     return { href: pluginHref(plugin.manifest.id), hrefLabel: 'Set it up' };
 }
@@ -44,6 +56,8 @@ function notReadyLabel(readiness: PluginReadiness): string {
             return 'needs a key';
         case 'needs-machine':
             return 'needs a machine';
+        case 'needs-sign-in':
+            return 'needs sign-in';
         case 'disabled':
             return 'turned off';
         case 'no-kek':
