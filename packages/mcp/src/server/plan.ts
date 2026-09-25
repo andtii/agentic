@@ -20,7 +20,8 @@ export interface PlanMcpUpdate {
 export interface PlanMcpAdd {
     readonly plan?: string;
     readonly phase?: number;
-    readonly items: readonly { readonly title: string; readonly after?: readonly number[]; readonly touches?: readonly string[]; readonly doneWhen?: readonly string[] }[];
+    /** `after`: this project's item numbers, or `project#n` for an item in another project. */
+    readonly items: readonly { readonly title: string; readonly after?: readonly (number | string)[]; readonly touches?: readonly string[]; readonly doneWhen?: readonly string[] }[];
     readonly split?: number;
 }
 
@@ -52,6 +53,8 @@ const itemNo = z.number().int().min(1).describe('The item number, `#n` without t
 const planId = z.string().min(1).optional().describe('One plan by id; absent: every plan of the project.');
 const handle = z.string().min(1).describe('A project member by handle, `lint` or `@lint`.');
 const bare = (h: string): string => h.replace(/^@/, '');
+/** One `after` entry: an item number of this project, or `project#n` for an item in another project (#881). */
+const afterEntry = z.union([z.number().int().min(1), z.string().regex(/^[\w.-]*#[1-9]\d*$/, 'write an item number, #n or project#n')]).describe('An item number of this project (`9`), or `project#n` for an item in another project — it stays blocked until that item is done.');
 
 /**
  * The plan tools (`PLAN_TOOLS` order) over `port`, made with the surface's gated `tool` factory. A host without a Plan
@@ -137,7 +140,7 @@ export function planMcpTools(port: PlanMcpPort | undefined, tool: ScopedTool): A
                 projectId,
                 plan: planId,
                 phase: z.number().int().min(1).optional(),
-                items: z.array(z.object({ title: z.string().min(1), after: z.array(z.number().int().min(1)).optional(), touches: z.array(z.string().min(1)).optional(), doneWhen: z.array(z.string().min(1)).optional() })).min(1),
+                items: z.array(z.object({ title: z.string().min(1), after: z.array(afterEntry).optional(), touches: z.array(z.string().min(1)).optional(), doneWhen: z.array(z.string().min(1)).optional() })).min(1),
                 split: z.number().int().min(1).optional()
             }),
             annotations: WRITE,
