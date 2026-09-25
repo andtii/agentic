@@ -9,11 +9,17 @@
  * data is the Session's record, so a decision from any client — this tab,
  * the chat, the phone — collapses the card here and the row leaves the
  * list once the Session marks the notification read.
+ *
+ * Pull requests join the list only when the next move is yours (PRJ-10,
+ * #745): ready to merge, a review asked of you, conflicts to decide, or
+ * autopilot stopped — as `PullCard`'s `home` item (`MERGE`, "Squash and
+ * merge"), the same card and state as in the chat and on the task node.
  */
 import { component } from 'sigx';
 import type { Decision } from '@sigx/ai-agent';
+import type { PullRequest } from '@agentic/core';
 import type { OpenRequest } from '@sigx/ai-agent/app';
-import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, ErrorNote, NeedsItem, QuestionPrompt, SectionHeading, type ApprovalDecision } from '@agentic/ui';
+import { AgentTile, ApprovalPrompt, Button, EmptyState, EnvironmentLine, ErrorNote, NeedsItem, PullCard, QuestionPrompt, SectionHeading, pullNeedsYou, type ApprovalDecision } from '@agentic/ui';
 import type { SessionRequestView } from '@agentic/platform';
 import { LinkButton } from '../ops/LinkButton';
 import { MachineNotice } from '../machines/MachineNotice';
@@ -138,16 +144,62 @@ const NeedsRowView = component<{ row: NeedsRow; source: NeedsSource }>(({ props,
     };
 });
 
+/** The pull requests Home may list, and how it merges one; only those whose next move is yours show. */
+export interface PullNeeds {
+    /** Called in the list's setup: a reactive getter of the open pull requests. */
+    usePulls(): () => readonly PullRequest[];
+    /** Who is looking: a review requested from them is their move. */
+    readonly me?: string;
+    /** The PR page a card opens. */
+    href?(pull: PullRequest): string | undefined;
+    /** "Squash and merge"; rejects when the merge did not go through. */
+    merge?(pull: PullRequest): Promise<void>;
+}
+
+/** The pull requests whose next move is yours, oldest first. */
+export function pullsNeedingYou(pulls: readonly PullRequest[], me?: string): PullRequest[] {
+    return pulls.filter((pr) => pullNeedsYou(pr, me)).sort((a, b) => a.openedAt - b.openedAt);
+}
+
+const PullRowView = component<{ pull: PullRequest; needs: PullNeeds }>(({ props, signal }) => {
+    const st = signal({ busy: false, error: '' });
+    const merge = (pull: PullRequest): void => {
+        const run = props.needs.merge;
+        if (!run || st.busy) return;
+        st.busy = true;
+        st.error = '';
+        run(pull).catch((e: unknown) => {
+            st.error = e instanceof Error ? e.message : String(e);
+        }).finally(() => {
+            st.busy = false;
+        });
+    };
+    return () => (
+        <>
+            <PullCard pull={props.pull} surface="home" me={props.needs.me} href={props.needs.href?.(props.pull)} merging={st.busy} onMerge={merge} />
+            {st.error ? <ErrorNote data-needs-error="">{`Could not merge: ${st.error}`}</ErrorNote> : null}
+        </>
+    );
+});
+
 /** The section: heading with the open count, the rows, or the inbox empty state. */
-export const NeedsYou = component<{ source: NeedsSource }>(({ props }) => {
+export const NeedsYou = component<{ source: NeedsSource; pulls?: PullNeeds }>(({ props }) => {
     const rows = props.source.useRows();
+    const pulls = props.pulls?.usePulls();
     return () => {
         const sorted = sortRows(rows());
+        const prs = pulls && props.pulls ? pullsNeedingYou(pulls(), props.pulls.me) : [];
+        const needs = props.pulls;
         return (
             <section data-home-needs aria-label="Needs you">
-                <SectionHeading count={`${sorted.length} open`} slots={{ aside: () => 'answer here, in the chat, or on your phone' }}>Needs you</SectionHeading>
-                {sorted.length
-                    ? <div data-needs-list>{sorted.map((row) => <div key={row.id} data-needs-row><NeedsRowView row={row} source={props.source} /></div>)}</div>
+                <SectionHeading count={`${sorted.length + prs.length} open`} slots={{ aside: () => 'answer here, in the chat, or on your phone' }}>Needs you</SectionHeading>
+                {sorted.length || prs.length
+                    ? (
+                        <div data-needs-list>
+                            {sorted.map((row) => <div key={row.id} data-needs-row><NeedsRowView row={row} source={props.source} /></div>)}
+                            {needs ? prs.map((pr) => <div key={`pr:${pr.repo}#${pr.number}`} data-needs-row data-needs-pull={String(pr.number)}><PullRowView pull={pr} needs={needs} /></div>) : null}
+                        </div>
+                    )
                     : <EmptyState variant="inbox" />}
             </section>
         );

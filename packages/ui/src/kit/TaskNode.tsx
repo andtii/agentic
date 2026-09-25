@@ -5,10 +5,13 @@
  * line, the wait reason in amber mono, the status pill. `selected` = base-300
  * fill and a `live` border at 53 %. The card is a real button: selecting a
  * node swaps the page's right rail. Depth indents to 3, the configured
- * maximum; beyond that the limit blocks creation.
+ * maximum; beyond that the limit blocks creation. A task whose result is a
+ * pull request shows it on the node as `PullCard`'s `task` line
+ * (`#602 · ready to merge`, PRJ-10) — the same state as everywhere else.
  */
 import { component, type Define } from '@sigx/runtime-core';
-import type { TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import type { PullRequest, TaskId, TaskStatus, WaitReason } from '@agentic/core';
+import { PullCard } from '../projects/PullCard.js';
 import { AgentTile, type AgentHue } from './AgentTile.js';
 import { agTaskNodeAnatomy } from './anatomy.js';
 import { EnvironmentLine, type EnvironmentParts } from './EnvironmentLine.js';
@@ -25,6 +28,8 @@ export type TaskNodeProps =
     & Define.Prop<'environment', EnvironmentParts>
     & Define.Prop<'wait', WaitReason>
     & Define.Prop<'waitDetail', string>
+    /** The pull request the task's result is; the node shows its one-line state. */
+    & Define.Prop<'pull', PullRequest>
     /** 0 at the root; the rail indents 28 px per level. */
     & Define.Prop<'depth', number>
     & Define.Prop<'selected', boolean>
@@ -43,6 +48,7 @@ export const TaskNode = component<TaskNodeProps>(({ props, emit }) => () => {
                     <span>{props.agent}</span>
                     {props.environment ? <EnvironmentLine tone="dim" {...props.environment} /> : null}
                 </span>
+                {props.pull ? <span data-pull-line="" style="grid-column: 2; display: flex; min-inline-size: 0"><PullCard pull={props.pull} surface="task" /></span> : null}
                 {props.wait ? <WaitReasonLine wait={props.wait} detail={props.waitDetail} /> : null}
                 <span data-scope={SCOPE} data-part="status"><StatusPill status={props.status} /></span>
             </button>
