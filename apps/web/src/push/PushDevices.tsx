@@ -9,6 +9,10 @@
  * enables the plugin, makes the key pair when there is none (a contact
  * defaults to the app's address) and subscribes this browser. A second
  * browser reuses the pair, so the ones already subscribed keep their pushes.
+ *
+ * Inside the desktop app (#845) there is nothing to subscribe: the app shows
+ * the Inbox's notifications natively while push is on, so the panel says so
+ * instead of offering browser push the system webview may not have.
  */
 import { component, onMounted, signal, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
@@ -22,6 +26,7 @@ import { pluginHref } from '../pages/plugins/model';
 import { currentEndpoint, pushSupport, subscribeBrowser, unsubscribeBrowser, type PushSupport } from './browser';
 import { VAPID_SECRET, WEB_PUSH_PLUGIN, canGenerateKeys, deviceRows, pushSetup } from './model';
 import { ensurePushKeys } from './setup';
+import { desktopHost } from '../desktop/bridge';
 
 export const PushDevices = component(() => {
     const defs = useActorDefs();
@@ -29,9 +34,10 @@ export const PushDevices = component(() => {
     const overview = useActorState(defs.Registry, () => (viewer.workspaceId ? ([registryKeyOf(viewer.workspaceId), 'overview'] as const) : null), { live: true });
     const subscriptions = useActorState(defs.Inbox, () => (viewer.workspaceId ? ([inboxKeyOf(viewer.workspaceId), 'subscriptions'] as const) : null), { live: true });
     // Client only: the server render knows nothing of this browser.
-    const st = signal<{ support: PushSupport | null; here: string | null; busy: boolean; error: string }>({ support: null, here: null, busy: false, error: '' });
+    const st = signal<{ support: PushSupport | null; here: string | null; busy: boolean; error: string; desktop: boolean }>({ support: null, here: null, busy: false, error: '', desktop: false });
     onMounted(() => {
         st.support = pushSupport();
+        st.desktop = desktopHost() !== null;
         void currentEndpoint().then((e) => { st.here = e; }, () => {});
     });
 
@@ -91,7 +97,9 @@ export const PushDevices = component(() => {
         const can = canGenerateKeys(o.hasKek);
         return (
             <div data-push-devices data-push-state={setup.state}>
-                {setup.state === 'absent'
+                {st.desktop
+                    ? <p data-panel-note data-push-desktop>This is the desktop app: it shows notifications itself while push is on for the workspace. Nothing to set up here.</p>
+                    : setup.state === 'absent'
                     ? <p data-panel-note>This deployment ships no push channel.</p>
                     : setup.state !== 'ready'
                         ? (

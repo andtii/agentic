@@ -3,8 +3,12 @@ fn main() {
     // (`allow-<command>`), so only the capabilities that name them can call
     // them. The local connect page gets them; the remote server gets none.
     tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["get_server", "set_server"])),
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+            "get_server",
+            "set_server",
+            "notify",
+            "set_badge",
+        ])),
     )
     .expect("failed to run tauri-build");
 }
