@@ -82,7 +82,7 @@ export const ProjectPicker = component<ProjectPickerProps>(({ props }) => {
         if (open) {
             st.query = '';
             st.active = 0;
-        }
+        } else projectPicker.open = false; // Escape or the backdrop: the switcher's state follows the dialog.
     };
     const onKeyDown = (e: KeyboardEvent): void => {
         const list = flat();
