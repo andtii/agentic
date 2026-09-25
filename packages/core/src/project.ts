@@ -229,7 +229,7 @@ export function projectFolderFor(project: Pick<ProjectRecord, 'folders'>, enviro
 
 /**
  * Where a project has folders, for a catalogue (#702): every machine named by a key, and every environment with a
- * folder of its own — an override, or a pre-#702 folder by environment id. Each once, in key order.
+ * folder of its own — an override, or a pre-#702 folder by environment id. Each once, in the order the record lists the keys (not sorted).
  */
 export function projectFolderPlaces(folders: ProjectRecord['folders']): { readonly machines: readonly MachineId[]; readonly environments: readonly EnvironmentId[] } {
     const machines = new Set<MachineId>();
