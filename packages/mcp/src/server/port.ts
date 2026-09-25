@@ -163,12 +163,14 @@ export interface ScheduleSummary {
     readonly next: number | null;
 }
 
-/** A project as an external client sees it (#334): the catalogue entry, with the environments it has a folder on. */
+/** A project as an external client sees it (#334): the catalogue entry, with the machines and environments it has folders on (#702). */
 export interface ProjectSummary {
     readonly id: ProjectId;
     readonly name: string;
     readonly description?: string;
-    /** The environments the project has a folder on (`Object.keys(ProjectRecord.folders)`). */
+    /** The machines the project has a folder on, shared or for one environment (#702). */
+    readonly machines: readonly MachineId[];
+    /** The environments with a folder of their own: an override on a machine, or a pre-#702 folder by environment id. */
     readonly environments: readonly EnvironmentId[];
 }
 

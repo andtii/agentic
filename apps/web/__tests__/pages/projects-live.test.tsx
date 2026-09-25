@@ -8,7 +8,7 @@
  * and edit through the Workspace.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { AgentId, EnvironmentDescriptor, EnvironmentId, HostOs, MachineId } from '@agentic/core';
+import { projectFolderKey, type AgentId, type EnvironmentDescriptor, type EnvironmentId, type HostOs, type MachineId } from '@agentic/core';
 import { DAEMON_PROTOCOL_VERSION } from '@agentic/daemon-protocol';
 import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
 import { AgentActor, Chat, Workspace, agentKey, machineKey, workspaceKey } from '@agentic/platform';
@@ -16,7 +16,7 @@ import { clientDefs } from '../../src/actors/client';
 import { chatKeyOf } from '../../src/actors/keys';
 import { topbarFor } from '../../src/components/topbar';
 import { chatHead } from '../../src/pages/chat/head';
-import { createChatWith } from '../../src/pages/chat/LiveChats';
+import { createChatWith, folderMachineFor } from '../../src/pages/chat/LiveChats';
 import { projectHead } from '../../src/pages/projects/head';
 import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
 import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
@@ -62,7 +62,7 @@ describe('projects on the live pages (#333)', () => {
         const { id: projectId } = await saveProjectWith(defs, USER, {
             name: 'agentic',
             members: { agentIds: [forge, lint], coordinator: forge },
-            folders: { [win.envId]: 'C:\\Dev\\agentic\\main', [mac.envId]: '/Users/me/dev/agentic' },
+            folders: { [projectFolderKey(win.machineId)]: 'C:\\Dev\\agentic\\main', [projectFolderKey(mac.machineId)]: '/Users/me/dev/agentic' },
             connectors: [],
             features: {}
         });
@@ -101,14 +101,14 @@ describe('projects on the live pages (#333)', () => {
         await until(() => chips()[0]?.hasAttribute('data-inherited') === true, 'the project folder back');
     });
 
-    it('/projects lists the project with a badge per environment; /projects/:id edits it and publishes the crumb', { timeout: 20_000 }, async () => {
+    it('/projects lists the project with a badge per machine; /projects/:id edits it and publishes the crumb', { timeout: 20_000 }, async () => {
         const win = await machineWith('laptop', 'windows', 'env_win', ['C:\\Dev']);
         const forge = await daemonAgent('Forge', win.envId);
         const defs = clientDefs();
-        const { id } = await saveProjectWith(defs, USER, { name: 'agentic', members: { agentIds: [forge], coordinator: null }, folders: { [win.envId]: 'C:\\Dev\\agentic\\main' } });
+        const { id } = await saveProjectWith(defs, USER, { name: 'agentic', members: { agentIds: [forge], coordinator: null }, folders: { [projectFolderKey(win.machineId)]: 'C:\\Dev\\agentic\\main' } });
         const list = await mountLive('/projects', h);
         await until(() => list.querySelectorAll('[data-project-row]').length === 1, 'the project row');
-        expect(texts(list.querySelectorAll('[data-project-row] .project-env'))).toEqual(['laptop / work']);
+        expect(texts(list.querySelectorAll('[data-project-row] .project-env'))).toEqual(['laptop']);
         expect(list.querySelectorAll('[data-project-row] [data-scope="avatar"][data-part="root"]').length).toBe(1);
 
         const edit = await mountLive(`/projects/${id}`, h);
@@ -116,10 +116,19 @@ describe('projects on the live pages (#333)', () => {
         await until(() => projectHead.value?.name === 'agentic', 'the crumb');
         expect(topbarFor({ name: 'project', path: `/projects/${id}`, params: { id } })?.crumb).toBe('agentic');
         const rows = [...edit.querySelectorAll<HTMLElement>('[data-project-folder]')];
-        expect(rows.map((r) => r.getAttribute('data-project-folder'))).toEqual([win.envId]);
+        expect(rows.map((r) => r.getAttribute('data-project-folder'))).toEqual([win.machineId]);
         expect(rows[0]!.querySelector('[data-scope="ag-workdir"][data-part="chip"]')!.textContent).toContain('agentic');
         // A refused save (a folder outside the roots) shows the actor's 400 inline and keeps the page.
-        await expect(saveProjectWith(defs, USER, { id: id as never, folders: { [win.envId]: 'D:\\elsewhere' } })).rejects.toThrow(/outside the roots/);
+        await expect(saveProjectWith(defs, USER, { id: id as never, folders: { [projectFolderKey(win.machineId)]: 'D:\\elsewhere' } })).rejects.toThrow(/outside the roots/);
         await tick();
+    });
+
+    it('a prefilled folder is saved on the chat\u2019s machine only when it reports the environment, else on the one that does (#702)', () => {
+        const hosted = (machineId: string, environmentId: string) => machineId === 'win' && environmentId === 'env_claude';
+        const machineOf = () => 'win';
+        expect(folderMachineFor('env_claude', 'win', machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', 'mac', machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', null, machineOf, hosted)).toBe('win');
+        expect(folderMachineFor('env_claude', null)).toBeUndefined();
     });
 });

@@ -32,7 +32,8 @@ export interface LocateState {
 
 export interface LocateBackend {
     readonly state: LocateState;
-    start(environmentId: EnvironmentId, origin: string): void;
+    /** `machineId` names where the environment is (#702: its id is only unique there); else the directory's first machine reporting it. */
+    start(environmentId: EnvironmentId, origin: string, machineId?: string): void;
     reset(): void;
 }
 
@@ -80,10 +81,10 @@ export function useLiveLocate(defs: Pick<ActorDefs, 'Machine'>, viewer: Pick<Vie
     });
     return {
         state,
-        start(environmentId, origin) {
+        start(environmentId, origin, machineId) {
             const mine = ++seq;
             const ws = viewer.workspaceId;
-            const machine = machineOf(environmentId);
+            const machine = machineId ?? machineOf(environmentId);
             clearTimer();
             Object.assign(req, { machine: '', id: '' });
             Object.assign(state, idle(), { environmentId, origin, status: 'loading' });

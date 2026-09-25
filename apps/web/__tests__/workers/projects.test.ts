@@ -4,7 +4,7 @@
  * (name included) on `Chat.get()`, the Workspace remembers it as the last
  * used, and a schedule in the project refuses an environment beside it.
  */
-import type { AgentId, ChatId, EnvironmentId, ProjectId, WorkspaceId } from '@agentic/core';
+import { projectFolderKey, type AgentId, type ChatId, type EnvironmentId, type MachineId, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { Chat, Workspace, workspaceKey } from '@agentic/platform';
 import { actor } from '@sigx/actors';
 import { configureActors, fetchTransport } from '@sigx/actors/client';
@@ -40,8 +40,9 @@ describe('worker: projects over the browser stubs', () => {
         const created = await workspace.upsertProject({ name: '  agentic  ', description: 'The platform', members: { agentIds: [agentId as AgentId], coordinator: agentId as AgentId }, connectors: [{ id: 'github' }] });
         expect(created).toMatchObject({ name: 'agentic', description: 'The platform', members: { agentIds: [agentId], coordinator: agentId }, folders: {}, connectors: [{ id: 'github' }], features: {} });
         expect((await workspace.projects()).map((p) => p.id)).toEqual([created.id]);
-        // A folder on an environment no machine reports is refused (a 400 the form shows inline).
-        await expect(workspace.upsertProject({ id: created.id, folders: { ['env_nowhere' as EnvironmentId]: 'C:\\x' } })).rejects.toThrow(/no machine/);
+        // A folder on a machine the workspace has not paired is refused (a 400 the form shows inline), and so is one keyed by a bare environment id (#702).
+        await expect(workspace.upsertProject({ id: created.id, folders: { [projectFolderKey('machine_nowhere' as MachineId)]: 'C:\\x' } })).rejects.toThrow(/not a paired machine/);
+        await expect(workspace.upsertProject({ id: created.id, folders: { ['env_nowhere' as EnvironmentId]: 'C:\\x' } })).rejects.toThrow(/key folders by machine/);
 
         const chatId = await createChatWith(defs, workspaceId, [agentId], agentId, created.id);
         const summary = await overHttp(Chat, chatKeyOf(workspaceId, chatId as ChatId), cookie).get();

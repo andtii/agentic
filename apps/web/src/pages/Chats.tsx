@@ -29,6 +29,7 @@ export const Chats = component(() => {
                 model={() => newChatRequest.open}
                 agents={AGENTS}
                 environments={mockWorkdirEnvironments.list()}
+                machines={mockWorkdirEnvironments.machines()}
                 projects={PROJECTS}
                 lastProjectId={LAST_PROJECT_ID}
                 {...(newChatRequest.prefill ? { prefill: newChatRequest.prefill } : {})}

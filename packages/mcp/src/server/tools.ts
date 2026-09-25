@@ -555,7 +555,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
         tool({
             name: 'projects_list',
             scope: 'projects',
-            description: 'List the workspace’s projects: id, name, description and the environments each one has a folder on. A chat is put in one with chats_set_project.',
+            description: 'List the workspace’s projects: id, name, description, the machines each one has a folder on and the environments with a folder of their own. A chat is put in one with chats_set_project.',
             input: z.object({}),
             annotations: READ,
             run: () => port.projects.list()

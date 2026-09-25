@@ -43,7 +43,7 @@
  * in `@agentic/runtimes`.
  */
 
-import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
+import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, projectFolderPlaces, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
 import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, ProjectSummary, TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
@@ -338,7 +338,7 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                 id: p.id,
                 name: p.name,
                 ...(p.description !== undefined ? { description: p.description } : {}),
-                environments: Object.entries(p.folders).flatMap(([environmentId, folder]) => (typeof folder === 'string' ? [environmentId as EnvironmentId] : []))
+                ...projectFolderPlaces(p.folders)
             }));
         },
         async current(chatId) {

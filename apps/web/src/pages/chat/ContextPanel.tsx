@@ -7,7 +7,8 @@ import { Field } from '@sigx/zero-daisyui/components';
 import { AgentTile, Button, ConfirmDialog, EnvironmentLine, FormDialog, Icon, Label, QuotaBadge, QuotaPanel, QuotaRings, StatusPill, WORKDIR_EMPTY, resetsShortText, ringWindows, workdirLabel, workdirPath, type WorkdirEnvironment } from '@agentic/ui';
 import { memberQuota } from './quota';
 import { DEFAULT_PERMISSION_MODE, modeChoices, modelChoices, type MemberChoice } from './member-options';
-import { effectiveWorkdir } from '../projects/model';
+import type { MachineEntry } from '../ops/environments';
+import { effectiveWorkdir, rootsOn } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
@@ -44,6 +45,8 @@ export type ContextPanelProps =
     & Define.Prop<'machineName', string>
     /** Whether a machine reports an environment (#414): a member's folder on another machine reads stale. */
     & Define.Prop<'hosted', (machineId: string, environmentId: string) => boolean>
+    /** The paired machines and their environments (#702): the roots a project's machine folder must be inside for a member there. */
+    & Define.Prop<'machines', readonly MachineEntry[]>
     /** The environment of an account on a machine (#414): where an account-bound member runs on the chat's machine, for its quota and its folder. */
     & Define.Prop<'accountEnvironment', (machineId: string, runtime: RuntimeId, ref: AccountRef) => string | undefined>
     /** A member's folder for this chat was picked, or cleared with `null`. */
@@ -135,6 +138,11 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
     return () => {
         const root = props.tasks.find((t) => !t.parentId);
         const lookup = props.lookup ?? agentNamed;
+        /** A member's folder (#702): the chat's machine, else the one reporting its environment, with that environment's roots there. */
+        const folderOf = (member: { readonly workdir?: WorkdirRef }, environmentId: string | undefined, machineId: string | undefined) => {
+            const on = machineId ?? (environmentId ? props.machineOf?.(environmentId) : undefined);
+            return effectiveWorkdir(member, environmentId, props.project, on, environmentId ? rootsOn(props.machines, on, environmentId) : undefined);
+        };
         const candidates = props.candidates ?? [];
         const picked = candidates.find((c) => c.id === st.pick) ?? candidates[0];
         // What a stop would reach: a settled task is listed in the tree, never in the dialog.
@@ -156,7 +164,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                             // A folder picked on another machine is stale there (#414): the activation leaves it aside, the project's folder or the first root applies.
                             const stale = !!(member.workdir && machineId && props.hosted && !props.hosted(machineId, member.workdir.environmentId));
                             // The folder it runs in: its override for this chat, else the project's for its environment (#333).
-                            const folder = effectiveWorkdir(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, props.project);
+                            const folder = folderOf(stale ? { ...member, workdir: undefined } : member, onMachine ?? a.environmentId, machineId);
                             const environments = props.environments;
                             const quota = environments ? memberQuota(a, folder.ref?.environmentId, environments, machineId ? { machineId, ...(props.machineName ? { machineName: props.machineName } : {}), accountEnvironment: (m, r, ref) => props.accountEnvironment?.(m, r, ref) } : undefined) : undefined;
                             // The model it runs here: its override for this chat, else its config's (#450).
@@ -318,7 +326,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                         model={() => st.picking}
                         title={st.pickFor ? `Working folder for ${lookup(st.pickFor).name}` : 'Working folder'}
                         // Opens on the folder in effect: the override, else the project's (#333).
-                        value={(() => { const m = props.chat.members.find((x) => x.agentId === st.pickFor); return m ? effectiveWorkdir(m, lookup(m.agentId).environmentId, props.project).ref : null; })()}
+                        value={(() => { const m = props.chat.members.find((x) => x.agentId === st.pickFor); return m ? folderOf(m, lookup(m.agentId).environmentId, props.chat.machineId).ref : null; })()}
                         environments={props.environments}
                         {...(props.machineOf ? { machineOf: props.machineOf } : {})}
                         // A daemon agent's identity names its default environment there (`identityOf`); anything else is ignored.

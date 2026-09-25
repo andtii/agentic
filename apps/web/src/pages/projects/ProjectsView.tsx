@@ -5,12 +5,12 @@ import { EmptyState, Tag } from '@agentic/ui';
 import { MemberTiles } from '../chat/ChatList';
 import type { AgentLookup } from '../chat/live';
 import { LinkButton } from '../ops/LinkButton';
-import { projectEnvironments } from './model';
+import { projectPlaces, type ProjectMachine } from './model';
 
 export type ProjectsViewProps =
     & Define.Prop<'projects', readonly ProjectRecord[], true>
-    /** The environments a folder can be on, for the badges' labels. */
-    & Define.Prop<'environments', readonly { readonly id: string; readonly label: string }[], true>
+    /** The paired machines and their environments, for the badges' labels (#702). */
+    & Define.Prop<'machines', readonly ProjectMachine[], true>
     & Define.Prop<'lookup', AgentLookup, true>
     /** Feature plugin id → its name; an unknown id shows as the id. */
     & Define.Prop<'featureName', (id: string) => string>
@@ -46,7 +46,7 @@ export const ProjectsView = component<ProjectsViewProps>(({ props }) => () => (
                                 </span>
                                 {p.description ? <span data-project-description>{p.description}</span> : null}
                                 <span data-project-badges>
-                                    {projectEnvironments(p, props.environments).map((e) => <Tag class="project-env" tone="live">{e.label}</Tag>)}
+                                    {projectPlaces(p, props.machines).map((e) => <Tag class="project-env" tone="live">{e.label}</Tag>)}
                                     {enabledProjectFeatures(p).map((id) => <Tag class="project-feature">{props.featureName?.(id) ?? id}</Tag>)}
                                     {!Object.keys(p.folders).length ? <span data-project-nofolder>No folder yet</span> : null}
                                 </span>

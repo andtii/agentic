@@ -14,7 +14,7 @@
  * every machine, reused by the next task, parked when the daemon cannot.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DAEMON_PROTOCOL_VERSION, actorKey, type AgentId, type ChatId, type DaemonFrame, type EnvironmentId, type FsError, type FsOp, type FsResult, type MachineId, type OfflinePolicy, type ProjectFeatureChatReleaseInput, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION, actorKey, type AgentId, type ChatId, type DaemonFrame, type EnvironmentId, projectFolderKey, type FsError, type FsOp, type FsResult, type MachineId, type OfflinePolicy, type ProjectFeatureChatReleaseInput, type Principal, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFeatureSessionInput, type ProjectId, type RuntimeId, type SessionId, type TaskContract, type TaskId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { mcpConnectorSetup } from '@agentic/mcp';
 import { GIT_FEATURE_ID, gitBranchFor, gitFeatureManifest, gitFeaturePlugin } from '@agentic/plugins-git';
@@ -157,6 +157,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+    reporter.clear();
     for (const d of daemons.splice(0)) d.stop();
     await app.stop();
 });
@@ -186,11 +187,18 @@ const LAPTOP: Reporting = [
     { id: E2, cwdRoots: ['/other'] }
 ];
 
+/** The first paired machine reporting each environment, for the project folders keyed by machine (#702). */
+const reporter = new Map<EnvironmentId, MachineId>();
+/** `folders` keyed by environment as the override on the first machine reporting it; a `null` for an environment no machine reports stays as is. */
+const onMachines = (folders: Partial<Record<EnvironmentId, string | null>>): Record<string, string | null> =>
+    Object.fromEntries(Object.entries(folders).map(([e, path]) => [reporter.has(e as EnvironmentId) ? projectFolderKey(reporter.get(e as EnvironmentId)!, e as EnvironmentId) : e, path!]));
+
 /** A paired machine reporting E1 (roots `/work`, `/scratch`) and E2 (root `/other`) unless told otherwise; `connect` dials its daemon. */
 async function pairMachine(reporting: Reporting = LAPTOP): Promise<{ machineId: MachineId; d: InMemoryDaemon; connect(): PlatformSeat }> {
     const { machineId, pairingCode } = await workspace().registerMachinePending({ name: 'laptop' });
     await machine(machineId).pair(pairingCode, { name: 'laptop' });
     const environments = reporting.map((e) => ({ ...inMemoryEnvironment(machineId, e.id), cwdRoots: [...e.cwdRoots] }));
+    for (const e of reporting) if (!reporter.has(e.id)) reporter.set(e.id, machineId);
     const d = inMemoryHarness({ machineId, environments }).start({ events: 2, heartbeatMs: 600_000 }) as InMemoryDaemon;
     daemons.push(d);
     const connect = (): PlatformSeat => {
@@ -240,7 +248,7 @@ async function openOf(machineId: MachineId, taskId: string): Promise<{ sent: { c
 async function project(extra: { connectors?: { id: string }[]; features?: Record<string, Record<string, unknown> | null>; folders?: Partial<Record<EnvironmentId, string | null>> } = {}): Promise<ProjectId> {
     const p = await workspace().upsertProject({
         name: 'Agentic',
-        folders: { [E1]: '/work/agentic', [E2]: '/other/agentic', ...extra.folders },
+        folders: onMachines({ [E1]: '/work/agentic', [E2]: '/other/agentic', ...extra.folders }),
         connectors: extra.connectors ?? [],
         features: extra.features ?? { [GIT]: { baseBranch: 'develop' } }
     });
@@ -295,6 +303,36 @@ describe('project folders (#332)', () => {
         expect(chosenFor('t2')!.summary).toMatch(/folder \/other \(the environment's first root\)/);
     });
 
+    it("one folder for the machine serves each environment whose roots hold it; the others fall through the chain (#702)", async () => {
+        const m1 = await onlineMachine();
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const { id: projectId } = await workspace().upsertProject({ name: 'Agentic', folders: { [projectFolderKey(m1)]: '/work/agentic' } });
+        await createTask('t1', a, { projectId, environmentId: E1 });
+        await createTask('t2', a, { projectId, environmentId: E2 });
+        await routing().run('t1' as TaskId);
+        await routing().run('t2' as TaskId);
+        await Promise.all([settled('t1'), settled('t2')]);
+        expect((await openOf(m1, 't1')).sent?.cwd).toBe('/work/agentic');
+        expect(chosenFor('t1')!.summary).toMatch(/folder \/work\/agentic \(the project's folder\)/);
+        // E2's roots (`/other`) do not hold the machine's folder: it is not inherited, and the task still runs.
+        expect((await task('t2').get()).status).toBe('completed');
+        expect((await openOf(m1, 't2')).sent?.cwd).toBe('/other');
+    });
+
+    it('the same environment id on two machines runs in each machine\'s own folder (#702)', async () => {
+        const mac = await onlineMachine([{ id: E1, cwdRoots: ['/Users/me/dev'] }]);
+        const win = await onlineMachine([{ id: E1, cwdRoots: ['/win/dev'] }]);
+        const a = await agent('agent_a', { runtime: 'in-memory', defaultEnvironmentId: E1 });
+        const { id: projectId } = await workspace().upsertProject({ name: 'Agentic', folders: { [projectFolderKey(mac)]: '/Users/me/dev/agentic', [projectFolderKey(win)]: '/win/dev/agentic' } });
+        await createTask('t1', a, { projectId, environmentId: E1, machineId: mac });
+        await createTask('t2', a, { projectId, environmentId: E1, machineId: win });
+        await routing().run('t1' as TaskId);
+        await routing().run('t2' as TaskId);
+        await Promise.all([settled('t1'), settled('t2')]);
+        expect((await openOf(mac, 't1')).sent?.cwd).toBe('/Users/me/dev/agentic');
+        expect((await openOf(win, 't2')).sent?.cwd).toBe('/win/dev/agentic');
+    });
+
     it("a delegated child inherits the parent's project and gets the project's folder on ITS environment", async () => {
         const m1 = await onlineMachine();
         const lead = await agent('agent_lead', { runtime: 'in-memory', defaultEnvironmentId: E1 });
@@ -309,7 +347,7 @@ describe('project folders (#332)', () => {
         expect((await openOf(m1, childId)).sent?.cwd).toBe('/other/agentic');
         expect(chosenFor(childId)!.summary).toMatch(/folder \/other\/agentic \(the project's folder\)/);
         // A child told its own project keeps that one.
-        const other = await workspace().upsertProject({ name: 'Other', folders: { [E2]: '/other/other' } });
+        const other = await workspace().upsertProject({ name: 'Other', folders: onMachines({ [E2]: '/other/other' }) });
         const c2 = await task('p1').delegate({ callId: 'call_2', objective: 'child', assignee: member, context: [], constraints: {}, projectId: other.id });
         expect((await task(c2).get()).projectId).toBe(other.id);
         await routing().run(c2);

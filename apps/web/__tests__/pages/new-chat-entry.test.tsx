@@ -37,7 +37,8 @@ describe('/chats/new (mock)', () => {
         expect(block.getAttribute('data-prefill-project')).toBe('p_agentic');
         const save = block.querySelector<HTMLInputElement>('input[name="chat-save-folder"]')!;
         expect(save.checked).toBe(true);
-        expect(text(block)).toBe(`Save ${path} as this project's folder on ${labelOf('env_nuclab_work')}`);
+        // Saved as the folder of the machine reporting the environment (#702).
+        expect(text(block)).toBe(`Save ${path} as this project's folder on nuc-lab`);
         expect(block.querySelector('[data-new-chat-prefill-choice]')).toBeNull();
     });
 
@@ -73,7 +74,8 @@ describe('/chats/new (mock)', () => {
         expect(page(dom, 'project')).not.toBeNull();
         expect(newChatRequest.open).toBe(false);
         expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('new-thing');
-        const row = dom.querySelector<HTMLElement>('[data-project-folder="env_alien01_work"]')!;
+        // The row of the machine reporting that environment (#702).
+        const row = dom.querySelector<HTMLElement>('[data-project-folder="alien01"]')!;
         expect(text(row.querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('new-thing');
         expect(text(row.querySelector('[data-project-folder-meta] [data-scope="badge"][data-part="root"]'))).toBe('repo');
     });

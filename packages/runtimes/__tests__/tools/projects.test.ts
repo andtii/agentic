@@ -6,8 +6,8 @@ import { fakePorts } from '../anthropic/helpers';
 
 const ctx = (id = 'call_1', signal = new AbortController().signal): ToolContext => ({ toolCallId: id, signal });
 
-const AGENTIC: ProjectSummary = { id: 'project_agentic' as ProjectId, name: 'Agentic', description: 'The agent platform', environments: ['env_laptop' as never] };
-const ZERO: ProjectSummary = { id: 'project_zero' as ProjectId, name: 'Zero', environments: [] };
+const AGENTIC: ProjectSummary = { id: 'project_agentic' as ProjectId, name: 'Agentic', description: 'The agent platform', machines: ['machine_laptop' as never], environments: ['env_laptop' as never] };
+const ZERO: ProjectSummary = { id: 'project_zero' as ProjectId, name: 'Zero', machines: [], environments: [] };
 
 /** A port over two projects and one chat whose project the test sets; every call is recorded with its `ToolCall`. */
 function fakeProjectPort(initial: ChatProject | null = null) {

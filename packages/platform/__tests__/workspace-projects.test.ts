@@ -7,7 +7,7 @@
  * `PROJECTS_MAX + 1`th project is refused; `createChat({ projectId })` puts the
  * chat in the project and notes it as the last used.
  */
-import { PROJECTS_MAX, actorKey, type EnvironmentId, type MachineId, type Principal, type ProjectFeatureManifest, type ProjectId, type WorkspaceId } from '@agentic/core';
+import { PROJECTS_MAX, actorKey, projectFolderFor, projectFolderKey, type EnvironmentId, type MachineId, type Principal, type ProjectFeatureManifest, type ProjectId, type WorkspaceId } from '@agentic/core';
 import { inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import { AuditActor, auditKey } from '../src/audit/index';
 import { workspaceKey } from '../src/auth/index';
@@ -84,14 +84,11 @@ const workspaceSaves = () => app.saves.filter((s) => s.type === 'Workspace');
 const stored = async () => (await app.storage.load('Workspace', KEY))!.state as WorkspaceState;
 const auditEvents = async () => (await app.as(owner).actor(AuditActor, auditKey(WS)).list({ kinds: ['project.changed'] })).events;
 
-/** A paired, online machine reporting E1 (roots `/work`, `/scratch`) and E2 (root `/other`). */
-async function onlineMachine(): Promise<MachineId> {
-    const { machineId, pairingCode } = await ws().registerMachinePending({ name: 'laptop' });
-    await machine(machineId).pair(pairingCode, { name: 'laptop' });
-    const environments = [
-        { ...inMemoryEnvironment(machineId, E1), cwdRoots: ['/work', '/scratch'] },
-        { ...inMemoryEnvironment(machineId, E2), cwdRoots: ['/other'] }
-    ];
+/** A paired, online machine reporting E1 (roots `/work`, `/scratch`) and E2 (root `/other`), or the roots given. */
+async function onlineMachine(name = 'laptop', roots: Partial<Record<EnvironmentId, string[]>> = { [E1]: ['/work', '/scratch'], [E2]: ['/other'] }): Promise<MachineId> {
+    const { machineId, pairingCode } = await ws().registerMachinePending({ name });
+    await machine(machineId).pair(pairingCode, { name });
+    const environments = Object.entries(roots).map(([id, cwdRoots]) => ({ ...inMemoryEnvironment(machineId, id as EnvironmentId), cwdRoots: cwdRoots! }));
     const d = inMemoryHarness({ machineId, environments }).start({ events: 2, heartbeatMs: 600_000 }) as InMemoryDaemon;
     daemons.push(d);
     const key = machineKey(WS, machineId);
@@ -165,24 +162,58 @@ describe('Workspace projects (#332)', () => {
         expect(await ws().projects()).toEqual([]);
     });
 
-    it('a folder must be inside the roots of an environment a paired machine reports; null removes one', async () => {
-        await onlineMachine();
+    it('a machine folder must be inside the roots of an environment on that machine; null removes one', async () => {
+        const m = await onlineMachine();
         const before = workspaceSaves().length;
-        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [E1]: '/elsewhere/app' } }))).toBe(400);
-        await expect(ws().upsertProject({ name: 'x', folders: { [E1]: '/work2/app' } })).rejects.toThrow(/outside the roots of environment env_1 \(\/work, \/scratch\)/);
-        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [E1]: 'work/app' } }))).toBe(400);
-        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [E1]: '  ' } }))).toBe(400);
-        // An environment no machine reports: never a folder nobody can run.
-        await expect(ws().upsertProject({ name: 'x', folders: { ['env_nope' as EnvironmentId]: '/work/app' } })).rejects.toThrow(/no machine of the workspace reports environment env_nope/);
+        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m)]: '/elsewhere/app' } }))).toBe(400);
+        await expect(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m)]: '/work2/app' } })).rejects.toThrow(/outside the roots of every environment on machine laptop \(\/work, \/scratch, \/other\)/);
+        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m)]: 'work/app' } }))).toBe(400);
+        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m)]: '  ' } }))).toBe(400);
+        // A machine that is not paired to the workspace, and a key of no known shape.
+        await expect(ws().upsertProject({ name: 'x', folders: { [projectFolderKey('machine_nope' as MachineId)]: '/work/app' } })).rejects.toThrow(/machine machine_nope is not a paired machine of the workspace/);
+        expect(await statusOf(ws().upsertProject({ name: 'x', folders: { 'a/b/c': '/work/app' } }))).toBe(400);
         expect(workspaceSaves()).toHaveLength(before);
 
-        const created = await ws().upsertProject({ name: 'Agentic', folders: { [E1]: ' /work/agentic ', [E2]: '/other/agentic' } });
-        expect(created.folders).toEqual({ [E1]: '/work/agentic', [E2]: '/other/agentic' });
-        const changed = await ws().upsertProject({ id: created.id, folders: { [E2]: null } });
-        expect(changed.folders).toEqual({ [E1]: '/work/agentic' });
+        // One folder for the machine serves every environment whose roots hold it (E1 here); E2 can have its own.
+        const created = await ws().upsertProject({ name: 'Agentic', folders: { [projectFolderKey(m)]: ' /work/agentic ', [projectFolderKey(m, E2)]: '/other/agentic' } });
+        expect(created.folders).toEqual({ [projectFolderKey(m)]: '/work/agentic', [projectFolderKey(m, E2)]: '/other/agentic' });
+        const changed = await ws().upsertProject({ id: created.id, folders: { [projectFolderKey(m, E2)]: null } });
+        expect(changed.folders).toEqual({ [projectFolderKey(m)]: '/work/agentic' });
         // A bad folder in a patch refuses the whole patch: the kept folder stands.
-        expect(await statusOf(ws().upsertProject({ id: created.id, name: 'renamed', folders: { [E1]: '/nowhere' } }))).toBe(400);
-        expect((await ws().projects())[0]).toMatchObject({ name: 'Agentic', folders: { [E1]: '/work/agentic' } });
+        expect(await statusOf(ws().upsertProject({ id: created.id, name: 'renamed', folders: { [projectFolderKey(m)]: '/nowhere' } }))).toBe(400);
+        expect((await ws().projects())[0]).toMatchObject({ name: 'Agentic', folders: { [projectFolderKey(m)]: '/work/agentic' } });
+    });
+
+    it('an environment override must be inside that environment\'s roots on that machine', async () => {
+        const m = await onlineMachine();
+        await expect(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m, E2)]: '/work/app' } })).rejects.toThrow(/outside the roots of environment env_2 on machine laptop \(\/other\)/);
+        await expect(ws().upsertProject({ name: 'x', folders: { [projectFolderKey(m, 'env_nope' as EnvironmentId)]: '/work/app' } })).rejects.toThrow(/machine laptop reports no environment env_nope/);
+    });
+
+    it('the same environment id on two machines keeps a folder per machine (#702)', async () => {
+        // The daemon names environments `env_<slug>`, so a Mac and a Windows box both carry E1 with their own roots.
+        const mac = await onlineMachine('mac', { [E1]: ['/Users/me/dev'] });
+        const win = await onlineMachine('win', { [E1]: ['/win/dev'] });
+        const created = await ws().upsertProject({ name: 'Agentic', folders: { [projectFolderKey(mac)]: '/Users/me/dev/agentic', [projectFolderKey(win)]: '/win/dev/agentic' } });
+        expect(projectFolderFor(created, E1, mac)).toBe('/Users/me/dev/agentic');
+        expect(projectFolderFor(created, E1, win)).toBe('/win/dev/agentic');
+    });
+
+    it('a pre-#702 folder keyed by a bare environment id is kept, removable, and never written again', async () => {
+        const created = await ws().upsertProject({ name: 'Agentic' });
+        const record = (await app.storage.load('Workspace', KEY))!;
+        const state = record.state as WorkspaceState;
+        const legacy = { ...state, projects: (state.projects ?? []).map((p) => (p.id === created.id ? { ...p, folders: { [E1]: '/work/old' } } : p)) };
+        const storage = app.storage;
+        await app.stop();
+        await storage.save('Workspace', KEY, legacy, record.etag);
+        app = testActorApp([Workspace, PairingDirectory, Chat, ChatPage, Machine, Registry, AuditActor], { storage });
+        await app.start();
+        const m = await onlineMachine();
+        expect((await ws().projects())[0]!.folders).toEqual({ [E1]: '/work/old' });
+        await expect(ws().upsertProject({ id: created.id, folders: { [E2]: '/other/agentic' } })).rejects.toThrow(/key folders by machine/);
+        const moved = await ws().upsertProject({ id: created.id, folders: { [E1]: null, [projectFolderKey(m)]: '/work/agentic' } });
+        expect(moved.folders).toEqual({ [projectFolderKey(m)]: '/work/agentic' });
     });
 
     it('feature settings are checked by the Registry; null removes the feature', async () => {

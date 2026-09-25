@@ -9,6 +9,7 @@
  * shape. Nothing here is a contract beyond `@agentic/core`'s types.
  */
 import type { AccountRef, AuthStatus, CapabilityReport, EnvironmentId, MachineId, ProjectId, ProjectRecord, SessionId, SessionOptions, TaskError, TaskId, TaskStatus, WaitReason, WorkdirRef } from '@agentic/core';
+import { projectFolderKey } from '@agentic/core';
 import { createTranscript } from '@sigx/ai-agent';
 import type { AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import type { AgentHue, ApprovalContext, EnvironmentParts, MessageAuthor, Recipient } from '@agentic/ui';
@@ -250,7 +251,8 @@ export const PROJECTS: readonly ProjectRecord[] = [
         name: 'agentic',
         description: 'The Unified Agent Platform monorepo.',
         members: { agentIds: ['forge', 'lint', 'atlas'] as never[], coordinator: 'atlas' as never },
-        folders: { [eid('env_alien01_work')]: 'C:\\Dev\\agentic\\main', [eid('env_alien01_personal')]: 'C:\\Users\\andy\\src\\agentic' },
+        // The machine's folder, and another checkout for one environment on it (#702).
+        folders: { [projectFolderKey('alien01' as MachineId)]: 'C:\\Dev\\agentic\\main', [projectFolderKey('alien01' as MachineId, eid('env_alien01_personal'))]: 'C:\\Users\\andy\\src\\agentic' },
         connectors: [{ id: 'github-mcp' }],
         features: { 'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktreePerChat: true, instructions: 'Branch first; never work on main.' } },
         createdAt: hoursAgo(72),
@@ -260,7 +262,7 @@ export const PROJECTS: readonly ProjectRecord[] = [
         id: pid('p_docs'),
         name: 'docs-site',
         members: { agentIds: ['scout'] as never[], coordinator: null },
-        folders: { [eid('env_alien01_personal')]: 'C:\\Users\\andy\\src\\blog' },
+        folders: { [projectFolderKey('alien01' as MachineId, eid('env_alien01_personal'))]: 'C:\\Users\\andy\\src\\blog' },
         connectors: [],
         features: {},
         createdAt: hoursAgo(48),

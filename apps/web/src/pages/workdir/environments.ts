@@ -9,11 +9,14 @@ import type { WorkdirEnvironment } from '@agentic/ui';
 import type { ActorDefs, ViewerState } from '../../actors/defs';
 import { opsEnvironments, opsMachine, opsMachines, opsQuota } from '../../mock/ops';
 import { useEnvironmentDirectory, type EnvironmentEntry, type MachineEntry } from '../ops/environments';
-import { workdirEnvironmentsOf } from './model';
+import type { ProjectMachine } from '../projects/model';
+import { workdirEnvironmentOf, workdirEnvironmentsOf } from './model';
 
 export interface WorkdirEnvironments {
     list(): WorkdirEnvironment[];
     machineOf(environmentId: string): string | undefined;
+    /** Every machine with the environments it reports (#702: an environment id is only unique on its machine) — the project folder rows. */
+    projectMachines(): ProjectMachine[];
     /** The paired machines and what they report (#414): the New chat picker's choices. */
     machines(): MachineEntry[];
     /** The accounts across them (#414). */
@@ -27,11 +30,23 @@ export interface WorkdirEnvironments {
     readonly loading: boolean;
 }
 
+/** Directory entries grouped by machine, in the directory's order. */
+export function projectMachinesOf(entries: readonly EnvironmentEntry[]): ProjectMachine[] {
+    const out = new Map<string, { id: string; name: string; environments: WorkdirEnvironment[] }>();
+    for (const e of entries) {
+        const m = out.get(e.machineId) ?? { id: e.machineId, name: e.machineName, environments: [] };
+        m.environments.push(workdirEnvironmentOf(e));
+        out.set(e.machineId, m);
+    }
+    return [...out.values()];
+}
+
 export function useLiveWorkdirEnvironments(defs: Pick<ActorDefs, 'Workspace' | 'Machine'>, viewer: Pick<ViewerState, 'workspaceId'>): WorkdirEnvironments {
     const directory = useEnvironmentDirectory(defs, viewer);
     return {
         list: () => workdirEnvironmentsOf(directory.all()),
         machineOf: (id) => directory.lookup(id)?.machineId,
+        projectMachines: () => projectMachinesOf(directory.all()),
         machines: () => directory.machines(),
         accounts: () => directory.accounts(),
         hosted: (machineId, id) => directory.hosted(machineId, id),
@@ -64,6 +79,7 @@ const mockMachines: readonly MachineEntry[] = opsMachines.map((m) => ({ id: m.id
 export const mockWorkdirEnvironments: WorkdirEnvironments = {
     list: () => workdirEnvironmentsOf(mockEntries),
     machineOf: (id) => mockEntries.find((e) => e.id === id)?.machineId,
+    projectMachines: () => projectMachinesOf(mockEntries),
     machines: () => [...mockMachines],
     accounts: () => accountDirectory(mockMachines.map((m) => ({ machineId: m.id as never, environments: m.environments }))),
     hosted: (machineId, id) => mockEntries.some((e) => e.machineId === machineId && e.id === id),

@@ -270,10 +270,10 @@ function noticeFor(settings: Readonly<Record<string, unknown>>, path: string, br
  * daemon's message (EXE-12). The agent is told it is already isolated (`worktreeNotice`), so a repo guide that says
  * "create a worktree first" does not make it leave the folder the user watches.
  */
-async function beforeSession({ settings, project, chatId, environmentId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
+async function beforeSession({ settings, project, chatId, environmentId, machineId, cwd, fs }: ProjectFeatureSessionInput): Promise<ProjectFeatureSessionEffect | undefined> {
     if (settings['worktreePerChat'] !== true || !chatId) return undefined;
     if (settings['reuseExisting'] !== false) {
-        const own = projectFolderFor(project, environmentId);
+        const own = projectFolderFor(project, environmentId, machineId);
         const os = hostOsOfPath(cwd);
         const key = (p: string) => (os === 'windows' ? normalizePath(p, os)?.toLowerCase() : normalizePath(p, os));
         if (own === undefined || key(own) !== key(cwd)) {

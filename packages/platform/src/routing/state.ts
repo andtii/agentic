@@ -59,7 +59,7 @@ export interface Route {
     cwd?: string;
     /** The project the task belongs to (#332), from its contract; the record is read from the Workspace at `run` and at every placement. */
     readonly projectId?: ProjectId;
-    /** `projectFolderFor(project, environmentId)` as resolved at `run` (EXE-12): the project's folder on this environment, when it has one. */
+    /** `projectFolderFor(project, environmentId, machineId)` as resolved at `run` (EXE-12, #702): the project's folder on this environment, when it has one. */
     readonly projectFolder?: string;
     readonly policy: OfflinePolicy;
     /** The configuration the session runs with (AGT-06/07), taken once at `run`. */

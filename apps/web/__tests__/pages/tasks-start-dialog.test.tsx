@@ -15,6 +15,7 @@ import { mountAt, setText, text, tick } from './helpers';
 const atlas: AgentIdentity = { id: 'atlas', name: 'Atlas', role: 'Assistant', hue: 1, environment: { machine: 'platform', runtime: 'anthropic-api', account: 'byo-key' }, configVersion: 1 };
 
 const workdirs: WorkdirEnvironments = {
+    projectMachines: () => [],
     list: () => [],
     machineOf: () => undefined,
     machines: () => [],

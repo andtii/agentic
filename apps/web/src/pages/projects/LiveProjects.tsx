@@ -43,7 +43,7 @@ export const LiveProjects = component(() => {
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return signedOut
             ? <Page title="Projects" page="projects"><EmptyState variant="generic" title="Sign in to see your projects" caption="Projects belong to your workspace." /></Page>
-            : <ProjectsView projects={projects.list()} environments={workdirs.list()} lookup={directory.lookup} featureName={featureName} loading={projects.loading} />;
+            : <ProjectsView projects={projects.list()} machines={workdirs.projectMachines()} lookup={directory.lookup} featureName={featureName} loading={projects.loading} />;
     };
 });
 
@@ -118,7 +118,7 @@ export const LiveProject = component<{ id?: string; initial?: Partial<ProjectDra
                         {...(props.initial ? { initial: props.initial } : {})}
                         agents={directory.all()}
                         environments={workdirs.list()}
-                        machineOf={workdirs.machineOf}
+                        machines={workdirs.projectMachines()}
                         connectors={connectorOptionsOf(plugins)}
                         features={featureManifestsOf(plugins)}
                         locate={locate}

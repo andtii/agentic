@@ -11,7 +11,7 @@ import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { useRoute, useRouter } from '@sigx/router';
 import type { ChatSummary, IndexedEntry } from '@agentic/platform';
-import { projectFolderFor, type AgentId, type EnvironmentId, type MachineId, type ProjectId, type ProjectRecord } from '@agentic/core';
+import { projectFolderFor, projectFolderKey, type AgentId, type EnvironmentId, type MachineId, type ProjectId, type ProjectRecord } from '@agentic/core';
 import { EmptyState, ErrorNote } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
@@ -155,18 +155,29 @@ export async function createChatWith(defs: ActorDefs, ws: string, agentIds: read
 }
 
 /**
+ * The machine a prefilled folder is on (#702), where it is saved as the project's folder: the chat's machine when it
+ * reports the environment — as the New chat dialog says — else the one that does.
+ */
+export function folderMachineFor(environmentId: string, chatMachineId: string | null | undefined, machineOf?: (environmentId: string) => string | undefined, hosted?: (machineId: string, environmentId: string) => boolean): string | undefined {
+    if (chatMachineId && (!hosted || hosted(chatMachineId, environmentId))) return chatMachineId;
+    return machineOf?.(environmentId);
+}
+
+/**
  * `createChatWith` from a prefilled opening (#336): a folder to save on the project goes through
  * `Workspace.upsertProject` first, so the chat inherits it; otherwise the folder is set on every picked member
  * that runs in that environment (`Chat.setWorkdir`, as "Start task" does for one agent) — where it runs on the
  * chat's machine (#414: its account's environment there, else its pinned one) — unless the project's folder
  * there is already this one.
  */
-export async function createChatFrom(defs: ActorDefs, ws: string, input: NewChatCreate, environmentOf: (agentId: string, machineId: string | null) => string | undefined, project?: Pick<ProjectRecord, 'folders'>): Promise<string> {
+export async function createChatFrom(defs: ActorDefs, ws: string, input: NewChatCreate, environmentOf: (agentId: string, machineId: string | null) => string | undefined, project?: Pick<ProjectRecord, 'folders'>, machineOf?: (environmentId: string) => string | undefined, hosted?: (machineId: string, environmentId: string) => boolean): Promise<string> {
     const { workdir } = input;
     const environmentId = workdir?.environmentId as EnvironmentId;
-    if (workdir?.saveToProject && input.projectId) await actor(defs.Workspace, workspaceKeyOf(ws)).upsertProject({ id: input.projectId as ProjectId, folders: { [environmentId]: workdir.path } });
+    const machineId = workdir ? (folderMachineFor(workdir.environmentId, input.machineId, machineOf, hosted) as MachineId | undefined) : undefined;
+    const save = !!(workdir?.saveToProject && input.projectId && machineId);
+    if (save) await actor(defs.Workspace, workspaceKeyOf(ws)).upsertProject({ id: input.projectId as ProjectId, folders: { [projectFolderKey(machineId!)]: workdir!.path } });
     const chatId = await createChatWith(defs, ws, input.agentIds, input.coordinator, input.projectId, input.machineId, input.permissionMode);
-    if (workdir && !workdir.saveToProject && !(project && projectFolderFor(project, environmentId) === workdir.path)) {
+    if (workdir && !save && !(project && projectFolderFor(project, environmentId, machineId) === workdir.path)) {
         const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
         for (const id of input.agentIds) if (environmentOf(id, input.machineId) === workdir.environmentId) await chat.setWorkdir(id as AgentId, { environmentId, path: workdir.path });
     }
@@ -200,7 +211,7 @@ export const LiveChats = component(() => {
         if (!ws) return;
         st.busy = true;
         try {
-            const chatId = await createChatFrom(defs, ws, input, memberEnvironmentFor(directory.lookup, workdirs), projects.byId(input.projectId));
+            const chatId = await createChatFrom(defs, ws, input, memberEnvironmentFor(directory.lookup, workdirs), projects.byId(input.projectId), workdirs.machineOf, workdirs.hosted);
             // From the deep link (#336) the URL is replaced, so back never reopens it; the entry closes the dialog as it leaves.
             if (route.name === 'chat-new') await router.replace(`/chats/${chatId}`);
             else {

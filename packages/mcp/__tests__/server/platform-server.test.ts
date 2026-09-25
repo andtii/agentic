@@ -179,7 +179,7 @@ function fakePlatform() {
         },
         schedules: { create: async (input) => ({ scheduleId: 'sch_1' as never, title: input.title, kind: input.kind, enabled: true, next: null }) },
         projects: {
-            list: async () => [{ id: 'project_agentic' as ProjectId, name: 'Agentic', description: 'The agent platform', environments: [ENV.id] }],
+            list: async () => [{ id: 'project_agentic' as ProjectId, name: 'Agentic', description: 'The agent platform', machines: ['m_laptop' as never], environments: [ENV.id] }],
             setChatProject: async (chatId, projectId) => {
                 if (projectId !== null && projectId !== 'project_agentic') throw new Error(`Chat.setProject: no project ${projectId} in this workspace`);
                 projectSets.push({ chatId, projectId, principal });
@@ -507,7 +507,7 @@ describe('platform MCP server: projects (#334)', () => {
         const { client } = await connect(s, ['projects', 'chats']);
         const listed = await client.callTool({ name: 'projects_list', arguments: {} });
         expect(listed.isError).toBeFalsy();
-        expect(JSON.parse((listed.content as { text: string }[])[0]!.text)).toEqual([{ id: 'project_agentic', name: 'Agentic', description: 'The agent platform', environments: ['env_laptop'] }]);
+        expect(JSON.parse((listed.content as { text: string }[])[0]!.text)).toEqual([{ id: 'project_agentic', name: 'Agentic', description: 'The agent platform', machines: ['m_laptop'], environments: ['env_laptop'] }]);
 
         const set = await client.callTool({ name: 'chats_set_project', arguments: { chatId: 'chat_1', projectId: 'project_agentic' } });
         expect(set.isError).toBeFalsy();

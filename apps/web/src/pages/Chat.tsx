@@ -166,11 +166,11 @@ export const Chat = component(() => {
                         />
                     </div>
                 </section>
-                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} project={project} onSetWorkdir={setWorkdir} />
+                <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} machines={mockWorkdirEnvironments.machines()} project={project} onSetWorkdir={setWorkdir} />
                 <Drawer.Root model={() => contextDrawer.open} placement="end" label="Members and tasks" onOpenChange={(open: boolean) => { if (!open) closeContextDrawer(); }}>
                     <Drawer.Panel>
                         <div data-context-drawer>
-                            <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} project={project} onSetWorkdir={setWorkdir} />
+                            <ContextPanel chat={v.chat} tasks={v.tasks} environments={mockWorkdirEnvironments.list()} machines={mockWorkdirEnvironments.machines()} project={project} onSetWorkdir={setWorkdir} />
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
