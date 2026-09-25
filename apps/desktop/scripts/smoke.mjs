@@ -36,6 +36,8 @@ async function waitFor(check, what, ms = 30000) {
 }
 
 const ELEMENT = 'element-6066-11e4-a52e-4f735466cecc';
+/** An element reference's id: the W3C key, or the legacy `ELEMENT` some drivers (WebKitWebDriver) still answer with. */
+const idOf = (el) => el?.[ELEMENT] ?? el?.ELEMENT ?? Object.values(el ?? {})[0];
 
 await waitFor(() => fetch(`${DRIVER}/status`).then((r) => r.ok), 'tauri-driver');
 const session = await wd('POST', '/session', { capabilities: { alwaysMatch: { 'tauri:options': { application: app } } } });
@@ -43,16 +45,16 @@ const id = session.sessionId;
 const s = (path) => `/session/${id}${path}`;
 try {
     const form = await waitFor(() => wd('POST', s('/element'), { using: 'css selector', value: '#setup' }), 'the connect page');
-    await waitFor(() => wd('GET', s(`/element/${form[ELEMENT]}/displayed`)), 'the server form to show');
+    await waitFor(() => wd('GET', s(`/element/${idOf(form)}/displayed`)), 'the server form to show');
     console.log('connect page: server form shown');
 
     const input = await wd('POST', s('/element'), { using: 'css selector', value: '#url' });
-    await wd('POST', s(`/element/${input[ELEMENT]}/value`), { text: 'http://agentic.example' });
+    await wd('POST', s(`/element/${idOf(input)}/value`), { text: 'http://agentic.example' });
     const submit = await wd('POST', s('/element'), { using: 'css selector', value: '#setup button[type=submit]' });
-    await wd('POST', s(`/element/${submit[ELEMENT]}/click`), {});
+    await wd('POST', s(`/element/${idOf(submit)}/click`), {});
     const error = await waitFor(async () => {
         const el = await wd('POST', s('/element'), { using: 'css selector', value: '#error' });
-        const text = await wd('GET', s(`/element/${el[ELEMENT]}/text`));
+        const text = await wd('GET', s(`/element/${idOf(el)}/text`));
         return text || null;
     }, 'the address error');
     if (!/https/.test(error)) throw new Error(`unexpected error text: ${error}`);
