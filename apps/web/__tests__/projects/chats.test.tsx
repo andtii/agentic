@@ -4,12 +4,15 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { Chat, Workspace, workspaceKey } from '@agentic/platform';
-import type { ProjectRecord } from '@agentic/core';
+import type { AgentId, ChatId, ProjectRecord, TaskId } from '@agentic/core';
+import type { TaskIndexRow } from '@agentic/platform';
+import { chatTasks, workingAgents } from '../../src/pages/chat/live';
 import { clientDefs } from '../../src/actors/client';
 import { chatKeyOf } from '../../src/actors/keys';
 import { projectHead } from '../../src/pages/projects/head';
 import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
 import { taskChips } from '../../src/pages/projects/chats/ProjectChats';
+import { chatTaskSummaries, summaryOf } from '../../src/pages/projects/chats/tasks';
 import { chatDefaults, chatGroupOf, defaultsTail, groupChats, matchesSearch, suggestedProject, unassignedChats, type ProjectChatRow } from '../../src/pages/projects/chats/groups';
 import { mountRoute, tick } from '../pages/mount';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from '../pages/live-harness';
@@ -66,6 +69,44 @@ describe('the chat groups (#731)', () => {
     it('a chat’s root tasks are chips, or their count past two', () => {
         expect(taskChips(['t1', 't2'])).toEqual([{ kind: 'task', id: 't1' }, { kind: 'task', id: 't2' }]);
         expect(taskChips(['t1', 't2', 't3', 't4'])).toEqual([{ kind: 'tasks', count: 4 }]);
+    });
+});
+
+const task = (id: string, extra: Partial<TaskIndexRow> = {}): TaskIndexRow => ({
+    id: id as TaskId, objective: `do ${id}`, assignee: 'a1' as AgentId, owner: 'a1' as AgentId, status: 'active', origin: 'user', depth: 0, createdAt: 1000, updatedAt: 1000, n: 1, ...extra
+});
+
+describe('chat task summaries in one pass (#804)', () => {
+    const rows: TaskIndexRow[] = [
+        task('c1-old', { chatId: 'c1' as ChatId, status: 'completed', createdAt: 1 }),
+        task('c1-old-kid', { parentId: 'c1-old' as TaskId, depth: 1, status: 'active', assignee: 'a2' as AgentId, createdAt: 2 }),
+        task('c1-new', { chatId: 'c1' as ChatId, status: 'completed', createdAt: 5 }),
+        task('c1-newest', { chatId: 'c1' as ChatId, status: 'failed', createdAt: 9 }),
+        task('c2-root', { chatId: 'c2' as ChatId, status: 'waiting', wait: { kind: 'input', requestId: 'r1' }, createdAt: 3 }),
+        task('c3-root', { chatId: 'c3' as ChatId, status: 'completed', createdAt: 4 }),
+        task('c3-kid', { parentId: 'c3-root' as TaskId, depth: 1, status: 'completed', createdAt: 5 }),
+        task('c3-grandkid', { parentId: 'c3-kid' as TaskId, depth: 2, status: 'waiting', wait: { kind: 'child', childTaskIds: [] }, createdAt: 6 }),
+        task('orphan', { parentId: 'gone' as TaskId, depth: 1, status: 'active', createdAt: 7 }),
+        task('loop-a', { parentId: 'loop-b' as TaskId, depth: 1, createdAt: 8 }),
+        task('loop-b', { parentId: 'loop-a' as TaskId, depth: 1, createdAt: 8 })
+    ];
+
+    it('gives each chat the roots and working flag the per-chat reads give', () => {
+        const summaries = chatTaskSummaries(rows);
+        for (const chatId of ['c1', 'c2', 'c3', 'c4']) {
+            const s = summaryOf(summaries, chatId);
+            expect(s.roots).toEqual(chatTasks(rows, chatId, Number.POSITIVE_INFINITY).filter((t) => t.depth === 0).map((t) => t.id));
+            expect(s.working).toBe(workingAgents(rows, chatId).size > 0);
+        }
+    });
+
+    it('orders a still-running chain first, then newest, and reads a delegated child as work', () => {
+        const summaries = chatTaskSummaries(rows);
+        expect(summaryOf(summaries, 'c1')).toEqual({ roots: ['c1-old', 'c1-newest', 'c1-new'], working: true });
+        expect(summaryOf(summaries, 'c2')).toEqual({ roots: ['c2-root'], working: false });
+        expect(summaryOf(summaries, 'c3')).toEqual({ roots: ['c3-root'], working: true });
+        expect(summaryOf(summaries, 'none')).toEqual({ roots: [], working: false });
+        expect(chatTaskSummaries([]).size).toBe(0);
     });
 });
 
