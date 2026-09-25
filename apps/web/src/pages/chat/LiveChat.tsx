@@ -58,7 +58,7 @@ import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTit
 import { LiveChatList, createChatWith } from './LiveChats';
 import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
-import { NewChatDialog } from './NewChatDialog';
+import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
 import { markSeen } from './read-marks';
 import { useProjects } from '../projects/live';
 import { useLiveWorkdirEnvironments } from '../workdir/environments';
@@ -417,11 +417,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         closeChatSettings();
     });
 
-    const createChat = async (agentIds: readonly string[], coordinator: string | null, projectId: string | null, machineId: string | null): Promise<void> => {
+    const createChat = async (agentIds: readonly string[], coordinator: string | null, projectId: string | null, machineId: string | null, permissionMode?: NewChatCreate['permissionMode']): Promise<void> => {
         const ws = viewer.workspaceId;
         if (!ws) return;
         try {
-            const chatId = await createChatWith(defs, ws, agentIds, coordinator, projectId, machineId);
+            const chatId = await createChatWith(defs, ws, agentIds, coordinator, projectId, machineId, permissionMode);
             closeNewChat();
             await router.push(`/chats/${chatId}`);
         } catch (e) {
@@ -547,7 +547,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                     </Drawer.Panel>
                 </Drawer.Root>
                 {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} machineId={s.machineId ?? ''} machines={workdirs.machines()} busy={st.saving} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
-                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} machines={workdirs.machines()} lastMachineId={workdirs.lastMachineId()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId, e.machineId); }} />
+                <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} machines={workdirs.machines()} lastMachineId={workdirs.lastMachineId()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId, e.machineId, e.permissionMode); }} />
             </Page>
         );
     };

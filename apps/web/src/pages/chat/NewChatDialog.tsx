@@ -1,10 +1,13 @@
 import { component, signal, watch, type Define } from 'sigx';
-import { accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
+import { BYPASS_PERMISSIONS_MODE, accountRefOf, environmentsForAccount, type AccountRef, type ProjectRecord } from '@agentic/core';
 import { RadioGroup } from '@sigx/zero';
+import { derivedModel } from '@sigx/zero/behaviors';
+import { Link } from '@sigx/router';
 import { Checkbox, Field } from '@sigx/zero-daisyui/components';
 import { ErrorNote, FormDialog, SelectField, type WorkdirEnvironment } from '@agentic/ui';
 import type { AgentIdentity } from './live';
 import { MemberPicker } from './MemberPicker';
+import { DEFAULT_PERMISSION_MODE, modeChoices } from './member-options';
 import { projectForOrigin, type NewChatPrefill } from './new-chat-prefill';
 import type { MachineEntry } from '../ops/environments';
 
@@ -27,6 +30,8 @@ export interface NewChatCreate {
     readonly machineId: string | null;
     /** Only from a prefilled opening. */
     readonly workdir?: NewChatWorkdir;
+    /** The permission mode the chat's Claude Code members start in (#698); absent for the runtime's `default`. */
+    readonly permissionMode?: { readonly mode: string; readonly agentIds: readonly string[] };
 }
 
 /** The account a member runs as (#414): its own, else the login of its pinned environment as the machines report it; `undefined` for a platform runtime or an unassigned agent. */
@@ -58,6 +63,19 @@ export function openingMachine(machines: readonly MachineEntry[], lastMachineId:
     }
     if (lastMachineId && machines.some((m) => m.id === lastMachineId)) return lastMachineId;
     return machineChoices(machines)[0]?.id ?? '';
+}
+
+/**
+ * Who a New chat's permission mode applies to on `machine` (#698): the picked members on Claude Code. `bypassPermissions`
+ * is offered only when each of them has an environment there that allows it — and is then the default.
+ */
+export function permissionScope(picked: readonly Pick<AgentIdentity, 'id' | 'environment' | 'environmentId' | 'account'>[], machine: MachineEntry | undefined, machines: readonly MachineEntry[]): { agentIds: string[]; bypassAllowed: boolean } {
+    const members = picked.filter((a) => a.environment.runtime === 'claude-code');
+    const bypassAllowed = !!machine && members.length > 0 && members.every((a) => {
+        const id = memberEnvironmentOn(a, machine, machines);
+        return machine.environments.some((e) => e.id === id && e.allowBypassPermissions === true);
+    });
+    return { agentIds: members.map((a) => a.id), bypassAllowed };
 }
 
 /** "This folder is not in a project yet" (#336): the chat alone, or a project made from the folder. */
@@ -106,6 +124,10 @@ export type NewChatDialogProps =
  * save this one. With no such project the folder is not in a project yet:
  * "Just this chat" (the default) runs the chat's members there, "Create
  * project from this folder" hands the folder to the project form.
+ *
+ * With Claude Code members on a machine (#698) a "Permissions" choice says the mode they start in:
+ * `bypassPermissions` (`--dangerously-skip-permissions`) by default where every one of them may run it there,
+ * else the runtime's `default`, with a line naming the machine page where bypass is allowed.
  */
 export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => {
     const projectOf = (id: string): NewChatProject | undefined => props.projects?.find((p) => p.id === id);
@@ -127,7 +149,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
     const machinesOf = (): readonly MachineEntry[] => props.machines ?? [];
     // Mounted open (the tests): already on the opening project and its roster.
     const first = props.model?.value === true ? openingProject() : '';
-    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project', machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
+    const st = signal({ ...rosterOf(first), attempted: false, project: first, saveFolder: true, mode: 'chat' as 'chat' | 'project', permission: '', machine: props.model?.value === true ? openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId) : '' });
     const toggle = (id: string, on: boolean): void => {
         st.picked = on ? [...new Set([...st.picked, id])] : st.picked.filter((p) => p !== id);
         if (!on && st.coordinator === id) st.coordinator = '';
@@ -162,6 +184,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
             if (!prev) {
                 st.saveFolder = true;
                 st.mode = 'chat';
+                st.permission = '';
             }
             // The machine (#414): the opening one until a person picks another; a pick that the machines no longer list restarts.
             if (!prev || !st.machine || !machinesOf().some((m) => m.id === st.machine)) st.machine = openingMachine(machinesOf(), props.lastMachineId, props.prefill?.environmentId);
@@ -182,6 +205,15 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         const has = project ? typeof project.folders[prefill.environmentId as keyof typeof project.folders] === 'string' : true;
         return { environmentId: prefill.environmentId, path: prefill.path, saveToProject: !!project && !has && st.saveFolder };
     };
+    /** The mode (#698): a person's pick while the machine still allows it, else bypass where allowed, else the runtime's own. */
+    const permissionInEffect = (): { scope: ReturnType<typeof permissionScope>; modes: ReturnType<typeof modeChoices>; mode: string } => {
+        const machine = machinesOf().find((m) => m.id === st.machine);
+        const scope = permissionScope(st.picked.map((id) => props.agents.find((a) => a.id === id)).filter((a): a is AgentIdentity => a !== undefined), machine, machinesOf());
+        const modes = scope.agentIds.length && machine ? modeChoices('claude-code', { allowBypassPermissions: scope.bypassAllowed }) : [];
+        const mode = modes.some((m) => m.id === st.permission) ? st.permission : scope.bypassAllowed ? BYPASS_PERMISSIONS_MODE : DEFAULT_PERMISSION_MODE;
+        return { scope, modes, mode };
+    };
+    const permissionModel = derivedModel<string>(() => permissionInEffect().mode, (mode) => { st.permission = mode; });
     return () => {
         const group = st.picked.length > 1;
         const project = projectOf(st.project);
@@ -199,6 +231,7 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
         const folders = project ? Object.entries(project.folders).filter((e): e is [string, string] => typeof e[1] === 'string') : [];
         const prefill = props.prefill;
         const creatingProject = !!prefill && !project && st.mode === 'project';
+        const { scope, modes, mode: permission } = permissionInEffect();
         const projectFolder = prefill && project ? project.folders[prefill.environmentId as keyof typeof project.folders] : undefined;
         return (
             <FormDialog
@@ -218,7 +251,8 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         return;
                     }
                     const workdir = workdirOf(project);
-                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null, projectId: st.project || null, machineId: st.machine || null, ...(workdir ? { workdir } : {}) });
+                    const permissionMode = modes.length && permission !== DEFAULT_PERMISSION_MODE ? { mode: permission, agentIds: scope.agentIds } : undefined;
+                    emit('create', { agentIds: st.picked, coordinator: st.coordinator || null, projectId: st.project || null, machineId: st.machine || null, ...(workdir ? { workdir } : {}), ...(permissionMode ? { permissionMode } : {}) });
                 }}
                 onCancel={() => emit('cancel')}
             >
@@ -292,6 +326,22 @@ export const NewChatDialog = component<NewChatDialogProps>(({ props, emit }) => 
                         })}
                         </RadioGroup.Root>
                         </Field.Root>
+                    </div>
+                ) : null}
+                {modes.length ? (
+                    <div data-new-chat-permission data-mode={permission}>
+                        <SelectField
+                            model={permissionModel}
+                            name="chat-permission-mode"
+                            label="Permissions"
+                            options={modes.map((m) => ({ value: m.id, label: m.hint ? `${m.label} — ${m.hint}` : m.label }))}
+                            description="The mode the chat's Claude Code members start in. Change it per member later from the chat's settings."
+                        />
+                        {scope.bypassAllowed ? null : (
+                            <p data-new-chat-permission-note="">
+                                bypassPermissions (--dangerously-skip-permissions) is off on {machine!.name}: allow it for the environment on <Link to={`/machines/${machine!.id}`}>the machine's page</Link>.
+                            </p>
+                        )}
                     </div>
                 ) : null}
                 <MemberPicker agents={props.agents} environments={props.environments} picked={st.picked} coordinator={st.coordinator} quotaEnvironmentOf={machine ? quotaEnvironmentOf : undefined} {...(quotaMachine ? { quotaMachine } : {})} onToggle={(e) => toggle(e.id, e.on)} onPickCoordinator={(id) => { st.coordinator = id; }} />
