@@ -127,6 +127,9 @@ export interface PlanActorOptions {
     readonly audit?: AuditPort;
 }
 
+/** The most item numbers one `itemStates` call reads. */
+export const ITEM_STATES_MAX = 2000;
+
 /** The reminder the lease expiry runs under. */
 export const PLAN_LEASE_REMINDER = 'lease';
 /** Who the lease alarm's records are by. */
@@ -297,7 +300,15 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                 if (!byProject.size) return () => undefined;
                 const ws = ctx.state.workspaceId;
                 const states = new Map<ProjectId, Readonly<Record<string, PlanItemState>>>();
-                await Promise.all([...byProject].map(async ([projectId, ns]) => states.set(projectId, await linkStates(ctx, ws, projectId, ns).catch(() => ({})))));
+                await Promise.all(
+                    [...byProject].map(async ([projectId, ns]) => {
+                        // In batches `itemStates` takes; a batch that cannot be read leaves its items unknown.
+                        const batches: number[][] = [];
+                        for (let i = 0; i < ns.length; i += ITEM_STATES_MAX) batches.push(ns.slice(i, i + ITEM_STATES_MAX));
+                        const read = await Promise.all(batches.map((batch) => linkStates(ctx, ws, projectId, batch).catch(() => ({}))));
+                        states.set(projectId, Object.assign({}, ...read));
+                    })
+                );
                 return lookupOf(states);
             };
             const allItems = () => Object.values(ctx.state.items);
@@ -461,7 +472,7 @@ export function definePlanActor(options: PlanActorOptions = {}) {
                  */
                 async itemStates(ns: readonly number[]): Promise<Record<string, PlanItemState>> {
                     requireKey();
-                    if (!Array.isArray(ns) || ns.length > 2000) throw new ServerFnError(400, '[plan] itemStates takes a list of item numbers');
+                    if (!Array.isArray(ns) || ns.length > ITEM_STATES_MAX) throw new ServerFnError(400, '[plan] itemStates takes a list of item numbers');
                     const at = now();
                     const out: Record<string, PlanItemState> = {};
                     for (const n of ns) {
