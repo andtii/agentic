@@ -1,0 +1,5 @@
+/* The desktop app's quick-ask window (#849): the page alone, filling a small borderless window. */
+[data-page="quick"] { min-block-size: 100dvh; padding: var(--space-lg); background: var(--color-base-100); box-sizing: border-box; }
+[data-quick] { display: flex; flex-direction: column; gap: var(--space-md); }
+[data-quick-actions] { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+[data-quick-hint], [data-quick-note] { font-size: var(--text-sm); color: var(--ag-text-muted); }

@@ -112,6 +112,8 @@ const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:w
  */
 /** Routes that run edge to edge: the chat, and a session's views under their session bar (#564). */
 const FLUSH_ROUTES = new Set(['chat', 'session', 'session-changes', 'session-files']);
+/** The desktop app's quick-ask window (#849): the page alone, no shell around it. */
+const BARE_ROUTE = 'quick';
 
 export const App = component(() => {
     useHead({
@@ -138,9 +140,11 @@ export const App = component(() => {
     // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source.
     const needs = useNeedsSource()().useRows();
     // Inside the desktop app (#845): new Inbox notifications become native ones, and the badge follows Home's.
-    if (dataMode() === 'live') useDesktopNotifications(() => needs().length);
+    // Not from the quick-ask window (#849): the main window's page already does it.
+    if (dataMode() === 'live' && route.name !== BARE_ROUTE) useDesktopNotifications(() => needs().length);
 
     return () => {
+        if (route.name === BARE_ROUTE) return <ThemeProvider><RouterView /></ThemeProvider>;
         const top = topbar();
         const crumbs = trail();
         return (

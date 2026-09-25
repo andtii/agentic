@@ -11,6 +11,8 @@ fn main() {
             "notify",
             "set_badge",
             "local_machine",
+            "open_main",
+            "hide_quick",
         ])),
     )
     .expect("failed to run tauri-build");

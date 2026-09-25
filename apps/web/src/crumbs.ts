@@ -50,7 +50,9 @@ export const CRUMBS: Record<string, { label: string; href: string }> = {
     'connector-add': { label: 'Plugins', href: '/plugins' },
     settings: { label: 'Settings', href: '/settings' },
     history: { label: 'History', href: '/history' },
-    usage: { label: 'Usage', href: '/usage' }
+    usage: { label: 'Usage', href: '/usage' },
+    // The desktop app's quick-ask window (#849) renders without the shell; the crumb is for completeness.
+    quick: { label: 'Quick ask', href: '/' }
 };
 
 /** Fixed trails for routes deeper than section › entity that carry no id. */

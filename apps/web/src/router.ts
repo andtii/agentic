@@ -32,10 +32,13 @@ import { Settings } from './pages/Settings';
 import { Pair } from './pages/Pair';
 import { History } from './pages/History';
 import { Usage } from './pages/Usage';
+import { QuickAsk } from './pages/quick/QuickAsk';
 
 /** One route table for the browser and the server (docs/architecture.md §10). */
 export const routes: RouteRecordRaw[] = [
     { path: '/', name: 'home', component: Home },
+    // The desktop app's quick-ask window (#849): rendered without the app shell.
+    { path: '/quick', name: 'quick', component: QuickAsk },
     { path: '/chats', name: 'chats', component: Chats },
     // `/chats/new` before `/chats/:id`, so "new" is never read as a chat id (#336: the daemon's deep link).
     { path: '/chats/new', name: 'chat-new', component: NewChatEntry },

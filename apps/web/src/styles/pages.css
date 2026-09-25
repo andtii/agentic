@@ -21,5 +21,6 @@
 @import './pages/plugins.css';
 @import './pages/history.css';
 @import './pages/usage.css';
+@import './pages/quick.css';
 /* The projects redesign (#725): its own aggregator, one file per page. */
 @import './projects/index.css';

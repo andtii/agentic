@@ -29,6 +29,10 @@ export interface DesktopHost {
     setBadge(count: number): Promise<void>;
     /** This computer's paired machine, or `null` when no daemon here is paired to this server. */
     localMachine(): Promise<LocalMachine | null>;
+    /** From the quick-ask window (#849): open an in-app path in the main window and hide this one. */
+    openMain(path: string): Promise<void>;
+    /** Hide the quick-ask window. */
+    hideQuick(): Promise<void>;
 }
 
 interface TauriInternals {
@@ -47,6 +51,12 @@ export function desktopHost(g: typeof globalThis = globalThis): DesktopHost | nu
         setBadge: async (count) => {
             await invoke('set_badge', { count: Math.max(0, Math.floor(count)) });
         },
-        localMachine: async () => ((await invoke('local_machine')) as LocalMachine | null) ?? null
+        localMachine: async () => ((await invoke('local_machine')) as LocalMachine | null) ?? null,
+        openMain: async (path) => {
+            await invoke('open_main', { path });
+        },
+        hideQuick: async () => {
+            await invoke('hide_quick');
+        }
     };
 }
