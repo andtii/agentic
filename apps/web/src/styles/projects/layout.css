@@ -1,0 +1,5 @@
+/* Projects redesign (#722): the project layout and the settings tab strip — owned by #728. The scaffold's minimum (#725). */
+[data-project-layout] { min-inline-size: 0; }
+[data-settings-tabs] { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-block-end: var(--space-lg); border-block-end: var(--border) solid var(--ag-line); }
+[data-settings-tabs] a { padding-block: var(--space-sm); color: var(--ag-text-muted); text-decoration: none; }
+[data-settings-tabs] a[aria-current="page"] { color: var(--color-base-content); border-block-end: 2px solid var(--color-base-content); }

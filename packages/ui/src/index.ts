@@ -7,4 +7,5 @@ export * from './kit/index.js';
 export * from './thread/index.js';
 export * from './composer/index.js';
 export * from './code/index.js';
+export * from './projects/index.js';
 export { fragment, recipes, SCOPES } from './fragment/index.js';

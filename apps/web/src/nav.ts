@@ -12,14 +12,15 @@ export const needsYouCount = (): number => inbox.filter(item => NEEDS_YOU_KINDS.
  * "Layout and shell"; routes per docs/architecture.md §10). `/pair` is
  * reached from Machines, not the nav. `badge` is Home's: the shell passes
  * the "Needs you" count it reads (#151) — the same rows Home lists.
+ * `project` is the open project's own menu (#725, `pages/projects/layout/menu.ts`), drawn under `Projects`.
  */
-export const NAV_GROUPS = (badge: number = needsYouCount()): readonly NavGroup[] => [
+export const NAV_GROUPS = (badge: number = needsYouCount(), project?: readonly NavGroup[]): readonly NavGroup[] => [
     {
         label: 'Primary',
         items: [
             { href: '/', label: 'Home', icon: 'home', badge },
             { href: '/chats', label: 'Chats', icon: 'chats' },
-            { href: '/projects', label: 'Projects', icon: 'folder' },
+            { href: '/projects', label: 'Projects', icon: 'folder', ...(project ? { children: project } : {}) },
             { href: '/agents', label: 'Agents', icon: 'agents' },
             { href: '/machines', label: 'Machines', icon: 'machines' },
             { href: '/schedules', label: 'Schedules', icon: 'schedules' }

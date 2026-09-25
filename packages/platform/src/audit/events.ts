@@ -54,7 +54,13 @@ export const AUDIT_KINDS = [
     'session.resumed',
     'task.machine-lost',
     'workdir.worktree-created',
-    'workdir.command-run'
+    'workdir.command-run',
+
+    // slot #742 pulls audit kinds — replace this line
+
+    // slot #750 plan audit kinds — replace this line
+
+    // slot #758 requests audit kinds — replace this line
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -439,6 +445,12 @@ export interface TaskMachineLostData {
     readonly since: number;
 }
 
+// slot #742 pulls audit data shapes — replace this line
+
+// slot #750 plan audit data shapes — replace this line
+
+// slot #758 requests audit data shapes — replace this line
+
 /** The per-kind payload. */
 export interface AuditDataByKind {
     readonly 'approval.requested': ApprovalRequestedData;
@@ -483,6 +495,12 @@ export interface AuditDataByKind {
     readonly 'task.machine-lost': TaskMachineLostData;
     readonly 'workdir.worktree-created': WorktreeCreatedData;
     readonly 'workdir.command-run': CommandRunData;
+
+    // slot #742 pulls audit data by kind — replace this line
+
+    // slot #750 plan audit data by kind — replace this line
+
+    // slot #758 requests audit data by kind — replace this line
 }
 
 /** What an emitter hands `record` / `recordAudit`: one kind, its data, the common fields. */

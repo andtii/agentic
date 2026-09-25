@@ -9,6 +9,21 @@ const REQUIRED = [
     '/machines', '/machines/:id', '/schedules', '/plugins', '/settings', '/pair', '/history', '/usage'
 ];
 
+/** The projects redesign's routes (#725, docs/design/projects/HANDOFF.md → "Routes"), in table order. */
+const PROJECT_ROUTES = [
+    ['/projects', 'projects'],
+    ['/projects/links', 'projects-links'],
+    ['/projects/new', 'project-new'],
+    ['/projects/:id', 'project'],
+    ['/projects/:id/chats', 'project-chats'],
+    ['/projects/:id/work', 'project-work'],
+    ['/projects/:id/work/:item', 'project-work-item'],
+    ['/projects/:id/requests', 'project-requests'],
+    ['/projects/:id/plan', 'project-plan'],
+    ['/projects/:id/settings/:tab', 'project-settings'],
+    ['/projects/:id/f/:feature', 'project-feature']
+] as const;
+
 describe('route skeleton', () => {
     it('declares every required route, each with a component', () => {
         const paths = routes.map(r => r.path);
@@ -54,6 +69,25 @@ describe('route skeleton', () => {
         await chat.isReady();
         expect(chat.currentRoute.name).toBe('chat');
         expect(chat.currentRoute.params.id).toBe('c1');
+    });
+
+    it('declares the projects redesign routes in order, literals before `:id`, each crumbed from Projects (#725)', async () => {
+        const table = routes.filter((r) => r.path.startsWith('/projects')).map((r) => [r.path, r.name] as const);
+        expect(table).toEqual(PROJECT_ROUTES);
+        for (const [, name] of PROJECT_ROUTES) expect(CRUMBS[name]!.href, name).toBe('/projects');
+        for (const [path, name] of [['/projects/links', 'projects-links'], ['/projects/p1/work/pr:603', 'project-work-item'], ['/projects/p1/settings/members', 'project-settings'], ['/projects/p1/f/agentic.feature.git', 'project-feature']] as const) {
+            const router = createServerRouter(path);
+            await router.isReady();
+            expect(router.currentRoute.name, path).toBe(name);
+        }
+    });
+
+    it('draws a project’s menu under Projects only when one is given, keeping the nav order (#725)', () => {
+        const menu = [{ label: 'agentic', items: [{ href: '/projects/p1', label: 'Overview' }] }];
+        const projects = NAV_GROUPS(0, menu)[0]!.items.find((i) => i.href === '/projects')!;
+        expect(projects.children).toEqual(menu);
+        expect(NAV_GROUPS(0, menu)[0]!.items.map((i) => i.href)).toEqual(['/', '/chats', '/projects', '/agents', '/machines', '/schedules']);
+        expect(NAV_GROUPS(0)[0]!.items.find((i) => i.href === '/projects')!.children).toBeUndefined();
     });
 
     it('resolves /projects/new as the New project route, not a project id (#333)', async () => {

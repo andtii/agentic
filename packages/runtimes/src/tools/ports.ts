@@ -176,4 +176,8 @@ export interface PlatformPorts {
     readonly usage?: UsagePort;
     /** Absent on hosts without a Workspace — `projects` then reports it unavailable. */
     readonly projects?: ProjectPort;
+
+    // slot #751 plan tool family port — replace this line
+
+    // slot #759 requests tool family port — replace this line
 }

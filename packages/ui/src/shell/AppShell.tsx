@@ -3,13 +3,21 @@ import { Badge, Drawer, Navbar, NavList, type PartProps } from '@sigx/zero';
 import { Icon, type IconName } from '../kit/icons';
 import { SHELL_SCOPE } from './anatomy';
 
-/** One navigation entry. `badge` is the Home count: open inbox items of kind approval, input or interrupted. */
+/**
+ * One navigation entry. `badge` is a count that needs the person (the Home count: open inbox items of kind approval,
+ * input or interrupted; a project sub-item's `needs-you` count).
+ */
 export interface NavItem {
     href: string;
     label: string;
     badge?: number;
     /** The 17 px glyph before the label (20 px in the drawer); the `link` slot renders it through `NavLinkSlotProps.icon`. */
     icon?: IconName;
+    /**
+     * A sub-menu drawn indented under the item (#725: a project's own menu under `Projects` while a project route is
+     * open), in blocks; the first block renders without a heading. Rendered minimally here — #727 draws the visuals.
+     */
+    children?: readonly NavGroup[];
 }
 
 /** A labelled group of entries — the sidebar shows "Primary" unlabelled and "Workspace" with its heading. */
@@ -78,6 +86,15 @@ function isActive(item: NavItem, path: string | undefined): boolean {
     return path === item.href || path.startsWith(`${item.href}/`);
 }
 
+/** The sub-item a path is on: the longest `href` it matches, so a project's Overview (`/projects/p`) does not claim `/projects/p/work`. */
+function activeChild(groups: readonly NavGroup[], path: string | undefined): NavItem | undefined {
+    let best: NavItem | undefined;
+    for (const group of groups) {
+        for (const item of group.items) if (isActive(item, path) && (!best || item.href.length > best.href.length)) best = item;
+    }
+    return best;
+}
+
 /** The Home count's accessible name. */
 const needsLabel = (n: number): string => (n === 1 ? '1 item needs you' : `${n} items need you`);
 
@@ -109,8 +126,8 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
     const groups = (): readonly NavGroup[] =>
         props.groups ?? [{ label: 'Primary', items: props.items ?? [] }];
 
-    const renderLink = (item: NavItem): JSXElement => {
-        const active = isActive(item, props.currentPath);
+    const renderLink = (item: NavItem, current?: boolean): JSXElement => {
+        const active = current ?? isActive(item, props.currentPath);
         const icon = item.icon ? <NavList.Icon><Icon name={item.icon} size={17} /></NavList.Icon> : null;
         const meta = item.badge
             ? <NavList.Meta><Badge.Root color="warning" size="sm" aria-label={needsLabel(item.badge)}>{item.badge}</Badge.Root></NavList.Meta>
@@ -121,6 +138,28 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
                     ? slots.link({ item, active, icon, meta, props: p })
                     : <a {...p}>{icon}{item.label}{meta}</a>)}
             </NavList.Link>
+        );
+    };
+
+    // An entry with a sub-menu: the entry, then its blocks indented under it. The page is the sub-item it is on, not the entry.
+    const renderItem = (item: NavItem): JSXElement => {
+        const children = item.children?.filter((group) => group.items.length) ?? [];
+        if (!children.length) return renderLink(item);
+        const on = activeChild(children, props.currentPath);
+        return (
+            <>
+                {renderLink(item, on ? false : undefined)}
+                <div data-nav-children="">
+                    {children.map((group, index) => (
+                        <div data-nav-block={group.label}>
+                            {index > 0 ? <span data-nav-block-heading="">{group.label}</span> : null}
+                            <NavList.List aria-label={group.label}>
+                                {group.items.map((child) => <NavList.Item>{renderLink(child, child === on)}</NavList.Item>)}
+                            </NavList.List>
+                        </div>
+                    ))}
+                </div>
+            </>
         );
     };
 
@@ -137,7 +176,7 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
                     <NavList.Group aria-label={index === 0 ? group.label : undefined}>
                         {index > 0 ? <NavList.Heading>{group.label}</NavList.Heading> : null}
                         <NavList.List>
-                            {group.items.map(item => <NavList.Item>{renderLink(item)}</NavList.Item>)}
+                            {group.items.map(item => <NavList.Item>{renderItem(item)}</NavList.Item>)}
                         </NavList.List>
                     </NavList.Group>
                 ))}

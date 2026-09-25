@@ -19,7 +19,7 @@ import { chatHead } from '../../src/pages/chat/head';
 import { createChatWith, folderMachineFor } from '../../src/pages/chat/LiveChats';
 import { projectHead } from '../../src/pages/projects/head';
 import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
-import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from './live-harness';
+import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from '../pages/live-harness';
 
 let h: LiveHarness;
 beforeEach(async () => {
@@ -101,7 +101,7 @@ describe('projects on the live pages (#333)', () => {
         await until(() => chips()[0]?.hasAttribute('data-inherited') === true, 'the project folder back');
     });
 
-    it('/projects lists the project with a badge per machine; /projects/:id edits it and publishes the crumb', { timeout: 20_000 }, async () => {
+    it('/projects lists the project with a badge per machine; /projects/:id/settings/general edits it and publishes the crumb', { timeout: 20_000 }, async () => {
         const win = await machineWith('laptop', 'windows', 'env_win', ['C:\\Dev']);
         const forge = await daemonAgent('Forge', win.envId);
         const defs = clientDefs();
@@ -111,7 +111,7 @@ describe('projects on the live pages (#333)', () => {
         expect(texts(list.querySelectorAll('[data-project-row] .project-env'))).toEqual(['laptop']);
         expect(list.querySelectorAll('[data-project-row] [data-scope="avatar"][data-part="root"]').length).toBe(1);
 
-        const edit = await mountLive(`/projects/${id}`, h);
+        const edit = await mountLive(`/projects/${id}/settings/general`, h);
         await until(() => edit.querySelector<HTMLInputElement>('input[name="project-name"]')?.value === 'agentic', 'the form on the record');
         await until(() => projectHead.value?.name === 'agentic', 'the crumb');
         expect(topbarFor({ name: 'project', path: `/projects/${id}`, params: { id } })?.crumb).toBe('agentic');
