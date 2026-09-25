@@ -238,8 +238,10 @@ describe('pluginReadiness', () => {
 
 describe('defaultToolMode', () => {
     it.each<[string, Parameters<typeof defaultToolMode>[0], ReturnType<typeof defaultToolMode>]>([
-        ['no hints', undefined, 'allow'],
-        ['empty hints', {}, 'allow'],
+        ['no hints (MCP default: destructive)', undefined, 'ask'],
+        ['empty hints', {}, 'ask'],
+        ['not read-only, destructive unset', { readOnlyHint: false }, 'ask'],
+        ['explicitly not destructive', { destructiveHint: false }, 'allow'],
         ['read-only', { readOnlyHint: true }, 'allow'],
         ['destructive', { destructiveHint: true }, 'ask'],
         ['read-only wins over destructive', { readOnlyHint: true, destructiveHint: true }, 'allow'],

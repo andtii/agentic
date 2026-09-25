@@ -45,18 +45,20 @@ describe('mcpConnector', () => {
         expect(stdio.connector).toEqual({ id: 'gh', pluginId: 'gh', transport: 'stdio', command: 'gh-mcp', args: ['serve'], machine: 'm-1', secrets: ['GH_HOST', 'github.token'], auth: { env: { GH_HOST: 'GH_HOST', GITHUB_TOKEN: 'github.token' } } });
     });
 
-    it('declares probed tools under their session names, destructive ones asking (PLG-09)', () => {
+    it('declares probed tools under their session names, destructive and unannotated ones asking (PLG-09, #672)', () => {
         const tools: McpConnectorTool[] = [
             { name: 'list_issues', description: 'List issues', annotations: { readOnlyHint: true } },
             { name: 'delete.repo', annotations: { destructiveHint: true, title: 'Delete repository' } },
             { name: 'create_issue' },
-            { name: 'create_issue', description: 'again' }
+            { name: 'create_issue', description: 'again' },
+            { name: 'add_label', annotations: { destructiveHint: false } }
         ];
         const m = mcpConnector({ id: 'git.hub', name: 'GitHub', transport: 'streamable-http', url: 'https://gh.test/mcp', tools });
         expect(m.tools).toEqual([
             { name: 'git_hub__list_issues', description: 'List issues', defaultMode: 'allow' },
             { name: 'git_hub__delete_repo', title: 'Delete repository', defaultMode: 'ask' },
-            { name: 'git_hub__create_issue', defaultMode: 'allow' }
+            { name: 'git_hub__create_issue', defaultMode: 'ask' },
+            { name: 'git_hub__add_label', defaultMode: 'allow' }
         ]);
         const setup = mcpConnectorSetup({ id: 'fs', name: 'Files', transport: 'stdio', command: 'x', tools: [{ name: 'rm', annotations: { destructiveHint: true } }] });
         expect(setup.manifest.tools).toEqual([{ name: 'fs__rm', defaultMode: 'ask' }]);

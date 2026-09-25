@@ -109,7 +109,7 @@ describe('addConnector', () => {
     }) as typeof fetch;
     const acme = draft({ name: 'Acme Tools', url: 'https://acme.test/mcp' });
 
-    it('registers a manifest whose tools match the probe, destructive ones asking', async () => {
+    it('registers a manifest whose tools match the probe, destructive and unannotated ones asking (#672)', async () => {
         const probe = await probeConnector(acme, { fetch: server });
         expect(probe.ok).toBe(true);
         const { r, got } = registry();
@@ -117,7 +117,7 @@ describe('addConnector', () => {
         expect(got.manifest?.tools).toEqual([
             { name: 'acme-tools__list_items', description: 'List items', defaultMode: 'allow' },
             { name: 'acme-tools__delete_item', description: 'Delete an item', defaultMode: 'ask' },
-            { name: 'acme-tools__ping', defaultMode: 'allow' }
+            { name: 'acme-tools__ping', defaultMode: 'ask' }
         ]);
         expect(got.manifest?.tools?.map((t) => t.name)).toEqual(probe.ok ? probe.tools : []);
         expect(got.status).toEqual({ state: 'ok' });
@@ -128,7 +128,7 @@ describe('addConnector', () => {
         const names: ConnectorProbe = { ok: true, tools: ['acme-tools__ping'] };
         const a = registry();
         await addConnector(a.r, acme, names);
-        expect(a.got.manifest?.tools).toEqual([{ name: 'acme-tools__ping', defaultMode: 'allow' }]);
+        expect(a.got.manifest?.tools).toEqual([{ name: 'acme-tools__ping', defaultMode: 'ask' }]);
         const b = registry();
         await addConnector(b.r, acme);
         expect(b.got.manifest).not.toHaveProperty('tools');
