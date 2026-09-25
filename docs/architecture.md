@@ -756,7 +756,15 @@ _not yet_
 
 #### #755 web: Plan board — columns by agent, limits, drag to assign and reorder
 
-_not yet_
+`?view=board` (`apps/web/src/pages/projects/features/plan/board/`). `model.ts` holds the rules as pure functions:
+`boardColumns` gives Not assigned, each agent member (the coordinator only while it holds items), any other assignee,
+then You — each with WORKING (items with a live claim) and QUEUE (by `queueIndex`); done items are left out and counted
+for the "show in List" note. `moveItem` drops an item into a column's queue at a position and renumbers both queues;
+taking an item off the agent working it (`needsHandoff`) drops the claim, makes it `ready` and records the handoff
+note in its activity. `BoardView` drags with the pointer (HTML5 drag and drop) and the keyboard (Space picks up,
+arrows step the slot via `stepSlot`, Space/Enter drop, Escape cancels, announced in a polite live region). On mock
+data the board reads its own fixture (`fixture.ts`); live, it shows the project's members until the Plan feature's
+store (#753) is read, and a drop changes the page's copy only.
 
 #### #756 web: Plan graph view (minimal) and plan switcher
 
