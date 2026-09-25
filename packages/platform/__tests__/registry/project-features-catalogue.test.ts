@@ -74,9 +74,17 @@ describe('Registry.projectFeatures (#735)', () => {
     });
 
     it('counts the projects that have each feature enabled', async () => {
-        await ws().upsertProject({ name: 'A', features: { [git.id]: {}, [plan.id]: {} } });
+        const a = await ws().upsertProject({ name: 'A', features: { [plan.id]: {} } });
         await ws().upsertProject({ name: 'B', features: { [plan.id]: {} } });
         await ws().upsertProject({ name: 'C' });
+        // Git needs a folder, which a test machine would have to report (#772): turn it on for A in storage.
+        await app.stop();
+        const stored = (await app.storage.load('Workspace', workspaceKey(WS)))!;
+        const state = stored.state as { projects: { id: string; features: Record<string, unknown> }[] };
+        state.projects.find((p) => p.id === a.id)!.features[git.id] = {};
+        await app.storage.save('Workspace', workspaceKey(WS), state, stored.etag);
+        app = testActorApp([Registry, Workspace, AuditActor, AgentActor], { storage: app.storage });
+        await app.start();
         const byId = Object.fromEntries((await reg().projectFeatures()).map((f) => [f.id, f.usedBy]));
         expect(byId).toEqual({ [git.id]: 1, [plan.id]: 2 });
     });
