@@ -41,7 +41,7 @@ const PAGES: readonly (readonly [path: string, name: string, page: string, trail
     ['/projects/p_agentic/requests', 'project-requests', 'project-requests', ['Projects', 'agentic', 'Requests']],
     ['/projects/p_agentic/plan', 'project-plan', 'project-plan', ['Projects', 'agentic', 'Plan']],
     ['/projects/p_agentic/settings/members', 'project-settings', 'project-settings', ['Projects', 'agentic', 'Settings', 'Members']],
-    ['/projects/p_agentic/f/agentic.feature.git', 'project-feature', 'project-feature', ['Projects', 'agentic', 'Code']]
+    ['/projects/p_agentic/code', 'project-code', 'project-feature', ['Projects', 'agentic', 'Code']]
 ];
 
 describe('the project routes (#725)', () => {
@@ -121,7 +121,7 @@ describe('the project menu (#725)', () => {
         // The sample agentic project has a coordinator, so it has Requests.
         expect(menu[0]!.items.map((i) => i.href)).toEqual(['/projects/p_agentic', '/projects/p_agentic/chats', '/projects/p_agentic/work', '/projects/p_agentic/requests']);
         // Git draws its Code section (#746); the sample project has no Plan feature.
-        expect(menu[1]!.items).toEqual([{ href: '/projects/p_agentic/f/agentic.feature.git', label: 'Code' }]);
+        expect(menu[1]!.items).toEqual([{ href: '/projects/p_agentic/code', label: 'Code' }]);
         expect(menu[2]!.items.map((i) => i.label)).toEqual(['General', 'Members', 'Folders', 'Connectors', 'Features', 'Project manager']);
     });
 });

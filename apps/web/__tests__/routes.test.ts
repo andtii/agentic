@@ -21,6 +21,8 @@ const PROJECT_ROUTES = [
     ['/projects/:id/requests', 'project-requests'],
     ['/projects/:id/plan', 'project-plan'],
     ['/projects/:id/settings/:tab', 'project-settings'],
+    ['/projects/:id/code', 'project-code'],
+    ['/projects/:id/f/agentic.feature.git', 'project-git-legacy'],
     ['/projects/:id/f/:feature', 'project-feature']
 ] as const;
 
@@ -28,7 +30,7 @@ describe('route skeleton', () => {
     it('declares every required route, each with a component', () => {
         const paths = routes.map(r => r.path);
         for (const p of REQUIRED) expect(paths).toContain(p);
-        for (const r of routes) expect(r.component, r.path).toBeTruthy();
+        for (const r of routes) expect(r.component ?? r.redirect, r.path).toBeTruthy();
     });
 
     it('every primary nav entry is a declared route', () => {
@@ -75,7 +77,7 @@ describe('route skeleton', () => {
         const table = routes.filter((r) => r.path.startsWith('/projects')).map((r) => [r.path, r.name] as const);
         expect(table).toEqual(PROJECT_ROUTES);
         for (const [, name] of PROJECT_ROUTES) expect(CRUMBS[name]!.href, name).toBe('/projects');
-        for (const [path, name] of [['/projects/links', 'projects-links'], ['/projects/p1/work/pr:603', 'project-work-item'], ['/projects/p1/settings/members', 'project-settings'], ['/projects/p1/f/agentic.feature.git', 'project-feature']] as const) {
+        for (const [path, name] of [['/projects/links', 'projects-links'], ['/projects/p1/work/pr:603', 'project-work-item'], ['/projects/p1/settings/members', 'project-settings'], ['/projects/p1/code', 'project-code'], ['/projects/p1/f/agentic.feature.plan', 'project-feature']] as const) {
             const router = createServerRouter(path);
             await router.isReady();
             expect(router.currentRoute.name, path).toBe(name);
