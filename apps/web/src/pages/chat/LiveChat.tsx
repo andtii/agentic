@@ -56,7 +56,7 @@ import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
 import { chatHead, chatSearchRequest, chatSettingsRequest, closeChatSearch, closeChatSettings, closeNewChat, newChatRequest, openNewChat } from './head';
 import { answerRequest, chatFailure, type InterruptionOfTurn, chatTasks, chatTitle, chatTranscript, chatWaitsOf, composeTranscript, detachedQuestions, entryTranscript, keepEntries, lastOf, membersOf, mentionsIn, notStoppedLine, queuedAgents, runActivation, stopTargets, waitingAgents, workingAgents, type SessionActorClient } from './live';
-import { LiveChatList, createChatWith } from './LiveChats';
+import { LiveChatList, archiveChat, createChatWith } from './LiveChats';
 import { queryOf } from '../session/files';
 import { fileToken, fileTokensIn, mentionOfQuery, viewDiffLinks } from '../session/references';
 import { NewChatDialog, type NewChatCreate } from './NewChatDialog';
@@ -426,6 +426,22 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         }
     };
 
+    /** Archive or restore this chat (#884): from its settings, or Restore on the archived note. The list's row moves on the chat's next read. */
+    const setArchived = async (archived: boolean): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws || st.saving) return;
+        st.saving = true;
+        st.error = '';
+        try {
+            await archiveChat(defs, ws, { id: props.id, archived });
+            closeChatSettings();
+        } catch (e) {
+            fail(e);
+        } finally {
+            st.saving = false;
+        }
+    };
+
     const search = (q: string) => actor(defs.Chat, key()!).search(q, SEARCH_LIMIT);
 
     // The topbar's requests are module-level (`head.ts`): leaving the page closes them.
@@ -551,6 +567,11 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             {slotAt ? <> <Link to={`/machines/${slotAt.machineId}?env=${encodeURIComponent(slotAt.environmentId)}`}>Change limit</Link></> : null}
                         </p>
                     ) : null}
+                    {s?.archived ? (
+                        <p data-chat-archived-note role="status">
+                            This chat is archived: it is out of the chat list. <button type="button" data-chat-restore-note disabled={st.saving} onClick={() => { void setArchived(false); }}>Restore chat</button>
+                        </p>
+                    ) : null}
                     {st.error ? <ErrorNote data-chat-error="">{st.error}</ErrorNote> : null}
                     <div data-chat-composer onInput={(e: Event) => { st.draft = (e.target as HTMLTextAreaElement).value ?? ''; }}>
                         <Composer
@@ -577,7 +598,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         </div>
                     </Drawer.Panel>
                 </Drawer.Root>
-                {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} machineId={s.machineId ?? ''} machines={workdirs.machines()} busy={st.saving} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
+                {chatSettingsRequest.open && s ? <ChatSettingsDialog model={() => chatSettingsRequest.open} title={s.title ?? ''} members={members} lookup={directory.lookup} machineId={s.machineId ?? ''} machines={workdirs.machines()} busy={st.saving} archived={s.archived === true} onArchive={(archived) => { void setArchived(archived); }} onCancel={closeChatSettings} onSave={(change) => { void saveSettings(change); }} /> : null}
                 <NewChatDialog model={() => newChatRequest.open} agents={directory.all()} environments={workdirs.list()} projects={projects.list()} lastProjectId={projects.lastProjectId()} machines={workdirs.machines()} lastMachineId={workdirs.lastMachineId()} onCancel={closeNewChat} onCreate={(e) => { void createChat(e.agentIds, e.coordinator, e.projectId, e.machineId, e.permissionMode); }} />
             </Page>
         );

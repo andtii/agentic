@@ -1,7 +1,7 @@
 import { component, signal, type Define } from 'sigx';
 import { Select } from '@sigx/zero';
 import { Checkbox, Field } from '@sigx/zero-daisyui/components';
-import { FormDialog, TextField } from '@agentic/ui';
+import { Button, FormDialog, TextField } from '@agentic/ui';
 import type { MockChatMember } from '../../mock/workspace';
 import type { AgentLookup } from './live';
 import type { MachineEntry } from '../ops/environments';
@@ -31,7 +31,11 @@ export type ChatSettingsDialogProps =
     & Define.Prop<'machineId', string>
     & Define.Prop<'machines', readonly MachineEntry[]>
     & Define.Prop<'busy', boolean>
+    /** `ChatSummary.archived` (#884): the dialog offers Restore instead of Archive. */
+    & Define.Prop<'archived', boolean>
     & Define.Event<'save', ChatSettingsChange>
+    /** Archive (`true`) or restore (`false`) the chat (#884, `Chat.archive`) — at once, not with Save. */
+    & Define.Event<'archive', boolean>
     & Define.Event<'cancel'>;
 
 /**
@@ -125,6 +129,10 @@ export const ChatSettingsDialog = component<ChatSettingsDialogProps>(({ props, e
                         );
                     }) : <p data-panel-note>Nobody is in this chat yet.</p>}
                 </fieldset>
+                <div data-chat-settings-archive style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-sm)">
+                    <span data-panel-note>{props.archived ? 'Archived: out of the chat list, kept under Archived.' : 'Archive to take it out of the chat list; the thread and its members stay.'}</span>
+                    <Button type="button" intent="default" icon={props.archived ? 'back' : 'download'} disabled={props.busy} onClick={() => emit('archive', !props.archived)}>{props.archived ? 'Restore chat' : 'Archive chat'}</Button>
+                </div>
             </FormDialog>
         );
     };

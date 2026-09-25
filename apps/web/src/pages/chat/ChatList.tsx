@@ -1,14 +1,16 @@
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
 import { Select } from '@sigx/zero';
-import { Badge, Field, Input } from '@sigx/zero-daisyui/components';
-import { AgentTile, Button, Icon, ProjectSquare, StatusPill } from '@agentic/ui';
+import { Badge, Field, Input, Menu } from '@sigx/zero-daisyui/components';
+import { AgentTile, Button, ErrorNote, Icon, ProjectSquare, StatusPill } from '@agentic/ui';
 import { agentNamed, type MockChatSummary } from '../../mock/workspace';
+import { dataMode } from '../../data-mode';
+import { mockArchive, setMockArchived, splitArchived, withMockArchive, type ArchiveRequest, type ChatListRow } from './archive';
 import { groupChatsByProject, type ChatGroupProject } from './chat-groups';
 import type { AgentLookup } from './live';
 
 export type ChatListProps =
-    & Define.Prop<'chats', readonly MockChatSummary[], true>
+    & Define.Prop<'chats', readonly ChatListRow[], true>
     & Define.Prop<'currentId', string>
     /** Full-width variant on `/chats`. */
     & Define.Prop<'wide', boolean>
@@ -16,8 +18,15 @@ export type ChatListProps =
     & Define.Prop<'lookup', AgentLookup>
     /** The workspace's projects (#333): a filter above the rows; absent or empty, no filter. With `wide`, the rows are grouped by project (#732). */
     & Define.Prop<'projects', readonly ChatGroupProject[]>
+    /** Why the last archive or restore failed (#884); shown under the rows. */
+    & Define.Prop<'error', string>
     /** The "+" button: opens the new-chat dialog. */
-    & Define.Event<'newChat'>;
+    & Define.Event<'newChat'>
+    /**
+     * A row's menu (#884): archive the chat, or restore an archived one. On mock data the list applies it itself
+     * (`archive.ts`); live, the page calls `Chat.archive` and the chat's next read moves the row.
+     */
+    & Define.Event<'archive', ArchiveRequest>;
 
 /** Member tiles stack to four, then `+N` in mono (docs/design/HANDOFF.md → Edge cases). */
 export const MemberTiles = component<{ agentIds: readonly string[]; size?: 18 | 20 | 22 | 28; lookup?: AgentLookup }>(({ props }) => () => {
@@ -42,7 +51,7 @@ export const ALL_PROJECTS = '*';
 const NO_PROJECT_KEY = '-';
 
 /** The rows a search keeps: every word of `q` somewhere in the title or the last line, case-insensitive; a blank search keeps all. */
-export function matchingChats(chats: readonly MockChatSummary[], q: string, projectId: string = ''): readonly MockChatSummary[] {
+export function matchingChats<T extends MockChatSummary>(chats: readonly T[], q: string, projectId: string = ''): readonly T[] {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     const inProject = projectId ? chats.filter((c) => c.projectId === projectId) : chats;
     if (!words.length) return inProject;
@@ -67,9 +76,28 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
     const toggleGroup = (key: string) => {
         groups.collapsed = groups.collapsed.includes(key) ? groups.collapsed.filter((k) => k !== key) : [...groups.collapsed, key];
     };
-    const row = (chat: MockChatSummary) => (
-        <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined}>
-            <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined}>
+    // The archived group (#884) starts collapsed; `null` until toggled, so it opens by itself around the chat on screen.
+    const archive = signal({ open: null as boolean | null });
+    const setArchived = (id: string, archived: boolean): void => {
+        if (dataMode() !== 'live') setMockArchived(id, archived);
+        emit('archive', { id, archived });
+    };
+    /** The row's overflow menu: Archive on an open chat, Restore on an archived one. */
+    const rowMenu = (chat: ChatListRow) => (
+        <Menu.Root placement="bottom-end" onSelect={(v: string) => setArchived(chat.id, v === 'archive')}>
+            <Menu.Trigger data-chat-row-menu="" aria-label={`More actions for ${chat.title}`}>
+                <Icon name="menu" size={14} />
+            </Menu.Trigger>
+            <Menu.Popup data-chat-row-menu-popup="">
+                {chat.archived
+                    ? <Menu.Item value="restore" data-chat-restore="">Restore chat</Menu.Item>
+                    : <Menu.Item value="archive" data-chat-archive="">Archive chat</Menu.Item>}
+            </Menu.Popup>
+        </Menu.Root>
+    );
+    const row = (chat: ChatListRow) => (
+        <li data-chat-row data-current={chat.id === props.currentId ? '' : undefined} data-waiting={chat.waiting ? '' : undefined} data-archived={chat.archived ? '' : undefined} style="display:flex;align-items:flex-start">
+            <Link to={`/chats/${chat.id}`} aria-current={chat.id === props.currentId ? 'page' : undefined} style="flex:1;min-inline-size:0">
                 <span data-chat-row-head>
                     <span data-chat-title>{chat.title}</span>
                     {chat.waiting ? <StatusPill status="approval" label={String(chat.unread || 1)} /> : chat.unread ? <Badge.Root color="warning" size="sm" data-chat-unread="">{chat.unread}</Badge.Root> : null}
@@ -79,13 +107,34 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
                     <span data-chat-last>{chat.lastLine}</span>
                 </span>
             </Link>
+            {rowMenu(chat)}
         </li>
     );
-    const rows = () => {
-        const chats = matchingChats(props.chats, st.q, projectFilter());
-        // The column beside a chat stays one flat list; `/chats` groups by project once there are projects.
-        if (!props.wide || !props.projects?.length) return <ul data-chat-rows>{chats.map(row)}</ul>;
+    /** Every row as it stands: live, the chats' own flags; on mock data, with this visit's archives and restores. */
+    const current = (): ChatListRow[] => (dataMode() === 'live' ? [...props.chats] : withMockArchive(props.chats, mockArchive.map));
+    /** The collapsed "Archived" group under the list (#884): each row restores from its menu. */
+    const archivedGroup = (chats: readonly ChatListRow[]) => {
+        if (!chats.length) return null;
+        const open = archive.open ?? chats.some((c) => c.id === props.currentId);
         return (
+            <section data-chat-archived aria-label="Archived chats">
+                <header data-chat-group-head style="display:flex;align-items:center;gap:var(--space-sm)">
+                    <button type="button" data-chat-archived-toggle aria-expanded={open ? 'true' : 'false'} aria-controls={open ? 'chat-group-archived' : undefined} aria-label={`${open ? 'Collapse' : 'Expand'} archived chats`} onClick={() => { archive.open = !open; }}>
+                        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+                    </button>
+                    <span data-chat-group-name>Archived</span>
+                    <span data-chat-group-count>{chats.length}</span>
+                </header>
+                {open ? <ul data-chat-rows id="chat-group-archived">{chats.map(row)}</ul> : null}
+            </section>
+        );
+    };
+    const rows = () => {
+        const { open: chats, archived } = splitArchived(matchingChats(current(), st.q, projectFilter()));
+        // The column beside a chat stays one flat list; `/chats` groups by project once there are projects.
+        if (!props.wide || !props.projects?.length) return <><ul data-chat-rows>{chats.map(row)}</ul>{archivedGroup(archived)}</>;
+        return (
+            <>
             <div data-chat-groups>
                 {groupChatsByProject(chats, props.projects).map((group) => {
                     const key = group.key ?? NO_PROJECT_KEY;
@@ -109,6 +158,8 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
                     );
                 })}
             </div>
+            {archivedGroup(archived)}
+            </>
         );
     };
     return () => (
@@ -137,6 +188,7 @@ export const ChatList = component<ChatListProps>(({ props, emit }) => {
             </div>
         ) : null}
         {rows()}
+        {props.error ? <ErrorNote data-chat-archive-error="">{props.error}</ErrorNote> : null}
     </nav>
     );
 });

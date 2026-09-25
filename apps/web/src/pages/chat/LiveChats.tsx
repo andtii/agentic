@@ -16,7 +16,7 @@ import { EmptyState, ErrorNote } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../actors/defs';
 import { chatKeyOf, workspaceKeyOf } from '../../actors/keys';
-import type { MockChatSummary } from '../../mock/workspace';
+import type { ArchiveRequest, ChatListRow } from './archive';
 import { ChatList } from './ChatList';
 import { useAgentDirectory, type AgentDirectory } from './directory';
 import { closeNewChat, newChatRequest, openNewChat } from './head';
@@ -36,7 +36,7 @@ interface ChatRead {
 
 export interface ChatRows {
     /** `currentId`: the chat that is open — everything in it is on screen, so it never counts as unread. */
-    rows(currentId?: string): MockChatSummary[];
+    rows(currentId?: string): ChatListRow[];
     /** The chats read so far, for the watchers. */
     ids(): string[];
     /** A watcher's newer read of one chat. */
@@ -96,8 +96,9 @@ export function useChatRows(defs: ActorDefs, viewer: ViewerState, directory: Age
         ids: () => (marksLoaded.value ? (reads.value ?? []).map((r) => r.id) : []),
         report(read) {
             const prev = live.map[read.id];
-            // Every change to a chat is an entry, so its seq says whether this read is news; the tail may trail the summary by a frame.
-            if (prev && prev.summary.seq === read.summary.seq && prev.newest.length === read.newest.length && prev.newest[prev.newest.length - 1]?.seq === read.newest[read.newest.length - 1]?.seq) return;
+            // Every change to a chat is an entry, so its seq says whether this read is news — but for an archive or restore
+            // (#884), which writes none; the tail may trail the summary by a frame.
+            if (prev && prev.summary.seq === read.summary.seq && prev.summary.archived === read.summary.archived && prev.newest.length === read.newest.length && prev.newest[prev.newest.length - 1]?.seq === read.newest[read.newest.length - 1]?.seq) return;
             live.map = { ...live.map, [read.id]: read };
         },
         get loading() {
@@ -124,17 +125,42 @@ const ChatWatch = component<{ id: string; workspaceId: string; onRead: (read: Ch
     return (): JSXElement => null;
 });
 
+/**
+ * Archive or restore one chat (#884, `Chat.archive`): the summary it answers with, reported at once so the row moves
+ * before the chat's live read comes back.
+ */
+export async function archiveChat(defs: ActorDefs, ws: string, request: ArchiveRequest, rows?: Pick<ChatRows, 'report'>): Promise<ChatSummary> {
+    const chat = actor(defs.Chat, chatKeyOf(ws, request.id));
+    const summary = await chat.archive(request.archived);
+    if (rows) {
+        const page = await chat.history(null, LIST_TAIL);
+        rows.report({ id: request.id, summary, newest: page.entries });
+    }
+    return summary;
+}
+
 /** The list column, live. */
 export const LiveChatList = component<LiveChatListProps>(({ props, emit }) => {
     const defs = useActorDefs();
     const viewer = useViewer()();
     const chats = useChatRows(defs, viewer, props.directory);
     const projects = useProjects(defs, viewer);
+    const st = signal({ error: '' });
+    const archive = async (request: ArchiveRequest): Promise<void> => {
+        const ws = viewer.workspaceId;
+        if (!ws) return;
+        st.error = '';
+        try {
+            await archiveChat(defs, ws, request, chats);
+        } catch (e) {
+            st.error = e instanceof Error ? e.message : String(e);
+        }
+    };
     return () => {
         const ws = viewer.workspaceId;
         return (
             <>
-                <ChatList chats={chats.rows(props.currentId)} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} projects={projects.list()} onNewChat={() => emit('newChat')} />
+                <ChatList chats={chats.rows(props.currentId)} currentId={props.currentId} wide={props.wide} lookup={props.directory.lookup} projects={projects.list()} onNewChat={() => emit('newChat')} onArchive={(r) => { void archive(r); }} error={st.error} />
                 {ws ? chats.ids().map((id) => <ChatWatch key={id} id={id} workspaceId={ws} onRead={chats.report} />) : null}
             </>
         );
