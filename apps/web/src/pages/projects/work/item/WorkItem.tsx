@@ -2,27 +2,35 @@
  * `/projects/:id/work/:item` for work that is not a pull request (#739, PRJ-05): the header with the stage stepper
  * (the item's stages, else Ready → Do → Review → Done), who acts next and what they do, the task, chat and session it
  * links to, and — when the item comes from Plan — its done-when checklist. `WorkItemRoute` sends `pr:<n>` to the pull
- * request page instead. Mock data only for now: live work items are derived by the Work view (#738).
+ * request page instead. On mock data the fixtures; live (#790) the work items the Work view derives (#738), each with
+ * its task, chat, session and plan item (`live.ts`).
  */
-import { component, type Define } from 'sigx';
+import { component, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import type { WorkStageState } from '@agentic/core';
 import { AgentTile, EmptyState, StageTrack, StatusPill, Tag, type Tone } from '@agentic/ui';
 import { dataMode } from '../../../../data-mode';
 import { AGENTS, formatAge } from '../../../../mock/workspace';
+import { clockNow } from '../../../../time';
 import type { ProjectPageProps } from '../../layout/types';
+import type { WorkAgentLookup } from '../WorkView';
 import { MOCK_WORK_ITEMS } from './fixtures';
+import { useLiveWorkItems } from './live';
 import { doneWhenProgress, findWorkItem, ownerLabel, stagesOf, stepsOf, type WorkItemDetail } from './model';
 
 export type WorkItemProps = ProjectPageProps & Define.Prop<'item', string, true>;
 
-const agentName = (id: string): string => AGENTS.find((a) => a.id === id)?.name ?? id;
-const agentHue = (id: string) => AGENTS.find((a) => a.id === id)?.hue;
+/** The mock workspace's agents; an id it does not have is its own name, in the first hue. */
+const mockAgent: WorkAgentLookup = (id) => {
+    const a = AGENTS.find((x) => x.id === id);
+    return { name: a?.name ?? id, hue: a?.hue ?? 1 };
+};
 
 const TONE_OF: Readonly<Record<WorkStageState, Tone>> = { working: 'working', 'needs-you': 'needs-you', failed: 'failed', done: 'live' };
 
-const Header = (d: WorkItemDetail) => {
+const Header = (d: WorkItemDetail, agentOf: WorkAgentLookup) => {
     const { item } = d;
+    const agentName = (id: string): string => agentOf(id).name;
     const steps = stepsOf(item);
     return (
         <header data-work-item-head="">
@@ -30,7 +38,7 @@ const Header = (d: WorkItemDetail) => {
             <p data-work-item-meta="">
                 {d.task ? <span data-ref="">{d.task.ref}</span> : null}
                 {item.itemRef ? <span data-ref="">{item.itemRef}</span> : null}
-                <span data-work-item-age="">{`updated ${formatAge(item.updatedAt)}`}</span>
+                <span data-work-item-age="">{`updated ${formatAge(item.updatedAt, clockNow())}`}</span>
             </p>
             <StageTrack stages={stagesOf(item)} stage={item.stage} state={item.stageState} bare />
             <ol data-work-item-steps="" aria-label="Stages">
@@ -43,7 +51,7 @@ const Header = (d: WorkItemDetail) => {
                     ? <span data-owner="you"><Tag tone="needs-you">YOU</Tag></span>
                     : (
                         <span data-owner="agent">
-                            <AgentTile name={agentName(item.owner.agentId)} hue={agentHue(item.owner.agentId)} size={20} />
+                            <AgentTile name={agentName(item.owner.agentId)} hue={agentOf(item.owner.agentId).hue} size={20} />
                             <strong>{ownerLabel(item.owner, agentName)}</strong>
                         </span>
                     )}
@@ -91,30 +99,37 @@ const DoneWhen = (d: WorkItemDetail) => {
     );
 };
 
-const missing = (item: string, live: boolean) => (
-    <EmptyState
-        variant="generic"
-        title="No work item with that id"
-        caption={live ? 'Live work items arrive with the Work view.' : `Nothing in this project is called ${item}.`}
-    />
+const missing = (item: string) => (
+    <EmptyState variant="generic" title="No work item with that id" caption={`Nothing in this project is called ${item}.`} />
 );
 
-export const WorkItem = component<WorkItemProps>(({ props }) => () => {
-    const live = dataMode() === 'live';
-    const d = live ? undefined : findWorkItem(MOCK_WORK_ITEMS[props.project.id] ?? [], props.item);
-    return (
-        <section aria-label={d?.item.title ?? props.item} data-work-item={props.item} data-plan-backed={d?.plan ? 'true' : undefined}>
-            {d
-                ? (
-                    <>
-                        {Header(d)}
-                        <div data-work-item-body="">
-                            {DoneWhen(d)}
-                            {Links(d)}
-                        </div>
-                    </>
-                )
-                : missing(props.item, live)}
-        </section>
-    );
-}, { name: 'WorkItem' });
+/** The page over one detail, or the not-found state; `pending` while the live reads have not landed. */
+const render = (param: string, d: WorkItemDetail | undefined, agentOf: WorkAgentLookup, pending = false): JSXElement => (
+    <section aria-label={d?.item.title ?? param} data-work-item={param} data-plan-backed={d?.plan ? 'true' : undefined}>
+        {d
+            ? (
+                <>
+                    {Header(d, agentOf)}
+                    <div data-work-item-body="">
+                        {DoneWhen(d)}
+                        {Links(d)}
+                    </div>
+                </>
+            )
+            : pending ? <p data-panel-note="" aria-busy="true">Loading work…</p> : missing(param)}
+    </section>
+);
+
+const LiveWorkItem = component<WorkItemProps>(({ props }) => {
+    const live = useLiveWorkItems(() => props.project);
+    return () => {
+        const d = findWorkItem(live.details(), props.item);
+        return render(props.item, d, live.agentOf, !d && live.loading);
+    };
+}, { name: 'LiveWorkItem' });
+
+export const WorkItem = component<WorkItemProps>(({ props }) => () => (
+    dataMode() === 'live'
+        ? <LiveWorkItem project={props.project} item={props.item} />
+        : render(props.item, findWorkItem(MOCK_WORK_ITEMS[props.project.id] ?? [], props.item), mockAgent)
+), { name: 'WorkItem' });
