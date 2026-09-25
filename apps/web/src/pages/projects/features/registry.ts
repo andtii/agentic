@@ -6,6 +6,7 @@
  * One line per feature issue: each replaces its own slot line with its entry and touches nothing else here.
  */
 import type { ProjectPage } from '../layout/types';
+import { GitOverviewCard, GitSection } from './git/GitSection';
 import { PlanList } from './plan/list/PlanList';
 import { PlanOverviewCard } from './plan/shared/parts';
 
@@ -21,7 +22,7 @@ export interface ProjectFeatureViews {
 }
 
 export const PROJECT_FEATURE_VIEWS: Readonly<Record<string, ProjectFeatureViews>> = {
-    // slot #746 git feature views — replace this line
+    'agentic.feature.git': { label: 'Code', Section: GitSection, OverviewCard: GitOverviewCard },
 
     'agentic.feature.plan': { label: 'Plan', path: 'plan', Section: PlanList, OverviewCard: PlanOverviewCard },
 };

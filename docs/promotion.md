@@ -125,7 +125,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #745: —
 
-- #746: —
+- #746: nothing generic — the Code card and section derive from `workItemsOf` (Work) and style in `apps/web/src/styles/projects/git.css`.
 
 - #747: `pullMove` / `pullNotification` (`packages/platform/src/pulls/notify.ts`) — a provider-neutral "whose move is this PR" rule; candidate for `@agentic/core` next to `pullBlockers` once the UI's owner badge needs it.
 
