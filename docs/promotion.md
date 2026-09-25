@@ -111,7 +111,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #738: —
 
-- #739: —
+- #739: `stepsOf` (`apps/web/src/pages/projects/work/item/model.ts`) — a labelled stage stepper beside `StageTrack`; move it into `@agentic/ui` when a second page needs named stages.
 
 - #740: —
 
