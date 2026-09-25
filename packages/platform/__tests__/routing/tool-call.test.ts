@@ -12,6 +12,7 @@ import { actorKey, type AgentId, type ChatId, type FrozenAgentConfig, type Princ
 
 import { agentMemoryScope } from '../../src/agent/index';
 import { AuditActor, auditKey } from '../../src/audit/index';
+import { AgentActor } from '../../src/agent/index';
 import { mintAgentPrincipal, workspaceKey } from '../../src/auth/index';
 import { Chat, ChatPage } from '../../src/chat/index';
 import { ToolCallError, type ToolCallPort } from '../../src/machine/index';
@@ -71,7 +72,7 @@ beforeEach(async () => {
     Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
     port = createToolCallPort({ routing: () => Routing, sessions: () => Session });
     quickPort = createToolCallPort({ routing: () => Routing, sessions: () => Session, askQuickWaitMs: 20 });
-    app = testActorApp([Session, Routing, Memory, Chat, ChatPage, Workspace, PairingDirectory, AuditActor]);
+    app = testActorApp([Session, Routing, Memory, Chat, ChatPage, Workspace, PairingDirectory, AuditActor, AgentActor]);
     await app.start();
     await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: AGENT, runtime: 'in-memory', chatId: CHAT, taskId: TASK, machineId: 'machine_1' as never, config });
     // A second, real daemon session of the same agent that works no task (#390): a chat session, say.

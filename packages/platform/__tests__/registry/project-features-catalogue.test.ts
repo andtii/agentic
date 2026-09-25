@@ -8,6 +8,8 @@ import { defineRegistry, registryKey } from '../../src/registry/index';
 import { statusOf, testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 import { Workspace } from '../../src/workspace/index';
 import { workspaceKey } from '../../src/auth/index';
+import { AgentActor } from '../../src/agent/index';
+import { AuditActor } from '../../src/audit/index';
 
 const WS = 'u1' as WorkspaceId;
 const owner = userPrincipal('u1');
@@ -52,7 +54,7 @@ const Registry = defineRegistry({ catalogue: [git, plan], projectFeatures: { [gi
 
 let app: TestActorApp;
 beforeEach(() => {
-    app = testActorApp([Registry, Workspace]);
+    app = testActorApp([Registry, Workspace, AuditActor, AgentActor]);
     return app.start();
 });
 afterEach(() => app.stop());

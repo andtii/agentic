@@ -149,6 +149,8 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #757: none — requests, PM policy and personality presets are agentic product contracts.
 
+- #784: none — the project manager playbook, name suggestions and config builder are agentic product behaviour.
+
 - #758: —
 
 - #759: —
