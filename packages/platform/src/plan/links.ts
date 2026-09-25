@@ -9,8 +9,8 @@
  * rest of the plan. The other project's item is read through an `ItemLookup` — the caller reads the other Plan
  * actors — and an unknown item counts as not done, like an unknown local `after` number.
  */
-import { parseRef, type AgentId, type PlanActor, type PlanItem, type PlanItemState, type ProjectId, type Ref } from '@agentic/core';
-import { ACTIVITY_KEPT, AFTER_MAX, PlanRuleError, claimRefusal, isManager, itemOf, itemView, type Outcome, type PlanBook, type PlanCall, type StoredItem } from './rules.js';
+import { parseRef, type AgentId, type Plan, type PlanActor, type PlanItem, type PlanItemState, type ProjectId, type ProjectRecord, type Ref } from '@agentic/core';
+import { ACTIVITY_KEPT, AFTER_MAX, PlanRuleError, claimRefusal, isManager, itemOf, itemView, planView, type Outcome, type PlanBook, type PlanCall, type PlanChange, type PlanItemInput, type StoredItem, type StoredPlan } from './rules.js';
 
 // ---------------------------------------------------------------------------
 // Cross-project `after`
@@ -404,4 +404,88 @@ function order(keys: readonly string[], entries: ReadonlyMap<string, Entry>): st
         for (const [k] of pending) pending.set(k, entries.get(k)!.after.filter((a) => pending.has(a) && a !== k).length);
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// The Plan actor's side (#822): replacing an item's waits, views, and the lookups the actor prefetches
+
+/** An item as `add` / `split` take it when `after` may name other projects' items (`project#n`). */
+export type LinkedItemInput = Omit<PlanItemInput, 'after'> & { readonly after?: readonly (number | string | Ref)[] };
+
+/**
+ * Replace everything an item waits on — this project's items and other projects' — from a parsed `after`
+ * (`parseAfter`). The project manager and people may; not on a done item; a local number must be another item of
+ * this project.
+ */
+export function setAfter(book: PlanBook, call: PlanCall, itemId: number, after: { readonly local: readonly number[]; readonly cross: readonly CrossAfter[] }, projects: readonly LinkProjectInfo[]): Outcome<StoredItem> {
+    const actor = call.actor ?? fail('a plan change needs an agent or a person');
+    if (!isManager(call)) throw new PlanRuleError('forbidden', 'only the project manager and people may change what an item waits on');
+    const item = itemOf(book, itemId);
+    if (item.state === 'done') throw new PlanRuleError('done', `#${item.id} is done`);
+    const local = [...new Set(after.local)];
+    for (const n of local) {
+        if (n === item.id) fail(`#${item.id} cannot wait on itself`);
+        if (!book.items[String(n)]) fail(`after names #${n}, which is not an item of this project`);
+    }
+    const cross = [...new Map(after.cross.map((a) => [`${a.projectId}#${a.n}`, a])).values()];
+    if (local.length + cross.length > AFTER_MAX) fail(`after holds at most ${AFTER_MAX}`);
+    // No cycle here: nothing it would wait on may (through its own `after`) wait on it.
+    const seen = new Set<number>();
+    const walk = [...local];
+    while (walk.length) {
+        const n = walk.pop()!;
+        if (n === item.id) fail(`#${item.id} cannot wait on an item that waits on it`);
+        if (seen.has(n)) continue;
+        seen.add(n);
+        walk.push(...(book.items[String(n)]?.after ?? []));
+    }
+    const changes: PlanChange[] = [];
+    const same = local.length === item.after.length && local.every((n) => item.after.includes(n));
+    if (!same) {
+        item.after = local;
+        const line = local.length ? `waits on ${local.map((n) => `#${n}`).join(', ')}` : 'waits on no item here';
+        item.activity.push({ at: call.now, actor, text: line });
+        item.updatedAt = call.now;
+        changes.push({ op: 'updated', actor, planId: item.planId, itemId: item.id, summary: `#${item.id} ${line}: ${item.title}` });
+    }
+    const set = setCrossAfter(book, call, itemId, cross, projects);
+    return { value: set.value, changes: [...changes, ...set.changes] };
+}
+
+/** The other projects' items the given items wait on, by project. */
+export function crossRefsByProject(items: Iterable<StoredItem>): Map<ProjectId, number[]> {
+    const out = new Map<ProjectId, Set<number>>();
+    for (const item of items) for (const a of crossAfterOf(item)) (out.get(a.projectId) ?? out.set(a.projectId, new Set()).get(a.projectId)!).add(a.n);
+    return new Map([...out].map(([p, ns]) => [p, [...ns]]));
+}
+
+/** An `ItemLookup` over states read per project (`{projectId: {n: state}}`); anything missing is unknown. */
+export function lookupOf(states: ReadonlyMap<ProjectId, Readonly<Record<string, PlanItemState | undefined>>>): ItemLookup {
+    return (projectId, n) => states.get(projectId)?.[String(n)];
+}
+
+/** `planView` with the cross-project waits applied to each item. */
+export function linkedPlanView(book: PlanBook, plan: StoredPlan, now: number, lookup: ItemLookup): Plan {
+    const view = planView(book, plan, now);
+    return {
+        ...view,
+        phases: view.phases.map((phase, k) => ({ ...phase, items: plan.phases[k]!.items.map((n) => book.items[String(n)]).filter((i): i is StoredItem => !!i).map((i) => linkedItemView(book, i, now, lookup)) }))
+    };
+}
+
+/** The project facts a link needs, from its record. */
+export const linkProjectInfo = (p: Pick<ProjectRecord, 'id' | 'name' | 'members'>): LinkProjectInfo => ({ id: p.id, name: p.name, manager: p.members.coordinator ?? null });
+
+/** Where the workspace-wide `links` read gets its projects and each project's plan items. */
+export interface WorkspaceLinksSource {
+    projects(): Promise<readonly LinkProjectInfo[]>;
+    /** A project's items for the graph (the Plan actor's `linkItems`); a throw leaves the project out. */
+    items(projectId: ProjectId): Promise<readonly LinkItemInput[]>;
+}
+
+/** The workspace's link graph (`/projects/links`, the projects index strip): every project's items, then `links()`. */
+export async function workspaceLinks(source: WorkspaceLinksSource, show: LinkShow = 'open'): Promise<LinkGraph> {
+    const projects = await source.projects();
+    const sources = await Promise.all(projects.map(async (project): Promise<LinkSource> => ({ project, items: await source.items(project.id).catch(() => []) })));
+    return links(sources, show);
 }

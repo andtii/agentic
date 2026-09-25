@@ -790,9 +790,12 @@ export function addRef(book: PlanBook, call: PlanCall, itemId: number, ref: Ref 
 // ---------------------------------------------------------------------------
 // Reads
 
-/** The next item for `agentId`: its own queue in order, then the open pool in plan order — claimable, no touches clash. */
-export function nextFor(book: PlanBook, call: PlanCall, agentId: AgentId): StoredItem | null {
-    const fits = (item: StoredItem) => !claimRefusal(book, call, agentId, item) && !liveClaim(item, call.now) && clashes(book, call, agentId, item).length === 0;
+/**
+ * The next item for `agentId`: its own queue in order, then the open pool in plan order — claimable, no touches clash.
+ * `refusal` is why an item may not be claimed (default `claimRefusal`; the actor adds cross-project waits).
+ */
+export function nextFor(book: PlanBook, call: PlanCall, agentId: AgentId, refusal: (item: StoredItem) => PlanRuleError | null = (item) => claimRefusal(book, call, agentId, item)): StoredItem | null {
+    const fits = (item: StoredItem) => !refusal(item) && !liveClaim(item, call.now) && clashes(book, call, agentId, item).length === 0;
     for (const n of book.queues[`agent:${agentId}`] ?? []) {
         const item = book.items[String(n)];
         if (item && fits(item)) return item;
