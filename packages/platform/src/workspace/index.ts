@@ -15,7 +15,7 @@
  * ports: its tasks record the failure in `ops` and change nothing.
  */
 
-import type { AgentConfig, AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectManagerSpec, ProjectMembers, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
+import type { AgentConfig, AgentId, ChatFileStore, ChatId, ConnectorRef, HostOs, MachineId, NotificationPrefs, ProjectColor, ProjectFeatures, ProjectId, ProjectManagerSpec, ProjectMembers, PmPolicy, ProjectPatch, ProjectRecord, RetentionSettings, ScheduleId, UpdateSettings, WorkdirRef, WorkspaceDefaults, WorkspaceId, WorkspaceSettings } from '@agentic/core';
 import { actorKey, createId, DEFAULT_UPDATE_SETTINGS, DEFAULT_WORKSPACE_SETTINGS, MEMBER_LIMIT_MAX, parseProjectFolderKey, pathWithin, PROJECT_COLORS, PROJECTS_MAX } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
@@ -34,6 +34,7 @@ import { registryKey } from '../registry/key.js';
 import { deleteWorkspace, exportWorkspace } from './cascade.js';
 import type { ArtifactSink, WorkspaceStore } from './ports.js';
 import { checkedPmSpec, DEFAULT_PM_SPEC, pmCoordinatorError, PmSpecError, projectManagerConfig, projectManagerConfigPatch, withProjectManager, type ProjectManagerPatch } from './project-manager.js';
+import { checkedPmPolicy } from './pm-policy.js';
 
 export const WORKSPACE_STATE_VERSION = 1;
 
@@ -636,6 +637,31 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
             },
 
             /**
+             * Set project `projectId`'s manager policy (#758; PRJ-14): who may send it requests and what its manager may
+             * do without asking (`checkedPmPolicy` — a priority cap above normal is refused). The manager agent is kept.
+             * 404 for an unknown project, 400 for a bad policy.
+             */
+            async setProjectPmPolicy(projectId: ProjectId, policy: PmPolicy): Promise<ProjectRecord> {
+                const project = (ctx.state.projects ?? []).find((p) => p.id === projectId);
+                if (!project) throw new ServerFnError(404, `Workspace.setProjectPmPolicy: no project ${String(projectId)} in this workspace`);
+                const checked = pmChecked('setProjectPmPolicy', () => checkedPmPolicy(policy));
+                const record: ProjectRecord = { ...project, pm: { ...(project.pm?.agentId ? { agentId: project.pm.agentId } : {}), policy: checked }, updatedAt: now() };
+                ctx.state.projects = (ctx.state.projects ?? []).map((p) => (p.id === projectId ? record : p));
+                await ctx.save();
+                const at = record.updatedAt;
+                const data: ProjectChangedData & { readonly changed: readonly string[] } = { projectId, name: record.name, op: 'updated', changed: ['pm.policy'] };
+                await recordAudit(ctx, ownerOfWorkspaceKey(ctx.key) as WorkspaceId, {
+                    key: `${ctx.key}:project:${projectId}:pm-policy:${at}`,
+                    kind: 'project.changed',
+                    at,
+                    by: `user:${ctx.state.owner}`,
+                    summary: `project ${record.name} (${projectId}) manager policy set`,
+                    data
+                });
+                return ctx.snapshot(record);
+            },
+
+            /**
              * Remove a project (#332): 404 when unknown; clears `lastProjectId` when it was
              * this one. Chats keep pointing at the id — the router fails their tasks
              * `project-missing` and the web shows a removed project (decisions 2026-09-20).
@@ -871,3 +897,4 @@ export type WorkspaceActor = ReturnType<typeof defineWorkspace>;
 
 export type { ActorRecordRef, ArtifactSink, WorkspaceStore } from './ports.js';
 export { childRecords, deleteWorkspace, exportWorkspace, type CascadeOptions, type DeleteReport, type ExportReport } from './cascade.js';
+export { checkedPmPolicy, pmPolicyOf, PM_SENDER_RULES_MAX, PM_SENDERS_PER_RULE_MAX } from './pm-policy.js';

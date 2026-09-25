@@ -24,4 +24,4 @@ export * from './pulls/index.js';
 
 export * from './plan/index.js';
 
-// slot #758 Requests actor exports — replace this line
+export * from './requests/index.js';

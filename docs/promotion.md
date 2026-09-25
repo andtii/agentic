@@ -151,7 +151,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #784: none — the project manager playbook, name suggestions and config builder are agentic product behaviour.
 
-- #758: —
+- #758: none — the requests state machine, the project manager policy checks and the triage turn are agentic product behaviour.
 
 - #759: `requestResolveRefusal` / `requestWhyLine` in `packages/runtimes/src/tools/requests.ts` are pure request rules over core types; if the Requests actor (#758) or the inbox (#761) needs the same decision or "why you:" text, promote them to `packages/core/src/requests.ts`.
 

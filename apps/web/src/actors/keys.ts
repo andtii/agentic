@@ -36,4 +36,5 @@ export const pullsKeyOf = (ws: string, projectId: string): string => `${ws}:pull
 /** One per project (#750): its plans, queues, claims and leases. */
 export const planKeyOf = (ws: string, projectId: string): string => `${ws}:plan:${projectId}`;
 
-// slot #758 Requests actor key — replace this line
+/** One per project (#758): the requests sent to it, triaged by its manager. */
+export const requestsKeyOf = (ws: string, projectId: string): string => `${ws}:requests:${projectId}`;
