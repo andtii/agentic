@@ -605,7 +605,9 @@ The shell draws `NavItem.children` as the project menu (`packages/ui/src/shell/`
 
 #### #728 web: project sub-menu data, project picker, crumbs
 
-_not yet_
+- **Counts** (`pages/projects/layout/counts.ts`): `projectMenu(head, counts)` puts a plain `count` on Chats, the `needs-you` `badge` on Work (its `count` when nothing waits) and a `count` on a feature section. Menu entries are `ProjectMenuItem` = `NavItem` + `count`; the shell (#727) draws `count` mono `text-dim` and `badge` as the Home badge. Live, `ProjectLayout` reads `Workspace.projectSummaries()` (#734) and publishes the open project's line to the `projectCounts` signal; `countsFor(id, lines, chats)` falls back to deriving them client-side from chats (`countsFromChats`) when there is no line. Mock mode reads `MOCK_PROJECT_MENU_COUNTS`, else derives from the sample chats.
+- **Picker** (`ProjectPicker.tsx`): a modal dialog `ProjectLayout` mounts around every project page; `openProjectPicker()` opens it (the sidebar switcher's `switch`, wired in `App.tsx` once #727 lands). A combobox search over the projects — the last-used (`lastProjectId`) under Recent, the rest under All projects; ArrowUp/Down/Home/End move, Enter opens `/projects/:id`, Escape closes — and `New project`.
+- **Crumbs**: `projectTrail` (#725) is unchanged: `Projects › <project>` from the head.
 
 #### #729 web: /projects index — cards, move/agent pills, open-links strip, unassigned strip
 
