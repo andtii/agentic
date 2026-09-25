@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { InboxNotification } from '@agentic/platform';
-import { desktopHost, noticeHref, noticeTracker } from '../src/desktop';
+import { desktopHost, isThisComputer, noticeHref, noticeTracker, offerPairing } from '../src/desktop';
 
 const n = (id: string, over: Partial<InboxNotification> = {}): InboxNotification => ({
     id,
@@ -29,6 +29,35 @@ describe('desktopHost', () => {
             ['set_badge', { count: 2 }],
             ['set_badge', { count: 0 }]
         ]);
+    });
+
+    it('reads this computer, or null', async () => {
+        const local = { workspaceId: 'ws1', machineId: 'm1', name: 'desk' };
+        const paired = desktopHost({ __TAURI_INTERNALS__: { invoke: async () => local } } as unknown as typeof globalThis)!;
+        expect(await paired.localMachine()).toEqual(local);
+        const none = desktopHost({ __TAURI_INTERNALS__: { invoke: async () => null } } as unknown as typeof globalThis)!;
+        expect(await none.localMachine()).toBeNull();
+    });
+});
+
+describe('this computer', () => {
+    const local = { workspaceId: 'ws1', machineId: 'm1', name: 'desk' };
+
+    it('marks only the matching machine of the matching workspace', () => {
+        expect(isThisComputer({ local }, 'ws1', 'm1')).toBe(true);
+        expect(isThisComputer({ local }, 'ws1', 'm2')).toBe(false);
+        expect(isThisComputer({ local }, 'ws2', 'm1')).toBe(false);
+        expect(isThisComputer({ local: null }, 'ws1', 'm1')).toBe(false);
+        expect(isThisComputer(null, 'ws1', 'm1')).toBe(false);
+    });
+
+    it('offers pairing only in the app, signed in, when this computer is not one of the workspace machines', () => {
+        expect(offerPairing(null, 'ws1', [])).toBe(false);
+        expect(offerPairing({ local: null }, undefined, [])).toBe(false);
+        expect(offerPairing({ local: null }, 'ws1', ['m9'])).toBe(true);
+        expect(offerPairing({ local }, 'ws2', ['m1'])).toBe(true);
+        expect(offerPairing({ local }, 'ws1', ['m2'])).toBe(true);
+        expect(offerPairing({ local }, 'ws1', ['m1', 'm2'])).toBe(false);
     });
 });
 

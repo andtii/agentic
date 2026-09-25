@@ -11,7 +11,8 @@ import { inboxKeyOf, workspaceKeyOf } from '../actors/keys';
 import { desktopHost } from './bridge';
 import { noticeTracker } from './notices';
 
-export { desktopHost, type DesktopHost, type DesktopNotice } from './bridge';
+export { desktopHost, type DesktopHost, type DesktopNotice, type LocalMachine } from './bridge';
+export { isThisComputer, offerPairing, type ThisComputer } from './machine';
 export { noticeHref, noticeOf, noticeTracker, type NoticeTracker } from './notices';
 
 /** Call in the app shell's setup; `badge` is the count the nav's Home badge shows. */
