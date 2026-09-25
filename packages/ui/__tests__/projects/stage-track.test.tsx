@@ -45,5 +45,6 @@ describe('StageTrack', () => {
     it('clamps an out-of-range stage', () => {
         expect(stageTrackLabel(GIT, 9, 'working')).toBe('Merge, stage 6 of 6, agent working');
         expect(stageTrackLabel(GIT, -1, 'working')).toBe('Ready, stage 1 of 6, agent working');
+        expect(stageTrackLabel([], 0, 'failed')).toBe('No stages, failed');
     });
 });

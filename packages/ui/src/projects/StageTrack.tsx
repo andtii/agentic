@@ -38,8 +38,9 @@ const clampStage = (stages: readonly string[], stage: number): number => Math.mi
 
 /** The track's accessible name: `Checks, stage 4 of 6, failed`. */
 export function stageTrackLabel(stages: readonly string[], stage: number, state: WorkStageState): string {
+    if (!stages.length) return `No stages, ${STAGE_STATE_TEXT[state]}`;
     const at = clampStage(stages, stage);
-    return `${stages[at] ?? 'No stage'}, stage ${Math.min(at + 1, stages.length)} of ${stages.length}, ${STAGE_STATE_TEXT[state]}`;
+    return `${stages[at]}, stage ${at + 1} of ${stages.length}, ${STAGE_STATE_TEXT[state]}`;
 }
 
 const rootStyle = 'display: inline-flex; flex-direction: column; gap: 5px; min-inline-size: 0; max-inline-size: 132px';
