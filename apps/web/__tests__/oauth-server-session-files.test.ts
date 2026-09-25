@@ -7,7 +7,7 @@
  */
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentId, EnvironmentId, MachineId, Principal, ProjectId, SessionId, TaskId, WorkspaceId } from '@agentic/core';
+import { projectFolderKey, type AgentId, type EnvironmentId, type MachineId, type Principal, type ProjectId, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { IN_MEMORY_PLAIN_ROOT, IN_MEMORY_PROJECT_ROOT, inMemoryEnvironment, inMemoryHarness, type InMemoryDaemon, type PlatformSeat } from '@agentic/daemon-protocol/testing';
 import type { ExternalPrincipal } from '@agentic/mcp';
 import {
@@ -177,7 +177,7 @@ describe('MCP session files through the actor port (#566)', () => {
     it("compares a branch with the project git feature's base when the session's task is in a project", async () => {
         const machineId = await onlineMachine();
         await app.as(owner).actor(Registry, registryKey(WS)).enable(GIT_FEATURE_ID);
-        const project = await workspace().upsertProject({ name: 'Agentic', features: { [GIT_FEATURE_ID]: { base: 'develop' } } });
+        const project = await workspace().upsertProject({ name: 'Agentic', folders: { [projectFolderKey(machineId)]: IN_MEMORY_PROJECT_ROOT }, features: { [GIT_FEATURE_ID]: { base: 'develop' } } });
         const sessionId = await sessionIn(machineId, IN_MEMORY_PROJECT_ROOT, project.id);
         const port = createActorPlatformPort(client, { actors });
         await port.sessions.changes(sessionId, 'branch');

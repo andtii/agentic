@@ -370,8 +370,13 @@ function checkedConnectors(connectors: readonly ConnectorRef[] | undefined, base
     return out;
 }
 
-/** `features` after `patch.features` — `null` removes one — each settings object checked by the Registry (`checkProjectSettings`) over a hop. */
-async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectFeatures | undefined, patch: ProjectPatch['features']): Promise<Record<string, Record<string, unknown>>> {
+/**
+ * `features` after `patch.features` — `null` removes one — each settings object checked by the Registry
+ * (`checkProjectSettings`) over a hop. A feature the patch newly enables is checked against the project's
+ * `folders` after the patch too, so one whose `ui.needs` the project lacks is refused (Git needs a folder,
+ * #772). A feature already on is not re-judged on needs: removing a folder never locks its settings.
+ */
+async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectFeatures | undefined, patch: ProjectPatch['features'], folders: ProjectRecord['folders']): Promise<Record<string, Record<string, unknown>>> {
     const features: Record<string, Record<string, unknown>> = {};
     for (const [id, settings] of Object.entries(base ?? {})) features[id] = { ...settings };
     if (patch === undefined) return features;
@@ -385,7 +390,7 @@ async function checkedFeatures(ctx: ActorContext<WorkspaceState>, base: ProjectF
         }
         if (typeof settings !== 'object' || Array.isArray(settings)) bad(`the settings of feature ${id} must be an object`);
         try {
-            await registry.checkProjectSettings(id, settings);
+            await registry.checkProjectSettings(id, settings, base !== undefined && Object.hasOwn(base, id) ? undefined : { folders });
         } catch (error) {
             bad(`feature ${id}: ${errorText(error)}`);
         }
@@ -550,7 +555,7 @@ export function defineWorkspace(options: WorkspaceOptions = {}) {
                 const pmPolicy = patch.pmPolicy !== undefined ? pmChecked('upsertProject', () => checkedPmPolicy(patch.pmPolicy)) : undefined;
                 const connectors = checkedConnectors(patch.connectors, base?.connectors);
                 const folders = await checkedFolders(ctx, base?.folders, patch.folders);
-                const features = await checkedFeatures(ctx, base?.features, patch.features);
+                const features = await checkedFeatures(ctx, base?.features, patch.features, folders as ProjectRecord['folders']);
                 const color = checkedColor(patch.color, base?.color);
                 // The hops awaited: the record may have moved meanwhile (a concurrent remove, a `get` interleaving is read-only).
                 const current = ctx.state.projects ?? [];
