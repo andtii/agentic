@@ -9,7 +9,9 @@
  */
 export { aiThreadAnatomy, aiMessageAnatomy, aiToolCallAnatomy, aiReasoningAnatomy, aiApprovalAnatomy, aiQuestionAnatomy, LIFECYCLE_STATES } from './anatomy.js';
 export { Thread, Thread as AiThread, threadMessages, looseRequests, midTurn } from './Thread.js';
-export type { ThreadProps, DescribeFn } from './Thread.js';
+export type { ThreadProps, DescribeFn, ThreadInsert } from './Thread.js';
+export { placeInserts, isoTime } from './interleave.js';
+export type { Timed, Placement } from './interleave.js';
 export { Message, Message as AiMessage, authorOf } from './Message.js';
 export type { MessageProps, MessageAuthor } from './Message.js';
 export { ToolCall, ToolCall as AiToolCall, toolIcon, OUTPUT_FOLD, OUTPUT_LOG } from './ToolCall.js';

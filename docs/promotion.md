@@ -162,7 +162,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #761: none — the Requests inbox is agentic product UI.
 
-- #762: none — visiting managers, the chat's request cards and Across projects are agentic product logic and UI.
+- #762: none — visiting managers, the chat's request cards and Across projects are agentic product logic and UI. #870: `placeInserts` / `Thread.inserts` (`packages/ui/src/thread/interleave.ts`) — host rows interleaved into a windowed transcript by time — is a candidate for `@sigx/ai-agent`'s app thread.
 
 - #763: `pmSummaryTrigger` (a `TriggerPort` that handles its own marked entries and hands the rest to `next`) in `packages/platform/src/requests/summary.ts` is a generic trigger-chaining pattern — candidate for `schedule/` next to `scheduleTrigger`.
 

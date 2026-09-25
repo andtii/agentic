@@ -30,6 +30,9 @@
  * asked for. Each member's feed follows its session from the last turn's end
  * (`feeds.ts`), so it carries the turn running now and never replays the
  * session's past — every earlier turn's final message is already an entry.
+ *
+ * #870: a visiting manager's rows carry its project chip and `project manager, visiting`; the request cards, the accept
+ * divider and the result card sit in the thread by time (`Thread.inserts`) — `ChatRequestsFrom` only reads and reports.
  */
 import { component, effect, onMounted, onUnmounted, signal, watch, type JSXElement } from 'sigx';
 import { Link, useRoute, useRouter } from '@sigx/router';
@@ -39,7 +42,8 @@ import { Drawer } from '@sigx/zero';
 import { createId, isChatFilePart, sessionFileUri, type AgentId, type ChatFilePart, type ChatId, type MachineId, type ProjectId, type ProjectRequest, type PromptPart, type SessionOptionsPatch, type TaskId, type WorkdirRef } from '@agentic/core';
 import { acrossProjects, activeIn, bringInVisitors, visitingManagers, visitorOf, visitorsIn, type IndexedEntry } from '@agentic/platform';
 import type { Decision, ToolPartState } from '@sigx/ai-agent';
-import { Composer, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions } from '@agentic/ui';
+import type { AgentMessage } from '@sigx/ai-agent/app';
+import { Composer, EmptyState, ErrorNote, NOBODY_HINT, Thread, prepareImage, type ComposerInsert, type Mention, type MessageAuthor, type RespondOptions, type ThreadInsert } from '@agentic/ui';
 import { Page } from '../../components/Page';
 import { baseTurnId, capacityWaitText, FailureNotice, interruptionOf, machineOfflineText, useInterruptionReads } from '../../components/status';
 import { useActorDefs, useViewer } from '../../actors/defs';
@@ -50,7 +54,7 @@ import { ChatSearchPanel, SEARCH_LIMIT } from './ChatSearchPanel';
 import { ChatSettingsDialog, type ChatSettingsChange } from './ChatSettingsDialog';
 import { ContextPanel } from './ContextPanel';
 import { DetachedQuestionCard } from './DetachedQuestionCard';
-import { ChatRequestsFrom } from './entries/RequestCard';
+import { ChatRequestsFrom, RequestCard, acceptedAt } from './entries/RequestCard';
 import { closeContextDrawer, contextDrawer } from './context-drawer';
 import { useAgentDirectory } from './directory';
 import { openFeed, type FeedHandle } from './feeds';
@@ -485,6 +489,27 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const visitors = visitorsIn([...memberIds], projects.list(), s?.projectId);
         const across = acrossProjects(visitors.flatMap((v) => sentFrom.value[v.projectId] ?? []), projects.list(), s?.projectId);
         const visitorOfMember = (agentId: string) => visitorOf(agentId, projects.list(), s?.projectId);
+        // A visiting manager's rows (#870): its project chip and role after its name. An entry row names its agent; a feed's in-flight row is its feed's.
+        const describe = (m: AgentMessage): MessageAuthor | undefined => {
+            const author = authors.value[m.id];
+            if (!visitors.length || m.role === 'user') return author;
+            const agentId = m.actor ?? feeds.list.find((f) => f.transcript.messages.some((x) => x.id === m.id))?.agentId;
+            const v = agentId ? visitors.find((x) => x.agentId === agentId) : undefined;
+            return v ? { ...author, project: v.projectName, role: v.role } : author;
+        };
+        // The request cards in the thread by time (#870): the request where it was sent, the divider and result card where it was accepted.
+        const inserts: ThreadInsert[] = visitors.flatMap((v) => (sentFrom.value[v.projectId] ?? []).flatMap((r) => {
+            const card = (part: 'request' | 'result') => () => (
+                <div data-chat-question>
+                    <RequestCard request={r} part={part} toProjectName={v.projectName} managerName={directory.lookup(v.agentId).name} {...(project ? { homeProjectName: project.name } : {})} time={time} />
+                </div>
+            );
+            const accepted = acceptedAt(r);
+            return [
+                { key: `${v.projectId}:${r.id}:request`, at: r.createdAt, render: card('request') },
+                ...(accepted !== undefined ? [{ key: `${v.projectId}:${r.id}:result`, at: accepted, render: card('result') }] : [])
+            ];
+        }));
         const candidates = directory.all().filter((a) => !memberIds.has(a.id));
         const tasks = chatTasks(index.value ?? [], props.id);
         const failure = chatFailure(entries, feeds.list, interruptionOfTurn, machineNameOf);
@@ -508,7 +533,8 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                         : (
                             <Thread
                                 transcript={transcript}
-                                describe={(m) => authors.value[m.id]}
+                                describe={describe}
+                                inserts={inserts}
                                 toolLinks={toolLinks}
                                 pullLinks={chatPullLinks(s?.projectId)}
                                 hasEarlier={older.next !== null && older.next !== undefined}
@@ -523,7 +549,7 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
                             />
                         )}
                     {viewer.workspaceId && s?.projectId ? visitors.map((v) => (
-                        <ChatRequestsFrom key={v.projectId} workspaceId={viewer.workspaceId!} chatId={props.id} chatProjectId={s.projectId!} {...(project ? { homeProjectName: project.name } : {})} projectId={v.projectId} projectName={v.projectName} managerName={directory.lookup(v.agentId).name} time={time} onRequests={reportRequests} />
+                        <ChatRequestsFrom key={v.projectId} workspaceId={viewer.workspaceId!} chatId={props.id} chatProjectId={s.projectId!} {...(project ? { homeProjectName: project.name } : {})} projectId={v.projectId} projectName={v.projectName} managerName={directory.lookup(v.agentId).name} time={time} onRequests={reportRequests} headless />
                     )) : null}
                     {detachedQuestions(entries, inbox.value ?? [], feeds.list, s?.sessions).map((q) => (
                         <div key={`${q.sessionId}:${q.requestId}`} data-chat-question>

@@ -32,8 +32,13 @@
  * Who an author is (hue, environment, time) comes from the page through
  * `describe`; the STREAMING pill sits on the last assistant row while the
  * session is mid-turn.
+ *
+ * `inserts` are the host's own rows placed by time (#870) — each before the
+ * first message later than it (`./interleave`, reading the message times
+ * `describe` gives). One shows while the row it precedes is in the window;
+ * the ones after every message show while the window reaches the tail.
  */
-import { component, onMounted, onUnmounted, type Define } from '@sigx/runtime-core';
+import { component, onMounted, onUnmounted, type Define, type JSXElement } from '@sigx/runtime-core';
 import { spawnedAgent } from '@sigx/ai-agent';
 import type { AgentMessage, AgentTranscript, OpenRequest } from '@sigx/ai-agent/app';
 import { aiThreadAnatomy } from './anatomy.js';
@@ -41,11 +46,21 @@ import { ApprovalPrompt, type RespondFn } from './ApprovalPrompt.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { Message, type MessageAuthor } from './Message.js';
 import { approvalContext, type DescribeRequestFn, type PullLinksFn, type ToolLinksFn, type ToolMetaFn } from './ToolCall.js';
+import { isoTime, placeInserts } from './interleave.js';
 import { DEFAULT_WINDOW, followRange, frozenRange, unitCount, windowRows } from './window.js';
 
 const SCOPE = aiThreadAnatomy.scope;
 
 export type DescribeFn = (message: AgentMessage) => MessageAuthor | undefined;
+
+/** A host row placed in the thread by time (#870): a request card, a divider, a result card. */
+export interface ThreadInsert {
+    /** Stable across renders and unique in the thread. */
+    readonly key: string;
+    /** When it happened (epoch ms): it sits before the first message later than this. */
+    readonly at: number;
+    readonly render: () => JSXElement;
+}
 
 export type ThreadProps =
     & Define.Prop<'transcript', AgentTranscript, true>
@@ -71,6 +86,8 @@ export type ThreadProps =
     & Define.Prop<'hasEarlier', boolean, false>
     /** Asked for the rows before the transcript's first — by the chip, or by a scroll to within `threshold` of the top — while `hasEarlier`; the host prepends them. */
     & Define.Prop<'onEarlier', () => void, false>
+    /** Host rows placed among the messages by time — see `ThreadInsert`. */
+    & Define.Prop<'inserts', readonly ThreadInsert[], false>
     /** Accessible name of the log. Default "Transcript". */
     & Define.Prop<'label', string, false>;
 
@@ -213,6 +230,12 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
         const loose = looseRequests(props.transcript);
         const streaming = midTurn(props.transcript);
         const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+        const placed = placeInserts(messages, props.inserts ?? [], (m) => isoTime(props.describe?.(m)?.time?.dateTime));
+        const insertRow = (insert: ThreadInsert) => (
+            <li key={`insert:${insert.key}`} data-scope={SCOPE} data-part="row" data-insert="">
+                {insert.render()}
+            </li>
+        );
         const shown = range.end - range.start;
         const more = range.start > 0 || props.hasEarlier === true;
         lastStart = range.start;
@@ -251,7 +274,8 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                         list = el;
                     }}
                 >
-                    {rows.map((row) => (
+                    {rows.flatMap((row) => [
+                        ...(placed.before.get(row.key) ?? []).map(insertRow),
                         <li key={row.key} data-scope={SCOPE} data-part="row">
                             <Message
                                 message={row.message}
@@ -269,7 +293,8 @@ export const Thread = component<ThreadProps>(({ props, signal, onUpdated }) => {
                                 onCancelAgent={props.onCancelAgent}
                             />
                         </li>
-                    ))}
+                    ])}
+                    {range.end === total && placed.after.map(insertRow)}
                     {props.onRespond &&
                         loose.map((r) => (
                             <li key={`request:${r.requestId}`} data-scope={SCOPE} data-part="row">
