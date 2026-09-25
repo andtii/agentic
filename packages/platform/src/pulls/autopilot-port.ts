@@ -3,8 +3,9 @@
  * workspace. The app adds the merge (the git feature's `PullProvider.merge`) — the only half that knows a provider.
  *
  * - `startTurn`: posts the autopilot's text in the PR's chat addressed to the agent (`Chat.post` with the agent as
- *   the one mention), starts the agent's task from that message (`mentionContract`, as a person's mention does) and
- *   hands it to the router (`Routing.run`, one-way). The agent must be a member of the chat; otherwise the turn throws and
+ *   the one mention), starts the agent's task from that message (`mentionContract`, as a person's mention does),
+ *   hands it to the router (`Routing.run`, one-way) and returns the task's id — the Pulls actor ends the turn when
+ *   that task ends (#858). The agent must be a member of the chat; otherwise the turn throws and
  *   the autopilot stops.
  * - `yourMove`: one Inbox row, one-way (`{repo}#{n} needs you`, the stop's line, deep-linked to the PR's task, else
  *   chat, else session).
@@ -114,6 +115,8 @@ export function chatAutopilotPort(options: ChatAutopilotOptions): Omit<PullsAuto
             // A hand-off, one-way (#492): the Pulls turn never waits on the placement — the task's record says how it went.
             const router = actor(options.routing(), routingKey(workspaceId)).with({ context: driver, oneWay: true }) as unknown as RouterClient;
             await router.run(taskId);
+            // The Pulls actor keeps it on the turn: the task's end is the turn's end (#858).
+            return { taskId };
         },
         async yourMove({ pr, stop }) {
             await push(autopilotStopRow(pr, stop));

@@ -15,7 +15,10 @@
  * Autopilot (#820, PRJ-09): an open PR with switches keeps one `AutopilotRun`, driven after every good poll through
  * the app's `PullsAutopilotPort`; `setAutopilot`, `takeOver`, `stopAutopilot`, `resumeAutopilot`,
  * `autopilotTurnEnded` and `answerMerge` are the page's and the chat's hooks. The view carries each PR through
- * `withAutopilotRun`, so its `autopilot.attempt` and `activity` are the run's.
+ * `withAutopilotRun`, so its `autopilot.attempt` and `activity` are the run's, and `runs` says where each run stands
+ * (paused, asking to merge) for the page's Resume and Approve / Decline. A turn whose task the port named ends when
+ * that task ends (#858): each poll reads the task — polling at the floor while such a turn runs — and ends the turn
+ * (`AUTOPILOT_SETTLE_MS` from then) once the task is terminal or waits on a pull request.
  *
  * Workers eviction rule: every mutation below ends in `ctx.save()` inside the turn.
  */
@@ -39,7 +42,8 @@ import {
     takeOverAutopilot,
     withAutopilotRun,
     type AutopilotPort,
-    type AutopilotRun
+    type AutopilotRun,
+    type AutopilotStopReason
 } from './autopilot.js';
 import type { PullsAutopilotPort } from './autopilot-port.js';
 import type { TriggerHop } from '../schedule/ports.js';
@@ -93,12 +97,22 @@ export interface PullsState {
     error?: string;
 }
 
+/** Where a PR's autopilot run stands (#858): what the page's Resume and Approve / Decline follow. */
+export interface PullAutopilotState {
+    /** Switched off (`off`, Stop autopilot) or why it stopped; absent while it runs. `resumeAutopilot` clears it. */
+    readonly paused?: 'off' | AutopilotStopReason;
+    /** A merge the autopilot asked for waits on your answer (`answerMerge`). */
+    readonly askingMerge?: true;
+}
+
 /** What `get()` returns: the PRs newest first, and how the polling stands. */
 export interface PullsView {
     readonly workspaceId: WorkspaceId;
     readonly projectId: ProjectId;
     readonly repo?: PullsRepo;
     readonly pulls: readonly PullRequest[];
+    /** By PR number: where each switched-on PR's autopilot run stands (#858). */
+    readonly runs: Readonly<Record<string, PullAutopilotState>>;
     readonly polledAt?: number;
     readonly next?: number;
     readonly error?: string;
@@ -204,6 +218,12 @@ export function definePullsActor(options: PullsActorOptions) {
 
     type Ctx = ActorContext<PullsState>;
 
+    const runStateOf = (t: TrackedPull): PullAutopilotState => {
+        const run = t.autopilot;
+        const paused = run?.off ? 'off' : run?.stopped?.reason;
+        return { ...(paused ? { paused } : {}), ...(t.mergeAsk && t.pr.state === 'open' ? { askingMerge: true as const } : {}) };
+    };
+
     const view = (s: PullsState): PullsView => ({
         workspaceId: s.workspaceId,
         projectId: s.projectId,
@@ -211,6 +231,7 @@ export function definePullsActor(options: PullsActorOptions) {
         pulls: Object.values(s.pulls)
             .map((t) => (t.autopilot ? withAutopilotRun(t.pr, t.autopilot) : t.pr))
             .sort((a, b) => b.number - a.number),
+        runs: Object.fromEntries(Object.values(s.pulls).filter((t) => t.pr.autopilot).map((t) => [String(t.pr.number), runStateOf(t)])),
         ...(s.polledAt !== undefined ? { polledAt: s.polledAt } : {}),
         ...(s.next !== undefined ? { next: s.next } : {}),
         ...(s.error !== undefined ? { error: s.error } : {})
@@ -313,7 +334,28 @@ export function definePullsActor(options: PullsActorOptions) {
         }
     };
 
-    const portFor =(s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
+    /** An autopilot turn whose task is known and has not ended yet: its task is read every poll. */
+    const turnRuns = (t: TrackedPull): boolean => {
+        const turn = t.autopilot?.turn;
+        return t.pr.state === 'open' && turn?.taskId !== undefined && turn.endedAt === undefined;
+    };
+
+    /** The turn's task ended (terminal, or waiting on a pull request): the turn ended (#858). */
+    const endTurn = async (ctx: Ctx, t: TrackedPull): Promise<void> => {
+        const taskId = t.autopilot?.turn?.taskId;
+        if (!t.autopilot || taskId === undefined || t.autopilot.turn?.endedAt !== undefined) return;
+        // A PR merged or closed mid-turn ends the turn: nothing reads its task again once the PR is not open.
+        if (t.pr.state !== 'open') {
+            t.autopilot = autopilotTurnEnded(t.autopilot, now());
+            return;
+        }
+        const task = await ctx.actor(TaskActor, taskKey(ctx.state.workspaceId, taskId)).get().catch(() => undefined);
+        // An unreadable task leaves the turn to `AUTOPILOT_TURN_STALE_MS`.
+        if (!task) return;
+        if (isTerminal(task.status) || (task.status === 'waiting' && task.wait?.kind === 'pull-request')) t.autopilot = autopilotTurnEnded(t.autopilot, now());
+    };
+
+    const portFor = (s: PullsState): PullsAutopilotPort | undefined => options.autopilot?.({ workspaceId: s.workspaceId, projectId: s.projectId });
 
     /**
      * Step the PR's autopilot and take its actions (#820). A merge whose rule says `ask` is not taken: it is recorded
@@ -410,11 +452,17 @@ export function definePullsActor(options: PullsActorOptions) {
         if (s.error === undefined) {
             for (const t of Object.values(s.pulls)) {
                 try {
+                    await endTurn(ctx, t);
                     await drive(s, t);
                 } catch (error) {
                     console.warn(`[pulls] autopilot on #${t.pr.number} failed:`, error);
                 }
             }
+        }
+        // A running turn's end is read on the next poll: keep that at the floor.
+        if (s.error === undefined && Object.values(s.pulls).some(turnRuns)) {
+            s.intervalMs = POLL_FLOOR_MS;
+            delay = Math.min(delay, POLL_FLOOR_MS);
         }
         prune(s);
         s.polledAt = at;

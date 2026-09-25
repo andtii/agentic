@@ -1,8 +1,10 @@
 /**
  * `/projects/:id/work/pr:<n>` — a pull request (#744, PRJ-08/09): on mock data the fixtures in `mock/projects/pull.ts`,
- * live the project's `Pulls.get` view (the PR by number) with names from the agent directory. `PullView` renders both.
+ * live the project's `Pulls.get` view (the PR by number) with names from the agent directory, its controls wired to the
+ * Pulls actor's autopilot methods (#858). `PullView` renders both.
  */
 import { component, type Define } from 'sigx';
+import { actor } from '@sigx/actors';
 import { useActorState } from '@sigx/actors/app';
 import { EmptyState } from '@agentic/ui';
 import { useActorDefs, useViewer } from '../../../../actors/defs';
@@ -12,7 +14,7 @@ import { MOCK_PULLS } from '../../../../mock/projects/pull';
 import { AGENTS, MOCK_NOW } from '../../../../mock/workspace';
 import { useAgentDirectory } from '../../../chat/directory';
 import type { ProjectPageProps } from '../../layout/types';
-import { findPull, type PullPageData } from './model';
+import { findPull, type PullActions, type PullPageData } from './model';
 import { PullView, type PullAgent } from './PullView';
 
 export type PullProps = ProjectPageProps & Define.Prop<'number', number, true>;
@@ -33,12 +35,26 @@ const LivePull = component<PullProps>(({ props }) => {
         const a = directory.lookup(id);
         return a.name === id ? undefined : { name: a.name, hue: a.hue };
     };
+    const pulls = () => actor(defs.Pulls, pullsKeyOf(viewer.workspaceId!, props.project.id));
+    // Each write re-reads the view: the actor hands the new one back, but the page follows `get` like any reader.
+    const write = async (call: () => Promise<unknown>): Promise<void> => {
+        await call();
+        await view.refresh();
+    };
+    const actions: PullActions = {
+        setAutopilot: (switches) => write(() => pulls().setAutopilot(props.number, switches)),
+        takeOver: () => write(() => pulls().takeOver(props.number)),
+        stopAutopilot: () => write(() => pulls().stopAutopilot(props.number)),
+        resumeAutopilot: () => write(() => pulls().resumeAutopilot(props.number)),
+        answerMerge: (approve) => write(() => pulls().answerMerge(props.number, approve))
+    };
     return () => {
         const pr = view.value?.pulls.find((p) => p.number === props.number);
         if (!pr) return view.loading ? null : missing(props.number, 'The project has not read a pull request by that number.');
         const env = pr.autopilot ? directory.lookup(pr.autopilot.agentId).environment : undefined;
         const data: PullPageData = { pr, ...(env && env.machine !== '—' ? { linked: { environment: env } } : {}) };
-        return <PullView projectId={props.project.id} data={data} agentOf={agentOf} now={Date.now()} readOnly />;
+        const run = view.value?.runs?.[String(pr.number)];
+        return <PullView projectId={props.project.id} data={data} agentOf={agentOf} now={Date.now()} actions={actions} {...(run ? { run } : {})} />;
     };
 }, { name: 'LivePull' });
 

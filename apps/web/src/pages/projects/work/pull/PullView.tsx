@@ -2,8 +2,10 @@
  * The Pull board (#744, PRJ-08/09): header (title, branch, diff size, task and issue), the Opened → Checks → Review →
  * Approved → Merge stepper, what is happening now with Take over / Stop autopilot, Checks, Review threads; and the
  * 380px rail — Autopilot switches, Merge (every blocker in one sentence, `Squash and merge`, the approval note),
- * Linked items. One view for mock and live data: `Pull` feeds it; the switches and actions are local until the git
- * feature's autopilot writes exist (G3), and `readOnly` (live) disables them.
+ * Linked items. One view for mock and live data: `Pull` feeds it. Live, `actions` are the Pulls actor's autopilot
+ * methods (#858) — the switches → `setAutopilot`, Take over / Stop autopilot / Resume, and Approve / Decline while the
+ * autopilot asks to merge — and `run` says where the run stands. Without `actions` (mock) they edit a local copy;
+ * `readOnly` disables them.
  */
 import { component, signal, type Define } from 'sigx';
 import { Link } from '@sigx/router';
@@ -11,8 +13,8 @@ import type { Autopilot, PullRequest } from '@agentic/core';
 import { AgentTile, Button, ChecksBar, EnvironmentLine, Icon, Switch, type AgentHue } from '@agentic/ui';
 import { formatTime } from '../../../../mock/workspace';
 import {
-    APPROVAL_NOTE, REVIEW_LABEL, THREAD_LABEL, autopilotOff, autopilotRows, blockerSentence, canMerge, diffText, durationText, openedAgo, originText, pullNow, pullSteps,
-    type AutopilotSwitch, type PullLinked, type PullPageData
+    APPROVAL_NOTE, REVIEW_LABEL, THREAD_LABEL, asksToMerge, autopilotOff, autopilotRows, blockerSentence, canMerge, diffText, durationText, openedAgo, originText, pullNow, pullSteps,
+    switchesOf, type AutopilotSwitch, type PullActions, type PullNow, type PullLinked, type PullPageData, type PullRunState
 } from './model';
 
 export interface PullAgent {
@@ -25,27 +27,76 @@ export type PullViewProps =
     & Define.Prop<'data', PullPageData, true>
     & Define.Prop<'agentOf', (id: string) => PullAgent | undefined, true>
     & Define.Prop<'now', number, true>
-    /** Live: the switches and actions are shown but disabled until autopilot writes exist. */
-    & Define.Prop<'readOnly', boolean>;
+    /** The switches and actions are shown but disabled. */
+    & Define.Prop<'readOnly', boolean>
+    /** Live (#858): the Pulls actor's autopilot methods for this PR; absent → a local copy (mock). */
+    & Define.Prop<'actions', PullActions>
+    /** Live: where the PR's autopilot run stands (`PullsView.runs`). */
+    & Define.Prop<'run', PullRunState>;
 
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { github: 'GitHub' };
 const LATER = 'Arrives with the git feature’s autopilot controls';
 
 export const PullView = component<PullViewProps>(({ props }) => {
-    // Local until the autopilot writes exist: Take over / Stop and the switches edit this copy.
-    // Local until the autopilot writes exist: Take over / Stop and the switches edit a copy taken at setup (`Pull` keys
-    // the view by PR number, so another PR gets a fresh copy); read-only (live) renders the PR's own autopilot.
+    // Without `actions` (mock), Take over / Stop and the switches edit a copy taken at setup (`Pull` keys the view by
+    // PR number, so another PR gets a fresh copy); live and read-only render the PR's own autopilot.
     const initial = props.data.pr.autopilot;
-    const st = signal({ autopilot: (initial ? { ...initial } : null) as Autopilot | null, stopped: '' as '' | 'you' | 'stopped', asked: false });
-    const autopilot = (): Autopilot | undefined => (props.readOnly ? props.data.pr.autopilot : (st.autopilot ?? undefined));
+    const st = signal({ autopilot: (initial ? { ...initial } : null) as Autopilot | null, stopped: '' as '' | 'you' | 'stopped', asked: false, busy: false, error: '' });
+    const own = (): boolean => !!props.actions || !!props.readOnly;
+    // Live, a copy per read: a switch's model writes into what it is given, never into the actor's view.
+    const autopilot = (): Autopilot | undefined => {
+        if (!own()) return st.autopilot ?? undefined;
+        const a = props.data.pr.autopilot;
+        return a ? { ...a } : undefined;
+    };
+    /** One write at a time; a refusal is said in the callout. */
+    const act = async (write: (actions: PullActions) => Promise<unknown>): Promise<void> => {
+        const actions = props.actions;
+        if (!actions || st.busy) return;
+        st.busy = true;
+        st.error = '';
+        try {
+            await write(actions);
+        } catch (error) {
+            st.error = error instanceof Error ? error.message : String(error);
+        } finally {
+            st.busy = false;
+        }
+    };
     const setSwitch = (key: AutopilotSwitch, on: boolean): void => {
-        if (!props.readOnly && st.autopilot && st.autopilot[key] !== on) st.autopilot = { ...st.autopilot, [key]: on };
+        if (props.readOnly) return;
+        const a = autopilot();
+        if (!a || a[key] === on) return;
+        if (props.actions) {
+            void act((x) => x.setAutopilot({ ...switchesOf(a), [key]: on }));
+            return;
+        }
+        if (st.autopilot) st.autopilot = { ...st.autopilot, [key]: on };
     };
     const stop = (by: 'you' | 'stopped'): void => {
+        if (props.actions) {
+            void act((x) => (by === 'you' ? x.takeOver() : x.stopAutopilot()));
+            return;
+        }
         if (!st.autopilot) return;
         st.autopilot = autopilotOff(st.autopilot);
         st.stopped = by;
     };
+    const resume = (): void => {
+        if (props.actions) {
+            void act((x) => x.resumeAutopilot());
+            return;
+        }
+        st.autopilot = initial ? { ...initial } : null;
+        st.stopped = '';
+    };
+    /** Live: `off`, `taken-over` or another stop's reason; mock: the local Take over / Stop. */
+    const paused = (): '' | 'you' | 'stopped' | 'other' => {
+        if (!props.actions) return st.stopped;
+        const p = props.data.pr.state === 'open' && props.data.pr.autopilot ? props.run?.paused : undefined;
+        return !p ? '' : p === 'taken-over' ? 'you' : p === 'off' ? 'stopped' : 'other';
+    };
+    const disabled = (): boolean => !!props.readOnly || st.busy;
 
     const person = (id: string): PullAgent => (id === 'you' ? { name: 'You' } : (props.agentOf(id) ?? { name: id }));
     const tile = (id: string, size: 18 | 20 = 20) => {
@@ -83,16 +134,32 @@ export const PullView = component<PullViewProps>(({ props }) => {
         </ol>
     );
 
+    const errorLine = () => (st.error ? <p data-pull-error="" role="alert">{st.error}</p> : null);
+
     const Now = (pr: PullRequest) => {
-        if (st.stopped) {
+        const stopped = paused();
+        if (stopped) {
+            const line = stopped === 'you'
+                ? 'You took over. Autopilot is off; the next move is yours.'
+                : stopped === 'stopped'
+                    ? 'Autopilot stopped. Nothing runs on this PR until you turn it back on.'
+                    : (pr.autopilot?.activity ?? 'Autopilot stopped; the next move is yours.');
             return (
-                <section data-pull-now="" data-stopped={st.stopped} aria-label="What is happening now">
-                    <p>{st.stopped === 'you' ? 'You took over. Autopilot is off; the next move is yours.' : 'Autopilot stopped. Nothing runs on this PR until you turn it back on.'}</p>
+                <section data-pull-now="" data-stopped={stopped} aria-label="What is happening now">
+                    <p>{line}</p>
+                    {errorLine()}
+                    <div data-pull-now-actions="">
+                        <span data-spacer="" />
+                        <Button label="Resume autopilot" name="resume-autopilot" disabled={disabled()} onClick={resume} />
+                    </div>
                 </section>
             );
         }
-        const now = pullNow(pr, (id) => person(id).name);
-        if (!now) return null;
+        // Live, an autopilot with nothing to do right now still has its controls.
+        const idle: PullNow | undefined = props.actions && pr.state === 'open' && pr.autopilot ? { title: `${person(pr.autopilot.agentId).name} is watching this PR` } : undefined;
+        const now = pullNow(pr, (id) => person(id).name) ?? idle;
+        if (!now) return errorLine();
+        const asking = !!props.actions && asksToMerge(pr, props.run);
         return (
             <section data-pull-now="" aria-label="What is happening now">
                 <div data-pull-now-head="">
@@ -102,12 +169,21 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 </div>
                 {now.body ? <p data-pull-now-body="">{now.body}</p> : null}
                 {props.readOnly ? <p data-pull-later="">{LATER}</p> : null}
+                {errorLine()}
                 <div data-pull-now-actions="">
                     {pr.sessionId ? <Link to={`/sessions/${pr.sessionId}`}>{`Watch session ${pr.sessionId}`}</Link> : null}
                     {pr.chatId ? <Link to={`/chats/${pr.chatId}`}>Open chat</Link> : null}
                     <span data-spacer="" />
-                    <Button label="Take over" name="take-over" disabled={props.readOnly} onClick={() => stop('you')} />
-                    <Button label="Stop autopilot" icon="stop" name="stop-autopilot" disabled={props.readOnly} onClick={() => stop('stopped')} />
+                    {asking
+                        ? (
+                            <>
+                                <Button label="Decline" name="decline-merge" disabled={disabled()} onClick={() => void act((x) => x.answerMerge(false))} />
+                                <Button label="Approve merge" icon="check" name="approve-merge" disabled={disabled()} onClick={() => void act((x) => x.answerMerge(true))} />
+                            </>
+                        )
+                        : null}
+                    <Button label="Take over" name="take-over" disabled={disabled()} onClick={() => stop('you')} />
+                    <Button label="Stop autopilot" icon="stop" name="stop-autopilot" disabled={disabled()} onClick={() => stop('stopped')} />
                 </div>
             </section>
         );
@@ -185,7 +261,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                                         <strong>{row.label}</strong>
                                         <small>{row.caption}</small>
                                     </div>
-                                    <Switch label={row.label} hideLabel model={() => a[row.key]} disabled={props.readOnly || pr.state !== 'open'} onCheckedChange={(on: boolean) => setSwitch(row.key, on)} />
+                                    <Switch label={row.label} hideLabel model={() => a[row.key]} disabled={disabled() || pr.state !== 'open'} onCheckedChange={(on: boolean) => setSwitch(row.key, on)} />
                                 </li>
                             ))}
                         </ul>
@@ -204,7 +280,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                 {pr.state === 'open'
                     ? (
                         <>
-                            <Button label="Squash and merge" name="merge" icon="commit" block disabled={!ready || props.readOnly || st.asked} onClick={() => { st.asked = true; }} />
+                            <Button label="Squash and merge" name="merge" icon="commit" block disabled={!ready || props.readOnly || !!props.actions || st.asked} onClick={() => { st.asked = true; }} />
                             <p data-pull-approval="">{st.asked ? 'Asked for approval: rule ask on merge' : APPROVAL_NOTE}</p>
                         </>
                     )
