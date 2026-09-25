@@ -20,10 +20,15 @@
  * that task ends (#858): each poll reads the task — polling at the floor while such a turn runs — and ends the turn
  * (`AUTOPILOT_SETTLE_MS` from then) once the task is terminal or waits on a pull request.
  *
+ * Your move (#818, PRJ-10): after every good poll, each PR whose next move became yours for a new reason
+ * (`pullNotification` over the view before and after the poll) is one `input` row in the workspace's Inbox, sent
+ * one-way after the save. A conflict a running autopilot rebases is left to it (it says so itself, `yourMove`, if the
+ * rebase fails), and the first read of a repo (`watch` of a new one) sends nothing — no burst.
+ *
  * Workers eviction rule: every mutation below ends in `ctx.save()` inside the turn.
  */
 import { isTerminal, type AgentId, type ApprovalRule, type Autopilot, type ChatId, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
-import { defineActor, type ActorContext, type ActorPolicy } from '@sigx/actors';
+import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
 import { sameWorkspace } from '../auth/index.js';
@@ -46,6 +51,7 @@ import {
     type AutopilotStopReason
 } from './autopilot.js';
 import type { PullsAutopilotPort } from './autopilot-port.js';
+import { notifyPull, pullMove } from './notify.js';
 import type { TriggerHop } from '../schedule/ports.js';
 
 // ---------------------------------------------------------------------------
@@ -144,6 +150,8 @@ export interface PullsActorOptions {
     readonly autopilot?: (ref: { readonly workspaceId: WorkspaceId; readonly projectId: ProjectId }) => PullsAutopilotPort;
     /** Told once per PR, when its merge is recorded and before its task completes. Never a gate: a throw is logged. */
     readonly merged?: PullMergedPort;
+    /** The workspace's Inbox (`defineInbox`), where a PR that became your move is told (#818). Absent → nothing is sent. */
+    readonly inbox?: () => AnyActorDefinition;
 }
 
 /** The switches `setAutopilot` takes: core's `Autopilot` without what the run fills. */
@@ -224,12 +232,15 @@ export function definePullsActor(options: PullsActorOptions) {
         return { ...(paused ? { paused } : {}), ...(t.mergeAsk && t.pr.state === 'open' ? { askingMerge: true as const } : {}) };
     };
 
+    /** A PR as the view shows it: with its autopilot run's attempt and activity. */
+    const shown = (t: TrackedPull): PullRequest => (t.autopilot ? withAutopilotRun(t.pr, t.autopilot) : t.pr);
+
     const view = (s: PullsState): PullsView => ({
         workspaceId: s.workspaceId,
         projectId: s.projectId,
         ...(s.repo ? { repo: { ...s.repo } } : {}),
         pulls: Object.values(s.pulls)
-            .map((t) => (t.autopilot ? withAutopilotRun(t.pr, t.autopilot) : t.pr))
+            .map(shown)
             .sort((a, b) => b.number - a.number),
         runs: Object.fromEntries(Object.values(s.pulls).filter((t) => t.pr.autopilot).map((t) => [String(t.pr.number), runStateOf(t)])),
         ...(s.polledAt !== undefined ? { polledAt: s.polledAt } : {}),
@@ -397,10 +408,31 @@ export function definePullsActor(options: PullsActorOptions) {
         t.autopilot = out;
     };
 
-    /** Read the source, fold, follow the tasks, arm the next poll — all inside this turn. */
-    const poll = async (ctx: Ctx): Promise<void> => {
+    /**
+     * Tell the Inbox about each PR whose move became yours since `before` (#818). A PR not in `before` is new to us
+     * (`prev` undefined) unless `baseline`. A conflict a running autopilot rebases is its own to report.
+     */
+    const notifyMoves = async (ctx: Ctx, before: ReadonlyMap<number, PullRequest>, baseline: boolean): Promise<void> => {
+        if (!options.inbox || baseline) return;
+        const driven = portFor(ctx.state) !== undefined;
+        for (const t of Object.values(ctx.state.pulls)) {
+            const next = shown(t);
+            // A running autopilot rebases a conflict itself and says so if it cannot (`yourMove`); a stopped run's
+            // `activity` already keeps `pullMove` from a second `gave-up`.
+            const rebasing = driven && next.autopilot?.rebase && !t.autopilot?.off && !t.autopilot?.stopped;
+            if (rebasing && pullMove(next) === 'conflicts') continue;
+            await notifyPull(ctx, options.inbox, ctx.state.workspaceId, before.get(t.pr.number), next);
+        }
+    };
+
+    /**
+     * Read the source, fold, follow the tasks, arm the next poll — all inside this turn; then tell the Inbox what became
+     * your move. `baseline`: the first read of a repo, which notifies nothing.
+     */
+    const poll = async (ctx: Ctx, baseline = false): Promise<void> => {
         const s = ctx.state;
         const at = now();
+        const before = new Map(Object.values(s.pulls).map((t) => [t.pr.number, shown(t)] as const));
         if (!s.repo) {
             delete s.next;
             await ctx.save();
@@ -469,6 +501,7 @@ export function definePullsActor(options: PullsActorOptions) {
         s.next = at + delay;
         await ctx.save();
         await ctx.reminders.set(PULLS_POLL, { due: delay });
+        if (s.error === undefined) await notifyMoves(ctx, before, baseline);
     };
 
     const failMissing = async (ctx: Ctx, taskId: TaskId, number: number): Promise<void> => {
@@ -518,13 +551,15 @@ export function definePullsActor(options: PullsActorOptions) {
                     if (!ref || typeof ref.provider !== 'string' || !PROVIDER_RE.test(ref.provider)) throw new ServerFnError(400, '[pulls] provider must be an adapter id');
                     if (typeof ref.repo !== 'string' || !isRepo(ref.repo)) throw new ServerFnError(400, '[pulls] repo must be owner/name');
                     const s = ctx.state;
-                    if (s.repo?.provider !== ref.provider || s.repo.repo !== ref.repo) {
+                    const fresh = s.repo?.provider !== ref.provider || s.repo.repo !== ref.repo;
+                    if (fresh) {
                         s.pulls = {};
                         delete s.error;
                     }
                     s.repo = { provider: ref.provider, repo: ref.repo };
                     s.intervalMs = POLL_FLOOR_MS;
-                    await poll(ctx);
+                    // A new repo's first read is the baseline: its PRs already red are not a burst of rows.
+                    await poll(ctx, fresh);
                     return view(s);
                 },
 
