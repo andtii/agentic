@@ -1,14 +1,14 @@
 /**
  * Where the Work view's inputs come from (#738): on mock data the fixtures in `mock/projects/work.ts`; live, the
  * workspace's TaskIndex (a task is the project's when its chat is), the Registry's project features for the stages,
- * and — until the git feature's pull request store (G2) and the Plan store (PL1) exist — no pull requests and no
- * plan items. Hooks only; the derivation is `model.ts`.
+ * the project's Plan actor for the plan items (#882), and — until the git feature's pull request store (G2) exists —
+ * no pull requests. Hooks only; the derivation is `model.ts`.
  */
 import { useActorState } from '@sigx/actors/app';
-import type { AgentId, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
+import type { AgentId, Plan, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
 import type { TaskIndexRow } from '@agentic/platform';
-import type { ActorDefs, ViewerState } from '../../../actors/defs';
-import { registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
+import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../actors/defs';
+import { planKeyOf, registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
 import { dataMode } from '../../../data-mode';
 import { MOCK_WORK, mockFeatureUi } from '../../../mock/projects/work';
 import type { WorkFeatures, WorkTask } from './model';
@@ -18,9 +18,44 @@ export function usePulls(projectId: string): () => readonly PullRequest[] {
     return () => (dataMode() === 'live' ? [] : (MOCK_WORK[projectId]?.pulls ?? []));
 }
 
-/** The project's plan items: `[]` live until the Plan store exists (PL1). */
-export function usePlanItems(projectId: string): () => readonly PlanItem[] {
-    return () => (dataMode() === 'live' ? [] : (MOCK_WORK[projectId]?.planItems ?? []));
+/** Where a live plan read goes: the actor defs and the viewer (injected when not given). */
+export interface PlanReadDeps {
+    readonly defs: Pick<ActorDefs, 'Plan'>;
+    readonly viewer: Pick<ViewerState, 'workspaceId'>;
+}
+
+const projectIdOf = (projectId: string | (() => string)): (() => string) => (typeof projectId === 'function' ? projectId : () => projectId);
+
+/**
+ * The project's plans, live: one `useActorState` read of its Plan actor's `list()` (#750), opened here in setup.
+ * `projectId` may be a getter, so a page that stays mounted while the route moves to another project follows it.
+ * `[]` until the read lands, and on mock data (the mock plan items come through `usePlanItems`).
+ */
+export function usePlans(projectId: string | (() => string), deps?: PlanReadDeps): { plans(): readonly Plan[]; readonly loading: boolean } {
+    if (dataMode() !== 'live') return { plans: () => [], loading: false };
+    const defs = deps?.defs ?? useActorDefs();
+    const viewer = deps?.viewer ?? useViewer()();
+    const id = projectIdOf(projectId);
+    const list = useActorState(defs.Plan, () => viewer.workspaceId && ([planKeyOf(viewer.workspaceId, id()), 'list'] as const), { live: true });
+    return {
+        plans: () => list.value?.plans ?? [],
+        get loading() {
+            return list.loading;
+        }
+    };
+}
+
+/** Every item of `plans`, in plan, phase and item order. */
+export const planItemsOf = (plans: readonly Plan[]): PlanItem[] => plans.flatMap((p) => p.phases.flatMap((ph) => ph.items));
+
+/** The project's plan items: live every item of its plans (`usePlans`), on mock data the fixtures. */
+export function usePlanItems(projectId: string | (() => string), deps?: PlanReadDeps): () => readonly PlanItem[] {
+    if (dataMode() !== 'live') {
+        const id = projectIdOf(projectId);
+        return () => MOCK_WORK[id()]?.planItems ?? [];
+    }
+    const read = usePlans(projectId, deps);
+    return () => planItemsOf(read.plans());
 }
 
 /** The project's tasks on mock data. */
