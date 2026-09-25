@@ -117,8 +117,9 @@ happens *before* the push, not after it:
    `vitest --changed origin/main`, plus build + size when a size-limited
    package changed and the scripts tests when `scripts/` changed. `--workers`
    adds workerd, `--all` the whole unit suite. `git fetch` first.
-5. **Review locally, before pushing.** Claude Code: the `code-review` skill on
-   the diff (low effort); other agents: an equivalent self-review of the diff
+5. **Review locally, before pushing.** Claude Code: commit locally, then the
+   `code-review` skill with args `low <branch>` (name the branch — from a
+   subagent it runs in `<repo>/main` and would see no diff); other agents: an equivalent self-review of the diff
    for correctness bugs, missing tests and layering breaks. Fix what it finds,
    re-run `pnpm check`.
 6. **Push once and open the PR, Copilot as reviewer.** `Closes #N` in the body;

@@ -55,9 +55,12 @@ git rebase origin/main                # the worktree starts from local main, whi
 git fetch -q && pnpm check            # add --workers when you touched platform/web actor code
 ```
 
-Then review the diff before it leaves the machine: run the `code-review` skill
-(low effort) on the working tree. Fix every correctness finding, re-run
-`pnpm check`. Style nits are not findings.
+Then review the diff before it leaves the machine: commit locally (do not push
+yet) and run the `code-review` skill with args `low <your branch name>`. The review
+runs from the session's directory — usually `<repo>/main`, which has no diff — so
+it must be given your branch as its target, or it reviews nothing. Fix every
+correctness finding (amend the local commit), re-run `pnpm check`. Style nits
+are not findings.
 
 ## 4. One push, PR, advisory Copilot
 
