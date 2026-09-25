@@ -93,7 +93,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #729: —
 
-- #730: —
+- #730: nothing generic — the Overview's row and card styles stay in `apps/web/src/styles/projects/overview.css`.
 
 - #731: —
 

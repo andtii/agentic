@@ -613,7 +613,7 @@ _not yet_
 
 #### #730 web: project Overview — Your move, recent chats, Schedules and People cards, feature card slot
 
-_not yet_
+`pages/projects/overview/`: `OverviewView` renders a `ProjectRecord` plus `OverviewData` (moves, chats, schedules; pure view model in `model.ts`) — header with feature/connector tags and the `machine → path` or `no folder · runs on the platform` line, Your move, the five most recent chats, then a 360px rail: one card per enabled feature whose `PROJECT_FEATURE_VIEWS` entry has an `OverviewCard` (rendered with `project`), Schedules, People and places, and the dashed Add-a-feature card linking to Settings › Features. The rail drops under the main column below 1280px. Mock data is `mock/projects/overview.ts`; live, the header, feature cards and People and places read the record, while Your move waits for the derived work items (#738) and chats/schedules for per-project reads.
 
 #### #731 web: project Chats — state groups, defaults strip, Review-and-move
 
