@@ -147,7 +147,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #756: —
 
-- #757: —
+- #757: none — requests, PM policy and personality presets are agentic product contracts.
 
 - #758: —
 
