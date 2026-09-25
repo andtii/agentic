@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "headers": {
+    "x-ratelimit-limit": "5000",
+    "x-ratelimit-remaining": "4266",
+    "x-ratelimit-reset": "1790336800"
+  },
+  "body": {
+    "data": {
+      "repository": {
+        "pullRequest": null
+      }
+    },
+    "errors": [
+      {
+        "type": "NOT_FOUND",
+        "path": [
+          "repository",
+          "pullRequest"
+        ],
+        "locations": [
+          {
+            "line": 2,
+            "column": 46
+          }
+        ],
+        "message": "Could not resolve to a PullRequest with the number of 999999."
+      }
+    ]
+  }
+}

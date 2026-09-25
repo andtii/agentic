@@ -647,7 +647,7 @@ _not yet_
 
 #### #741 plugins-git: provider-neutral pull request adapter + GitHub adapter
 
-_not yet_
+`packages/plugins-git/src/provider/`: the `PullProvider` seam — `get`, `listOpen`, `forBranch`, `merge(method, {subject, body})`, `reply(threadId, body)`, `openIssue`, `rateLimit()` — filling core's `PullRequest` (#724). `pullRepoOf(folder)` reads `{provider, repo}` from `identityOf`'s origin (https, scp and ssh forms; `DEFAULT_PULL_HOSTS` maps `github.com` → `github`, an Enterprise host is added by the caller). `createGitHubPullProvider({token, fetch?, apiBase?})` reads each PR in one GraphQL query (check rollup of the head commit, review decision, requested reviewers, the first 100 review threads) and acts over REST (merge, issues) and GraphQL (thread replies). The token (a string or a per-request function) comes from the project's GitHub connector credential and never appears in an error. Failures are `PullProviderError` with a code (`unauthorized`, `forbidden`, `not-found`, `rate-limited` with `retryAt`, `invalid`, `failed`); a merge GitHub refuses (405/409) is `merged: false` with its reason, not an error. It remembers the last `x-ratelimit-*` window and refuses calls while an exhausted one has not reset. Not yet re-exported from the package root (owner paths); polling and state are #742.
 
 #### #742 platform: Pulls actor — polled PR state, pull-request wait reason, task completes on merge
 
