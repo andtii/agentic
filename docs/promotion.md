@@ -85,7 +85,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #725: `NavItem.children` (a nav entry's sub-menu in blocks, the page on the longest matching sub-item) in `@agentic/ui`'s `AppShell` — a zero `NavList` candidate for nested items once #727 settles the visuals.
 
-- #726: —
+- #726: `StageTrack` (a segmented progress track, current segment in a state colour) and `ChecksBar` (a proportional multi-state bar with a worded summary) in `@agentic/ui` `projects/` — zero `Progress`/`Meter` variant candidates; the parts style inline because zero parts forward no `style` and the package ships no per-part stylesheet export.
 
 - #727: —
 

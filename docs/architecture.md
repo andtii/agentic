@@ -597,7 +597,13 @@ Every shared file the redesign needs, edited once, so a page issue only adds fil
 
 #### #726 ui: ProjectSquare, StageTrack, ItemGlyph, SlotMarks, ChecksBar
 
-_not yet_
+The five shared parts in `packages/ui/src/projects/`, drawn to the handoff with inline token styles (no stylesheet to import; happy-dom drops `color-mix()` fills, so tests check the border/text tokens). Props are #725's; colour is never the only signal.
+
+- **`ProjectSquare`**: 22 px default (44 px header, radius 10 from 36 px), the four agent hues by `ProjectColor` (`--ag-agent-1…4`, fill 12 %, border 40 %); unset, `projectColorFor(id ?? name)` hashes onto `PROJECT_COLORS`. Decorative (`aria-hidden`) — the name sits beside it.
+- **`StageTrack`**: 132 px, 6 px segments, 3 px gap; passed `--color-primary`, current by `WorkStageState` (`info` / `warning` / `error` / `primary` when done), later `--ag-line-strong`; name mono 11 below unless `bare`. `role="img"` named `Checks, stage 4 of 6, failed`; `stage` is clamped.
+- **`ItemGlyph`**: 16 px, the six plan states per the Plan table. Named by its state (`Needs you`) by default; `label=""` makes it decorative for rows that say the state in text.
+- **`SlotMarks`**: a `<ul aria-label="Feature slots">` of five 22 px marks (Section, Overview card, Work stages, Chat context, Agent instructions and tools), each `<slot>: used|not used` as name and tooltip; `data-used` on the list keeps `usedSlots` order.
+- **`ChecksBar`**: 96 × 6 px on `line-strong`, `flex-grow` per count (passed, running + queued, failed); summary `N failing · N running · N queued`, else `P/N passed` (skipped left out), else `no checks`.
 
 #### #727 ui: AppShell project sub-menu — switcher, counts, needs-you badge, FEATURES block
 
