@@ -31,6 +31,7 @@ import {
 } from '@agentic/platform';
 import { authenticateRequest } from '@agentic/platform';
 import { isServerFnError } from '@sigx/server';
+import { clearLoginCookie, loginCookie } from './viewer-login';
 
 /**
  * Workers Secrets the auth routes read (architecture §3). Never defaults,
@@ -158,14 +159,23 @@ export function createWebAuth(env: AuthEnv, wiring: AuthWiring): WebAuth {
                 if (!session) return json({ error: 'unauthorized' }, 401, { 'set-cookie': result.clearCookie });
                 if (session.userId !== user.userId) return json({ error: 'user_mismatch' }, 403, { 'set-cookie': result.clearCookie });
                 headers.append('set-cookie', elevationCookie(await sealElevation({ userId: session.userId }, secret, { now: now() })));
-            } else headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
+            } else {
+                headers.append('set-cookie', sessionCookie(await sealSession(user, secret, { now: now() })));
+                // The provider login (#893) beside the session, so "Needs you" knows a review requested of this user.
+                const login = result.identity.login;
+                headers.append('set-cookie', login ? await loginCookie({ userId: user.userId, login }, secret, { now: now() }) : clearLoginCookie());
+            }
             headers.append('set-cookie', result.clearCookie);
             return new Response(null, { status: 302, headers });
         };
         return { provider, routes: { 'GET /auth/login': begin, 'GET /auth/callback': callback, 'GET /auth/elevate': elevate } };
     })();
 
-    const logout: RouteHandler = async () => redirect('/', clearSessionCookie());
+    const logout: RouteHandler = async () => {
+        const response = redirect('/', clearSessionCookie());
+        response.headers.append('set-cookie', clearLoginCookie());
+        return response;
+    };
 
     const me: RouteHandler = async (request) => {
         const principal = await authenticateRequest(request, authOptions);
