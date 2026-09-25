@@ -17,8 +17,8 @@ const fail = (message: string): never => {
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 function checkedActor(value: unknown): PlanActor {
-    if (isObject(value) && value.kind === 'agent' && typeof value.agentId === 'string' && value.agentId.trim() && value.agentId.length <= 200) return { kind: 'agent', agentId: value.agentId as AgentId };
-    if (isObject(value) && value.kind === 'user' && typeof value.userId === 'string' && value.userId.trim() && value.userId.length <= 200) return { kind: 'user', userId: value.userId };
+    if (isObject(value) && value.kind === 'agent' && typeof value.agentId === 'string' && value.agentId.trim() && value.agentId.length <= 200) return { kind: 'agent', agentId: value.agentId.trim() as AgentId };
+    if (isObject(value) && value.kind === 'user' && typeof value.userId === 'string' && value.userId.trim() && value.userId.length <= 200) return { kind: 'user', userId: value.userId.trim() };
     return fail('a listed sender is {kind: "agent", agentId} or {kind: "user", userId}');
 }
 

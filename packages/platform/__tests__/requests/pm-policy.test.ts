@@ -46,6 +46,7 @@ describe('project manager policy', () => {
         expect(refused({ ...good, senders: [{ project: '*', who: 'anyone', mode: 'allowed' }] })).toMatch(/who/);
         expect(refused({ ...good, senders: [{ project: '*', who: 'any-member', mode: 'maybe' }] })).toMatch(/mode/);
         expect(refused({ ...good, senders: [{ project: '*', who: [{ kind: 'robot' }], mode: 'ask' }] })).toMatch(/sender/);
+        expect(checkedPmPolicy({ ...good, senders: [{ project: '*', who: [{ kind: 'user', userId: ' u1 ' }], mode: 'ask' }] }).senders[0]!.who).toEqual([{ kind: 'user', userId: 'u1' }]);
         expect(refused({ ...good, autonomy: { ...good.autonomy, assign: 'yes' } })).toMatch(/assign/);
         expect(refused({ ...good, weeklySummary: { day: 7, time: '09:00' } })).toMatch(/day/);
         expect(refused({ ...good, weeklySummary: { day: 1, time: '9am' } })).toMatch(/time/);

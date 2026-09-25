@@ -373,13 +373,15 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                             accepting.delete(id);
                         }
                     }
+                    // One instant for the request and its audit record, taken after the Plan hop.
+                    const at = now();
                     let out: ReturnType<typeof resolve>;
                     try {
-                        out = resolve(ctx.state, { ...call, now: now() }, id, resolution, resultItem);
+                        out = resolve(ctx.state, { ...call, now: at }, id, resolution, resultItem);
                     } catch (error) {
                         return toServerError(error);
                     }
-                    await record(out.change, out.value, actor, call.now);
+                    await record(out.change, out.value, actor, at);
                     return requestView(out.value);
                 },
 
