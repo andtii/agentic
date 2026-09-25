@@ -830,7 +830,7 @@ _not yet_
 
 #### #765 web: /projects/links — lanes, arrows, chain highlight, chain panel
 
-_not yet_
+`pages/projects/links/`: `Links.tsx` (`LinksBoard` over any `LinksData`, `ProjectLinks` the route) over `model.ts` — a page-local view model (`LinksView`: lanes `{ projectId, name, manager? }` and items `{ ref (`project#n` or a milestone name), projectId, state, title, meta, owner?, after: refs, milestone?, step? }`, one per Open / Done toggle) until the platform lists links (#764), and the pure layout. `linksLayout(view, highlighted)`: one 150px lane per project that has an item (in the given order), 230px nodes at x = 200 + col·300, y = lane·150 + 30; an item's column is one past the deepest item it waits on, moved right while its lane already holds that column (so arrows still point right); refs outside the view, self refs and a cycle add nothing. Arrows are a bezier from the waited-on node's right edge to the waiting node's left edge at its header row, plus a chevron head: `line-strong` 1.4px, `text` 1.8px when both ends are on the chain. `chainOf(view, ref)` is the ref and everything it transitively waits on, ordered by column then lane; the selected milestone (the first by default; a milestone node is a toggle button) is highlighted and listed in the chain panel with each step's line and `Open plan` → `/projects/<project>/plan`. `linkCount` (arrows) names the toggles and the Links tab count. Below 768px the graph and the highlight line hide and `linkChains` (one chain per item nothing waits on) draws as stacked cards. Mock: `mock/projects/links.ts` is the board; live, the page shows its empty state until #764.
 
 #### #766 web: responsive pass and e2e for every project page
 
