@@ -10,7 +10,7 @@
  */
 
 import type { ConnectorRef } from './agent.js';
-import type { AgentId, ChatId, EnvironmentId, ProjectId, TaskId } from './ids.js';
+import type { AgentId, ChatId, EnvironmentId, MachineId, ProjectId, TaskId } from './ids.js';
 import type { ConfigSchema } from './plugin-config.js';
 import type { PluginManifest } from './plugin.js';
 import type { FsError, FsGitInfo, FsOp, FsResult } from './workdir.js';
@@ -36,8 +36,13 @@ export interface ProjectRecord {
     readonly name: string;
     readonly description?: string;
     readonly members: ProjectMembers;
-    /** One folder per environment, each absolute, machine-native and inside that environment's `cwdRoots`. */
-    readonly folders: Readonly<Partial<Record<EnvironmentId, string>>>;
+    /**
+     * Where the project lives, keyed as `projectFolderKey` builds them (#702): `<machineId>/*` is the folder on a machine, for every
+     * environment on it whose `cwdRoots` hold it; `<machineId>/<environmentId>` overrides it for one environment.
+     * Each absolute and machine-native. A bare environment id is the shape before #702 (environment ids are only
+     * unique per machine), still read as the last fallback and never written.
+     */
+    readonly folders: Readonly<Partial<Record<string, string>>>;
     /** Connectors every session in the project gets, on top of the agent's own. */
     readonly connectors: readonly ConnectorRef[];
     readonly features: ProjectFeatures;
@@ -55,7 +60,7 @@ export interface ProjectPatch {
     readonly name?: string;
     readonly description?: string | null;
     readonly members?: ProjectMembers;
-    readonly folders?: Readonly<Partial<Record<EnvironmentId, string | null>>>;
+    readonly folders?: Readonly<Partial<Record<string, string | null>>>;
     readonly connectors?: readonly ConnectorRef[];
     readonly features?: Readonly<Record<string, Readonly<Record<string, unknown>> | null>>;
 }
@@ -97,6 +102,8 @@ export interface ProjectFeatureSessionInput extends ProjectFeatureContext {
     /** The chat the task came from, when it did. */
     readonly chatId?: ChatId;
     readonly environmentId: EnvironmentId;
+    /** The machine the session runs on, when the router bound one: with `environmentId`, `projectFolderFor` finds the project's folder there (#702). */
+    readonly machineId?: MachineId;
     /** The folder the router resolved for this session (the project's for the environment unless overridden). */
     readonly cwd: string;
     readonly fs: ProjectFeatureFs;
@@ -190,9 +197,54 @@ export function applyProjectFeaturePreset(settings: Readonly<Record<string, unkn
     return next;
 }
 
-/** The project's folder on `environmentId`, or `undefined` when it has none there. */
-export function projectFolderFor(project: Pick<ProjectRecord, 'folders'>, environmentId: EnvironmentId): string | undefined {
-    return Object.hasOwn(project.folders, environmentId) ? project.folders[environmentId] : undefined;
+/** The `ProjectRecord.folders` key of a machine's folder (`<machineId>/*`), or of an override for one environment on it. */
+export function projectFolderKey(machineId: MachineId, environmentId?: EnvironmentId): string {
+    return `${machineId}/${environmentId ?? '*'}`;
+}
+
+/**
+ * A `ProjectRecord.folders` key read back: a machine's folder (no `environmentId`), an override (both), or a
+ * pre-#702 bare environment id (`legacy`, no `machineId`). `null` for a key of none of these shapes, or with whitespace in an id.
+ */
+export function parseProjectFolderKey(key: string): { readonly machineId?: MachineId; readonly environmentId?: EnvironmentId; readonly legacy?: true } | null {
+    // An id never holds whitespace: a padded segment is refused, not trimmed into a different key.
+    const ok = (segment: string): boolean => segment.length > 0 && !/\s/.test(segment);
+    const at = key.indexOf('/');
+    if (at < 0) return ok(key) ? { environmentId: key as EnvironmentId, legacy: true } : null;
+    const machineId = key.slice(0, at);
+    const rest = key.slice(at + 1);
+    if (!ok(machineId) || !ok(rest) || rest.includes('/')) return null;
+    return rest === '*' ? { machineId: machineId as MachineId } : { machineId: machineId as MachineId, environmentId: rest as EnvironmentId };
+}
+
+/**
+ * The project's folder for `environmentId` on `machineId`, or `undefined` when it has none there: the override for
+ * that environment, else the machine's folder, else a pre-#702 folder keyed by the bare environment id. Without a
+ * machine only the last applies. The caller checks the machine's folder against the environment's roots.
+ */
+export function projectFolderFor(project: Pick<ProjectRecord, 'folders'>, environmentId: EnvironmentId, machineId?: MachineId): string | undefined {
+    const at = (key: string): string | undefined => (Object.hasOwn(project.folders, key) ? project.folders[key] : undefined);
+    return (machineId !== undefined ? (at(projectFolderKey(machineId, environmentId)) ?? at(projectFolderKey(machineId))) : undefined) ?? at(environmentId);
+}
+
+/**
+ * Where a project has folders, for a catalogue (#702): every machine named by a key, and every environment with a
+ * folder of its own — an override, or a pre-#702 folder by environment id. Each once, in the order the record lists the keys (not sorted).
+ */
+export function projectFolderPlaces(folders: ProjectRecord['folders']): { readonly machines: readonly MachineId[]; readonly environments: readonly EnvironmentId[] } {
+    const machines = new Set<MachineId>();
+    const environments = new Set<EnvironmentId>();
+    for (const [key, path] of Object.entries(folders)) {
+        const parsed = typeof path === 'string' ? parseProjectFolderKey(key) : null;
+        if (parsed?.machineId !== undefined) machines.add(parsed.machineId);
+        if (parsed?.environmentId !== undefined) environments.add(parsed.environmentId);
+    }
+    return { machines: [...machines], environments: [...environments] };
+}
+
+/** Whether `projectFolderFor` would answer from the machine's shared folder (`<machineId>/*`) rather than an override or a pre-#702 entry. */
+export function projectFolderIsShared(project: Pick<ProjectRecord, 'folders'>, environmentId: EnvironmentId, machineId: MachineId): boolean {
+    return !Object.hasOwn(project.folders, projectFolderKey(machineId, environmentId)) && Object.hasOwn(project.folders, projectFolderKey(machineId));
 }
 
 /** The ids of the feature plugins the project has switched on. */
