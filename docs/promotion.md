@@ -145,7 +145,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #755: —
 
-- #756: —
+- #756: `planGraphLayout` (apps/web plan/graph/layout.ts) — a layered DAG layout by dependency depth in lanes; generic enough for a `@agentic/ui` graph part once a second view needs it.
 
 - #757: none — requests, PM policy and personality presets are agentic product contracts.
 
