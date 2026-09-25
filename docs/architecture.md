@@ -831,7 +831,7 @@ store (#753) is read, and a drop changes the page's copy only.
 
 #### #760 web: Settings › Project manager
 
-_not yet_
+`apps/web/src/pages/projects/settings/manager/`: `ProjectManager` draws the PMSettings board. The manager card is the project's own agent (`pm.agentId`, read live with `AgentActor.get()`; `pmAgentOf` reads the personality back from the `## Personality` section of its instructions — a preset by its exact text, else custom) with the runtime note, personality and its opening lines, and skills. **Change** edits that agent only: `managerPatchOf` sends just the changed fields to `Workspace.updateProjectManager` (a new config version); a project without a manager gets one through `upsertProject({ pm })`. The policy — sender rules (named projects, then `'*'` as "Any other project"), the weekly summary and merge notices, the six autonomy switches (the priority switch keeps a stored `low` cap) — is a flat `PolicyDraft`; **Save policy** sends `policyOf(draft)` as `pmPolicy` through `upsertProject` (the settings tabs' `useTabSave`). The tools list is static. On mock data the coordinator stands in for the manager and changes land in `mockManagerSaves` / `mockSettingsSaves`.
 
 #### #761 web: Requests inbox — incoming, sent, linked, triage card, actions
 

@@ -158,7 +158,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #759: `requestResolveRefusal` / `requestWhyLine` in `packages/runtimes/src/tools/requests.ts` are pure request rules over core types; if the Requests actor (#758) or the inbox (#761) needs the same decision or "why you:" text, promote them to `packages/core/src/requests.ts`.
 
-- #760: —
+- #760: `personalityOfInstructions` (`apps/web/src/pages/projects/settings/manager/model.ts`) parses the manager's personality back out of its instructions; a `pmPersonalityOf(config)` in `@agentic/core` next to `pmPersonalityText` would let the platform and the web share it.
 
 - #761: none — the Requests inbox is agentic product UI.
 
