@@ -141,7 +141,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #753: —
 
-- #754: —
+- #754: `useFollow` in `apps/web/src/pages/projects/features/plan/shared/parts.tsx` — a router-followed plain `<a>`, because `@sigx/router`'s `Link` forwards no attributes and sets `aria-current` by path only (ignores the query); candidate for a `Link` fix upstream in `@sigx/router`.
 
 - #755: —
 
