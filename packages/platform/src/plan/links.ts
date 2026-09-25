@@ -36,6 +36,16 @@ const fail = (message: string): never => {
     throw new PlanRuleError('invalid', message);
 };
 
+/** A value for an error message; never throws (a BigInt or a cycle would make `JSON.stringify` throw). */
+function describe(v: unknown): string {
+    if (typeof v === 'string') return v.slice(0, 80);
+    try {
+        return String(JSON.stringify(v)).slice(0, 80);
+    } catch {
+        return typeof v;
+    }
+}
+
 /** A project name as a handle: lower case, runs of anything but letters, digits, `.`, `_` and `-` as one `-`. */
 export const projectHandle = (name: string): string =>
     name
@@ -74,7 +84,7 @@ export function parseAfter(values: readonly unknown[], here: ProjectId, projects
             const projectId = resolveProject(ref.project, projects) ?? fail(`after names ${ref.project}#${ref.n}, but there is no project ${ref.project}`);
             if (projectId === here) local.add(ref.n);
             else cross.set(`${projectId}#${ref.n}`, { projectId, n: ref.n });
-        } else fail(`after takes #n or project#n, not ${typeof v === 'string' ? v.slice(0, 80) : JSON.stringify(v)?.slice(0, 80)}`);
+        } else fail(`after takes #n or project#n, not ${describe(v)}`);
     }
     return { local: [...local], cross: [...cross.values()] };
 }

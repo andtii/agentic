@@ -79,6 +79,9 @@ describe('parseAfter / resolveProject', () => {
         expect(code(() => parseAfter(['ghost#1'], AGENTIC, PROJECTS))).toBe('invalid');
         expect(code(() => parseAfter(['@lint'], AGENTIC, PROJECTS))).toBe('invalid');
         expect(code(() => parseAfter([0], AGENTIC, PROJECTS))).toBe('invalid');
+        const loop: Record<string, unknown> = {};
+        loop.self = loop;
+        expect(code(() => parseAfter([loop, 1n], AGENTIC, PROJECTS))).toBe('invalid');
     });
 });
 
