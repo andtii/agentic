@@ -748,7 +748,15 @@ in-memory daemon answers it from its fake HEAD.
 
 #### #753 plugins-plan: plan feature manifest, presets, instructions
 
-_not yet_
+`@agentic/plugins-plan` exports `planFeaturePlugin` (`agentic.feature.plan`, category `planning`), registered in the
+web's `projectFeatureCatalogue` and, as a manifest, in the Registry's `pluginCatalogue` so it lists in the Features
+catalogue. Its `ui`: section Plan (icon `check`, badge `open-items`), overview card Plan, work stages
+Ready/Do/Review/Done, chat ref prefix `#`, tool family `plan`. Project settings: `agentsMayTick` (default on),
+`claimLimit` (1), `leaseMinutes` (30, core's `PLAN_LEASE_DEFAULT_MS`), `starter` (`none` or a `PLAN_TEMPLATES` id) and
+free-text `instructions`. Presets only fill settings: Blank, Event day (20 items), Release (12 items); the starter's
+phases and items are plain data (`PLAN_TEMPLATES`) for whoever creates the plan to seed it with. `instructions()`
+lists the eight `plan_*` tools, the claim/lease/`after`/touches rules with the project's limits, whether agents tick
+done-when lines, and the shared ref syntax (core `refs.ts`), then the project's own instructions.
 
 #### #754 web: Plan list — phases, crew strip, item detail panel, ref hover card, overview card
 

@@ -139,7 +139,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #752: — (daemon-only git read; nothing generic)
 
-- #753: —
+- #753: — (plan feature manifest, presets and instructions; nothing generic)
 
 - #754: —
 

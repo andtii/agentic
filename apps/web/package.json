@@ -27,6 +27,7 @@
     "@agentic/memory": "workspace:*",
     "@agentic/platform": "workspace:*",
     "@agentic/plugins-git": "workspace:*",
+    "@agentic/plugins-plan": "workspace:*",
     "@agentic/runtimes": "workspace:*",
     "@agentic/ui": "workspace:*",
     "@sigx/ai-agent": "catalog:",

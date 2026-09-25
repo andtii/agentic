@@ -2,7 +2,7 @@
   "name": "@agentic/plugins-plan",
   "version": "0.0.0",
   "private": true,
-  "description": "Plan project feature plugin: plans of phases and items carried out by tasks, with queues, claims and leases (PRJ-11). Scaffold only for now.",
+  "description": "Plan project feature plugin: plans of phases and items carried out by tasks, with queues, claims and leases (PRJ-11).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

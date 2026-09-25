@@ -48,6 +48,7 @@ import { learningDefaultPlugin, learningPlugin } from '@agentic/learning';
 import { openMcpConnector } from '@agentic/mcp';
 import { memoryDefaultPlugin, memoryFlatPlugin } from '@agentic/memory';
 import { gitFeatureManifest } from '@agentic/plugins-git';
+import { planFeatureManifest } from '@agentic/plugins-plan';
 import { conduitOpener, type ConduitOpenerOptions } from '../connectors/opener';
 import { ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID, CODEX_CLI_PLUGIN_ID, COPILOT_CLI_PLUGIN_ID, anthropicApiPlugin, claudeCodePlugin, codexCliPlugin, copilotCliPlugin } from '@agentic/runtimes';
 
@@ -62,6 +63,7 @@ export const pluginCatalogue: readonly CatalogueEntry[] = [
     learningDefaultPlugin,
     // On, but it only acts on a project that switches it on (#335).
     gitFeatureManifest,
+    planFeatureManifest,
     // Off until the owner sets a contact and generates keys on its page (#244).
     { manifest: webPushPlugin, enabledByDefault: false },
     { manifest: a2aServerPlugin, enabledByDefault: false },
