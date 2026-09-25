@@ -631,7 +631,7 @@ _not yet_
 
 #### #737 platform/runtimes: feature tools join sessions (ui.tools)
 
-_not yet_
+`routing/features.ts`: at every placement of a project task (local and daemon), after the feature hooks ran, `featureTools(project, projectFeatures, toolFamilies)` collects the `manifest.ui.tools` of the enabled features this build ships, in the project's order, and maps each family through `RoutingPorts.toolFamilies` (default `DEFAULT_TOOL_FAMILIES`: `plan` → the PRJ-12 `plan_*` tools, implemented by PL2) to `ToolGrant`s, one per tool name. `withFeatureTools(config, grants)` joins them to the agent's config under the existing tool policy — a tool the agent already grants keeps the agent's grant (a `deny` stays denied), and the approval rules apply first as for any tool — and that config is the one the session opens with: `SessionOpenSpec.config` (the API factory's tools and `sessionPolicy`), `SessionOpenSpec.tools`, the `## Tools` of the prompt, and on the daemon path `OpenSpec.tools` / `OpenSpec.policy.grants` (taken from the stored spec, so a rehost keeps them). A family the build does not know is skipped: `skippedToolsNote` is kept on the route (`Route.notice`) and appended to the `why` of the task's next transition to `active` (`Task.start` takes an optional `why`), so the task's timeline says `warning: unknown tool family "x" (feature y) skipped`.
 
 #### #738 web: Work view — derived work items, groups, stage tracks, filters
 
