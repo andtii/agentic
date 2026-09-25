@@ -143,7 +143,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #754: —
 
-- #755: —
+- #755: `apps/web/src/pages/projects/features/plan/board/model.ts` keyboard drag slot stepping (`stepSlot`) — a generic sortable-lists keyboard pattern that could become a zero part.
 
 - #756: —
 
