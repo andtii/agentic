@@ -10,4 +10,4 @@ export type { RoutingPorts } from './ports.js';
 export { initialRoutingState, type Route, type RouteStatus, type RoutingState } from './state.js';
 export { AnswerDeliveryError, answerContract, answerObjective, answerPostText, answerPrompt, answerTaskId, createAnswerFollowUp, type AnswerFollowUpOptions, type AnswerStep } from './answers.js';
 export { createToolCallPort, type ToolCallPortOptions } from './tool-call.js';
-export { agentChatKey, answerText, ASK_QUICK_WAIT_MS, createActorToolPorts, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';
+export { agentChatKey, answerText, ASK_QUICK_WAIT_MS, createActorToolPorts, DELEGATE_WAIT_MS, type ActorToolPortsOptions, type AgentPrincipal } from './tools.js';

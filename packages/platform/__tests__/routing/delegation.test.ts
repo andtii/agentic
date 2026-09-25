@@ -329,3 +329,67 @@ describe('stop and restart over the port (COL-12, idempotent child ids)', () => 
         expect((error as Error).message).toMatch(/depth 1 exceeds maxDepth 0/);
     });
 });
+
+describe('a wait that outlives its window keeps the child (#599)', () => {
+    const spec = { assignee: BOB, objective: 'slow child', context: [], constraints: {} };
+
+    it('answers `running` with the child id; the child goes on, and `follow` waits for that same child — never a second', async () => {
+        await start(() => mockFactory(slowAgent()));
+        await agent(ADA, { tools: [] });
+        await agent(BOB, { tools: [] });
+        await agent(EVE, { tools: [] });
+        await createTask('t_parent', ADA, { objective: 'slow parent' });
+        const started = await routing().run('t_parent' as TaskId);
+        const principal = mintAgentPrincipal({ workspaceId: WS, agentId: ADA, sessionId: started.sessionId!, taskId: 't_parent' as TaskId }) as AgentPrincipal;
+        const ports = createActorToolPorts({ principal, routing: () => Routing, delegateWaitMs: 50 });
+        const childId = childTaskId('t_parent' as TaskId, 'c1');
+        const delegated: TaskId[] = [];
+
+        const first = await ports.task.delegate(spec, { callId: 'c1', signal: new AbortController().signal, onDelegated: (id) => delegated.push(id) });
+        expect(first).toEqual({ taskId: childId, status: 'running' });
+        expect(delegated).toEqual([childId]);
+        expect(['queued', 'active']).toContain((await task(childId).get()).status);
+
+        // Following it: the same child, waited for again — nothing new is created.
+        const again = await ports.task.delegate({ ...spec, follow: childId }, { callId: 'c2', signal: new AbortController().signal, onDelegated: (id) => delegated.push(id) });
+        expect(again).toEqual({ taskId: childId, status: 'running' });
+        expect(delegated).toEqual([childId, childId]);
+        expect((await task('t_parent').get()).children).toEqual([childId]);
+
+        // Only a child this agent delegated, to that assignee.
+        await expect(ports.task.delegate({ ...spec, assignee: EVE, follow: childId }, { callId: 'c3', signal: new AbortController().signal })).rejects.toMatchObject({ name: 'ToolCallError', code: 'invalid' });
+        await expect(ports.task.delegate({ ...spec, follow: 't_nobody' as TaskId }, { callId: 'c4', signal: new AbortController().signal })).rejects.toMatchObject({ name: 'ToolCallError', code: 'invalid' });
+        const bobs = createActorToolPorts({ principal: mintAgentPrincipal({ workspaceId: WS, agentId: BOB, sessionId: started.sessionId!, taskId: 't_parent' as TaskId }) as AgentPrincipal, routing: () => Routing, delegateWaitMs: 50 });
+        await expect(bobs.task.delegate({ ...spec, follow: childId }, { callId: 'c5', signal: new AbortController().signal })).rejects.toMatchObject({ name: 'ToolCallError', code: 'invalid' });
+        expect((await task('t_parent').get()).children).toEqual([childId]);
+    });
+
+    it('a parent turn that ends while its child still runs completes; the child runs on and settles on its own record', async () => {
+        await start((routingDef) => createSessionFactory({ routing: routingDef, delegateWaitMs: 50, model: scriptedModel({ assignee: BOB, objective: 'Look it up.' }) }));
+        await agent(ADA, { tools: [{ name: 'delegate' }] });
+        // The child blocks on an approval nobody gives yet: it outlives the parent's wait window.
+        await agent(BOB, { tools: [{ name: 'memory_search' }], approvalPolicy: [{ id: 'ask-memory', match: { tools: ['memory_search'] }, outcome: 'ask' }] });
+        await createTask('t_parent', ADA);
+        await routing().run('t_parent' as TaskId);
+        await settled('t_parent');
+        const childId = childTaskId('t_parent' as TaskId, 'd1');
+
+        const parent = await task('t_parent').get();
+        expect(parent.status).toBe('completed');
+        expect(parent.result?.text).toBe('parent done');
+        expect(edges(parent)).toEqual(['queued>active', 'active>waiting', 'waiting>active', 'active>completed']);
+        const transcript = await session(parent.sessionId!).transcript();
+        const call = transcript!.messages.flatMap((m) => m.parts).find((p) => p.type === 'tool' && p.callId === 'd1');
+        expect(call).toMatchObject({ output: { taskId: childId, status: 'running', note: expect.stringContaining('follow') } });
+        // No terminal card update for a child still running.
+        expect((await events(parent.sessionId!)).filter((e) => e.type === 'agent-update')).toEqual([]);
+
+        await until(async () => (await task(childId).get()).status === 'waiting', 'the child to wait for approval');
+        const child = await task(childId).get();
+        const { requestId } = child.wait as { requestId: string };
+        await session(child.sessionId!).respond(requestId, { type: 'permission', outcome: 'allow', scope: 'once' });
+        await settled(childId);
+        expect((await task(childId).get()).status).toBe('completed');
+        expect((await task('t_parent').get()).status).toBe('completed');
+    });
+});

@@ -44,7 +44,7 @@
  */
 
 import { actorKey, chatFileUri, createId, isTerminal, MODEL_IMAGE_TYPES, parseChatFileUri, projectFolderPlaces, type AgentId, type ChatFile, type ChatFileStore, type ChatId, type EnvironmentId, type MachineId, type MemoryEntry, type MemoryStore, type MessageId, type Principal, type PromptPart, type SessionId, type TaskId, type TaskStatus, type WorkspaceId } from '@agentic/core';
-import type { ChatPost, ChatPostResult, DelegateCall, DelegateOutcome, DelegateSpec, PlatformPorts, ProjectSummary, TaskReport } from '@agentic/runtimes';
+import { describeEnvironments, type ChatPost, type ChatPostResult, type DelegateCall, type DelegateEnvironment, type DelegateOutcome, type DelegateSpec, type PlatformPorts, type ProjectSummary, type TaskReport } from '@agentic/runtimes';
 import { actor, type ActorClientWith, type AnyActorDefinition } from '@sigx/actors';
 import { isServerFnError } from '@sigx/server';
 
@@ -87,6 +87,13 @@ interface SessionAskClient {
  */
 export const ASK_QUICK_WAIT_MS = 25_000;
 
+/**
+ * How long a daemon's `delegate` waits for its child before it answers `running` with the child's id (#599) — under
+ * the engines' MCP tool-call timeout (60 s by default), which would otherwise throw the id away with the call. The
+ * child goes on; `delegate({ follow })` waits for it again. The local path waits for the child however long it runs.
+ */
+export const DELEGATE_WAIT_MS = 45_000;
+
 export interface ActorToolPortsOptions {
     /** Whose tools these are — the session's agent principal (workspace, agent, session, task?). */
     readonly principal: AgentPrincipal;
@@ -114,6 +121,11 @@ export interface ActorToolPortsOptions {
     readonly machines?: () => AnyActorDefinition;
     /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
     readonly askQuickWaitMs?: number;
+    /**
+     * How long one `delegate` call waits for its child before it answers `running` (#599). Absent → until the child
+     * settles; the daemon path passes `DELEGATE_WAIT_MS`, under the engine's tool-call timeout.
+     */
+    readonly delegateWaitMs?: number;
 }
 
 export function agentChatKey(workspaceId: WorkspaceId, chatId: ChatId): string {
@@ -187,17 +199,29 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         }
     }
 
-    /** Wait for the child's terminal state, or for the parent turn to be aborted — whichever comes first. */
+    /**
+     * Wait for the child's terminal state, for the parent turn to be aborted, or for the wait window (`delegateWaitMs`,
+     * #599) to pass — whichever comes first. A window that passes answers `running` with the child's id: the child goes on.
+     */
     async function awaitChild(childId: TaskId, signal: AbortSignal): Promise<DelegateOutcome> {
         const it = task(childId).result()[Symbol.asyncIterator]();
         const aborted = new Promise<'aborted'>((resolve) => {
             if (signal.aborted) resolve('aborted');
             else signal.addEventListener('abort', () => resolve('aborted'), { once: true });
         });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const windowMs = options.delegateWaitMs;
+        const window = windowMs === undefined ? undefined : new Promise<'window'>((resolve) => (timer = setTimeout(() => resolve('window'), windowMs)));
         try {
-            const next = await Promise.race([it.next(), aborted]);
+            const next = await Promise.race([it.next(), aborted, ...(window ? [window] : [])]);
+            if (next === 'window') {
+                // Settled just as the window closed: the result, not a handle.
+                const child = await task(childId).get();
+                return isTerminal(child.status) ? outcomeOf(child) : { taskId: childId, status: 'running' };
+            }
             if (next !== 'aborted' && !next.done) return outcomeOf(next.value);
         } finally {
+            clearTimeout(timer);
             await it.return?.().catch(() => undefined);
         }
         // The parent's turn is over (its task was cancelled, or the session went away): report the child as it stands —
@@ -206,6 +230,57 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         if (child.status === 'completed' || child.status === 'failed') return outcomeOf(child);
         const straggler = !isTerminal(child.status) || (child.cancel !== undefined && !child.cancel.stopped);
         return outcomeOf({ ...child, status: 'cancelled' }, straggler ? [childId] : []);
+    }
+
+    /** The paired machines' views (#599): the index is the workspace user's to read, each machine the agent's (as `usage`). */
+    async function machineViews(): Promise<MachineView[]> {
+        const def = options.machines;
+        if (!def) return [];
+        const listed = await actor(Workspace, workspaceKey(workspaceId))
+            .with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) })
+            .listMachines();
+        const views: MachineView[] = [];
+        for (const entry of listed) {
+            if (entry.status !== 'paired') continue;
+            const m = (await as(def(), machineKey(workspaceId, entry.id as MachineId)).get()) as MachineView;
+            if (!m.revoked) views.push(m);
+        }
+        return views;
+    }
+
+    /** The environments on `views` that run `assignee`'s runtime (#599). */
+    async function usableBy(assignee: AgentId, views: readonly MachineView[]): Promise<DelegateEnvironment[]> {
+        const { config } = await as(AgentActor, agentKey(workspaceId, assignee)).get();
+        const runtime = config.execution.runtime;
+        return views.flatMap((m) =>
+            m.environments
+                .filter((e) => e.runtime === runtime)
+                .map((e) => ({ id: e.id, machineId: m.machineId, ...(m.name ? { machineName: m.name } : {}), cwdRoots: e.cwdRoots, online: m.online }))
+        );
+    }
+
+    /** `TaskPort.environments`: where `assignee` can run — none named without the Machine definition, or for an unknown agent. */
+    async function assigneeEnvironments(assignee: AgentId): Promise<readonly DelegateEnvironment[]> {
+        if (!options.machines) return [];
+        return usableBy(assignee, await machineViews());
+    }
+
+    /**
+     * `delegate({ follow })` (#599): wait again for a child an earlier call answered `running` — only one this agent
+     * delegated, to that assignee. Nothing is created or routed; the call's card links to the same child.
+     */
+    async function followChild(childId: TaskId, assignee: AgentId, call: DelegateCall): Promise<DelegateOutcome> {
+        const child = await task(childId)
+            .get()
+            .catch(() => null);
+        if (!child || child.origin.kind !== 'agent' || child.origin.agentId !== agentId) {
+            throw new ToolCallError('invalid', `delegate: ${childId} is not a task agent ${agentId} delegated; \`follow\` takes the taskId an earlier delegate answered`);
+        }
+        if (child.assignee !== assignee) {
+            throw new ToolCallError('invalid', `delegate: ${childId} was delegated to ${child.assignee}, not ${assignee}; pass the assignee of the original call with \`follow\``);
+        }
+        call.onDelegated?.(childId);
+        return awaitChild(childId, call.signal);
     }
 
     /** The chat's word on a file for this agent — `null` when it is missing or the agent may not see it. */
@@ -433,7 +508,9 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
             }
         },
         task: {
+            environments: assigneeEnvironments,
             async delegate(spec: DelegateSpec, call: DelegateCall): Promise<DelegateOutcome> {
+                if (spec.follow !== undefined) return followChild(spec.follow, spec.assignee, call);
                 // The parent is the task of THIS turn (#390): on a reused session the task it opened with may be long settled.
                 const { taskId } = principalNow();
                 if (!taskId) throw new ToolCallError('unsupported', 'delegate: this session works no task');
@@ -452,6 +529,14 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
                         'invalid',
                         `delegate: "${spec.assignee}" is not an agent of this workspace. The assignee is a platform agent id (agent_…): take it from "This chat" in your instructions — session or process names on your machine are not agents here.`
                     );
+                }
+                // An environment no machine reports would leave the child queued for a machine that never comes: refused
+                // before any child exists, naming where the assignee can run so the retry can fill it in (#599).
+                if (spec.environmentId !== undefined && options.machines) {
+                    const views = await machineViews();
+                    if (!views.some((m) => m.environments.some((e) => e.id === spec.environmentId))) {
+                        throw new ToolCallError('invalid', `delegate: no machine of this workspace reports environment ${spec.environmentId}. ${describeEnvironments(spec.assignee, await usableBy(spec.assignee, views))}`);
+                    }
                 }
                 let childId: TaskId;
                 try {

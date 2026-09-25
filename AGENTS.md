@@ -116,7 +116,13 @@ user-owned repo. Rebase only on a real conflict. CI still runs on every push to
    gh pr create --base main --title "<area>: <what>" \
      --body "Closes #N. <summary>" --reviewer @copilot
    ```
-   On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`. If `gh`
+   On an already-open PR: `gh pr edit <pr> --add-reviewer @copilot`.
+   **Rebase early on a conflict.** GitHub runs no `pull_request` CI on a PR it
+   cannot compute a merge ref for (`mergeable_state: dirty`) — only
+   `pull_request_target` workflows run, and close/reopen does not help. When
+   `gh pr view <pr> --json mergeStateStatus` says `DIRTY`, `git fetch && git
+   rebase origin/main` right away (then `git push --force-with-lease`), not at
+   merge time. If `gh`
    cannot resolve `@copilot` (`'@copilot' not found`), request it via the API —
    don't skip it:
    ```sh

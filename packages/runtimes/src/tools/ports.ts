@@ -37,6 +37,20 @@ export interface DelegateSpec {
     readonly workdir?: string;
     /** The project the child works in (#332). Absent: the parent task's, when it has one. */
     readonly projectId?: ProjectId;
+    /**
+     * Follow a child an earlier `delegate` answered `running` (#599): wait for THIS task again instead of creating one.
+     * The port checks it is a child this agent delegated to `assignee`; nothing new is created or routed.
+     */
+    readonly follow?: TaskId;
+}
+
+/** One environment a delegate's assignee can run in (#599): what a refusal names so the caller's retry can fill `environmentId`. */
+export interface DelegateEnvironment {
+    readonly id: EnvironmentId;
+    readonly machineId: MachineId;
+    readonly machineName?: string;
+    readonly cwdRoots: readonly string[];
+    readonly online: boolean;
 }
 
 /** A `delegate` call: the port tells the tool the child's id as soon as it exists, so the parent transcript can show it. */
@@ -48,7 +62,12 @@ export type DelegateOutcome =
     | { readonly taskId: TaskId; readonly status: 'completed'; readonly result: TaskResult }
     | { readonly taskId: TaskId; readonly status: 'failed'; readonly error: TaskError }
     /** Cancelled — by the parent's stop cascade or the turn's abort; `notStopped` is the work that could not be confirmed stopped (COL-12). */
-    | { readonly taskId: TaskId; readonly status: 'cancelled'; readonly notStopped: readonly TaskId[] };
+    | { readonly taskId: TaskId; readonly status: 'cancelled'; readonly notStopped: readonly TaskId[] }
+    /**
+     * Still running when the port stopped waiting (#599): its wait window passed — under the engine's own tool-call
+     * timeout, so the caller keeps the child's id. The child goes on; `follow` waits for it again.
+     */
+    | { readonly taskId: TaskId; readonly status: 'running' };
 
 export interface TaskReport {
     readonly status: 'progress' | 'blocked' | 'done';
@@ -64,6 +83,8 @@ export interface TaskPort {
      * restarts because the id is deterministic (architecture §7).
      */
     delegate(spec: DelegateSpec, call: DelegateCall): Promise<DelegateOutcome>;
+    /** The environments `assignee` can run in (#599), named when a delegate is refused for its environment. Absent: none are named. */
+    environments?(assignee: AgentId): Promise<readonly DelegateEnvironment[]>;
     report(report: TaskReport, call: ToolCall): Promise<void>;
 }
 
