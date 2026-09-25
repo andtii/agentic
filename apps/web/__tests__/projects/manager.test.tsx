@@ -14,6 +14,7 @@ import {
     managerDraftOf,
     managerPatchOf,
     openingLines,
+    runtimeNote,
     personalityOfInstructions,
     policyDraftOf,
     policyOf,
@@ -148,6 +149,8 @@ describe('Project manager model', () => {
         // An emptied name is not sent (the form refuses it).
         expect(managerPatchOf({ ...d, name: '  ' }, NOVA)).toBeNull();
         expect(openingLines({ custom: 'First. Second! Third?' })).toBe('First. Second!');
+        expect(runtimeNote('—')).toBe('runtime unknown');
+        expect(runtimeNote('claude-code')).toContain('runs on a machine');
     });
 
     it('the policy round trip: sender rules in order, the * rule last, a low cap kept, the weekly summary only when on', () => {

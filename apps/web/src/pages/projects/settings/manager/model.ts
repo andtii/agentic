@@ -106,6 +106,7 @@ export function personalityLabel(p: PmPersonality | undefined): string {
 
 /** The runtime note: a platform runtime answers with every machine off. */
 export function runtimeNote(runtime: string): string {
+    if (!runtime.trim() || runtime === '—') return 'runtime unknown';
     return runtime === 'anthropic-api' ? `${runtime} · runs on the platform, so it answers with every machine off` : `${runtime} · runs on a machine; a platform runtime is recommended so it answers with every machine off`;
 }
 
