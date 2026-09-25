@@ -44,6 +44,7 @@ describe('worker: the plugin catalogue and the workspace’s own Anthropic key',
             ['agentic.a2a.server', false, true],
             // On, but it only acts on a project that switches it on (#335).
             ['agentic.feature.git', true, true],
+            ['agentic.feature.plan', true, true],
             ['agentic.learning.default', true, true],
             ['agentic.memory.default', true, true],
             ['agentic.memory.flat', true, true],
