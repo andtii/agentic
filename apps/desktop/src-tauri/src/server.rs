@@ -185,7 +185,9 @@ mod tests {
         );
         assert_eq!(navigation(&u("about:blank"), server), Navigation::Stay);
         assert_eq!(navigation(&u("data:text/html,hi"), server), Navigation::Block);
-        assert_eq!(navigation(&u("blob:https://a.example/1"), server), Navigation::Block);
+        // A blob URL carries its creator's origin: the server's own may stay, another's may not.
+        assert_eq!(navigation(&u("blob:https://a.example/1"), server), Navigation::Stay);
+        assert_eq!(navigation(&u("blob:https://evil.example/1"), server), Navigation::Block);
     }
 
     #[test]
