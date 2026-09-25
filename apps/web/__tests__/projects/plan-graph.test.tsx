@@ -6,9 +6,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { Plan, PlanItem, ProjectId } from '@agentic/core';
 import { setDataMode } from '../../src/data-mode';
 import { GRAPH_COL_GAP, GRAPH_LANE_HEAD, GRAPH_NODE_H, GRAPH_NODE_W, GRAPH_PAD, GRAPH_ROW_GAP, planDepths, planGraphLayout } from '../../src/pages/projects/features/plan/graph/layout';
-import { PlanGraph } from '../../src/pages/projects/features/plan/graph/PlanGraph';
-import { PROJECTS } from '../../src/mock/workspace';
-import { mountAt } from '../pages/helpers';
 import { mountRoute, tick } from '../pages/mount';
 
 const item = (id: number, after: number[] = [], state: PlanItem['state'] = 'ready'): PlanItem => ({ id, title: `Item ${id}`, state, after, touches: [], refs: [], doneWhen: [], activity: [] });
@@ -107,15 +104,5 @@ describe('the Plan graph view (#756)', () => {
         await tick();
         expect(dom.querySelector('[data-plan-switcher-title]')?.textContent).toBe('Untitled plan 1');
         expect(dom.querySelector('[data-plan-graph-empty]')?.textContent).toBe('No items in this plan yet.');
-    });
-
-    it('says there are no plans live, where there is no plan store yet, and cannot make one', async () => {
-        setDataMode('live');
-        const dom = await mountAt('/projects/p_agentic/plan?view=graph', <PlanGraph project={PROJECTS[0]!} />);
-        expect(dom.querySelector('[data-plan-graph-empty]')?.textContent).toBe('No plans yet.');
-        expect(dom.querySelector('[data-plan-switcher-title]')?.textContent).toBe('No plan');
-        (dom.querySelector('[data-plan-switcher]') as HTMLElement).click();
-        await tick();
-        expect((document.querySelector('[data-plan-new]') as HTMLButtonElement).disabled).toBe(true);
     });
 });

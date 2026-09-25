@@ -177,3 +177,14 @@ export function stepSlot(item: PlanItem, slot: BoardSlot, step: BoardStep, colum
     if (at >= 0 && index === at + 1) index += step === 'up' ? -1 : 1;
     return index < 0 || index > max ? slot : { column: col.key, index };
 }
+
+/**
+ * The queue position a drop at `slot` asks the Plan actor's `assign` for (#926). The slot counts the queue as shown,
+ * the dragged card included; the actor takes the card out of its queue before putting it back, so a move further
+ * down its own queue is one place less.
+ */
+export function assignIndex(item: PlanItem, slot: BoardSlot, columns: readonly BoardColumn[]): number {
+    if (columnOf(item) !== slot.column) return slot.index;
+    const at = columns.find((c) => c.key === slot.column)?.queue.findIndex((i) => i.id === item.id) ?? -1;
+    return at >= 0 && slot.index > at ? slot.index - 1 : slot.index;
+}
