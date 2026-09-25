@@ -95,7 +95,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #730: —
 
-- #731: —
+- #731: `pages/projects/chats/groups.ts` `suggestedProject` (a chat names a project as a word) and `listOf` (`a, b and c`) are generic; `ProjectChatWatch` repeats `/chats`' renderless `ChatWatch` (`pages/chat/LiveChats.tsx`, not exported) — export it from there if a third page needs one.
 
 - #732: —
 
