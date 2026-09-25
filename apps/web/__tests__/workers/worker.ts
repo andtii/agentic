@@ -10,6 +10,7 @@
 // does — so a test that expects an answer sets the key first (`setAnthropicKey`).
 import { ANTHROPIC_API_KEY_SECRET, ANTHROPIC_API_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID } from '@agentic/runtimes';
 import { NO_API_KEY_CODE, type RuntimeCatalogue } from '@agentic/platform';
+import type { AnyActorDefinition } from '@sigx/actors';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 import { createA2aMount } from '../../src/a2a/mount';
@@ -21,7 +22,7 @@ import { runWithHost } from '../../src/host-scope';
 import { createConnectorMount } from '../../src/connectors/routes';
 import { conduitCall, fakeGoogle } from './google';
 import { conduitConnectorCatalogue } from '../../src/plugins/catalogue';
-import { fakePullSources } from './pulls-source';
+import { workerPullSources } from './pulls-source';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -46,7 +47,7 @@ const runtimes: RuntimeCatalogue = {
 const google = fakeGoogle();
 
 // Offline: no daemon release manifest is fetched (#365); pull requests come from a scripted fake (#742).
-const actors = platformActors({ ...defaultPorts, runtimes, connectorHttp: google.http, releasesFetch: async () => new Response('offline', { status: 404 }), pulls: fakePullSources });
+const actors: readonly AnyActorDefinition[] = platformActors({ ...defaultPorts, runtimes, connectorHttp: google.http, releasesFetch: async () => new Response('offline', { status: 404 }), pulls: workerPullSources(() => actors) });
 
 export const ActorHost = createActorHost(actors);
 

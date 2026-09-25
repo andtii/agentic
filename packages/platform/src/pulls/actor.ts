@@ -27,7 +27,7 @@
  *
  * Workers eviction rule: every mutation below ends in `ctx.save()` inside the turn.
  */
-import { isTerminal, type AgentId, type ApprovalRule, type Autopilot, type ChatId, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { isTerminal, type AgentId, type ApprovalRule, type Autopilot, type ChatId, type PluginReadinessStatus, type ProjectId, type PullRequest, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { defineActor, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import { ServerFnError } from '@sigx/server';
 import { auditPort, type AuditPort } from '../audit/port.js';
@@ -101,6 +101,8 @@ export interface PullsState {
     next?: number;
     /** Why the last poll failed; absent after a good one. */
     error?: string;
+    /** Set when the last poll found no credential for the repo (#840); absent after a good one. */
+    readiness?: PullsReadiness;
 }
 
 /** Where a PR's autopilot run stands (#858): what the page's Resume and Approve / Decline follow. */
@@ -122,6 +124,19 @@ export interface PullsView {
     readonly polledAt?: number;
     readonly next?: number;
     readonly error?: string;
+    /** `needs-sign-in`: the last poll found no credential for the repo (#840) — the project needs a GitHub connector or token. */
+    readonly readiness?: PullsReadiness;
+}
+
+/** Why the actor cannot read: only a missing credential, so far (#840). */
+export type PullsReadiness = Extract<PluginReadinessStatus, 'needs-sign-in'>;
+
+/** The error a poll records when there is no source (no adapter or credential) for the repo. */
+export class NoPullSourceError extends Error {
+    constructor(provider: string, repo: string) {
+        super(`no ${provider} pull request source for ${repo} (no adapter or credential)`);
+        this.name = 'NoPullSourceError';
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +260,8 @@ export function definePullsActor(options: PullsActorOptions) {
         runs: Object.fromEntries(Object.values(s.pulls).filter((t) => t.pr.autopilot).map((t) => [String(t.pr.number), runStateOf(t)])),
         ...(s.polledAt !== undefined ? { polledAt: s.polledAt } : {}),
         ...(s.next !== undefined ? { next: s.next } : {}),
-        ...(s.error !== undefined ? { error: s.error } : {})
+        ...(s.error !== undefined ? { error: s.error } : {}),
+        ...(s.readiness !== undefined ? { readiness: s.readiness } : {})
     });
 
     /** Fold a fresh read into the tracked PR: the provider's facts, our links and what only we know. Returns whether it changed. */
@@ -444,7 +460,7 @@ export function definePullsActor(options: PullsActorOptions) {
         let delay: number;
         try {
             const source: PullSource | undefined = await options.sources.open({ workspaceId: s.workspaceId, projectId: s.projectId, provider, repo });
-            if (!source) throw new Error(`no ${provider} pull request source for ${repo} (no adapter or credential)`);
+            if (!source) throw new NoPullSourceError(provider, repo);
             const seen = new Map<number, PullRequest>();
             for (const pr of await source.listOpen(repo)) if (pr.repo === repo) seen.set(pr.number, pr);
             // An open PR that left the list merged or closed; a reported one may never have been open to us.
@@ -463,13 +479,16 @@ export function definePullsActor(options: PullsActorOptions) {
                 }
             }
             for (const pr of seen.values()) if (upsert(s, pr)) changed = true;
-            if (s.error !== undefined) changed = true;
+            if (s.error !== undefined || s.readiness !== undefined) changed = true;
             delete s.error;
+            delete s.readiness;
             const running = Object.values(s.pulls).some((t) => t.pr.state === 'open' && t.pr.checks.some((c) => c.state === 'queued' || c.state === 'running'));
             s.intervalMs = running || changed ? POLL_FLOOR_MS : Math.min(POLL_MAX_MS, s.intervalMs * 2);
             delay = s.intervalMs;
         } catch (error) {
             s.error = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+            if (error instanceof NoPullSourceError) s.readiness = 'needs-sign-in';
+            else delete s.readiness;
             s.intervalMs = Math.min(POLL_MAX_MS, s.intervalMs * 2);
             const retryAt = retryAtOf(error);
             delay = retryAt !== undefined ? Math.max(POLL_FLOOR_MS, retryAt - at) : s.intervalMs;
@@ -555,6 +574,7 @@ export function definePullsActor(options: PullsActorOptions) {
                     if (fresh) {
                         s.pulls = {};
                         delete s.error;
+                        delete s.readiness;
                     }
                     s.repo = { provider: ref.provider, repo: ref.repo };
                     s.intervalMs = POLL_FLOOR_MS;
