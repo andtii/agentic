@@ -4,8 +4,10 @@
  * without Git is not read. `taskPullOf` / `createWorkspacePulls` are the pure parts.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { ChatId, MessageId, PullRequest, TaskId } from '@agentic/core';
-import { TaskActor, definePullsActor, defineRegistry, pullsKey, registryKey, taskKey, type PullSource } from '@agentic/platform';
+import { projectFolderKey, type EnvironmentDescriptor, type EnvironmentId, type ChatId, type MessageId, type PullRequest, type TaskId } from '@agentic/core';
+import { DAEMON_PROTOCOL_VERSION } from '@agentic/daemon-protocol';
+import { IN_MEMORY_CAPABILITIES, inMemoryEnvironment } from '@agentic/daemon-protocol/testing';
+import { TaskActor, Workspace, definePullsActor, defineRegistry, machineKey, pullsKey, registryKey, taskKey, workspaceKey, type PullSource } from '@agentic/platform';
 import { gitFeatureManifest } from '@agentic/plugins-git';
 import { clientDefs } from '../../src/actors/client';
 import { createChatWith } from '../../src/pages/chat/LiveChats';
@@ -54,7 +56,13 @@ describe('the Pulls actor on the live pages (#865)', () => {
         const forge = await h.agent('Forge', 'Builds things');
         const defs = clientDefs();
         const members = { agentIds: [forge], coordinator: forge };
-        const { id } = await saveProjectWith(defs, USER, { name: 'agentic', members, folders: {}, connectors: [], features: { [GIT_FEATURE_ID]: {} } });
+        // Git needs a folder, and a folder a paired machine.
+        const { machineId, pairingCode } = await h.app.as(owner).actor(Workspace, workspaceKey(WS)).registerMachinePending({ name: 'laptop' });
+        const daemon = h.app.as({ kind: 'machine', workspaceId: WS, machineId }).actor(h.Machine, machineKey(WS, machineId));
+        await daemon.pair(pairingCode, { name: 'laptop', os: 'windows', daemonVersion: '0.1.0-test' });
+        const env: EnvironmentDescriptor = { ...inMemoryEnvironment(machineId, 'env_win' as EnvironmentId), name: 'work', runtime: 'claude-code', account: { label: 'work', authStatus: 'ok' }, cwdRoots: ['C:/Dev'], isolation: 'config-dir' };
+        await daemon.socketMessage(JSON.stringify({ v: DAEMON_PROTOCOL_VERSION, t: 'hello', machineId, daemonVersion: '0.1.0-test', os: 'windows', environments: [env], capabilities: [{ ...IN_MEMORY_CAPABILITIES, runtime: 'claude-code' }], resume: {} }));
+        const { id } = await saveProjectWith(defs, USER, { name: 'agentic', members, folders: { [projectFolderKey(machineId)]: 'C:/Dev/agentic' }, connectors: [], features: { [GIT_FEATURE_ID]: {} } });
         const { id: plain } = await saveProjectWith(defs, USER, { name: 'notes', members, folders: {}, connectors: [], features: {} });
         await h.app.as(owner).actor(Pulls, pullsKey(WS, id)).watch({ provider: 'github', repo: 'andtii/agentic' });
         // The same repo on a project without Git: never read, so the PR is listed once.

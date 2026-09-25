@@ -13,12 +13,14 @@ import { dataMode } from '../../../data-mode';
 import { MOCK_WORK, mockFeatureUi } from '../../../mock/projects/work';
 import type { WorkFeatures, WorkTask } from './model';
 
+const projectIdOf = (projectId: string | (() => string)): (() => string) => (typeof projectId === 'function' ? projectId : () => projectId);
+
 /**
  * The project's pull requests: live the Pulls actor's `get` view (#865), on mock data the Work fixtures. Call it in
  * setup; given a getter, the read follows the project it names.
  */
 export function usePulls(projectId: string | (() => string)): () => readonly PullRequest[] {
-    const id = typeof projectId === 'string' ? () => projectId : projectId;
+    const id = projectIdOf(projectId);
     if (dataMode() !== 'live') return () => MOCK_WORK[id()]?.pulls ?? [];
     const defs = useActorDefs();
     const viewer = useViewer()();
@@ -31,8 +33,6 @@ export interface PlanReadDeps {
     readonly defs: Pick<ActorDefs, 'Plan'>;
     readonly viewer: Pick<ViewerState, 'workspaceId'>;
 }
-
-const projectIdOf = (projectId: string | (() => string)): (() => string) => (typeof projectId === 'function' ? projectId : () => projectId);
 
 /**
  * The project's plans, live: one `useActorState` read of its Plan actor's `list()` (#750), opened here in setup.
