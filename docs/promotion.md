@@ -119,7 +119,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #742: `tokenPullSources` (packages/platform/src/pulls/ports.ts) — a per-credential adapter cache with a TTL; generic enough for any polled provider that opens a secret per call.
 
-- #743: —
+- #743: `stepAutopilot` (packages/platform/src/pulls/autopilot.ts) — a pure observe → actions state machine with an attempt limit and settle/stale turn windows; the shape fits any agent that babysits an external resource.
 
 - #744: —
 
