@@ -122,7 +122,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #743: `stepAutopilot` (packages/platform/src/pulls/autopilot.ts) — a pure observe → actions state machine with an attempt limit and settle/stale turn windows; the shape fits any agent that babysits an external resource.
 
-- #744: —
+- #744: `pullSteps` / `blockerSentence` / `pullNow` (`apps/web/src/pages/projects/work/pull/model.ts`) — the PR stepper, merge sentence and now-line; move to `@agentic/ui` beside `PullCard` when chat, Home and notifications show the same states.
 
 - #745: `pullNextMove` / `pullNeedsYou` / `pullStatusText` (`packages/ui/src/projects/PullCard.tsx`) are provider-neutral PR state rules — candidates for `@agentic/core` next to `pullBlockers`.
 
