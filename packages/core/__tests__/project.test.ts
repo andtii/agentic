@@ -1,5 +1,5 @@
-import type { EnvironmentId, PluginManifest, ProjectFeatureManifest, ProjectId, ProjectRecord } from '../src/index';
-import { applyProjectFeaturePreset, enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, projectFolderFor } from '../src/index';
+import type { EnvironmentId, MachineId, PluginManifest, ProjectFeatureManifest, ProjectId, ProjectRecord } from '../src/index';
+import { applyProjectFeaturePreset, enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, parseProjectFolderKey, projectFolderFor, projectFolderIsShared, projectFolderKey } from '../src/index';
 
 const env = (id: string) => id as EnvironmentId;
 
@@ -26,6 +26,42 @@ describe('projectFolderFor', () => {
     it('never reads a prototype key', () => {
         expect(projectFolderFor({ folders: {} }, env('constructor'))).toBeUndefined();
         expect(projectFolderFor({ folders: {} }, env('__proto__'))).toBeUndefined();
+        expect(projectFolderFor({ folders: {} }, env('__proto__'), machine('constructor'))).toBeUndefined();
+    });
+});
+
+const machine = (id: string) => id as MachineId;
+
+describe('project folders by machine (#702)', () => {
+    // Environment ids are only unique per machine: `env_claude` on the Mac and on the Windows box are two environments.
+    const folders = {
+        [projectFolderKey(machine('machine_mac'))]: '/Users/me/dev/agentic',
+        [projectFolderKey(machine('machine_win'))]: 'C:\\Dev\\agentic\\main',
+        [projectFolderKey(machine('machine_win'), env('env_codex'))]: 'D:\\agentic'
+    };
+    it('keys a machine folder as <machineId>/* and an override as <machineId>/<environmentId>', () => {
+        expect(projectFolderKey(machine('machine_mac'))).toBe('machine_mac/*');
+        expect(projectFolderKey(machine('machine_mac'), env('env_claude'))).toBe('machine_mac/env_claude');
+    });
+    it('gives the same environment id its own folder on each machine', () => {
+        expect(projectFolderFor({ folders }, env('env_claude'), machine('machine_mac'))).toBe('/Users/me/dev/agentic');
+        expect(projectFolderFor({ folders }, env('env_claude'), machine('machine_win'))).toBe('C:\\Dev\\agentic\\main');
+    });
+    it('lets an environment override win over its machine folder', () => {
+        expect(projectFolderFor({ folders }, env('env_codex'), machine('machine_win'))).toBe('D:\\agentic');
+        expect(projectFolderIsShared({ folders }, env('env_codex'), machine('machine_win'))).toBe(false);
+        expect(projectFolderIsShared({ folders }, env('env_claude'), machine('machine_win'))).toBe(true);
+    });
+    it('falls back to a pre-#702 folder keyed by the bare environment id', () => {
+        expect(projectFolderFor({ folders: { env_claude: '/old' } }, env('env_claude'), machine('machine_mac'))).toBe('/old');
+        expect(projectFolderFor({ folders: { ...folders, env_claude: '/old' } }, env('env_claude'), machine('machine_mac'))).toBe('/Users/me/dev/agentic');
+        expect(projectFolderFor({ folders }, env('env_claude'))).toBeUndefined();
+    });
+    it('parses every key shape and refuses a malformed one', () => {
+        expect(parseProjectFolderKey('machine_mac/*')).toEqual({ machineId: 'machine_mac' });
+        expect(parseProjectFolderKey('machine_mac/env_claude')).toEqual({ machineId: 'machine_mac', environmentId: 'env_claude' });
+        expect(parseProjectFolderKey('env_claude')).toEqual({ environmentId: 'env_claude', legacy: true });
+        for (const bad of ['', ' ', '/*', 'machine_mac/', 'machine_mac/a/b']) expect(parseProjectFolderKey(bad)).toBeNull();
     });
 });
 
