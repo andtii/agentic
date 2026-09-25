@@ -36,12 +36,23 @@ async function reachable(origin) {
 /** A deep link's in-app path to open once connected (#847), taken from `get_server` once. */
 let landing = '/';
 
+/** Keep a link's path when it is an in-app one (`/…`, never `//host`). */
+function takeLanding(path) {
+    takeLanding(path);
+}
+
 async function connect(origin, attempt = 0) {
     clearTimeout(retryTimer);
     clearInterval(countdown);
     setServer(origin);
     show('connecting');
     if (await reachable(origin)) {
+        // A link may have arrived while this page was already up (setup or offline): ask once more.
+        try {
+            takeLanding((await invoke('get_server')).path);
+        } catch {
+            // Keep what we have.
+        }
         location.replace(`${origin}${landing}`);
         return;
     }
@@ -81,7 +92,7 @@ function setup(current, canCancel) {
 
 async function start() {
     const { server, suggested, path } = await invoke('get_server');
-    if (typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')) landing = path;
+    takeLanding(path);
     const change = new URLSearchParams(location.search).has('change');
     $('change').onclick = () => setup(server, Boolean(server));
     if (!server || change) setup(server ?? suggested, Boolean(server));
