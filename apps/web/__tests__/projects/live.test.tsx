@@ -115,7 +115,10 @@ describe('projects on the live pages (#333)', () => {
         await until(() => edit.querySelector<HTMLInputElement>('input[name="project-name"]')?.value === 'agentic', 'the form on the record');
         await until(() => projectHead.value?.name === 'agentic', 'the crumb');
         expect(topbarFor({ name: 'project', path: `/projects/${id}`, params: { id } })?.crumb).toBe('agentic');
-        const rows = [...edit.querySelectorAll<HTMLElement>('[data-project-folder]')];
+        // The folder rows are their own tab (#733).
+        const folders = await mountLive(`/projects/${id}/settings/folders`, h);
+        await until(() => folders.querySelectorAll('[data-project-folder]').length === 1, 'the folder row');
+        const rows = [...folders.querySelectorAll<HTMLElement>('[data-project-folder]')];
         expect(rows.map((r) => r.getAttribute('data-project-folder'))).toEqual([win.machineId]);
         expect(rows[0]!.querySelector('[data-scope="ag-workdir"][data-part="chip"]')!.textContent).toContain('agentic');
         // A refused save (a folder outside the roots) shows the actor's 400 inline and keeps the page.

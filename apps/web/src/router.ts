@@ -6,7 +6,7 @@ import { NewChatEntry } from './pages/chat/NewChatEntry';
 import { Tasks } from './pages/Tasks';
 import { Agents } from './pages/Agents';
 import { Agent } from './pages/Agent';
-import { NewProject } from './pages/Projects';
+import { NewProject } from './pages/projects/new/NewProject';
 import { ProjectsIndex } from './pages/projects/index/ProjectsIndex';
 import { ProjectLinks } from './pages/projects/links/Links';
 import { inProject } from './pages/projects/layout/ProjectLayout';

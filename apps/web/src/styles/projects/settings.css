@@ -1,1 +1,60 @@
-/* Projects redesign (#722): Settings: General, Members, Folders, Connectors, and the New project dialog — owned by #733. Empty until then (#725). */
+/* Projects redesign (#722): Settings › General, Members, Folders, Connectors and the New project dialog — owned by #733.
+   Scoped to the tabs and the dialog, so it stands when the old project form's styles go (X2). */
+@import '@agentic/ui/css/breakpoints';
+
+/* ---- the tab frame: heading, hint, fields, Save ---- */
+[data-project-settings] { display: flex; flex-direction: column; gap: var(--space-lg); max-inline-size: 960px; min-inline-size: 0; }
+[data-project-settings] > h2 { margin: 0; font-size: var(--text-md); }
+[data-project-settings] [data-project-hint], [data-new-project] [data-project-hint] { margin: 0; font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-project-settings] [data-project-section] { display: flex; flex-direction: column; gap: var(--space-sm); max-inline-size: 640px; min-inline-size: 0; }
+[data-project-settings] [data-project-actions] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+[data-project-saved] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+/* Delete sits apart from Save. */
+[data-project-settings] [data-project-actions] > [data-intent="danger"] { margin-inline-start: auto; }
+
+/* ---- Members: the cards wrap on the page; a role and a limit per member ---- */
+[data-settings-tab="members"] [data-new-chat-grid] { max-block-size: none; overflow: visible; }
+[data-project-member-roles] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-project-member] { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 160px; align-items: end; gap: var(--space-md); padding: var(--space-sm) var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); min-inline-size: 0; }
+[data-project-member-name] { align-self: center; font-weight: var(--weight-semibold); overflow-wrap: anywhere; }
+
+/* ---- Folders: one row per machine, the overrides indented under it ---- */
+[data-settings-tab="folders"] [data-project-folders] { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+[data-settings-tab="folders"] [data-project-folder] { display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); min-inline-size: 0; }
+[data-settings-tab="folders"] [data-project-folder][data-mismatch] { border-color: color-mix(in oklab, var(--color-warning) 60%, transparent); }
+[data-settings-tab="folders"] [data-scope="ag-workdir"] { max-inline-size: 100%; }
+[data-settings-tab="folders"] [data-project-folder-meta] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+[data-settings-tab="folders"] [data-project-folder-note] { font-size: var(--text-xs); color: var(--ag-text-dim); }
+[data-settings-tab="folders"] [data-project-folder-warning] { margin: 0; font-size: var(--text-xs); color: var(--color-warning); overflow-wrap: anywhere; }
+[data-settings-tab="folders"] [data-project-overrides] { list-style: none; margin: 0; padding: 0 0 0 var(--space-md); border-inline-start: var(--border) solid var(--ag-line); display: flex; flex-direction: column; gap: var(--space-sm); }
+[data-settings-tab="folders"] [data-project-override] { display: flex; flex-direction: column; gap: var(--space-xs); min-inline-size: 0; }
+
+/* ---- New project dialog ---- */
+[data-new-project] { display: flex; flex-direction: column; gap: var(--space-md); min-inline-size: 0; }
+[data-new-project-steps] { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-md); font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ag-text-dim); }
+[data-new-project-steps] [aria-current="step"] { color: var(--color-base-content); }
+[data-new-project] [data-project-folder] { display: flex; flex-direction: column; gap: var(--space-xs); min-inline-size: 0; }
+[data-new-project] [data-scope="ag-workdir"] { max-inline-size: 100%; }
+[data-new-project] [data-project-folder-meta] { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+[data-new-project-find] { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-xs); }
+[data-new-project-find] [data-scope="field"] { align-self: stretch; }
+[data-new-project] [data-project-locate="matches"] { list-style: none; margin: 0; padding: 0; align-self: stretch; display: flex; flex-direction: column; gap: var(--space-xs); max-block-size: 30vh; overflow-y: auto; }
+[data-new-project] [data-project-match] { display: flex; align-items: center; gap: var(--space-sm); min-inline-size: 0; }
+[data-new-project] [data-project-match-path] { font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; flex: 1 1 auto; min-inline-size: 0; }
+
+/* The personality cards: a preset's name, its one line, and how it talks. */
+[data-pm-personalities] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm); }
+[data-pm-personality] { display: flex; align-items: flex-start; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border: var(--border) solid var(--ag-line); border-radius: var(--radius-box); background: var(--color-base-200); cursor: pointer; min-inline-size: 0; }
+[data-pm-personality][data-state="checked"] { border-color: color-mix(in oklab, var(--color-primary) 60%, transparent); background: var(--color-base-300); }
+[data-pm-personality] > [data-part="item-label"] { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
+[data-pm-personality-label] { font-weight: var(--weight-semibold); }
+[data-pm-personality-summary] { font-size: var(--text-sm); color: var(--ag-text-muted); }
+[data-pm-personality-sample] { font-size: var(--text-xs); font-style: italic; color: var(--ag-text-dim); }
+
+@media (--below-md) {
+    [data-settings-tab="members"] [data-new-chat-grid] { grid-template-columns: minmax(0, 1fr); }
+    [data-project-member] { grid-template-columns: minmax(0, 1fr); }
+    [data-settings-tab="folders"] [data-scope="ag-workdir"][data-part="root"] { flex-wrap: wrap; }
+    [data-pm-personalities] { grid-template-columns: minmax(0, 1fr); }
+    [data-project-settings] [data-project-actions] > [data-scope="button"] { flex: 1 1 auto; }
+}

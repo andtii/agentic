@@ -70,12 +70,13 @@ describe('/chats/new (mock)', () => {
         await settle();
         button('Create project').click();
         await settle();
-        // The form, on the folder: the name from the folder, the row on that environment, the origin as its badge.
-        expect(page(dom, 'project')).not.toBeNull();
+        // The New project dialog over the index (#733), on the folder: the name from the folder, the folder on the
+        // machine reporting that environment (#702), the origin as its badge.
+        expect(page(dom, 'projects')).not.toBeNull();
         expect(newChatRequest.open).toBe(false);
-        expect(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('new-thing');
-        // The row of the machine reporting that environment (#702).
-        const row = dom.querySelector<HTMLElement>('[data-project-folder="alien01"]')!;
+        const dialog = document.querySelector<HTMLElement>('[data-new-project]')!;
+        expect(dialog.querySelector<HTMLInputElement>('input[name="project-name"]')!.value).toBe('new-thing');
+        const row = dialog.querySelector<HTMLElement>('[data-project-folder="alien01"]')!;
         expect(text(row.querySelector('[data-scope="ag-workdir"][data-part="chip"]'))).toContain('new-thing');
         expect(text(row.querySelector('[data-project-folder-meta] [data-scope="badge"][data-part="root"]'))).toBe('repo');
     });
