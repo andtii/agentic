@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { signal } from 'sigx';
 import type { EnvironmentDescriptor, EnvironmentId, QuotaSnapshot } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
-import { NewChatDialog, memberEnvironmentOn, openingMachine, type NewChatCreate, type NewChatProject } from '../../src/pages/chat/NewChatDialog';
+import { NewChatDialog, memberEnvironmentOn, openingMachine, permissionScope, type NewChatCreate, type NewChatProject } from '../../src/pages/chat/NewChatDialog';
 import type { MachineEntry } from '../../src/pages/ops/environments';
 import type { AgentIdentity } from '../../src/pages/chat/live';
 import type { NewChatPrefill } from '../../src/pages/chat/new-chat-prefill';
@@ -297,5 +297,66 @@ describe('New chat on a machine (#414)', () => {
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         await tick();
         expect(d.projectsRequested).toEqual([{ environmentId: 'env_nowhere', path: '/tmp/thing' }]);
+    });
+});
+
+// ---- the permission mode (#698) ------------------------------------------------------------------------------------
+
+const bypassing = (e: EnvironmentDescriptor): EnvironmentDescriptor => ({ ...e, allowBypassPermissions: true });
+const MAC_BYPASS: MachineEntry = { ...MAC, online: true, environments: MAC.environments.map(bypassing) };
+
+describe('New chat permission mode (#698)', () => {
+    const mode = () => document.querySelector<HTMLSelectElement>('select[name="chat-permission-mode"]');
+    const modeOptions = () => [...mode()!.querySelectorAll('option')].map((o) => o.value).filter(Boolean);
+    const pickMode = async (value: string) => {
+        mode()!.value = value;
+        mode()!.dispatchEvent(new Event('change', { bubbles: true }));
+        mode()!.dispatchEvent(new Event('input', { bubbles: true }));
+        await tick();
+    };
+
+    it('permissionScope: the Claude Code members; bypass only when each has an environment on the machine that allows it', () => {
+        const [forge, homer, , atlas] = withAccounts;
+        expect(permissionScope([forge!, atlas!], MAC_BYPASS, [MAC_BYPASS])).toEqual({ agentIds: ['forge'], bypassAllowed: true });
+        expect(permissionScope([forge!, homer!], MAC, [MAC])).toEqual({ agentIds: ['forge', 'homer'], bypassAllowed: false });
+        const halfMac: MachineEntry = { ...MAC, environments: [bypassing(MAC.environments[0]!), MAC.environments[1]!] };
+        expect(permissionScope([forge!, homer!], halfMac, [halfMac])).toEqual({ agentIds: ['forge', 'homer'], bypassAllowed: false });
+        expect(permissionScope([atlas!], MAC_BYPASS, [MAC_BYPASS])).toEqual({ agentIds: [], bypassAllowed: false });
+        expect(permissionScope([forge!], undefined, [])).toEqual({ agentIds: ['forge'], bypassAllowed: false });
+    });
+
+    it('where the machine allows bypass it is the default, and the chat\'s Claude Code members start in it', async () => {
+        const d = await open({ machines: [MAC_BYPASS], lastMachineId: 'm_mac', agents: withAccounts });
+        // Nobody picked, or only an API agent: no choice.
+        expect(mode()).toBeNull();
+        await d.pick('atlas');
+        expect(mode()).toBeNull();
+        await d.pick('forge');
+        expect(document.querySelector('[data-new-chat-permission]')!.getAttribute('data-mode')).toBe('bypassPermissions');
+        expect(modeOptions()).toContain('bypassPermissions');
+        expect(document.querySelector('[data-new-chat-permission-note]')).toBeNull();
+        await d.create();
+        expect(d.created).toEqual([{ agentIds: ['atlas', 'forge'], coordinator: null, projectId: null, machineId: 'm_mac', permissionMode: { mode: 'bypassPermissions', agentIds: ['forge'] } }]);
+    });
+
+    it('another mode can be picked; default sends nothing', async () => {
+        const d = await open({ machines: [MAC_BYPASS], lastMachineId: 'm_mac', agents: withAccounts });
+        await d.pick('forge');
+        await pickMode('plan');
+        expect(document.querySelector('[data-new-chat-permission]')!.getAttribute('data-mode')).toBe('plan');
+        await d.create();
+        await pickMode('default');
+        await d.create();
+        expect(d.created.map((c) => c.permissionMode)).toEqual([{ mode: 'plan', agentIds: ['forge'] }, undefined]);
+    });
+
+    it('where the machine does not allow it, bypass is not offered and the note links the machine page', async () => {
+        const d = await open({ machines: [MAC, PC], lastMachineId: 'm_mac', agents: withAccounts });
+        await d.pick('forge');
+        expect(modeOptions()).not.toContain('bypassPermissions');
+        expect(document.querySelector('[data-new-chat-permission]')!.getAttribute('data-mode')).toBe('default');
+        expect(document.querySelector('[data-new-chat-permission-note] a')!.getAttribute('href')).toBe('/machines/m_mac');
+        await d.create();
+        expect(d.created[0]!.permissionMode).toBeUndefined();
     });
 });

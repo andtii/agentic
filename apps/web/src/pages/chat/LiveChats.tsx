@@ -141,12 +141,16 @@ export const LiveChatList = component<LiveChatListProps>(({ props, emit }) => {
     };
 });
 
-/** Create a chat with `agentIds` as members (all history), an optional coordinator, in a project (#333) and on a machine (#414) when named; resolves to the new id. */
-export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null, projectId: string | null = null, machineId: string | null = null): Promise<string> {
+/**
+ * Create a chat with `agentIds` as members (all history), an optional coordinator, in a project (#333) and on a machine (#414) when named,
+ * its Claude Code members starting in `permissionMode` when one is picked (#698); resolves to the new id.
+ */
+export async function createChatWith(defs: ActorDefs, ws: string, agentIds: readonly string[], coordinator: string | null, projectId: string | null = null, machineId: string | null = null, permissionMode?: NewChatCreate['permissionMode']): Promise<string> {
     const { chatId } = await actor(defs.Workspace, workspaceKeyOf(ws)).createChat({ ...(projectId ? { projectId: projectId as ProjectId } : {}), ...(machineId ? { machineId: machineId as MachineId } : {}) });
     const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
     for (const id of agentIds) await chat.addAgent(id as AgentId, 'all');
     if (coordinator) await chat.setCoordinator(coordinator as AgentId);
+    if (permissionMode) for (const id of permissionMode.agentIds) if (agentIds.includes(id)) await chat.setOptions(id as AgentId, { permissionMode: permissionMode.mode });
     return chatId;
 }
 
@@ -161,7 +165,7 @@ export async function createChatFrom(defs: ActorDefs, ws: string, input: NewChat
     const { workdir } = input;
     const environmentId = workdir?.environmentId as EnvironmentId;
     if (workdir?.saveToProject && input.projectId) await actor(defs.Workspace, workspaceKeyOf(ws)).upsertProject({ id: input.projectId as ProjectId, folders: { [environmentId]: workdir.path } });
-    const chatId = await createChatWith(defs, ws, input.agentIds, input.coordinator, input.projectId, input.machineId);
+    const chatId = await createChatWith(defs, ws, input.agentIds, input.coordinator, input.projectId, input.machineId, input.permissionMode);
     if (workdir && !workdir.saveToProject && !(project && projectFolderFor(project, environmentId) === workdir.path)) {
         const chat = actor(defs.Chat, chatKeyOf(ws, chatId));
         for (const id of input.agentIds) if (environmentOf(id, input.machineId) === workdir.environmentId) await chat.setWorkdir(id as AgentId, { environmentId, path: workdir.path });
