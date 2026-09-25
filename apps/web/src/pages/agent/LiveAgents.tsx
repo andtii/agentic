@@ -27,6 +27,9 @@ import { NewAgentDialog } from './NewAgentDialog';
 import { AgentCardLink } from './AgentCardLink';
 import { useWorkspaceReadiness } from '../plugins/readiness';
 import { runtimeOptions } from './runtimes';
+import { useProjects } from '../projects/live';
+import { pmProjectsOf } from './pm';
+import { PmChip } from './PmChip';
 
 /** Create the agent in `ws` with its first config version; resolves to the new id. */
 export async function createAgentWith(defs: ActorDefs, ws: string, input: NewAgentInput): Promise<string> {
@@ -57,6 +60,7 @@ export const LiveAgents = component(() => {
     const router = useRouter();
     const directory = useAgentDirectory(defs, viewer);
     const tasks = useWorkspaceTasks(defs, viewer);
+    const projects = useProjects(defs, viewer);
     const readiness = useWorkspaceReadiness(defs, viewer);
     const workspace = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const runtimes = () => { const plugins = readiness.overview()?.plugins; return plugins ? runtimeOptions(plugins, readiness.byId()) : undefined; };
@@ -79,6 +83,7 @@ export const LiveAgents = component(() => {
     return () => {
         const rows = directory.all();
         const byAgent = tasksByAssignee(tasks());
+        const pms = pmProjectsOf(projects.list());
         const signedOut = !viewer.pending && !viewer.workspaceId;
         return (
             <div data-page="agents" aria-busy={directory.loading ? 'true' : undefined}>
@@ -93,6 +98,7 @@ export const LiveAgents = component(() => {
                             <ul data-agent-grid="" aria-label="Agents">
                                 {rows.map((a) => {
                                     const pill = presencePill(presenceOf(byAgent[a.id] ?? []));
+                                    const pm = pms.get(a.id);
                                     return (
                                     <li data-agent-card={a.id}>
                                         <AgentCardLink to={`/agents/${a.id}`}>
@@ -106,6 +112,7 @@ export const LiveAgents = component(() => {
                                                 </Stack.Item>
                                                 <StatusPill status={pill.status} label={pill.label} hollow={pill.hollow} />
                                             </Row>
+                                            {pm ? <PmChip project={pm} /> : null}
                                             <p data-agent-card-description="">{a.description ?? ''}</p>
                                             <Col gap="xs">
                                                 <Label>Default environment</Label>
