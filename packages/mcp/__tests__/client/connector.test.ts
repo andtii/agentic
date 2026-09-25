@@ -1,7 +1,7 @@
 /** The connector manifest and the static capability declaration. */
 // @vitest-environment node
 import { configDefaults, validateConfig, type PluginManifest } from '@agentic/core';
-import { MCP_CONNECTOR_CAPABILITIES, MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS, capabilityReportFor, mcpConnector, mcpConnectorSetup } from '@agentic/mcp';
+import { MCP_CONNECTOR_CAPABILITIES, MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS, capabilityReportFor, mcpConnector, mcpConnectorSetup, type McpConnectorTool } from '@agentic/mcp';
 
 describe('mcpConnector', () => {
     it('declares an HTTP server with its host, secret and tool namespace as permissions', () => {
@@ -46,7 +46,7 @@ describe('mcpConnector', () => {
     });
 
     it('declares probed tools under their session names, destructive ones asking (PLG-09)', () => {
-        const tools = [
+        const tools: McpConnectorTool[] = [
             { name: 'list_issues', description: 'List issues', annotations: { readOnlyHint: true } },
             { name: 'delete.repo', annotations: { destructiveHint: true, title: 'Delete repository' } },
             { name: 'create_issue' },
