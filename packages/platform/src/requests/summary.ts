@@ -15,57 +15,27 @@
  *
  * The text is pure (`weeklySummary`, `mergeNotice`, `requestsForMerge`) and table-tested; the ports carry the I/O.
  */
-import { actorKey, PM_POLICY_DEFAULT, type ChatId, type PmPolicy, type PmWeeklySummary, type ProjectId, type ProjectRecord, type ScheduleId, type WorkspaceId } from '@agentic/core';
+import { actorKey, PM_POLICY_DEFAULT, type ChatId, type Plan, type PlanItem, type PmPolicy, type Principal, type ProjectId, type ProjectRecord, type PullRequest, type ScheduleId, type SessionId, type WorkspaceId } from '@agentic/core';
+import { actor } from '@sigx/actors';
+import { asPrincipal, userPrincipal, workspaceKey } from '../auth/index.js';
+import { Chat } from '../chat/index.js';
 import { Inbox, inboxKey } from '../notify/index.js';
-import type { ScheduleSpec } from '../schedule/actor.js';
+import { definePlanActor } from '../plan/actor.js';
+import { planKey } from '../plan/key.js';
+import type { PullMergedPort } from '../pulls/actor.js';
 import type { ScheduleFired, TriggerHop, TriggerPort, TriggerResult } from '../schedule/ports.js';
+import { Workspace } from '../workspace/index.js';
 import { defineRequestsActor } from './actor.js';
 import { requestsKey } from './key.js';
 import type { RequestView } from './rules.js';
+import { PM_SUMMARY_PROMPT, pmSummaryScheduleId } from './summary-schedule.js';
 
 // ---------------------------------------------------------------------------
-// The schedule
+// The schedule (pure, in summary-schedule.ts)
 
-/** When a project's summary goes out unless its manager's settings say otherwise: Monday 08:45. */
-export const PM_SUMMARY_DEFAULT: PmWeeklySummary = { day: 1, time: '08:45' };
-
-/** The prompt that marks a Schedule entry as a project's weekly summary. */
-export const PM_SUMMARY_PROMPT = 'pm:weekly-summary';
+export * from './summary-schedule.js';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-/** The Schedule id of a project's weekly summary — one per project, so a settings change patches the same entry. */
-export function pmSummaryScheduleId(projectId: ProjectId): ScheduleId {
-    return `sch_pm_${projectId}` as ScheduleId;
-}
-
-/** `{ws}:schedule:sch_pm_{project}`. */
-export function pmSummaryScheduleKey(workspaceId: WorkspaceId, projectId: ProjectId): string {
-    return actorKey(workspaceId, 'schedule', pmSummaryScheduleId(projectId));
-}
-
-/** The cron for a weekly summary (`45 8 * * 1`); throws on a day outside 0–6 or a time that is not `HH:MM`. */
-export function pmSummaryCron(summary: PmWeeklySummary = PM_SUMMARY_DEFAULT): string {
-    if (!Number.isInteger(summary.day) || summary.day < 0 || summary.day > 6) throw new Error(`[requests] a weekly summary day is 0 (Sunday) to 6, got ${String(summary.day)}`);
-    const m = TIME_RE.exec(summary.time);
-    if (!m) throw new Error(`[requests] a weekly summary time is HH:MM, got ${String(summary.time)}`);
-    return `${Number(m[2])} ${Number(m[1])} * * ${summary.day}`;
-}
-
-/**
- * The Schedule entry for a project's weekly summary, on the workspace's time zone `tz`. No agent: the firing is
- * turned into the summary by `pmSummaryTrigger`, not into a task.
- */
-export function pmSummarySchedule(project: Pick<ProjectRecord, 'id' | 'name'>, tz: string, summary: PmWeeklySummary = PM_SUMMARY_DEFAULT): ScheduleSpec {
-    return {
-        kind: 'recurring',
-        title: `Weekly summary · ${project.name}`,
-        recurrence: { kind: 'cron', cron: pmSummaryCron(summary), tz },
-        projectId: project.id,
-        prompt: PM_SUMMARY_PROMPT
-    };
-}
 
 /** Whether a firing is a project's weekly summary. */
 export const isPmSummary = (event: Pick<ScheduleFired, 'prompt' | 'projectId' | 'scheduleId'>): boolean =>
@@ -196,6 +166,13 @@ export interface PmSummaryProjectPort {
     project(hop: TriggerHop, workspaceId: WorkspaceId, projectId: ProjectId): Promise<Pick<ProjectRecord, 'id' | 'name' | 'pm'> | undefined>;
 }
 
+/** The production projects: the project records on the Workspace root, over the hop. */
+export const workspaceSummaryProjects: PmSummaryProjectPort = {
+    async project(hop, workspaceId, projectId) {
+        return (await hop.actor(Workspace, workspaceKey(workspaceId)).projects()).find((p) => p.id === projectId);
+    }
+};
+
 /** The week's requests for a project. Default: its Requests actor over the hop. */
 export interface PmSummaryRequestsPort {
     requests(hop: TriggerHop, workspaceId: WorkspaceId, projectId: ProjectId): Promise<{ incoming: readonly RequestView[]; sent: readonly RequestView[] }>;
@@ -215,7 +192,8 @@ export const actorSummaryRequests: PmSummaryRequestsPort = {
 };
 
 export interface PmSummaryTriggerOptions {
-    readonly projects: PmSummaryProjectPort;
+    /** Default: `workspaceSummaryProjects`. */
+    readonly projects?: PmSummaryProjectPort;
     /** Default: `inboxSummaryHome`. */
     readonly home?: PmHomePort;
     /** Default: `actorSummaryRequests`. */
@@ -233,7 +211,7 @@ export type PmSummaryOutcome = { readonly posted: PmSummaryPost } | { readonly p
  */
 export async function deliverPmSummary(event: ScheduleFired, hop: TriggerHop, options: PmSummaryTriggerOptions): Promise<PmSummaryOutcome> {
     const projectId = event.projectId!;
-    const project = await options.projects.project(hop, event.workspaceId, projectId);
+    const project = await (options.projects ?? workspaceSummaryProjects).project(hop, event.workspaceId, projectId);
     if (!project) return { paused: `project ${projectId} is gone` };
     if (!project.pm?.policy.weeklySummary) return { paused: 'the weekly summary is off in the project manager settings' };
     const { incoming, sent } = await (options.requests ?? actorSummaryRequests).requests(hop, event.workspaceId, projectId);
@@ -310,4 +288,90 @@ export async function notifyRequestersOnMerge(hop: TriggerHop, merged: MergedIte
         }
     }
     return sent;
+}
+
+/**
+ * The production requester chat for `project` (#868): the notice is posted in the request's chat as the project's
+ * manager — an agent principal on the manager's id, on a session that is only the notice's — else, with no manager,
+ * as the workspace user. `Chat.post` needs a principal and a schedule or poll hop has none, so the post goes through
+ * its own client; nobody is mentioned, so no agent is started by it.
+ */
+export function chatRequesterPort(project: Pick<ProjectRecord, 'id' | 'pm'>): RequesterChatPort {
+    return {
+        async post(_hop, workspaceId, chatId, text) {
+            const agentId = project.pm?.agentId;
+            const principal: Principal = agentId
+                ? { kind: 'agent', workspaceId, agentId, sessionId: `session_pm_notice_${project.id}` as SessionId }
+                : userPrincipal(workspaceId, workspaceId);
+            await actor(Chat, actorKey(workspaceId, 'chat', chatId)).with({ context: asPrincipal(principal) }).post(text, []);
+        }
+    };
+}
+
+/**
+ * The plan items a merged PR finishes (#868): an item whose claim is carried out by the PR's task, or an item that
+ * names the PR among its refs (`pr:n`). Each item once, in plan order.
+ */
+export function mergedPlanItems(plans: readonly Pick<Plan, 'phases'>[], pr: Pick<PullRequest, 'number' | 'taskId'>): PlanItem[] {
+    const out: PlanItem[] = [];
+    const seen = new Set<number>();
+    for (const plan of plans) {
+        for (const phase of plan.phases) {
+            for (const item of phase.items) {
+                if (seen.has(item.id)) continue;
+                const byTask = pr.taskId !== undefined && item.claim?.taskId === pr.taskId;
+                const byRef = item.refs.some((r) => r.kind === 'pr' && r.n === pr.number);
+                if (!byTask && !byRef) continue;
+                seen.add(item.id);
+                out.push(item);
+            }
+        }
+    }
+    return out;
+}
+
+/** Where the merge notices read a project's plans. Default: its Plan actor over the hop (`list()`). */
+export interface PmPlanPort {
+    plans(hop: TriggerHop, workspaceId: WorkspaceId, projectId: ProjectId): Promise<readonly Pick<Plan, 'phases'>[]>;
+}
+
+/** Only its `type` matters for a hop: the host runs the app's own Plan definition. */
+let planRef: ReturnType<typeof definePlanActor> | undefined;
+
+/** The production plans: `list()` on the project's Plan actor. */
+export const actorPmPlans: PmPlanPort = {
+    async plans(hop, workspaceId, projectId) {
+        planRef ??= definePlanActor();
+        return (await hop.actor(planRef, planKey(workspaceId, projectId)).list()).plans;
+    }
+};
+
+export interface PullMergeNoticeOptions {
+    /** Default: `workspaceSummaryProjects`. */
+    readonly projects?: PmSummaryProjectPort;
+    /** Default: `actorPmPlans`. */
+    readonly plans?: PmPlanPort;
+    /** Default: `actorSummaryRequests`. */
+    readonly requests?: PmSummaryRequestsPort;
+    /** Default: `chatRequesterPort(project)`. */
+    readonly chat?: (project: Pick<ProjectRecord, 'id' | 'name' | 'pm'>) => RequesterChatPort;
+}
+
+/**
+ * The Pulls actor's merge hook (#868): when a PR merges, every plan item it finishes (`mergedPlanItems`) tells the
+ * requesters whose request became that item (`notifyRequestersOnMerge`, named `{repo name}#{n}`).
+ */
+export function pullMergeNotices(options: PullMergeNoticeOptions = {}): PullMergedPort {
+    return {
+        async merged(hop, { workspaceId, projectId, pr }) {
+            const project = await (options.projects ?? workspaceSummaryProjects).project(hop, workspaceId, projectId);
+            if (!project || !(project.pm?.policy ?? PM_POLICY_DEFAULT).notifyOnMerge) return;
+            const items = mergedPlanItems(await (options.plans ?? actorPmPlans).plans(hop, workspaceId, projectId), pr);
+            const chat = (options.chat ?? chatRequesterPort)(project);
+            const pull = `${pr.repo.slice(pr.repo.indexOf('/') + 1)}#${pr.number}`;
+            for (const item of items) {
+                await notifyRequestersOnMerge(hop, { workspaceId, projectId, item: item.id, pull }, { project, chat, ...(options.requests ? { requests: options.requests } : {}) });
+            }
+        }
+    };
 }
