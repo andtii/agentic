@@ -10,13 +10,14 @@ import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_CHATS } from '../../../mock/projects/chats';
 import { PROJECTS, USER, agentNamed, formatAge } from '../../../mock/workspace';
 import { useAgentDirectory } from '../../chat/directory';
-import { LIST_TAIL, chatTasks, workingAgents } from '../../chat/live';
+import { LIST_TAIL } from '../../chat/live';
 import { useChatRows } from '../../chat/LiveChats';
 import { projectTrail } from '../layout/trail';
 import type { ProjectPageProps } from '../layout/types';
 import { useProjects } from '../live';
 import { ChatsView } from './ChatsView';
 import type { ProjectChatRow, WorkChip } from './groups';
+import { chatTaskSummaries, summaryOf } from './tasks';
 
 defineTopbar('project-chats', (route) => ({ trail: projectTrail(route, { label: 'Chats', href: `/projects/${String(route.params.id)}/chats` }) }));
 
@@ -72,8 +73,10 @@ const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
     // The chats this page moved: shown in the project at once, before the chat's own read comes back.
     const st = signal({ moved: {} as Record<string, string>, busy: false, error: '' });
     const rows = (): ProjectChatRow[] => {
-        const tasks = index.value ?? [];
+        // One pass over the index for every chat's roots and working flag, looked up per row (#804).
+        const tasks = chatTaskSummaries(index.value ?? []);
         return chats.rows().map((c) => {
+            const summary = summaryOf(tasks, c.id);
             // The chat's own read wins once it names a project; until then, the move this page just made.
             const projectId = c.projectId ?? st.moved[c.id];
             return {
@@ -82,10 +85,10 @@ const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
                 lastLine: c.lastLine,
                 agentIds: c.members.map((m) => m.agentId),
                 waiting: c.waiting,
-                working: workingAgents(tasks, c.id).size > 0,
+                working: summary.working,
                 updatedAt: c.updatedAt,
                 ...(projectId ? { projectId } : {}),
-                work: taskChips(chatTasks(tasks, c.id, Number.POSITIVE_INFINITY).filter((t) => t.depth === 0).map((t) => t.id))
+                work: taskChips(summary.roots)
             };
         });
     };
