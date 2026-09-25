@@ -140,6 +140,8 @@ export interface ChatSummary {
     readonly machineId?: MachineId;
     /** `machineId` with the machine's name from the Workspace index, while it is listed there — a removed machine leaves `machineId` alone. */
     readonly machine?: { readonly id: MachineId; readonly name: string };
+    /** `true` while the chat is archived (#774, `archive`); absent otherwise. */
+    readonly archived?: true;
 }
 
 /** A title is one line of at most this many characters; `rename` trims and rejects the rest. */
@@ -292,8 +294,8 @@ async function archive(ctx: ActorContext<ChatState>): Promise<void> {
  * Machine actor: whether the machine is online is the caller's to read.
  */
 async function summaryOf(ctx: ActorContext<ChatState>): Promise<ChatSummary> {
-    const { seq, members, coordinator, sessions, title, titleAuto, projectId, machineId } = ctx.state;
-    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(titleAuto === undefined ? {} : { titleAuto }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }) });
+    const { seq, members, coordinator, sessions, title, titleAuto, projectId, machineId, archived } = ctx.state;
+    let summary: ChatSummary = ctx.snapshot({ seq, members, coordinator, sessions, ...(title === undefined ? {} : { title }), ...(titleAuto === undefined ? {} : { titleAuto }), ...(projectId === undefined ? {} : { projectId }), ...(machineId === undefined ? {} : { machineId }), ...(archived ? { archived } : {}) });
     if (projectId === undefined && machineId === undefined) return summary;
     const workspace = ctx.actor(Workspace, workspaceKey(workspaceOfKey(ctx.key) as WorkspaceId));
     if (projectId !== undefined) {
@@ -415,6 +417,7 @@ export function defineChatActor(ports: ChatOptions = {}) {
             // Users, external clients and member agents; a non-member agent is refused inside the method (a policy sees no state).
             setProject: [notMachine],
             setMachine: [notMachine],
+            archive: [userOrExternal],
             registerUpload: [userOrExternal],
             fileAccess: [notMachine]
         },
@@ -652,6 +655,33 @@ export function defineChatActor(ports: ChatOptions = {}) {
                     by: principalLabel(principal),
                     summary: machineId === null ? `chat ${chatId} runs on no particular machine` : `chat ${chatId} runs on machine ${name} (${machineId})`,
                     data: { chatId, machineId, ...(name !== undefined ? { name } : {}) }
+                });
+                return summaryOf(ctx);
+            },
+
+            /**
+             * Archive the chat (#774; PRJ-02/04), or bring it back with `false`: `get().archived`, and
+             * `Workspace.projectSummaries` counts it as archived instead of open. The thread, its members and
+             * its sessions are left alone, and nothing is written into it. Users and external clients only; a
+             * value that is not a boolean is 400. Idempotent. Recorded as `chat.archived`.
+             */
+            async archive(archived: boolean): Promise<ChatSummary> {
+                const principal = principalOf(ctx);
+                if (!principal) throw new Error('Chat.archive: no principal');
+                if (typeof archived !== 'boolean') throw new ServerFnError(400, 'Chat.archive: true or false is required');
+                if ((ctx.state.archived ?? false) === archived) return summaryOf(ctx);
+                if (archived) ctx.state.archived = true;
+                else delete ctx.state.archived;
+                await ctx.save();
+                const at = Date.now();
+                const chatId = chatIdOfKey(ctx.key);
+                await recordAudit(ctx, workspaceOfKey(ctx.key) as WorkspaceId, {
+                    key: `${ctx.key}:archive:${at}:${archived}`,
+                    kind: 'chat.archived',
+                    at,
+                    by: principalLabel(principal),
+                    summary: archived ? `chat ${chatId} archived` : `chat ${chatId} restored from the archive`,
+                    data: { chatId, archived }
                 });
                 return summaryOf(ctx);
             },

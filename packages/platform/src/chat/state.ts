@@ -101,6 +101,11 @@ export interface ChatState {
     /** The machine the last `machine` note put the chat on (#414, `Chat.setMachine`); absent until one does, or after one clears it. */
     machineId?: MachineId;
     /**
+     * Set while the chat is archived (#774, `Chat.archive`); absent otherwise. Chat state, not an entry — archiving
+     * writes nothing into the thread, and a replay of the entries leaves it as it is.
+     */
+    archived?: true;
+    /**
      * Every file ever posted, keyed by file id (#203). Kept in the actor's own state, never in the
      * window, so it outlives archiving. Absent until the first file is posted.
      */
