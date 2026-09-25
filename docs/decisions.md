@@ -325,3 +325,13 @@ The projects handoff ([`docs/design/projects/`](design/projects/HANDOFF.md), req
 6. **Git is behind a provider-neutral adapter in `plugins-git`, GitHub first.** It runs at the edge with the project's GitHub connector credential. Pull request state is polled from a `Pulls` actor alarm; webhooks are a follow-up.
 7. **New actors `Plan`, `Pulls` and `Requests`, keyed per project.** `ProjectRecord` stays in Workspace, extended. **Work items are derived** (tasks + pulls + plan items), not stored.
 8. **`text-mute` in the handoff means `text-muted`**, the existing token.
+
+## 2026-09-25 — desktop app on Tauri 2 (#843, #850)
+
+Open decision 8 settled v1 as "responsive web only… No native shell". This entry revises it **for desktop only**. Mobile is unchanged: responsive web, with a Lynx shell later.
+
+1. **A desktop app ships for Windows, macOS and Linux as a thin Tauri 2 shell.** It loads the deployed origin directly, and adds native notifications, an unread badge, `agentic://` deep links, "This computer" daemon awareness, a quick-ask hotkey and auto-update. The design is architecture §13.
+2. **Why Tauri.** It uses the system webview (WebView2, WKWebView, WebKitGTK), so installers are about 3–10 MB, against 80–150 MB for Electron, which bundles Chromium. It also has first-party plugins for everything the shell needs (tray, notification, deep-link, updater, single-instance, window-state, autostart, global-shortcut), and a capability model that scopes IPC to one origin. Wails, Neutralino and Electrobun are less mature, or don't cover all three OSes equally. The cost is a Rust toolchain for desktop work and in its release workflow, and three webview engines to smoke-test.
+3. **A Node-based "sigx desktop" was considered and deferred.** That would be a native helper process over wry/tao driven by a Node backend, with `serverFn` over IPC, a custom protocol serving SSR, and a local actor host. It only pays off when apps must run backend code on the user's machine. Agentic doesn't need that: its state lives in Durable Objects, and its local compute is the Node daemon. Other costs of the Node version: the Node runtime alone puts the installer at about 35–45 MB, and it means owning a native build matrix. The web side reaches the shell only through the `DesktopHost` interface, so a sigx host can replace Tauri later without touching the pages.
+4. **The shell is the UI, and the daemon stays compute.** The app doesn't install, bundle or supervise the daemon in v1. Pairing is unchanged and per account. Launching the daemon as a Tauri sidecar is a later option.
+5. **Nothing is hard-coded.** The server URL is a first-run setting (with a build-time default), so any deployment works.
