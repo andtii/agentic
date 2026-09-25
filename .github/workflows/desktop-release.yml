@@ -1,0 +1,137 @@
+name: Desktop release
+
+# Installers of the Tauri desktop shell (apps/desktop, #848) for Windows, macOS
+# and Linux, published to a GitHub release — docs/runbook.md "Desktop app":
+#
+# - a pushed tag `desktop-v<semver>` (or a manual run with the `tag` input)
+#   builds every target with tauri-action and creates the release
+#   `desktop-v<semver>`: NSIS + MSI (Windows x64), a universal DMG (macOS arm64
+#   + x64), AppImage + .deb (Linux x64 and arm64). Every installer must stay
+#   under 15 MB (scripts/check-size.mjs);
+# - with the repo variable AGENTIC_UPDATER_PUBKEY and the secret
+#   TAURI_SIGNING_PRIVATE_KEY set, the build carries the updater
+#   (scripts/release-config.mjs) and the release a signed `latest.json`; unless
+#   the semver is a pre-release, the publish job copies it to the rolling
+#   `desktop-stable` pre-release, the endpoint installed apps check. Without the
+#   key the installers have no updater. GitHub's "latest release" is
+#   release-drafter's, so nothing here uses it;
+# - AGENTIC_SERVER_URL (repo variable, optional) is the server a fresh install
+#   suggests. Code signing (Apple Developer ID + notarization, a Windows
+#   certificate) is not wired yet: the installers are unsigned until the
+#   certificates exist (runbook).
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag desktop-v<semver> to build from this ref'
+        required: true
+
+concurrency:
+  group: desktop-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ''
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          # 22.04: an AppImage runs on the glibc it was built against and newer.
+          - os: ubuntu-22.04
+            args: ''
+          - os: ubuntu-22.04-arm
+            args: ''
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux webview and tray libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install the Tauri CLI
+        run: pnpm install --frozen-lockfile --filter @agentic/desktop
+
+      - name: Release config
+        shell: bash
+        env:
+          AGENTIC_UPDATER_PUBKEY: ${{ vars.AGENTIC_UPDATER_PUBKEY }}
+          AGENTIC_UPDATER_URL: https://github.com/${{ github.repository }}/releases/download/desktop-stable/latest.json
+        run: |
+          node apps/desktop/scripts/release-config.mjs "$TAG" > apps/desktop/src-tauri/release.conf.json
+          cat apps/desktop/src-tauri/release.conf.json
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          AGENTIC_SERVER_URL: ${{ vars.AGENTIC_SERVER_URL }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          args: ${{ matrix.args }} --config src-tauri/release.conf.json
+          tagName: ${{ env.TAG }}
+          releaseName: Agentic desktop ${{ env.TAG }}
+          releaseBody: 'Installers of the Agentic desktop app. Windows: the .exe (NSIS) or .msi. macOS: the universal .dmg. Linux: the .AppImage or .deb. Unsigned until code-signing certificates are set up (docs/runbook.md "Desktop app").'
+          prerelease: ${{ contains(env.TAG, '-') }}
+          includeUpdaterJson: ${{ vars.AGENTIC_UPDATER_PUBKEY != '' }}
+          updaterJsonPreferNsis: true
+
+      - name: Installer size (15 MB)
+        shell: bash
+        run: node apps/desktop/scripts/check-size.mjs apps/desktop/src-tauri/target 15
+
+  # The stable updater channel: installed apps read desktop-stable/latest.json.
+  publish-channel:
+    needs: build
+    if: ${{ vars.AGENTIC_UPDATER_PUBKEY != '' && !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Copy latest.json to desktop-stable
+        run: |
+          gh release download "$TAG" --pattern latest.json --output latest.json
+          cat latest.json
+          notes="The stable update channel of the Agentic desktop app: latest.json points at the newest desktop-v<semver> release. Not a release to download."
+          if ! gh release view desktop-stable >/dev/null 2>&1; then
+            gh release create desktop-stable --prerelease --title "Desktop (stable channel)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload desktop-stable latest.json --clobber
+          gh release edit desktop-stable --notes "$notes Now: $TAG."

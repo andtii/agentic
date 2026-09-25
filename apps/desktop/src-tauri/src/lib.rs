@@ -7,6 +7,7 @@ mod machine;
 mod notify;
 mod server;
 mod tray;
+mod updater;
 
 use server::Navigation;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -182,7 +183,13 @@ fn build_window(
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    let updates = updater::configured(context.config());
+    let mut builder = tauri::Builder::default();
+    if updates {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    builder
         // First, so a second launch exits before it builds anything.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_deep_link::init())
@@ -210,6 +217,7 @@ pub fn run() {
             }
             build_window(&handle, MAIN, WebviewUrl::App("index.html".into()), None)?;
             tray::build(&handle)?;
+            updater::start(&handle);
             // `agentic://` links (#847): the one that started the app, then each one while it runs
             // (a second launch hands its link over through single-instance).
             {
@@ -241,7 +249,7 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the Agentic desktop app")
         .run(|_app, _event| {
             // macOS: clicking the dock icon brings the hidden window back.

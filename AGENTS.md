@@ -185,7 +185,8 @@ Run the web app: `pnpm dev` (the real Worker on `wrangler dev`, http://localhost
 `pnpm dev:mock` (Vite on mock data). Run the daemon: `pnpm --filter @agentic/daemon start`.
 Run the desktop app: `pnpm --filter @agentic/desktop dev` (`tauri dev`; needs a Rust toolchain — only for
 `apps/desktop`, nothing else in the repo does). Its Rust checks: `cargo fmt --check && cargo clippy
---all-targets -- -D warnings && cargo test` in `apps/desktop/src-tauri` (CI: `desktop.yml`, on changes there).
+--all-targets -- -D warnings && cargo test` in `apps/desktop/src-tauri`, and `node --test apps/desktop/scripts/*.test.mjs`
+(CI: `desktop.yml`, on changes there, plus a WebKitGTK WebDriver smoke). Releases: tag `desktop-v<semver>` (`docs/runbook.md` §5a).
 
 ## Packages
 
