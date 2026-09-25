@@ -82,4 +82,28 @@ test.describe('plugins', () => {
         // The switch never followed the row's link.
         await expect(page).toHaveURL(/\/plugins$/);
     });
+
+    test('the connectors readiness chips are the kit FilterChips and filter the list (#687)', async ({ page }) => {
+        await page.goto('/plugins?kind=connector');
+        const group = page.getByRole('group', { name: 'Filter by readiness' });
+        await expect(group).toHaveAttribute('data-filter-chips', '');
+        await expect(group.locator('[aria-pressed="true"]')).toContainText('All');
+        await group.getByRole('button', { name: /^Needs sign-in/ }).click();
+        await expect(group.getByRole('button', { name: /^Needs sign-in/ })).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('[data-connector-item]')).toHaveCount(1);
+        await expect(page.locator('[data-connector-item="linear"]')).toBeVisible();
+        await group.getByRole('button', { name: /^All/ }).click();
+        await expect(page.locator('[data-connector-item]')).toHaveCount(4);
+    });
+});
+
+test.describe('plugins on the phone', () => {
+    test.skip(({ viewport }) => (viewport?.width ?? 0) >= 768, 'below 768 px');
+
+    test('the connectors readiness chips keep 44 px touch targets (#641, #687)', async ({ page }) => {
+        await page.goto('/plugins?kind=connector');
+        const chips = page.getByRole('group', { name: 'Filter by readiness' }).getByRole('button');
+        await expect(chips).toHaveCount(3);
+        for (const chip of await chips.all()) expect((await chip.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    });
 });
