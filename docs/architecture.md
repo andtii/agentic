@@ -760,7 +760,7 @@ _not yet_
 
 #### #756 web: Plan graph view (minimal) and plan switcher
 
-_not yet_
+`apps/web/src/pages/projects/features/plan/graph/`. `?view=graph` draws one plan: pure `planGraphLayout(plan)` (`layout.ts`) puts each item in a column by its `after` depth across the whole plan (`planDepths`: 0 with nothing before it, else one past the deepest item it waits on, so every arrow points right) and in a horizontal lane per phase (phase order; a lane is as tall as its tallest column), and returns px nodes, lanes and one SVG path per `after` that is an item of the same plan (other plans' numbers draw nothing; a cycle is cut where it closes). Nodes are an `<ol>` over the SVG with the `ItemGlyph` state glyph and an off-screen `after #n` line, since the arrows are decorative. `PlanSwitcher` is a zero `Popover` by the title listing the project's plans and New plan. Mock data reads the graph's own `MOCK_GRAPH_PLANS` (`mock.ts`) and New plan adds a local empty plan; live there is no plan store yet, so it says "No plans yet." with New plan disabled.
 
 #### #757 core: Request, Triage and project-manager policy (contract)
 
