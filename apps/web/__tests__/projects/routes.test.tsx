@@ -120,8 +120,8 @@ describe('the project menu (#725)', () => {
         expect(menu.map((g) => g.label)).toEqual(['agentic', 'Features', 'Settings']);
         // The sample agentic project has a coordinator, so it has Requests.
         expect(menu[0]!.items.map((i) => i.href)).toEqual(['/projects/p_agentic', '/projects/p_agentic/chats', '/projects/p_agentic/work', '/projects/p_agentic/requests']);
-        // Git draws its Code section (#746); the sample project has no Plan feature.
-        expect(menu[1]!.items).toEqual([{ href: '/projects/p_agentic/code', label: 'Code' }]);
+        // Git draws its Code section (#746), Plan its own (#923 turns it on in the sample project).
+        expect(menu[1]!.items.map((i) => [i.href, i.label])).toEqual([['/projects/p_agentic/code', 'Code'], ['/projects/p_agentic/plan', 'Plan']]);
         expect(menu[2]!.items.map((i) => i.label)).toEqual(['General', 'Members', 'Folders', 'Connectors', 'Features', 'Project manager']);
     });
 });

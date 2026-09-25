@@ -21,7 +21,7 @@ const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await ne
 describe('the Overview model (#730)', () => {
     it('tags a feature by its last id segment and a connector with spaces', () => {
         expect(featureTagOf('agentic.feature.git')).toBe('git');
-        expect(projectTagsOf(agentic).map((t) => t.label)).toEqual(['git', 'github mcp']);
+        expect(projectTagsOf(agentic).map((t) => t.label)).toEqual(['git', 'plan', 'github mcp']);
     });
 
     it('prints the machine folder before an override, and the no-folder line without one', () => {
@@ -56,7 +56,7 @@ describe('the Overview page (#730)', () => {
         expect(el).not.toBeNull();
         expect(el.querySelector('[data-stub]')).toBeNull();
         expect(text(el.querySelector('[data-overview-name]'))).toBe('agentic');
-        expect(texts([...el.querySelectorAll('[data-overview-tag]')])).toEqual(['git', 'github mcp']);
+        expect(texts([...el.querySelectorAll('[data-overview-tag]')])).toEqual(['git', 'plan', 'github mcp']);
         expect(text(el.querySelector('[data-overview-folder]'))).toBe('alien01 → C:\\Dev\\agentic\\main');
         expect(texts([...el.querySelectorAll('[data-overview-actions] a')])).toEqual(['New task', 'New chat']);
         expect(el.querySelectorAll('[data-overview-move]')).toHaveLength(3);
@@ -65,10 +65,10 @@ describe('the Overview page (#730)', () => {
         expect(text(chats.querySelector('[data-overview-card-aside] a'))).toBe('All 6 chats →');
         expect(chats.querySelector('[data-overview-card-aside] a')!.getAttribute('href')).toBe('/projects/p_agentic/chats');
         expect(text(chats.querySelector('[data-overview-chat="c_rel04"] [data-overview-chat-state]'))).toBe('NEEDS YOU');
-        // The rail: git's Code card (#746), then the fixed cards and Add a feature.
+        // The rail: git's Code card (#746) and Plan's, then the fixed cards and Add a feature.
         const rail = el.querySelector('[data-overview-rail]')!;
-        expect([...rail.querySelectorAll('[data-overview-feature]')].map((f) => f.getAttribute('data-overview-feature'))).toEqual(['agentic.feature.git']);
-        expect([...rail.children].map((c) => c.getAttribute('data-overview-card') ?? (c.hasAttribute('data-overview-feature') ? 'feature' : c.hasAttribute('data-overview-add-feature') ? 'add' : '?'))).toEqual(['feature', 'schedules', 'people', 'add']);
+        expect([...rail.querySelectorAll('[data-overview-feature]')].map((f) => f.getAttribute('data-overview-feature'))).toEqual(['agentic.feature.git', 'agentic.feature.plan']);
+        expect([...rail.children].map((c) => c.getAttribute('data-overview-card') ?? (c.hasAttribute('data-overview-feature') ? 'feature' : c.hasAttribute('data-overview-add-feature') ? 'add' : '?'))).toEqual(['feature', 'feature', 'schedules', 'people', 'add']);
         expect(text(rail.querySelector('[data-overview-schedule]'))).toContain('Nightly dependency check');
         expect(rail.querySelector('[data-overview-add-feature] a')!.getAttribute('href')).toBe('/projects/p_agentic/settings/features');
     });

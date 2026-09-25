@@ -242,7 +242,7 @@ const eid = (s: string): EnvironmentId => s as EnvironmentId;
 
 /**
  * The workspace's projects: "agentic" lives on two environments with the git
- * feature on, "docs-site" on one. A chat in a project inherits the project's
+ * and plan features on, "docs-site" on one. A chat in a project inherits the project's
  * folder for each member's environment.
  */
 export const PROJECTS: readonly ProjectRecord[] = [
@@ -254,7 +254,11 @@ export const PROJECTS: readonly ProjectRecord[] = [
         // The machine's folder, and another checkout for one environment on it (#702).
         folders: { [projectFolderKey('alien01' as MachineId)]: 'C:\\Dev\\agentic\\main', [projectFolderKey('alien01' as MachineId, eid('env_alien01_personal'))]: 'C:\\Users\\andy\\src\\agentic' },
         connectors: [{ id: 'github-mcp' }],
-        features: { 'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktreePerChat: true, instructions: 'Branch first; never work on main.' } },
+        features: {
+            'agentic.feature.git': { origin: 'https://github.com/andtii/agentic.git', worktreePerChat: true, instructions: 'Branch first; never work on main.' },
+            // Plan on its defaults, so its sidebar entry shows on mock data as the ProjectHome board draws it (#923).
+            'agentic.feature.plan': {}
+        },
         createdAt: hoursAgo(72),
         updatedAt: hoursAgo(2)
     },

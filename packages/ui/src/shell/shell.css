@@ -14,7 +14,8 @@
  * and user.
  *
  * Two regimes on one markup:
- *   < 768px  the bar is a 60 px app bar on base-200: menu or back, title
+ *   < 768px  the bar is a 60 px app bar on base-200: menu or back (both on
+ *            a route with a sub-menu), title
  *            16 / 600 with an optional sub-line, one right slot
  *            ("Mobile specifics"). Page padding 16.
  *   >= 768px the docked sidebar beside the column of 60 px topbar + main.
@@ -218,8 +219,10 @@
     /* the breadcrumb yields to the title; on a detail route the back link replaces the menu */
     [data-scope="ai-shell"][data-part="breadcrumb"] { display: none; }
     [data-scope="ai-shell"][data-part="title"] { display: flex; }
-    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"] [data-scope="drawer"][data-part="trigger"] { display: none; }
+    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"]:not([data-sub-menu]) [data-scope="drawer"][data-part="trigger"] { display: none; }
     [data-scope="ai-shell"][data-part="bar"][data-regime="detail"] [data-part="back"] { display: inline-flex; }
+    /* a route with a sub-menu (a project's, #923): back leads, the menu stays after it */
+    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"][data-sub-menu] [data-part="back"] { order: -1; }
     [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"] [data-part="brand"] { margin-inline-start: var(--space-xs); }
 
     /* one right slot: the page's phone action, else the last of its actions */

@@ -63,7 +63,7 @@ describe('/projects (mock)', () => {
         expect(agentic.querySelector('[data-project-name]')!.textContent).toBe('agentic');
         expect(agentic.querySelector('[data-project-description]')!.textContent).toBe('The Unified Agent Platform monorepo.');
         expect(agentic.querySelectorAll('[data-member-tiles] [data-scope="avatar"][data-part="root"]').length).toBe(3);
-        expect(texts([...agentic.querySelectorAll('.project-feature')])).toEqual(['git']);
+        expect(texts([...agentic.querySelectorAll('.project-feature')])).toEqual(['git', 'plan']);
         expect(texts([...agentic.querySelectorAll('.project-env')])).toEqual(['alien01', 'alien01 / personal']);
         expect(texts([...agentic.querySelectorAll('[data-project-pills] [data-status]')])).toEqual(['3 YOUR MOVE', '4 AGENTS ON IT']);
         expect(agentic.querySelector('[data-project-next]')!.textContent).toBe('Next: merge #602 · review #598 · decide #605');
