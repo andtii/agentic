@@ -65,7 +65,8 @@ defineTopbar('home', () => ({ actions: () => <Button intent="primary" icon="plus
  * TaskIndex (`LiveActiveTasks`). Today's schedule is not read here yet: the
  * Schedules page lists it. Above everything, while no runtime is ready, the
  * setup checklist says what to do first (#234). The pull requests whose move is yours join "Needs you" from every
- * Git project's Pulls actor (#865).
+ * Git project's Pulls actor (#865); a review requested of the viewer's provider
+ * login (`viewer.login`, #893) is theirs too.
  */
 export const LiveHome = component(() => {
     const defs = useActorDefs();
@@ -74,7 +75,7 @@ export const LiveHome = component(() => {
     const ws = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'get'] as const), { live: true });
     const spend = useMonthSpend(defs, viewer);
     const feed = createWorkspacePulls();
-    const pulls = livePullNeeds(feed, defs, () => viewer.workspaceId);
+    const pulls = livePullNeeds(feed, defs, () => viewer.workspaceId, () => viewer.login);
     return (): JSXElement => {
         const w = ws.value;
         if (w && w.agents.length === 0) {

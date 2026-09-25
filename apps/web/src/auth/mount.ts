@@ -20,6 +20,7 @@ import type { AnyActorDefinition } from '@sigx/actors';
 import { isLocalhost } from './dev-login';
 import { createWebAuth, defaultResolveUser, loginConfigured, type AuthWiring, type RouteHandler, type WebAuth } from './index';
 import { createOAuthRoutes, MCP_PATH, type WebOAuthServer } from './oauth-server';
+import { setLoginSecret } from './viewer-login';
 
 /** The env keys the mount reads (all optional: what is missing decides what is mounted). */
 export interface AuthMountEnv {
@@ -60,6 +61,8 @@ export function createAuthMount(wiring: AuthMountWiring): (request: Request, env
     let built: { key: string; routes: WebAuth['routes']; oauth: WebOAuthServer | null } | null = null;
     return (request, env) => {
         const secret = secretOf(env);
+        // `whoami` opens the viewer's `__Host-login` with it (#893) — recorded before any route, so the document's SSR sees it.
+        setLoginSecret(secret);
         if (!secret) return undefined;
         const origin = originOf(env, request);
         const github = loginConfigured({ ...env, APP_ORIGIN: origin });

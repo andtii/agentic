@@ -69,13 +69,16 @@ export const PullsFeed = component<{ feed: WorkspacePulls }>(({ props }) => {
  * Home's pull requests live: the feed's PRs, each opening its PR page; "Squash and merge" answers the project's
  * Pulls actor (`answerMerge`) and rejects when the actor refuses; the PR leaves the list once its poll reads it merged.
  */
-export function livePullNeeds(feed: WorkspacePulls, defs: Pick<ActorDefs, 'Pulls'>, workspaceId: () => string | null, me?: string): PullNeeds {
+export function livePullNeeds(feed: WorkspacePulls, defs: Pick<ActorDefs, 'Pulls'>, workspaceId: () => string | null, me: () => string | null | undefined = () => undefined): PullNeeds {
     // Keyed by repo and number, not by object: the list hands the card a reactive view of the record.
     const key = (pr: Pick<PullRequest, 'repo' | 'number'>): string => `${pr.repo}#${pr.number}`;
     const projectOf = (pr: PullRequest): string | undefined => feed.all().find((p) => key(p.pr) === key(pr))?.projectId;
     return {
         usePulls: () => () => feed.all().map((p) => p.pr),
-        ...(me !== undefined ? { me } : {}),
+        // A getter: the viewer's login arrives with `whoami`, after this setup may have run (#893).
+        get me() {
+            return me() ?? undefined;
+        },
         href: (pr) => {
             const projectId = projectOf(pr);
             return projectId ? pullPageHref(projectId, pr.number) : undefined;

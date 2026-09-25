@@ -9,6 +9,9 @@ export const viewerHook: ViewerHook = () => {
         get workspaceId() {
             return me.value?.workspaceId ?? null;
         },
+        get login() {
+            return me.value?.login ?? null;
+        },
         get pending() {
             return me.loading;
         }
