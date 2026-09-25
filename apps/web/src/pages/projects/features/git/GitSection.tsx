@@ -34,33 +34,37 @@ const stats = (s: GitSummary) => (
 );
 
 /** The Code card in the Overview's right column. */
-export const GitOverviewCard = component<ProjectPageProps>(({ props }) => () => {
-    const s = useGitSummary(props.project.id)();
-    const without = s.branchesWithoutPr;
-    return (
-        <section data-overview-card="git" data-git-card="" aria-label="Code">
-            <header data-overview-card-head="">
-                <Icon name="branch" size={15} />
-                <h2 data-overview-card-title="">Code</h2>
-                <span data-overview-feature-tag="">FEATURE</span>
-                <span data-overview-card-aside=""><Link to={gitSectionHref(props.project.id)}>Open →</Link></span>
-            </header>
-            {branchLine(s)}
-            {stats(s)}
-            <div data-overview-kv="" data-git-without="">
-                <span data-overview-k="">Branches without a PR</span>
-                <span data-overview-v="" data-mono="">
-                    {without.length ? `${without.length} · ${without.map((b) => b.name).join(', ')}` : 'none'}
-                </span>
-            </div>
-            <div data-overview-kv="" data-git-last-merge="">
-                <span data-overview-k="">Last merge</span>
-                <span data-overview-v="" data-mono="">
-                    {s.lastMerge ? <>{`#${s.lastMerge.number} · `}<Age at={s.lastMerge.at} /></> : 'none yet'}
-                </span>
-            </div>
-        </section>
-    );
+export const GitOverviewCard = component<ProjectPageProps>(({ props }) => {
+    // In setup, not render: the hook subscribes once pulls are live.
+    const summary = useGitSummary(props.project.id);
+    return () => {
+        const s = summary();
+        const without = s.branchesWithoutPr;
+        return (
+            <section data-overview-card="git" data-git-card="" aria-label="Code">
+                <header data-overview-card-head="">
+                    <Icon name="branch" size={15} />
+                    <h2 data-overview-card-title="">Code</h2>
+                    <span data-overview-feature-tag="">FEATURE</span>
+                    <span data-overview-card-aside=""><Link to={gitSectionHref(props.project.id)}>Open →</Link></span>
+                </header>
+                {branchLine(s)}
+                {stats(s)}
+                <div data-overview-kv="" data-git-without="">
+                    <span data-overview-k="">Branches without a PR</span>
+                    <span data-overview-v="" data-mono="">
+                        {without.length ? `${without.length} · ${without.map((b) => b.name).join(', ')}` : 'none'}
+                    </span>
+                </div>
+                <div data-overview-kv="" data-git-last-merge="">
+                    <span data-overview-k="">Last merge</span>
+                    <span data-overview-v="" data-mono="">
+                        {s.lastMerge ? <>{`#${s.lastMerge.number} · `}<Age at={s.lastMerge.at} /></> : 'none yet'}
+                    </span>
+                </div>
+            </section>
+        );
+    };
 }, { name: 'GitOverviewCard' });
 
 const pullRow = (projectId: string, o: GitOpenPull) => {
@@ -87,38 +91,41 @@ const pullRow = (projectId: string, o: GitOpenPull) => {
 };
 
 /** The Code section: stats, open pull requests, branches without a PR. */
-export const GitSection = component<ProjectPageProps>(({ props }) => () => {
-    const id = props.project.id;
-    const s = useGitSummary(id)();
-    return (
-        <section aria-label="Code" data-feature-section="" data-git-section="">
-            {branchLine(s)}
-            {stats(s)}
-            <section data-git-block="pulls" aria-label="Open pull requests">
-                <h2 data-git-block-title="">Open pull requests</h2>
-                {s.open.length
-                    ? <ul data-git-rows="">{s.open.map((o) => pullRow(id, o))}</ul>
-                    : <p data-git-empty="">No open pull requests.</p>}
+export const GitSection = component<ProjectPageProps>(({ props }) => {
+    const summary = useGitSummary(props.project.id);
+    return () => {
+        const id = props.project.id;
+        const s = summary();
+        return (
+            <section aria-label="Code" data-feature-section="" data-git-section="">
+                {branchLine(s)}
+                {stats(s)}
+                <section data-git-block="pulls" aria-label="Open pull requests">
+                    <h2 data-git-block-title="">Open pull requests</h2>
+                    {s.open.length
+                        ? <ul data-git-rows="">{s.open.map((o) => pullRow(id, o))}</ul>
+                        : <p data-git-empty="">No open pull requests.</p>}
+                </section>
+                <section data-git-block="branches" aria-label="Branches without a PR">
+                    <h2 data-git-block-title="">Branches without a PR</h2>
+                    {s.branchesWithoutPr.length
+                        ? (
+                            <ul data-git-rows="">
+                                {s.branchesWithoutPr.map((b) => (
+                                    <li key={b.name} data-git-branch-row={b.name}>
+                                        <Icon name="branch" size={14} />
+                                        <span data-git-head="">{b.name}</span>
+                                        <span data-git-row-main=""><Link to={taskItemHref(id, b.taskId)}><span data-git-row-title="">{b.title}</span></Link></span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )
+                        : <p data-git-empty="">Every branch has a pull request.</p>}
+                </section>
+                {s.lastMerge
+                    ? <p data-git-last-merge="">Last merge <Link to={pullHref(id, s.lastMerge.number)}>{`#${s.lastMerge.number}`}</Link> · <Age at={s.lastMerge.at} /></p>
+                    : null}
             </section>
-            <section data-git-block="branches" aria-label="Branches without a PR">
-                <h2 data-git-block-title="">Branches without a PR</h2>
-                {s.branchesWithoutPr.length
-                    ? (
-                        <ul data-git-rows="">
-                            {s.branchesWithoutPr.map((b) => (
-                                <li key={b.name} data-git-branch-row={b.name}>
-                                    <Icon name="branch" size={14} />
-                                    <span data-git-head="">{b.name}</span>
-                                    <span data-git-row-main=""><Link to={taskItemHref(id, b.taskId)}><span data-git-row-title="">{b.title}</span></Link></span>
-                                </li>
-                            ))}
-                        </ul>
-                    )
-                    : <p data-git-empty="">Every branch has a pull request.</p>}
-            </section>
-            {s.lastMerge
-                ? <p data-git-last-merge="">Last merge <Link to={pullHref(id, s.lastMerge.number)}>{`#${s.lastMerge.number}`}</Link> · <Age at={s.lastMerge.at} /></p>
-                : null}
-        </section>
-    );
+        );
+    };
 }, { name: 'GitSection' });

@@ -206,14 +206,24 @@ jobs:
     timeout-minutes: 3
     permissions:
       issues: write
+      actions: write
     steps:
+      # Most reds so far were timing flakes that passed on the next run, and every main-red stops all
+      # agents: the first attempt re-runs its failed jobs (this job runs again after them) instead.
+      - name: Re-run the failed jobs once
+        if: github.run_attempt == 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run rerun ${{ github.run_id }} --failed
       - name: Open or update the main-red issue
+        if: github.run_attempt > 1
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          body="CI is red on \`main\` (${{ github.event_name }}, ${GITHUB_SHA::7}): $RUN — fix main before starting new work (AGENTS.md)."
+          body="CI is red on \`main\` (${{ github.event_name }}, ${GITHUB_SHA::7}), and again after re-running the failed jobs: $RUN — fix main before starting new work (AGENTS.md)."
           open=$(gh issue list --label main-red --state open --json number -q '.[0].number')
           if [ -n "$open" ]; then gh issue comment "$open" --body "$body"
           else gh issue create --title "main is red" --label main-red --body "$body"; fi
