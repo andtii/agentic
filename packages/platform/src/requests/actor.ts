@@ -16,6 +16,9 @@
  *   creates; the item's phase, else the first phase with open work), assigns it when the triage names an assignee,
  *   and links it as `resultItem`. The Plan checks the caller again: only the manager and people add items.
  *
+ * - **replies** (#839): the manager's triage reply, the result of an accept, a decline's reason and a question for
+ *   the sender are posted into the request's `fromChat` through `RequestReplyPort` (`reply.ts`), as the caller.
+ *
  * Every transition is a `request.changed` audit record with its actor. Workers eviction rule: every mutation ends in
  * `ctx.save()` inside the turn.
  */
@@ -32,6 +35,8 @@ import { taskKey } from '../task/key.js';
 import { Workspace } from '../workspace/index.js';
 import { pmPolicyOf } from '../workspace/pm-policy.js';
 import { parseRequestsKey, REQUESTS_TYPE, requestsKey } from './key.js';
+import { chatRequestReplies, requestReplyFor, type RequestReplyPort } from './reply.js';
+export { chatRequestReplies, NO_REQUEST_REPLIES, requestReplyText, type RequestReply, type RequestReplyHop, type RequestReplyPort } from './reply.js';
 import {
     admit,
     answer,
@@ -125,6 +130,8 @@ export interface RequestsActorOptions {
     readonly projects?: RequestsProjectPort;
     /** Default: `taskTriageTurns`. */
     readonly turns?: RequestsTurnPort;
+    /** Where a request's replies go (#839). Default: `chatRequestReplies`, into the request's `fromChat`. */
+    readonly replies?: RequestReplyPort;
     /** Clock; default `Date.now`. */
     readonly now?: () => number;
     /** Override the policy chain. Default: the package's `sameWorkspace`. */
@@ -168,6 +175,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
     const audit = options.audit ?? auditPort();
     const projectsPort = options.projects ?? workspaceRequestProjects;
     const turns = options.turns ?? taskTriageTurns;
+    const replies = options.replies ?? chatRequestReplies;
     const authorize: ActorPolicy | readonly ActorPolicy[] = options.authorize ?? sameWorkspace;
 
     type Ctx = ActorContext<RequestsState>;
@@ -258,6 +266,17 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                 }
             };
 
+            /** Tell the requester's chat what `change` says there (`reply.ts`). Best effort: the request is saved. */
+            const reply = async (change: RequestChange, r: StoredRequest, projectName: string): Promise<void> => {
+                const out = requestReplyFor(ctx.state.workspaceId, ctx.state.projectId, projectName, change, requestView(r));
+                if (!out) return;
+                try {
+                    await replies.post(ctx, out);
+                } catch {
+                    // A reply is never a gate on the request: the card still reads it live.
+                }
+            };
+
             /** Run one pure transition, save, audit, and start a turn when it is owed. */
             const transition = async (id: string, fn: (book: RequestsBook, call: RequestCall) => { value: StoredRequest; change: RequestChange }): Promise<RequestView> => {
                 requireKey();
@@ -271,6 +290,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     return toServerError(error);
                 }
                 await record(out.change, out.value, actor, call.now);
+                if (out.change.op === 'triaged') await reply(out.change, out.value, project.name);
                 await maybeTurn(out.value, out.change, call, project.name);
                 return requestView(out.value);
             };
@@ -354,7 +374,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                     requireKey();
                     requireIdle(id);
                     const actor = callerActor();
-                    const { call } = await context(actor);
+                    const { project, call } = await context(actor);
                     requireIdle(id);
                     let accept: AcceptPlan | null;
                     try {
@@ -382,6 +402,7 @@ export function defineRequestsActor(options: RequestsActorOptions = {}) {
                         return toServerError(error);
                     }
                     await record(out.change, out.value, actor, at);
+                    await reply(out.change, out.value, project.name);
                     return requestView(out.value);
                 },
 
