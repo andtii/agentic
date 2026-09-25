@@ -31,6 +31,11 @@ describe('the plan item detail on a done item (#909)', () => {
         expect(text(el.querySelector('[data-fact="claimed"]'))).toBe('Done');
     });
 
+    it('says Done, not "Not claimed", when a done item has no claim', async () => {
+        const el = await mount(done(undefined));
+        expect(text(el.querySelector('[data-fact="claimed"]'))).toBe('Done');
+    });
+
     it('still says the lease ran out on an open item whose claim lapsed', async () => {
         const open = { ...items.find((i) => i.state !== 'done')!, state: 'ready' as const, claim: { agentId: 'forge' as AgentId, leaseUntil: now - 60_000 } };
         const el = await mount(open);
