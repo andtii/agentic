@@ -87,7 +87,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #726: —
 
-- #727: —
+- #727: the nested nav look (indented sub-menu behind a rule, compact 32 px sub-items, a plain count beside the badge, a labelled or divided block, a switcher button heading the sub-menu) in `@agentic/ui`'s `shell.css` / `AppShell` — a zero `NavList` candidate with #725's `NavItem.children`.
 
 - #728: —
 

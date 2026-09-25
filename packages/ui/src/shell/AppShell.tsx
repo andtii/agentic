@@ -1,6 +1,8 @@
 import { component, signal, type Define, type JSXElement } from '@sigx/runtime-core';
 import { Badge, Drawer, Navbar, NavList, type PartProps } from '@sigx/zero';
+import type { ProjectColor } from '@agentic/core';
 import { Icon, type IconName } from '../kit/icons';
+import { ProjectSquare } from '../projects/ProjectSquare';
 import { SHELL_SCOPE } from './anatomy';
 
 /**
@@ -11,19 +13,41 @@ export interface NavItem {
     href: string;
     label: string;
     badge?: number;
+    /**
+     * A plain count (`mono` 11 px `text-dim`, e.g. a project's chats) — drawn only on a sub-item, and only when there
+     * is no `badge`: a count that needs the person is the badge.
+     */
+    count?: number;
     /** The 17 px glyph before the label (20 px in the drawer); the `link` slot renders it through `NavLinkSlotProps.icon`. */
     icon?: IconName;
     /**
      * A sub-menu drawn indented under the item (#725: a project's own menu under `Projects` while a project route is
-     * open), in blocks; the first block renders without a heading. Rendered minimally here — #727 draws the visuals.
+     * open), in blocks (#727): 32 px items at 13 px with 15 px glyphs, indented behind a 1 px `line-strong` rule; the
+     * first block renders without a heading, the rest under a mono label (`FEATURES`) or after a divider
+     * (`NavGroup.divider`, Settings). The page is the longest matching sub-item, not the entry.
      */
     children?: readonly NavGroup[];
+    /**
+     * The switcher on top of the sub-menu (#727): the project's square, name and a chevron, a button named "Switch
+     * project" that makes the shell emit `switch` with this entry. Drawn only with `children`.
+     */
+    switcher?: NavSwitcher;
+}
+
+/** What the sub-menu's switcher shows: the project it is on (#727). */
+export interface NavSwitcher {
+    name: string;
+    /** The project's id — the square's colour seed when `color` is unset. */
+    id?: string;
+    color?: ProjectColor;
 }
 
 /** A labelled group of entries — the sidebar shows "Primary" unlabelled and "Workspace" with its heading. */
 export interface NavGroup {
     label: string;
     items: readonly NavItem[];
+    /** In a sub-menu: open the block with a 1 px divider instead of its heading (the project's Settings, #727). */
+    divider?: boolean;
 }
 
 /**
@@ -64,6 +88,8 @@ export type AppShellProps =
     & Define.Prop<'title', string>
     /** Below 768 px a back link replaces the menu button — the breadcrumb's parent. */
     & Define.Prop<'back', string>
+    /** The sub-menu's switcher was pressed (#727): the entry carrying it — the app opens its picker. */
+    & Define.Event<'switch', NavItem>
     & Define.Slot<'default'>
     & Define.Slot<'link', NavLinkSlotProps>
     & Define.Slot<'back', BackSlotProps>
@@ -118,7 +144,7 @@ const needsLabel = (n: number): string => (n === 1 ? '1 item needs you' : `${n} 
  * flashes; a sheet still up when the viewport widens closes itself, and the
  * trigger and close hide while docked.
  */
-export const AppShell = component<AppShellProps>(({ props, slots }) => {
+export const AppShell = component<AppShellProps>(({ props, slots, emit }) => {
     // The sheet's open state; docked, the drawer ignores it.
     const state = signal({ open: false });
 
@@ -126,12 +152,15 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
     const groups = (): readonly NavGroup[] =>
         props.groups ?? [{ label: 'Primary', items: props.items ?? [] }];
 
-    const renderLink = (item: NavItem, current?: boolean): JSXElement => {
+    // A top-level entry (`sub` unset: 17 px glyph, badge only) or a sub-item (15 px glyph, badge else count).
+    const renderLink = (item: NavItem, current?: boolean, sub = false): JSXElement => {
         const active = current ?? isActive(item, props.currentPath);
-        const icon = item.icon ? <NavList.Icon><Icon name={item.icon} size={17} /></NavList.Icon> : null;
+        const icon = item.icon ? <NavList.Icon><Icon name={item.icon} size={sub ? 15 : 17} /></NavList.Icon> : null;
         const meta = item.badge
             ? <NavList.Meta><Badge.Root color="warning" size="sm" aria-label={needsLabel(item.badge)}>{item.badge}</Badge.Root></NavList.Meta>
-            : null;
+            : sub && item.count
+                ? <NavList.Meta><span data-nav-count="">{item.count}</span></NavList.Meta>
+                : null;
         return (
             <NavList.Link asChild href={item.href} current={active}>
                 {(p: PartProps) => (slots.link
@@ -141,7 +170,22 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
         );
     };
 
-    // An entry with a sub-menu: the entry, then its blocks indented under it. The page is the sub-item it is on, not the entry.
+    const switcher = (item: NavItem, s: NavSwitcher): JSXElement => (
+        <button type="button" data-nav-switcher="" aria-label="Switch project" onClick={() => emit('switch', item)}>
+            <ProjectSquare name={s.name} id={s.id} color={s.color} size={22} />
+            <span data-nav-switcher-name="">{s.name}</span>
+            <Icon name="chevron-down" size={15} />
+        </button>
+    );
+
+    // A sub-menu block's opening: none for the first, a divider when asked, else its mono label with a rule after it.
+    const blockHead = (group: NavGroup, index: number): JSXElement | null => {
+        if (index === 0) return null;
+        if (group.divider) return <hr data-nav-block-divider="" />;
+        return <span data-nav-block-heading="">{group.label}</span>;
+    };
+
+    // An entry with a sub-menu: the entry, then the switcher and its blocks indented under it. The page is the sub-item it is on, not the entry.
     const renderItem = (item: NavItem): JSXElement => {
         const children = item.children?.filter((group) => group.items.length) ?? [];
         if (!children.length) return renderLink(item);
@@ -150,11 +194,12 @@ export const AppShell = component<AppShellProps>(({ props, slots }) => {
             <>
                 {renderLink(item, on ? false : undefined)}
                 <div data-nav-children="">
+                    {item.switcher ? switcher(item, item.switcher) : null}
                     {children.map((group, index) => (
                         <div data-nav-block={group.label}>
-                            {index > 0 ? <span data-nav-block-heading="">{group.label}</span> : null}
+                            {blockHead(group, index)}
                             <NavList.List aria-label={group.label}>
-                                {group.items.map((child) => <NavList.Item>{renderLink(child, child === on)}</NavList.Item>)}
+                                {group.items.map((child) => <NavList.Item>{renderLink(child, child === on, true)}</NavList.Item>)}
                             </NavList.List>
                         </div>
                     ))}
