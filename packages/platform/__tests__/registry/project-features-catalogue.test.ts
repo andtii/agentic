@@ -86,6 +86,12 @@ describe('Registry.projectFeatures (#735)', () => {
 });
 
 describe('checkProjectSettings needs (#735)', () => {
+    it('checks every declared need, machine included', async () => {
+        await reg().register({ ...base, id: 'ops', name: 'Ops', description: 'x', ui: { needs: ['machine', 'folder'] } } as never, { enabled: true });
+        await expect(reg().checkProjectSettings('ops', {}, { folders: {} })).rejects.toThrow(/Ops needs a machine/);
+        await expect(reg().checkProjectSettings('ops', {}, { folders: { 'm1/*': 'C:/ops' } })).resolves.toBeUndefined();
+    });
+
     it('refuses Git on a project without a folder, in one line', async () => {
         const refused = reg().checkProjectSettings(git.id, {}, { folders: {} });
         expect(await statusOf(refused)).toBe(400);

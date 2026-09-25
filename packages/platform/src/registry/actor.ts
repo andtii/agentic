@@ -127,9 +127,14 @@ export function initialRegistryState(): RegistryState {
     return { v: REGISTRY_STATE_VERSION, plugins: {}, connectors: {}, secrets: {} };
 }
 
-/** Whether a project has a folder set — what every `ProjectFeatureNeed` comes down to, a folder being on a machine. */
-const hasFolder = (target: ProjectFeatureTarget): boolean =>
-    Object.values(target.folders ?? {}).some((path) => typeof path === 'string' && path.trim() !== '');
+/**
+ * Whether a project has what one `ProjectFeatureNeed` asks for, from its folders: `folder` takes a folder set; `machine`
+ * takes a folder entry on some machine (every `projectFolderKey` starts with the machine id), so a folder meets both.
+ */
+const needMet = (need: ProjectFeatureNeed, target: ProjectFeatureTarget): boolean => {
+    const entries = Object.entries(target.folders ?? {}).filter(([, path]) => typeof path === 'string' && path.trim() !== '');
+    return need === 'folder' ? entries.length > 0 : entries.some(([key]) => key.split('/')[0] !== '');
+};
 
 const NEED_LABEL: Record<ProjectFeatureNeed, string> = { folder: 'a folder', machine: 'a machine' };
 
@@ -496,7 +501,7 @@ export function defineRegistry(options: RegistryOptions = {}) {
                 const checked = validateConfig(p.manifest.projectSettings, { ...configDefaults(p.manifest.projectSettings), ...own });
                 if (!checked.ok) throw new ServerFnError(400, `[registry] the settings of "${pluginId}" are invalid: ${checked.errors.map((e) => `${e.path || '.'}: ${e.message}`).join('; ')}`);
                 if (target !== undefined) {
-                    const missing = hasFolder(target) ? undefined : p.manifest.ui?.needs?.[0];
+                    const missing = (p.manifest.ui?.needs ?? []).find((need) => !needMet(need, target));
                     if (missing !== undefined) throw new ServerFnError(400, `[registry] ${p.manifest.name} needs ${NEED_LABEL[missing]}: add one to the project first`);
                 }
             },
