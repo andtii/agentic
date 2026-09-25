@@ -1,0 +1,40 @@
+name: main-red
+
+# A failed CI run on main (push or nightly) is re-run once — most reds so far were timing flakes that passed
+# on the next attempt, and an open `main-red` issue stops every agent (AGENTS.md step 0). Only a run that
+# fails again opens (or comments on) the `main-red` issue. It is a separate workflow because a run cannot
+# re-run itself while it is still in progress.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: write
+  issues: write
+
+jobs:
+  red:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Re-run the failed jobs once
+        if: github.event.workflow_run.run_attempt == 1
+        run: gh run rerun "$RUN_ID" --failed
+      - name: Open or update the main-red issue
+        if: github.event.workflow_run.run_attempt > 1
+        run: |
+          body="CI is red on \`main\` (${SHA::7}), and again after re-running the failed jobs (attempt $ATTEMPT): $URL — fix main before starting new work (AGENTS.md)."
+          open=$(gh issue list --label main-red --state open --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"
+          else gh issue create --title "main is red" --label main-red --body "$body"; fi
