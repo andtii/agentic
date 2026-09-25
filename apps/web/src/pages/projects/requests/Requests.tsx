@@ -6,12 +6,11 @@ import { MOCK_REQUEST_ITEM_FLOOR, MOCK_REQUEST_PHASES, MOCK_REQUESTS } from '../
 import { AGENTS, MOCK_NOW, USER } from '../../../mock/workspace';
 import { projectTrail } from '../layout/trail';
 import type { ProjectPageProps } from '../layout/types';
+import { LiveRequests } from './LiveRequests';
 import { accept, askForMore, decline, nextItemNumber, type ActorNames, type RequestEntry } from './model';
 import { RequestsView, type AcceptEdit } from './RequestsView';
 
 defineTopbar('project-requests', (route) => ({ trail: projectTrail(route, { label: 'Requests', href: `/projects/${String(route.params.id)}/requests` }) }));
-
-const LIVE_NOTE = 'Requests reach this inbox once the project manager’s request store is live; nothing has arrived yet.';
 
 /** Agents by id from the sample workspace; an agent of another project shows by its id, capitalised. */
 const mockNames: ActorNames = (id) => {
@@ -21,12 +20,12 @@ const mockNames: ActorNames = (id) => {
 
 /**
  * `/projects/:id/requests` — the project manager's inbox (#761; HANDOFF.md → "Project manager and requests"). On mock
- * data the board's batch; a person's accept, ask or decline changes it for the page's lifetime. Live, the Requests
- * store (#758) is not readable from the web yet, so the inbox is empty and says so.
+ * data the board's batch; a person's accept, ask or decline changes it for the page's lifetime. Live, the project's
+ * Requests store (#758), read and resolved by `LiveRequests` (#831).
  */
 export const ProjectRequests = component<ProjectPageProps>(({ props }) => {
-    const live = dataMode() === 'live';
-    const st = signal({ entries: (live ? [] : MOCK_REQUESTS[props.project.id] ?? []) as readonly RequestEntry[] });
+    if (dataMode() === 'live') return () => <LiveRequests project={props.project} />;
+    const st = signal({ entries: (MOCK_REQUESTS[props.project.id] ?? []) as readonly RequestEntry[] });
     const managerId = props.project.members.coordinator;
     const manager = (): string => (managerId ? mockNames(managerId).name : 'The project manager');
     const change = (id: string, f: (e: RequestEntry) => RequestEntry): void => {
@@ -45,7 +44,7 @@ export const ProjectRequests = component<ProjectPageProps>(({ props }) => {
                 names={mockNames}
                 you={USER.name}
                 phases={MOCK_REQUEST_PHASES[props.project.id] ?? []}
-                {...(live ? { note: LIVE_NOTE } : { now: MOCK_NOW })}
+                now={MOCK_NOW}
                 onAccept={onAccept}
                 onAskForMore={(id: string, q: string) => change(id, (e) => askForMore(e, q, manager(), MOCK_NOW))}
                 onDecline={(id: string, reason: string) => change(id, (e) => decline(e, reason, MOCK_NOW))}
