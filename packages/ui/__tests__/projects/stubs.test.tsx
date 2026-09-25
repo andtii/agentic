@@ -1,5 +1,5 @@
 /**
- * The project parts' stubs (#725): each renders a minimal placeholder from its final props, exported from the
+ * The project parts' stubs (#725): each renders a minimal placeholder from its final props (#726 drew five of them), exported from the
  * package barrel. #726 and #745 replace them (and may replace this file).
  */
 import type { PullCheck, PullRequest } from '@agentic/core';
@@ -30,7 +30,7 @@ describe('project part stubs', () => {
         expect(part(host, 'stage-track').textContent).toBe('Do');
         expect(part(host, 'item-glyph').getAttribute('aria-label')).toBe('Blocked');
         expect(part(host, 'slot-marks').getAttribute('data-used')).toBe('section workStages tools');
-        expect(part(host, 'checks-bar').textContent).toBe('1/2');
+        expect(part(host, 'checks-bar').textContent).toBe('1 failing');
         expect(part(host, 'pull-card').querySelector('a')!.getAttribute('href')).toBe('/projects/p/work/pr:603');
     });
 
