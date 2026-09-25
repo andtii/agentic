@@ -104,7 +104,9 @@ import {
     type ArtifactSink,
     type KekSource,
 
-    // slot #742 Pulls actor import — replace this line
+    NO_PULL_SOURCES,
+    definePullsActor,
+    type PullSourcePort,
 
     // slot #750 Plan actor import — replace this line
 
@@ -186,6 +188,8 @@ export interface PlatformPorts {
      * both tool ports (`chat_file_read`) and the Workspace (the purge).
      */
     readonly files?: ChatFileStore;
+    /** Where the Pulls actor reads a project's pull requests (#742). Default: `NO_PULL_SOURCES`, until the git feature's credential is wired. */
+    readonly pulls?: PullSourcePort;
 }
 
 /** Secrets and bindings the actor registry reads lazily: it is built once per isolate, before any request carries `env`. */
@@ -293,7 +297,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     return [
         Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, ConnectorAccounts, OAuthClients, OAuthGrants,
 
-        // slot #742 Pulls actor registration — replace this line
+        definePullsActor({ sources: ports.pulls ?? NO_PULL_SOURCES }),
 
         // slot #750 Plan actor registration — replace this line
 
@@ -357,7 +361,7 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
         FlatMemory: byType('FlatMemory') as ActorDefs['FlatMemory'],
         ConnectorAccounts: byType('ConnectorAccounts') as ActorDefs['ConnectorAccounts'],
 
-        // slot #742 Pulls actor SSR def — replace this line
+        Pulls: byType('pulls') as ActorDefs['Pulls'],
 
         // slot #750 Plan actor SSR def — replace this line
 

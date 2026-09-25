@@ -30,7 +30,8 @@ export const ledgerMonthOf = (at: number): string => {
 /** `scope` is `agent:{id}` or `shared:{name}`. */
 export const memoryKeyOf = (ws: string, scope: string): string => actorKey(ws as WorkspaceId, 'memory', scope);
 
-// slot #742 Pulls actor key — replace this line
+/** One per project (#742): its pull requests, polled. */
+export const pullsKeyOf = (ws: string, projectId: string): string => `${ws}:pulls:${projectId}`;
 
 // slot #750 Plan actor key — replace this line
 

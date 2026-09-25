@@ -675,7 +675,13 @@ is #741.
 
 #### #742 platform: Pulls actor — polled PR state, pull-request wait reason, task completes on merge
 
-_not yet_
+`packages/platform/src/pulls/`: the `Pulls` actor, keyed `{ws}:pulls:{projectId}` (`pullsKey`; workspace first, so `sameWorkspace` reads it). `watch({provider, repo})` names the repo the project's origin points at (plugins-git `pullRepoOf`) and polls at once. `get()` returns every open PR and the newest 50 settled ones, newest first, with `polledAt`, `next` and the last poll's `error`.
+
+A poll reads `listOpen`, then `get` for each tracked-open or reported PR that left the list, through a `PullSourcePort` — the read half of #741's `PullProvider`. `tokenPullSources({adapters, token})` builds the ref's adapter from its credential and reuses it for 10 minutes. The poll is a one-shot reminder, re-armed each time: every `POLL_FLOOR_MS` (60 s) while an open PR has a check queued or running, or anything changed; otherwise the interval doubles, up to 15 minutes. A failing source backs off the same way; a `rate-limited` one waits until its `retryAt`.
+
+Links: `linkBranch(branch, {taskId?, chatId?, sessionId?})` (the chat's `gitBranchFor`) links every PR on that head; `report(number, link)` is the agent's word. A linked task waits `pull-request {number, state: 'open'}` while the PR is open; `report` parks it inside its own call, so the reporting turn's end cannot complete it first. On merge the actor resumes and completes the task (`Pull request #N merged: <title>`, verified); on close it fails `pull-closed`; a reported number the repo lacks fails `pull-missing`. A task that is not waiting on the PR when it settles is left to its own turn. `pull.merged` / `pull.closed` (`PullSettledData`) are audited once per PR, by `system:pulls`. Every mutation ends in `ctx.save()`.
+
+The web registers it with `PlatformPorts.pulls`, default `NO_PULL_SOURCES` (the view says there is no source) until the git feature's credential and the GitHub adapter are wired (follow-up). `pullsKeyOf` and `Pulls` are in the web's actor defs.
 
 #### #743 platform: autopilot — fix checks, answer threads, rebase, merge when green
 

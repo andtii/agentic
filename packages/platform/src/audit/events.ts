@@ -56,7 +56,8 @@ export const AUDIT_KINDS = [
     'workdir.worktree-created',
     'workdir.command-run',
 
-    // slot #742 pulls audit kinds — replace this line
+    'pull.merged',
+    'pull.closed',
 
     // slot #750 plan audit kinds — replace this line
 
@@ -445,7 +446,22 @@ export interface TaskMachineLostData {
     readonly since: number;
 }
 
-// slot #742 pulls audit data shapes — replace this line
+/**
+ * `pull.merged` / `pull.closed` (#742): a project's pull request merged, or closed without merging — once per PR,
+ * by the Pulls actor (`by` is `system:pulls`). `taskId` / `chatId` are what the PR was linked to, when it was.
+ */
+export interface PullSettledData {
+    readonly projectId: ProjectId;
+    readonly provider: string;
+    readonly repo: string;
+    readonly number: number;
+    readonly title: string;
+    readonly url: string;
+    readonly head: string;
+    readonly base: string;
+    readonly taskId?: TaskId;
+    readonly chatId?: ChatId;
+}
 
 // slot #750 plan audit data shapes — replace this line
 
@@ -496,7 +512,8 @@ export interface AuditDataByKind {
     readonly 'workdir.worktree-created': WorktreeCreatedData;
     readonly 'workdir.command-run': CommandRunData;
 
-    // slot #742 pulls audit data by kind — replace this line
+    readonly 'pull.merged': PullSettledData;
+    readonly 'pull.closed': PullSettledData;
 
     // slot #750 plan audit data by kind — replace this line
 

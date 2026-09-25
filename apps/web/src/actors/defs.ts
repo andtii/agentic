@@ -16,7 +16,7 @@
 import { defineInjectable } from 'sigx';
 import type { AgentActor, AuditActor, Chat, ConnectorAccounts, FlatMemory, Inbox, LedgerActor, MachineActor, Memory, Registry, RoutingActor, ScheduleActor, SessionActor, TaskActor, TaskIndex, Workspace } from '@agentic/platform';
 
-// slot #742 Pulls actor type import — replace this line
+import type { PullsActor } from '@agentic/platform';
 
 // slot #750 Plan actor type import — replace this line
 
@@ -50,7 +50,8 @@ export interface ActorDefs {
     /** The workspace's connected conduit accounts (#532) — a connector page's status (#533). Summaries only, never credentials. */
     readonly ConnectorAccounts: typeof ConnectorAccounts;
 
-    // slot #742 Pulls actor def — replace this line
+    /** One per project — its pull requests, polled (#742). */
+    readonly Pulls: PullsActor;
 
     // slot #750 Plan actor def — replace this line
 

@@ -20,7 +20,7 @@ export * from './routing/index.js';
 export * from './audit/index.js';
 export * from './policy/index.js';
 
-// slot #742 Pulls actor exports — replace this line
+export * from './pulls/index.js';
 
 // slot #750 Plan actor exports — replace this line
 

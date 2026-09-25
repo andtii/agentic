@@ -21,6 +21,7 @@ import { runWithHost } from '../../src/host-scope';
 import { createConnectorMount } from '../../src/connectors/routes';
 import { conduitCall, fakeGoogle } from './google';
 import { conduitConnectorCatalogue } from '../../src/plugins/catalogue';
+import { fakePullSources } from './pulls-source';
 
 const agent = mockAgent({ respond: (input) => [{ text: `echo: ${input.map((p) => (p.type === 'text' ? p.text : '')).join('')}` }] });
 
@@ -44,8 +45,8 @@ const runtimes: RuntimeCatalogue = {
  */
 const google = fakeGoogle();
 
-// Offline: no daemon release manifest is fetched (#365).
-const actors = platformActors({ ...defaultPorts, runtimes, connectorHttp: google.http, releasesFetch: async () => new Response('offline', { status: 404 }) });
+// Offline: no daemon release manifest is fetched (#365); pull requests come from a scripted fake (#742).
+const actors = platformActors({ ...defaultPorts, runtimes, connectorHttp: google.http, releasesFetch: async () => new Response('offline', { status: 404 }), pulls: fakePullSources });
 
 export const ActorHost = createActorHost(actors);
 
