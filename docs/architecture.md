@@ -601,7 +601,7 @@ _not yet_
 
 #### #727 ui: AppShell project sub-menu — switcher, counts, needs-you badge, FEATURES block
 
-_not yet_
+The shell draws `NavItem.children` as the project menu (`packages/ui/src/shell/`): the blocks indented behind a 1 px `line-strong` rule, 32 px sub-items at 13 px with 15 px glyphs, the page on base-300 with `aria-current="page"` and no live marker. Additive seam for #728: `NavItem.count` (a plain count, mono 11 `text-dim`; `badge` wins — the needs-you badge), `NavItem.switcher` (`{ name, id?, color? }`: a "Switch project" button with the 22 px `ProjectSquare`, name and chevron on top of the sub-menu) with the shell's `switch` event carrying the entry, and `NavGroup.divider` (open a block with a divider instead of its heading — Settings). Blocks after the first otherwise open under their mono uppercase label with a hairline (FEATURES). The phone sheet shows the same tree (the navigation renders once), its sub-rows at the touch minimum.
 
 #### #728 web: project sub-menu data, project picker, crumbs
 
