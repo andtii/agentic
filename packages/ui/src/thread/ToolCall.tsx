@@ -7,7 +7,9 @@
  * too) that folds past six lines behind "Show N more lines" and links to the
  * session log past two hundred; an error line; the approval card in place
  * while the call waits on the operator; the sub-agent card when the call
- * spawned one.
+ * spawned one. A call whose result is a pull request carries the live
+ * `PullCard` in place of the well (PRJ-10): it re-renders from the record,
+ * so it updates in place rather than posting a message per check.
  *
  * `data-state` is zero's governed lifecycle (`./tool-state`): `loading`
  * while pending — arguments still streaming, or awaiting approval —
@@ -17,12 +19,14 @@
  * meta text when the caller gave none.
  */
 import { component, type Define } from '@sigx/runtime-core';
-import { agentMessages } from '@sigx/ai-agent';
+import { agentMessages, toolOutput } from '@sigx/ai-agent';
+import type { PullRequest } from '@agentic/core';
 import { Collapsible } from '@sigx/zero';
 import type { AgentState, AgentTranscript, OpenRequest, ToolPartState } from '@sigx/ai-agent/app';
 import { Button } from '../kit/Button.js';
 import { Icon, type IconName } from '../kit/icons.js';
 import { StatusPill } from '../kit/StatusPill.js';
+import { PullCard, isPullRequest } from '../projects/PullCard.js';
 import { aiToolCallAnatomy } from './anatomy.js';
 import { followDisclosure } from './disclosure.js';
 import { ApprovalPrompt, type ApprovalPromptProps, type RespondFn } from './ApprovalPrompt.js';
@@ -45,6 +49,23 @@ export type ToolMetaFn = (part: ToolPartState) => string | undefined;
 export interface ToolLink {
     readonly label: string;
     readonly href: string;
+}
+
+/** Where a pull request a call returned leads: the PR page and its diff (`chat` card); the provider's page by default. */
+export type PullLinksFn = (pull: PullRequest) => { readonly href?: string; readonly diffHref?: string; readonly agentName?: string } | undefined;
+
+/** The pull request a call's result is — the output itself, or its JSON text — else `undefined`. */
+export function pullOf(p: ToolPartState): PullRequest | undefined {
+    if (p.status === 'streaming' || !reportedOutput(p)) return undefined;
+    let out: unknown = toolOutput(p);
+    if (typeof out === 'string' && out.trimStart().startsWith('{')) {
+        try {
+            out = JSON.parse(out);
+        } catch {
+            return undefined;
+        }
+    }
+    return isPullRequest(out) ? out : undefined;
 }
 
 /** The links a page puts on a call's card; none by default. */
@@ -82,6 +103,8 @@ export type ToolCallProps =
     & Define.Prop<'logHref', string, false>
     /** The page's links about this call ("View diff"), in the header before the meta. */
     & Define.Prop<'links', readonly ToolLink[], false>
+    /** The links of a pull request the call returned. */
+    & Define.Prop<'pullLinks', PullLinksFn, false>
     & Define.Prop<'onRespond', RespondFn, false>
     & Define.Prop<'describeRequest', DescribeRequestFn, false>
     & Define.Prop<'onCancelAgent', (agentId: string) => void, false>;
@@ -209,6 +232,12 @@ const AgentCard = component<Define.Prop<'agent', AgentState, true> & ThreadConte
     };
 }, { name: 'ToolCall.Agent' });
 
+/** The chat card's links: the page's, else the provider's page. */
+function pullCardLinks(pull: PullRequest, links?: PullLinksFn): { href: string; diffHref?: string; agentName?: string } {
+    const l = links?.(pull);
+    return { href: l?.href ?? pull.url, ...(l?.diffHref ? { diffHref: l.diffHref } : {}), ...(l?.agentName ? { agentName: l.agentName } : {}) };
+}
+
 export const ToolCall = component<ToolCallProps>(({ props }) => {
     return () => {
         const p = props.part;
@@ -217,8 +246,9 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
         const asking = request !== undefined && request.kind === 'input';
         const streaming = p.status === 'streaming';
         const sig = streaming ? `${oneLine(p.inputText ?? '')}…` : signature(p.input);
-        const output = streaming ? undefined : outputText(p);
-        const view = toolCallState(p, { awaiting, emptyOutput: output === undefined && reportedOutput(p) });
+        const pull = pullOf(p);
+        const output = streaming || pull ? undefined : outputText(p);
+        const view = toolCallState(p, { awaiting, emptyOutput: output === undefined && !pull && reportedOutput(p) });
         const error = nonBlank(p.error);
         const agent = p.agentId !== undefined ? props.transcript?.agents[p.agentId] : undefined;
         // The refined phase reads as meta when the caller gave none: "awaiting approval", "cancelled", "done, no output".
@@ -246,7 +276,7 @@ export const ToolCall = component<ToolCallProps>(({ props }) => {
                     </span>
                 </div>
                 {!streaming && sig !== '' && <InputBlock text={inputText(p.input)} />}
-                {output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
+                {pull ? <PullCard pull={pull} surface="chat" {...pullCardLinks(pull, props.pullLinks)} /> : output !== undefined && <OutputBlock text={output} logHref={props.logHref} />}
                 {error && <p data-scope={SCOPE} data-part="error">{error}</p>}
                 {awaiting && props.onRespond && <ApprovalPrompt request={request!} onRespond={props.onRespond} {...approvalContext(props.describeRequest?.(request!))} toolName={p.name} input={p.input} />}
                 {asking && props.onRespond && <QuestionPrompt request={request!} onRespond={props.onRespond} requestedBy={props.describeRequest?.(request!)?.requestedBy} stale={props.describeRequest?.(request!)?.stale} />}

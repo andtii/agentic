@@ -123,7 +123,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #744: —
 
-- #745: —
+- #745: `pullNextMove` / `pullNeedsYou` / `pullStatusText` (`packages/ui/src/projects/PullCard.tsx`) are provider-neutral PR state rules — candidates for `@agentic/core` next to `pullBlockers`.
 
 - #746: —
 

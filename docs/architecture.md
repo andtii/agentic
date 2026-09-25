@@ -708,7 +708,16 @@ _not yet_
 
 #### #745 ui+web: one PR card on chat, Home needs-you and task node
 
-_not yet_
+`PullCard` (`packages/ui/src/projects/PullCard.tsx`) draws one `PullRequest` on four surfaces, re-rendering from the
+record so every surface shows the same state (PRJ-10): `chat` (title, `autopilot` badge, `ChecksBar`, review, what
+autopilot is doing, Open / View diff), `home` (the move as an amber pill, `Squash and merge` emitting `merge`, Open),
+`task` (`#602 · ready to merge`, never a link) and `notification`. `pullNextMove(pr, me?)` decides whether the next
+move is yours — `merge` (open, mergeable, no `pullBlockers`, autopilot not merging it itself), `review` (asked of
+`me`), `conflicts` (`mergeable === false`), `stopped` (autopilot used its attempts with checks failing); drafts,
+running checks and everything autopilot handles are not. Consumers: `ToolCall` swaps the output well for the `chat`
+card when a call's result (object or JSON text) is a `PullRequest` (`pullLinks` gives the PR page; the provider URL
+otherwise); `TaskNode` takes `pull`; `NeedsYou` takes `pulls: PullNeeds` (`usePulls`, `me`, `href`, `merge`) and
+lists only `pullNeedsYou` PRs, oldest first.
 
 #### #746 web: Git Code section and Code overview card
 

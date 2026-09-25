@@ -7,7 +7,7 @@
   {
     "name": "@agentic/ui",
     "path": "packages/ui/dist/index.prod.js",
-    "limit": "121 KB",
+    "limit": "123 KB",
     "ignore": [
       "shiki",
       "@sigx/monaco-editor"

@@ -13,5 +13,5 @@ export { SlotMarks, PROJECT_FEATURE_SLOTS, usedSlots } from './SlotMarks.js';
 export type { SlotMarksProps, ProjectFeatureSlot } from './SlotMarks.js';
 export { ChecksBar } from './ChecksBar.js';
 export type { ChecksBarProps } from './ChecksBar.js';
-export { PullCard } from './PullCard.js';
-export type { PullCardProps, PullCardSurface } from './PullCard.js';
+export { PullCard, isPullRequest, pullNextMove, pullNeedsYou, pullStatusText, pullName } from './PullCard.js';
+export type { PullCardProps, PullCardSurface, PullMove } from './PullCard.js';
