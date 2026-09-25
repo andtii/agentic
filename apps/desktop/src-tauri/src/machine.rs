@@ -74,8 +74,13 @@ pub fn parse(text: &str, server: &str) -> Option<LocalMachine> {
 }
 
 fn credentials_file() -> Option<PathBuf> {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
-    let dir = config_dir(std::env::consts::OS, |k| std::env::var(k).ok(), &home.to_string_lossy());
+    // No home is fine while AGENTIC_DAEMON_HOME is set; without either there is nothing to read.
+    let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default();
+    let override_set = std::env::var("AGENTIC_DAEMON_HOME").is_ok_and(|v| !v.is_empty());
+    if home.is_empty() && !override_set {
+        return None;
+    }
+    let dir = config_dir(std::env::consts::OS, |k| std::env::var(k).ok(), &home);
     Some(PathBuf::from(dir).join("credentials.json"))
 }
 
