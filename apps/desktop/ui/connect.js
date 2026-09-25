@@ -99,4 +99,9 @@ async function start() {
     else connect(server);
 }
 
-start();
+// Whatever goes wrong before the first screen shows, show the setup form with the reason rather than a blank page.
+start().catch((error) => {
+    document.body.dataset.error = String(error);
+    setup('', false);
+    $('error').textContent = `The app could not read its settings: ${error}`;
+});
