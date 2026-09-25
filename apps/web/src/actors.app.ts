@@ -108,7 +108,7 @@ import {
     definePullsActor,
     type PullSourcePort,
 
-    // slot #750 Plan actor import — replace this line
+    definePlanActor,
 
     // slot #758 Requests actor import — replace this line
 } from '@agentic/platform';
@@ -299,7 +299,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
 
         definePullsActor({ sources: ports.pulls ?? NO_PULL_SOURCES }),
 
-        // slot #750 Plan actor registration — replace this line
+        definePlanActor(),
 
         // slot #758 Requests actor registration — replace this line
     ];
@@ -363,7 +363,7 @@ export function platformDefs(actors: readonly AnyActorDefinition[] = defaultActo
 
         Pulls: byType('pulls') as ActorDefs['Pulls'],
 
-        // slot #750 Plan actor SSR def — replace this line
+        Plan: byType('plan') as ActorDefs['Plan'],
 
         // slot #758 Requests actor SSR def — replace this line
     };

@@ -133,7 +133,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #749: — (scaffold only; nothing generic)
 
-- #750: —
+- #750: `packages/platform/src/plan/rules.ts` — ordered per-assignee queues with leased claims (renew on any call, expiry back to the queue top, alarm-armed) are a generic work-queue primitive; a candidate for `@sigx/actors` once a second store needs it.
 
 - #751: `planNext` / `planClaimRefusal` / `planTouchWarnings` in `packages/runtimes/src/tools/plan.ts` are pure plan rules over core types; if the Plan actor (#750) or the web needs the same next-item pick, promote them to `packages/core/src/plan.ts`.
 

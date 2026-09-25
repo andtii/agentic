@@ -18,7 +18,7 @@ import type { AgentActor, AuditActor, Chat, ConnectorAccounts, FlatMemory, Inbox
 
 import type { PullsActor } from '@agentic/platform';
 
-// slot #750 Plan actor type import — replace this line
+import type { PlanStoreActor } from '@agentic/platform';
 
 // slot #758 Requests actor type import — replace this line
 
@@ -53,7 +53,8 @@ export interface ActorDefs {
     /** One per project — its pull requests, polled (#742). */
     readonly Pulls: PullsActor;
 
-    // slot #750 Plan actor def — replace this line
+    /** One per project — its plans, queues, claims and leases (#750). */
+    readonly Plan: PlanStoreActor;
 
     // slot #758 Requests actor def — replace this line
 }

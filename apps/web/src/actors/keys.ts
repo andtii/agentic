@@ -33,6 +33,7 @@ export const memoryKeyOf = (ws: string, scope: string): string => actorKey(ws as
 /** One per project (#742): its pull requests, polled. */
 export const pullsKeyOf = (ws: string, projectId: string): string => `${ws}:pulls:${projectId}`;
 
-// slot #750 Plan actor key — replace this line
+/** One per project (#750): its plans, queues, claims and leases. */
+export const planKeyOf = (ws: string, projectId: string): string => `${ws}:plan:${projectId}`;
 
 // slot #758 Requests actor key — replace this line

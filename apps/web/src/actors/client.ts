@@ -38,7 +38,7 @@ export function clientDefs(): ActorDefs {
 
         Pulls: ref('pulls'),
 
-        // slot #750 Plan actor stub — replace this line
+        Plan: ref('plan'),
 
         // slot #758 Requests actor stub — replace this line
     };

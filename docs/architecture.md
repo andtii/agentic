@@ -730,7 +730,17 @@ _not yet_
 
 #### #750 platform: Plan actor — items, queues, claims and leases, limits, after, touches, audit
 
-_not yet_
+`packages/platform/src/plan/`: one `Plan` actor per project, keyed `{ws}:plan:{projectId}` (workspace first, like every key `sameWorkspace` reads), holding all of the project's plans; item numbers `#n` are unique across them. Every rule is a pure function in `rules.ts` over the stored book, and every method runs one of them server-side, whoever calls — the UI, the `plan_*` tools (#751) or another actor. The caller is the principal (`user` → a person, `agent` → that agent; machines and external clients only read). The manager is the project's `members.coordinator` and each agent's working limit is `memberLimit`, both read from the Workspace record on each call (`PlanProjectPort`).
+
+- **Who**: plans, phases, `add`, `split` and `assign` are the manager's and people's; `claim` is an agent's, for itself; `update` (tick, note, state) is the holder's, the assignee's or a manager's, and only a person marks an item `done` or reopens it; `ref` is anyone's; `handoff` is the holder's, the assignee's or a manager's.
+- **Queues**: one ordered queue per assignee (`queueIndex`); a claimed or done item leaves it. `assign(item, to, index?)` places or reorders; moving a claimed item to someone else ends the claim and tells its holder.
+- **Claims**: refused (409, `data.code`) when the item is done, waits on an unfinished `after` item (`blocked`, derived for the view, never stored), is claimed by another agent (`taken`), sits in someone else's queue, needs a person, or the agent is at its limit. The lease is `PLAN_LEASE_DEFAULT_MS` (a claim may ask for 1 s – 4 h) and every plan call by that agent — reads too, and refused writes — renews it.
+- **Lease expiry**: each call first runs out the leases that have ended, and a durable one-shot reminder (`lease`, re-armed to the next lease end after every write) does it with nobody calling. The item goes back to the top of the claimer's queue, `ready`, and the manager (else the agent) gets a notice.
+- **Touches**: a claim whose `touches` overlap another agent's live claim (`planTouchesOverlap`) returns a warning and leaves both agents a notice with a suggested order — the item already being worked first. `next` skips such items.
+- **Done**: when every done-when line is ticked, or a person marks it; a split item's dependants wait on all its parts.
+- **Notices** wait on the actor until the addressee takes them (`takeNotices`); the plan tools hand them over.
+- **History**: every change is an activity line on the item with its actor and a `plan.changed` audit record (`data.op`), a lease running out a `plan.lease-expired` by `system:plan`.
+- **Reads**: `list`, `get`, `next(agentId?)` (own queue, then the open pool, claimable and clash-free) and `openItems()` (every item not done with its plan and phase — the Work view's plan rows, K1).
 
 #### #751 runtimes+mcp: plan_list/next/claim/assign/update/ref/add/handoff tools
 
