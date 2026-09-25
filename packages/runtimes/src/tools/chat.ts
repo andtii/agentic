@@ -17,27 +17,30 @@ export const askUserInput = z.object({
     choices: z.array(z.string().min(1)).min(2).optional().describe('Offer these answers when the question is a choice.')
 });
 
-/** The array parameters of `chat_post` a model can leak into `text` (#599). */
-const LEAKABLE = ['mentions', 'attachments'] as const;
-type Leaked = Partial<Record<(typeof LEAKABLE)[number], string[]>>;
+/**
+ * The array parameters of `chat_post` a model can leak into `text` (#599), each with the shape its values must have to
+ * be taken — the same as the input schema's for attachments, an agent id for a mention.
+ */
+const LEAKABLE = { mentions: z.array(z.string().regex(/^agent_[A-Za-z0-9_-]+$/)).min(1), attachments: z.array(chatFileUriInput).min(1) } as const;
+type Leaked = Partial<Record<keyof typeof LEAKABLE, string[]>>;
 const PARAMETER_OPEN = /<parameter name="([A-Za-z_]+)">/g;
 
 /**
  * Parameters a model wrote INTO `text` as its own tool-call markup instead of as keys (#599): the text value ends
- * with `</text>`, then one or more `<parameter name="mentions">["agent_…"]` blocks (closed or not). Recovered only
- * when everything after `</text>` is such blocks, each a known array parameter whose value is a JSON array of
- * strings — anything else is the agent's own text and is left alone.
+ * with its last `</text>`, then one or more `<parameter name="mentions">["agent_…"]` blocks (closed or not). Recovered only
+ * when everything after that `</text>` is such blocks, each a known array parameter whose value is a JSON array of
+ * well-formed values (agent ids, `agentic-file:` URIs) — anything else is the agent's own text and is left alone.
  */
 export function recoverLeakedParameters(text: string): { text: string; leaked: Leaked } | undefined {
-    const end = text.indexOf('</text>');
+    const end = text.lastIndexOf('</text>');
     if (end < 0) return undefined;
     const tail = text.slice(end + '</text>'.length);
     const opens = [...tail.matchAll(PARAMETER_OPEN)];
     if (opens.length === 0 || tail.slice(0, opens[0]!.index).trim() !== '') return undefined;
     const leaked: Leaked = {};
     for (const [i, open] of opens.entries()) {
-        const name = open[1] as (typeof LEAKABLE)[number];
-        if (!LEAKABLE.includes(name) || leaked[name]) return undefined;
+        const name = open[1] as keyof typeof LEAKABLE;
+        if (!Object.hasOwn(LEAKABLE, name) || leaked[name]) return undefined;
         const raw = tail
             .slice(open.index + open[0].length, opens[i + 1]?.index ?? tail.length)
             .trim()
@@ -49,8 +52,9 @@ export function recoverLeakedParameters(text: string): { text: string; leaked: L
         } catch {
             return undefined;
         }
-        if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) return undefined;
-        leaked[name] = value;
+        const parsed = LEAKABLE[name].safeParse(value);
+        if (!parsed.success) return undefined;
+        leaked[name] = parsed.data;
     }
     const kept = text.slice(0, end).trimEnd();
     return kept === '' ? undefined : { text: kept, leaked };
