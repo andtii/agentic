@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { AgentId, PlanItem, ProjectFeatureUi, PullRequest } from '@agentic/core';
-import { WEEK_MS, workItemsOf, type WorkFeatures } from '../../src/pages/projects/work/model';
+import { NO_CHECKS_GRACE_MS, WEEK_MS, workItemsOf, type WorkFeatures } from '../../src/pages/projects/work/model';
 
 const NOW = Date.parse('2026-09-20T12:00:00Z');
 const min = (n: number): number => NOW - n * 60_000;
@@ -21,9 +21,14 @@ const pr = (number: number, more: Partial<PullRequest> = {}): PullRequest => ({
 const item = (id: number, more: Partial<PlanItem> = {}): PlanItem => ({ id, title: `Item ${id}`, state: 'ready', after: [], touches: [], refs: [], doneWhen: [], activity: [], ...more });
 
 describe('empty checks are not green (#802)', () => {
-    it('an open PR with no checks waits on CI at the Checks stage', () => {
-        const [row] = workItemsOf([], [pr(7)], [], git, NOW);
+    it('an open PR with no checks waits on CI at the Checks stage while CI may still start', () => {
+        const [row] = workItemsOf([], [pr(7, { openedAt: min(5) })], [], git, NOW);
         expect(row).toMatchObject({ id: 'pr:7', stage: 3, stageState: 'working', group: 'waiting', nextStep: 'Waiting on CI · no checks reported yet' });
+    });
+
+    it('past the grace, a PR with no checks is a repo without CI and moves on to merge', () => {
+        const [row] = workItemsOf([], [pr(7, { openedAt: NOW - NO_CHECKS_GRACE_MS })], [], git, NOW);
+        expect(row).toMatchObject({ id: 'pr:7', stage: 5, group: 'your-move' });
     });
 
     it('conflicts still come first', () => {

@@ -56,7 +56,10 @@ interface Placed {
 }
 
 /** A pull request's place: merged is done, then conflicts, checks, review and merge in the order they block. */
-function placePull(pr: PullRequest, stages: readonly string[], doer: AgentId | undefined): Placed {
+/** How long a PR with no checks reported waits for CI before it is treated as a repo without CI. */
+export const NO_CHECKS_GRACE_MS = 10 * 60_000;
+
+function placePull(pr: PullRequest, stages: readonly string[], doer: AgentId | undefined, now: number): Placed {
     const last = stages.length - 1;
     const at = (name: string, fallback: number): number => stageIndex(stages, name, fallback);
     const pilot = pr.autopilot;
@@ -78,8 +81,8 @@ function placePull(pr: PullRequest, stages: readonly string[], doer: AgentId | u
     }
     const pending = pr.checks.filter((c) => c.state === 'queued' || c.state === 'running').length;
     if (pending) return { stage: at('Checks', 1), stageState: 'working', owner: fixer ? agent(fixer) : YOU, nextStep: `Waiting on CI · ${plural(pending, 'check', 'checks')} running`, group: 'waiting' };
-    // No checks reported yet is not green: CI has not started (or not reported), so it waits at Checks.
-    if (!pr.checks.length) return { stage: at('Checks', 1), stageState: 'working', owner: fixer ? agent(fixer) : YOU, nextStep: 'Waiting on CI · no checks reported yet', group: 'waiting' };
+    // No checks reported yet is not green while CI may still start; past the grace it is a repo without CI.
+    if (!pr.checks.length && now - pr.openedAt < NO_CHECKS_GRACE_MS) return { stage: at('Checks', 1), stageState: 'working', owner: fixer ? agent(fixer) : YOU, nextStep: 'Waiting on CI · no checks reported yet', group: 'waiting' };
     const open = pr.review.threads.filter((t) => t.state !== 'resolved').length;
     if (open || pr.review.state === 'changes-requested') {
         const what = open ? plural(open, 'review thread', 'review threads') : 'the requested changes';
@@ -167,7 +170,7 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
             ...(item ? { itemRef: `#${item.id}` } : {}),
             pull: pr.number,
             stages,
-            ...placePull(pr, stages, task?.assignee),
+            ...placePull(pr, stages, task?.assignee, now),
             updatedAt
         });
     }
