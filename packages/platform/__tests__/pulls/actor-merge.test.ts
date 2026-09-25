@@ -122,6 +122,8 @@ describe('Pulls.merge', () => {
     it('refuses an agent (403), a PR that is not open or not tracked, and a deployment without a merge', async () => {
         await pulls().watch({ provider: 'github', repo: REPO });
         expect(await statusOf(pulls(agent).merge(9))).toBe(403);
+        // Before the tracked check: an agent cannot tell a tracked PR from an untracked one.
+        expect(await statusOf(pulls(agent).merge(10))).toBe(403);
         expect(await statusOf(pulls().merge(10))).toBe(404);
         wired = false;
         expect(await statusOf(pulls().merge(9))).toBe(409);

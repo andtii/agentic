@@ -718,9 +718,12 @@ export function definePullsActor(options: PullsActorOptions) {
                  * principal (403 otherwise); the port's refusal (or its absence) is a 409 and changes nothing.
                  */
                 async merge(number: number): Promise<PullsView> {
-                    const t = trackedOf(number);
-                    // A person's: an agent merges only through the autopilot's approval rule (`answerMerge`).
+                    // A person's: an agent merges only through the autopilot's approval rule (`answerMerge`). Checked first,
+                    // so a refused caller learns nothing about which PRs are tracked.
                     if ((ctx.principal as { kind?: string } | null | undefined)?.kind !== 'user') throw new ServerFnError(403, '[pulls] only a person merges a pull request here');
+                    const t = trackedOf(number);
+                    // No repo watched → nothing would read the merge back (no poll, no `pull.merged`).
+                    if (!ctx.state.repo) throw new ServerFnError(409, '[pulls] no repo is watched');
                     if (t.pr.state !== 'open') throw new ServerFnError(409, `[pulls] #${number} is ${t.pr.state}, not open`);
                     const port = portFor(ctx.state);
                     if (!port) throw new ServerFnError(409, '[pulls] no merge is wired on this deployment');
