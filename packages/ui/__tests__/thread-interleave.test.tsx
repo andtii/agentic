@@ -31,7 +31,7 @@ describe('placeInserts', () => {
         expect(p.before.get('c')?.map((i) => i.key)).toEqual(['x', 'y']);
     });
 
-    it('treats a message with no time as now: the inserts land before it', () => {
+    it('treats a message with no time as later than every insert: the inserts land before it', () => {
         const p = placeInserts([msg('a'), msg('live')], [at('r', 50)], (m) => (m.id === 'a' ? 10 : undefined));
         expect(p.before.get('live')?.map((i) => i.key)).toEqual(['r']);
         expect(p.after).toEqual([]);

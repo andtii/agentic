@@ -7,8 +7,9 @@
  * Pure: the thread hands each message's time (from its author's `time`), and
  * an insert goes before the first message that is strictly later than it —
  * a message at the same instant keeps its place ahead of the insert. A
- * message with no time (a feed's in-flight row) counts as now, so inserts
- * land before it; a thread with no times at all keeps every insert after it.
+ * message with no time (a feed's in-flight row) counts as later than every
+ * insert, so inserts land before it; a thread with no times at all keeps
+ * every insert after it.
  */
 import type { AgentMessage } from '@sigx/ai-agent/app';
 
@@ -25,6 +26,7 @@ export interface Placement<T extends Timed> {
 }
 
 export function placeInserts<T extends Timed>(messages: readonly AgentMessage[], inserts: readonly T[], timeOf: (message: AgentMessage) => number | undefined): Placement<T> {
+    if (!inserts.length) return { before: new Map(), after: [] };
     const sorted = inserts
         .map((insert, i) => ({ insert, i }))
         .sort((a, b) => a.insert.at - b.insert.at || a.i - b.i)

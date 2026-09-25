@@ -490,10 +490,12 @@ export const LiveChat = component<{ id: string }>(({ props }) => {
         const across = acrossProjects(visitors.flatMap((v) => sentFrom.value[v.projectId] ?? []), projects.list(), s?.projectId);
         const visitorOfMember = (agentId: string) => visitorOf(agentId, projects.list(), s?.projectId);
         // A visiting manager's rows (#870): its project chip and role after its name. An entry row names its agent; a feed's in-flight row is its feed's.
+        const feedAgentOf = new Map<string, string>();
+        if (visitors.length) for (const f of feeds.list) for (const x of f.transcript.messages) feedAgentOf.set(x.id, f.agentId);
         const describe = (m: AgentMessage): MessageAuthor | undefined => {
             const author = authors.value[m.id];
             if (!visitors.length || m.role === 'user') return author;
-            const agentId = m.actor ?? feeds.list.find((f) => f.transcript.messages.some((x) => x.id === m.id))?.agentId;
+            const agentId = m.actor ?? feedAgentOf.get(m.id);
             const v = agentId ? visitors.find((x) => x.agentId === agentId) : undefined;
             return v ? { ...author, project: v.projectName, role: v.role } : author;
         };
