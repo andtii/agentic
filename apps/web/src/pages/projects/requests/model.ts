@@ -27,6 +27,8 @@ export interface RequestEntry {
     readonly triagedAt?: number;
     /** Where the triage places it (`core`), for the kind row: `Bug in core`. */
     readonly area?: string;
+    /** Needs you: to let it in (the sender rules held it back) or to decide on the triage (#831). */
+    readonly needs?: 'admit' | 'decision';
 }
 
 /** A name and hue for an actor id; the caller's directory. */

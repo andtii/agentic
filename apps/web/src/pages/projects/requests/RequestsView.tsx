@@ -130,6 +130,13 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
     const triageCard = (e: RequestEntry) => {
         const r = e.request;
         const t = r.triage;
+        if (!t && e.needs === 'admit') {
+            return (
+                <section data-requests-triage="admit" aria-label={`${props.manager}’s triage`}>
+                    <p data-requests-empty="">{`${e.fromProjectName} needs your say before sending here; let it in and ${props.manager} triages it.`}</p>
+                </section>
+            );
+        }
         if (!t) {
             return (
                 <section data-requests-triage="pending" aria-label={`${props.manager}’s triage`}>
@@ -251,7 +258,7 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
         };
         return (
             <div data-requests-actions="">
-                <Button intent="wait" icon="check" onClick={accept}>Accept as proposed</Button>
+                <Button intent="wait" icon="check" onClick={accept}>{e.needs === 'admit' ? 'Let it in' : 'Accept as proposed'}</Button>
                 {t?.proposedItem ? <Button icon="edit" onClick={() => { st.draft = draftOf(t); st.mode = 'edit'; }}>Edit first</Button> : null}
                 <Button icon="chats" onClick={() => { st.mode = 'ask'; }}>Ask for more</Button>
                 <span data-requests-actions-end="">
