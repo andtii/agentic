@@ -10,6 +10,7 @@ import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_CHATS } from '../../../mock/projects/chats';
 import { PROJECTS, USER, agentNamed, formatAge } from '../../../mock/workspace';
 import { useAgentDirectory } from '../../chat/directory';
+import type { ChatListRow } from '../../chat/archive';
 import { LIST_TAIL } from '../../chat/live';
 import { useChatRows } from '../../chat/LiveChats';
 import { projectTrail } from '../layout/trail';
@@ -17,7 +18,7 @@ import type { ProjectPageProps } from '../layout/types';
 import { useProjects } from '../live';
 import { ChatsView } from './ChatsView';
 import type { ProjectChatRow, WorkChip } from './groups';
-import { chatTaskSummaries, summaryOf } from './tasks';
+import { chatTaskSummaries, summaryOf, type ChatTaskSummary } from './tasks';
 
 defineTopbar('project-chats', (route) => ({ trail: projectTrail(route, { label: 'Chats', href: `/projects/${String(route.params.id)}/chats` }) }));
 
@@ -30,9 +31,29 @@ export function taskChips(taskIds: readonly string[]): WorkChip[] {
     return taskIds.map((id) => ({ kind: 'task', id }));
 }
 
+/**
+ * A `/chats` list row as a project Chats row: its tasks from the index summary, its project from the chat's own read
+ * or, until that names one, the move this page just made (`moved`); an archived chat (#884) sits under Archived (#897).
+ */
+export function projectChatRow(c: ChatListRow, summary: ChatTaskSummary, moved?: string): ProjectChatRow {
+    const projectId = c.projectId ?? moved;
+    return {
+        id: c.id,
+        title: c.title,
+        lastLine: c.lastLine,
+        agentIds: c.members.map((m) => m.agentId),
+        waiting: c.waiting,
+        working: summary.working,
+        updatedAt: c.updatedAt,
+        ...(projectId ? { projectId } : {}),
+        ...(c.archived ? { archived: true } : {}),
+        work: taskChips(summary.roots)
+    };
+}
+
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** On mock data: the sample chats; a move changes them for the page's lifetime. */
+/** On mock data: the sample chats; a move changes them for the page's lifetime */
 const MockProjectChats = component<ProjectPageProps>(({ props }) => {
     const st = signal({ moved: {} as Record<string, string> });
     const rows = (): ProjectChatRow[] => MOCK_PROJECT_CHATS.map((c) => (st.moved[c.id] ? { ...c, projectId: st.moved[c.id] } : c));
@@ -75,22 +96,7 @@ const LiveProjectChats = component<ProjectPageProps>(({ props }) => {
     const rows = (): ProjectChatRow[] => {
         // One pass over the index for every chat's roots and working flag, looked up per row (#804).
         const tasks = chatTaskSummaries(index.value ?? []);
-        return chats.rows().map((c) => {
-            const summary = summaryOf(tasks, c.id);
-            // The chat's own read wins once it names a project; until then, the move this page just made.
-            const projectId = c.projectId ?? st.moved[c.id];
-            return {
-                id: c.id,
-                title: c.title,
-                lastLine: c.lastLine,
-                agentIds: c.members.map((m) => m.agentId),
-                waiting: c.waiting,
-                working: summary.working,
-                updatedAt: c.updatedAt,
-                ...(projectId ? { projectId } : {}),
-                work: taskChips(summary.roots)
-            };
-        });
+        return chats.rows().map((c) => projectChatRow(c, summaryOf(tasks, c.id), st.moved[c.id]));
     };
     const move = async (ids: readonly string[]): Promise<void> => {
         const ws = viewer.workspaceId;
