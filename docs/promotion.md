@@ -163,7 +163,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #763: —
 
-- #764: —
+- #764: `projectHandle` / `resolveProject` (project name → handle for `project#n`) and the upstream-first `order` in `packages/platform/src/plan/links.ts` are generic — candidates for core next to `refs.ts`.
 
 - #765: —
 
