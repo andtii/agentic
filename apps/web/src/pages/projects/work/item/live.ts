@@ -9,7 +9,7 @@ import type { TaskIndexRow } from '@agentic/platform';
 import { useActorDefs, useViewer } from '../../../../actors/defs';
 import { useAgentDirectory } from '../../../chat/directory';
 import { useChatRows } from '../../../chat/LiveChats';
-import { featuresOf, projectTasks, useFeatureUi, usePlanItems, usePulls, useTaskIndexRows } from '../live';
+import { featuresOf, planItemsOf, projectTasks, useFeatureUi, usePlans, usePulls, useTaskIndexRows } from '../live';
 import { workItemsOf } from '../model';
 import type { WorkAgentLookup } from '../WorkView';
 import type { WorkItemDetail, WorkItemPlan } from './model';
@@ -72,8 +72,8 @@ export interface LiveWorkItems {
 
 /**
  * The project's work item details, live: the same inputs as the Work view (TaskIndex rows whose chat is in the
- * project, the Registry's feature stages, pull requests and plan items as `live.ts` has them). No plan store is read
- * yet, so plan-backed items carry no checklist until one is.
+ * project, the Registry's feature stages, pull requests as `live.ts` has them) plus the project's plans from its Plan
+ * actor (#882), read once in setup — a plan-backed item carries its plan, phase and item (done-when, refs, activity).
  */
 export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
     const defs = useActorDefs();
@@ -82,6 +82,7 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
     const chats = useChatRows(defs, viewer, directory);
     const index = useTaskIndexRows(defs, viewer);
     const uiOf = useFeatureUi(defs, viewer);
+    const plans = usePlans(() => project().id, { defs, viewer });
     return {
         details: () => {
             // The project read on every call: the route may move to another one while the page stays mounted.
@@ -89,15 +90,16 @@ export function useLiveWorkItems(project: () => ProjectRecord): LiveWorkItems {
             const inProject = chats.rows().filter((c) => c.projectId === p.id);
             const ids = new Set(inProject.map((c) => c.id));
             const rows = index.rows().filter((r) => r.chatId !== undefined && ids.has(r.chatId));
-            const items = workItemsOf(projectTasks(rows, ids), usePulls(p.id)(), usePlanItems(p.id)(), featuresOf(p, uiOf), Date.now());
-            return detailsOf(items, rows, inProject);
+            const planList = plans.plans();
+            const items = workItemsOf(projectTasks(rows, ids), usePulls(p.id)(), planItemsOf(planList), featuresOf(p, uiOf), Date.now());
+            return detailsOf(items, rows, inProject, planList);
         },
         agentOf: (id) => {
             const a = directory.lookup(id);
             return { name: a.name, hue: a.hue };
         },
         get loading() {
-            return index.loading || chats.loading;
+            return index.loading || chats.loading || plans.loading;
         }
     };
 }
