@@ -32,6 +32,7 @@
     "@sigx/ai-agent": "catalog:",
     "@sigx/actors": "catalog:",
     "@sigx/actors-cloudflare": "catalog:",
+    "@sigx/actors-ws": "catalog:",
     "@sigx/router": "catalog:",
     "@sigx/server": "catalog:",
     "@sigx/server-renderer": "catalog:",
