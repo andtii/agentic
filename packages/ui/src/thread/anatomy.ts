@@ -50,6 +50,10 @@ export const aiMessageAnatomy = defineAnatomy('ai-message', {
     avatar: { element: 'span', parent: 'root', tokens: ['color', 'radius-selector', 'text'] },
     meta: { element: 'div', parent: 'root', tokens: ['text'] },
     name: { element: 'span', parent: 'meta', tokens: ['text'] },
+    /** The author's project — a visiting manager's (#870): a folder-icon chip. */
+    project: { element: 'span', parent: 'meta', tokens: ['color', 'radius-selector', 'text'] },
+    /** What the author is here (`project manager, visiting`), dim. */
+    role: { element: 'span', parent: 'meta', tokens: ['text'] },
     /** `machine / runtime / account` — the kit's env line, dropped from the row below 768 px. */
     environment: { element: 'span', parent: 'meta', tokens: ['text'] },
     time: { element: 'time', parent: 'meta', tokens: ['text'] },

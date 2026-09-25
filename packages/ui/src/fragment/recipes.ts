@@ -162,6 +162,20 @@ const message: RecipeInput = {
             }
         },
         name: { base: { fontWeight: 'var(--weight-semibold, 600)' } },
+        // A visiting manager's project (#870): a small folder chip, then its role, dim.
+        project: {
+            base: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-2xs)',
+                paddingInline: 'var(--space-xs)',
+                border: `var(--border) solid ${lineStrong}`,
+                borderRadius: 'var(--radius-selector)',
+                background: 'var(--color-base-200)',
+                fontSize: 'var(--text-xs)'
+            }
+        },
+        role: { base: { fontSize: 'var(--text-sm)', color: textDim } },
         // Phones: the meta line drops the environment.
         environment: { base: { display: 'inline-flex', minInlineSize: '0', color: textDim }, at: { 'below-md': { base: { display: 'none' } } } },
         time: { base: { fontFamily: mono, fontSize: 'var(--text-xs)', color: textDim } },

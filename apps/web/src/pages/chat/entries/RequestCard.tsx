@@ -4,6 +4,9 @@
  * refs and "See triage" into the target's Requests inbox — then, once accepted, a divider (`accepted in SignalX ·
  * 14:09`) and the result card: the filed item, the chat project's items that wait on it, and Track → Links.
  *
+ * #870: the thread places the two halves by time — `part="request"` at the request's creation, `part="result"` (the
+ * divider and the result card, nothing before the accept) at its accept; with no `part` the card draws both.
+ *
  * `ChatRequestsFrom` is the live source: one per project the chat's visitors come from, reading that project's
  * `Requests.from(chatProject)` live, keeping this chat's requests (`chatRequests`) and reporting them up for the
  * Across projects card.
@@ -28,7 +31,14 @@ export type RequestCardProps =
     /** The chat's project, by name: its items a request names wait on the filed one. */
     & Define.Prop<'homeProjectName', string>
     /** `14:09` for an instant, in the workspace zone. */
-    & Define.Prop<'time', (at: number) => string, true>;
+    & Define.Prop<'time', (at: number) => string, true>
+    /** One half (#870): the request card, or the accept divider and result card; both by default. */
+    & Define.Prop<'part', 'request' | 'result'>;
+
+/** The request's accept, once it is filed: when the divider and the result card happened. */
+export function acceptedAt(r: ProjectRequest): number | undefined {
+    return r.state === 'accepted' && r.resultItem !== undefined ? r.updatedAt : undefined;
+}
 
 export const RequestCard = component<RequestCardProps>(({ props }) => () => {
     const r = props.request;
@@ -36,10 +46,13 @@ export const RequestCard = component<RequestCardProps>(({ props }) => () => {
     const card = requestCardState(r, props.toProjectName, props.managerName);
     const home = props.homeProjectName?.toLowerCase();
     const waiting = home ? r.refs.flatMap((ref) => (ref.kind === 'project-item' && ref.project.toLowerCase() === home ? [projectItemRef(ref.project, ref.n)] : [])) : [];
-    const filed = r.state === 'accepted' && r.resultItem !== undefined ? projectItemRef(props.toProjectName, r.resultItem) : undefined;
+    const filed = acceptedAt(r) !== undefined ? projectItemRef(props.toProjectName, r.resultItem!) : undefined;
+    const request = props.part !== 'result';
+    const result = props.part !== 'request' && filed !== undefined;
+    if (!request && !result) return null;
     return (
         <div data-chat-request={r.state}>
-            <article data-requests-triage="" aria-label={`Request to ${props.toProjectName}: ${r.title}`}>
+            {request ? <article data-requests-triage="" aria-label={`Request to ${props.toProjectName}: ${r.title}`}>
                 <header data-requests-triage-head="">
                     <Icon name="send" size={14} />
                     <span data-requests-dim="">Request to {props.toProjectName}</span>
@@ -52,8 +65,8 @@ export const RequestCard = component<RequestCardProps>(({ props }) => () => {
                     {r.refs.length ? <span data-requests-refs="">{r.refs.map((ref) => <span data-requests-ref={ref.kind}><Icon name={refIcon(ref)} size={12} />{refLabel(ref)}</span>)}</span> : null}
                     <span data-requests-detail-age=""><Link to={`/projects/${encodeURIComponent(r.toProject)}/requests`}>See triage</Link></span>
                 </div>
-            </article>
-            {filed ? (
+            </article> : null}
+            {result ? (
                 <>
                     <p data-chat-request-divider="" data-requests-mono="" role="separator">accepted in {props.toProjectName} · {props.time(r.updatedAt)}</p>
                     <article data-requests-triage="" data-chat-request-result="" aria-label={`Filed as ${filed}`}>
@@ -82,7 +95,9 @@ export type ChatRequestsFromProps =
     & Define.Prop<'managerName', string, true>
     & Define.Prop<'time', (at: number) => string, true>
     /** This chat's requests to `project`, oldest first, whenever the live read changes. */
-    & Define.Prop<'onRequests', (projectId: ProjectId, requests: readonly ProjectRequest[]) => void>;
+    & Define.Prop<'onRequests', (projectId: ProjectId, requests: readonly ProjectRequest[]) => void>
+    /** Read and report only (#870): the thread draws the cards, placed by time. Default false. */
+    & Define.Prop<'headless', boolean>;
 
 /** The live read of this chat's requests to one project, drawn as request cards. */
 export const ChatRequestsFrom = component<ChatRequestsFromProps>(({ props }) => {
@@ -97,7 +112,7 @@ export const ChatRequestsFrom = component<ChatRequestsFromProps>(({ props }) => 
         stop();
         props.onRequests?.(props.projectId, []);
     });
-    return (): JSXElement => (
+    return (): JSXElement => (props.headless ? null : (
         <>
             {mine().map((r) => (
                 <div key={`${props.projectId}:${r.id}`} data-chat-question>
@@ -105,5 +120,5 @@ export const ChatRequestsFrom = component<ChatRequestsFromProps>(({ props }) => 
                 </div>
             ))}
         </>
-    );
+    ));
 }, { name: 'ChatRequestsFrom' });

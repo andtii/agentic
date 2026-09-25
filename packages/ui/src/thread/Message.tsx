@@ -41,6 +41,10 @@ export interface MessageAuthor {
     readonly hue?: AgentHue;
     /** A person: circle tile. The user's own rows are people by default. */
     readonly person?: boolean;
+    /** The project the author comes from — a visiting manager's (#870): a chip after the name. */
+    readonly project?: string;
+    /** What the author is here, after the name (`project manager, visiting`). */
+    readonly role?: string;
     /** Where the row ran (EXE-06) — rendered as the kit's environment line. */
     readonly environment?: EnvironmentParts;
     /** Wall-clock time of the row, already formatted in the workspace zone (`14:02`), with the ISO datetime for the `<time>` element. */
@@ -194,6 +198,13 @@ export const Message = component<MessageProps>(({ props }) => {
                 </span>
                 <div data-scope={SCOPE} data-part="meta">
                     <span data-scope={SCOPE} data-part="name">{name}</span>
+                    {nonBlank(author?.project) && (
+                        <span data-scope={SCOPE} data-part="project">
+                            <Icon name="folder" size={12} />
+                            {author!.project}
+                        </span>
+                    )}
+                    {nonBlank(author?.role) && <span data-scope={SCOPE} data-part="role">{author!.role}</span>}
                     {env && (
                         <span data-scope={SCOPE} data-part="environment">
                             <EnvironmentLine machine={env.machine} runtime={env.runtime} account={env.account} tone="dim" />
