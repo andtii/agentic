@@ -21,10 +21,12 @@ describe('tokenPullSources', () => {
         const first = (await port.open(ref())) as ReturnType<typeof fake>;
         expect(first.token).toBe('tok_1');
         clock = PULL_SOURCE_TTL_MS - 1;
-        expect(await port.open(ref({ projectId: 'prj_2' as ProjectId }))).toBe(first); // per workspace and provider
+        expect(await port.open(ref({ repo: 'o/other' }))).toBe(first); // per workspace, project and provider
+        // Another project has its own credential (#793: a project's GitHub token).
+        expect(((await port.open(ref({ projectId: 'prj_2' as ProjectId }))) as ReturnType<typeof fake>).token).toBe('tok_2');
         clock = PULL_SOURCE_TTL_MS;
-        expect(((await port.open(ref())) as ReturnType<typeof fake>).token).toBe('tok_2');
-        expect(((await port.open(ref({ workspaceId: 'ws_2' as WorkspaceId }))) as ReturnType<typeof fake>).token).toBe('tok_3');
+        expect(((await port.open(ref())) as ReturnType<typeof fake>).token).toBe('tok_3');
+        expect(((await port.open(ref({ workspaceId: 'ws_2' as WorkspaceId }))) as ReturnType<typeof fake>).token).toBe('tok_4');
     });
 
     it('no adapter or no credential is no source, and a missing credential is asked again next time', async () => {

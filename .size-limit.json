@@ -24,6 +24,11 @@
     "limit": "5.5 KB"
   },
   {
+    "name": "@agentic/plugins-git/provider",
+    "path": "packages/plugins-git/dist/provider.js",
+    "limit": "3.5 KB"
+  },
+  {
     "name": "@agentic/plugins-plan",
     "path": "packages/plugins-plan/dist/index.js",
     "limit": "2.75 KB"

@@ -118,6 +118,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 - #741: `pullRepoOfOrigin` (origin URL → host + `owner/name`) and the GitHub rate-limit window handling in `plugins-git/src/provider/` are generic git-host helpers; candidates for a shared forge-client package once a second consumer appears.
 
 - #742: `tokenPullSources` (packages/platform/src/pulls/ports.ts) — a per-credential adapter cache with a TTL; generic enough for any polled provider that opens a secret per call.
+- #793: `RoutingPorts.placed` (packages/platform/src/routing/ports.ts) — a fire-and-forget placement observer; any feature that needs to act once a task lands in a project could use it instead of wrapping its plugin.
 
 - #743: `stepAutopilot` (packages/platform/src/pulls/autopilot.ts) — a pure observe → actions state machine with an attempt limit and settle/stale turn windows; the shape fits any agent that babysits an external resource.
 

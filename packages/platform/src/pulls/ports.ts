@@ -5,6 +5,10 @@
  * so an adapter is a `PullSource` as it stands.
  */
 import type { ProjectId, PullRequest, WorkspaceId } from '@agentic/core';
+import { actor, type AnyActorDefinition } from '@sigx/actors';
+import { asPrincipal, userPrincipal } from '../auth/index.js';
+import { registryKey } from '../registry/key.js';
+import { registryCode } from '../routing/factory.js';
 
 /** The reads the actor makes: one PR by number, and the repo's open PRs. */
 export interface PullSource {
@@ -50,8 +54,8 @@ export interface TokenPullSourcesOptions {
 export const PULL_SOURCE_TTL_MS = 10 * 60_000;
 
 /**
- * The app's port: the ref's adapter over the ref's credential, reused per workspace and provider for `ttlMs`
- * (per isolate — a cold object asks again). A failed credential lookup is not cached.
+ * The app's port: the ref's adapter over the ref's credential, reused per workspace, project and provider for
+ * `ttlMs` (per isolate — a cold object asks again). A failed credential lookup is not cached.
  */
 export function tokenPullSources(options: TokenPullSourcesOptions): PullSourcePort {
     const ttl = options.ttlMs ?? PULL_SOURCE_TTL_MS;
@@ -61,7 +65,7 @@ export function tokenPullSources(options: TokenPullSourcesOptions): PullSourcePo
         async open(ref) {
             const adapter = options.adapters[ref.provider];
             if (!adapter) return undefined;
-            const id = `${ref.workspaceId}\u0000${ref.provider}`;
+            const id = `${ref.workspaceId}\u0000${ref.projectId}\u0000${ref.provider}`;
             const hit = cache.get(id);
             if (hit && now() - hit.at < ttl) return hit.source;
             const token = await options.token(ref);
@@ -78,3 +82,38 @@ export function tokenPullSources(options: TokenPullSourcesOptions): PullSourcePo
 
 /** No source for any ref: every poll says so on the view. What an app registers until it wires an adapter. */
 export const NO_PULL_SOURCES: PullSourcePort = { open: () => undefined };
+
+export interface RegistryPullTokenOptions {
+    /** The Registry definition, as a thunk like the other actor ports. */
+    readonly registry: () => AnyActorDefinition;
+    /** The plugin that holds the `secret:<secret>` grant (the git feature, `agentic.feature.git`). */
+    readonly pluginId: string;
+    /** The secret's name (`github-token`). */
+    readonly secret: string;
+}
+
+interface RegistrySecrets {
+    openSecret(name: string, pluginId: string): Promise<string>;
+}
+
+/** Registry refusals that mean "no credential", not "something broke": by their stable codes. */
+const NO_TOKEN_CODES: ReadonlySet<string> = new Set(['secret-missing', 'secret-denied', 'plugin-missing', 'plugin-disabled']);
+
+/**
+ * A `TokenPullSourcesOptions.token` over the workspace's Registry (#793): `openSecret(secret, pluginId)` as the
+ * workspace owner — enabled plugin, granted secret, audited like every open. No secret, no grant or the plugin
+ * off → `undefined` (the actor says there is no source); any other failure throws.
+ */
+export function registryPullToken(options: RegistryPullTokenOptions): (ref: PullSourceRef) => Promise<string | undefined> {
+    return async (ref) => {
+        const registry = actor(options.registry(), registryKey(ref.workspaceId)).with({ context: asPrincipal(userPrincipal(ref.workspaceId, ref.workspaceId)) }) as unknown as RegistrySecrets;
+        try {
+            const token = await registry.openSecret(options.secret, options.pluginId);
+            return token.trim() || undefined;
+        } catch (e) {
+            const code = registryCode(e) ?? (/\[registry\] ".*" was not granted secret:/.test(e instanceof Error ? e.message : '') ? 'secret-denied' : undefined);
+            if (code !== undefined && NO_TOKEN_CODES.has(code)) return undefined;
+            throw e;
+        }
+    };
+}

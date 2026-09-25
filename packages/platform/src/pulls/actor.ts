@@ -407,6 +407,7 @@ export function definePullsActor(options: PullsActorOptions) {
                 },
 
                 async get(): Promise<PullsView> {
+                    requireKey();
                     return view(ctx.state);
                 }
             };

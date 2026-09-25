@@ -166,6 +166,25 @@ export interface ProjectPort {
     set(chatId: ChatId, projectId: ProjectId | null, call: ToolCall): Promise<void>;
 }
 
+/** What `pull_report` answers (#793): the PR as the project's Pulls actor tracks it, when it has read it yet. */
+export interface PullReportResult {
+    readonly number: number;
+    /** `owner/name`, when the project's repo is watched. */
+    readonly repo?: string;
+    /** `open`, `merged` or `closed`; absent until the PR is read. */
+    readonly state?: string;
+    readonly title?: string;
+    readonly url?: string;
+    /** Why the PR could not be read now (no source, a failing poll): the report is kept and read on the next poll. */
+    readonly note?: string;
+}
+
+/** The project's pull requests (#793), for `pull_report`: bound to the session's chat, project, task and session. */
+export interface PullsPort {
+    /** `Pulls.report(number, {taskId, chatId, sessionId})` in the chat's project, under the agent's principal. */
+    report(number: number, call: ToolCall): Promise<PullReportResult>;
+}
+
 export interface PlatformPorts {
     readonly memory: MemoryPort;
     readonly task: TaskPort;
@@ -182,4 +201,7 @@ export interface PlatformPorts {
 
     /** Absent where the session is in no project or the host has no Requests actor (#759) — the `requests_*` tools and `projects_request` then report it unavailable. */
     readonly requests?: import('./requests.js').RequestsPort;
+
+    /** Absent on hosts without a Pulls actor — `pull_report` then reports it unavailable. */
+    readonly pulls?: PullsPort;
 }

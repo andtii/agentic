@@ -19,10 +19,11 @@ import { taskReportTool } from './task.js';
 import { usageLimitsTool } from './usage.js';
 
 import { planTools } from './plan.js';
+import { pullReportTool } from './pulls.js';
 
 import { requestTools } from './requests.js';
 
-export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, ChatPostResult, UserQuestion, AskOutcome, DelegateSpec, DelegateCall, DelegateOutcome, DelegateEnvironment, TaskReport, ChatFilesPort, UsagePort, ProjectPort, ProjectSummary, ChatProject, PlatformPorts } from './ports.js';
+export type { ToolCall, MemoryPort, TaskPort, ChatPort, ChatPost, ChatPostResult, UserQuestion, AskOutcome, DelegateSpec, DelegateCall, DelegateOutcome, DelegateEnvironment, TaskReport, ChatFilesPort, UsagePort, ProjectPort, ProjectSummary, ChatProject, PullsPort, PullReportResult, PlatformPorts } from './ports.js';
 export { memorySearchTool, memoryRememberTool, memorySearchInput, memoryRememberInput } from './memory.js';
 export { delegateTool, delegateInput, delegateResult, describeEnvironments, DELEGATE_RUNNING_NOTE, type DelegateResult } from './delegate.js';
 export { chatPostTool, askUserTool, chatPostInput, askUserInput } from './chat.js';
@@ -31,6 +32,7 @@ export { taskReportTool, taskReportInput } from './task.js';
 export { usageLimitsTool, usageLimitsInput } from './usage.js';
 export { projectsTool, projectsInput, type ProjectsListResult, type ProjectsSetResult } from './projects.js';
 
+export { pullReportTool, pullReportInput } from './pulls.js';
 export { planTools, planNext, planClaimRefusal, planManagerRefusal, planApplyChecks, planTouchWarnings, planItemView, PlanRefusal, planListInput, planNextInput, planClaimInput, planAssignInput, planUpdateInput, planRefInput, planAddInput, planHandoffInput, type PlanPort, type PlanBoard, type PlanMember, type PlanUpdateInput, type PlanAddInput, type NewPlanItem, type PlanItemView } from './plan.js';
 
 export { requestTools, requestView, requestWhyLine, requestManagerRefusal, requestResolveRefusal, RequestRefusal, requestsListInput, requestsTriageInput, requestsResolveInput, projectsRequestInput, type RequestsPort, type RequestsBoard, type RequestTarget, type RequestResolution, type NewRequest, type RequestView } from './requests.js';
@@ -41,6 +43,8 @@ export const PLATFORM_TOOL_NAMES = [
     'plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff',
 
     'requests_list', 'requests_triage', 'requests_resolve', 'projects_request',
+
+    'pull_report',
 ] as const;
 export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number];
 
@@ -56,6 +60,8 @@ export function platformTools(ports: PlatformPorts): readonly AnyTool[] {
         ...planTools(ports.plan),
 
         ...requestTools(ports.requests),
+
+        pullReportTool(ports.pulls),
     ];
 }
 

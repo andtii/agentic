@@ -12,6 +12,12 @@
       "development": "./dist/index.js",
       "production": "./dist/index.prod.js",
       "import": "./dist/index.js"
+    },
+    "./provider": {
+      "types": "./dist/provider/index.d.ts",
+      "development": "./dist/provider.js",
+      "production": "./dist/provider.prod.js",
+      "import": "./dist/provider.js"
     }
   },
   "sideEffects": false,

@@ -58,6 +58,8 @@ export interface ToolCallPortOptions {
     readonly memory?: (gate: RegistryGate | undefined) => SessionMemory;
     /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
     readonly machines?: () => AnyActorDefinition;
+    /** The Pulls actor definition — `pull_report` (#793); absent, the tool reports it unavailable. */
+    readonly pulls?: () => AnyActorDefinition;
     /** The Registry actor definition — where a daemon's connector credentials are opened (#280); absent, it gets none. */
     readonly registry?: () => AnyActorDefinition;
     /**
@@ -194,6 +196,7 @@ export function createToolCallPort(options: ToolCallPortOptions): ToolCallPort {
                 ...(options.files ? { files: options.files } : {}),
                 ...(memory ? { memory } : {}),
                 ...(options.machines ? { machines: options.machines } : {}),
+                ...(options.pulls ? { pulls: options.pulls } : {}),
                 ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {}),
                 // A daemon's engine gives up on a tool call after its own timeout, and the child's id with it (#599).
                 delegateWaitMs: options.delegateWaitMs ?? DELEGATE_WAIT_MS

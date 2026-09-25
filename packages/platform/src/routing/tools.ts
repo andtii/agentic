@@ -76,6 +76,8 @@ import { Workspace } from '../workspace/index.js';
 import { readChatFile } from './files.js';
 import { MENTION_CONTEXT_WINDOW, mentionContract } from './mentions.js';
 import { routingKey } from './key.js';
+import { pullsKey } from '../pulls/key.js';
+import type { PullLink, PullsView } from '../pulls/actor.js';
 
 export type AgentPrincipal = Extract<Principal, { kind: 'agent' }>;
 
@@ -84,6 +86,11 @@ interface RoutingClient {
     report(taskId: TaskId, report: TaskReport): Promise<void>;
     run(taskId: TaskId): Promise<TaskView>;
     get(): Promise<{ readonly routes: readonly { readonly taskId: TaskId; readonly environmentId?: EnvironmentId }[] }>;
+}
+
+/** The slice of the Pulls actor `pull_report` calls (`definePullsActor`). */
+interface PullsClient {
+    report(number: number, link: PullLink): Promise<PullsView>;
 }
 
 /** The slice of the Session actor `ask_user` uses (`defineSessionActor`). */
@@ -152,6 +159,8 @@ export interface ActorToolPortsOptions {
     readonly memory?: SessionMemory;
     /** The Machine actor definition, for `usage_limits` (#272); without it there is no `usage` port and the tool reports it unavailable. */
     readonly machines?: () => AnyActorDefinition;
+    /** The Pulls actor definition, for `pull_report` (#793); without it there is no `pulls` port and the tool reports it unavailable. */
+    readonly pulls?: () => AnyActorDefinition;
     /** `ask_user`'s quick-answer window in a chat (#285); default `ASK_QUICK_WAIT_MS`. */
     readonly askQuickWaitMs?: number;
     /**
@@ -562,9 +571,45 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
         await as(Chat, agentChatKey(workspaceId, chatId)).post(text, []);
     }
 
+    // Pull requests (#793): the PR the agent opened goes to the Pulls actor of the chat's project, under the agent's own
+    // principal, linked to the task it works right now, the chat and the session.
+    const pullsDef = options.pulls;
+    const pulls: PlatformPorts['pulls'] = pullsDef
+        ? {
+              async report(number) {
+                  if (!chatId) throw new ToolCallError('unsupported', 'pull_report: this session belongs to no chat, so no project to report the pull request in');
+                  let projectId: ProjectId | undefined;
+                  try {
+                      projectId = (await as(Chat, agentChatKey(workspaceId, chatId)).get()).projectId;
+                  } catch (e) {
+                      throw asChatToolError('pull_report', e);
+                  }
+                  if (!projectId) throw new ToolCallError('unsupported', 'pull_report: this chat is in no project');
+                  const { taskId } = principalNow();
+                  const client = actor(pullsDef(), pullsKey(workspaceId, projectId)).with({ context: asPrincipal(principalNow()) }) as unknown as PullsClient;
+                  let view: PullsView;
+                  try {
+                      view = await client.report(number, { chatId, sessionId, ...(taskId ? { taskId } : {}) });
+                  } catch (e) {
+                      if (isServerFnError(e) && e.status === 400) throw new ToolCallError('invalid', `pull_report: ${e.message}`);
+                      throw e;
+                  }
+                  const pr = view.pulls.find((p) => p.number === number);
+                  const note = pr ? undefined : (view.error ?? (view.repo ? 'not read yet; it is read on the next poll' : "the project's repo is not watched yet; the report is kept for when it is"));
+                  return {
+                      number,
+                      ...(view.repo ? { repo: view.repo.repo } : {}),
+                      ...(pr ? { state: pr.state, title: pr.title, url: pr.url } : {}),
+                      ...(note ? { note } : {})
+                  };
+              }
+          }
+        : undefined;
+
     return {
         ...(files ? { files } : {}),
         ...(usage ? { usage } : {}),
+        ...(pulls ? { pulls } : {}),
         projects,
         plan,
         memory: {

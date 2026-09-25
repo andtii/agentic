@@ -6,12 +6,25 @@
  * Session, Machine and Routing reference each other.
  */
 
-import type { ChatFileStore, Principal, ProjectFeaturePlugin, SessionId, WorkspaceId } from '@agentic/core';
+import type { ChatFileStore, ChatId, EnvironmentId, MachineId, Principal, ProjectFeaturePlugin, ProjectRecord, SessionId, TaskId, WorkspaceId } from '@agentic/core';
 import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
 import type { WorkspaceStore } from '../workspace/ports.js';
 import type { RuntimeCatalogue } from './factory.js';
 import type { ToolFamilies } from './features.js';
+
+/** A task placed in a project (#793): its feature hooks ran and its session is about to open, in `cwd`. */
+export interface ProjectPlacement {
+    readonly workspaceId: WorkspaceId;
+    readonly project: ProjectRecord;
+    readonly taskId: TaskId;
+    readonly chatId?: ChatId;
+    /** Absent on the API path (no folder, so no `beforeSession` ran). */
+    readonly environmentId?: EnvironmentId;
+    readonly machineId?: MachineId;
+    /** The folder the session opens in — a feature's (a chat's worktree) or the route's. */
+    readonly cwd?: string;
+}
 
 export interface RoutingPorts {
     /** The Session actor definition this app built (`defineSessionActor`). */
@@ -58,6 +71,12 @@ export interface RoutingPorts {
      * `DEFAULT_TOOL_FAMILIES` (`plan`).
      */
     readonly toolFamilies?: ToolFamilies;
+    /**
+     * Told of every placement in a project once its feature hooks ran (#793) — the app watches the project's repo and
+     * links a chat's branch to its task (the Pulls actor). Fire and forget: never awaited, and a throw is logged and
+     * never fails the placement. Default: none.
+     */
+    readonly placed?: (placement: ProjectPlacement) => void | Promise<void>;
     /**
      * How `endSession` (#399, OPS-10) deletes the ended session's record and its pages — the same store
      * `Workspace.deleteAll` purges through (`WorkspaceOptions.store`; each actor's own Durable Object in the web
