@@ -230,7 +230,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     // The build's plugins (#231): the Registry lists them, the router gates on them, a local runtime's key is their secret.
     const kek = ports.kek ?? defaultPorts.kek;
     // Switching the active memory plugin moves the memories between these implementations (#243).
-    const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue, memoryPlugins: memoryCatalogue });
+    const Registry = defineRegistry({ ...(kek ? { kek } : {}), catalogue: ports.catalogue ?? pluginCatalogue, memoryPlugins: memoryCatalogue, projectFeatures: projectFeatureCatalogue });
     const registry = () => Registry;
     // Notification channels (#244): the static ones, then every enabled notification plugin this build implements — one Registry hop per notification.
     // The Workspace's notification prefs decide first (#302): push off reaches no channel, inbox off records without counting unread.
