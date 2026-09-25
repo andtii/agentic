@@ -7,8 +7,9 @@
  * runs in (its own override, else the project's for its environment). Pure:
  * the mock page and the live page render the same form over it.
  */
-import { isProjectFeatureManifest, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderKey, sameOrigin, type ConfigSchema, type EnvironmentId, type FsGitInfo, type MachineId, type PluginManifest, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFolderInfo, type ProjectPatch, type ProjectRecord, type WorkdirRef } from '@agentic/core';
+import { isProjectFeatureManifest, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, projectFolderKey, sameOrigin, type ConfigSchema, type EnvironmentId, type FsGitInfo, type MachineId, type PluginManifest, type ProjectFeatureManifest, type ProjectFeaturePlugin, type ProjectFolderInfo, type ProjectPatch, type ProjectRecord, type WorkdirRef } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
+import type { MachineEntry } from '../ops/environments';
 
 /** A folder row's value: the path and, when the listing or `locate` showed one, its git badge. */
 export interface ProjectFolderDraft {
@@ -187,13 +188,30 @@ export function projectPlaces(project: Pick<ProjectRecord, 'folders'>, machines:
     return out;
 }
 
+/** An environment's roots on one machine, as the directory reports them (#702: its id alone may name another machine's). */
+export function rootsOn(machines: readonly MachineEntry[] | undefined, machineId: string | undefined, environmentId: string): Pick<WorkdirEnvironment, 'roots' | 'os'> | undefined {
+    const m = machineId !== undefined ? machines?.find((x) => x.id === machineId) : undefined;
+    const env = m?.environments.find((e) => e.id === environmentId);
+    return m && env ? { roots: env.cwdRoots, os: m.os ?? 'windows' } : undefined;
+}
+
+/**
+ * The project's folder for `environmentId` on `machineId`, as the router takes it (#702): an override or a pre-#702
+ * entry as stored; the machine's folder only when `env`'s roots hold it — unknown roots take it as stored.
+ */
+export function projectFolderOn(project: Pick<ProjectRecord, 'folders'>, environmentId: string, machineId: string | undefined, env: Pick<WorkdirEnvironment, 'roots' | 'os'> | undefined): string | undefined {
+    const path = projectFolderFor(project, environmentId as EnvironmentId, machineId as MachineId | undefined);
+    if (path === undefined || machineId === undefined || !env || !projectFolderIsShared(project, environmentId as EnvironmentId, machineId as MachineId)) return path;
+    return reaches(env, path) ? path : undefined;
+}
+
 /**
  * The folder a chat member runs in: its own override for the chat (`Chat.setWorkdir`), else the project's folder
- * for the environment it runs in on the chat's machine (#702), else none — what the context panel shows and marks
- * "from project".
+ * for the environment it runs in on the chat's machine (#702, `projectFolderOn` with that environment's roots
+ * there), else none — what the context panel shows and marks "from project".
  */
-export function effectiveWorkdir(member: { readonly workdir?: WorkdirRef }, environmentId: string | undefined, project: Pick<ProjectRecord, 'folders'> | undefined, machineId?: string): { readonly ref: WorkdirRef | null; readonly inherited: boolean } {
+export function effectiveWorkdir(member: { readonly workdir?: WorkdirRef }, environmentId: string | undefined, project: Pick<ProjectRecord, 'folders'> | undefined, machineId?: string, env?: Pick<WorkdirEnvironment, 'roots' | 'os'>): { readonly ref: WorkdirRef | null; readonly inherited: boolean } {
     if (member.workdir) return { ref: member.workdir, inherited: false };
-    const path = project && environmentId ? projectFolderFor(project, environmentId as EnvironmentId, machineId as MachineId | undefined) : undefined;
+    const path = project && environmentId ? projectFolderOn(project, environmentId, machineId, env) : undefined;
     return path ? { ref: { environmentId: environmentId as EnvironmentId, path }, inherited: true } : { ref: null, inherited: false };
 }

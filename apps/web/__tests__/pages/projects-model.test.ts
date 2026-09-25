@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { projectFolderKey, type EnvironmentId, type MachineId, type ProjectFeatureManifest, type ProjectRecord } from '@agentic/core';
 import type { WorkdirEnvironment } from '@agentic/ui';
-import { connectorOptionsOf, detectedFeatures, effectiveWorkdir, featureManifestsOf, hasUnplacedFolders, originMismatch, originOf, projectDraftOf, projectPatchOf, projectPlaces, resolveFolders, validateProjectDraft, withOrigin, type ProjectMachine } from '../../src/pages/projects/model';
+import { connectorOptionsOf, detectedFeatures, effectiveWorkdir, featureManifestsOf, hasUnplacedFolders, originMismatch, originOf, projectDraftOf, projectFolderOn, projectPatchOf, projectPlaces, resolveFolders, rootsOn, validateProjectDraft, withOrigin, type ProjectMachine } from '../../src/pages/projects/model';
 import { PROJECTS } from '../../src/mock/workspace';
 import { opsPlugins } from '../../src/mock/ops';
 
@@ -140,6 +140,19 @@ describe('features', () => {
     });
 });
 
+describe('rootsOn', () => {
+    it('reads an environment\u2019s roots on the machine named, never another machine\u2019s of the same id (#702)', () => {
+        const machines = [
+            { id: 'mac', name: 'Mac', online: true, os: 'darwin' as const, environments: [{ id: 'env_claude', cwdRoots: ['/Users/me/dev'] }] },
+            { id: 'win', name: 'Win', online: true, environments: [{ id: 'env_claude', cwdRoots: ['C:\\Dev'] }] }
+        ] as never;
+        expect(rootsOn(machines, 'win', 'env_claude')).toEqual({ roots: ['C:\\Dev'], os: 'windows' });
+        expect(rootsOn(machines, 'mac', 'env_claude')).toEqual({ roots: ['/Users/me/dev'], os: 'darwin' });
+        expect(rootsOn(machines, undefined, 'env_claude')).toBeUndefined();
+        expect(rootsOn(machines, 'win', 'env_nope')).toBeUndefined();
+    });
+});
+
 describe('effectiveWorkdir', () => {
     it('the override wins, else the project\u2019s folder for the member\u2019s environment, else none', () => {
         const project = { folders: { env_work: 'C:\\Dev\\agentic\\main' } };
@@ -153,6 +166,12 @@ describe('effectiveWorkdir', () => {
         expect(effectiveWorkdir({}, 'env_claude', byMachine, WIN_M).ref).toEqual({ environmentId: 'env_claude', path: 'C:\\Dev\\agentic\\main' });
         expect(effectiveWorkdir({}, 'env_codex', byMachine, WIN_M).ref).toEqual({ environmentId: 'env_codex', path: 'D:\\work\\agentic' });
         expect(effectiveWorkdir({}, 'env_claude', byMachine, MAC_M).ref).toBeNull();
+        // As the router takes it: the machine's folder only where the environment's roots hold it; an override always.
+        const dev = { roots: ['C:\\Dev'], os: 'windows' as const };
+        const elsewhere = { roots: ['E:\\other'], os: 'windows' as const };
+        expect(effectiveWorkdir({}, 'env_claude', byMachine, WIN_M, dev).ref?.path).toBe('C:\\Dev\\agentic\\main');
+        expect(effectiveWorkdir({}, 'env_claude', byMachine, WIN_M, elsewhere)).toEqual({ ref: null, inherited: false });
+        expect(projectFolderOn(byMachine, 'env_codex', WIN_M, elsewhere)).toBe('D:\\work\\agentic');
         expect(effectiveWorkdir({}, 'env_work', undefined)).toEqual({ ref: null, inherited: false });
     });
 });
