@@ -5,19 +5,20 @@
  * `Open plan`. Below 768px the graph gives way to a stacked list of chains. The layout is `linksLayout` (./model.ts).
  * Its trail is `crumbs.ts`'s.
  *
- * Mock data draws `MOCK_PROJECT_LINKS`; live, nothing lists cross-project links yet (#764), so the page says so.
+ * Mock data draws `MOCK_PROJECT_LINKS`; live, every project's `Plan.linkItems()` through `workspaceLinks` (#881,
+ * ./live.ts), with the agents' names from the directory.
  */
 import { component, signal, useHead, type Define, type JSXElement } from 'sigx';
 import { Link } from '@sigx/router';
 import { AgentTile, EmptyState, Icon, ItemGlyph } from '@agentic/ui';
+import { useActorDefs, useViewer } from '../../../actors/defs';
 import { dataMode } from '../../../data-mode';
 import { MOCK_PROJECT_LINKS } from '../../../mock/projects/links';
+import { useAgentDirectory } from '../../chat/directory';
+import { useProjects } from '../live';
+import { liveLinksData, useLiveLinks, type LinkAgentNames } from './live';
 import { chainOf, itemsOf, linkChains, linkCount, linksLayout, LINKS_NODE_W, milestonesOf, toggleLabel, type LinkActor, type LinkItem, type LinksData, type LinksView } from './model';
 
-const EMPTY: LinksData = { open: { lanes: [], items: [] }, done: { lanes: [], items: [] } };
-
-/** Where the page reads from: the mock links, or none live until the platform lists them (#764). */
-export const linksData = (): LinksData => (dataMode() === 'live' ? EMPTY : MOCK_PROJECT_LINKS);
 
 const Tile = (a: LinkActor) => <AgentTile name={a.name} hue={a.hue} person={a.person ?? false} monogram={a.monogram} size={18} />;
 
@@ -231,8 +232,22 @@ export const LinksBoard = component<LinksBoardProps>(({ props }) => {
     };
 }, { name: 'LinksBoard' });
 
+/** The board over the workspace's live link graphs (#881). */
+const LiveProjectLinks = component(() => {
+    const defs = useActorDefs();
+    const viewer = useViewer()();
+    const directory = useAgentDirectory(defs, viewer);
+    const projects = useProjects(defs, viewer);
+    const links = useLiveLinks(defs, viewer, () => projects.list());
+    const names: LinkAgentNames = (id) => {
+        const a = directory.lookup(id);
+        return { name: a.name, hue: a.hue };
+    };
+    return () => <LinksBoard data={liveLinksData(links.graphs(), names)} />;
+}, { name: 'LiveProjectLinks' });
+
 /** `/projects/links`. */
 export const ProjectLinks = component(() => {
     useHead({ title: 'Links' });
-    return () => <LinksBoard data={linksData()} />;
+    return () => (dataMode() === 'live' ? <LiveProjectLinks /> : <LinksBoard data={MOCK_PROJECT_LINKS} />);
 }, { name: 'ProjectLinks' });

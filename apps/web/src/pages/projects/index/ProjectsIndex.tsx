@@ -1,7 +1,8 @@
 /**
  * `/projects` (#729; PRJ-02): the projects index board on mock data or on the platform. Live, the cards are
  * `Workspace.projects()` with `Workspace.projectSummaries()` (#734) for each card's chats line and the unassigned
- * strip; your-move and agents-on-it counts and the open-links strip wait for sources that count them.
+ * strip, and the open-links strip counts the workspace's open cross-project links (`workspaceLinks`, #881); your-move
+ * and agents-on-it counts wait for sources that count them.
  */
 // Projects.tsx registers the old list's topbar (New project in the topbar); importing it first makes ours win.
 import '../../Projects';
@@ -18,6 +19,7 @@ import { agentNamed } from '../../../mock/workspace';
 import { useAgentDirectory } from '../../chat/directory';
 import { mockWorkdirEnvironments, useLiveWorkdirEnvironments } from '../../workdir/environments';
 import { useProjects } from '../live';
+import { openLinksOf, useLiveLinks } from '../links/live';
 import type { ProjectCardData } from './model';
 import { ProjectsBoard } from './ProjectsBoard';
 
@@ -38,6 +40,7 @@ const LiveProjectsIndex = component(() => {
     const projects = useProjects(defs, viewer);
     const workdirs = useLiveWorkdirEnvironments(defs, viewer);
     const summaries = useActorState(defs.Workspace, () => viewer.workspaceId && ([workspaceKeyOf(viewer.workspaceId), 'projectSummaries'] as const), { live: true });
+    const links = useLiveLinks(defs, viewer, () => projects.list());
     return () => {
         if (!viewer.pending && !viewer.workspaceId) {
             return <Page title="Projects" page="projects"><EmptyState variant="generic" title="Sign in to see your projects" caption="Projects belong to your workspace." /></Page>;
@@ -48,6 +51,8 @@ const LiveProjectsIndex = component(() => {
             const line = s?.projects.find((l) => l.projectId === project.id);
             return line ? { project, next: chatsLine(line.openChats, line.lastActivityAt, now) } : { project };
         });
+        const graphs = links.graphs();
+        const open = graphs ? openLinksOf(graphs.open) : undefined;
         return (
             <ProjectsBoard
                 cards={cards}
@@ -55,6 +60,7 @@ const LiveProjectsIndex = component(() => {
                 lookup={directory.lookup}
                 loading={projects.loading}
                 {...(s ? { unassigned: { chats: s.unassigned.openChats } } : {})}
+                {...(open ? { links: open } : {})}
             />
         );
     };

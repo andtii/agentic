@@ -1,7 +1,7 @@
 /**
  * `/projects/links` (#765, PRJ-17): the pure layout (`linksLayout` — lanes, columns, arrows, the highlighted chain),
  * `chainOf` / `linkChains` / `linkCount`, and the page on mock data: the toggle, the graph matching the board, the
- * chain panel, the stacked chains, and the empty state live.
+ * chain panel and the stacked chains. Live data: links-live.test.ts (#881).
  */
 import { afterEach, describe, it, expect } from 'vitest';
 import { setDataMode } from '../../src/data-mode';
@@ -167,12 +167,4 @@ describe('/projects/links (mock)', () => {
         expect(dom.querySelector('[data-links-node="signalx#14"]')).not.toBeNull();
     });
 
-    it('says there are no links live, where nothing lists them yet', async () => {
-        setDataMode('live');
-        const dom = await mountRoute('/projects/links');
-        const p = page(dom, 'projects-links')!;
-        expect(p.querySelector('[data-links-canvas]')).toBeNull();
-        expect(p.textContent).toContain('No open links across projects');
-        expect(p.querySelector('[data-links-toggle-option="open"]')!.textContent).toBe('Open 0');
-    });
 });
