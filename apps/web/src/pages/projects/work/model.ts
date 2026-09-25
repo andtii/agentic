@@ -78,6 +78,8 @@ function placePull(pr: PullRequest, stages: readonly string[], doer: AgentId | u
     }
     const pending = pr.checks.filter((c) => c.state === 'queued' || c.state === 'running').length;
     if (pending) return { stage: at('Checks', 1), stageState: 'working', owner: fixer ? agent(fixer) : YOU, nextStep: `Waiting on CI · ${plural(pending, 'check', 'checks')} running`, group: 'waiting' };
+    // No checks reported yet is not green: CI has not started (or not reported), so it waits at Checks.
+    if (!pr.checks.length) return { stage: at('Checks', 1), stageState: 'working', owner: fixer ? agent(fixer) : YOU, nextStep: 'Waiting on CI · no checks reported yet', group: 'waiting' };
     const open = pr.review.threads.filter((t) => t.state !== 'resolved').length;
     if (open || pr.review.state === 'changes-requested') {
         const what = open ? plural(open, 'review thread', 'review threads') : 'the requested changes';
@@ -134,8 +136,8 @@ function placeItem(item: PlanItem, stages: readonly string[], now: number): Plac
     return null;
 }
 
-/** When a plan item last changed: its newest History line. */
-const itemUpdatedAt = (item: PlanItem): number => item.activity.reduce((at, a) => Math.max(at, a.at), 0);
+/** When a plan item last changed: its newest History line, else `now` so it neither sorts as oldest nor drops off when done. */
+const itemUpdatedAt = (item: PlanItem, now: number): number => (item.activity.length ? item.activity.reduce((at, a) => Math.max(at, a.at), 0) : now);
 
 /**
  * Every work item of a project, newest first: one per open or recently merged pull request (its task folded in), one
@@ -179,7 +181,7 @@ export function workItemsOf(tasks: readonly WorkTask[], pulls: readonly PullRequ
     for (const item of planItems) {
         if (item.claim?.taskId && taskById.has(item.claim.taskId)) continue;
         const placed = placeItem(item, stages, now);
-        const updatedAt = itemUpdatedAt(item);
+        const updatedAt = itemUpdatedAt(item, now);
         if (!placed || (placed.group === 'done' && !recent(updatedAt))) continue;
         out.push({ id: `item:${item.id}`, title: item.title, itemRef: `#${item.id}`, stages, ...placed, updatedAt });
     }
