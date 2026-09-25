@@ -89,7 +89,13 @@ jobs:
         env:
           AGENTIC_UPDATER_PUBKEY: ${{ vars.AGENTIC_UPDATER_PUBKEY }}
           AGENTIC_UPDATER_URL: https://github.com/${{ github.repository }}/releases/download/desktop-stable/latest.json
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
+          # The public key turns the updater on; without the private key the signed artifacts cannot be made.
+          if [ -n "$AGENTIC_UPDATER_PUBKEY" ] && [ "$HAS_SIGNING_KEY" != "true" ]; then
+            echo "::error::AGENTIC_UPDATER_PUBKEY is set but the TAURI_SIGNING_PRIVATE_KEY secret is not (docs/runbook.md §5a.3)"
+            exit 1
+          fi
           node apps/desktop/scripts/release-config.mjs "$TAG" > apps/desktop/src-tauri/release.conf.json
           cat apps/desktop/src-tauri/release.conf.json
 

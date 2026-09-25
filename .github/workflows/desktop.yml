@@ -83,8 +83,9 @@ jobs:
         run: cargo build
         working-directory: apps/desktop/src-tauri
 
+      # Pinned so a new tauri-driver never breaks the smoke on its own; bump on purpose.
       - name: tauri-driver
-        run: cargo install tauri-driver --locked
+        run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Smoke
         run: |
