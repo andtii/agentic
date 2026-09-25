@@ -679,7 +679,7 @@ _not yet_
 
 #### #749 repo: packages/plugins-plan scaffold
 
-_not yet_
+`packages/plugins-plan` (`@agentic/plugins-plan`) exists and is wired like `plugins-git`: `tsconfig.json` paths, the vitest alias, `.size-limit.json` and the build. It depends on `@agentic/core` only, stays edge-safe, and exports nothing yet; the plan feature manifest lands with #753.
 
 #### #750 platform: Plan actor — items, queues, claims and leases, limits, after, touches, audit
 

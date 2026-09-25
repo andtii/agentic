@@ -532,6 +532,22 @@ importers:
         specifier: ^8.0.3
         version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)
 
+  packages/plugins-plan:
+    dependencies:
+      '@agentic/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@sigx/vite':
+        specifier: 'catalog:'
+        version: 1.0.1(@sigx/server-renderer@1.0.1(sigx@1.0.1))(@sigx/server@1.0.1(sigx@1.0.1))(sigx@1.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0))
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.0.3
+        version: 8.3.0(@types/node@26.6.1)(esbuild@0.28.1)(jiti@2.7.0)
+
   packages/runtimes:
     dependencies:
       '@agentic/core':
