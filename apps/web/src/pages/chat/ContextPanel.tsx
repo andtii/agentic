@@ -10,6 +10,8 @@ import { DEFAULT_PERMISSION_MODE, modeChoices, modelChoices, type MemberChoice }
 import type { MachineEntry } from '../ops/environments';
 import { effectiveWorkdir, rootsOn } from '../projects/model';
 import { WorkdirPicker } from '../workdir/WorkdirPicker';
+import { AcrossProjects } from './panels/AcrossProjects';
+import type { AcrossItem, Visitor } from '@agentic/platform';
 import { agentNamed, formatTime, type MockChatSummary } from '../../mock/workspace';
 import { stoppable, type AgentIdentity, type AgentLookup, type ChatTaskRow, type TimeText } from './live';
 
@@ -54,7 +56,11 @@ export type ContextPanelProps =
     /** "New session" confirmed for a member (#399): its session ends and the next message opens a fresh one; the chat's history stays. */
     & Define.Event<'resetSession', { readonly agentId: string }>
     /** A member's model or permission mode for this chat was picked, or cleared back to its config with `null` (#453). */
-    & Define.Event<'setOptions', { readonly agentId: string; readonly patch: SessionOptionsPatch }>;
+    & Define.Event<'setOptions', { readonly agentId: string; readonly patch: SessionOptionsPatch }>
+    /** Another project's manager visiting this chat (#762): its card carries its project chip and `project manager, visiting`. */
+    & Define.Prop<'visitorOf', (agentId: string) => Visitor | undefined>
+    /** The items this chat links across projects (#762), for the Across projects card. */
+    & Define.Prop<'across', readonly AcrossItem[]>;
 
 /** Which of a member's switchable rows is open (#453). */
 type OptionKey = 'model' | 'permissionMode';
@@ -241,7 +247,7 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                                         <AgentTile name={a.name} hue={a.hue} size={28} />
                                         <span data-member-who>
                                             <span data-member-name>{a.name}</span>
-                                            <span data-member-role>{a.role}</span>
+                                            {(() => { const v = props.visitorOf?.(member.agentId); return v ? <span data-member-role data-member-visiting="">{v.role} <span data-requests-chip="project"><Icon name="folder" size={12} />{v.projectName}</span></span> : <span data-member-role>{a.role}</span>; })()}
                                         </span>
                                         <StatusPill status={member.status === 'idle' ? 'idle' : member.status} />
                                     </header>
@@ -292,6 +298,8 @@ export const ContextPanel = component<ContextPanelProps>(({ props, emit }) => {
                         })}
                     </ul>
                 </section>
+
+                <AcrossProjects items={props.across ?? []} />
 
                 <section data-context-section aria-label="Tasks in this chat">
                     <header data-context-head>

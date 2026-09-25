@@ -162,7 +162,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #761: none — the Requests inbox is agentic product UI.
 
-- #762: —
+- #762: none — visiting managers, the chat's request cards and Across projects are agentic product logic and UI.
 
 - #763: —
 
