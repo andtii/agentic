@@ -15,7 +15,8 @@ describe('git feature ui slots', () => {
             overviewCard: { title: 'Code' },
             workStages: ['Ready', 'Code', 'PR', 'Checks', 'Review', 'Merge'],
             chatRefPrefixes: ['pr:'],
-            needs: ['folder']
+            needs: ['folder'],
+            tools: ['pulls']
         });
     });
 

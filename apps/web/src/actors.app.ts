@@ -104,7 +104,6 @@ import {
     type ArtifactSink,
     type KekSource,
 
-    NO_PULL_SOURCES,
     definePullsActor,
     type PullSourcePort,
 
@@ -128,6 +127,7 @@ import { channelCatalogue, connectorOpener, learningCatalogue, memoryCatalogue, 
 import { createPurgeHandler, durableObjectWorkspaceStore, r2ArtifactSink, type R2BucketLike } from './retention';
 import { runWithHost } from './host-scope';
 import { observeSlowTurns } from './actors/slow-turns';
+import { githubPullSources, pullsPlacement } from './actors/pulls';
 
 export { DAEMON_SOCKET_PREFIX };
 
@@ -188,7 +188,10 @@ export interface PlatformPorts {
      * both tool ports (`chat_file_read`) and the Workspace (the purge).
      */
     readonly files?: ChatFileStore;
-    /** Where the Pulls actor reads a project's pull requests (#742). Default: `NO_PULL_SOURCES`, until the git feature's credential is wired. */
+    /**
+     * Where the Pulls actor reads a project's pull requests (#742, #793). Default: `githubPullSources` — the GitHub
+     * adapter over the workspace's `github-token` secret, under the git plugin's `secret:github-token` grant.
+     */
     readonly pulls?: PullSourcePort;
 }
 
@@ -237,9 +240,9 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const learning = platformLearningPorts({ plugin: learningCatalogue[learningDefaultPlugin.id]!({}), memoryPlugins: memoryCatalogue, learningPlugins: learningCatalogue });
     const memory = (gate: RegistryGate | undefined): SessionMemory => memoryAccess(learning, gate);
     // Conduit connectors (#533): a session's engine names the deployment's callback, though it never begins a sign-in.
-    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, memory, ...withFiles }, { origin: () => secrets.appOrigin });
+    const runtimes = ports.runtimes ?? runtimeCatalogue({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, memory, ...withFiles }, { origin: () => secrets.appOrigin });
     const Session = defineSessionActor({
-        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, runtimes, ...withFiles }),
+        factory: ports.factory ?? createSessionFactory({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, registry, runtimes, ...withFiles }),
         commands: { send: (t, command) => actor(Machine, machineKey(t.workspaceId, t.machineId)).with({ context: asPrincipal(userPrincipal(t.workspaceId, t.workspaceId)) }).sendCommand(t.sessionId, command) },
         // The machine owns a daemon session's history (#397): the record keeps `RETAINED_PAGES` pages and reads older events here.
         history: machineHistorySource(() => Machine),
@@ -253,7 +256,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     const sink = ports.sink ?? defaultPorts.sink;
     const store = ports.store ?? defaultPorts.store;
     // "New session" (#399): the router ends a chat member's session and purges its record and pages through the same store `deleteAll` uses.
-    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, ...withFiles, ...(store ? { store } : {}) });
+    // A placement in a project with Git on watches its repo and links the chat's branch to the task (#793).
+    const Routing: RoutingActor = defineRoutingActor({ sessions: () => Session, machines: () => Machine, registry, runtimes, projectFeatures: projectFeatureCatalogue, placed: pullsPlacement(() => Pulls), ...withFiles, ...(store ? { store } : {}) });
     // Daemon updates (#365): the global release directory every Machine compares its daemon against; update notices go to the Inbox.
     const Releases = defineReleaseDirectory(ports.releasesFetch ? { fetch: ports.releasesFetch } : {});
     const Machine: MachineActor = defineMachineActor({
@@ -263,7 +267,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
         releases: () => Releases,
         inbox: () => Inbox,
         // A daemon session's conduit connectors run here, through the opener local sessions use (#534).
-        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, registry, memory, connectors: connectorOpener({ origin: () => secrets.appOrigin }), ...withFiles })
+        tools: ports.tools ?? createToolCallPort({ routing: () => Routing, sessions: () => Session, machines: () => Machine, pulls: () => Pulls, registry, memory, connectors: connectorOpener({ origin: () => secrets.appOrigin }), ...withFiles })
     });
     // A firing's task goes to the router (queued, or parked `waiting {environment-offline}` by the trigger for the router to resolve, #42/#37).
     // Fire and forget: the observer never fails a firing, and the Schedule alarm does not wait on the run.
@@ -288,6 +292,8 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
             origin: () => secrets.appOrigin,
             ...(ports.connectorHttp ? { http: ports.connectorHttp } : {})
         });
+    // A project's pull requests (#742): read through the git feature's GitHub adapter with the workspace's token (#793).
+    const Pulls = definePullsActor({ sources: ports.pulls ?? githubPullSources(registry) });
     const Workspace = defineWorkspace({ ...(sink ? { sink } : {}), ...(store ? { store } : {}), ...withFiles });
     // Removing a member ends its session through the router (#399, architecture §6). A chat titles itself (#460): the
     // runtime's title when one reports it, else the platform's own model call with the workspace's Anthropic key.
@@ -297,7 +303,7 @@ export function platformActors(ports: PlatformPorts = defaultPorts): readonly An
     return [
         Workspace, AgentActor, Chat, ChatPage, TaskActor, TaskIndex, Session, SessionPage, SessionTranscriptPage, Machine, Routing, LedgerActor, AuditActor, PairingDirectory, Releases, defineScheduleActor({ trigger }), Memory, FlatMemory, Inbox, Registry, ConnectorAccounts, OAuthClients, OAuthGrants,
 
-        definePullsActor({ sources: ports.pulls ?? NO_PULL_SOURCES }),
+        Pulls,
 
         definePlanActor(),
 

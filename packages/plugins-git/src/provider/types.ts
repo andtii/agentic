@@ -7,8 +7,6 @@
 
 import type { ProjectFolderInfo, PullRequest } from '@agentic/core';
 
-import { identityOf } from '../index.js';
-
 /** How a PR is merged — the three methods every provider we target offers. */
 export type PullMergeMethod = 'merge' | 'squash' | 'rebase';
 
@@ -124,6 +122,7 @@ export function pullRepoOfOrigin(origin: string, hosts: Readonly<Record<string, 
 
 /** The folder's `{provider, repo}` from its origin (`identityOf`); `undefined` when it has none an adapter reads. */
 export function pullRepoOf(folder: ProjectFolderInfo, hosts?: Readonly<Record<string, string>>): PullRepoRef | undefined {
-    const origin = identityOf(folder);
+    // `identityOf`, inline: this module is the `./provider` entry and must not pull the feature plugin in with it.
+    const origin = folder.git?.origin;
     return origin ? pullRepoOfOrigin(origin, hosts) : undefined;
 }

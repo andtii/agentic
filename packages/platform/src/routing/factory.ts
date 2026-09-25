@@ -112,6 +112,8 @@ export interface AnthropicApiRuntimeOptions {
     readonly connectors?: ConnectorOpener;
     /** The Machine actor definition — `usage_limits` (#272); absent, the tool reports it unavailable. */
     readonly machines?: () => AnyActorDefinition;
+    /** The Pulls actor definition — `pull_report` (#793); absent, the tool reports it unavailable. */
+    readonly pulls?: () => AnyActorDefinition;
 }
 
 export interface SessionFactoryOptions extends AnthropicApiRuntimeOptions {
@@ -167,6 +169,7 @@ export function anthropicApiRuntime(options: AnthropicApiRuntimeOptions): Runtim
                 ...(options.files ? { files: options.files } : {}),
                 ...(options.memory ? { memory: options.memory(c.spec.plugins) } : {}),
                 ...(options.machines ? { machines: options.machines } : {}),
+                ...(options.pulls ? { pulls: options.pulls } : {}),
                 ...(options.askQuickWaitMs !== undefined ? { askQuickWaitMs: options.askQuickWaitMs } : {}),
                 ...(options.delegateWaitMs !== undefined ? { delegateWaitMs: options.delegateWaitMs } : {})
             });

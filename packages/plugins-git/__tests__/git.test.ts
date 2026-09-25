@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FEATURE_KIND, applyProjectFeaturePreset, configDefaults, isProjectFeatureManifest, projectFolderKey, suggestWorktreePath, validateConfig, type ChatId, type EnvironmentId, type FsError, type FsGitInfo, type FsOp, type FsResult, type MachineId, type ProjectFeatureFs, type ProjectFeatureSessionInput, type ProjectId, type ProjectRecord, type TaskId } from '@agentic/core';
 
-import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
+import { chatWorktreeFor, splitCommand, DEFAULT_BRANCH_PREFIX, DEFAULT_WORKTREE_NOTICE, GIT_FEATURE_ID, GITHUB_TOKEN_SECRET, gitBranchFor, gitSettingsErrors, gitFeatureManifest, gitFeaturePlugin, hostOsOfPath, identityOf, isValidBranchName } from '../src/index';
 
 const CHAT = 'chat_AbCdEfGhIjKlMnOpQrStUv' as ChatId;
 const SHORT = 'opqrstuv';
@@ -67,7 +67,9 @@ describe('manifest', () => {
         expect(gitFeatureManifest.name.trim()).not.toBe('');
         expect(typeof gitFeatureManifest.description).toBe('string');
         expect(Array.isArray(gitFeatureManifest.capabilities)).toBe(true);
-        expect(gitFeatureManifest.permissions).toEqual([]);
+        // The pull request adapter's credential (#793): declared, and granted by its own scope.
+        expect(gitFeatureManifest.permissions.map((p) => p.scope)).toEqual([`secret:${GITHUB_TOKEN_SECRET}`]);
+        expect(gitFeatureManifest.secrets?.map((s) => [s.name, s.required])).toEqual([[GITHUB_TOKEN_SECRET, false]]);
         expect(gitFeatureManifest.compat).toEqual({ platform: '*', core: '*' });
         expect(Object.keys(gitFeatureManifest.projectSettings.properties!)).toEqual(['origin', 'worktreePerChat', 'branchPrefix', 'branchTemplate', 'worktreePath', 'worktreeStrategy', 'worktreeCreate', 'worktreeSetup', 'worktreeCleanup', 'worktreeDeleteBranch', 'worktreeRemove', 'reuseExisting', 'worktreeNotice', 'base', 'instructions']);
         expect(configDefaults(gitFeatureManifest.projectSettings)).toEqual({ worktreePerChat: false, branchPrefix: DEFAULT_BRANCH_PREFIX, worktreeStrategy: 'builtin', worktreeCleanup: 'never', worktreeDeleteBranch: false, reuseExisting: true, instructions: '' });

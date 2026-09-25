@@ -37,6 +37,9 @@
       "@agentic/connectors": [
         "./packages/connectors/src/index.ts"
       ],
+      "@agentic/plugins-git/provider": [
+        "./packages/plugins-git/src/provider/index.ts"
+      ],
       "@agentic/plugins-git": [
         "./packages/plugins-git/src/index.ts"
       ],

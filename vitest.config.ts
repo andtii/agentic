@@ -45,6 +45,7 @@ export default defineConfig({
             { find: '@agentic/runtimes', replacement: pkg('runtimes') },
             { find: '@agentic/learning', replacement: pkg('learning') },
             { find: '@agentic/connectors', replacement: pkg('connectors') },
+            { find: '@agentic/plugins-git/provider', replacement: resolve(__dirname, 'packages/plugins-git/src/provider/index.ts') },
             { find: '@agentic/plugins-git', replacement: pkg('plugins-git') },
             { find: '@agentic/plugins-plan', replacement: pkg('plugins-plan') },
             { find: '@agentic/memory/testing', replacement: resolve(__dirname, 'packages/memory/src/testing/index.ts') },

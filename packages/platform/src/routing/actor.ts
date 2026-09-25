@@ -797,6 +797,13 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await park(route, { kind: 'project-feature', pluginId: outcome.pluginId, message: outcome.message }, `project feature ${outcome.pluginId}: ${outcome.message}`);
                     return undefined;
                 }
+                // The app hears of the placement (#793: the Pulls actor watches the repo, links the chat's branch); it never holds it up.
+                if (ports.placed) {
+                    const placement = { workspaceId, project, taskId: route.taskId, ...(route.chatId ? { chatId: route.chatId } : {}), ...(route.environmentId ? { environmentId: route.environmentId } : {}), ...(route.machineId ? { machineId: route.machineId } : {}), ...(outcome.cwd !== undefined ? { cwd: outcome.cwd } : {}) };
+                    void Promise.resolve()
+                        .then(() => ports.placed!(placement))
+                        .catch((e: unknown) => console.warn(`[routing] placed hook for ${route.taskId} failed:`, e));
+                }
                 // The tool families the features declare (#737): their grants join the session; an unknown one is skipped, and the timeline says so.
                 const joined = featureTools(project, projectFeatures, toolFamilies);
                 const notice = skippedToolsNote(joined.skipped);

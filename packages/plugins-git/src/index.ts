@@ -20,6 +20,10 @@ export const GIT_FEATURE_ID = 'agentic.feature.git';
 export const GIT_FEATURE_VERSION = '0.1.0';
 /** Where a chat's branch name starts unless the project says otherwise. */
 export const DEFAULT_BRANCH_PREFIX = 'chat/';
+/** The Registry secret the pull request adapter reads (#793): a GitHub token that can read the project's repo, under the plugin's `secret:github-token` grant. */
+export const GITHUB_TOKEN_SECRET = 'github-token';
+/** The tool family the feature gives every session of the project (#793): `pull_report`. */
+export const PULLS_TOOL_FAMILY = 'pulls';
 /** How many characters of the chat id (after its `chat_` prefix) name the branch. */
 export const SHORT_CHAT_ID_LENGTH = 8;
 /** The `worktreePath` value that keeps the built-in placement (`suggestWorktreePath`). */
@@ -131,7 +135,8 @@ export const gitFeatureManifest: ProjectFeatureManifest = {
     description: 'Knows the repo behind a project: its origin, how to work in it, and a branch and worktree per chat when you want one.',
     capabilities: ['detect', 'instructions', 'worktree-per-chat'],
     config: { type: 'object', properties: {}, additionalProperties: false },
-    permissions: [],
+    permissions: [{ scope: `secret:${GITHUB_TOKEN_SECRET}`, reason: "Reads the project's pull requests and their checks on GitHub." }],
+    secrets: [{ name: GITHUB_TOKEN_SECRET, title: 'GitHub token', description: "A token that can read the project's repo: its pull requests and their checks are polled with it.", required: false }],
     compat: { platform: '*', core: '*' },
     projectSettings: gitProjectSettings,
     category: 'code',
@@ -140,7 +145,8 @@ export const gitFeatureManifest: ProjectFeatureManifest = {
         overviewCard: { title: 'Code' },
         workStages: ['Ready', 'Code', 'PR', 'Checks', 'Review', 'Merge'],
         chatRefPrefixes: ['pr:'],
-        needs: ['folder']
+        needs: ['folder'],
+        tools: [PULLS_TOOL_FAMILY]
     }
 };
 

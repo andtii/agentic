@@ -83,11 +83,19 @@ Every call is audited as `project.chat-released`, with what the plugin did or wh
 
 Out of scope here: push/pull, PR creation, clone, removal when a branch merges.
 
+## Pull requests
+
+The manifest declares a `github-token` secret (`GITHUB_TOKEN_SECRET`, under its own `secret:github-token` grant) and
+the `pulls` tool family (`pull_report`). The adapter lives in its own entry, `@agentic/plugins-git/provider`
+(`createGitHubPullProvider`, `pullRepoOf`, `pullRepoOfOrigin`), so importing the feature plugin never pulls it in; the
+web opens it over the secret for the Pulls actor (#793).
+
 ## Layout
 
 | File | What |
 |---|---|
 | `src/index.ts` | `gitFeaturePlugin`, `gitFeatureManifest`, `gitProjectSettings`, `GIT_FEATURE_ID`, `gitBranchFor`, `chatWorktreeFor`, `gitSettingsErrors`, `DEFAULT_WORKTREE_NOTICE`, `isValidBranchName`, `hostOsOfPath`, `identityOf` |
+| `src/provider/` | the `./provider` entry: the provider-neutral `PullProvider` seam and the GitHub adapter |
 | `src/templates.ts` | the `{token}` templates: `expandTemplate`, `templateError`, `templateTokens`, `slugOf`, the token lists; command lines: `splitCommand`, `expandCommand`, `commandError` |
 | `__tests__/git.test.ts` | the manifest, detect / identity / instructions, and `beforeSession` against a recording fake daemon |
 

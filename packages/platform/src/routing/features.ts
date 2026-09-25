@@ -142,8 +142,11 @@ export type ToolFamilies = Readonly<Record<string, readonly ToolGrant[]>>;
 /** The plan tools (PRJ-12): how an agent works a project's plan. The tools themselves are PL2's. */
 export const PLAN_TOOL_NAMES = ['plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff'] as const;
 
+/** The pull request tools (#793, PRJ-08): the agent reports the PR it opened, and its task waits on it. */
+export const PULL_TOOL_NAMES = ['pull_report'] as const;
+
 /** The families this build ships when `RoutingPorts.toolFamilies` names none. */
-export const DEFAULT_TOOL_FAMILIES: ToolFamilies = { plan: PLAN_TOOL_NAMES.map((name) => ({ name })) };
+export const DEFAULT_TOOL_FAMILIES: ToolFamilies = { plan: PLAN_TOOL_NAMES.map((name) => ({ name })), pulls: PULL_TOOL_NAMES.map((name) => ({ name })) };
 
 /** A family an enabled feature declared that the build does not know: skipped, and the task's timeline says so. */
 export interface SkippedToolFamily {

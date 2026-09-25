@@ -2,7 +2,7 @@ import { defineLibConfig } from '@sigx/vite/lib';
 import type { ConfigEnv, UserConfig } from 'vite';
 
 const base = defineLibConfig({
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', provider: 'src/provider/index.ts' },
     external: [/@sigx\/.*/, /@agentic\/.*/, /^node:/],
     root: import.meta.url
 }) as (env: ConfigEnv) => UserConfig;
