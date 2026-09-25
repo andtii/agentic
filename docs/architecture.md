@@ -678,7 +678,9 @@ _not yet_
 
 #### #748 core: Plan, Phase, Item, Ref and the ref parser (contract)
 
-_not yet_
+`packages/core/src/plan.ts`: `Plan {id, projectId, title, description?, originChatId?, phases}` → `PlanPhase {n, title, items}` → `PlanItem` (`id` is the per-project `#n`; `state` ready | claimed | needs-you | blocked | done | stuck; `assignee`/`assignedBy` are a `PlanActor` (agent or user); `queueIndex`; `claim {agentId, leaseUntil, taskId?}`; `after`, `touches`, `refs`, `doneWhen`, `activity`, `options`). `PLAN_TOOLS` names the eight `plan_*` tools and `PLAN_LEASE_DEFAULT_MS` is 30 minutes; the pure helpers `planItemWaitsOn`, `planClaimLive`, `planDoneWhenMet` and `planTouchesOverlap` are what the Plan actor (#750) and the tools (#751) enforce with.
+
+`packages/core/src/refs.ts`: the `Ref` union (item, project-item, member, file range with an optional pinned `sha`, pr, commit, chat message, doc section, url) and the one text syntax shared by chats, items and notes. `parseRefs(text)` returns every ref with its offsets, `parseRef` reads exactly one, `formatRef` prints the canonical form (`#9`, `signalx#14`, `@lint`, `path/file.ts:38-41[@sha]`, `pr:604`, `4f2a9c1`, `chat:msg-42`, `doc:architecture.md#7`, URLs). A bare hex word counts as a commit only when it mixes digits and letters.
 
 #### #749 repo: packages/plugins-plan scaffold
 

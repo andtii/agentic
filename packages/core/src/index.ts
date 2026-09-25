@@ -30,7 +30,8 @@ export * from './project-ui.js';
 export * from './work.js';
 export * from './pull.js';
 
-// slot #748 plan + refs exports — replace this line
+export * from './plan.js';
+export * from './refs.js';
 
 // slot #757 requests exports — replace this line
 

@@ -129,7 +129,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #747: —
 
-- #748: —
+- #748: `parseRefs`/`formatRef` in `packages/core/src/refs.ts` — a generic typed-ref tokenizer (items, mentions, file ranges, commits, URLs); a candidate for a sigx text utility once a second consumer appears.
 
 - #749: — (scaffold only; nothing generic)
 
