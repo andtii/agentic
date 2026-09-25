@@ -28,7 +28,7 @@ export type { McpCapabilityReport, McpUnsupportedOp } from './capabilities.js';
 export { MCP_SUPPORTED_OPS, MCP_UNSUPPORTED_OPS, capabilityReportFor } from './capabilities.js';
 export type { McpClient, McpClientOptions, McpClientBaseOptions, McpHttpClientOptions, McpTransportClientOptions, McpServerInfo } from './client.js';
 export { createMcpClient } from './client.js';
-export type { McpConnectorOptions, McpConnectorBase, McpHttpConnector, McpStdioConnector, McpConnectorAuth, McpConnectorRecordInput } from './connector.js';
+export type { McpConnectorOptions, McpConnectorBase, McpHttpConnector, McpStdioConnector, McpConnectorTool, McpConnectorAuth, McpConnectorRecordInput } from './connector.js';
 export { mcpConnector, mcpConnectorSetup, connectorNamespace, connectorToolPrefix, MCP_CONNECTOR_CAPABILITIES } from './connector.js';
 export type { OpenMcpConnectorOptions, OpenedMcpConnector } from './open.js';
 export { openMcpConnector, MCP_CONNECTOR_OPEN_TIMEOUT_MS } from './open.js';
