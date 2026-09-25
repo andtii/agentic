@@ -41,7 +41,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
     const nameOf = (actor: PlanActor): string => (actor.kind === 'user' ? props.you : props.lookup(actor.agentId).name);
     const columnName = (key: BoardColumnKey): string => (key === 'open' ? 'Not assigned' : key === 'you' ? 'You' : props.lookup(key.slice('agent:'.length)).name);
     const itemOf = (id: number): PlanItem | undefined => props.items.find((i) => i.id === id);
-    const columns = (): BoardColumn[] => boardColumns(props.items, props.members);
+    const columns = (): BoardColumn[] => boardColumns(props.items, props.members, props.now);
     const where = (slot: BoardSlot): string => `${columnName(slot.column)}, queue position ${slot.index + 1}`;
 
     const focusCard = (id: number): void => {
@@ -51,11 +51,11 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
     const commit = (id: number, slot: BoardSlot): void => {
         const item = itemOf(id);
         st.drag = null;
-        if (!item || isNoop(item, slot, columns())) {
+        if (!item || isNoop(item, slot, columns(), props.now)) {
             st.said = `#${id} stays where it was.`;
             return;
         }
-        if (needsHandoff(item, slot)) {
+        if (needsHandoff(item, slot, props.now)) {
             st.note = '';
             st.pending = { id, slot };
             st.asking = true;
@@ -157,7 +157,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
                 <div
                     data-plan-card={String(item.id)}
                     data-state={item.state}
-                    data-working={isWorking(item) ? '' : undefined}
+                    data-working={isWorking(item, props.now) ? '' : undefined}
                     data-lifted={lifted ? '' : undefined}
                     tabIndex={0}
                     role="button"
@@ -187,7 +187,7 @@ export const BoardView = component<BoardViewProps>(({ props }) => {
     const Queue = (col: BoardColumn): JSXElement[] => {
         const drag = st.drag;
         const dragged = drag ? itemOf(drag.id) : undefined;
-        const slotAt = drag && dragged && drag.slot.column === col.key && !isNoop(dragged, drag.slot, columns()) ? drag.slot.index : -1;
+        const slotAt = drag && dragged && drag.slot.column === col.key && !isNoop(dragged, drag.slot, columns(), props.now) ? drag.slot.index : -1;
         const out: JSXElement[] = [];
         col.queue.forEach((item, i) => {
             if (i === slotAt) out.push(Slot());
