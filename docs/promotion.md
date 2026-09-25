@@ -165,7 +165,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #764: —
 
-- #765: —
+- #765: the lane layout (`pages/projects/links/model.ts`) may merge with the Plan graph layout (`features/plan/graph/layout.ts`) once #764 gives both one item shape — a candidate for one lanes-and-arrows graph helper.
 
 - #766: —
 
