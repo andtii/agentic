@@ -38,7 +38,7 @@ let landing = '/';
 
 /** Keep a link's path when it is an in-app one (`/…`, never `//host`). */
 function takeLanding(path) {
-    takeLanding(path);
+    if (typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')) landing = path;
 }
 
 async function connect(origin, attempt = 0) {
