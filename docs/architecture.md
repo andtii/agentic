@@ -621,7 +621,7 @@ _not yet_
 
 #### #732 web: global /chats grouped by project
 
-_not yet_
+`ChatList` with `wide` (the `/chats` page, mock and live) and a non-empty `projects` groups its filtered rows with the pure `groupChatsByProject(chats, projects)` (`pages/chat/chat-groups.ts`): one group per project that has chats, newest activity first (ties by name), then "No project" for chats in none or in a removed project. Each group header has a collapse toggle, the `ProjectSquare`, the name linking to `/projects/:id/chats` and the count; collapsed keys live in the list's own state. The column beside a chat (`/chats/:id`) stays one flat list; the project filter chip is unchanged.
 
 #### #733 web: Settings General / Members / Folders / Connectors tabs + New project dialog
 
