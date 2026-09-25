@@ -225,16 +225,22 @@ export function createActorToolPorts(options: ActorToolPortsOptions): PlatformPo
      * agent's post without mentions wakes nobody. The poster's collaborators gate it as they gate `delegate` (COL-10);
      * each task is one level deeper than the poster's, so agents mentioning each other stop at `maxDepth`. An assignee
      * with neither a folder in this chat nor a default environment runs in the poster's (#220). Never throws: the post
-     * is stored, and what could not be started is said in `notActivated`.
+     * is stored, and what could not be started is said in `notActivated` — every mention, the poster's own included, is
+     * in one of the two lists (#599).
      */
     async function activateMentions(chatId: ChatId, messageId: MessageId, post: ChatPost, addressed: readonly AgentId[]): Promise<Pick<ChatPostResult, 'activated' | 'notActivated'>> {
         // The poster's task as of this post (#390): each mention's task is one level below it, in its environment.
         const taskId = principalNow().taskId;
         // `addressed` is Chat.post's answer: the mentions that are members, less the poster. A mention it left out is said, not dropped.
-        const mentioned = [...new Set(post.mentions)].filter((id) => id !== agentId);
+        // Every mention gets an answer (#599): a non-empty `mentions` never comes back with neither `activated` nor `notActivated`.
+        const unique = [...new Set(post.mentions)];
+        const mentioned = unique.filter((id) => id !== agentId);
         const targets = mentioned.filter((id) => addressed.includes(id));
         const activated: { agentId: AgentId; taskId: TaskId; status: TaskStatus }[] = [];
-        const notActivated: { agentId: AgentId; reason: string }[] = mentioned.filter((id) => !addressed.includes(id)).map((id) => ({ agentId: id, reason: 'not a member of this chat' }));
+        const notActivated: { agentId: AgentId; reason: string }[] = [
+            ...(unique.includes(agentId) ? [{ agentId, reason: 'the poster itself: an agent never starts itself by a mention' }] : []),
+            ...mentioned.filter((id) => !addressed.includes(id)).map((id) => ({ agentId: id, reason: 'not a member of this chat' }))
+        ];
         if (targets.length === 0) return notActivated.length ? { notActivated } : {};
         const skip = (reason: string) => ({ notActivated: [...notActivated, ...targets.map((id) => ({ agentId: id, reason }))] });
         const def = options.routing?.();

@@ -6,7 +6,7 @@
  * than the posting task, so agents mentioning each other stop at `maxDepth`.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type AgentId, type ChatEntry, type ChatId, type ChatMember, type EnvironmentId, type MachineId, type MessageId, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
+import { actorKey, type AgentId, type ChatEntry, type FrozenAgentConfig, type ChatId, type ChatMember, type EnvironmentId, type MachineId, type MessageId, type PromptPart, type SessionId, type TaskId, type WorkspaceId } from '@agentic/core';
 import { allowAll } from '@sigx/ai-agent';
 import { mockAgent } from '@sigx/ai-agent/testing';
 
@@ -16,9 +16,10 @@ import { PairingDirectory } from '../../src/pairing/index';
 import { Workspace } from '../../src/workspace/index';
 import { Chat, ChatPage } from '../../src/chat/index';
 import type { IndexedEntry } from '../../src/chat/state';
-import { createActorToolPorts, defineRoutingActor, type AgentPrincipal } from '../../src/routing/index';
+import { bridgedPlatformTools } from '@agentic/runtimes/claude-code';
+import { createActorToolPorts, createToolCallPort, defineRoutingActor, type AgentPrincipal } from '../../src/routing/index';
 import { mentionContract } from '../../src/routing/mentions';
-import { defineSessionActor, type SessionFactory } from '../../src/session/index';
+import { defineSessionActor, type CommandSink, type SessionFactory } from '../../src/session/index';
 import { TaskActor, taskKey, type TaskView } from '../../src/task/index';
 import { testActorApp, userPrincipal, type TestActorApp } from '../../src/testing/index';
 
@@ -161,11 +162,14 @@ describe("chat_post mentions over the actors", () => {
         expect(result.notActivated).toEqual([{ agentId: BOB, reason: 'not a collaborator of agent_ada' }]);
     });
 
-    it('says which mentions are no member of the chat instead of dropping them; a self-mention is ignored', async () => {
+    it('says which mentions are no member of the chat instead of dropping them; a self-mention starts nothing and is said (#599)', async () => {
         await posting();
         const result = await ports().chat.post({ text: '@bob @stranger ping', mentions: [BOB, 'agent_stranger' as AgentId, ADA] }, call);
         expect(result.activated?.map((a) => a.agentId)).toEqual([BOB]);
-        expect(result.notActivated).toEqual([{ agentId: 'agent_stranger', reason: 'not a member of this chat' }]);
+        expect(result.notActivated).toEqual([
+            { agentId: ADA, reason: 'the poster itself: an agent never starts itself by a mention' },
+            { agentId: 'agent_stranger', reason: 'not a member of this chat' }
+        ]);
         expect(await ports().chat.post({ text: '@stranger', mentions: ['agent_stranger' as AgentId] }, call)).toMatchObject({ notActivated: [{ agentId: 'agent_stranger', reason: 'not a member of this chat' }] });
     });
 
@@ -176,5 +180,94 @@ describe("chat_post mentions over the actors", () => {
         expect(result.notActivated).toEqual([{ agentId: BOB, reason: expect.stringMatching(/^depth limit: delegation depth 3 exceeds maxDepth 2/) }]);
         // The message itself is stored.
         expect((await chat().history(null, 10)).entries.some((e) => e.entry.t === 'msg' && e.entry.id === result.messageId)).toBe(true);
+    });
+});
+
+/**
+ * The same mentions over the daemon bridge (#599 Finding 1): the model's call reaches the daemon's bridged `chat_post`
+ * (`bridgedPlatformTools`), crosses as `tool.call {tool, input}` (JSON on the wire) and runs in the platform's
+ * `createToolCallPort`, whose answer comes back as `tool.result.output` — not the in-process ports above.
+ */
+describe('chat_post mentions over the daemon bridge (tool.call → tool.result)', () => {
+    let app: TestActorApp;
+    let Routing: ReturnType<typeof defineRoutingActor>;
+    let Session: ReturnType<typeof defineSessionActor>;
+    const SESSION = 'session_ada' as SessionId;
+
+    const factory: SessionFactory = async (runtime, c) => {
+        if (runtime !== 'anthropic-api') return null;
+        const agent = mockAgent({ respond: () => [{ text: 'pong' }] });
+        const session = await agent.session({ policy: allowAll, signal: c.signal });
+        return { session, agentId: agent.id, capabilities: agent.capabilities };
+    };
+
+    beforeEach(async () => {
+        const commands: CommandSink = { send: async () => {} };
+        Session = defineSessionActor({ factory, commands });
+        Routing = defineRoutingActor({ sessions: () => Session, machines: () => Session });
+        app = testActorApp([Routing, Session, TaskActor, AgentActor, Chat, ChatPage, Workspace, PairingDirectory]);
+        await app.start();
+        for (const id of [ADA, BOB, CY]) {
+            await app.as(owner).actor(AgentActor, agentKey(WS, id)).update({ name: id.slice(6), instructions: 'Be brief.', tools: [], approvalPolicy: [], execution: { runtime: 'anthropic-api', offlinePolicy: 'fail' } }, 'create');
+            await app.as(owner).actor(Chat, `${WS}:chat:${CHAT}`).addAgent(id, 'all');
+        }
+        const config = { ...(await app.as(owner).actor(AgentActor, agentKey(WS, ADA)).get()).config, configVersion: 1 } as unknown as FrozenAgentConfig;
+        // ADA's own session runs on a machine (a Claude Code session behind the daemon), in the chat, working no task.
+        await app.as(owner).actor(Session, actorKey(WS, 'session', SESSION)).open({ agentId: ADA, runtime: 'claude-code', chatId: CHAT, machineId: 'machine_1' as MachineId, config });
+    });
+    afterEach(() => app.stop());
+
+    /** The daemon's `chat_post`, called the way the harness's MCP tool server calls it, bridged to the platform's port. */
+    async function bridgedChatPost(args: unknown): Promise<unknown> {
+        const port = createToolCallPort({ routing: () => Routing, sessions: () => Session });
+        const principal = mintAgentPrincipal({ workspaceId: WS, agentId: ADA, sessionId: SESSION });
+        let n = 0;
+        const { tools } = bridgedPlatformTools(['chat_post'], async (tool, input) => {
+            // The frame is JSON on the socket both ways.
+            const frame = JSON.parse(JSON.stringify({ callId: `call_${++n}`, sessionId: SESSION, tool, input })) as { callId: string; sessionId: SessionId; tool: string; input: unknown };
+            return JSON.parse(JSON.stringify(await port.call(frame, principal)));
+        });
+        return tools[0]!.run(JSON.parse(JSON.stringify(args)), { toolCallId: 'call_model', signal: new AbortController().signal });
+    }
+    const task = (id: string) => app.as(owner).actor(TaskActor, taskKey(WS, id as TaskId));
+
+    it('starts each mentioned member and says so in the result', async () => {
+        const result = (await bridgedChatPost({ text: '@bob @cy the plan', mentions: [BOB, CY] })) as { messageId: string; activated?: { agentId: AgentId; taskId: TaskId }[]; notActivated?: unknown };
+        expect(result.activated?.map((a) => a.agentId)).toEqual([BOB, CY]);
+        expect(result.notActivated).toBeUndefined();
+        for (const { taskId } of result.activated!) {
+            const deadline = Date.now() + 4_000;
+            while ((await task(taskId).get()).status !== 'completed') {
+                if (Date.now() > deadline) throw new Error(`timed out waiting for ${taskId}`);
+                await new Promise((r) => setTimeout(r, 5));
+            }
+        }
+    });
+
+    it('recovers mentions the model leaked into the text as parameter markup, and posts the text without it (#599)', async () => {
+        // The input the daemon really sent for msg_HItp65Ok5HygvTga: `mentions` never became a key, it ended the text.
+        const leaked = `@bob @cy the plan.</text>\n<parameter name="mentions">["${BOB}", "${CY}"]`;
+        const result = (await bridgedChatPost({ text: leaked })) as { messageId: string; activated?: { agentId: AgentId; taskId: TaskId }[] };
+        expect(result.activated?.map((a) => a.agentId)).toEqual([BOB, CY]);
+        const stored = (await app.as(owner).actor(Chat, `${WS}:chat:${CHAT}`).history(null, 100)).entries.find((e) => e.entry.t === 'msg' && e.entry.id === result.messageId)?.entry;
+        expect(stored).toMatchObject({ parts: [{ type: 'text', text: '@bob @cy the plan.' }], mentions: [BOB, CY] });
+        for (const { taskId } of result.activated!) {
+            const deadline = Date.now() + 4_000;
+            while ((await task(taskId).get()).status !== 'completed') {
+                if (Date.now() > deadline) throw new Error(`timed out waiting for ${taskId}`);
+                await new Promise((r) => setTimeout(r, 5));
+            }
+        }
+    });
+
+    it('a mention of the poster alone is said, not answered with neither key', async () => {
+        const result = (await bridgedChatPost({ text: 'note to self', mentions: [ADA] })) as { activated?: unknown; notActivated?: { agentId: string; reason: string }[] };
+        expect(result.activated).toBeUndefined();
+        expect(result.notActivated).toEqual([{ agentId: ADA, reason: 'the poster itself: an agent never starts itself by a mention' }]);
+    });
+
+    it('a mention that starts nobody says why', async () => {
+        const result = (await bridgedChatPost({ text: '@stranger', mentions: ['agent_stranger'] })) as { notActivated?: { agentId: string; reason: string }[] };
+        expect(result.notActivated).toEqual([{ agentId: 'agent_stranger', reason: 'not a member of this chat' }]);
     });
 });

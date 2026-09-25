@@ -100,6 +100,33 @@ describe('chat and task tools', () => {
         expect(ports.calls[0]).toMatchObject({ port: 'chat', op: 'post', args: { text: 'Found it.', mentions: ['agent_bob'] } });
         expect(out).toEqual({ messageId: 'msg_1' });
     });
+    it('chat_post recovers parameters the model leaked into `text` as markup (#599)', async () => {
+        const { ports, tool } = byName();
+        // As logged for the real call: the mentions ended the text, unclosed, and never became a key.
+        await tool('chat_post').run({ text: 'The plan.</text>\n<parameter name="mentions">["agent_bob", "agent_cy"]' }, ctx());
+        expect(ports.calls[0]).toMatchObject({ args: { text: 'The plan.', mentions: ['agent_bob', 'agent_cy'] } });
+        // Closed blocks, attachments too.
+        await tool('chat_post').run({ text: 'See.</text>\n<parameter name="mentions">["agent_bob"]</parameter>\n<parameter name="attachments">["agentic-file:c1/f1"]</parameter>\n' }, ctx());
+        expect(ports.calls[1]).toMatchObject({ args: { text: 'See.', mentions: ['agent_bob'], attachments: ['agentic-file:c1/f1'] } });
+    });
+    it('chat_post leaves text alone when the trailing markup is not recoverable parameters', async () => {
+        const { ports, tool } = byName();
+        const texts = [
+            'Use `</text>` then <parameter name="mentions">not json',
+            'x</text>\n<parameter name="other">["a"]',
+            'x</text>\n<parameter name="mentions">[1, 2]',
+            'x</text>\n<parameter name="mentions">["agent_cy"]'
+        ];
+        for (const text of texts.slice(0, 3)) await tool('chat_post').run({ text }, ctx());
+        // A caller that did pass mentions keeps its own, and its text.
+        await tool('chat_post').run({ text: texts[3], mentions: ['agent_bob'] }, ctx());
+        expect(ports.calls.map((c) => c.args)).toEqual([
+            { text: texts[0], mentions: [] },
+            { text: texts[1], mentions: [] },
+            { text: texts[2], mentions: [] },
+            { text: texts[3], mentions: ['agent_bob'] }
+        ]);
+    });
     it('ask_user waits for the answer through the chat port', async () => {
         const { ports, tool } = byName(fakePorts({ answer: 'blue' }));
         const out = await tool('ask_user').run({ question: 'Which colour?', choices: ['red', 'blue'] }, ctx());

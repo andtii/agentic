@@ -17,17 +17,59 @@ export const askUserInput = z.object({
     choices: z.array(z.string().min(1)).min(2).optional().describe('Offer these answers when the question is a choice.')
 });
 
+/** The array parameters of `chat_post` a model can leak into `text` (#599). */
+const LEAKABLE = ['mentions', 'attachments'] as const;
+type Leaked = Partial<Record<(typeof LEAKABLE)[number], string[]>>;
+const PARAMETER_OPEN = /<parameter name="([A-Za-z_]+)">/g;
+
+/**
+ * Parameters a model wrote INTO `text` as its own tool-call markup instead of as keys (#599): the text value ends
+ * with `</text>`, then one or more `<parameter name="mentions">["agent_…"]` blocks (closed or not). Recovered only
+ * when everything after `</text>` is such blocks, each a known array parameter whose value is a JSON array of
+ * strings — anything else is the agent's own text and is left alone.
+ */
+export function recoverLeakedParameters(text: string): { text: string; leaked: Leaked } | undefined {
+    const end = text.indexOf('</text>');
+    if (end < 0) return undefined;
+    const tail = text.slice(end + '</text>'.length);
+    const opens = [...tail.matchAll(PARAMETER_OPEN)];
+    if (opens.length === 0 || tail.slice(0, opens[0]!.index).trim() !== '') return undefined;
+    const leaked: Leaked = {};
+    for (const [i, open] of opens.entries()) {
+        const name = open[1] as (typeof LEAKABLE)[number];
+        if (!LEAKABLE.includes(name) || leaked[name]) return undefined;
+        const raw = tail
+            .slice(open.index + open[0].length, opens[i + 1]?.index ?? tail.length)
+            .trim()
+            .replace(/<\/parameter>$/, '')
+            .trim();
+        let value: unknown;
+        try {
+            value = JSON.parse(raw);
+        } catch {
+            return undefined;
+        }
+        if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) return undefined;
+        leaked[name] = value;
+    }
+    const kept = text.slice(0, end).trimEnd();
+    return kept === '' ? undefined : { text: kept, leaked };
+}
+
 export function chatPostTool(port: ChatPort) {
     return defineTool({
         name: 'chat_post',
         description: 'Post a message into the chat this task came from, in your name. Each agent id in `mentions` gets a task of its own and answers in the chat when its turn ends; the result lists who was started (`activated`) and who was not, and why (`notActivated`). It does not wait for the reply: use `delegate` when you need the answer back as a tool result. Attach files from the chat by their agentic-file: URIs.',
         input: chatPostInput,
         annotations: { idempotent: false },
-        execute: (input, ctx) =>
-            port.post(
-                { text: input.text, mentions: (input.mentions ?? []) as AgentId[], ...(input.attachments?.length ? { attachments: input.attachments } : {}) },
-                { callId: ctx.toolCallId, signal: ctx.signal }
-            )
+        execute: (input, ctx) => {
+            // A model that wrote its mentions into the text (#599) would otherwise post the markup and start nobody.
+            const recovered = input.mentions === undefined && input.attachments === undefined ? recoverLeakedParameters(input.text) : undefined;
+            const text = recovered?.text ?? input.text;
+            const mentions = input.mentions ?? recovered?.leaked.mentions ?? [];
+            const attachments = input.attachments ?? recovered?.leaked.attachments;
+            return port.post({ text, mentions: mentions as AgentId[], ...(attachments?.length ? { attachments } : {}) }, { callId: ctx.toolCallId, signal: ctx.signal });
+        }
     });
 }
 
