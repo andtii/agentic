@@ -82,7 +82,7 @@
  * machine, and the machine may not drive sessions.
  */
 
-import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
+import { accountKeyFor, accountRefOf, actorKey, enabledProjectFeatures, type ProjectFeatureReleaseReason, type ProjectId, BYPASS_PERMISSIONS_MODE, createId, environmentsForAccount, hasScope, isChatFilePart, isTerminal, parseProjectFolderKey, pathWithin, projectFolderFor, projectFolderIsShared, SESSION_EVENTS_TOPIC, type AccountKey, type AccountRef, type AgentId, type ApprovalRule, type Author, type ChatEntry, type ChatFilePart, type ChatId, type ChatRoster, type EnvironmentDescriptor, type EnvironmentId, type FrozenAgentConfig, type FsOp, type SessionOptions, type HostOs, type MachineId, type OpenSpec, type OpenSpecPolicy, type Principal, type ProjectRecord, type PromptPart, type RuntimeId, type SessionClosedCode, type SessionEvent, type SessionId, type TaskError, type TaskId, type ToolGrant, type WaitReason, type WorkdirRef, type WorkspaceId } from '@agentic/core';
 import { buildSystemPrompt, type TaskReport } from '@agentic/runtimes';
 import { actor, defineActor, topic, type ActorClientWith, type ActorContext, type ActorPolicy, type AnyActorDefinition } from '@sigx/actors';
 import type { AgentEvent, AgentTranscript } from '@sigx/ai-agent';
@@ -102,7 +102,7 @@ import { registryKey } from '../registry/key.js';
 import type { RegistryGate } from '../registry/types.js';
 import { daemonConnectors, withWorkspaceRules, workspaceToolRules } from './connectors.js';
 import { PLUGIN_DISABLED_CODE, resolveRuntime, UNKNOWN_RUNTIME_CODE } from './factory.js';
-import { featureSettings, machineFs, noDaemonFs, runFeatureHooks, type FeatureHooksOutcome } from './features.js';
+import { DEFAULT_TOOL_FAMILIES, featureSettings, featureTools, machineFs, noDaemonFs, runFeatureHooks, skippedToolsNote, withFeatureTools, type FeatureHooksOutcome } from './features.js';
 import { hydrateChatFiles, withChatFileRead } from './files.js';
 import { parseRoutingKey, ROUTING_TYPE } from './key.js';
 import { locateEnvironment, readMachine, type LocatedEnvironment } from './locate.js';
@@ -327,16 +327,17 @@ function optionsDrift(has: SessionOptions | undefined, want: SessionOptions | un
     return patch;
 }
 
-const grantedToolNames = (route: Route): string[] => route.config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
+const grantedNames = (config: Pick<FrozenAgentConfig, 'tools'>): string[] => config.tools.filter((g) => g.mode !== 'deny').map((g) => g.name);
 
 /**
  * What the daemon compiles the session policy from (#121): the agent's rules and grants, and as constraints the
  * ancestors' rules on a delegated task (AC-12) merged with the workspace tool policy of its connectors (#636) — the same
  * input `sessionPolicy` takes on the local path.
  */
-const openSpecPolicy = (route: Route): OpenSpecPolicy => {
+const openSpecPolicy = (route: Route, config: FrozenAgentConfig = route.config): OpenSpecPolicy => {
     const constraints = withWorkspaceRules(route.constraints ?? [], workspaceToolRules(route.plugins?.connectors ?? []));
-    return { rules: route.config.approvalPolicy, grants: route.config.tools, ...(constraints.length ? { constraints } : {}) };
+    // `config` is the one the session opened with: the agent's grants plus the project's feature tools (#737).
+    return { rules: config.approvalPolicy, grants: config.tools, ...(constraints.length ? { constraints } : {}) };
 };
 
 /** How many caught-up messages a reused session's prompt carries at most (#393) — the activation's own window. */
@@ -384,6 +385,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
     const driverOf = ports.driver ?? ((ws: WorkspaceId): Principal => userPrincipal(ws, ws));
     const audit = ports.audit ?? auditPort();
     const projectFeatures = ports.projectFeatures ?? {};
+    const toolFamilies = ports.toolFamilies ?? DEFAULT_TOOL_FAMILIES;
     const ghostTurnMs = ports.ghostTurnMs ?? GHOST_TURN_MS;
     /** Per activation (by actor key): what `prompt` pokes so the `follow` supervisor rescans the routes. */
     const wakers = new Map<string, () => void>();
@@ -441,8 +443,11 @@ export function defineRoutingActor(ports: RoutingPorts) {
             /** The Task's `waiting → active` or `queued → active` edge, whichever applies. */
             async function activate(route: Route, why: string, sessionId: SessionId): Promise<void> {
                 const t = await task(route.taskId).get();
-                if (t.status === 'queued') await task(route.taskId).start(ROUTER, sessionId);
-                else if (t.status === 'waiting') await task(route.taskId).resolveWaiting(ROUTER, why, sessionId);
+                // What the placement warned about (#737: a feature's unknown tool family) rides on the edge that starts the work.
+                const notice = route.notice;
+                delete route.notice;
+                if (t.status === 'queued') await task(route.taskId).start(ROUTER, sessionId, notice ? `started; ${notice}` : undefined);
+                else if (t.status === 'waiting') await task(route.taskId).resolveWaiting(ROUTER, notice ? `${why}; ${notice}` : why, sessionId);
             }
 
             /** `Task.reportWaiting` from `queued`, or from `waiting` through an `active` step (the state machine has no waiting → waiting edge). */
@@ -770,7 +775,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
              * (`fs`), and every plugin's `instructions()`. `undefined` when the placement goes on — with the folder and
              * instructions to use — else the route was failed or parked here and the caller returns.
              */
-            async function projectHooks(route: Route, fs: 'daemon' | 'local'): Promise<{ cwd?: string; instructions?: string } | undefined> {
+            async function projectHooks(route: Route, fs: 'daemon' | 'local'): Promise<{ cwd?: string; instructions?: string; tools?: readonly ToolGrant[] } | undefined> {
                 const { project, error } = await projectOf(route);
                 if (error) {
                     await fail(route, error);
@@ -792,7 +797,12 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     await park(route, { kind: 'project-feature', pluginId: outcome.pluginId, message: outcome.message }, `project feature ${outcome.pluginId}: ${outcome.message}`);
                     return undefined;
                 }
-                return { ...(outcome.cwd !== undefined ? { cwd: outcome.cwd } : {}), ...(outcome.instructions !== undefined ? { instructions: outcome.instructions } : {}) };
+                // The tool families the features declare (#737): their grants join the session; an unknown one is skipped, and the timeline says so.
+                const joined = featureTools(project, projectFeatures, toolFamilies);
+                const notice = skippedToolsNote(joined.skipped);
+                if (notice) route.notice = notice;
+                else delete route.notice;
+                return { ...(outcome.cwd !== undefined ? { cwd: outcome.cwd } : {}), ...(outcome.instructions !== undefined ? { instructions: outcome.instructions } : {}), ...(joined.tools.length ? { tools: joined.tools } : {}) };
             }
 
             /**
@@ -865,6 +875,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                 if (!hooks) return;
                 const sessionId = await bindSession(route);
                 route.options = await settleOptions(route, t);
+                const featured = withFeatureTools(route.config, hooks.tools ?? []);
                 // Detached copies: the route lives in the actor's state, and a spec is cloned by the actors it reaches.
                 const spec: SessionOpenSpec = {
                     agentId: route.agentId,
@@ -872,9 +883,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(route.chatId ? { chatId: route.chatId } : {}),
                     taskId: route.taskId,
                     ...(await work(route, t)),
-                    config: ctx.snapshot(withModel(route.config, route.options)),
+                    config: ctx.snapshot(withModel(featured, route.options)),
                     ...(route.constraints ? { approvalConstraints: ctx.snapshot(route.constraints) } : {}),
-                    tools: grantedToolNames(route),
+                    tools: grantedNames(featured),
                     ...(route.plugins ? { plugins: ctx.snapshot(route.plugins) } : {}),
                     ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {})
                 };
@@ -971,8 +982,8 @@ export function defineRoutingActor(ports: RoutingPorts) {
                         ...(spec.permissionMode ? { permissionMode: spec.permissionMode } : {}),
                         ...(limits.maxTurns !== undefined ? { maxTurns: limits.maxTurns } : {}),
                         ...(limits.maxCostUsd !== undefined ? { maxBudgetUsd: limits.maxCostUsd } : {}),
-                        tools: grantedToolNames(route),
-                        policy: ctx.snapshot(openSpecPolicy(route)),
+                        tools: spec.tools ? [...spec.tools] : grantedNames(route.config),
+                        policy: ctx.snapshot(openSpecPolicy(route, spec.config)),
                         ...(placed.connectors.length ? { connectors: placed.connectors } : {}),
                         ...(opened.ref !== undefined ? { resume: opened.ref } : resume !== undefined ? { resume } : {})
                     },
@@ -1193,8 +1204,9 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     return;
                 }
                 const opening = await work(route, t);
-                const tools = grantedToolNames(route);
-                const effective = withModel(route.config, options);
+                const featured = withFeatureTools(route.config, hooks.tools ?? []);
+                const tools = grantedNames(featured);
+                const effective = withModel(featured, options);
                 // The agent's MCP connectors (#280): the ready ones go to the daemon, secret names only; the rest are named in the prompt.
                 const placed = daemonConnectors(route.plugins?.connectors ?? [], machineId);
                 const spec: SessionOpenSpec = {
@@ -1213,7 +1225,7 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     ...(hooks.instructions ? { projectInstructions: hooks.instructions } : {}),
                     // The same prompt the API path builds (identity, role, instructions, skills, the chat, the project, the tools);
                     // `open` appends the memory block. The daemon's runtime appends it to its own preset.
-                    system: buildSystemPrompt({ config: route.config, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(hooks.instructions ? { project: hooks.instructions } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
+                    system: buildSystemPrompt({ config: featured, tools, ...(opening.roster ? { roster: opening.roster } : {}), ...(hooks.instructions ? { project: hooks.instructions } : {}), ...(placed.unavailable.length ? { unavailableConnectors: placed.unavailable } : {}) }),
                     tools
                 };
                 // The route is `opening` from here, so a `sessionOpened` notification (its own turn, after this one) always finds it ready.

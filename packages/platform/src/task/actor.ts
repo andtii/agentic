@@ -37,8 +37,8 @@ export const DEFAULT_STOP_TIMEOUT_MS = 10_000;
 export type TaskMethods = {
     /** Idempotent: a second call returns the existing task untouched. */
     create(contract: TaskContract, init: TaskInit): Promise<TaskView>;
-    /** `queued → active`; `sessionId` is the session doing the work, when there is one. */
-    start(by: string, sessionId?: SessionId): Promise<TaskView>;
+    /** `queued → active`; `sessionId` is the session doing the work, when there is one. `why` defaults to `started` (the router adds what the placement warned about, #737). */
+    start(by: string, sessionId?: SessionId, why?: string): Promise<TaskView>;
     /** `queued | active → waiting {reason}`; `sessionId` records the session the task waits with, when one was opened for it. */
     reportWaiting(reason: WaitReason, by: string, sessionId?: SessionId): Promise<TaskView>;
     /** `waiting → active`; `sessionId` records the session that resumes the work (a fallback runtime opens a new one). */
@@ -321,9 +321,9 @@ const options: ActorOptions<TaskState, TaskMethods, TaskStreams> & { applyEntry(
                 await indexTask(ctx, s.workspaceId, ctx.snapshot(), at);
                 return view();
             },
-            async start(by, sessionId) {
+            async start(by, sessionId, why) {
                 requireStatus('queued', 'start');
-                await transition('active', by, 'started', sessionId === undefined ? {} : { sessionId });
+                await transition('active', by, typeof why === 'string' && why ? why : 'started', sessionId === undefined ? {} : { sessionId });
                 return view();
             },
             async reportWaiting(reason, by, sessionId) {

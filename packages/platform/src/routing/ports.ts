@@ -11,6 +11,7 @@ import type { AnyActorDefinition } from '@sigx/actors';
 import type { AuditPort } from '../audit/port.js';
 import type { WorkspaceStore } from '../workspace/ports.js';
 import type { RuntimeCatalogue } from './factory.js';
+import type { ToolFamilies } from './features.js';
 
 export interface RoutingPorts {
     /** The Session actor definition this app built (`defineSessionActor`). */
@@ -50,6 +51,13 @@ export interface RoutingPorts {
      * with no plugin here is skipped. Default: none.
      */
     readonly projectFeatures?: Readonly<Record<string, ProjectFeaturePlugin>>;
+    /**
+     * The tool families this build knows, by name (#737; PRJ-06): a feature the project enables that declares
+     * `ui.tools` adds each family's grants to every session of the project, local and daemon, under the agent's tool
+     * policy (`withFeatureTools`). A family not listed is skipped, and the task's timeline says so. Default
+     * `DEFAULT_TOOL_FAMILIES` (`plan`).
+     */
+    readonly toolFamilies?: ToolFamilies;
     /**
      * How `endSession` (#399, OPS-10) deletes the ended session's record and its pages — the same store
      * `Workspace.deleteAll` purges through (`WorkspaceOptions.store`; each actor's own Durable Object in the web

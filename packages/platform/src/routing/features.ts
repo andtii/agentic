@@ -10,7 +10,7 @@
  * never a silent fallback.
  */
 
-import { configDefaults, enabledProjectFeatures, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, type ChatId, type EnvironmentId, type FsOp, type MachineId, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId } from '@agentic/core';
+import { configDefaults, enabledProjectFeatures, FS_RUN_DEFAULT_TIMEOUT_MS, FS_RUN_MAX_TIMEOUT_MS, type ChatId, type EnvironmentId, type FsOp, type MachineId, type ProjectFeatureFs, type ProjectFeaturePlugin, type ProjectRecord, type TaskId, type ToolGrant } from '@agentic/core';
 import { isServerFnError } from '@sigx/server';
 import type { FsResultView } from '../machine/index.js';
 
@@ -130,4 +130,74 @@ export async function runFeatureHooks(input: FeatureHooksInput): Promise<Feature
         }
     }
     return { ok: true, ...(cwd !== undefined ? { cwd } : {}), ...(fragments.length ? { instructions: fragments.join('\n\n') } : {}) };
+}
+
+/**
+ * The tool families a build knows (#737; PRJ-06, PRJ-12), by the name a feature's `ui.tools` declares: the grants each
+ * family adds to a session of the project. A grant's `mode` is the family's default; the agent's own grant for the same
+ * tool always wins (`withFeatureTools`).
+ */
+export type ToolFamilies = Readonly<Record<string, readonly ToolGrant[]>>;
+
+/** The plan tools (PRJ-12): how an agent works a project's plan. The tools themselves are PL2's. */
+export const PLAN_TOOL_NAMES = ['plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff'] as const;
+
+/** The families this build ships when `RoutingPorts.toolFamilies` names none. */
+export const DEFAULT_TOOL_FAMILIES: ToolFamilies = { plan: PLAN_TOOL_NAMES.map((name) => ({ name })) };
+
+/** A family an enabled feature declared that the build does not know: skipped, and the task's timeline says so. */
+export interface SkippedToolFamily {
+    readonly pluginId: string;
+    readonly family: string;
+}
+
+export interface FeatureTools {
+    /** The grants the project's features add, in the project's feature order, one per tool name (the first wins). */
+    readonly tools: readonly ToolGrant[];
+    readonly skipped: readonly SkippedToolFamily[];
+}
+
+/**
+ * The tool families the project's enabled features declare (`manifest.ui.tools`), as grants (#737). Only features this
+ * build ships count — an enabled feature with no plugin here is skipped, as for its hooks; a family the build does not
+ * know is left out and reported in `skipped`.
+ */
+export function featureTools(project: ProjectRecord, plugins: Readonly<Record<string, ProjectFeaturePlugin>>, families: ToolFamilies): FeatureTools {
+    const tools: ToolGrant[] = [];
+    const skipped: SkippedToolFamily[] = [];
+    const seen = new Set<string>();
+    for (const id of enabledProjectFeatures(project)) {
+        const plugin = Object.hasOwn(plugins, id) ? plugins[id] : undefined;
+        for (const family of plugin?.manifest.ui?.tools ?? []) {
+            const grants = Object.hasOwn(families, family) ? families[family] : undefined;
+            if (!grants) {
+                if (!skipped.some((s) => s.pluginId === id && s.family === family)) skipped.push({ pluginId: id, family });
+                continue;
+            }
+            for (const grant of grants) {
+                if (seen.has(grant.name)) continue;
+                seen.add(grant.name);
+                tools.push({ ...grant });
+            }
+        }
+    }
+    return { tools, skipped };
+}
+
+/**
+ * The agent's configuration with the feature tools joined (#737), under the existing tool policy: a tool the agent
+ * already grants keeps the agent's grant — a `deny` stays denied, an `ask` still asks — and the approval rules, which
+ * the session evaluates first, apply to the new tools as to any other. Returns `config` itself when nothing is added.
+ */
+export function withFeatureTools<C extends { readonly tools: readonly ToolGrant[] }>(config: C, tools: readonly ToolGrant[]): C {
+    const own = new Set(config.tools.map((g) => g.name));
+    const added = tools.filter((g) => !own.has(g.name));
+    return added.length ? { ...config, tools: [...config.tools, ...added] } : config;
+}
+
+/** The timeline's line for the families left out: `tool family "x" (feature y) is unknown here; skipped`. */
+export function skippedToolsNote(skipped: readonly SkippedToolFamily[]): string | undefined {
+    if (!skipped.length) return undefined;
+    const names = skipped.map((s) => `"${s.family}" (feature ${s.pluginId})`).join(', ');
+    return `warning: unknown tool ${skipped.length === 1 ? 'family' : 'families'} ${names} skipped`;
 }

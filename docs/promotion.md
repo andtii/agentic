@@ -107,7 +107,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #736: —
 
-- #737: —
+- #737: `featureTools` / `withFeatureTools` (`packages/platform/src/routing/features.ts`) — a named tool-family registry joined to an agent's grants under its policy; generic enough for `@sigx/ai-agent` tool sets.
 
 - #738: —
 

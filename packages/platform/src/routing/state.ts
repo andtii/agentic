@@ -108,6 +108,8 @@ export interface Route {
      * it instead sends the task to a fresh session (`sessionClosed`).
      */
     rehosting?: boolean;
+    /** What the last placement warned about (#737: an unknown feature tool family), for the next transition to active to carry; cleared by it. */
+    notice?: string;
     /**
      * While `waiting-capacity` (#433): the route waited on a live session — for a slot, or for the running turn — and the
      * daemon closed it for a restart or an update. The record waits `idle` with its ref; the session is re-opened on the
