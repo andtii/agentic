@@ -3,7 +3,8 @@
  * resolves a task's cwd ONCE — the task's `workdir`, a delegating parent's
  * folder in the same environment, the agent's `defaultWorkdir` in its default
  * environment only, else the environment's first root — checks it against
- * the environment's `cwdRoots` before any session opens, and records it on
+ * the environment's `cwdRoots` before any session opens (a derived folder that
+ * does not fit is passed over, #599), and records it on
  * the route, the `environment.chosen` audit entry, the Session record and
  * `OpenSpec.cwd`. Same in-process host as `routing.test.ts`.
  */
@@ -222,11 +223,27 @@ describe('working folder resolution (#190)', () => {
         expect((await machine(m1).get()).activeSessions).toEqual([]);
         expect((await machine(m1).get()).queued).toEqual([]);
         expect((await routing().get()).routes).toEqual([]);
-        // An agent default outside the roots fails the same way.
-        const b = await agent('agent_bad', { runtime: 'in-memory', defaultEnvironmentId: E1, defaultWorkdir: '/nowhere' });
-        await createTask('t4', b);
-        expect((await routing().run('t4' as TaskId)).error).toMatchObject({ code: 'workdir-outside-roots' });
-        expect(sockets.opens(machineKey(WS, m1))).toEqual({});
+    });
+
+    it("an agent default outside the environment's roots is passed over for the first root, and the record says why (#599)", async () => {
+        const m1 = await onlineMachine();
+        // A default picked on another host (a Windows path), and one on this host but outside the roots.
+        const win = await agent('agent_win', { runtime: 'in-memory', defaultEnvironmentId: E1, defaultWorkdir: 'C:\\Dev\\agentic\\main' });
+        const bad = await agent('agent_bad', { runtime: 'in-memory', defaultEnvironmentId: E1, defaultWorkdir: '/nowhere' });
+        await createTask('t1', win);
+        await createTask('t2', bad);
+        for (const id of ['t1', 't2']) await routing().run(id as TaskId);
+        await Promise.all([settled('t1'), settled('t2')]);
+        for (const id of ['t1', 't2']) {
+            expect((await task(id).get()).status).toBe('completed');
+            expect(await cwdOf(m1, id)).toEqual({ sent: '/work', record: '/work' });
+            expect(chosenFor(id)).toMatchObject({ data: { environmentId: E1, cwd: '/work' } });
+        }
+        expect(chosenFor('t1')!.summary).toContain("folder /work (the environment's first root; the agent's default C:\\Dev\\agentic\\main is not in this environment)");
+        expect(chosenFor('t2')!.summary).toContain("folder /work (the environment's first root; the agent's default /nowhere is not in this environment)");
+        // The task's own folder outside the roots still fails, whatever the agent's default.
+        await createTask('t3', win, { environmentId: E1, workdir: '/nowhere/app' });
+        expect((await routing().run('t3' as TaskId)).error).toMatchObject({ code: 'workdir-outside-roots', recoverable: false });
     });
 
     it("a delegated task inherits its parent's folder in the parent's environment only — resolved once, while the machine is offline", async () => {

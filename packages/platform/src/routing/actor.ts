@@ -1485,20 +1485,28 @@ export function defineRoutingActor(ports: RoutingPorts) {
                     // The folder, once (#190, #332, EXE-12): the task's own, the project's folder for this environment on this machine, a
                     // delegating parent's in the same environment (on the same machine), the agent's default in its default environment,
                     // else the environment's first root — which needs the machine's report, so the machine is located first (#702).
+                    // Only the task's own folder (which fails outside the roots) and the project's (already checked by `projectFolderOn`)
+                    // are taken as asked: a DERIVED one — the parent's, the
+                    // agent's default, picked perhaps on another host — that the environment's roots do not hold is passed over for
+                    // the next candidate, and the record says why (#599).
                     if (located === undefined) located = await locate(environmentId, requestedMachineId);
                     const projectFolder = project ? projectFolderOn(project, environmentId, detail.machineId ?? located?.machine.machineId ?? requestedMachineId, located) : undefined;
-                    const asked: { cwd: string; from: string } | undefined =
-                        workdir !== undefined
-                            ? { cwd: workdir, from: "the task's own" }
-                            : projectFolder !== undefined
-                              ? { cwd: projectFolder, from: "the project's folder" }
-                              : parent?.cwd !== undefined && parent.environmentId === environmentId && (detail.machineId === undefined || parent.machineId === detail.machineId)
-                                ? { cwd: parent.cwd, from: "the delegating task's" }
-                                : config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId && pinFolder
-                                  ? { cwd: config.execution.defaultWorkdir, from: "the agent's default" }
-                                  : undefined;
+                    const derived: { cwd: string; from: string }[] = [];
+                    if (parent?.cwd !== undefined && parent.environmentId === environmentId && (detail.machineId === undefined || parent.machineId === detail.machineId)) derived.push({ cwd: parent.cwd, from: "the delegating task's" });
+                    if (config.execution.defaultWorkdir !== undefined && environmentId === config.execution.defaultEnvironmentId && pinFolder) derived.push({ cwd: config.execution.defaultWorkdir, from: "the agent's default" });
+                    const passedOver: string[] = [];
+                    let asked: { cwd: string; from: string } | undefined =
+                        workdir !== undefined ? { cwd: workdir, from: "the task's own" } : projectFolder !== undefined ? { cwd: projectFolder, from: "the project's folder" } : undefined;
+                    for (const d of asked ? [] : derived) {
+                        // Unreported environment (nothing to check against yet): taken as asked, and `placeRemote` checks it.
+                        if (!located || pathWithin(d.cwd, located.env.cwdRoots, osOf(located.machine))) {
+                            asked = d;
+                            break;
+                        }
+                        passedOver.push(`${d.from} ${d.cwd} is not in this environment`);
+                    }
                     const cwd = asked?.cwd ?? located?.env.cwdRoots[0];
-                    const folder = cwd === undefined ? '' : `; folder ${cwd} (${asked ? asked.from : "the environment's first root"})`;
+                    const folder = cwd === undefined ? '' : `; folder ${cwd} (${[asked ? asked.from : "the environment's first root", ...passedOver].join('; ')})`;
                     await chosen(`runtime ${runtime} in environment ${environmentId} (${envFrom})${folder}; offline policy ${config.execution.offlinePolicy}${alsoWhy}`, environmentId, { ...(cwd !== undefined ? { cwd } : {}), ...detail });
                     // A folder picked for this task joins the workspace's recent folders — one-way, never failing the run.
                     if (workdir !== undefined) await noteWorkdir({ environmentId, path: workdir });
