@@ -27,6 +27,9 @@ const STATE_LABEL: Readonly<Record<Plan['phases'][number]['items'][number]['stat
 export const PlanGraphCanvas = component<Define.Prop<'plan', Plan, true>>(({ props }) => () => {
     const g = planGraphLayout(props.plan);
     if (g.nodes.length === 0) return <p data-plan-graph-empty="" role="status">No items in this plan yet.</p>;
+    // The arrows into each node, for its off-screen `after #n` line.
+    const waitsOn = new Map<number, number[]>();
+    for (const e of g.edges) waitsOn.set(e.to, [...(waitsOn.get(e.to) ?? []), e.from]);
     return (
         <div data-plan-graph-scroll="">
             <div data-plan-graph-canvas="" style={{ width: `${g.width}px`, height: `${g.height}px` }}>
@@ -47,8 +50,7 @@ export const PlanGraphCanvas = component<Define.Prop<'plan', Plan, true>>(({ pro
                 </svg>
                 <ol data-plan-graph-nodes="" aria-label="Items">
                     {g.nodes.map((n) => {
-                        const item = props.plan.phases.flatMap((p) => p.items).find((i) => i.id === n.id);
-                        const waits = (item?.after ?? []).filter((a) => g.nodes.some((m) => m.id === a));
+                        const waits = waitsOn.get(n.id) ?? [];
                         return (
                             <li
                                 key={n.id}

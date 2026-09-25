@@ -62,6 +62,14 @@ describe('planGraphLayout (#756)', () => {
         expect(g.edges[0]!.d.endsWith(` ${n2.x} ${n2.y + GRAPH_NODE_H / 2}`)).toBe(true);
     });
 
+    it('cuts a cycle where it closes: no arrow points left or stays in its column', () => {
+        const g = planGraphLayout(plan([item(1, [2]), item(2, [1]), item(3, [3])]));
+        expect(g.edges).toHaveLength(1);
+        const [e] = g.edges;
+        const depth = (id: number) => g.nodes.find((n) => n.id === id)!.depth;
+        expect(depth(e!.from)).toBeLessThan(depth(e!.to));
+    });
+
     it('sorts lanes by phase number, gives an empty phase a lane and draws an empty plan as nothing', () => {
         const p: Plan = { id: 'p', projectId: 'p_x' as ProjectId, title: 'P', phases: [{ n: 2, title: 'B', items: [item(2)] }, { n: 1, title: 'A', items: [] }] };
         const g = planGraphLayout(p);

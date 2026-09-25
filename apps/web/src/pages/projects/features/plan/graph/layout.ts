@@ -119,7 +119,8 @@ export function planGraphLayout(plan: Pick<Plan, 'phases'>): PlanGraphLayout {
             if (!to || to.phase !== phase.n) continue;
             for (const a of new Set(item.after)) {
                 const from = byId.get(a);
-                if (!from || a === item.id) continue;
+                // Only rightward arrows: an `after` that closes a cycle (not in an earlier column) is the cut edge.
+                if (!from || from.depth >= to.depth) continue;
                 const x1 = from.x + GRAPH_NODE_W;
                 const y1 = from.y + GRAPH_NODE_H / 2;
                 const x2 = to.x;
