@@ -172,4 +172,4 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #766: —
 
-- #767: —
+- #767: none — removing the old projects pages leaves nothing generic behind.
