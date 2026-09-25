@@ -8,6 +8,7 @@
  */
 import type { PluginReadiness } from '@agentic/core';
 import type { PluginView } from '@agentic/platform';
+import { signInHref } from '../agent/runtimes';
 import { pluginHref } from '../plugins/model';
 
 export interface SetupStep {
@@ -55,6 +56,9 @@ export function setupSteps(input: SetupInput): SetupStep[] | null {
                 );
                 break;
             }
+            case 'needs-sign-in':
+                steps.push({ id, title: `${name} needs sign-in`, detail: `${name} is signed out, so it cannot run work until you sign in again.`, href: signInHref(p), action: 'Sign in', icon: 'plugins' });
+                break;
             case 'no-kek':
                 steps.push({ id, title: 'This deployment cannot store keys', detail: `${name} needs a stored key, and the Worker has no WORKSPACE_KEK to seal it with (runbook §2.4).`, icon: 'warning' });
                 break;
