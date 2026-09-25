@@ -79,10 +79,10 @@ const REF_PATTERN = new RegExp(
             String.raw`(?<url>https?://[^\s<>"'\x60]+)`,
             String.raw`doc:(?<docPath>[\w./-]*\w)(?:#(?<docSection>[\w-]+(?:\.[\w-]+)*))?(?![\w/-])`,
             String.raw`chat:(?<chatMsg>[\w.-]*\w)(?![\w-])`,
-            String.raw`pr:(?<pr>\d+)(?![\w-])`,
+            String.raw`pr:(?<pr>[1-9]\d*)(?![\w-])`,
             String.raw`(?<filePath>@?(?:[\w.-]+/)+[\w.-]*\w|[\w-]+(?:\.[\w-]+)+):(?<from>\d+)(?:-(?<to>\d+))?(?:@(?<fileSha>${SHA}))?(?![\w-])`,
-            String.raw`(?<project>[A-Za-z0-9][\w.-]*)#(?<projectN>\d+)(?![\w-])`,
-            String.raw`#(?<itemN>\d+)(?![\w-])`,
+            String.raw`(?<project>[A-Za-z0-9][\w.-]*)#(?<projectN>[1-9]\d*)(?![\w-])`,
+            String.raw`#(?<itemN>[1-9]\d*)(?![\w-])`,
             String.raw`@(?<handle>[A-Za-z0-9](?:[\w.-]*\w)?)(?![\w/@-])`,
             String.raw`(?<sha>${SHA})(?![\w-])`,
         ].join('|') +

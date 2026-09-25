@@ -38,7 +38,7 @@ describe('refs (#748)', () => {
     });
 
     it('leaves look-alikes alone', () => {
-        expect(parseRefs('mail a@b.com at 14:52, id 1234567, word defaced, x#y, #9x, v2#, pr:x, 2026-09-25')).toEqual([]);
+        expect(parseRefs('mail a@b.com at 14:52, id 1234567, word defaced, x#y, #9x, v2#, pr:x, 2026-09-25, #0, pr:0, signalx#0, #007')).toEqual([]);
     });
 
     it('reads a scoped package path as a file, not a member', () => {
