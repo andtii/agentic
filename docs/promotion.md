@@ -97,7 +97,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #731: —
 
-- #732: —
+- #732: `groupChatsByProject` (`apps/web/src/pages/chat/chat-groups.ts`) — a generic group-by-key-ordered-by-recency; stays in web until a second list needs it.
 
 - #733: —
 
