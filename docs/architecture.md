@@ -623,7 +623,7 @@ _not yet_
 
 #### #735 platform: Registry exposes project-feature ui slots, categories and needs
 
-_not yet_
+`Registry.projectFeatures()` lists every project feature plugin, id order, in one read: `ProjectFeatureView` — id, name, description, version, `enabled`, `builtin`, the manifest's `ui` (`{}` when none), `category`, `needs` (`ui.needs`), `presets` (from `defineRegistry({ projectFeatures })`, the same plugin map Routing takes) and `usedBy`, the number of the Workspace's projects with it enabled (one hop to `Workspace.projects()`). `checkProjectSettings(pluginId, settings, target?)` takes the project's `folders` as `target`; a feature with `needs` on a project with no folder is a 400 in one line (`Git needs a folder: add one to the project first`). Without `target` the needs check is skipped: `Workspace.upsertProject` passing it is #772, the web passing the plugin map is #773.
 
 #### #736 web: Settings › Features — slot marks, add-a-feature catalogue, detail panel
 
