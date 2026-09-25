@@ -45,7 +45,7 @@ import { z } from 'zod';
 import { McpScopeError } from './errors.js';
 import type { ExternalPrincipal, PlatformPort } from './port.js';
 
-// slot #751 plan mcp tools import — replace this line
+import { PLAN_SCOPE, planMcpTools } from './plan.js';
 
 // slot #759 requests mcp tools import — replace this line
 
@@ -565,7 +565,8 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
             run: () => port.projects.list()
         }),
 
-        // slot #751 plan tool family — replace this line
+        // ---- plan (#751) ----------------------------------------------------------------
+        ...planMcpTools(port.plan, tool),
 
         // slot #759 requests tool family — replace this line
     ];
@@ -575,7 +576,7 @@ export function platformTools(port: PlatformPort, principal: ExternalPrincipal, 
 export function scopeOfTool(name: string): Scope | null {
     const family = name.split('_')[0];
 
-    // slot #751 plan tool family scope — replace this line
+    if (family === 'plan') return PLAN_SCOPE;
 
     // slot #759 requests tool family scope — replace this line
 

@@ -18,7 +18,7 @@ import { projectsTool } from './projects.js';
 import { taskReportTool } from './task.js';
 import { usageLimitsTool } from './usage.js';
 
-// slot #751 plan tool family import — replace this line
+import { planTools } from './plan.js';
 
 // slot #759 requests tool family import — replace this line
 
@@ -31,14 +31,14 @@ export { taskReportTool, taskReportInput } from './task.js';
 export { usageLimitsTool, usageLimitsInput } from './usage.js';
 export { projectsTool, projectsInput, type ProjectsListResult, type ProjectsSetResult } from './projects.js';
 
-// slot #751 plan tool family exports — replace this line
+export { planTools, planNext, planClaimRefusal, planManagerRefusal, planApplyChecks, planTouchWarnings, planItemView, PlanRefusal, planListInput, planNextInput, planClaimInput, planAssignInput, planUpdateInput, planRefInput, planAddInput, planHandoffInput, type PlanPort, type PlanBoard, type PlanMember, type PlanUpdateInput, type PlanAddInput, type NewPlanItem, type PlanItemView } from './plan.js';
 
 // slot #759 requests tool family exports — replace this line
 
 export const PLATFORM_TOOL_NAMES = [
     'memory_search', 'memory_remember', 'delegate', 'chat_post', 'chat_file_read', 'task_report', 'ask_user', 'usage_limits', 'projects',
 
-    // slot #751 plan tool family names — replace this line
+    'plan_list', 'plan_next', 'plan_claim', 'plan_assign', 'plan_update', 'plan_ref', 'plan_add', 'plan_handoff',
 
     // slot #759 requests tool family names — replace this line
 ] as const;
@@ -53,7 +53,7 @@ export function platformTools(ports: PlatformPorts): readonly AnyTool[] {
     return [
         memorySearchTool(ports.memory), memoryRememberTool(ports.memory), delegateTool(ports.task), chatPostTool(ports.chat), chatFileReadTool(ports.files), taskReportTool(ports.task), askUserTool(ports.chat), usageLimitsTool(ports.usage), projectsTool(ports.projects),
 
-        // slot #751 plan tool family roster — replace this line
+        ...planTools(ports.plan),
 
         // slot #759 requests tool family roster — replace this line
     ];

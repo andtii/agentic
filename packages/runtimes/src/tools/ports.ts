@@ -177,7 +177,8 @@ export interface PlatformPorts {
     /** Absent on hosts without a Workspace — `projects` then reports it unavailable. */
     readonly projects?: ProjectPort;
 
-    // slot #751 plan tool family port — replace this line
+    /** Absent where the session's project has no Plan (#751) — the `plan_*` tools then report it unavailable. */
+    readonly plan?: import('./plan.js').PlanPort;
 
     // slot #759 requests tool family port — replace this line
 }

@@ -135,7 +135,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #750: —
 
-- #751: —
+- #751: `planNext` / `planClaimRefusal` / `planTouchWarnings` in `packages/runtimes/src/tools/plan.ts` are pure plan rules over core types; if the Plan actor (#750) or the web needs the same next-item pick, promote them to `packages/core/src/plan.ts`.
 
 - #752: — (daemon-only git read; nothing generic)
 

@@ -245,7 +245,8 @@ export interface PlatformPort {
         limits(query: UsageLimitsQuery): Promise<UsageLimits>;
     };
 
-    // slot #751 plan port — replace this line
+    /** A project's plans (#751, the Plan actor under this client). Absent: this host has no Plan, and the surface declares no `plan_*` tool. */
+    readonly plan?: import('./plan.js').PlanMcpPort;
 
     // slot #759 requests port — replace this line
 }

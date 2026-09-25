@@ -732,7 +732,9 @@ _not yet_
 
 #### #751 runtimes+mcp: plan_list/next/claim/assign/update/ref/add/handoff tools
 
-_not yet_
+`packages/runtimes/src/tools/plan.ts`: the eight `plan_*` platform tools (on `PLATFORM_TOOL_NAMES`, so the `plan` family that routing's `DEFAULT_TOOL_FAMILIES` grants when the plan feature is on lands on the roster) over an injected `PlanPort` — `PlatformPorts.plan`, absent where the session's project has no Plan (the tools then say so). The port is the Plan actor (#750) under the agent's principal in the session's project: `board()` (plans, members by handle, the caller, the project manager, the caller's claim limit), `claim`, `assign`, `update`, `ref` (a file ref comes back pinned), `add`, `handoff`; it renews the caller's lease on every call and enforces every rule again. The tools read the board first and refuse in words the model can act on (`refused: #11 waits on #9 (claimed by you). Try plan_next.`): claim refuses done, taken, in another member's queue, waiting on unfinished `after` items, not ready, or over the limit (a lapsed lease holds nothing); `plan_assign` and `plan_add` refuse any agent that is not the project manager; `plan_update` refuses `done` until every done-when is ticked (a person marks it otherwise); `plan_handoff` needs the item claimed by or queued for the caller. `plan_next` is the caller's queue in order, then the open pool: `ready`, `after` done, no touch overlap with another agent's live claim; `plan_claim` answers overlaps as `headsUp`.
+
+`packages/mcp/src/server/plan.ts`: the same eight tools on the orchestration surface over `PlatformPort.plan` (`PlanMcpPort`, every call names its `projectId`; `plan_next`/`plan_claim` name the agent), gated by the `projects` scope. The external client acts in its user's name, so it has the people's tools; the actor's refusals come back as `isError` results. A host without the port declares none of them.
 
 #### #752 daemon: pin file refs to a commit (resolve sha, read range)
 
