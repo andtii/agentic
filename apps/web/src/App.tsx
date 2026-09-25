@@ -13,6 +13,7 @@ import { useViewer } from './actors/defs';
 import { signInOptions } from './api/sign-in.server';
 import { DEV_LOGIN_PATH } from './auth/dev-login';
 import { useNeedsSource } from './pages/inbox';
+import { useDesktopNotifications } from './desktop';
 import { projectMenuFor, projectMenuSource } from './pages/projects/layout/menu';
 import { openProjectPicker } from './pages/projects/layout/ProjectPicker';
 
@@ -136,6 +137,8 @@ export const App = component(() => {
     const trail = () => trailFor(route, topbar());
     // The Home badge is "Needs you" itself (#151): the rows Home lists, read from the same source.
     const needs = useNeedsSource()().useRows();
+    // Inside the desktop app (#845): new Inbox notifications become native ones, and the badge follows Home's.
+    if (dataMode() === 'live') useDesktopNotifications(() => needs().length);
 
     return () => {
         const top = topbar();
