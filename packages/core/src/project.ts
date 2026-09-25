@@ -223,6 +223,21 @@ export function projectFolderFor(project: Pick<ProjectRecord, 'folders'>, enviro
     return (machineId !== undefined ? (at(projectFolderKey(machineId, environmentId)) ?? at(projectFolderKey(machineId))) : undefined) ?? at(environmentId);
 }
 
+/**
+ * Where a project has folders, for a catalogue (#702): every machine named by a key, and every environment with a
+ * folder of its own — an override, or a pre-#702 folder by environment id. Each once, in key order.
+ */
+export function projectFolderPlaces(folders: ProjectRecord['folders']): { readonly machines: readonly MachineId[]; readonly environments: readonly EnvironmentId[] } {
+    const machines = new Set<MachineId>();
+    const environments = new Set<EnvironmentId>();
+    for (const [key, path] of Object.entries(folders)) {
+        const parsed = typeof path === 'string' ? parseProjectFolderKey(key) : null;
+        if (parsed?.machineId !== undefined) machines.add(parsed.machineId);
+        if (parsed?.environmentId !== undefined) environments.add(parsed.environmentId);
+    }
+    return { machines: [...machines], environments: [...environments] };
+}
+
 /** Whether `projectFolderFor` would answer from the machine's shared folder (`<machineId>/*`) rather than an override or a pre-#702 entry. */
 export function projectFolderIsShared(project: Pick<ProjectRecord, 'folders'>, environmentId: EnvironmentId, machineId: MachineId): boolean {
     return !Object.hasOwn(project.folders, projectFolderKey(machineId, environmentId)) && Object.hasOwn(project.folders, projectFolderKey(machineId));

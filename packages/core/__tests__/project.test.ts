@@ -1,5 +1,5 @@
 import type { EnvironmentId, MachineId, PluginManifest, ProjectFeatureManifest, ProjectId, ProjectRecord } from '../src/index';
-import { applyProjectFeaturePreset, enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, parseProjectFolderKey, projectFolderFor, projectFolderIsShared, projectFolderKey } from '../src/index';
+import { applyProjectFeaturePreset, enabledProjectFeatures, isProjectFeatureManifest, PROJECT_FEATURE_KIND, PROJECTS_MAX, parseProjectFolderKey, projectFolderFor, projectFolderIsShared, projectFolderKey, projectFolderPlaces } from '../src/index';
 
 const env = (id: string) => id as EnvironmentId;
 
@@ -62,6 +62,10 @@ describe('project folders by machine (#702)', () => {
         expect(parseProjectFolderKey('machine_mac/env_claude')).toEqual({ machineId: 'machine_mac', environmentId: 'env_claude' });
         expect(parseProjectFolderKey('env_claude')).toEqual({ environmentId: 'env_claude', legacy: true });
         for (const bad of ['', ' ', '/*', 'machine_mac/', 'machine_mac/a/b']) expect(parseProjectFolderKey(bad)).toBeNull();
+    });
+    it('lists the machines and the environments with a folder of their own, each once', () => {
+        expect(projectFolderPlaces({ ...folders, env_old: '/old', bad: undefined })).toEqual({ machines: ['machine_mac', 'machine_win'], environments: ['env_codex', 'env_old'] });
+        expect(projectFolderPlaces({})).toEqual({ machines: [], environments: [] });
     });
 });
 
