@@ -37,7 +37,7 @@ export interface ProjectRecord {
     readonly description?: string;
     readonly members: ProjectMembers;
     /**
-     * Where the project lives, by `ProjectFolderKey` (#702): `<machineId>/*` is the folder on a machine, for every
+     * Where the project lives, keyed as `projectFolderKey` builds them (#702): `<machineId>/*` is the folder on a machine, for every
      * environment on it whose `cwdRoots` hold it; `<machineId>/<environmentId>` overrides it for one environment.
      * Each absolute and machine-native. A bare environment id is the shape before #702 (environment ids are only
      * unique per machine), still read as the last fallback and never written.
@@ -202,14 +202,16 @@ export function projectFolderKey(machineId: MachineId, environmentId?: Environme
 
 /**
  * A `ProjectRecord.folders` key read back: a machine's folder (no `environmentId`), an override (both), or a
- * pre-#702 bare environment id (`legacy`, no `machineId`). `null` for a key of none of these shapes.
+ * pre-#702 bare environment id (`legacy`, no `machineId`). `null` for a key of none of these shapes, or with whitespace in an id.
  */
 export function parseProjectFolderKey(key: string): { readonly machineId?: MachineId; readonly environmentId?: EnvironmentId; readonly legacy?: true } | null {
+    // An id never holds whitespace: a padded segment is refused, not trimmed into a different key.
+    const ok = (segment: string): boolean => segment.length > 0 && !/\s/.test(segment);
     const at = key.indexOf('/');
-    if (at < 0) return key.trim() ? { environmentId: key as EnvironmentId, legacy: true } : null;
+    if (at < 0) return ok(key) ? { environmentId: key as EnvironmentId, legacy: true } : null;
     const machineId = key.slice(0, at);
     const rest = key.slice(at + 1);
-    if (!machineId.trim() || !rest.trim() || rest.includes('/')) return null;
+    if (!ok(machineId) || !ok(rest) || rest.includes('/')) return null;
     return rest === '*' ? { machineId: machineId as MachineId } : { machineId: machineId as MachineId, environmentId: rest as EnvironmentId };
 }
 
