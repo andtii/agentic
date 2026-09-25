@@ -37,7 +37,7 @@ describe('the live Requests model (#831)', () => {
     it('accepts as proposed or edited, reads the first plan’s phases and words a refusal', () => {
         expect(acceptResolution()).toEqual({ action: 'accept' });
         const item = { title: 'x', doneWhen: [] };
-        expect(acceptResolution({ item, openIssue: false })).toEqual({ action: 'accept', item });
+        expect(acceptResolution({ item, openIssue: false })).toEqual({ action: 'accept', item, openIssue: false });
         expect(phasesOf(undefined)).toEqual([]);
         expect(phasesOf([{ phases: [{ n: 1, title: 'Core', items: [] } as never] }])).toEqual([{ n: 1, title: 'Core' }]);
         expect(failureNote('accept it', new Error('[requests] req_1 has no proposed item; give one'))).toBe('Could not accept it: req_1 has no proposed item; give one');

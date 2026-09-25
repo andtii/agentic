@@ -27,11 +27,15 @@ function noteOf(r: RequestView, manager: string): string | undefined {
 
 function entryOf(r: RequestView, box: RequestEntry['box'], names: ProjectNames, manager: string): RequestEntry {
     const note = noteOf(r, manager);
+    // An accepted request shows the open-issue choice it was accepted with, not only the manager's proposal (#883).
+    const request = r.openIssue !== undefined && r.triage && r.triage.openIssue !== r.openIssue ? { ...r, triage: { ...r.triage, openIssue: r.openIssue } } : r;
     return {
-        request: r,
+        request,
         box,
         fromProjectName: names(r.fromProject),
         toProjectName: names(r.toProject),
+        ...(r.fromChatTitle ? { fromChatTitle: r.fromChatTitle } : {}),
+        ...(r.triagedAt !== undefined ? { triagedAt: r.triagedAt } : {}),
         ...(r.state === 'needs-you' && r.needs ? { needs: r.needs } : {}),
         ...(note !== undefined ? { note } : {})
     };
@@ -46,8 +50,8 @@ export function liveEntries(reads: RequestReads, names: ProjectNames, manager: s
     ];
 }
 
-/** The resolution Accept sends: the triage's item as proposed, or the edited one. */
-export const acceptResolution = (edit?: AcceptEdit): RequestResolution => (edit ? { action: 'accept', item: edit.item } : { action: 'accept' });
+/** The resolution Accept sends: the triage's item as proposed, or the edited one with the "open GitHub issue" choice (#883). */
+export const acceptResolution = (edit?: AcceptEdit): RequestResolution => (edit ? { action: 'accept', item: edit.item, openIssue: edit.openIssue } : { action: 'accept' });
 
 /** The phases a proposed item can go in: the project's first plan (where an accepted item lands by default). */
 export const phasesOf = (plans: readonly { readonly phases: readonly { readonly n: number; readonly title: string }[] }[] | undefined): { n: number; title: string }[] =>

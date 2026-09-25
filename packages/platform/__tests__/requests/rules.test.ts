@@ -109,7 +109,7 @@ describe('Requests rules', () => {
         triage(b, call(nova), r.id, bug);
         expect(codeOf(() => checkResolution(b, call(forge), r.id, { action: 'accept' }))).toBe('forbidden');
         expect(codeOf(() => checkResolution(b, call(nova), r.id, { action: 'accept', item: { title: 'x', doneWhen: [] } }))).toBe('forbidden');
-        expect(checkResolution(b, call(nova), r.id, { action: 'accept' })).toEqual({ item: bug.proposedItem });
+        expect(checkResolution(b, call(nova), r.id, { action: 'accept' })).toEqual({ item: bug.proposedItem, openIssue: false });
         expect(resolve(b, call(nova), r.id, { action: 'accept' }, 14).value).toMatchObject({ state: 'accepted', resultItem: 14 });
         expect(codeOf(() => checkResolution(b, call(person), r.id, { action: 'decline', reason: 'x' }))).toBe('final');
 
@@ -117,7 +117,7 @@ describe('Requests rules', () => {
         triage(b, call(nova), high.id, { ...bug, priority: 'high' });
         expect(codeOf(() => checkResolution(b, call(nova), high.id, { action: 'accept' }))).toBe('wrong-state');
         const edited = { title: 'batch() nested', doneWhen: ['fixed'], phase: 2 };
-        expect(checkResolution(b, call(person), high.id, { action: 'accept', item: edited, planId: 'plan-1' })).toEqual({ item: edited, planId: 'plan-1' });
+        expect(checkResolution(b, call(person), high.id, { action: 'accept', item: edited, planId: 'plan-1' })).toEqual({ item: edited, openIssue: false, planId: 'plan-1' });
         const bare = send(b, call(forge, PM_POLICY_DEFAULT));
         expect(codeOf(() => checkResolution(b, call(person), bare.id, { action: 'accept' }))).toBe('invalid');
     });

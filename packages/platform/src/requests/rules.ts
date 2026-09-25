@@ -67,6 +67,8 @@ export interface StoredRequest {
     id: string;
     fromProject: ProjectId;
     fromChat?: ChatId;
+    /** The chat it came from, by title, as the sender named it (#883). */
+    fromChatTitle?: string;
     sender: PlanActor;
     toProject: ProjectId;
     title: string;
@@ -74,7 +76,11 @@ export interface StoredRequest {
     refs: Ref[];
     state: RequestState;
     triage?: Triage;
+    /** When the manager's current triage landed (#883); cleared with the triage when the sender answers. */
+    triagedAt?: number;
     resultItem?: number;
+    /** `accepted`: whether a GitHub issue is opened for the item — the person's choice on accept, else the triage's (#883). */
+    openIssue?: boolean;
     declineReason?: string;
     /** `needs-you`: what a person is asked — to let it in, or to decide on the triage. */
     needs?: 'admit' | 'decision';
@@ -107,6 +113,12 @@ export interface RequestView extends ProjectRequest {
     readonly needs?: 'admit' | 'decision';
     readonly reasons?: readonly RequestAskReason[];
     readonly question?: string;
+    /** The chat it came from, by title (#883). */
+    readonly fromChatTitle?: string;
+    /** When the manager's current triage landed (#883). */
+    readonly triagedAt?: number;
+    /** `accepted`: whether a GitHub issue is opened for the item it became (#883). */
+    readonly openIssue?: boolean;
 }
 
 export function requestView(r: StoredRequest): RequestView {
@@ -254,14 +266,19 @@ export function checkTriage(value: unknown): Triage {
 export interface RequestInput {
     readonly fromProject: ProjectId;
     readonly fromChat?: ChatId;
+    /** The chat's title, shown in the receiving inbox; kept only with `fromChat`. */
+    readonly fromChatTitle?: string;
     readonly title: string;
     readonly body: string;
     readonly refs?: readonly (Ref | string)[];
 }
 
-/** How a request is resolved: accept (optionally with an edited item and a target plan), decline, or ask for more. */
+/**
+ * How a request is resolved: accept (optionally with an edited item, a target plan and whether to open a GitHub issue
+ * for it — default: the triage's `openIssue`), decline, or ask for more.
+ */
 export type RequestResolution =
-    | { readonly action: 'accept'; readonly item?: TriageProposedItem; readonly planId?: string }
+    | { readonly action: 'accept'; readonly item?: TriageProposedItem; readonly planId?: string; readonly openIssue?: boolean }
     | { readonly action: 'decline'; readonly reason: string }
     | { readonly action: 'ask'; readonly question: string };
 
@@ -318,6 +335,7 @@ export function receive(book: RequestsBook, call: RequestCall, input: RequestInp
     const fromProject = text(input.fromProject, 'fromProject', 200) as ProjectId;
     if (fromProject === book.projectId) fail('invalid', 'a project does not send requests to itself');
     const fromChat = optionalText(input.fromChat, 'fromChat', 200) as ChatId | undefined;
+    const fromChatTitle = fromChat !== undefined ? optionalText(input.fromChatTitle, 'fromChatTitle', TITLE_MAX) : undefined;
     const title = text(input.title, 'the request title', TITLE_MAX);
     const body = text(input.body, 'the request body', TEXT_MAX);
     const refs = list(input.refs, 'refs', REFS_MAX, (r) => asRequestError(() => checkRef(r)));
@@ -326,6 +344,7 @@ export function receive(book: RequestsBook, call: RequestCall, input: RequestInp
         id: `req_${book.nextId++}`,
         fromProject,
         ...(fromChat !== undefined ? { fromChat } : {}),
+        ...(fromChatTitle !== undefined ? { fromChatTitle } : {}),
         sender: call.actor,
         toProject: book.projectId,
         title,
@@ -368,6 +387,7 @@ export function triage(book: RequestsBook, call: RequestCall, id: string, value:
     const checked = checkTriage(value);
     const reasons = needsPersonReasons(checked, call.policy);
     r.triage = reasons.length && !checked.why ? { ...checked, why: whyText(reasons) } : checked;
+    r.triagedAt = call.now;
     if (reasons.length) toPerson(r, 'decision', reasons);
     r.updatedAt = call.now;
     return {
@@ -380,6 +400,8 @@ export function triage(book: RequestsBook, call: RequestCall, id: string, value:
 export interface AcceptPlan {
     readonly item: TriageProposedItem;
     readonly planId?: string;
+    /** Whether a GitHub issue is opened for the item: the person's choice, else the triage's. */
+    readonly openIssue: boolean;
 }
 
 /**
@@ -397,16 +419,19 @@ export function checkResolution(book: RequestsBook, call: RequestCall, id: strin
     if (action === 'accept') {
         if (resolution.planId !== undefined && typeof resolution.planId !== 'string') fail('invalid', 'planId is a plan id');
         const planId = resolution.planId as string | undefined;
+        if (resolution.openIssue !== undefined && typeof resolution.openIssue !== 'boolean') fail('invalid', 'openIssue must be true or false');
+        const openIssue = (resolution.openIssue as boolean | undefined) ?? r.triage?.openIssue ?? false;
         if (person) {
             const item = resolution.item !== undefined ? checkProposedItem(resolution.item) : (r.triage?.proposedItem ?? fail('invalid', `${r.id} has no proposed item; give one`));
-            return { item, ...(planId !== undefined ? { planId } : {}) };
+            return { item, openIssue, ...(planId !== undefined ? { planId } : {}) };
         }
         if (resolution.item !== undefined) fail('forbidden', 'the project manager accepts its triage as proposed; triage again to change it');
+        if (resolution.openIssue !== undefined && resolution.openIssue !== (r.triage?.openIssue ?? false)) fail('forbidden', 'the project manager accepts its triage as proposed; triage again to change openIssue');
         if (r.state !== 'triaging' || !r.triage) fail('wrong-state', `${r.id} is ${r.state}${r.triage ? '' : ' with no triage'}; triage it first`);
         const reasons = needsPersonReasons(r.triage!, call.policy);
         if (reasons.length) fail('needs-person', `${r.id} needs a person: ${whyText(reasons)}`);
         const item = r.triage!.proposedItem ?? fail('invalid', `${r.id} is a ${r.triage!.kind} with no proposed item; decline it instead`);
-        return { item, ...(planId !== undefined ? { planId } : {}) };
+        return { item, openIssue, ...(planId !== undefined ? { planId } : {}) };
     }
     if (action === 'decline') {
         text(resolution.reason, 'the decline reason', TEXT_MAX);
@@ -426,7 +451,10 @@ export function checkResolution(book: RequestsBook, call: RequestCall, id: strin
     return fail('invalid', 'a resolution action is "accept", "decline" or "ask"');
 }
 
-/** Apply a resolution `checkResolution` passed; an accept carries the plan item it became. */
+/**
+ * Apply a resolution `checkResolution` passed; an accept carries the plan item it became and records whether a GitHub
+ * issue is opened for it (`resolution.openIssue`, else the triage's).
+ */
 export function resolve(book: RequestsBook, call: RequestCall, id: string, resolution: RequestResolution, resultItem?: number): { value: StoredRequest; change: RequestChange } {
     const r = requestOf(book, id);
     leaveNeedsYou(r);
@@ -435,6 +463,7 @@ export function resolve(book: RequestsBook, call: RequestCall, id: string, resol
     if (resolution.action === 'accept') {
         r.state = 'accepted';
         if (resultItem !== undefined) r.resultItem = resultItem;
+        r.openIssue = resolution.openIssue ?? r.triage?.openIssue ?? false;
         return { value: r, change: { op: 'accepted', requestId: r.id, state: r.state, summary: `${r.id} accepted by ${who(call.actor)}${resultItem !== undefined ? ` as #${resultItem}` : ''}`, ...(resultItem !== undefined ? { resultItem } : {}) } };
     }
     if (resolution.action === 'decline') {
@@ -463,6 +492,7 @@ export function answer(book: RequestsBook, call: RequestCall, id: string, value:
     delete r.question;
     // A new triage is owed: the old one was made without the answer.
     delete r.triage;
+    delete r.triagedAt;
     if (call.manager === null) toPerson(r, 'decision', ['no-manager']);
     else r.state = 'triaging';
     r.updatedAt = call.now;
