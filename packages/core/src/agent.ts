@@ -24,11 +24,13 @@ export interface ToolGrant {
 
 /**
  * The mode a tool starts in when nothing chose one, from its MCP-style hints:
- * read-only is allowed, destructive asks, anything else is allowed (PLG-09).
+ * read-only is allowed, an explicit `destructiveHint: false` is allowed, and
+ * anything else asks — MCP defaults `destructiveHint` to true when a tool is
+ * not read-only, so an unannotated tool is treated as destructive (PLG-09).
  */
 export function defaultToolMode(annotations?: { readonly readOnlyHint?: boolean; readonly destructiveHint?: boolean }): ToolMode {
     if (annotations?.readOnlyHint) return 'allow';
-    return annotations?.destructiveHint ? 'ask' : 'allow';
+    return annotations?.destructiveHint === false ? 'allow' : 'ask';
 }
 
 export interface ConnectorRef {

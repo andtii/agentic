@@ -16,8 +16,8 @@ export const mockPluginTools: Readonly<Record<string, readonly PluginToolDeclara
         { name: 'gmail__get-message', title: 'Get message', defaultMode: 'allow' },
         { name: 'gmail__get-thread', title: 'Get conversation', defaultMode: 'allow' },
         { name: 'gmail__get-attachment', title: 'Download attachment', defaultMode: 'allow' },
-        { name: 'gmail__create-draft', title: 'Create draft', defaultMode: 'allow' },
-        { name: 'gmail__modify-labels', title: 'Add or remove labels', defaultMode: 'allow' },
+        { name: 'gmail__create-draft', title: 'Create draft', defaultMode: 'ask' },
+        { name: 'gmail__modify-labels', title: 'Add or remove labels', defaultMode: 'ask' },
         { name: 'gmail__send-email', title: 'Send email', defaultMode: 'ask' },
         { name: 'gmail__reply-to-message', title: 'Reply to message', defaultMode: 'ask' },
         { name: 'gmail__trash-message', title: 'Move to trash', defaultMode: 'ask' }
