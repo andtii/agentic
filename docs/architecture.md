@@ -617,7 +617,12 @@ _not yet_
 
 #### #731 web: project Chats — state groups, defaults strip, Review-and-move
 
-_not yet_
+`/projects/:id/chats` (`pages/projects/chats/`). `ChatsView` draws the same body on mock data (`mock/projects/chats.ts`) and live; the page around it supplies `ProjectChatRow`s and does the move.
+
+- **Groups** (`groups.ts`, pure): `chatGroupOf` — archived, else an open approval or question (`waiting`) is Needs you, else a running session (`working`) is Agents working, else Quiet. `groupChats(chats, projectId, q)` keeps the project's chats matching the search, newest first per group; Archived starts collapsed. Row grid `104px minmax(0,1fr) 96px 170px 44px`.
+- **Live rows**: the `/chats` list's `useChatRows` (Workspace index + `Chat.get`/`history` per chat, a renderless live watcher each); `working` is `workingAgents(TaskIndex.list(), chatId)` non-empty, linked work the chat's root tasks (`chatTasks`, depth 0; past two, `N tasks`). Chats have no archived state on the platform yet, so live Archived is empty.
+- **Defaults strip**: `chatDefaults` — the project's first folder, coordinator, other members, and enabled features with an `instructions` string; `Change defaults` → Settings › General.
+- **Review and move**: `unassignedChats` lists live chats in no project, those whose title or last line names this project as a word (`suggestedProject`) first and pre-ticked. Moving calls `Chat.setProject(projectId)` per chat; the Chat actor runs each feature's release hook server-side.
 
 #### #732 web: global /chats grouped by project
 

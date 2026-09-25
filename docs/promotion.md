@@ -95,7 +95,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #730: nothing generic — the Overview's row and card styles stay in `apps/web/src/styles/projects/overview.css`.
 
-- #731: —
+- #731: `pages/projects/chats/groups.ts` `suggestedProject` (a chat names a project as a word) and `listOf` (`a, b and c`) are generic; `ProjectChatWatch` repeats `/chats`' renderless `ChatWatch` (`pages/chat/LiveChats.tsx`, not exported) — export it from there if a third page needs one.
 
 - #732: `groupChatsByProject` (`apps/web/src/pages/chat/chat-groups.ts`) — a generic group-by-key-ordered-by-recency; stays in web until a second list needs it.
 
