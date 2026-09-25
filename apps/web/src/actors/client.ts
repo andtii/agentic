@@ -36,7 +36,7 @@ export function clientDefs(): ActorDefs {
         FlatMemory: ref('FlatMemory'),
         ConnectorAccounts: ref('ConnectorAccounts'),
 
-        // slot #742 Pulls actor stub — replace this line
+        Pulls: ref('pulls'),
 
         // slot #750 Plan actor stub — replace this line
 
