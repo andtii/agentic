@@ -13,7 +13,7 @@ import { clientDefs } from '../../src/actors/client';
 import { createChatWith } from '../../src/pages/chat/LiveChats';
 import { GIT_FEATURE_ID } from '../../src/pages/projects/features/git/model';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { createWorkspacePulls, taskPullOf } from '../../src/pages/projects/work/pull/LivePulls';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from '../pages/live-harness';
 

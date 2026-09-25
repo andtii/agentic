@@ -9,7 +9,7 @@ import type { ChatListRow } from '../../src/pages/chat/archive';
 import { clientDefs } from '../../src/actors/client';
 import { chatKeyOf } from '../../src/actors/keys';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { projectChatRow } from '../../src/pages/projects/chats/ProjectChats';
 import { chatGroupOf } from '../../src/pages/projects/chats/groups';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from '../pages/live-harness';

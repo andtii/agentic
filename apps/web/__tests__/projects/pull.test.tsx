@@ -11,7 +11,7 @@ import {
 import { definePullsActor, pullsKey, type PullSource } from '@agentic/platform';
 import { clientDefs } from '../../src/actors/client';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { mountRoute, page, texts, tick } from '../pages/mount';
 import { USER, WS, mountLive, owner, startLive, until, type LiveHarness } from '../pages/live-harness';
 

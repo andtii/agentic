@@ -4,8 +4,6 @@
  * strip, and the open-links strip counts the workspace's open cross-project links (`workspaceLinks`, #881); your-move
  * and agents-on-it counts wait for sources that count them.
  */
-// Projects.tsx registers the old list's topbar (New project in the topbar); importing it first makes ours win.
-import '../../Projects';
 import { component, useHead } from 'sigx';
 import { useActorState } from '@sigx/actors/app';
 import { ageText, EmptyState } from '@agentic/ui';

@@ -2,22 +2,19 @@
  * Settings › General, Members, Folders and Connectors and the New project dialog (#733) on mock data: each tab shows
  * its part of the record and saves only that part (`mockSettingsSaves`); the folder rows keep Browse, the git badge,
  * the overrides per environment and the acme note (#702); `/projects/new` is the dialog over the index, prefilled
- * from a folder (#336), with its Project manager step and the `pm` spec on the create. The old project form (#333) is
- * still covered below until X2 removes it. #733 owns this file.
+ * from a folder (#336), with its Project manager step and the `pm` spec on the create. #733 owns this file.
  */
 import { describe, it, expect } from 'vitest';
-import { MEMBER_LIMIT_MAX, PM_PERSONALITIES, type ProjectFeaturePlugin, type ProjectPatch } from '@agentic/core';
-import { AGENTS, PROJECTS } from '../../src/mock/workspace';
-import { AGENTIC_ORIGIN, mockFsLocate } from '../../src/mock/fs';
-import { opsPlugins } from '../../src/mock/ops';
+import { MEMBER_LIMIT_MAX, PM_PERSONALITIES, type ProjectPatch } from '@agentic/core';
+import { PROJECTS } from '../../src/mock/workspace';
+import { AGENTIC_ORIGIN } from '../../src/mock/fs';
 import { mockSettingsSaves } from '../../src/mock/projects/settings';
 import { mockLocate } from '../../src/pages/projects/locate';
 import { blankNewProject, newProjectPatchOf, PERSONALITY_SAMPLES, suggestedPmName } from '../../src/pages/projects/new/model';
 import { NewProjectDialog } from '../../src/pages/projects/new/NewProjectDialog';
 import { tabPatchOf } from '../../src/pages/projects/settings/general/TabFrame';
 import { membersPatchOf } from '../../src/pages/projects/settings/members/Members';
-import { connectorOptionsOf, featureManifestsOf, projectDraftOf } from '../../src/pages/projects/model';
-import { ProjectForm } from '../../src/pages/projects/ProjectForm';
+import { projectDraftOf } from '../../src/pages/projects/model';
 import { mockWorkdirEnvironments } from '../../src/pages/workdir/environments';
 import { mountAt, setText, text } from '../pages/helpers';
 import { mountRoute, page, texts } from '../pages/mount';
@@ -27,10 +24,6 @@ const settle = async (): Promise<void> => { for (let i = 0; i < 3; i++) await ne
 const row = (dom: ParentNode, machine: string): HTMLElement => dom.querySelector<HTMLElement>(`[data-project-folder="${machine}"]`)!;
 const override = (dom: ParentNode, machine: string, env: string): HTMLElement => row(dom, machine).querySelector<HTMLElement>(`[data-project-override="${env}"]`)!;
 const chip = (el: ParentNode): string => text(el.querySelector('[data-scope="ag-workdir"][data-part="chip"]'));
-const openOverrides = async (dom: ParentNode, machine: string): Promise<void> => {
-    row(dom, machine).querySelector<HTMLButtonElement>('[data-project-override-open]')!.click();
-    await settle();
-};
 const openPopup = (): HTMLElement => document.querySelector<HTMLElement>('[data-scope="dialog"][data-part="popup"][data-state="open"]')!;
 const buttonIn = (root: ParentNode, label: string): HTMLButtonElement => {
     const b = [...root.querySelectorAll<HTMLButtonElement>('button')].find((x) => x.textContent?.trim() === label && !x.disabled);
@@ -247,163 +240,5 @@ describe('/projects/new: the New project dialog (#733)', () => {
         const d = { ...blankNewProject(), name: ' x ', folder: { key: 'alien01/*', row: { path: 'C:\\Dev\\x' } }, personality: 'custom', pmCustom: '  Calm.  ', skills: ['a', ' a ', 'b', ''] };
         expect(newProjectPatchOf(d)).toEqual({ name: 'x', folders: { 'alien01/*': 'C:\\Dev\\x' }, pm: { name: 'x PM', personality: { custom: 'Calm.' }, skills: [{ id: 'a' }, { id: 'b' }] } });
         expect(suggestedPmName('')).toBe('Project manager');
-    });
-});
-
-describe('the project form (mock)', () => {
-    async function mountForm(extra: { catalogue?: Readonly<Record<string, ProjectFeaturePlugin>> } = {}) {
-        const saved: ProjectPatch[] = [];
-        const dom = await mountAt('/projects/new', (
-            <ProjectForm
-                agents={AGENTS}
-                environments={mockWorkdirEnvironments.list()}
-                machines={mockWorkdirEnvironments.projectMachines()}
-                connectors={connectorOptionsOf(opsPlugins)}
-                features={featureManifestsOf(opsPlugins)}
-                locate={mockLocate()}
-                {...(extra.catalogue ? { catalogue: extra.catalogue } : {})}
-                onSave={(p) => saved.push(p)}
-            />
-        ));
-        return { dom, saved };
-    }
-
-    it('Browse keeps the folder\u2019s git badge on the row; Find offers the mock locate matches and fills another row; a foreign origin warns', async () => {
-        const { dom } = await mountForm();
-        expect(dom.querySelectorAll('[data-project-folder] button').length).toBeGreaterThan(0);
-        // No origin yet: no Find anywhere.
-        expect([...dom.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.textContent?.trim() === 'Find')).toBe(false);
-        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
-        expect(chip(row(dom, 'alien01'))).toContain('agentic');
-        // The build's git feature (#335) detects the badge and suggests itself on the row.
-        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
-        // Now every empty row offers Find; the offline machine's row cannot.
-        expect(row(dom, 'nuc-lab').querySelector<HTMLButtonElement>('button[disabled]')).not.toBeNull();
-        await openOverrides(dom, 'alien01');
-        expect(buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find')).toBeTruthy();
-
-        buttonIn(override(dom, 'alien01', 'env_alien01_personal'), 'Find').click();
-        await settle();
-        const popup = openPopup();
-        const matches = mockFsLocate('env_alien01_personal', AGENTIC_ORIGIN);
-        expect('matches' in matches && matches.matches.map((m) => m.path)).toEqual(['C:\\Users\\andy\\src\\agentic']);
-        expect(texts([...popup.querySelectorAll('[data-project-match-path]')])).toEqual(['C:\\Users\\andy\\src\\agentic']);
-        // The first match is in effect until another is picked: confirming without touching a radio uses it.
-        expect(popup.querySelector<HTMLInputElement>('input[name="project-locate-match"]')!.checked).toBe(true);
-        buttonIn(popup, 'Use this folder').click();
-        await settle();
-        expect(chip(override(dom, 'alien01', 'env_alien01_personal'))).toContain('agentic');
-        expect(dom.querySelector('[data-project-folder-warning]')).toBeNull();
-
-        // No match to use (here: the mock has no tree for the codex environment, an error): confirming keeps the dialog and its answer in view; Cancel closes it.
-        // An environment that inherits the machine's folder can still look for another checkout of its own.
-        buttonIn(override(dom, 'alien01', 'env_alien01_codex'), 'Find').click();
-        await settle();
-        // The error line is the kit ErrorNote (#592): zero's Alert, announced, keeping its hook.
-        const locateError = openPopup().querySelector('[data-project-locate="error"]')!;
-        expect([locateError.getAttribute('data-scope'), locateError.getAttribute('role')]).toEqual(['alert', 'alert']);
-        buttonIn(openPopup(), 'Use this folder').click();
-        await settle();
-        expect(openPopup()).not.toBeNull();
-        expect(openPopup().querySelector('[data-project-locate="error"]')).not.toBeNull();
-        buttonIn(openPopup(), 'Cancel').click();
-        await settle();
-        expect(document.querySelector('[data-scope="dialog"][data-part="popup"][data-state="open"]')).toBeNull();
-
-        // Another repo on the work row: both rows now disagree, and say so without blocking.
-        await browse(row(dom, 'alien01'), 'C:\\Dev', 'sigx');
-        expect(row(dom, 'alien01').hasAttribute('data-mismatch')).toBe(true);
-        expect(text(row(dom, 'alien01').querySelector('[data-project-folder-warning]'))).toContain('another origin');
-    });
-
-    it('a feature switched on renders its settings from the schema with the origin prefilled from the folders; detect preselects it', async () => {
-        const catalogue: Readonly<Record<string, ProjectFeaturePlugin>> = { 'agentic.feature.git': { manifest: featureManifestsOf(opsPlugins)[0]!, detect: (f) => !!f.git } };
-        const { dom } = await mountForm({ catalogue });
-        const feature = () => dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
-        expect(feature().hasAttribute('data-on')).toBe(false);
-        expect(feature().querySelector('[data-form="schema"]')).toBeNull();
-        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
-        // The badge said "repo": the plugin's detect suggested the feature, the row shows it, and the settings opened on the origin.
-        expect(texts([...row(dom, 'alien01').querySelectorAll('[data-project-folder-meta] [data-scope="badge"][data-part="root"]')])).toEqual(['repo · main', 'Git']);
-        expect(feature().hasAttribute('data-on')).toBe(true);
-        expect(feature().querySelector<HTMLInputElement>('input[name="feature-agentic.feature.git.origin"]')!.value).toBe(AGENTIC_ORIGIN);
-        expect(feature().querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
-    });
-
-    it('a save produces the patch: name, roster with coordinator, connectors, folders and the feature settings; no name keeps it here', async () => {
-        const { dom, saved } = await mountForm();
-        buttonIn(dom, 'Create project').click();
-        await settle();
-        expect(saved).toEqual([]);
-        expect(text(dom.querySelector('[data-scope="field"][data-part="error"]'))).toBe('A name is required.');
-        setText(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!, ' agentic ');
-        for (const id of ['forge', 'lint']) {
-            const box = dom.querySelector<HTMLInputElement>(`[data-new-chat-agent="${id}"] input[name="member"]`)!;
-            box.checked = true;
-            box.dispatchEvent(new Event('change', { bubbles: true }));
-            await settle();
-        }
-        const radio = dom.querySelector<HTMLInputElement>('[data-new-chat-agent="forge"] input[name="coordinator"]')!;
-        radio.checked = true;
-        radio.dispatchEvent(new Event('change', { bubbles: true }));
-        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
-        // The badge switched the build's git feature on (detect, #335) with the origin prefilled: nothing to click.
-        expect(dom.querySelector<HTMLInputElement>('[data-project-feature="agentic.feature.git"] input[role="switch"]')!.checked).toBe(true);
-        buttonIn(dom, 'Create project').click();
-        await settle();
-        expect(saved).toEqual([{
-            name: 'agentic',
-            members: { agentIds: ['forge', 'lint'], coordinator: 'forge' },
-            folders: { 'alien01/*': 'C:\\Dev\\agentic\\main' },
-            connectors: [],
-            features: { 'agentic.feature.git': { origin: AGENTIC_ORIGIN } }
-        }]);
-    });
-
-    it('a feature\u2019s presets fill its fields, the preview follows the draft, and the plugin\u2019s own errors keep the page here (#621)', async () => {
-        const { dom, saved } = await mountForm();
-        setText(dom.querySelector<HTMLInputElement>('input[name="project-name"]')!, 'agentic');
-        await browse(row(dom, 'alien01'), 'C:\\Dev', 'agentic', 'main');
-        const feature = () => dom.querySelector<HTMLElement>('[data-project-feature="agentic.feature.git"]')!;
-        const preview = () => Object.fromEntries([...feature().querySelectorAll('[data-project-feature-preview-line]')].map((l) => [text(l.querySelector('dt')), text(l.querySelector('dd'))]));
-        const field = (key: string) => feature().querySelector<HTMLInputElement>(`input[name="feature-agentic.feature.git.${key}"]`)!;
-        expect(preview()).toEqual({ Worktrees: 'off: sessions open in the project folder' });
-        field('worktreePerChat').click();
-        await settle();
-        expect(preview()).toMatchObject({ Branch: 'chat/a1b2c3d4', Folder: 'C:\\Dev\\agentic\\branches\\chat-a1b2c3d4', 'Made by': 'git worktree add' });
-
-        buttonIn(feature(), 'Inside the repo').click();
-        await settle();
-        expect(field('worktreePath').value).toBe('{repo}/.worktrees/{branchSlug}');
-        expect(preview()).toMatchObject({ Folder: 'C:\\Dev\\agentic\\main\\.worktrees\\chat-a1b2c3d4' });
-        // Every field stays editable after a preset; a token the plugin does not know is its error, and the save waits.
-        setText(field('worktreePath'), '{repo}/{nope}');
-        await settle();
-        expect(text(feature().querySelector('[data-project-feature-errors]'))).toContain('{nope}');
-        expect(preview()).toMatchObject({ Problem: expect.stringContaining('{nope}') });
-        buttonIn(dom, 'Create project').click();
-        await settle();
-        expect(saved).toEqual([]);
-        expect(text(dom.querySelector('[data-project-error]'))).toBe('Check the Git settings.');
-        expect(dom.querySelector('[data-project-error]')!.getAttribute('role')).toBe('alert');
-        expect(feature().querySelector('[data-project-feature-errors]')!.getAttribute('role')).toBe('alert');
-        // Nothing in the form is a hand-stamped <p role="alert"> any more.
-        expect(dom.querySelector('p[role="alert"], ul[role="alert"]')).toBeNull();
-
-        buttonIn(feature(), 'Git default').click();
-        await settle();
-        expect(field('worktreePath').value).toBe('');
-        expect(feature().querySelector('[data-project-feature-errors]')).toBeNull();
-        buttonIn(dom, 'Create project').click();
-        await settle();
-        expect(saved[0]?.features).toEqual({ 'agentic.feature.git': { origin: AGENTIC_ORIGIN, worktreePerChat: true } });
-    });
-
-    it('the phone regime: the form and the list have no element wider than 400 px worth of columns (one column each)', async () => {
-        const { dom } = await mountForm();
-        // happy-dom does no layout; the structural rule is what the CSS pins: every grid on the form collapses to one column below 768.
-        expect(dom.querySelector('[data-project-form]')).not.toBeNull();
-        expect(dom.querySelectorAll('[data-project-folder]').length).toBe(mockWorkdirEnvironments.projectMachines().length);
-        expect(PROJECTS.length).toBe(2);
     });
 });

@@ -10,7 +10,7 @@ import { trailFor } from '../../src/crumbs';
 import { setDataMode } from '../../src/data-mode';
 import { projectHead } from '../../src/pages/projects/head';
 import { projectMenuFor } from '../../src/pages/projects/layout/menu';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { USER, mountLive, startLive, until, type LiveHarness } from '../pages/live-harness';
 
 let h: LiveHarness;

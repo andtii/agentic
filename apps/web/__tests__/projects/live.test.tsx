@@ -18,7 +18,7 @@ import { topbarFor } from '../../src/components/topbar';
 import { chatHead } from '../../src/pages/chat/head';
 import { createChatWith, folderMachineFor } from '../../src/pages/chat/LiveChats';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { USER, WS, mountLive, owner, startLive, texts, tick, until, type LiveHarness } from '../pages/live-harness';
 
 let h: LiveHarness;

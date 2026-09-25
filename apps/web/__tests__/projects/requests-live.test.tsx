@@ -7,7 +7,7 @@ import type { AgentId, Principal, ProjectId, SessionId, Triage } from '@agentic/
 import { definePlanActor, defineRequestsActor, NO_REQUEST_TURNS, planKey, requestsKey, type RequestView } from '@agentic/platform';
 import { clientDefs } from '../../src/actors/client';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { acceptResolution, failureNote, liveEntries, phasesOf } from '../../src/pages/projects/requests/live';
 import { text } from '../pages/helpers';
 import { USER, WS, mountLive, owner, startLive, tick, until, type LiveHarness } from '../pages/live-harness';

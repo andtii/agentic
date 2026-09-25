@@ -7,7 +7,7 @@ import type { ProjectId } from '@agentic/core';
 import { definePlanActor, planKey } from '@agentic/platform';
 import { clientDefs } from '../../src/actors/client';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { USER, WS, mountLive, owner, startLive, texts, until, type LiveHarness } from '../pages/live-harness';
 
 describe('the work item page refs and History on the live Plan (#890)', () => {

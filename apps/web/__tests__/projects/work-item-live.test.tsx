@@ -9,7 +9,7 @@ import { TaskActor, taskKey } from '@agentic/platform';
 import { clientDefs } from '../../src/actors/client';
 import { createChatWith } from '../../src/pages/chat/LiveChats';
 import { projectHead } from '../../src/pages/projects/head';
-import { saveProjectWith } from '../../src/pages/projects/LiveProjects';
+import { saveProjectWith } from '../../src/pages/projects/live';
 import { detailsOf, planOf } from '../../src/pages/projects/work/item/live';
 import { findWorkItem } from '../../src/pages/projects/work/item/model';
 import { USER, WS, mountLive, owner, startLive, texts, until, type LiveHarness } from '../pages/live-harness';
