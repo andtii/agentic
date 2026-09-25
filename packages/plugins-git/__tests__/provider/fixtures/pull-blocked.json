@@ -1,0 +1,307 @@
+{
+  "status": 200,
+  "headers": {
+    "x-ratelimit-limit": "5000",
+    "x-ratelimit-remaining": "4380",
+    "x-ratelimit-reset": "1790336800"
+  },
+  "body": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "number": 768,
+          "title": "core: project feature ui slots, work items, pull requests, member roles and limits (contract)",
+          "url": "https://github.com/andtii/agentic/pull/768",
+          "state": "OPEN",
+          "isDraft": false,
+          "headRefName": "724-core-contract",
+          "baseRefName": "main",
+          "additions": 358,
+          "deletions": 6,
+          "changedFiles": 9,
+          "createdAt": "2026-09-25T11:33:34Z",
+          "mergedAt": null,
+          "mergeable": "CONFLICTING",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "author": {
+            "login": "andtii"
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "__typename": "Bot",
+                  "login": "copilot-pull-request-reviewer"
+                }
+              },
+              {
+                "requestedReviewer": {
+                  "__typename": "Team",
+                  "slug": "core"
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "name": "automerge",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:07Z",
+                          "completedAt": "2026-09-25T11:37:07Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "update_release_draft",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:07Z",
+                          "completedAt": "2026-09-25T11:37:06Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "changes",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:10Z",
+                          "completedAt": "2026-09-25T11:37:16Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "compat",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:07Z",
+                          "completedAt": "2026-09-25T11:37:07Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "autolabel",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:10Z",
+                          "completedAt": "2026-09-25T11:37:16Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "coverage",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:07Z",
+                          "completedAt": "2026-09-25T11:37:07Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "static",
+                          "status": "COMPLETED",
+                          "conclusion": "FAILURE",
+                          "title": "oxlint: 2 errors",
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:37:50Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "unit (1)",
+                          "status": "IN_PROGRESS",
+                          "conclusion": null,
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": null
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "unit (2)",
+                          "status": "QUEUED",
+                          "conclusion": null,
+                          "title": null,
+                          "startedAt": null,
+                          "completedAt": null
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "unit (3)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:38:14Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "unit (4)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:38:37Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "workers (test:workers)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:39:05Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "workers (test:acceptance)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:38:29Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "e2e (1)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:39:16Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "e2e (2)",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:19Z",
+                          "completedAt": "2026-09-25T11:39:01Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "size",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:37:18Z",
+                          "completedAt": "2026-09-25T11:37:57Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "gate",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:39:19Z",
+                          "completedAt": "2026-09-25T11:39:21Z"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "name": "main-red",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "title": null,
+                          "startedAt": "2026-09-25T11:39:22Z",
+                          "completedAt": "2026-09-25T11:39:21Z"
+                        },
+                        {
+                          "__typename": "StatusContext",
+                          "context": "codecov/patch",
+                          "state": "PENDING",
+                          "description": "Measuring bundles"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "reviewThreads": {
+            "nodes": [
+              {
+                "id": "PRRT_kwDOUeZuAc6l-2bm",
+                "isResolved": true,
+                "path": "packages/core/src/project-ui.ts",
+                "line": 39,
+                "first": {
+                  "nodes": [
+                    {
+                      "author": {
+                        "login": "copilot-pull-request-reviewer"
+                      },
+                      "body": "`projectFeatureUiError` checks that `section.label`, `section.icon`, and `overviewCard.title` are strings, but it currently accepts empty strings (e.g. `{ label: '' }`). Since the helper already enforces non-empty strings for arrays, it seems unintended to allow empty UI labels/titles here too."
+                    }
+                  ]
+                },
+                "last": {
+                  "totalCount": 2,
+                  "nodes": [
+                    {
+                      "body": "Fixed in cdfcbc5a."
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "PRRT_kwDOUeZuAc6l-2b7",
+                "isResolved": false,
+                "path": "packages/core/src/project.ts",
+                "line": 114,
+                "first": {
+                  "nodes": [
+                    {
+                      "author": {
+                        "login": "copilot-pull-request-reviewer"
+                      },
+                      "body": "`isProjectFeatureManifest` now allows a `category` field via `ProjectFeatureManifest`, but the runtime type guard never validates `category`. That makes the guard unsound: a manifest with `category: 'not-a-real-category'` will still pass and then be treated as a `ProjectFeatureManifest` elsewhere."
+                    }
+                  ]
+                },
+                "last": {
+                  "totalCount": 2,
+                  "nodes": [
+                    {
+                      "body": "Fixed in cdfcbc5a."
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "PRRT_kwDOUeZuAc6l-2cR",
+                "isResolved": false,
+                "path": "packages/core/src/pull.ts",
+                "line": 98,
+                "first": {
+                  "nodes": [
+                    {
+                      "author": {
+                        "login": "copilot-pull-request-reviewer"
+                      },
+                      "body": "`pullBlockers` builds the reviewer clause as \"<names> has not approved\" even when there are multiple reviewers, which yields ungrammatical output (\"A, B has not approved\"). This string is user-facing on the PR page summary, so it should pluralize correctly."
+                    }
+                  ]
+                },
+                "last": {
+                  "totalCount": 2,
+                  "nodes": [
+                    {
+                      "body": "Fixed in cdfcbc5a."
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
