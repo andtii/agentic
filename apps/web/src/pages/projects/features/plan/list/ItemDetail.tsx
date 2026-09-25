@@ -129,7 +129,11 @@ export const ItemDetail = component<ItemDetailProps>(({ props }) => {
                     </dd>
                     <dt>Claimed</dt>
                     <dd data-fact="claimed">
-                        {item.claim && claimLive
+                        {item.state === 'done'
+                            ? item.claim?.taskId
+                                ? <><span data-dim="">{'finished by '}</span>{NavChip(`/tasks/${item.claim.taskId}`, 'task', <><Icon name="check" size={12} />{item.claim.taskId}</>)}</>
+                                : <span data-dim="">Done</span>
+                            : item.claim && claimLive
                             ? <><span data-plan-tone="working">working now</span><span data-dim="">{`· lease ${leaseMinutesLeft(item.claim.leaseUntil, props.now)} min left, renews while it works`}</span></>
                             : item.claim
                                 ? <span data-plan-tone="needs-you">lease ran out</span>
