@@ -643,7 +643,10 @@ _not yet_
 
 #### #740 plugins-git: ui block — Code section, overview card, Git stages, pr: refs, needs a folder
 
-_not yet_
+`gitFeatureManifest` declares `category: 'code'` and a `ui` block: a **Code** section (icon `code`) and overview card, the
+work stages Ready → Code → PR → Checks → Review → Merge (so `workStagesFor` picks them whenever Git is on), the `pr:` chat
+ref prefix, and `needs: ['folder']` (the catalogue shows NEEDS A FOLDER without one). No web code names Git; the PR adapter
+is #741.
 
 #### #741 plugins-git: provider-neutral pull request adapter + GitHub adapter
 

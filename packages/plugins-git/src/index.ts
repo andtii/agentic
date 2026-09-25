@@ -133,7 +133,15 @@ export const gitFeatureManifest: ProjectFeatureManifest = {
     config: { type: 'object', properties: {}, additionalProperties: false },
     permissions: [],
     compat: { platform: '*', core: '*' },
-    projectSettings: gitProjectSettings
+    projectSettings: gitProjectSettings,
+    category: 'code',
+    ui: {
+        section: { label: 'Code', icon: 'code' },
+        overviewCard: { title: 'Code' },
+        workStages: ['Ready', 'Code', 'PR', 'Checks', 'Review', 'Merge'],
+        chatRefPrefixes: ['pr:'],
+        needs: ['folder']
+    }
 };
 
 /** The folder's origin remote URL: the repo's identity across machines (what the project form fills `origin` from). */
