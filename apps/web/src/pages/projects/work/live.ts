@@ -6,7 +6,7 @@
  */
 import { useActorState } from '@sigx/actors/app';
 import type { AgentId, Plan, PlanItem, ProjectFeatureUi, ProjectRecord, PullRequest, TaskId } from '@agentic/core';
-import type { TaskIndexRow } from '@agentic/platform';
+import type { PullsReadiness, TaskIndexRow } from '@agentic/platform';
 import { useActorDefs, useViewer, type ActorDefs, type ViewerState } from '../../../actors/defs';
 import { planKeyOf, pullsKeyOf, registryKeyOf, taskIndexKeyOf } from '../../../actors/keys';
 import { dataMode } from '../../../data-mode';
@@ -20,12 +20,24 @@ const projectIdOf = (projectId: string | (() => string)): (() => string) => (typ
  * setup; given a getter, the read follows the project it names.
  */
 export function usePulls(projectId: string | (() => string)): () => readonly PullRequest[] {
+    return usePullsState(projectId).pulls;
+}
+
+/** The project's pull requests and whether the Pulls actor can read them (#915): `readiness` is live only. */
+export interface PullsState {
+    pulls(): readonly PullRequest[];
+    /** `needs-sign-in`: the last poll found no GitHub credential for the project's repo. */
+    readiness(): PullsReadiness | undefined;
+}
+
+/** `usePulls` with the view's `readiness` beside the PRs, from the same one read. */
+export function usePullsState(projectId: string | (() => string)): PullsState {
     const id = projectIdOf(projectId);
-    if (dataMode() !== 'live') return () => MOCK_WORK[id()]?.pulls ?? [];
+    if (dataMode() !== 'live') return { pulls: () => MOCK_WORK[id()]?.pulls ?? [], readiness: () => undefined };
     const defs = useActorDefs();
     const viewer = useViewer()();
     const view = useActorState(defs.Pulls, () => viewer.workspaceId && ([pullsKeyOf(viewer.workspaceId, id()), 'get'] as const), { live: true });
-    return () => view.value?.pulls ?? [];
+    return { pulls: () => view.value?.pulls ?? [], readiness: () => view.value?.readiness };
 }
 
 /** Where a live plan read goes: the actor defs and the viewer (injected when not given). */

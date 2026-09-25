@@ -24,6 +24,7 @@ import type { ProjectPageProps } from '../layout/types';
 import { LiveStartTask } from '../../task/LiveStartTask';
 import { openStartTask } from '../../task/start';
 import { useLiveWork } from './LiveWork';
+import { PullsSignIn } from './pull/PullsSignIn';
 import { mockWorkFeatures, mockWorkTasks, usePlanItems, usePulls } from './live';
 import { WORK_GROUPS, filterWork, groupWork, isStale, workAgentOf, workItemsOf, type WorkFeatures, type WorkFilter, type WorkTask } from './model';
 
@@ -180,6 +181,7 @@ const LiveWork = component<ProjectPageProps>(({ props }) => {
     return () => (
         <>
             {live.loading && !live.tasks().length ? <p data-panel-note aria-busy="true">Loading work…</p> : null}
+            <PullsSignIn projectId={props.project.id} readiness={live.pullsReadiness()} />
             <WorkBoard
                 projectId={props.project.id}
                 tasks={live.tasks()}
