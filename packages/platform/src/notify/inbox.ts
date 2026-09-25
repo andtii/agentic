@@ -8,8 +8,8 @@
  */
 
 import { actor, defineActor, type AnyActorDefinition } from '@sigx/actors';
-import { workspaceOfKey, type WorkspaceId } from '@agentic/core';
-import { asPrincipal, sameWorkspace, userPrincipal } from '../auth/index.js';
+import { workspaceOfKey, type NotificationPrefs, type WorkspaceId, type WorkspaceSettings } from '@agentic/core';
+import { asPrincipal, sameWorkspace, userPrincipal, workspaceKey } from '../auth/index.js';
 import { registryKey } from '../registry/key.js';
 import { deliverAll } from './deliver.js';
 import type { ChannelCatalogue } from './plugins.js';
@@ -112,6 +112,12 @@ export interface InboxOptions {
     readonly channelPlugins?: ChannelCatalogue;
     /** The Registry definition `channelPlugins` are resolved through. */
     readonly registry?: () => AnyActorDefinition;
+    /**
+     * The Workspace definition the notification prefs are read from (#302): `notifications.push`
+     * decides whether `push` reaches any outbound channel, `notifications.inbox` whether a new
+     * notification counts as unread. Absent: both on — every channel, every notification counted.
+     */
+    readonly workspace?: () => AnyActorDefinition;
     /** Clock, for tests. */
     readonly now?: () => number;
 }
@@ -132,6 +138,17 @@ function secretMissing(error: unknown): boolean {
 /** The attempt recorded when the Registry cannot be asked which channels are on (OPS-04: shown, not lost). */
 export const PLUGIN_CHANNELS = 'plugins';
 
+/** The attempt recorded when the workspace's notification prefs cannot be read: nothing is pushed (#302). */
+export const PREFS_CHANNEL = 'settings';
+
+/** What the Inbox asks the Workspace, as its owner. */
+interface WorkspaceSettingsReader {
+    get(): Promise<{ readonly settings: WorkspaceSettings }>;
+}
+
+/** The prefs when no Workspace is wired: everything on, as before #302. */
+const ALL_ON: NotificationPrefs = { inbox: true, push: true };
+
 /**
  * Build the Inbox definition. The default export {@link Inbox} has no outbound
  * channels; the app registers `defineInbox({ channelPlugins, registry })` so the
@@ -143,6 +160,19 @@ export function defineInbox(options: InboxOptions = {}) {
     const staticChannels = options.channels ?? [];
     const plugins = options.channelPlugins && options.registry ? { impls: options.channelPlugins, registry: options.registry } : null;
     const now = options.now ?? Date.now;
+    const workspaceDef = options.workspace;
+
+    /** The workspace's notification prefs, read over one hop as its owner; a read that fails is reported, not thrown. */
+    const prefsOf = async (workspaceId: WorkspaceId): Promise<{ prefs: NotificationPrefs } | { failed: string }> => {
+        if (!workspaceDef) return { prefs: ALL_ON };
+        try {
+            const ws = actor(workspaceDef(), workspaceKey(workspaceId)).with({ context: asPrincipal(userPrincipal(workspaceId, workspaceId)) }) as unknown as WorkspaceSettingsReader;
+            const { notifications } = (await ws.get()).settings;
+            return { prefs: { inbox: notifications.inbox !== false, push: notifications.push === true } };
+        } catch (e) {
+            return { failed: `the notification settings could not be read, so nothing was pushed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+    };
 
     /**
      * The channels one notification goes through: the static ones, then every enabled
@@ -189,7 +219,8 @@ export function defineInbox(options: InboxOptions = {}) {
             const workspaceId = (): WorkspaceId => workspaceOfKey(ctx.key) ?? ('' as WorkspaceId);
             const find = (id: string): InboxNotification | undefined => ctx.state.notifications.find((n) => n.id === id);
 
-            const append = async (input: NotificationInput): Promise<InboxNotification> => {
+            /** Record one notification; `muted` when the workspace's inbox switch is off. */
+            const record = async (input: NotificationInput, muted: boolean): Promise<InboxNotification> => {
                 const notification: InboxNotification = {
                     kind: input.kind,
                     title: input.title,
@@ -198,6 +229,7 @@ export function defineInbox(options: InboxOptions = {}) {
                     id: `n_${ctx.state.seq + 1}`,
                     at: now(),
                     read: false,
+                    ...(muted ? { muted: true as const } : {}),
                     deliveries: []
                 };
                 reduceInbox(ctx.state, { type: 'append', notification }, cap);
@@ -206,13 +238,28 @@ export function defineInbox(options: InboxOptions = {}) {
             };
 
             return {
-                /** Record only — what `Schedule.onReminder` and Task use when no outbound delivery is wanted. */
-                append,
+                /** Record only — what `Schedule.onReminder` and Task use when no outbound delivery is wanted. Muted while the inbox switch is off. */
+                async append(input: NotificationInput): Promise<InboxNotification> {
+                    const read = await prefsOf(workspaceId());
+                    return record(input, 'prefs' in read && !read.prefs.inbox);
+                },
 
-                /** Record, then deliver through every channel; attempts land on the record (OPS-04). */
+                /**
+                 * Record, then deliver through every channel; attempts land on the record (OPS-04). The prefs are read
+                 * first, in this turn (#302): push off skips every outbound channel — the Registry is not asked — and
+                 * records no attempt, since that is the user's choice; prefs that cannot be read push nothing and say so.
+                 */
                 async push(input: NotificationInput): Promise<InboxNotification> {
-                    const notification = await append(input);
+                    const read = await prefsOf(workspaceId());
+                    const notification = await record(input, 'prefs' in read && !read.prefs.inbox);
                     if (staticChannels.length === 0 && !plugins) return notification;
+                    if ('prefs' in read && !read.prefs.push) return notification;
+                    if ('failed' in read) {
+                        const attempts = [{ channel: PREFS_CHANNEL, at: now(), ok: false, error: read.failed }];
+                        reduceInbox(ctx.state, { type: 'delivered', id: notification.id, attempts }, cap);
+                        await ctx.save();
+                        return ctx.snapshot(find(notification.id)) ?? { ...notification, deliveries: attempts };
+                    }
                     const { channels, failed } = await channelsFor(workspaceId());
                     if (channels.length === 0 && failed === undefined) return notification;
                     const target = { workspaceId: workspaceId(), subscriptions: ctx.snapshot(ctx.state.subscriptions) };
@@ -234,7 +281,7 @@ export function defineInbox(options: InboxOptions = {}) {
 
                 unread(): number {
                     let n = 0;
-                    for (const row of ctx.state.notifications) if (!row.read) n++;
+                    for (const row of ctx.state.notifications) if (!row.read && !row.muted) n++;
                     return n;
                 },
 
