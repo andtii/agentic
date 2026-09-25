@@ -285,7 +285,7 @@ export const RequestsView = component<RequestsViewProps>(({ props }) => {
                     {e.fromChatTitle ? <><Icon name="chevron-right" size={12} /><span data-requests-chip="chat"><Icon name="chats" size={12} />{e.fromChatTitle}</span></> : null}
                     <Icon name="chevron-right" size={12} />
                     <span data-requests-sender="">
-                        {r.sender.kind === 'agent' ? <AgentTile name={props.names(r.sender.agentId).name} hue={props.names(r.sender.agentId).hue} size={20} /> : <AgentTile name={props.you} person size={20} />}
+                        {r.sender.kind === 'agent' ? <AgentTile name={props.names(r.sender.agentId).name} hue={props.names(r.sender.agentId).hue} size={20} /> : <AgentTile name={actorName(r.sender, props.names, props.you)} person size={20} />}
                         {senderLine(e, props.names, props.you)}
                     </span>
                     <span data-requests-detail-age="">{age(r.createdAt)}</span>

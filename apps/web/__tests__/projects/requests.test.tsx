@@ -8,7 +8,7 @@ import type { AgentId, ProjectId, ProjectRequest } from '@agentic/core';
 import { MOCK_REQUESTS } from '../../src/mock/projects/requests';
 import { PROJECTS } from '../../src/mock/workspace';
 import {
-    accept, askForMore, boxCount, decline, draftErrors, draftOf, entriesIn, githubRepoOf, itemMeta, itemOfDraft, kindLine, nextItemNumber,
+    accept, actorName, askForMore, boxCount, decline, draftErrors, draftOf, entriesIn, githubRepoOf, itemMeta, itemOfDraft, kindLine, nextItemNumber,
     requestPill, senderLine, type ActorNames, type RequestEntry
 } from '../../src/pages/projects/requests/model';
 import { text } from '../pages/helpers';
@@ -51,6 +51,8 @@ describe('the Requests model (#761)', () => {
         expect(itemMeta(t.proposedItem!, names, 'Andii')).toBe('Forge, top of queue · done when repro passes and bench holds');
         expect(githubRepoOf(agentic)).toBe('andtii/agentic');
         expect(githubRepoOf({ features: {} })).toBeUndefined();
+        expect(githubRepoOf({ features: { git: { origin: 'git@github.com:andtii/signalx.git' } } })).toBe('andtii/signalx');
+        expect(actorName({ kind: 'user', userId: 'kim' }, names, 'Andii')).toBe('kim');
     });
 
     it('turns an edited draft back into a proposed item, and refuses an empty title', () => {

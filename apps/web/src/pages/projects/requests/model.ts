@@ -89,12 +89,15 @@ export function itemMeta(item: TriageProposedItem, names: ActorNames, you: strin
     return item.doneWhen.length ? `${who} · done when ${item.doneWhen.join(' and ')}` : who;
 }
 
-/** `owner/repo` from the project's git origin, for the "open GitHub issue" line; `undefined` without a GitHub origin. */
+/** `owner/repo` from the project's git origin (feature `agentic.feature.git`, or the legacy `git` key), for the "open GitHub issue" line; `undefined` without a GitHub origin. */
 export function githubRepoOf(p: Pick<ProjectRecord, 'features'>): string | undefined {
-    const origin = (p.features['agentic.feature.git'] as { origin?: unknown } | undefined)?.origin;
-    if (typeof origin !== 'string') return undefined;
-    const m = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(origin);
-    return m ? `${m[1]}/${m[2]}` : undefined;
+    for (const id of ['agentic.feature.git', 'git']) {
+        const origin = (p.features[id] as { origin?: unknown } | undefined)?.origin;
+        if (typeof origin !== 'string') continue;
+        const m = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(origin);
+        if (m) return `${m[1]}/${m[2]}`;
+    }
+    return undefined;
 }
 
 // ---- the edit-first form -------------------------------------------------------------------------------------------
