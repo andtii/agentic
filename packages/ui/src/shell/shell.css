@@ -221,8 +221,6 @@
     [data-scope="ai-shell"][data-part="title"] { display: flex; }
     [data-scope="ai-shell"][data-part="bar"][data-regime="detail"]:not([data-sub-menu]) [data-scope="drawer"][data-part="trigger"] { display: none; }
     [data-scope="ai-shell"][data-part="bar"][data-regime="detail"] [data-part="back"] { display: inline-flex; }
-    /* a route with a sub-menu (a project's, #923): back leads, the menu stays after it */
-    [data-scope="ai-shell"][data-part="bar"][data-regime="detail"][data-sub-menu] [data-part="back"] { order: -1; }
     [data-scope="ai-shell"][data-part="bar"] > [data-scope="navbar"] [data-part="brand"] { margin-inline-start: var(--space-xs); }
 
     /* one right slot: the page's phone action, else the last of its actions */

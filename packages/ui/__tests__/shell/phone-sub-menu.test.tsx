@@ -26,6 +26,9 @@ describe('AppShell phone menu on a sub-menu route', () => {
         expect(bar(host).hasAttribute('data-sub-menu')).toBe(true);
         expect(bar(host).querySelector('button[aria-label="Menu"]')).not.toBeNull();
         expect(bar(host).querySelector('[data-part="back"] a[aria-label="Back"]')).not.toBeNull();
+        // Back comes first in the DOM, so the focus order matches what the phone draws: Back, then Menu.
+        const controls = [...bar(host).querySelectorAll('[data-part="back"] a, button[aria-label="Menu"]')].map((el) => el.getAttribute('aria-label'));
+        expect(controls).toEqual(['Back', 'Menu']);
     });
 
     it('leaves the bar unmarked off the entry with the sub-menu', async () => {

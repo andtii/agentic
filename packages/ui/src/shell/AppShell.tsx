@@ -280,10 +280,11 @@ export const AppShell = component<AppShellProps>(({ props, slots, emit }) => {
                     <div data-scope={SHELL_SCOPE} data-part="bar" data-regime={props.back ? 'detail' : 'root'} data-sub-menu={hasSubMenu() ? '' : undefined}>
                         <Navbar.Root>
                             <Navbar.Start>
+                                {/* Back leads, so with a sub-menu (#923) the focus order matches the phone's Back, Menu. */}
+                                {props.back ? backLink(props.back) : null}
                                 <Drawer.Trigger asChild>
                                     {(p: PartProps) => <button type="button" aria-label="Menu" {...p}><Icon name="menu" size={20} /></button>}
                                 </Drawer.Trigger>
-                                {props.back ? backLink(props.back) : null}
                                 <div data-scope={SHELL_SCOPE} data-part="breadcrumb">{slots.breadcrumb?.()}</div>
                                 {props.title ? (
                                     <div data-scope={SHELL_SCOPE} data-part="title">
