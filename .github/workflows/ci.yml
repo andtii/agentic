@@ -7,7 +7,7 @@ name: CI
 #   and size run in parallel, each only when needed. `gate` is the ONE required
 #   check — it passes when every lane that ran passed (skipped counts as passed).
 # - push to main + nightly: every lane, plus Windows and Node 20, e2e at all
-#   three widths and coverage. A red run opens (or comments on) a `main-red`
+#   three widths and coverage. A red run is re-run once, then opens (or comments on) a `main-red`
 #   issue; fixing main comes before anything else (AGENTS.md).
 
 on:
@@ -198,22 +198,3 @@ jobs:
           for r in $RESULTS; do
             case "$r" in success|skipped) ;; *) echo "::error::a lane ended $r"; exit 1 ;; esac
           done
-
-  main-red:
-    if: failure() && github.event_name != 'pull_request'
-    needs: [gate, compat, coverage]
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    permissions:
-      issues: write
-    steps:
-      - name: Open or update the main-red issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          body="CI is red on \`main\` (${{ github.event_name }}, ${GITHUB_SHA::7}): $RUN — fix main before starting new work (AGENTS.md)."
-          open=$(gh issue list --label main-red --state open --json number -q '.[0].number')
-          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"
-          else gh issue create --title "main is red" --label main-red --body "$body"; fi
