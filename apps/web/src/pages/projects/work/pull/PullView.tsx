@@ -12,7 +12,7 @@ import { AgentTile, Button, ChecksBar, EnvironmentLine, Icon, Switch, type Agent
 import { formatTime } from '../../../../mock/workspace';
 import {
     APPROVAL_NOTE, REVIEW_LABEL, THREAD_LABEL, autopilotOff, autopilotRows, blockerSentence, canMerge, diffText, durationText, openedAgo, originText, pullNow, pullSteps,
-    type PullLinked, type PullPageData
+    type AutopilotSwitch, type PullLinked, type PullPageData
 } from './model';
 
 export interface PullAgent {
@@ -38,6 +38,9 @@ export const PullView = component<PullViewProps>(({ props }) => {
     const initial = props.data.pr.autopilot;
     const st = signal({ autopilot: (initial ? { ...initial } : null) as Autopilot | null, stopped: '' as '' | 'you' | 'stopped', asked: false });
     const autopilot = (): Autopilot | undefined => (props.readOnly ? props.data.pr.autopilot : (st.autopilot ?? undefined));
+    const setSwitch = (key: AutopilotSwitch, on: boolean): void => {
+        if (!props.readOnly && st.autopilot && st.autopilot[key] !== on) st.autopilot = { ...st.autopilot, [key]: on };
+    };
     const stop = (by: 'you' | 'stopped'): void => {
         if (!st.autopilot) return;
         st.autopilot = autopilotOff(st.autopilot);
@@ -182,7 +185,7 @@ export const PullView = component<PullViewProps>(({ props }) => {
                                         <strong>{row.label}</strong>
                                         <small>{row.caption}</small>
                                     </div>
-                                    <Switch label={row.label} hideLabel model={() => a[row.key]} disabled={props.readOnly || pr.state !== 'open'} />
+                                    <Switch label={row.label} hideLabel model={() => a[row.key]} disabled={props.readOnly || pr.state !== 'open'} onCheckedChange={(on: boolean) => setSwitch(row.key, on)} />
                                 </li>
                             ))}
                         </ul>
