@@ -137,7 +137,7 @@ One slot per sub-issue of [#722](https://github.com/andtii/agentic/issues/722). 
 
 - #751: —
 
-- #752: —
+- #752: — (daemon-only git read; nothing generic)
 
 - #753: —
 

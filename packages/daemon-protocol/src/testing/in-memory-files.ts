@@ -9,6 +9,7 @@ import {
     CHANGES_MAX_COMMITS,
     CHANGES_MAX_FILES,
     FS_LIST_MAX_ENTRIES,
+    FS_PIN_MAX_LINES,
     FS_READ_MAX_BYTES,
     isBinaryText,
     normalizePath,
@@ -42,7 +43,12 @@ export interface InMemoryVcs {
     readonly commits?: readonly ChangeCommit[];
     /** Paths an ignore file hides from `tree`. */
     readonly ignored?: readonly string[];
+    /** The full id of HEAD, what `pin` answers (#752). Default: the newest commit's id, else `IN_MEMORY_HEAD_SHA`. */
+    readonly headSha?: string;
 }
+
+/** HEAD's id in a fake repository that names no commit (#752). */
+export const IN_MEMORY_HEAD_SHA = 'feedfacefeedfacefeedfacefeedfacefeedface';
 
 /** A session folder on the fake's disk: an absolute POSIX `root` and its files by relative, `/`-separated path. */
 export interface InMemoryFolder {
@@ -205,4 +211,29 @@ export function answerFilesOp(folders: readonly InMemoryFolder[], env: Environme
         case 'changes':
             return folder.vcs ? { result: changeSet(folder, folder.vcs, op.scope) } : err('not-a-repo', `${root} is not under version control`);
     }
+}
+
+/**
+ * `pin` / `read-at` (#752) over `folders`: the fake knows one commit, HEAD, holding the `head` texts. `read-at` answers a
+ * `sha` that is HEAD's id or a prefix of it (at least 4 characters) and `not-found` for any other.
+ */
+export function answerPinOp(folders: readonly InMemoryFolder[], env: EnvironmentDescriptor, op: Extract<FsOp, { kind: 'pin' | 'read-at' }>): Answer {
+    const root = normalizePath(op.root, 'linux');
+    if (!root || !pathWithin(root, env.cwdRoots, 'linux')) return err('outside-roots', `${op.root} is outside the working roots`);
+    const path = relative(op.path);
+    if (path === null) return err('outside-roots', `${op.path} is outside ${op.root}`);
+    if (!Number.isInteger(op.from) || !Number.isInteger(op.to) || op.from < 1 || op.to < op.from) return err('not-found', `lines ${op.from}-${op.to} are not a range`);
+    if (op.to - op.from + 1 > FS_PIN_MAX_LINES) return err('too-large', `a pin covers at most ${FS_PIN_MAX_LINES} lines`);
+    const folder = folders.find((f) => normalizePath(f.root, 'linux') === root);
+    if (!folder) return err('not-found', `${root} does not exist`);
+    if (!folder.vcs) return err('not-a-repo', `${root} is not under version control`);
+    const sha = folder.vcs.headSha ?? folder.vcs.commits?.[0]?.id ?? IN_MEMORY_HEAD_SHA;
+    if (op.kind === 'read-at' && !(op.sha.length >= 4 && sha.startsWith(op.sha.toLowerCase()))) return err('not-found', `no commit ${op.sha} in ${root}`);
+    const text = (folder.vcs.head ?? folder.files)[path];
+    if (text === undefined) return err('not-found', `${path} is not a file at ${sha.slice(0, 7)}`);
+    if (isBinaryText(text)) return err('unsupported', `${path} is binary at ${sha.slice(0, 7)}`);
+    const all = text === '' ? [] : text.replace(/\r?\n$/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+    if (op.from > all.length) return err('not-found', `${path} has ${all.length} lines at ${sha.slice(0, 7)}`);
+    const to = Math.min(op.to, all.length);
+    return { result: { kind: op.kind, path, sha, from: op.from, to, lines: all.slice(op.from - 1, to) } };
 }

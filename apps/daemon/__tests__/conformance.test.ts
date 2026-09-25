@@ -95,7 +95,7 @@ const harness: DaemonConformanceHarness = {
     // exits 75 with nothing staged); the log is a real file of `LOG_LINES` lines under the state dir, tailed through `tailLog`.
     // `login` (#484): the real relay (`spawnLoginRelay`, the Claude parser) over a fake CLI with piped stdio; `done` flips the
     // scripted driver's account to `ok` before the daemon re-inspects, so the `env` after `done` is the real re-inspect.
-    features: ['env', 'gap', 'raw', 'fs', 'files', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log', 'login'],
+    features: ['env', 'gap', 'raw', 'fs', 'files', 'pin', 'env-manage', 'session-ref', 'history', 'resume', 'build', 'update', 'harness', 'policy', 'restart', 'log', 'login'],
     logLines: LOG_LINES,
     loginAction: { kind: 'open-url', url: LOGIN_URL, expectsPaste: true },
     loginAnswer: LOGIN_ANSWER,

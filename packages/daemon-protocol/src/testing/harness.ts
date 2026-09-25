@@ -27,7 +27,7 @@ export interface ConformanceScript {
 }
 
 /** Optional behaviour a harness can expose; a case that needs one it lacks is skipped with a reason. */
-export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'files' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness' | 'policy' | 'log' | 'login' | 'restart';
+export type ConformanceFeature = 'env' | 'gap' | 'raw' | 'fs' | 'files' | 'env-manage' | 'session-ref' | 'history' | 'build' | 'resume' | 'update' | 'harness' | 'policy' | 'log' | 'login' | 'restart' | 'pin';
 
 export interface DaemonConformanceHarness {
     /**
@@ -44,7 +44,9 @@ export interface DaemonConformanceHarness {
      * answers `log.request` from a log that holds at least `logLines` lines; `'login'`: the daemon relays a sign-in for the suite
      * environment (`login.request`, the `loginAction` it will show, and `loginAnswer` when the action expects a paste); `'restart'`:
      * the daemon restarts on `update.request { target: 'restart' }` — no download, `session.closed { code: 'restart' }`; `'files'`: the daemon
-     * lists `files` in `hello.features` and answers `fs.request` `tree` / `read` / `changes` (#559) over the harness's `files` folders.
+     * lists `files` in `hello.features` and answers `fs.request` `tree` / `read` / `changes` (#559) over the harness's `files` folders;
+     * `'pin'`: the daemon lists `pin` in `hello.features` and answers `fs.request` `pin` / `read-at` (#752) over the `files` root, a
+     * repository whose `file` is committed.
      */
     readonly features?: readonly ConformanceFeature[];
     /**

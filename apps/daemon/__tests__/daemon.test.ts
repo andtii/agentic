@@ -528,7 +528,7 @@ describe('daemon', () => {
                         rebuild: (runtime) => (rebuilt.push(runtime), runtime === 'mock' ? agentDriver('mock', mockAgent({ respond: async () => [{ text: 'new' }] })) : scripted)
                     }
                 });
-                expect(hello.features).toEqual(['files', 'run', 'worktrees', 'harness']);
+                expect(hello.features).toEqual(['files', 'run', 'worktrees', 'pin', 'harness']);
                 expect(hello.harnesses).toEqual([
                     { runtime: 'mock', status: 'missing' },
                     { runtime: 'scripted', status: 'missing' }
